@@ -392,7 +392,7 @@
                 clear() { this.selected = []; this.selectionMode = false; },
             }"
             x-on:sms-selection-cleared.window="clear()"
-            x-on:sms-selection-started.window="selectionMode = true"
+            x-on:sms-selection-started.window="selectionMode = true; if ($event.detail?.ids) selected = $event.detail.ids"
         >
         <div class="relative flex-1 min-h-0">
             {{-- Loading skeleton during thread switching (transparent overlay, bubbles only) --}}
@@ -501,7 +501,7 @@
                     }
                     $msgReactions = $reactionsMap[$msg->id] ?? [];
                 @endphp
-                <div wire:key="msg-{{ $msg->id }}" class="flex items-center"
+                <div wire:key="msg-{{ $msg->id }}" class="flex items-center group"
                     x-bind:class="selectionMode ? '' : '{{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}'">
                     <div class="flex-shrink-0 pr-2" x-show="selectionMode" x-cloak>
                         <flux:checkbox
@@ -612,6 +612,31 @@
                             @endif
                         </p>
                     </div>
+                    @if (! $isClientUser && $msg->display_text)
+                        <div
+                            class="flex items-center self-center opacity-0 group-hover:opacity-100 transition-opacity {{ $msg->isOutbound() ? 'order-first pr-1' : 'pl-1' }}"
+                            x-show="!selectionMode"
+                            x-on:click.stop
+                        >
+                            <flux:dropdown position="bottom" align="{{ $msg->isOutbound() ? 'start' : 'end' }}">
+                                <flux:button variant="ghost" size="xs" square icon="ellipsis-vertical" aria-label="Message actions" />
+                                <flux:menu>
+                                    <flux:menu.item icon="calendar-date-range" wire:click="createTaskFromMessage({{ $msg->id }})">
+                                        Create Task
+                                    </flux:menu.item>
+                                    <flux:menu.item icon="arrow-right-circle" wire:click="forwardSingleMessage({{ $msg->id }})">
+                                        Forward
+                                    </flux:menu.item>
+                                    <flux:menu.item
+                                        icon="clipboard"
+                                        x-on:click="navigator.clipboard.writeText(@js($msg->display_text)); $flux.toast({ text: 'Message copied', variant: 'success' })"
+                                    >
+                                        Copy Text
+                                    </flux:menu.item>
+                                </flux:menu>
+                            </flux:dropdown>
+                        </div>
+                    @endif
                 </div>
             @empty
                 <div class="text-center py-12">

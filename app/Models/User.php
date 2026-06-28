@@ -19,9 +19,31 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, WebAuthnAuthentication;
 
+    /**
+     * Languages a user can choose as their preferred communication language.
+     *
+     * @var list<string>
+     */
+    public const PREFERRED_LANGUAGES = [
+        'English',
+        'Spanish',
+        'Polish',
+        'Ukrainian',
+        'Portuguese',
+        'French',
+        'German',
+        'Italian',
+        'Russian',
+        'Mandarin',
+        'Vietnamese',
+        'Arabic',
+    ];
+
     protected $fillable = [
         'first_name',
         'last_name',
+        'nickname',
+        'preferred_language',
         'cell_phone',
         'email',
         'password',

@@ -65,6 +65,13 @@ class AvailabilityIndex extends Component
     protected function baseTaskQuery()
     {
         return Task::where('vendor_id', $this->vendorId)
+            ->where(function ($query) {
+                $query
+                    ->where('type', '!=', 'Reminder')
+                    ->orWhereNull('type')
+                    ->orWhereColumn('belongs_to_vendor_id', 'vendor_id')
+                    ->orWhereNull('belongs_to_vendor_id');
+            })
             ->where(function ($q) {
                 $q->whereIn('vendor_status', [
                     Task::VENDOR_STATUS_REQUESTED,
@@ -91,6 +98,50 @@ class AvailabilityIndex extends Component
             ->whereDate('end_date', '>=', Carbon::today())
             ->orderBy('start_date')
             ->get();
+    }
+
+    /**
+     * Upcoming scheduled tasks grouped by date (matching the hub schedule UI).
+     *
+     * Tasks with multiple selected dates appear under each of their dates.
+     *
+     * @return \Illuminate\Support\Collection<string, \Illuminate\Support\Collection<int, Task>>
+     */
+    public function getGroupedTasks(): \Illuminate\Support\Collection
+    {
+        $tasks = $this->getTasks();
+
+        if ($tasks->isEmpty()) {
+            return collect();
+        }
+
+        $todayStr = Carbon::today()->format('Y-m-d');
+        $grouped = collect();
+
+        foreach ($tasks as $task) {
+            $selectedDates = (array) data_get($task->options, 'dates', []);
+
+            $dates = ! empty($selectedDates)
+                ? array_filter($selectedDates, fn ($date) => $date >= $todayStr)
+                : [$task->start_date->format('Y-m-d')];
+
+            foreach ($dates as $dateStr) {
+                if (! $grouped->has($dateStr)) {
+                    $grouped[$dateStr] = collect();
+                }
+                $grouped[$dateStr]->push($task);
+            }
+        }
+
+        return $grouped->sortKeys()->map(function ($dayTasks, $dateStr) {
+            return $dayTasks->sortBy(function (Task $task) use ($dateStr) {
+                $startTime = (string) data_get($task->options, "time_settings.$dateStr.start_time", '');
+                $usesTime = (bool) data_get($task->options, "time_settings.$dateStr.use_time", false);
+                $hasTime = $usesTime && $startTime !== '';
+
+                return $hasTime ? '0_' . $startTime : '1';
+            })->values();
+        });
     }
 
     /**
@@ -386,6 +437,7 @@ class AvailabilityIndex extends Component
     {
         return view('livewire.vendor.availability-index', [
             'tasks' => $this->getTasks(),
+            'groupedTasks' => $this->getGroupedTasks(),
             'pastTasks' => $this->getPastTasks(),
             'pendingTasks' => $this->getPendingTasks(),
             'vendor' => $this->getVendor(),

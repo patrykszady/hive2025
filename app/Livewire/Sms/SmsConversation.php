@@ -4,8 +4,10 @@ namespace App\Livewire\Sms;
 
 use App\Livewire\Sms\SmsIndex;
 use App\Livewire\Sms\SmsNewThread;
+use App\Livewire\Tasks\TaskCreate;
 use App\Models\CallLog;
 use App\Models\Client;
+use App\Models\Project;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadParticipant;
@@ -13,10 +15,12 @@ use App\Models\SmsThreadRead;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
+use App\Services\SmsTaskExtractionService;
 use Carbon\Carbon;
 use Flux;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Isolate;
 use Livewire\Attributes\On;
@@ -304,6 +308,205 @@ class SmsConversation extends Component
         $this->messageLimit += 50;
     }
 
+    /**
+     * Use AI to extract a schedulable Hive task from a single message, then open
+     * the create-task modal pre-filled for review. Runs only on explicit user
+     * action (the per-message 3-dot menu) — never automatically.
+     */
+    public function createTaskFromMessage(int $messageId, SmsTaskExtractionService $extractor): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $message = SmsMessage::where('thread_id', $this->threadId)->find($messageId);
+        $text = trim((string) $message?->display_text);
+
+        if (! $message || $text === '') {
+            Flux::toast(variant: 'warning', heading: 'No Text', text: 'This message has no text to analyze.', duration: 4000, position: 'top right');
+
+            return;
+        }
+
+        $sentAt = $message->created_at->copy()->setTimezone(vendor_timezone());
+
+        $extracted = $extractor->extract($text, $sentAt);
+
+        if (! $extracted || ! $extracted['has_task'] || $extracted['title'] === '') {
+            Flux::toast(variant: 'warning', heading: 'No Task Found', text: 'No schedulable task was found in this message.', duration: 4000, position: 'top right');
+
+            return;
+        }
+
+        $thread = SmsGroupThread::find($this->threadId);
+        $client = $thread?->client;
+
+        if (! $client) {
+            Flux::toast(variant: 'warning', heading: 'No Client', text: 'Assign a client to this conversation before creating a task.', duration: 4500, position: 'top right');
+
+            return;
+        }
+
+        $projectId = $this->resolveClientProjectId($client, $thread, $extracted['project_hint']);
+
+        if (! $projectId) {
+            Flux::toast(variant: 'warning', heading: 'No Project', text: 'This client has no project to attach the task to.', duration: 4500, position: 'top right');
+
+            return;
+        }
+
+        $this->dispatch('prefillTaskFromSms', payload: [
+            'title' => $extracted['title'],
+            'type' => $extracted['type'],
+            'project_id' => $projectId,
+            'client_id' => $client->id,
+            'vendor_id' => $thread->subject_vendor_id,
+            'date' => $extracted['date'],
+            'start_time' => $extracted['start_time'],
+            'end_time' => $extracted['end_time'],
+            'user_ids' => $this->resolveAssigneeUserIds($extracted['assignee_names']),
+            'checklist' => collect($extracted['checklist'])
+                ->map(fn ($item) => trim((string) $item))
+                ->filter()
+                ->map(fn (string $text) => ['text' => $text, 'completed' => false])
+                ->values()
+                ->all(),
+        ])->to(TaskCreate::class);
+    }
+
+    /**
+     * Match AI-extracted person names to employed team members of the acting
+     * user's vendor, returning their user ids for task assignment.
+     *
+     * @param  array<int, string>  $names
+     * @return array<int, int>
+     */
+    protected function resolveAssigneeUserIds(array $names): array
+    {
+        $names = array_values(array_filter(array_map(
+            fn ($name) => strtolower(trim((string) $name)),
+            $names
+        )));
+
+        if ($names === []) {
+            return [];
+        }
+
+        $vendor = auth()->user()?->vendor;
+
+        if (! $vendor) {
+            return [];
+        }
+
+        $ids = [];
+
+        foreach ($vendor->users()->employed()->get() as $user) {
+            $first = strtolower(trim((string) $user->first_name));
+            $nickname = strtolower(trim((string) $user->nickname));
+            $full = strtolower(trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')));
+            $nicknameFull = $nickname === '' ? '' : strtolower(trim($nickname . ' ' . ($user->last_name ?? '')));
+
+            foreach ($names as $name) {
+                if ($name === '') {
+                    continue;
+                }
+
+                if ($name === $first || $name === $full || $name === $nickname || $name === $nicknameFull) {
+                    $ids[] = (int) $user->id;
+
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Pick the best project for a client when creating a task from a message.
+     * Prefers a keyword match against the AI room/area hint, then the thread's
+     * project, then the most recent active (non-closed) project.
+     */
+    protected function resolveClientProjectId(Client $client, ?SmsGroupThread $thread, ?string $hint): ?int
+    {
+        $projects = $client->projects()
+            ->with('latestStatus')
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($projects->isEmpty()) {
+            return $thread?->project_id;
+        }
+
+        if ($hint) {
+            $best = $projects
+                ->map(fn (Project $project) => [
+                    'id' => (int) $project->id,
+                    'score' => $this->projectMatchScore($hint, (string) ($project->getRawOriginal('project_name') ?? $project->project_name)),
+                ])
+                ->sortByDesc('score')
+                ->first();
+
+            if ($best && $best['score'] > 0) {
+                return $best['id'];
+            }
+        }
+
+        if ($thread?->project_id && $projects->contains('id', $thread->project_id)) {
+            return (int) $thread->project_id;
+        }
+
+        $closedStatusCodes = [7, 8, 10, 11]; // Complete, Service Call, Cancelled, VIEW_ONLY
+
+        $active = $projects->first(fn (Project $project) => ! in_array(
+            (int) ($project->latestStatus?->status_code ?? 0),
+            $closedStatusCodes,
+            true
+        ));
+
+        return (int) ($active?->id ?? $projects->first()->id);
+    }
+
+    /**
+     * Score keyword overlap between a hint and a project name. Exact word
+     * matches score highest; substring matches (e.g. "bath" in "bathrooms")
+     * still count so loose references resolve to the right project.
+     */
+    protected function projectMatchScore(string $hint, string $name): int
+    {
+        $hintWords = $this->keywords($hint);
+        $nameWords = $this->keywords($name);
+        $score = 0;
+
+        foreach ($hintWords as $hintWord) {
+            foreach ($nameWords as $nameWord) {
+                if ($hintWord === $nameWord) {
+                    $score += 2;
+                } elseif (strlen($hintWord) >= 4 && (str_contains($nameWord, $hintWord) || str_contains($hintWord, $nameWord))) {
+                    $score += 1;
+                }
+            }
+        }
+
+        return $score;
+    }
+
+    /**
+     * Break text into lowercased significant keywords.
+     *
+     * @return array<int, string>
+     */
+    protected function keywords(string $text): array
+    {
+        $stopWords = ['the', 'and', 'for', 'with', 'room', 'repair', 'project', 'job'];
+
+        return collect(preg_split('/[^a-z0-9]+/i', strtolower($text)) ?: [])
+            ->filter(fn (string $word) => strlen($word) >= 3 && ! in_array($word, $stopWords, true))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     public function openAssignClientModal(): void
     {
         $thread = SmsGroupThread::find($this->threadId);
@@ -464,6 +667,31 @@ class SmsConversation extends Component
             ->all();
 
         $this->openForwardModal();
+    }
+
+    /**
+     * Forward a single message from its per-message menu. Mirrors the thread
+     * "Forward messages" flow by entering selection mode, but pre-selects the
+     * clicked message so the user can add more and forward from the same bar.
+     */
+    public function forwardSingleMessage(int $messageId): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $exists = SmsMessage::where('thread_id', $this->threadId)
+            ->whereKey($messageId)
+            ->exists();
+
+        if (! $exists) {
+            Flux::toast(variant: 'warning', heading: 'Not Found', text: 'That message could not be found.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        $this->selectionMode = true;
+        $this->selectedMessageIds = [$messageId];
+        $this->dispatch('sms-selection-started', ids: [$messageId]);
     }
 
     /**
@@ -1222,7 +1450,7 @@ class SmsConversation extends Component
                 continue;
             }
 
-            $quotedNormalized = mb_strtolower(trim($tapback['quoted']));
+            $quotedNormalized = $this->normalizeTapbackMatchText((string) ($tapback['quoted'] ?? ''));
             $quotedLen = mb_strlen($quotedNormalized);
             $matched = $allMessages
                 ->filter(function ($candidate) use ($quotedNormalized, $msg) {
@@ -1233,12 +1461,16 @@ class SmsConversation extends Component
                     if (! $candidateText) {
                         return false;
                     }
-                    $candidateNormalized = mb_strtolower(trim($candidateText));
+                    $candidateNormalized = $this->normalizeTapbackMatchText((string) $candidateText);
+
+                    if ($candidateNormalized === '' || $quotedNormalized === '') {
+                        return false;
+                    }
 
                     return str_contains($candidateNormalized, $quotedNormalized)
                         || str_contains($quotedNormalized, $candidateNormalized);
                 })
-                ->sortBy(fn ($c) => abs(mb_strlen(mb_strtolower(trim($c->display_text))) - $quotedLen))
+                ->sortBy(fn ($c) => abs(mb_strlen($this->normalizeTapbackMatchText((string) $c->display_text)) - $quotedLen))
                 ->first();
 
             // Generic (strict) tapbacks are only processed when the quoted text
@@ -1272,6 +1504,74 @@ class SmsConversation extends Component
                 ->values(),
             'reactions' => $reactionsMap,
         ];
+    }
+
+    /**
+     * Normalize text used when matching tapback quoted text to actual thread messages.
+     */
+    private function normalizeTapbackMatchText(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        $text = $this->repairMojibakeForTapbackMatch($text);
+        $text = Str::of($text)
+            ->lower()
+            ->ascii()
+            ->replaceMatches('/[^a-z0-9\s]/u', ' ')
+            ->replaceMatches('/\s+/u', ' ')
+            ->trim()
+            ->value();
+
+        return $text;
+    }
+
+    /**
+     * Lightweight mojibake repair for quote/body mismatches during tapback matching.
+     */
+    private function repairMojibakeForTapbackMatch(string $text): string
+    {
+        if (! preg_match('/[ÃÂâðÄÅ]/u', $text)) {
+            return $text;
+        }
+
+        $candidates = [
+            $text,
+            @mb_convert_encoding($text, 'Windows-1252', 'UTF-8'),
+            @mb_convert_encoding($text, 'ISO-8859-1', 'UTF-8'),
+        ];
+
+        $score = static function (string $value): int {
+            $penalty = preg_match_all('/[ÃÂâðÄÅ]/u', $value, $m);
+            $signal = preg_match_all('/["“”„óęąśłżźćń]/u', $value, $m2);
+
+            return (int) $signal - ((int) $penalty * 2);
+        };
+
+        $best = $text;
+        $bestScore = $score($text);
+
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate) || $candidate === '') {
+                continue;
+            }
+
+            if (! mb_check_encoding($candidate, 'UTF-8')) {
+                continue;
+            }
+
+            $candidateScore = $score($candidate);
+            if ($candidateScore > $bestScore) {
+                $best = $candidate;
+                $bestScore = $candidateScore;
+            }
+        }
+
+        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $best);
+
+        return is_string($clean) && $clean !== '' ? $clean : $best;
     }
 
     /**

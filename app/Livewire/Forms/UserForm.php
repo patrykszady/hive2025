@@ -22,6 +22,12 @@ class UserForm extends Form
     #[Validate('required|min:2')]
     public $last_name = null;
 
+    #[Validate('nullable|max:255')]
+    public $nickname = null;
+
+    #[Validate('required|string|max:255')]
+    public $preferred_language = 'English';
+
     #[Validate]
     public $email = null;
 
@@ -81,6 +87,8 @@ class UserForm extends Form
 
         $this->first_name = $user->first_name;
         $this->last_name = $user->last_name;
+        $this->nickname = $user->nickname;
+        $this->preferred_language = $user->preferred_language ?: 'English';
         $this->email = $user->email;
         $this->cell_phone = $user->cell_phone;
     }
@@ -97,6 +105,8 @@ class UserForm extends Form
             $existingUser->update([
                 'first_name' => $this->first_name,
                 'last_name' => $this->last_name,
+                'nickname' => $this->nickname,
+                'preferred_language' => $this->preferred_language ?: 'English',
                 'cell_phone' => $this->component->user_cell ?: $existingUser->cell_phone,
             ]);
             
@@ -108,6 +118,8 @@ class UserForm extends Form
             $user = User::create([
                 'first_name' => $this->first_name,
                 'last_name' => $this->last_name,
+                'nickname' => $this->nickname,
+                'preferred_language' => $this->preferred_language ?: 'English',
                 'email' => $this->email,
                 'cell_phone' => $this->component->user_cell,
             ]);
@@ -127,6 +139,8 @@ class UserForm extends Form
         $user = $this->user->update([
             'first_name' => $this->first_name,
             'last_name' => $this->last_name,
+            'nickname' => $this->nickname,
+            'preferred_language' => $this->preferred_language ?: 'English',
             'email' => $this->email,
             // 'cell_phone' => $this->component->user_cell,
         ]);

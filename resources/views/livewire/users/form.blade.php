@@ -70,6 +70,25 @@
                 placeholder="Email"
             />
 
+            <flux:input
+                wire:model.live.debounce.500ms="form.nickname"
+                x-bind:disabled="$wire.model.type == 'client_member'"
+                label="Nickname"
+                description="Short name or alias (e.g. Greg for Grzegorz). Helps match names in messages."
+                type="text"
+                placeholder="Nickname"
+            />
+
+            <flux:select
+                wire:model.live="form.preferred_language"
+                x-bind:disabled="$wire.model.type == 'client_member'"
+                label="Preferred Language"
+            >
+                @foreach(\App\Models\User::PREFERRED_LANGUAGES as $language)
+                    <flux:select.option value="{{ $language }}">{{ $language }}</flux:select.option>
+                @endforeach
+            </flux:select>
+
             {{-- save/create User here if not yet saved --}}
             <div
                 x-show="!$wire.form.user_id && $wire.model.id != 'NEW'"

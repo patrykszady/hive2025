@@ -30,6 +30,39 @@ class SendScheduleModal extends Component
         $this->editableMessage = $this->previewMessage;
     }
 
+    #[On('refreshSchedulePreview')]
+    public function refreshSchedulePreview(): void
+    {
+        if (! $this->showModal || ! $this->threadId) {
+            return;
+        }
+
+        unset(
+            $this->thread,
+            $this->clientProjectIds,
+            $this->upcomingTasks,
+            $this->groupedUpcomingTasks,
+            $this->pendingTasks,
+            $this->nextUpcomingTasks,
+            $this->selectedTaskIds,
+            $this->previewMessage,
+        );
+
+        $this->editableMessage = $this->previewMessage;
+    }
+
+    public function openCreateTaskForDate(string $date): void
+    {
+        $thread = $this->thread;
+
+        $this->dispatch(
+            'addTask',
+            date: $date,
+            vendor_id: $thread?->subject_vendor_id,
+            client_id: $thread?->client_id,
+        )->to('tasks.task-create');
+    }
+
     public function close(): void
     {
         $this->showModal = false;
@@ -283,10 +316,7 @@ class SendScheduleModal extends Component
 
         $greeting = $this->buildRecipientGreeting();
 
-        $taskCount = $allTasks->count();
-        $taskWord = $taskCount === 1 ? 'task' : 'tasks';
-
-        $intro = "Upcoming {$taskWord}:";
+        $intro = 'Confirm Tasks:';
 
         // Build task lines grouped by day (matching digest format)
         $today = Carbon::today(browser_timezone());
@@ -400,12 +430,12 @@ class SendScheduleModal extends Component
         $subjectVendor = $this->thread?->subjectVendor;
         if ($subjectVendor) {
             $token = $subjectVendor->getOrCreateAvailabilityToken();
-            $linksText = "\nView Schedule: {$baseUrl}/v/{$token}";
+            $linksText = "\nConfirm Schedule: {$baseUrl}/v/{$token}";
         } else {
             $firstProject = $allTasks->first()?->project;
             if ($firstProject) {
                 $token = $firstProject->getOrCreateScheduleToken();
-                $linksText = "\nView Schedule: {$baseUrl}/s/{$token}";
+                $linksText = "\nConfirm Schedule: {$baseUrl}/s/{$token}";
             } else {
                 $link = $this->buildScheduleLink();
                 if ($link) {
@@ -440,21 +470,20 @@ class SendScheduleModal extends Component
     protected function buildRecipientGreeting(): string
     {
         $thread = $this->thread;
-        $names = [];
 
         if ($thread?->subject_vendor_id) {
-            $names = $thread->subjectVendor?->users
-                ?->pluck('first_name')
-                ->filter()
-                ->values()
-                ->all() ?? [];
-        } else {
-            $names = $thread?->client?->users
-                ?->pluck('first_name')
-                ->filter()
-                ->values()
-                ->all() ?? [];
+            $shortName = trim((string) ($thread->subjectVendor?->short_name ?? ''));
+
+            return $shortName !== ''
+                ? "Hi {$shortName},"
+                : 'Hi,';
         }
+
+        $names = $thread?->client?->users
+                ?->pluck('first_name')
+                ->filter()
+                ->values()
+                ->all() ?? [];
 
         return count($names) > 0
             ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
@@ -462,7 +491,7 @@ class SendScheduleModal extends Component
     }
 
     /**
-     * Build the "View Schedule" link text from the first available project.
+     * Build the "Confirm Schedule" link text from the first available project.
      */
     protected function buildScheduleLink(): string
     {
@@ -482,7 +511,7 @@ class SendScheduleModal extends Component
         $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
         $token = $project->getOrCreateScheduleToken();
 
-        return "View Schedule: {$baseUrl}/s/{$token}";
+        return "Confirm Schedule: {$baseUrl}/s/{$token}";
     }
 
     /**
@@ -510,6 +539,16 @@ class SendScheduleModal extends Component
         $text = $this->editableMessage . "\n-GSC";
 
         $smsService->sendToThread($thread, $text, [], null);
+
+        // Mark vendor tasks as requested only after the SMS is sent.
+        if ($thread->subject_vendor_id) {
+            Task::whereIn('id', $this->selectedTaskIds)
+                ->where('vendor_id', $thread->subject_vendor_id)
+                ->whereNull('vendor_status')
+                ->update([
+                    'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
+                ]);
+        }
 
         Flux::toast(variant: 'success', heading: 'Sent', text: 'Schedule message sent.', duration: 4000, position: 'top right');
 

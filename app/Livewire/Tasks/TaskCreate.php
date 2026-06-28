@@ -16,6 +16,7 @@ use App\Livewire\Projects\UpcomingTasks;
 use App\Livewire\Dashboard\UserTasks;
 use App\Livewire\Dashboard\VendorTasks;
 use App\Livewire\Clients\UpcomingClientTasks;
+use App\Livewire\Sms\SendScheduleModal;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux;
@@ -42,7 +43,7 @@ class TaskCreate extends Component
         'form_submit' => 'save',
     ];
 
-    protected $listeners = ['editTask', 'addTask'];
+    protected $listeners = ['editTask', 'addTask', 'prefillTaskFromSms'];
 
     private function ensureProjectOptionLoaded(?int $projectId): void
     {
@@ -869,6 +870,7 @@ class TaskCreate extends Component
         $this->dispatch('refreshComponent')->to(UserTasks::class);
         $this->dispatch('refreshComponent')->to(VendorTasks::class);
         $this->dispatch('refreshComponent')->to(UpcomingClientTasks::class);
+        $this->dispatch('refreshSchedulePreview')->to(SendScheduleModal::class);
     }
 
     /**
@@ -948,6 +950,102 @@ class TaskCreate extends Component
         }
 
         $this->modal('task_create_form_modal')->show();
+    }
+
+    /**
+     * Create a task from an AI extraction of an SMS message and open it in the
+     * full editor (edit mode) so every option — Dates, Notes/Checklist,
+     * Dependencies, History — is available for review and refinement.
+     *
+     * @param  array{title?: ?string, type?: ?string, project_id?: ?int, client_id?: ?int, vendor_id?: ?int, date?: ?string, start_time?: ?string, end_time?: ?string, user_ids?: array<int, int>, checklist?: array<int, array{text: string, completed: bool}>}  $payload
+     */
+    public function prefillTaskFromSms(array $payload): void
+    {
+        $this->resetFormFields();
+        $this->setupViewText('create');
+
+        $clientId = isset($payload['client_id']) ? (int) $payload['client_id'] : null;
+        $projectId = isset($payload['project_id']) ? (int) $payload['project_id'] : null;
+
+        if ($clientId) {
+            $this->projects = Project::query()
+                ->where('client_id', $clientId)
+                ->with('latestStatus')
+                ->orderByDesc('created_at')
+                ->get()
+                ->all();
+        }
+
+        if ($projectId) {
+            $this->form->project_id = $projectId;
+            $this->ensureProjectOptionLoaded($projectId);
+        }
+
+        if (! empty($payload['title'])) {
+            $this->form->title = $payload['title'];
+        }
+
+        $type = $payload['type'] ?? 'Task';
+        if (in_array($type, ['Task', 'Milestone', 'Meet', 'Reminder'], true)) {
+            $this->form->type = $type;
+        }
+
+        if (! empty($payload['vendor_id'])) {
+            $this->form->vendor_id = (int) $payload['vendor_id'];
+        }
+
+        if (! empty($payload['user_ids']) && is_array($payload['user_ids'])) {
+            $this->form->user_ids = array_values(array_unique(array_map('intval', $payload['user_ids'])));
+        }
+
+        if (! empty($payload['checklist']) && is_array($payload['checklist'])) {
+            $this->form->checklist = array_values(array_filter(
+                array_map(function ($item): ?array {
+                    $text = is_array($item) ? trim((string) ($item['text'] ?? '')) : trim((string) $item);
+
+                    return $text === '' ? null : ['text' => $text, 'completed' => false];
+                }, $payload['checklist'])
+            ));
+        }
+
+        $date = ! empty($payload['date']) ? Carbon::parse($payload['date'])->format('Y-m-d') : null;
+
+        if ($date) {
+            $this->form->dates = [$date];
+
+            $startTime = $payload['start_time'] ?? null;
+
+            if (! empty($startTime)) {
+                $this->form->time_settings = [
+                    $date => [
+                        'use_time' => true,
+                        'start_time' => $startTime,
+                        'end_time' => $payload['end_time'] ?? $startTime,
+                    ],
+                ];
+            }
+        }
+
+        // Persist immediately and reopen in edit mode so the full task editor
+        // (Dates, Notes/Checklist, Dependencies, History) is available for the
+        // user to review and refine. Dependencies and history require a saved
+        // task, so creation must happen before those tabs can be shown.
+        $task = $this->form->store();
+
+        if (! $task instanceof Task) {
+            $this->modal('task_create_form_modal')->show();
+            $this->dispatch('task-modal-opened');
+
+            return;
+        }
+
+        $this->ensureProjectOptionLoaded((int) $task->project_id);
+        $this->form->setTask($task);
+        $this->setupViewText('edit');
+        $this->refreshPlannerComponents();
+
+        $this->modal('task_create_form_modal')->show();
+        $this->dispatch('task-modal-opened');
     }
 
     public function editTask(int $task)

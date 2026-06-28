@@ -24,6 +24,17 @@ it('parses Polish tapback with regular space inside reaction name', function () 
         ->and($parsed['emoji'])->toBe('👍');
 });
 
+it('parses mojibake Polish tapback text from iOS relay', function () {
+    $text = "Dodano â€žkciuk wÂ gÃ³rÄ™â€ do â€žSiema Grzesiek, bÄ™dziemy uÅ¼ywaÄ‡ ten numer zÄ™by Grzesiek i ja mieliÅ›my te same informacje caÅ‚y czas. - Patryk\n-PSâ€";
+
+    $msg = new SmsMessage(['text' => $text]);
+    $parsed = $msg->parseTapback();
+
+    expect($parsed)->not->toBeNull()
+        ->and($parsed['emoji'])->toBe('👍')
+        ->and($parsed['quoted'])->toContain('Siema Grzesiek');
+});
+
 it('parses Hebrew tapback (liked) using Hebrew Gershayim quotes', function () {
     // Real production message: הוסיף/ה סימן ״אהבתי״ להודעה ״Mark knows of the delay.\n-PS״
     $text = "הוסיף/ה סימן \u{05f4}אהבתי\u{05f4} להודעה \u{05f4}Mark knows of the delay.\n-PS\u{05f4}";

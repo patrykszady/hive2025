@@ -319,5 +319,8 @@
 
         {{-- Send Schedule Modal --}}
         <livewire:sms.send-schedule-modal />
+
+        {{-- Task Create/Edit Modal used by clickable task cards in schedule modal --}}
+        <livewire:tasks.task-create />
     @endif
 </div>

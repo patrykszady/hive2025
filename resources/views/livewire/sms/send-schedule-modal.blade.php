@@ -1,7 +1,7 @@
 <div>
     <flux:modal wire:model="showModal" name="send-schedule-modal" class="w-full max-w-lg">
         <div class="space-y-4">
-            <flux:heading size="lg">Send Schedule</flux:heading>
+            <flux:heading size="lg">Confirm Tasks</flux:heading>
 
             @if (empty($this->clientProjectIds))
                 <flux:callout variant="warning" icon="exclamation-triangle">
@@ -11,7 +11,6 @@
                 {{-- Task list --}}
                 <div class="space-y-1">
                     <flux:text class="text-sm font-medium">Tasks</flux:text>
-
                     @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty() && $this->nextUpcomingTasks->isEmpty())
                         <div class="py-6 text-center">
                             <flux:icon name="calendar" class="mx-auto h-8 w-8 text-zinc-300 dark:text-zinc-600" />
@@ -92,6 +91,16 @@
                                         @if($tasks->isEmpty())
                                             <flux:badge color="zinc" size="sm">No Tasks</flux:badge>
                                         @endif
+
+                                        <flux:button
+                                            variant="subtle"
+                                            icon="plus"
+                                            size="xs"
+                                            class="ml-auto"
+                                            wire:click="openCreateTaskForDate('{{ $date }}')"
+                                            tooltip="Add task for this date"
+                                            aria-label="Add task for {{ $carbonDate->format('D, M j, Y') }}"
+                                        />
                                     </div>
 
                                     {{-- Task cards --}}
@@ -101,7 +110,7 @@
                                             'date' => $date,
                                             'carbonDate' => $carbonDate,
                                             'showAvatars' => true,
-                                            'clickable' => false,
+                                            'clickable' => true,
                                             'showProjectInfo' => $showProjectInfo,
                                             'showVendorInfo' => true,
                                         ])
@@ -124,7 +133,7 @@
                                         'date' => $nextTasks->first()->start_date->format('Y-m-d'),
                                         'carbonDate' => \Carbon\Carbon::parse($nextTasks->first()->start_date),
                                         'showAvatars' => true,
-                                        'clickable' => false,
+                                        'clickable' => true,
                                         'showProjectInfo' => count($this->clientProjectIds) > 1,
                                         'showVendorInfo' => true,
                                     ])
@@ -146,7 +155,7 @@
                                         'date' => null,
                                         'carbonDate' => null,
                                         'showAvatars' => true,
-                                        'clickable' => false,
+                                        'clickable' => true,
                                         'showProjectInfo' => count($this->clientProjectIds) > 1,
                                         'showVendorInfo' => true,
                                     ])
@@ -179,7 +188,7 @@
                     wire:loading.attr="disabled"
                     :disabled="!$this->editableMessage"
                 >
-                    Send Schedule
+                    Confirm Tasks
                 </flux:button>
             </div>
         </div>

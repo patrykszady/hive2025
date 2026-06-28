@@ -48,11 +48,17 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         $log->info("SendBatchVendorAvailabilitySms: Vendor notifications are currently disabled, skipping vendor {$this->vendorId}");
         return;
 
-        // Find all tasks for this vendor that need notifications
-        // Tasks with vendor_status = 'requested' and no token haven't had SMS sent yet
+        // Find all tasks for this vendor that need notifications.
+        // Requested should be set only after an SMS is actually sent.
         $tasks = Task::with(['project.createdByVendor', 'owner'])
             ->where('vendor_id', $this->vendorId)
-            ->where('vendor_status', Task::VENDOR_STATUS_REQUESTED)
+            ->where(function ($query) {
+                $query->whereNull('vendor_status')
+                    ->orWhereNotIn('vendor_status', [
+                        Task::VENDOR_STATUS_CONFIRMED,
+                        Task::VENDOR_STATUS_REJECTED,
+                    ]);
+            })
             ->whereNull('vendor_status_token')
             ->whereNotNull('start_date')
             ->where('start_date', '>=', now()->startOfDay())
@@ -125,21 +131,6 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
 
         $vendorToken = $vendor->getOrCreateAvailabilityToken();
 
-        // Mark tasks as sent by setting a (vendor-level) token on each task
-        foreach ($tasks as $task) {
-            $task->update([
-                'vendor_status_token' => $vendorToken,
-            ]);
-            
-            $log->debug("Set vendor token for task", [
-                'task_id' => $task->id,
-                'task_title' => $task->title,
-                'project' => $task->project?->short_address,
-                'start_date' => $task->start_date?->toDateString(),
-                'vendor_token' => $vendorToken,
-            ]);
-        }
-
         // Send consolidated notification to each admin user
         $notification = new VendorAvailabilitySmsNotification($tasks, $vendorToken);
         $successCount = 0;
@@ -197,6 +188,23 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         // If all failed, throw exception to trigger job retry
         if ($successCount === 0 && $failureCount > 0) {
             throw new \RuntimeException("All SMS notifications failed for vendor {$vendor->id}");
+        }
+
+        if ($successCount > 0) {
+            foreach ($tasks as $task) {
+                $task->update([
+                    'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
+                    'vendor_status_token' => $vendorToken,
+                ]);
+
+                $log->debug("Set vendor requested status and token for task", [
+                    'task_id' => $task->id,
+                    'task_title' => $task->title,
+                    'project' => $task->project?->short_address,
+                    'start_date' => $task->start_date?->toDateString(),
+                    'vendor_token' => $vendorToken,
+                ]);
+            }
         }
     }
 

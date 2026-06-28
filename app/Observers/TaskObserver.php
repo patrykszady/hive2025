@@ -225,12 +225,9 @@ class TaskObserver
             return;
         }
 
-        // Set vendor_status to 'requested' immediately so it shows in the UI
-        // The token remains null until the SMS is actually sent
-        if ($task->vendor_status !== Task::VENDOR_STATUS_REQUESTED) {
-            $task->updateQuietly(['vendor_status' => Task::VENDOR_STATUS_REQUESTED]);
-            $log->info("TaskObserver: Set vendor_status to 'requested'", $logContext);
-        }
+        // Do not set vendor_status to requested here.
+        // Requested must only be set when an SMS is actually sent to the vendor.
+        $log->debug("TaskObserver: Vendor notification queued; vendor_status remains unchanged until send", $logContext);
 
         // Dispatch the job with a 1 hour delay, keyed by vendor_id
         // Using ShouldBeUnique, if another task for the same vendor is created within the hour,

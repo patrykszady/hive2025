@@ -429,6 +429,8 @@ class SmsMessage extends Model
 
         $text = trim($this->text);
 
+        $text = self::repairMojibakeText($text);
+
         // Repair double-encoded UTF-8 mojibake.
         // Two common variants:
         // 1) Latin-1 path: high bytes (C0-FF) become C3 [80-BF] followed by C2 continuation
@@ -476,6 +478,33 @@ class SmsMessage extends Model
             ];
         }
 
+        // Polish carrier/iOS variant seen in the wild:
+        // Dodano „kciuk w górę” do „original message”
+        // Also handles common mojibake wrappers like â€ž ... â€.
+        if (preg_match('/^Dodano\s+(.+?)\s+do\s+(.+)$/isu', $text, $matches)) {
+            $reactionRaw = trim($matches[1]);
+            $quotedRaw = trim($matches[2]);
+
+            $reactionRaw = preg_replace('/^(?:â€ž|â€œ|[„“"«])+/u', '', $reactionRaw) ?? $reactionRaw;
+            $reactionRaw = preg_replace('/(?:â€|â€|[”"»])+$/u', '', $reactionRaw) ?? $reactionRaw;
+
+            $quotedRaw = preg_replace('/^(?:â€ž|â€œ|[„“"«])+/u', '', $quotedRaw) ?? $quotedRaw;
+            $quotedRaw = preg_replace('/(?:â€|â€|[”"»])+$/u', '', $quotedRaw) ?? $quotedRaw;
+
+            $reaction = self::repairMojibakeText(trim($reactionRaw));
+            $quoted = self::repairMojibakeText(trim($quotedRaw));
+            $emoji = self::detectReactionEmoji($reaction);
+
+            if ($emoji && mb_strlen($quoted) >= 2) {
+                return [
+                    'reaction' => $reaction,
+                    'emoji' => $emoji,
+                    'quoted' => $quoted,
+                    'strict' => true,
+                ];
+            }
+        }
+
         // Generic multi-language fallback: extract quoted text from Unicode quotation
         // marks and match reaction keywords across many languages.
         return self::parseGenericTapback($text);
@@ -497,6 +526,8 @@ class SmsMessage extends Model
             ["\u{00ab}", "\u{00bb}"],  // \u{00ab}\u{00bb} French/Russian guillemets
             ["\u{201e}", "\u{201c}"],  // \u{201e}\u{201c} German low-high
             ["\u{201e}", "\u{201d}"],  // \u{201e}\u{201d} Polish low-right
+            ["\u{00e2}\u{20ac}\u{017e}", "\u{00e2}\u{20ac}\u{009d}"], // mojibake Polish low-right
+            ["\u{00e2}\u{20ac}\u{0153}", "\u{00e2}\u{20ac}\u{009d}"], // mojibake left-right
             ["\u{300c}", "\u{300d}"],  // \u{300c}\u{300d} CJK corner brackets
             ["\u{05f4}", "\u{05f4}"],  // ״ Hebrew Punctuation Gershayim (U+05F4)
         ];
@@ -594,6 +625,8 @@ class SmsMessage extends Model
      */
     private static function detectReactionEmoji(string $text): ?string
     {
+        $text = self::repairMojibakeText($text);
+
         // Normalise smart quotes/apostrophes to ASCII for keyword matching
         $normalized = str_replace(
             ["\u{2018}", "\u{2019}", "\u{201a}", "\u{2032}"],
@@ -648,6 +681,77 @@ class SmsMessage extends Model
         }
 
         return null;
+    }
+
+    /**
+     * Best-effort repair for UTF-8 mojibake text produced by double encoding.
+     */
+    private static function repairMojibakeText(string $text): string
+    {
+        $utf8 = @iconv('UTF-8', 'UTF-8//IGNORE', $text);
+        if (is_string($utf8) && $utf8 !== '') {
+            $text = $utf8;
+        }
+
+        $text = str_replace(
+            [
+                "\u{00e2}\u{20ac}\u{0153}",
+                "\u{00e2}\u{20ac}\u{009d}",
+                "\u{00e2}\u{20ac}\u{017e}",
+                'â€',
+                'â€',
+                "\u{009d}",
+                "\u{00c2}\u{00a0}",
+            ],
+            [
+                "\u{201c}",
+                "\u{201d}",
+                "\u{201e}",
+                "\u{201d}",
+                "\u{201d}",
+                "\u{201d}",
+                ' ',
+            ],
+            $text,
+        );
+
+        if ($text === '' || ! preg_match('/[ÃÂâðÄÅ]/u', $text)) {
+            return $text;
+        }
+
+        $candidates = [
+            @mb_convert_encoding($text, 'Windows-1252', 'UTF-8'),
+            @mb_convert_encoding($text, 'ISO-8859-1', 'UTF-8'),
+        ];
+
+        $score = static function (string $value): int {
+            $penalty = preg_match_all('/[ÃÂâðÄÅ]/u', $value, $m);
+            $signal = preg_match_all('/["“”„óęąśłżźćń]/u', $value, $m2);
+
+            return (int) $signal - ((int) $penalty * 2);
+        };
+
+        $best = $text;
+        $bestScore = $score($text);
+
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate) || $candidate === '') {
+                continue;
+            }
+
+            $candidateUtf8 = @iconv('UTF-8', 'UTF-8//IGNORE', $candidate);
+            if (! is_string($candidateUtf8) || $candidateUtf8 === '' || ! mb_check_encoding($candidateUtf8, 'UTF-8')) {
+                continue;
+            }
+
+            $candidateScore = $score($candidateUtf8);
+            if ($candidateScore > $bestScore) {
+                $best = $candidateUtf8;
+                $bestScore = $candidateScore;
+            }
+        }
+
+        return $best;
     }
 
     /**

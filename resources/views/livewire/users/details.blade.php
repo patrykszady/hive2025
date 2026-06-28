@@ -42,6 +42,8 @@
     {{-- Lightweight skeleton guard to avoid flash before hydration --}}
     @php($hydrated = isset($user) && $user->id)
     <x-details.row title="Name" :content="$hydrated ? $user->full_name : 'Loading...'" />
+    <x-details.row title="Nickname" :content="$hydrated ? ($user->nickname ?: '—') : 'Loading...'" />
+    <x-details.row title="Preferred Language" :content="$hydrated ? ($user->preferred_language ?: 'English') : 'Loading...'" />
     <x-details.row title="Email" :content="$hydrated ? $user->email : 'Loading...'" copyable />
     <x-details.row title="Cell Phone" :content="$hydrated && $user->cell_phone ? preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $user->cell_phone) : 'Loading...'" copyable />
 

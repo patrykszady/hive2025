@@ -80,11 +80,57 @@
                 </flux:accordion>
             @endif
 
-            {{-- Upcoming Confirmed Tasks --}}
-            @if($tasks->isNotEmpty())
-            <div class="space-y-3">
-                @foreach($tasks as $task)
-                    <div wire:key="scheduled-task-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+            {{-- Upcoming Confirmed Tasks (grouped by date, matching hub UI) --}}
+            @if($groupedTasks->isNotEmpty())
+            <div class="space-y-5">
+                @foreach($groupedTasks as $date => $dayTasks)
+                    @php
+                        $carbonDate = \Carbon\Carbon::parse($date);
+                        $serverDayBadge = $carbonDate->isToday() ? 'today' : ($carbonDate->isTomorrow() ? 'tomorrow' : '');
+                        $isFirstGroup = $loop->first;
+                        $dayTaskCount = $dayTasks->count();
+                    @endphp
+                    <div wire:key="schedule-day-{{ $date }}" class="space-y-3">
+                        {{-- Date Header --}}
+                        <div class="flex items-center gap-2">
+                            <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
+                                {{ $carbonDate->format('D, M j, Y') }}
+                            </flux:heading>
+                            <span
+                                x-data="{
+                                    badge: '{{ $serverDayBadge }}',
+                                    isFirst: {{ $isFirstGroup ? 'true' : 'false' }},
+                                    init() {
+                                        let p = '{{ $date }}'.split('-');
+                                        let d = new Date(p[0], p[1]-1, p[2]); d.setHours(0,0,0,0);
+                                        let t = new Date(); t.setHours(0,0,0,0);
+                                        let tm = new Date(t); tm.setDate(tm.getDate()+1);
+                                        this.badge = d.getTime() === t.getTime() ? 'today' : (d.getTime() === tm.getTime() ? 'tomorrow' : '');
+                                    }
+                                }"
+                                x-cloak
+                                class="contents"
+                            >
+                                <template x-if="badge === 'today'">
+                                    <flux:badge color="green" size="sm">Today</flux:badge>
+                                </template>
+                                <template x-if="badge === 'tomorrow'">
+                                    <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
+                                </template>
+                                <template x-if="isFirst && badge === ''">
+                                    <flux:badge color="sky" size="sm">Next Up</flux:badge>
+                                </template>
+                            </span>
+
+                            <flux:badge color="zinc" size="sm">
+                                {{ $dayTaskCount }}
+                            </flux:badge>
+                        </div>
+
+                        @foreach($dayTasks as $task)
+                            <div wire:key="scheduled-task-{{ $date }}-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+
+
                         {{-- Task Card Content --}}
                         <div class="p-3">
                             <div class="flex items-start justify-between gap-2 min-w-0">
@@ -166,29 +212,6 @@
                                         download="{{ Str::slug($task->title) }}.ics"
                                         class="hover:underline hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
                                     >{{ $task->date_with_time }}</a>
-                                    @php
-                                        $serverBadge = $task->start_date?->isToday() ? 'today' : ($task->start_date?->isTomorrow() ? 'tomorrow' : '');
-                                    @endphp
-                                    <span
-                                        x-data="{ 
-                                            badge: '{{ $serverBadge }}',
-                                            init() {
-                                                let p = '{{ $task->start_date?->format('Y-m-d') }}'.split('-');
-                                                let d = new Date(p[0], p[1]-1, p[2]); d.setHours(0,0,0,0);
-                                                let t = new Date(); t.setHours(0,0,0,0);
-                                                let tm = new Date(t); tm.setDate(tm.getDate()+1);
-                                                this.badge = d.getTime() === t.getTime() ? 'today' : (d.getTime() === tm.getTime() ? 'tomorrow' : '');
-                                            }
-                                        }"
-                                        x-cloak
-                                    >
-                                        <template x-if="badge === 'today'">
-                                            <flux:badge color="green" size="sm">Today</flux:badge>
-                                        </template>
-                                        <template x-if="badge === 'tomorrow'">
-                                            <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
-                                        </template>
-                                    </span>
                                 </div>
                             </div>
 
@@ -270,6 +293,8 @@
                                 </button>
                             </div>
                         @endif
+                    </div>
+                        @endforeach
                     </div>
                 @endforeach
             </div>

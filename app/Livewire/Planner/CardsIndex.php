@@ -1667,18 +1667,27 @@ class CardsIndex extends Component
 
     public function render()
     {
+        $isCards = $this->viewMode === 'cards';
+        $isTable = $this->viewMode === 'table';
         $isGantt = $this->viewMode === 'gantt';
-        $needsKanban = ! $isGantt; // cards + table views need kanbanColumns / dayHeaders / projectRows
+
+        // Each view renders a disjoint dataset. Only compute what the active view
+        // needs so changing a filter doesn't pay for views that aren't on screen.
+        // The list view in particular only renders the flat `taskList`, so it can
+        // skip the heavy kanban / lane / undated computations entirely.
+        $needsKanban = $isCards;                 // cards view: per-day project columns
+        $needsRows = $isTable;                   // table view: day headers + lane rows
+        $needsUndated = $isCards || $isTable;    // pending-tasks modal (cards + table only)
 
         return view('livewire.planner.cards', [
             'kanbanColumns' => $needsKanban ? $this->kanbanColumns : collect(),
-            'dayHeaders'    => $needsKanban ? $this->dayHeaders : collect(),
-            'projectRows'   => $needsKanban ? $this->projectRows : collect(),
+            'dayHeaders'    => $needsRows ? $this->dayHeaders : collect(),
+            'projectRows'   => $needsRows ? $this->projectRows : collect(),
             'ganttRows'        => $isGantt ? $this->ganttRows : collect(),
             'ganttLinks'       => $isGantt ? $this->ganttDependencyLinks : [],
             'ganttArrowPaths'  => $isGantt ? $this->ganttArrowPaths : [],
             'pxPerDay'         => $this->ganttPxPerDay,
-            'undatedTasksByProject' => $this->buildUndatedTasksByProject(),
+            'undatedTasksByProject' => $needsUndated ? $this->buildUndatedTasksByProject() : [],
         ])->layout('components.layouts.app', [
             'title' => 'Planner',
             'fullscreenClasses' => 'h-full overflow-hidden flex flex-col',

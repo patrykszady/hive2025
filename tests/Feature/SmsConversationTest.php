@@ -298,3 +298,62 @@ describe('forwarding messages', function (): void {
             ->assertHasNoErrors();
     });
 });
+
+describe('tapback reactions', function (): void {
+    uses(RefreshDatabase::class);
+
+    it('attaches a mojibake Polish like tapback to the quoted message', function (): void {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+        $subjectVendor = Vendor::factory()->create(['business_name' => 'Smartech Electric']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'tapback-test-' . uniqid() . '@example.com',
+            'cell_phone' => '2245551111',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Tapback Thread',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'subject_vendor_id' => $subjectVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        $original = SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => "Siema Grzesiek, bÄ™dziemy uÅ¼ywaÄ‡ ten numer zÄ™by Grzesiek i ja mieliÅ›my te same informacje caÅ‚y czas. - Patryk\n-PS",
+            'status' => 'received',
+        ]);
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => "Dodano â€žkciuk wÂ gÃ³rÄ™â€ do â€žSiema Grzesiek, bÄ™dziemy uÅ¼ywaÄ‡ ten numer zÄ™by Grzesiek i ja mieliÅ›my te same informacje caÅ‚y czas. - Patryk\n-PSâ€",
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $thread->id]);
+        $processed = $component->instance()->processedMessages;
+
+        expect($processed['visible'])->toHaveCount(1)
+            ->and((int) $processed['visible']->first()->id)->toBe((int) $original->id)
+            ->and($processed['reactions'][$original->id]['👍'] ?? null)->toBeArray();
+    });
+});
