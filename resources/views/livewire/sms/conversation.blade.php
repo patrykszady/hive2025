@@ -427,12 +427,15 @@
                 <div wire:key="msg-{{ $msg->id }}" class="flex justify-end">
                     <div class="max-w-[85%] lg:max-w-[75%] order-last">
                         <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
-                            {{ $msg->sentByUser?->first_name ?? 'GS Crew' }}
+                            {{ $msg->sentByUser?->nickname ?: ($msg->sentByUser?->first_name ?? 'GS Crew') }}
                         </p>
 
                         <div class="relative">
                             <div class="mb-1.5 flex items-center justify-end gap-1">
-                                <flux:badge color="amber" size="sm" icon="clock">Scheduled &middot; {{ $msg->scheduled_at->timezone('America/Chicago')->format('M j, g:i A') }}</flux:badge>
+                                <flux:badge color="amber" size="sm" icon="clock">
+                                    {{ $msg->scheduled_at ? 'Scheduled · ' . $msg->scheduled_at->timezone('America/Chicago')->format('M j, g:i A') : 'Draft' }}
+                                </flux:badge>
+                                <flux:button size="xs" variant="ghost" square icon="pencil-square" wire:click="openEditScheduledMessage({{ $msg->id }})" tooltip="Edit" aria-label="Edit scheduled message"></flux:button>
                                 <flux:button size="xs" variant="primary" square icon="paper-airplane" wire:click="sendScheduledNow({{ $msg->id }})" tooltip="Send now" aria-label="Send now"></flux:button>
                                 <flux:button size="xs" variant="danger" square icon="x-mark" wire:click="$set('cancelScheduledId', {{ $msg->id }}); $set('showCancelModal', true)" tooltip="Cancel" aria-label="Cancel scheduled message"></flux:button>
                             </div>
@@ -468,11 +471,11 @@
                                         @endforeach
                                     </div>
                                 @endif
-                                @if ($msg->display_text)
+                                @if (($msg->translated_display_text ?? $msg->display_text))
                                     {!! preg_replace(
                                         '/(https?:\/\/[^\s<]+)/',
                                         '<a href="$1" target="_blank" class="underline text-indigo-100 hover:text-white">$1</a>',
-                                        nl2br(e($msg->display_text))
+                                        nl2br(e($msg->translated_display_text ?? $msg->display_text))
                                     ) !!}
                                 @endif
                             </div>
@@ -524,7 +527,7 @@
                             </p>
                         @elseif ($msg->isOutbound())
                             <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
-                                {{ $msg->sentByUser?->first_name ?? 'GS Crew' }}
+                                {{ $msg->sentByUser?->nickname ?: ($msg->sentByUser?->first_name ?? 'GS Crew') }}
                             </p>
                         @endif
 
@@ -572,11 +575,11 @@
                                         @endforeach
                                     </div>
                                 @endif
-                                @if ($msg->display_text)
+                                @if (($msg->translated_display_text ?? $msg->display_text))
                                     {!! preg_replace(
                                         '/(https?:\/\/[^\s<]+)/',
                                         '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
-                                        nl2br(e($msg->display_text))
+                                        nl2br(e($msg->translated_display_text ?? $msg->display_text))
                                     ) !!}
                                 @endif
                             </div>
@@ -612,7 +615,7 @@
                             @endif
                         </p>
                     </div>
-                    @if (! $isClientUser && $msg->display_text)
+                    @if (! $isClientUser && ($msg->translated_display_text ?? $msg->display_text))
                         <div
                             class="flex items-center self-center opacity-0 group-hover:opacity-100 transition-opacity {{ $msg->isOutbound() ? 'order-first pr-1' : 'pl-1' }}"
                             x-show="!selectionMode"
@@ -629,7 +632,7 @@
                                     </flux:menu.item>
                                     <flux:menu.item
                                         icon="clipboard"
-                                        x-on:click="navigator.clipboard.writeText(@js($msg->display_text)); $flux.toast({ text: 'Message copied', variant: 'success' })"
+                                        x-on:click="navigator.clipboard.writeText(@js($msg->translated_display_text ?? $msg->display_text)); $flux.toast({ text: 'Message copied', variant: 'success' })"
                                     >
                                         Copy Text
                                     </flux:menu.item>
@@ -1252,6 +1255,7 @@
                 </div>
             </div>
         </flux:modal>
+
     @else
         {{-- No thread selected on the server. Use template x-if so only one branch
              ever exists in the DOM — avoids any flash of both states together.
@@ -1343,26 +1347,32 @@
                     max-rows="6"
                 >
                     <x-slot name="actionsLeading">
-                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach media" :disabled="! $this->thread"></flux:button>
+                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach media" x-bind:disabled="!! $wire.editScheduledId || @js($composerDisabled)"></flux:button>
                         <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*,video/*,.mp4,.mov,.webm,.m4v,.3gp,.avi" class="hidden" />
-                        <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" aria-label="Send schedule" :disabled="$composerDisabled"></flux:button>
+                        <div x-show="! $wire.editScheduledId" x-cloak>
+                            <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" aria-label="Send schedule" :disabled="$composerDisabled"></flux:button>
+                        </div>
                     </x-slot>
 
                     <x-slot name="actionsTrailing">
-                        <flux:dropdown position="top end">
-                            <flux:button size="sm" variant="subtle" square icon="clock" aria-label="Schedule send" :disabled="$composerDisabled"></flux:button>
+                        <div x-show="! $wire.editScheduledId" x-cloak>
+                            <flux:dropdown position="top end">
+                                <flux:button size="sm" variant="subtle" square icon="clock" aria-label="Schedule send" :disabled="$composerDisabled"></flux:button>
 
-                            <flux:menu>
-                                <flux:heading size="xs" class="px-2 pb-1">Schedule send</flux:heading>
-                                <flux:menu.item wire:click="scheduleMessage('1hr')" icon="clock">In 1 hour</flux:menu.item>
-                                <flux:menu.item wire:click="scheduleMessage('2hr')" icon="clock">In 2 hours</flux:menu.item>
-                                <flux:separator />
-                                <flux:menu.item wire:click="scheduleMessage('tomorrow_8am')" icon="sun">Tomorrow 8:00 AM</flux:menu.item>
-                                <flux:menu.item wire:click="scheduleMessage('tomorrow_12pm')" icon="sun">Tomorrow 12:00 PM</flux:menu.item>
-                            </flux:menu>
-                        </flux:dropdown>
+                                <flux:menu>
+                                    <flux:heading size="xs" class="px-2 pb-1">Schedule send</flux:heading>
+                                    <flux:menu.item wire:click="scheduleMessage('1hr')" icon="clock">In 1 hour</flux:menu.item>
+                                    <flux:menu.item wire:click="scheduleMessage('2hr')" icon="clock">In 2 hours</flux:menu.item>
+                                    <flux:menu.item wire:click="scheduleMessage('schedule_only')" icon="bookmark">Schedule Only (manual send)</flux:menu.item>
+                                    <flux:separator />
+                                    <flux:menu.item wire:click="scheduleMessage('tomorrow_8am')" icon="sun">Tomorrow 8:00 AM</flux:menu.item>
+                                    <flux:menu.item wire:click="scheduleMessage('tomorrow_12pm')" icon="sun">Tomorrow 12:00 PM</flux:menu.item>
+                                </flux:menu>
+                            </flux:dropdown>
+                        </div>
 
-                        <flux:button type="submit" size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" :disabled="$composerDisabled" aria-label="Send message"></flux:button>
+                        <flux:button type="submit" x-show="! $wire.editScheduledId" x-cloak size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" :disabled="$composerDisabled" aria-label="Send message" tooltip="Send message"></flux:button>
+                        <flux:button type="submit" x-show="!! $wire.editScheduledId" x-cloak size="sm" variant="primary" square icon="check" class="data-loading:opacity-50" :disabled="$composerDisabled" aria-label="Save Draft" tooltip="Save Draft"></flux:button>
                     </x-slot>
                 </flux:composer>
             </form>

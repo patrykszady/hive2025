@@ -5,7 +5,9 @@ namespace App\Livewire\Sms;
 use App\Models\Project;
 use App\Models\SmsGroupThread;
 use App\Models\Task;
+use App\Models\User;
 use App\Services\GroupSmsService;
+use App\Services\SmsTranslationService;
 use Carbon\Carbon;
 use Flux;
 use Livewire\Attributes\Computed;
@@ -20,6 +22,8 @@ class SendScheduleModal extends Component
 
     public string $editableMessage = '';
 
+    public bool $scheduleWithoutDate = false;
+
     protected int $daysAhead = 3;
 
     #[On('openScheduleModal')]
@@ -27,6 +31,7 @@ class SendScheduleModal extends Component
     {
         $this->threadId = $threadId;
         $this->showModal = true;
+        $this->scheduleWithoutDate = false;
         $this->editableMessage = $this->previewMessage;
     }
 
@@ -66,6 +71,19 @@ class SendScheduleModal extends Component
     public function close(): void
     {
         $this->showModal = false;
+        $this->scheduleWithoutDate = false;
+    }
+
+    public function useNoDateSchedule(): void
+    {
+        $this->scheduleWithoutDate = true;
+        $this->editableMessage = $this->buildScheduleLinkMessage();
+    }
+
+    public function useDatedSchedule(): void
+    {
+        $this->scheduleWithoutDate = false;
+        $this->editableMessage = $this->previewMessage;
     }
 
     #[Computed]
@@ -77,9 +95,42 @@ class SendScheduleModal extends Component
 
         return SmsGroupThread::with([
             'project.createdByVendor',
-            'client.users:id,first_name,last_name',
-            'subjectVendor.users:id,first_name,last_name',
+            'client.users:id,first_name,last_name,nickname,preferred_language',
+            'subjectVendor.users:id,first_name,last_name,nickname,preferred_language',
         ])->find($this->threadId);
+    }
+
+    #[Computed]
+    public function recipientLanguage(): string
+    {
+        $thread = $this->thread;
+
+        if (! $thread) {
+            return 'English';
+        }
+
+        $language = null;
+
+        if ($thread->subject_vendor_id) {
+            $language = $thread->subjectVendor?->users
+                ?->pluck('preferred_language')
+                ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+                ->first();
+        } else {
+            $language = $thread->client?->users
+                ?->pluck('preferred_language')
+                ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+                ->first();
+        }
+
+        return is_string($language) && trim($language) !== '' ? $language : 'English';
+    }
+
+    #[Computed]
+    public function viewerLanguage(): string
+    {
+        return app(SmsTranslationService::class)
+            ->normalizeLanguage((string) (auth()->user()?->preferred_language ?: 'English'));
     }
 
     #[Computed]
@@ -316,7 +367,7 @@ class SendScheduleModal extends Component
 
         $greeting = $this->buildRecipientGreeting();
 
-        $intro = 'Confirm Tasks:';
+        $intro = $this->translateText('confirm_tasks') . ':';
 
         // Build task lines grouped by day (matching digest format)
         $today = Carbon::today(browser_timezone());
@@ -331,9 +382,9 @@ class SendScheduleModal extends Component
             $shortDate = $carbonDate->format('D n/j');
 
             if ($carbonDate->isSameDay($today)) {
-                $dateLabel = "Today {$shortDate}";
+                $dateLabel = $this->translateText('today') . " {$shortDate}";
             } elseif ($carbonDate->isSameDay($tomorrow)) {
-                $dateLabel = "Tomorrow {$shortDate}";
+                $dateLabel = $this->translateText('tomorrow') . " {$shortDate}";
             } else {
                 $dateLabel = $shortDate;
             }
@@ -394,7 +445,7 @@ class SendScheduleModal extends Component
                 return $line;
             })->implode("\n");
 
-            $daySections[] = "Next up {$dateLabel}:\n{$taskLines}";
+            $daySections[] = $this->translateText('next_up') . " {$dateLabel}:\n{$taskLines}";
         }
 
         // Add pending tasks section
@@ -417,7 +468,7 @@ class SendScheduleModal extends Component
                 return $line;
             })->implode("\n");
 
-            $daySections[] = "Pending:\n{$pendingLines}";
+            $daySections[] = $this->translateText('pending') . ":\n{$pendingLines}";
         }
 
         $body = implode("\n\n", $daySections);
@@ -430,12 +481,12 @@ class SendScheduleModal extends Component
         $subjectVendor = $this->thread?->subjectVendor;
         if ($subjectVendor) {
             $token = $subjectVendor->getOrCreateAvailabilityToken();
-            $linksText = "\nConfirm Schedule: {$baseUrl}/v/{$token}";
+            $linksText = "\n" . $this->translateText('confirm_schedule') . ": {$baseUrl}/v/{$token}";
         } else {
             $firstProject = $allTasks->first()?->project;
             if ($firstProject) {
                 $token = $firstProject->getOrCreateScheduleToken();
-                $linksText = "\nConfirm Schedule: {$baseUrl}/s/{$token}";
+                $linksText = "\n" . $this->translateText('confirm_schedule') . ": {$baseUrl}/s/{$token}";
             } else {
                 $link = $this->buildScheduleLink();
                 if ($link) {
@@ -475,19 +526,19 @@ class SendScheduleModal extends Component
             $shortName = trim((string) ($thread->subjectVendor?->short_name ?? ''));
 
             return $shortName !== ''
-                ? "Hi {$shortName},"
-                : 'Hi,';
+                ? $this->translateText('hi') . " {$shortName},"
+                : ($this->vendorUserGreeting() ?: $this->translateText('hi') . ',');
         }
 
         $names = $thread?->client?->users
-                ?->pluck('first_name')
+                ?->map(fn (User $user) => $this->displayFirstName($user))
                 ->filter()
                 ->values()
                 ->all() ?? [];
 
         return count($names) > 0
-            ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
-            : 'Hi,';
+            ? $this->translateText('hi') . ' ' . collect($names)->join(', ', ' & ') . ','
+            : $this->translateText('hi') . ',';
     }
 
     /**
@@ -511,13 +562,95 @@ class SendScheduleModal extends Component
         $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
         $token = $project->getOrCreateScheduleToken();
 
-        return "Confirm Schedule: {$baseUrl}/s/{$token}";
+        return $this->translateText('confirm_schedule') . ": {$baseUrl}/s/{$token}";
+    }
+
+    protected function vendorUserGreeting(): ?string
+    {
+        $names = $this->thread?->subjectVendor?->users
+            ?->map(fn (User $user) => $this->displayName($user))
+            ->filter()
+            ->values()
+            ->all() ?? [];
+
+        if ($names === []) {
+            return null;
+        }
+
+        return $this->translateText('hi') . ' ' . collect($names)->join(', ', ' & ') . ',';
+    }
+
+    protected function displayFirstName(User $user): string
+    {
+        $nickname = trim((string) ($user->nickname ?? ''));
+
+        if ($nickname !== '') {
+            return $nickname;
+        }
+
+        return trim((string) ($user->first_name ?? ''));
+    }
+
+    protected function displayName(User $user): string
+    {
+        $first = $this->displayFirstName($user);
+        $last = trim((string) ($user->last_name ?? ''));
+
+        return trim($first . ' ' . $last);
+    }
+
+    protected function languageKey(): string
+    {
+        $language = strtolower(trim((string) $this->viewerLanguage));
+
+        return match (true) {
+            str_contains($language, 'polish'), str_contains($language, 'polski') => 'pl',
+            str_contains($language, 'spanish'), str_contains($language, 'espanol') => 'es',
+            default => 'en',
+        };
+    }
+
+    protected function translateText(string $key): string
+    {
+        $translations = [
+            'en' => [
+                'hi' => 'Hi',
+                'confirm_tasks' => 'Confirm Tasks',
+                'confirm_schedule' => 'Confirm Schedule',
+                'today' => 'Today',
+                'tomorrow' => 'Tomorrow',
+                'next_up' => 'Next up',
+                'pending' => 'Pending',
+            ],
+            'pl' => [
+                'hi' => 'Czesc',
+                'confirm_tasks' => 'Potwierdz zadania',
+                'confirm_schedule' => 'Potwierdz plan',
+                'today' => 'Dzisiaj',
+                'tomorrow' => 'Jutro',
+                'next_up' => 'Nastepnie',
+                'pending' => 'Oczekujace',
+            ],
+            'es' => [
+                'hi' => 'Hola',
+                'confirm_tasks' => 'Confirma tareas',
+                'confirm_schedule' => 'Confirmar horario',
+                'today' => 'Hoy',
+                'tomorrow' => 'Manana',
+                'next_up' => 'Proximo',
+                'pending' => 'Pendientes',
+            ],
+        ];
+
+        $language = $this->languageKey();
+
+        return $translations[$language][$key] ?? $translations['en'][$key] ?? $key;
     }
 
     /**
      * Send the schedule message to the thread.
      */
-    public function send(GroupSmsService $smsService): void
+    public function send(GroupSmsService $smsService, SmsTranslationService $translator): void
     {
         if (empty($this->editableMessage)) {
             Flux::toast(variant: 'warning', heading: 'No Message', text: 'No message to send.', duration: 4000, position: 'top right');
@@ -536,12 +669,36 @@ class SendScheduleModal extends Component
             return;
         }
 
-        $text = $this->editableMessage . "\n-GSC";
+        $viewerLanguage = $translator->normalizeLanguage((string) (auth()->user()?->preferred_language ?: 'English'));
+        $recipientLanguage = $translator->normalizeLanguage($this->recipientLanguage);
 
-        $smsService->sendToThread($thread, $text, [], null);
+        $outboundBody = $this->editableMessage;
+        if (trim($outboundBody) !== '' && strcasecmp($viewerLanguage, $recipientLanguage) !== 0) {
+            $outboundBody = $translator->translate($outboundBody, $recipientLanguage, $viewerLanguage);
+        }
+
+        $text = $outboundBody . "\n-GSC";
+
+        $rawPayload = [
+            'original_text' => $this->editableMessage,
+            'sender_language' => $viewerLanguage,
+            'recipient_language' => $recipientLanguage,
+            'source' => 'send_schedule_modal',
+            'scheduled_task_ids' => $this->selectedTaskIds,
+        ];
+
+        $smsService->sendToThread(
+            $thread,
+            $text,
+            [],
+            null,
+            null,
+            $rawPayload,
+            $this->scheduleWithoutDate,
+        );
 
         // Mark vendor tasks as requested only after the SMS is sent.
-        if ($thread->subject_vendor_id) {
+        if ($thread->subject_vendor_id && ! $this->scheduleWithoutDate) {
             Task::whereIn('id', $this->selectedTaskIds)
                 ->where('vendor_id', $thread->subject_vendor_id)
                 ->whereNull('vendor_status')
@@ -550,9 +707,14 @@ class SendScheduleModal extends Component
                 ]);
         }
 
-        Flux::toast(variant: 'success', heading: 'Sent', text: 'Schedule message sent.', duration: 4000, position: 'top right');
+        if ($this->scheduleWithoutDate) {
+            Flux::toast(variant: 'success', heading: 'Scheduled', text: 'Message scheduled without date. Use send now to send it.', duration: 4000, position: 'top right');
+        } else {
+            Flux::toast(variant: 'success', heading: 'Sent', text: 'Schedule message sent.', duration: 4000, position: 'top right');
+        }
 
         $this->showModal = false;
+        $this->scheduleWithoutDate = false;
         $this->dispatch('messageSent');
         $this->dispatch('refreshMessages');
     }

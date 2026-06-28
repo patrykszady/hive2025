@@ -24,7 +24,15 @@ class GroupSmsService
      *
      * @param  array<string>  $mediaUrls  Public URLs to media attachments
      */
-    public function sendToThread(SmsGroupThread $thread, string $text, array $mediaUrls = [], ?int $sentByUserId = null, ?Carbon $scheduledAt = null): SmsMessage
+    public function sendToThread(
+        SmsGroupThread $thread,
+        string $text,
+        array $mediaUrls = [],
+        ?int $sentByUserId = null,
+        ?Carbon $scheduledAt = null,
+        ?array $rawPayload = null,
+        bool $scheduleOnly = false,
+    ): SmsMessage
     {
         $participants = $thread->participants ?? [];
 
@@ -36,12 +44,13 @@ class GroupSmsService
             'to_numbers' => $participants,
             'text' => $text,
             'media_urls' => $mediaUrls ?: null,
-            'status' => $scheduledAt ? 'scheduled' : 'sending',
+            'raw_payload' => $rawPayload,
+            'status' => ($scheduledAt || $scheduleOnly) ? 'scheduled' : 'sending',
             'sent_by_user_id' => $sentByUserId,
             'scheduled_at' => $scheduledAt,
         ]);
 
-        if ($scheduledAt) {
+        if ($scheduledAt || $scheduleOnly) {
             return $message;
         }
 

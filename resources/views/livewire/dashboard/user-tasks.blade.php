@@ -6,6 +6,7 @@
         :clickable="true"
         :show-project-info="true"
         :show-add-task="true"
+        :pending-tasks-expanded="false"
         title="Tasks"
         empty-message="No tasks upcoming assigned to you."
     />

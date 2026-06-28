@@ -9,6 +9,7 @@
     'showVendorInfo' => true,
     'showNotifications' => true,
     'publicView' => false,
+    'pendingTasksExpanded' => true,
     'title' => 'Tasks',
     'emptyMessage' => 'No tasks upcoming for this project.',
     'projectId' => null,
@@ -59,7 +60,7 @@
         <div class="space-y-4">
             @if($unscheduledTasks && $unscheduledTasks->isNotEmpty())
                 <flux:accordion transition>
-                    <flux:accordion.item expanded>
+                    <flux:accordion.item :expanded="$pendingTasksExpanded">
                         <flux:accordion.heading>
                             <div class="flex items-center gap-2">
                                 <span class="text-orange-600 dark:text-orange-400">Pending Tasks</span>

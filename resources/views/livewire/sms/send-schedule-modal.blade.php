@@ -180,6 +180,22 @@
 
             {{-- Actions --}}
             <div class="flex justify-end gap-2 pt-2">
+                <flux:button
+                    variant="ghost"
+                    icon="calendar"
+                    wire:click="useDatedSchedule"
+                    :disabled="!$this->scheduleWithoutDate"
+                >
+                    Schedule With Date
+                </flux:button>
+                <flux:button
+                    variant="ghost"
+                    icon="calendar-days"
+                    wire:click="useNoDateSchedule"
+                    :disabled="$this->scheduleWithoutDate"
+                >
+                    Schedule No Date
+                </flux:button>
                 <flux:button variant="ghost" wire:click="close">Cancel</flux:button>
                 <flux:button
                     variant="primary"

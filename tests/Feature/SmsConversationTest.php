@@ -1,10 +1,13 @@
 <?php
 
 use App\Livewire\Sms\SmsConversation;
+use App\Livewire\Sms\SmsNewThread;
 use App\Models\Client;
+use App\Models\Project;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadParticipant;
+use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
@@ -296,6 +299,315 @@ describe('forwarding messages', function (): void {
             ->set('forwardTargetThreadId', $target->id)
             ->call('forwardMessages')
             ->assertHasNoErrors();
+    });
+
+    it('shows original text when stored translated content is a prompt artifact', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_number' => '+12245550001',
+            'text' => 'Please provide the SMS text you would like translated.',
+            'status' => 'sent',
+            'raw_payload' => [
+                'original_text' => 'Start',
+                'sender_language' => 'English',
+                'recipient_language' => 'Polish',
+            ],
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $visible = $component->instance()->processedMessages['visible'];
+        $rendered = $visible->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        expect($rendered->translated_display_text)->toBe('Start');
+    });
+});
+
+describe('scheduled messages', function (): void {
+    uses(RefreshDatabase::class);
+
+    it('creates a no-date schedule-only draft from the conversation menu', function (): void {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+        $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'scheduled-only-' . uniqid() . '@example.com',
+            'cell_phone' => '2245553000',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Scheduled Thread',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'subject_vendor_id' => $subjectVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->set('newMessage', 'Please review this when ready')
+            ->call('scheduleMessage', 'schedule_only');
+
+        $scheduled = SmsMessage::query()
+            ->where('thread_id', $thread->id)
+            ->latest('id')
+            ->first();
+
+        expect($scheduled)->not->toBeNull();
+        expect($scheduled->status)->toBe('scheduled');
+        expect($scheduled->scheduled_at)->toBeNull();
+        expect(data_get($scheduled->raw_payload, 'schedule_only'))->toBeTrue();
+    });
+
+    it('shows draft for scheduled messages without a send date', function (): void {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+        $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'draft-badge-' . uniqid() . '@example.com',
+            'cell_phone' => '2245553001',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Draft Thread',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'subject_vendor_id' => $subjectVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_numbers' => ['+12245550001'],
+            'text' => "Draft text\n-GSC",
+            'status' => 'scheduled',
+            'scheduled_at' => null,
+            'sent_by_user_id' => $user->id,
+            'raw_payload' => [
+                'original_text' => 'Draft text',
+                'sender_language' => 'English',
+                'recipient_language' => 'English',
+                'schedule_only' => true,
+            ],
+        ]);
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->assertSee('Draft');
+    });
+
+    it('edits a scheduled message before sending', function (): void {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+        $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'scheduled-edit-' . uniqid() . '@example.com',
+            'cell_phone' => '2245553111',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Scheduled Thread',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'subject_vendor_id' => $subjectVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_numbers' => ['+12245550001'],
+            'text' => "Old scheduled text\n-PS",
+            'status' => 'scheduled',
+            'sent_by_user_id' => $user->id,
+            'raw_payload' => [
+                'original_text' => 'Old scheduled text',
+                'sender_language' => 'English',
+                'recipient_language' => 'English',
+            ],
+        ]);
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->call('openEditScheduledMessage', $message->id)
+            ->assertSet('editScheduledId', $message->id)
+            ->assertSet('newMessage', 'Old scheduled text')
+            ->set('newMessage', 'Updated scheduled text')
+            ->call('sendMessage')
+            ->assertSet('editScheduledId', null);
+
+        expect($message->fresh()->text)->toBe("Updated scheduled text\n-PS");
+        expect(data_get($message->fresh()->raw_payload, 'original_text'))->toBe('Updated scheduled text');
+    });
+
+    it('marks vendor tasks requested when sending a no-date scheduled draft now', function (): void {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+        $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'scheduled-send-now-' . uniqid() . '@example.com',
+            'cell_phone' => '2245553222',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $this->actingAs($user);
+
+        $client = Client::factory()->create();
+        $project = Project::query()->create([
+            'project_name' => 'Scheduled Send Project',
+            'client_id' => $client->id,
+            'address' => '3154 Violet Ln',
+            'city' => 'Northbrook',
+            'state' => 'IL',
+            'zip_code' => 60062,
+            'belongs_to_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $task = Task::query()->create([
+            'title' => 'Scheduled task',
+            'project_id' => $project->id,
+            'vendor_id' => $subjectVendor->id,
+            'type' => 'Task',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Scheduled Thread',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'subject_vendor_id' => $subjectVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_numbers' => ['+12245550001'],
+            'text' => "Draft schedule\n-GSC",
+            'status' => 'scheduled',
+            'scheduled_at' => null,
+            'raw_payload' => [
+                'source' => 'send_schedule_modal',
+                'scheduled_task_ids' => [$task->id],
+            ],
+        ]);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->call('sendScheduledNow', $message->id);
+
+        expect($message->fresh()->status)->not->toBe('scheduled');
+        expect($task->fresh()->vendor_status)->toBe(Task::VENDOR_STATUS_REQUESTED);
+    });
+
+    it('re-signs a scheduled draft with the sending user signature', function (): void {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+        $author = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Author',
+            'email' => 'resign-author-' . uniqid() . '@example.com',
+            'cell_phone' => '2245553111',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $sender = User::query()->create([
+            'first_name' => 'Greg',
+            'last_name' => 'Sender',
+            'email' => 'resign-sender-' . uniqid() . '@example.com',
+            'cell_phone' => '2245553112',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Resign Thread',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_numbers' => ['+12245550001'],
+            'text' => "Draft body here\n-PS",
+            'status' => 'scheduled',
+            'scheduled_at' => null,
+            'sent_by_user_id' => $author->id,
+            'raw_payload' => ['source' => 'send_schedule_modal'],
+        ]);
+
+        $this->actingAs($sender);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->call('sendScheduledNow', $message->id);
+
+        $expectedSignature = SmsNewThread::getSignature($sender->id);
+
+        $fresh = $message->fresh();
+        expect($fresh->text)->toBe("Draft body here\n{$expectedSignature}");
+        expect($fresh->sent_by_user_id)->toBe($sender->id);
+        expect($fresh->text)->not->toContain('-PS');
     });
 });
 

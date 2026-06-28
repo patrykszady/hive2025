@@ -12,9 +12,11 @@ use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadParticipant;
 use App\Models\SmsThreadRead;
+use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
+use App\Services\SmsTranslationService;
 use App\Services\SmsTaskExtractionService;
 use Carbon\Carbon;
 use Flux;
@@ -63,6 +65,8 @@ class SmsConversation extends Component
     public ?int $cancelScheduledId = null;
 
     public bool $showCancelModal = false;
+
+    public ?int $editScheduledId = null;
 
     public string $manualOptInReason = '';
 
@@ -206,9 +210,10 @@ class SmsConversation extends Component
     }
 
     #[On('refreshMessages')]
+    #[On('sms-schedule-changed')]
     public function refreshMessages(): void
     {
-        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages, $this->threadHasMixedNumbers);
         $this->markThreadAsRead();
     }
 
@@ -871,10 +876,16 @@ class SmsConversation extends Component
         );
     }
 
-    public function sendMessage(GroupSmsService $smsService): void
+    public function sendMessage(GroupSmsService $smsService, SmsTranslationService $translator): void
     {
         if ($this->isClientUser) {
             abort(403, 'Client users cannot send messages.');
+        }
+
+        if ($this->editScheduledId) {
+            $this->saveEditedScheduledMessage($translator);
+
+            return;
         }
 
         $this->validate([
@@ -898,7 +909,18 @@ class SmsConversation extends Component
         }
 
         $text = trim($this->newMessage);
-        $messageWithSig = $text ? $text . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature();
+
+        $senderLanguage = $this->preferredLanguageForUser(auth()->user());
+        $recipientLanguage = $this->threadRecipientLanguage($thread);
+        $outboundText = $text;
+
+        if ($text !== '' && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
+            $outboundText = $translator->translate($text, $recipientLanguage, $senderLanguage);
+        }
+
+        $messageWithSig = $outboundText !== ''
+            ? $outboundText . "\n" . SmsNewThread::getSignature()
+            : SmsNewThread::getSignature();
 
         $mediaUrls = [];
         if ($this->attachment) {
@@ -908,19 +930,25 @@ class SmsConversation extends Component
             $mediaUrls[] = '/storage/' . $path;
         }
 
-        $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id());
+        $rawPayload = [
+            'original_text' => $text,
+            'sender_language' => $senderLanguage,
+            'recipient_language' => $recipientLanguage,
+        ];
+
+        $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id(), null, $rawPayload);
 
         $this->newMessage = '';
         $this->attachment = null;
 
         // Clear memoized computed properties so the re-render fetches fresh data
-        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+        $this->refreshMessages();
 
         $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = \$wire.\$el.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
         $this->dispatch('messageSent');
     }
 
-    public function scheduleMessage(string $preset, GroupSmsService $smsService): void
+    public function scheduleMessage(string $preset, GroupSmsService $smsService, SmsTranslationService $translator): void
     {
         if ($this->isClientUser) {
             abort(403, 'Client users cannot send messages.');
@@ -935,6 +963,7 @@ class SmsConversation extends Component
         $thread = SmsGroupThread::findOrFail($this->threadId);
 
         $now = now('America/Chicago');
+        $scheduleOnly = $preset === 'schedule_only';
         $scheduledAt = match ($preset) {
             '1hr' => $now->copy()->addHour()->utc(),
             '2hr' => $now->copy()->addHours(2)->utc(),
@@ -943,12 +972,23 @@ class SmsConversation extends Component
             default => null,
         };
 
-        if (! $scheduledAt) {
+        if (! $scheduleOnly && ! $scheduledAt) {
             return;
         }
 
         $text = trim($this->newMessage);
-        $messageWithSig = $text ? $text . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature();
+
+        $senderLanguage = $this->preferredLanguageForUser(auth()->user());
+        $recipientLanguage = $this->threadRecipientLanguage($thread);
+        $outboundText = $text;
+
+        if ($text !== '' && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
+            $outboundText = $translator->translate($text, $recipientLanguage, $senderLanguage);
+        }
+
+        $messageWithSig = $outboundText !== ''
+            ? $outboundText . "\n" . SmsNewThread::getSignature()
+            : SmsNewThread::getSignature();
 
         $mediaUrls = [];
         if ($this->attachment) {
@@ -956,20 +996,46 @@ class SmsConversation extends Component
             $mediaUrls[] = '/storage/' . $path;
         }
 
-        $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id(), $scheduledAt);
+        $rawPayload = [
+            'original_text' => $text,
+            'sender_language' => $senderLanguage,
+            'recipient_language' => $recipientLanguage,
+            'source' => 'conversation_schedule_menu',
+            'schedule_only' => $scheduleOnly,
+        ];
+
+        $smsService->sendToThread(
+            $thread,
+            $messageWithSig,
+            $mediaUrls,
+            auth()->id(),
+            $scheduledAt,
+            $rawPayload,
+            $scheduleOnly,
+        );
 
         $this->newMessage = '';
         $this->attachment = null;
 
         unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
-        Flux::toast(
-            variant: 'success',
-            heading: 'Message Scheduled',
-            text: 'Will send ' . $scheduledAt->timezone('America/Chicago')->format('M j, g:i A'),
-            duration: 4000,
-            position: 'top right'
-        );
+        if ($scheduleOnly) {
+            Flux::toast(
+                variant: 'success',
+                heading: 'Draft Scheduled',
+                text: 'Saved as Schedule Only. It will send only when manually sent.',
+                duration: 4000,
+                position: 'top right'
+            );
+        } else {
+            Flux::toast(
+                variant: 'success',
+                heading: 'Message Scheduled',
+                text: 'Will send ' . $scheduledAt->timezone('America/Chicago')->format('M j, g:i A'),
+                duration: 4000,
+                position: 'top right'
+            );
+        }
 
         $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = \$wire.\$el.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
         $this->dispatch('messageSent');
@@ -1015,7 +1081,37 @@ class SmsConversation extends Component
             ->where('status', 'scheduled')
             ->firstOrFail();
 
-        $message->update(['status' => 'sending', 'scheduled_at' => null]);
+        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
+
+        $taskIds = collect((array) ($rawPayload['scheduled_task_ids'] ?? []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->values()
+            ->all();
+
+        if ($taskIds !== [] && $message->thread?->subject_vendor_id) {
+            Task::whereIn('id', $taskIds)
+                ->where('vendor_id', $message->thread->subject_vendor_id)
+                ->whereNull('vendor_status')
+                ->update([
+                    'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
+                ]);
+        }
+
+        $updates = ['status' => 'sending', 'scheduled_at' => null];
+
+        $currentUserId = auth()->id();
+        $newSignature = SmsNewThread::getSignature($currentUserId);
+        $existingSignature = $this->extractSignatureLine((string) ($message->text ?? ''));
+
+        if ($existingSignature !== null && $existingSignature !== $newSignature) {
+            $body = rtrim(preg_replace('/\n?-(?:PS|GS|GSC)$/', '', rtrim((string) $message->text)));
+            $updates['text'] = $body . "\n" . $newSignature;
+        }
+
+        $updates['sent_by_user_id'] = $currentUserId;
+
+        $message->update($updates);
 
         \App\Jobs\SendGroupMms::dispatch($message->id);
 
@@ -1041,6 +1137,95 @@ class SmsConversation extends Component
         );
 
         $this->dispatch('sms-schedule-changed');
+    }
+
+    public function openEditScheduledMessage(int $messageId): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $message = SmsMessage::where('id', $messageId)
+            ->where('thread_id', $this->threadId)
+            ->where('status', 'scheduled')
+            ->firstOrFail();
+
+        $this->editScheduledId = $message->id;
+        $this->newMessage = trim((string) $message->display_text);
+        $this->attachment = null;
+        $this->js("(function(){ const ta = \$wire.\$el.querySelector('ui-composer textarea'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } })()");
+    }
+
+    public function saveEditedScheduledMessage(SmsTranslationService $translator): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $this->validate([
+            'newMessage' => 'required|string|max:1600',
+        ]);
+
+        $message = SmsMessage::where('id', $this->editScheduledId)
+            ->where('thread_id', $this->threadId)
+            ->where('status', 'scheduled')
+            ->firstOrFail();
+
+        $newOriginalText = trim($this->newMessage);
+        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
+
+        $senderLanguage = $this->normalizeLanguage((string) ($rawPayload['sender_language'] ?? $this->preferredLanguageForUser(auth()->user())));
+        $recipientLanguage = $this->normalizeLanguage((string) ($rawPayload['recipient_language'] ?? $this->threadRecipientLanguage($message->thread)));
+
+        $outboundText = $newOriginalText;
+        if ($newOriginalText !== '' && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
+            $outboundText = $translator->translate($newOriginalText, $recipientLanguage, $senderLanguage);
+        }
+
+        $signatureLine = $this->extractSignatureLine((string) ($message->text ?? ''));
+        if ($signatureLine !== null) {
+            $outboundText .= "\n{$signatureLine}";
+        }
+
+        $rawPayload['original_text'] = $newOriginalText;
+        $rawPayload['sender_language'] = $senderLanguage;
+        $rawPayload['recipient_language'] = $recipientLanguage;
+
+        $message->update([
+            'text' => $outboundText,
+            'raw_payload' => $rawPayload,
+        ]);
+
+        $this->editScheduledId = null;
+        $this->newMessage = '';
+        $this->attachment = null;
+
+        $this->refreshMessages();
+
+        Flux::toast(
+            text: 'Scheduled message updated.',
+            variant: 'success',
+            duration: 3000,
+            position: 'top right'
+        );
+
+        $this->dispatch('sms-schedule-changed');
+    }
+
+    public function cancelScheduledEdit(): void
+    {
+        $this->editScheduledId = null;
+        $this->newMessage = '';
+        $this->attachment = null;
+    }
+
+    protected function extractSignatureLine(string $text): ?string
+    {
+        if (preg_match('/(?:^|\n)(-(?:PS|GS|GSC))$/', trim($text), $matches) === 1) {
+            return $matches[1];
+        }
+
+        return null;
     }
 
     public function resendOptInPrompt(GroupSmsService $smsService): void
@@ -1148,9 +1333,10 @@ class SmsConversation extends Component
         return SmsGroupThread::with([
             'project:id,address',
             'client',
-            'client.users:id,first_name,last_name,cell_phone',
+            'client.users:id,first_name,last_name,nickname,preferred_language,cell_phone',
             'ownerVendor:id,business_name,options',
             'subjectVendor:id,business_name,options',
+            'subjectVendor.users:id,first_name,last_name,nickname,preferred_language,cell_phone',
             'threadParticipants:id,thread_id,phone_number',
         ])->find($this->threadId);
     }
@@ -1358,7 +1544,7 @@ class SmsConversation extends Component
         }
 
         return SmsMessage::where('thread_id', $this->threadId)
-            ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'status', 'scheduled_at', 'created_at', 'sent_by_user_id'])
+            ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'raw_payload', 'status', 'scheduled_at', 'created_at', 'sent_by_user_id'])
             ->with('sentByUser:id,first_name,last_name')
             ->orderByDesc('created_at')
             ->limit($this->messageLimit)
@@ -1389,7 +1575,7 @@ class SmsConversation extends Component
             foreach ($this->threadClientUsersFor($this->thread->client) as $user) {
                 $telnyx = $user->routeNotificationForTelnyx();
                 if ($telnyx) {
-                    $map[$telnyx] = $user->first_name;
+                    $map[$telnyx] = $this->preferredUserDisplayName($user, false);
                 }
             }
             $rawHome = $this->thread->client->getRawOriginal('home_phone');
@@ -1489,6 +1675,12 @@ class SmsConversation extends Component
 
         $withoutTapbacks = $allMessages->reject(fn ($m) => $tapbackIds->contains($m->id));
 
+        $viewerLanguage = $this->preferredLanguageForUser(auth()->user());
+        $translator = app(SmsTranslationService::class);
+        $withoutTapbacks->each(function (SmsMessage $message) use ($viewerLanguage, $translator): void {
+            $message->translated_display_text = $this->messageDisplayTextForViewer($message, $viewerLanguage, $translator);
+        });
+
         return [
             'visible' => $withoutTapbacks->where('status', '!=', 'scheduled')->values(),
             // Scheduled messages render in a flex-col-reverse container, so the
@@ -1504,6 +1696,83 @@ class SmsConversation extends Component
                 ->values(),
             'reactions' => $reactionsMap,
         ];
+    }
+
+    protected function messageDisplayTextForViewer(SmsMessage $message, string $viewerLanguage, SmsTranslationService $translator): ?string
+    {
+        $displayText = trim((string) $message->display_text);
+        if ($displayText === '') {
+            return null;
+        }
+
+        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
+        $senderLanguage = $this->normalizeLanguage((string) ($rawPayload['sender_language'] ?? ''));
+        $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
+
+        if ($originalText !== '' && $this->looksLikeTranslationPromptArtifact($displayText)) {
+            if ($senderLanguage !== '' && strcasecmp($senderLanguage, $viewerLanguage) === 0) {
+                return $originalText;
+            }
+
+            return $translator->translate($originalText, $viewerLanguage, $senderLanguage !== '' ? $senderLanguage : null);
+        }
+
+        if (
+            $message->isOutbound()
+            && (int) ($message->sent_by_user_id ?? 0) === (int) auth()->id()
+            && $originalText !== ''
+            && $senderLanguage !== ''
+            && strcasecmp($senderLanguage, $viewerLanguage) === 0
+        ) {
+            return $originalText;
+        }
+
+        if ($viewerLanguage === 'English') {
+            return $translator->translate($displayText, 'English');
+        }
+
+        if ($senderLanguage !== '' && strcasecmp($senderLanguage, $viewerLanguage) === 0 && $originalText !== '') {
+            return $originalText;
+        }
+
+        return $translator->translate($displayText, $viewerLanguage);
+    }
+
+    private function looksLikeTranslationPromptArtifact(string $text): bool
+    {
+        $normalized = strtolower(trim($text));
+
+        return str_contains($normalized, 'please provide')
+            && str_contains($normalized, 'translated');
+    }
+
+    protected function preferredLanguageForUser(?User $user): string
+    {
+        return $this->normalizeLanguage((string) ($user?->preferred_language ?: 'English'));
+    }
+
+    protected function threadRecipientLanguage(SmsGroupThread $thread): string
+    {
+        if ($thread->subject_vendor_id) {
+            $language = $thread->subjectVendor?->users
+                ?->pluck('preferred_language')
+                ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+                ->first();
+
+            return $this->normalizeLanguage((string) ($language ?: 'English'));
+        }
+
+        $language = $thread->client?->users
+            ?->pluck('preferred_language')
+            ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+            ->first();
+
+        return $this->normalizeLanguage((string) ($language ?: 'English'));
+    }
+
+    protected function normalizeLanguage(string $language): string
+    {
+        return app(SmsTranslationService::class)->normalizeLanguage($language);
     }
 
     /**
@@ -1652,8 +1921,8 @@ class SmsConversation extends Component
             ->orWhere('cell_phone', $last10)
             ->first();
 
-        if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
-            return $cache[$e164] = trim($user->first_name . ' ' . $user->last_name);
+        if ($user && trim($this->preferredUserDisplayName($user, true)) !== '') {
+            return $cache[$e164] = $this->preferredUserDisplayName($user, true);
         }
 
         $vendor = Vendor::where('business_phone', $normalized)
@@ -1671,6 +1940,17 @@ class SmsConversation extends Component
         }
 
         return $cache[$e164] = $e164;
+    }
+
+    protected function preferredUserDisplayName(User $user, bool $includeLastName = true): string
+    {
+        $first = trim((string) ($user->nickname ?: $user->first_name));
+
+        if (! $includeLastName) {
+            return $first;
+        }
+
+        return trim($first . ' ' . trim((string) $user->last_name));
     }
 
     protected function markThreadAsRead(): void

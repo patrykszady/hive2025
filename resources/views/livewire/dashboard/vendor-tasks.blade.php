@@ -9,6 +9,7 @@
         :show-project-info="true"
         :show-vendor-info="false"
         :show-add-task="true"
+        :pending-tasks-expanded="false"
         title="Your Tasks"
         empty-message="No tasks upcoming for your projects."
     />

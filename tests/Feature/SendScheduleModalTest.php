@@ -84,6 +84,81 @@ it('uses vendor short name in schedule greeting for vendor-subject threads', fun
         ->and($preview)->toContain('Confirm Schedule:');
 });
 
+it('uses vendor user nickname and preferred language when vendor short name is missing', function (): void {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+    ]);
+
+    $ownerUser = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'preferred_language' => 'Polish',
+        'email' => 'owner.schedule-modal-language@example.com',
+        'cell_phone' => '2245550198',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $this->actingAs($ownerUser);
+
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'RG Tile',
+    ]);
+    $subjectVendor->short_name = null;
+    $subjectVendor->save();
+
+    $subjectUser = User::query()->create([
+        'first_name' => 'Grzegorz',
+        'last_name' => 'Szady',
+        'nickname' => 'Gresiek',
+        'preferred_language' => 'Polish',
+        'email' => 'gresiek.vendor-thread@example.com',
+        'cell_phone' => '2245550002',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $subjectVendor->users()->attach($subjectUser->id, [
+        'is_employed' => true,
+        'role_id' => 1,
+    ]);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Vendor Thread Project',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => 60062,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Foundation',
+        'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Vendor Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550002'],
+        'vendor_id' => $ownerVendor->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)->toStartWith('Czesc Rg Tile,')
+        ->and($preview)->toContain('Potwierdz zadania:')
+        ->and($preview)->toContain('Potwierdz plan:');
+});
+
 it('renders schedule modal task cards as clickable edit actions', function (): void {
     $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
 
@@ -289,4 +364,72 @@ it('sets vendor status to requested only after sending the vendor schedule messa
         ->call('send');
 
     expect($task->fresh()->vendor_status)->toBe(Task::VENDOR_STATUS_REQUESTED);
+});
+
+it('creates a no-date scheduled draft and does not mark vendor status requested yet', function (): void {
+    $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $ownerUser = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-no-date@example.com',
+        'cell_phone' => '2245550599',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $this->actingAs($ownerUser);
+
+    $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile']);
+    $subjectVendor->short_name = 'RG';
+    $subjectVendor->save();
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Vendor Thread Project',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => 60062,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $task = Task::query()->create([
+        'title' => 'No Date Scheduling Task',
+        'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Vendor Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $ownerVendor->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $thread->threadParticipants()->create([
+        'phone_number' => '+12245550001',
+        'opted_in_at' => now(),
+    ]);
+
+    Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->call('useNoDateSchedule')
+        ->set('editableMessage', 'Hi RG, Confirm Schedule:')
+        ->call('send');
+
+    $scheduled = \App\Models\SmsMessage::query()
+        ->where('thread_id', $thread->id)
+        ->where('status', 'scheduled')
+        ->latest('id')
+        ->first();
+
+    expect($scheduled)->not->toBeNull();
+    expect($scheduled->scheduled_at)->toBeNull();
+    expect($task->fresh()->vendor_status)->toBeNull();
 });
