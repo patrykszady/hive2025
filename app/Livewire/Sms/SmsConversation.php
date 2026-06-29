@@ -2127,11 +2127,16 @@ class SmsConversation extends Component
         $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
         $senderLanguage = trim((string) ($rawPayload['sender_language'] ?? ''));
 
+        $inferredLanguage = $this->inferSupportedLanguageFromText($originalText);
+        if ($inferredLanguage !== null) {
+            return $inferredLanguage;
+        }
+
         if ($senderLanguage !== '') {
             return $this->normalizeLanguage($senderLanguage);
         }
 
-        return $this->inferSupportedLanguageFromText($originalText);
+        return null;
     }
 
     protected function languageBadgeForLanguage(?string $language): ?string
@@ -2165,19 +2170,39 @@ class SmsConversation extends Component
 
         $polishHints = ['dziekuje', 'prosze', 'czesc', 'jutro', 'witam', 'tak', 'nie'];
         foreach ($polishHints as $hint) {
-            if (str_contains($normalized, $hint)) {
+            if ($this->containsHintWord($normalized, $hint)) {
                 return 'Polish';
             }
         }
 
         $spanishHints = ['hola', 'gracias', 'manana', 'por favor', 'buenos', 'buenas', 'que tal'];
         foreach ($spanishHints as $hint) {
-            if (str_contains($normalized, $hint)) {
+            if ($this->containsHintWord($normalized, $hint)) {
                 return 'Spanish';
             }
         }
 
+        $englishHints = ['hello', 'hi', 'please', 'can', 'you', 'your', 'send', 'project', 'schedule', 'tasks', 'message', 'thanks'];
+        $englishHits = 0;
+
+        foreach ($englishHints as $hint) {
+            if ($this->containsHintWord($normalized, $hint)) {
+                $englishHits++;
+            }
+        }
+
+        if ($englishHits >= 2) {
+            return 'English';
+        }
+
         return null;
+    }
+
+    private function containsHintWord(string $normalizedText, string $hint): bool
+    {
+        $pattern = '/\b' . preg_quote($hint, '/') . '\b/u';
+
+        return preg_match($pattern, $normalizedText) === 1;
     }
 
     private function looksLikeTranslationPromptArtifact(string $text): bool

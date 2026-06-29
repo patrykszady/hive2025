@@ -79,9 +79,9 @@ it('uses vendor short name in schedule greeting for vendor-subject threads', fun
         ->call('open', $thread->id)
         ->get('previewMessage');
 
-    expect($preview)->toStartWith('Hi Smartech,')
-        ->and($preview)->toContain('Confirm Tasks:')
-        ->and($preview)->toContain('Confirm Schedule:');
+    expect($preview)->toStartWith('Hello Smartech,')
+        ->and($preview)->toContain('Upcoming tasks:')
+        ->and($preview)->toContain('View schedule:');
 });
 
 it('uses client schedule wording for client threads', function (): void {
@@ -229,9 +229,11 @@ it('uses vendor user nickname and preferred language when vendor short name is m
         ->call('open', $thread->id)
         ->get('previewMessage');
 
-    expect($preview)->toStartWith('Czesc Rg Tile,')
-        ->and($preview)->toContain('Potwierdz zadania:')
-        ->and($preview)->toContain('Potwierdz plan:');
+    expect($preview)->toStartWith('Hello Rg Tile,')
+        ->and($preview)->toContain('Upcoming tasks:')
+        ->and($preview)->toContain('View schedule:')
+        ->and($preview)->not->toContain('Potwierdz zadania:')
+        ->and($preview)->not->toContain('Potwierdz plan:');
 });
 
 it('renders schedule modal task cards as clickable edit actions', function (): void {

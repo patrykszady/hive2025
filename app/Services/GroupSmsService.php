@@ -91,6 +91,15 @@ class GroupSmsService
             ->values()
             ->all();
 
+        $alreadyOptedInPhones = SmsThreadParticipant::query()
+            ->whereIn('phone_number', $normalizedPhoneNumbers)
+            ->whereNotNull('opted_in_at')
+            ->pluck('phone_number')
+            ->map(fn (string $phone): string => self::formatE164($phone))
+            ->unique()
+            ->values()
+            ->all();
+
         $thread = SmsGroupThread::create([
             'from_number' => $this->from,
             'participants' => $normalizedPhoneNumbers,
@@ -105,6 +114,7 @@ class GroupSmsService
             SmsThreadParticipant::create([
                 'thread_id' => $thread->id,
                 'phone_number' => $phoneNumber,
+                'opted_in_at' => in_array($phoneNumber, $alreadyOptedInPhones, true) ? now() : null,
             ]);
         }
 
@@ -172,12 +182,12 @@ class GroupSmsService
 
     private function buildConsentMessage(SmsGroupThread $thread): string
     {
-        return $this->buildGreeting($thread) . "\n" . self::START_CONSENT_TEXT . "\n-GSC";
+        return $this->buildGreeting($thread, pendingOnly: true) . "\n" . self::START_CONSENT_TEXT . "\n-GSC";
     }
 
-    private function buildGreeting(SmsGroupThread $thread): string
+    private function buildGreeting(SmsGroupThread $thread, bool $pendingOnly = false): string
     {
-        $recipientNames = $this->resolveRecipientNames($thread);
+        $recipientNames = $this->resolveRecipientNames($thread, $pendingOnly);
 
         if ($recipientNames === '') {
             return 'Hi there,';
@@ -186,12 +196,25 @@ class GroupSmsService
         return "Hi {$recipientNames},";
     }
 
-    private function resolveRecipientNames(SmsGroupThread $thread): string
+    private function resolveRecipientNames(SmsGroupThread $thread, bool $pendingOnly = false): string
     {
-        $thread->loadMissing('client.users', 'subjectVendor.users');
+        $thread->loadMissing('client.users', 'subjectVendor.users', 'threadParticipants');
 
         $participants = collect($thread->participants ?? [])
             ->map(fn (string $phone): string => self::formatE164($phone));
+
+        if ($pendingOnly) {
+            $pendingPhones = $thread->threadParticipants
+                ->filter(fn (SmsThreadParticipant $participant): bool => $participant->opted_in_at === null)
+                ->pluck('phone_number')
+                ->map(fn (string $phone): string => self::formatE164($phone))
+                ->unique()
+                ->values();
+
+            $participants = $participants
+                ->filter(fn (string $phone): bool => $pendingPhones->contains($phone))
+                ->values();
+        }
 
         $names = collect();
 

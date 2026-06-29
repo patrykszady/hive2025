@@ -380,12 +380,15 @@ class SendScheduleModal extends Component
             }
 
             $carbonDate = Carbon::parse($dateStr);
-            $shortDate = $carbonDate->format('D n/j');
+            $isVendorSchedule = (bool) $this->thread?->subject_vendor_id;
+            $shortDate = $isVendorSchedule
+                ? $carbonDate->format('l d/m')
+                : $carbonDate->format('D n/j');
 
             if ($carbonDate->isSameDay($today)) {
-                $dateLabel = $this->translateText('today') . " {$shortDate}";
+                $dateLabel = $this->scheduleDayLabel('today') . " {$shortDate}";
             } elseif ($carbonDate->isSameDay($tomorrow)) {
-                $dateLabel = $this->translateText('tomorrow') . " {$shortDate}";
+                $dateLabel = $this->scheduleDayLabel('tomorrow') . " {$shortDate}";
             } else {
                 $dateLabel = $shortDate;
             }
@@ -422,7 +425,9 @@ class SendScheduleModal extends Component
         // Add next upcoming tasks beyond the 3-day window
         if ($nextTasks->isNotEmpty()) {
             $nextDate = Carbon::parse($nextTasks->first()->start_date);
-            $dateLabel = $nextDate->format('D n/j');
+            $dateLabel = $this->thread?->subject_vendor_id
+                ? $nextDate->format('l d/m')
+                : $nextDate->format('D n/j');
 
             $showProject = (bool) $this->thread?->subject_vendor_id;
             $taskLines = $nextTasks->map(function (Task $task) use ($nextDate, $showProject) {
@@ -446,7 +451,7 @@ class SendScheduleModal extends Component
                 return $line;
             })->implode("\n");
 
-            $daySections[] = $this->translateText('next_up') . " {$dateLabel}:\n{$taskLines}";
+            $daySections[] = $this->scheduleDayLabel('next_up') . " {$dateLabel}:\n{$taskLines}";
         }
 
         // Add pending tasks section
@@ -469,7 +474,7 @@ class SendScheduleModal extends Component
                 return $line;
             })->implode("\n");
 
-            $daySections[] = $this->translateText('pending') . ":\n{$pendingLines}";
+            $daySections[] = $this->scheduleDayLabel('pending') . ":\n{$pendingLines}";
         }
 
         $body = implode("\n\n", $daySections);
@@ -527,8 +532,8 @@ class SendScheduleModal extends Component
             $shortName = trim((string) ($thread->subjectVendor?->short_name ?? ''));
 
             return $shortName !== ''
-                ? $this->translateText('hi') . " {$shortName},"
-                : ($this->vendorUserGreeting() ?: $this->translateText('hi') . ',');
+                ? 'Hello' . " {$shortName},"
+                : ($this->vendorUserGreeting() ?: 'Hello,');
         }
 
         $clientName = trim((string) (Client::withoutGlobalScopes()->with('users')->find($thread?->client_id)?->first_names ?? ''));
@@ -565,14 +570,14 @@ class SendScheduleModal extends Component
     protected function scheduleIntroLabel(): string
     {
         return $this->thread?->subject_vendor_id
-            ? $this->translateText('confirm_tasks')
+            ? 'Upcoming tasks'
             : 'Upcoming tasks';
     }
 
     protected function scheduleLinkLabel(): string
     {
         return $this->thread?->subject_vendor_id
-            ? $this->translateText('confirm_schedule')
+            ? 'View schedule'
             : 'View Schedule';
     }
 
@@ -588,7 +593,22 @@ class SendScheduleModal extends Component
             return null;
         }
 
-        return $this->translateText('hi') . ' ' . collect($names)->join(', ', ' & ') . ',';
+        return 'Hello ' . collect($names)->join(', ', ' & ') . ',';
+    }
+
+    protected function scheduleDayLabel(string $key): string
+    {
+        if ($this->thread?->subject_vendor_id) {
+            return match ($key) {
+                'today' => 'Today',
+                'tomorrow' => 'Tomorrow',
+                'next_up' => 'Next up',
+                'pending' => 'Pending',
+                default => $key,
+            };
+        }
+
+        return $this->translateText($key);
     }
 
     protected function displayFirstName(User $user): string

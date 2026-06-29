@@ -4,6 +4,7 @@ namespace App\Livewire\Sms;
 
 use App\Models\Client;
 use App\Models\SmsGroupThread;
+use App\Models\SmsThreadParticipant;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
@@ -252,6 +253,30 @@ class SmsNewThread extends Component
             ->map(fn (string $phone): string => GroupSmsService::formatE164($phone))
             ->all();
 
+        $alreadyOptedInPhones = $this->alreadyOptedInPhones($recipientNumbers);
+
+        $pendingRecipientNames = collect($vendor->users)
+            ->map(function (User $user) use ($recipientNumbers, $alreadyOptedInPhones): ?string {
+                $rawPhone = $user->getRawOriginal('cell_phone');
+                if (! is_string($rawPhone) || $rawPhone === '') {
+                    return null;
+                }
+
+                $cellPhoneE164 = GroupSmsService::formatE164($rawPhone);
+                if (! in_array($cellPhoneE164, $recipientNumbers, true)) {
+                    return null;
+                }
+
+                if (in_array($cellPhoneE164, $alreadyOptedInPhones, true)) {
+                    return null;
+                }
+
+                return $this->displayFirstName($user);
+            })
+            ->filter()
+            ->unique()
+            ->join(', ', ' & ');
+
         $recipientNames = collect($vendor->users)
             ->map(function (User $user) use ($recipientNumbers): ?string {
                 $rawPhone = $user->getRawOriginal('cell_phone');
@@ -280,6 +305,10 @@ class SmsNewThread extends Component
 
         if ($recipientNames === '') {
             $recipientNames = $vendor->short_name ?: $vendor->name;
+        }
+
+        if ($pendingRecipientNames !== '') {
+            $recipientNames = $pendingRecipientNames;
         }
 
         $this->message = "Hi {$recipientNames},\n" . GroupSmsService::START_CONSENT_TEXT;
@@ -417,6 +446,31 @@ class SmsNewThread extends Component
 
     private function setDefaultMessageFromRecipients(Client $client): void
     {
+        $recipientNumbers = collect($this->recipients)
+            ->pluck('number')
+            ->map(fn (string $phone): string => GroupSmsService::formatE164($phone))
+            ->all();
+
+        $alreadyOptedInPhones = $this->alreadyOptedInPhones($recipientNumbers);
+
+        $pendingRecipientNames = collect($this->recipients)
+            ->filter(function (array $recipient) use ($alreadyOptedInPhones): bool {
+                $number = $recipient['number'] ?? null;
+
+                if (! is_string($number) || $number === '') {
+                    return false;
+                }
+
+                $e164 = GroupSmsService::formatE164($number);
+
+                return ! in_array($e164, $alreadyOptedInPhones, true);
+            })
+            ->pluck('label')
+            ->map(fn ($name) => explode(' ', trim($name))[0])
+            ->filter()
+            ->unique()
+            ->join(', ', ' & ');
+
         $recipientNames = collect($this->recipients)
             ->pluck('label')
             ->map(fn ($name) => explode(' ', trim($name))[0])
@@ -424,11 +478,35 @@ class SmsNewThread extends Component
             ->unique()
             ->join(', ', ' & ');
 
+        if ($pendingRecipientNames !== '') {
+            $recipientNames = $pendingRecipientNames;
+        }
+
         if ($recipientNames === '') {
             $recipientNames = $client->name;
         }
 
         $this->message = "Hi {$recipientNames},\n" . GroupSmsService::START_CONSENT_TEXT;
+    }
+
+    /**
+     * @param  array<int, string>  $phoneNumbers
+     * @return array<int, string>
+     */
+    private function alreadyOptedInPhones(array $phoneNumbers): array
+    {
+        if (empty($phoneNumbers)) {
+            return [];
+        }
+
+        return SmsThreadParticipant::query()
+            ->whereIn('phone_number', $phoneNumbers)
+            ->whereNotNull('opted_in_at')
+            ->pluck('phone_number')
+            ->map(fn (string $phone): string => GroupSmsService::formatE164($phone))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function displayFirstName(User $user): string

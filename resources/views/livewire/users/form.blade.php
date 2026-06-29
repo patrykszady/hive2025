@@ -74,7 +74,7 @@
                 wire:model.live.debounce.500ms="form.nickname"
                 x-bind:disabled="$wire.model.type == 'client_member'"
                 label="Nickname"
-                description="Short name or alias (e.g. Greg for Grzegorz). Helps match names in messages."
+                description="Short name or alias (e.g. Greg for Grzegorz)."
                 type="text"
                 placeholder="Nickname"
             />

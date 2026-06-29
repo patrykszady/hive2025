@@ -356,6 +356,34 @@ describe('forwarding messages', function (): void {
         expect($rendered->show_original_toggle)->toBeTrue();
         expect($rendered->original_display_text)->toBe('Dzien dobry');
     });
+
+    it('does not mark English outbound text as Polish from sender preference metadata', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_number' => '+12245550001',
+            'text' => "Hi Bonnie, can you please send your husband's contact info?",
+            'status' => 'sent',
+            'raw_payload' => [
+                'original_text' => "Hi Bonnie, can you please send your husband's contact info?",
+                'sender_language' => 'Polish',
+                'recipient_language' => 'English',
+            ],
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $visible = $component->instance()->processedMessages['visible'];
+        $rendered = $visible->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        expect($rendered->language_badge)->toBeNull();
+        expect($rendered->show_original_toggle)->toBeFalse();
+    });
 });
 
 describe('scheduled messages', function (): void {

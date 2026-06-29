@@ -3,6 +3,7 @@
 use App\Livewire\Sms\SmsNewThread;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
+use App\Models\SmsThreadParticipant;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
@@ -250,4 +251,141 @@ it('uses nickname-first labels in vendor recipient presets', function (): void {
 
     expect($labels)->toContain('Stan Palupski')
         ->and(collect($labels)->join(' | '))->not->toContain('Stanislaw Palupski');
+});
+
+it('prefills new vendor thread consent greeting with only recipients pending START', function (): void {
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'business_phone' => '2245559900',
+    ]);
+
+    $viewer = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Tester',
+        'email' => 'patryk.prefill.pending@example.com',
+        'cell_phone' => '2245551000',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $bonnie = User::query()->create([
+        'first_name' => 'Bonnie',
+        'last_name' => 'Johnson',
+        'email' => 'bonnie.pending@example.com',
+        'cell_phone' => '2245558801',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $bradley = User::query()->create([
+        'first_name' => 'Bradley',
+        'last_name' => 'Johnson',
+        'nickname' => 'Brad',
+        'email' => 'brad.pending@example.com',
+        'cell_phone' => '2245558802',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $subjectVendor->users()->attach([$bonnie->id, $bradley->id], [
+        'is_employed' => true,
+        'role_id' => 1,
+    ]);
+
+    $previousThread = SmsGroupThread::query()->create([
+        'from_number' => '+12245550199',
+        'participants' => ['+12245558801'],
+        'vendor_id' => $subjectVendor->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    SmsThreadParticipant::query()->create([
+        'thread_id' => $previousThread->id,
+        'phone_number' => '+12245558801',
+        'opted_in_at' => now(),
+    ]);
+
+    $this->actingAs($viewer);
+
+    Livewire::test(SmsNewThread::class)
+        ->set('recipientType', 'vendor')
+        ->set('vendorId', $subjectVendor->id)
+        ->assertSet('message', "Hi Brad,\n" . GroupSmsService::START_CONSENT_TEXT);
+});
+
+it('carries prior opt-in into new group and greets only pending participants in consent prompt', function (): void {
+    Queue::fake();
+
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+    ]);
+
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'Palupski Construction',
+        'business_phone' => '2245559900',
+    ]);
+
+    $bonnie = User::query()->create([
+        'first_name' => 'Bonnie',
+        'last_name' => 'Johnson',
+        'email' => 'bonnie.carry@example.com',
+        'cell_phone' => '2245558801',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $bradley = User::query()->create([
+        'first_name' => 'Bradley',
+        'last_name' => 'Johnson',
+        'nickname' => 'Brad',
+        'email' => 'brad.carry@example.com',
+        'cell_phone' => '2245558802',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $subjectVendor->users()->attach([$bonnie->id, $bradley->id], [
+        'is_employed' => true,
+        'role_id' => 1,
+    ]);
+
+    $previousThread = SmsGroupThread::query()->create([
+        'from_number' => '+12245550199',
+        'participants' => ['+12245558801'],
+        'vendor_id' => $ownerVendor->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    SmsThreadParticipant::query()->create([
+        'thread_id' => $previousThread->id,
+        'phone_number' => '+12245558801',
+        'opted_in_at' => now(),
+    ]);
+
+    $thread = app(GroupSmsService::class)->sendNewGroup(
+        ['2245558801', '2245558802'],
+        'Ignored manual text',
+        null,
+        null,
+        null,
+        $ownerVendor->id,
+        $subjectVendor->id,
+    );
+
+    $consentMessage = SmsMessage::query()
+        ->where('thread_id', $thread->id)
+        ->firstOrFail();
+
+    $bonnieParticipant = SmsThreadParticipant::query()
+        ->where('thread_id', $thread->id)
+        ->where('phone_number', '+12245558801')
+        ->firstOrFail();
+
+    $bradParticipant = SmsThreadParticipant::query()
+        ->where('thread_id', $thread->id)
+        ->where('phone_number', '+12245558802')
+        ->firstOrFail();
+
+    expect($consentMessage->text)
+        ->toStartWith("Hi Brad,\n" . GroupSmsService::START_CONSENT_TEXT)
+        ->and($consentMessage->text)->not->toContain('Hi Bonnie')
+        ->and($bonnieParticipant->opted_in_at)->not->toBeNull()
+        ->and($bradParticipant->opted_in_at)->toBeNull();
 });
