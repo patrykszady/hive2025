@@ -69,8 +69,10 @@ class SmsMessage extends Model
             return null;
         }
 
+        $text = self::repairMojibakeText((string) $this->text);
+
         // Strip trailing signature (e.g. "\n-PS") or standalone signature (e.g. "-PS")
-        $cleaned = preg_replace('/(?:^|\n)-(?:PS|GS|GSC)$/s', '', $this->text);
+        $cleaned = preg_replace('/(?:^|\n)-(?:PS|GS|GSC)$/s', '', $text);
 
         return $cleaned !== '' ? $cleaned : null;
     }

@@ -503,8 +503,16 @@
                         $timeLabel = $msgLocal->format('M j, g:i A');
                     }
                     $msgReactions = $reactionsMap[$msg->id] ?? [];
+                    $translatedTextForUi = (string) ($msg->translated_display_text ?? $msg->display_text ?? '');
+                    $originalTextForUi = (string) ($msg->original_display_text ?? $msg->display_text ?? '');
+                    $languageBadge = $msg->language_badge ?? null;
+                    $canToggleOriginal = (bool) ($msg->show_original_toggle ?? false);
                 @endphp
                 <div wire:key="msg-{{ $msg->id }}" class="flex items-center group"
+                    x-data="{ showOriginal: false, showActions: false, isTouch: window.matchMedia('(hover: none)').matches }"
+                    x-on:mouseenter="if (!isTouch) { $dispatch('sms-message-actions-focus', { id: {{ $msg->id }} }); showActions = true }"
+                    x-on:mouseleave="if (!isTouch) { showActions = false }"
+                    x-on:sms-message-actions-focus.window="if ($event.detail?.id !== {{ $msg->id }}) { showActions = false }"
                     x-bind:class="selectionMode ? '' : '{{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}'">
                     <div class="flex-shrink-0 pr-2" x-show="selectionMode" x-cloak>
                         <flux:checkbox
@@ -519,15 +527,39 @@
                             'order-last': !selectionMode && {{ $msg->isOutbound() ? 'true' : 'false' }},
                             'cursor-pointer': selectionMode,
                         }"
-                        x-on:click="if (selectionMode) toggle({{ $msg->id }})"
+                        x-on:click="if (selectionMode) { toggle({{ $msg->id }}) } else if (isTouch) { $dispatch('sms-message-actions-focus', { id: {{ $msg->id }} }); showActions = !showActions }"
                     >
                         @if ($msg->isInbound())
-                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1">
-                                {{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}
+                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 flex items-center gap-1">
+                                <span>{{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}</span>
+                                @if ($languageBadge && $canToggleOriginal)
+                                    <button
+                                        type="button"
+                                        class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
+                                        x-bind:class="showOriginal
+                                            ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
+                                            : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
+                                        x-on:click.stop="showOriginal = !showOriginal"
+                                        x-text="@js($languageBadge)"
+                                        :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
+                                    ></button>
+                                @endif
                             </p>
                         @elseif ($msg->isOutbound())
-                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
-                                {{ $msg->sentByUser?->nickname ?: ($msg->sentByUser?->first_name ?? 'GS Crew') }}
+                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right flex items-center justify-end gap-1">
+                                @if ($languageBadge && $canToggleOriginal)
+                                    <button
+                                        type="button"
+                                        class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
+                                        x-bind:class="showOriginal
+                                            ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
+                                            : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
+                                        x-on:click.stop="showOriginal = !showOriginal"
+                                        x-text="@js($languageBadge)"
+                                        :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
+                                    ></button>
+                                @endif
+                                <span>{{ $msg->sentByUser?->nickname ?: ($msg->sentByUser?->first_name ?? 'GS Crew') }}</span>
                             </p>
                         @endif
 
@@ -575,12 +607,29 @@
                                         @endforeach
                                     </div>
                                 @endif
-                                @if (($msg->translated_display_text ?? $msg->display_text))
-                                    {!! preg_replace(
-                                        '/(https?:\/\/[^\s<]+)/',
-                                        '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
-                                        nl2br(e($msg->translated_display_text ?? $msg->display_text))
-                                    ) !!}
+                                @if ($translatedTextForUi !== '')
+                                    @if ($canToggleOriginal)
+                                        <div x-show="!showOriginal">
+                                            {!! preg_replace(
+                                                '/(https?:\/\/[^\s<]+)/',
+                                                '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
+                                                nl2br(e($translatedTextForUi))
+                                            ) !!}
+                                        </div>
+                                        <div x-show="showOriginal">
+                                            {!! preg_replace(
+                                                '/(https?:\/\/[^\s<]+)/',
+                                                '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
+                                                nl2br(e($originalTextForUi))
+                                            ) !!}
+                                        </div>
+                                    @else
+                                        {!! preg_replace(
+                                            '/(https?:\/\/[^\s<]+)/',
+                                            '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
+                                            nl2br(e($translatedTextForUi))
+                                        ) !!}
+                                    @endif
                                 @endif
                             </div>
 
@@ -617,12 +666,16 @@
                     </div>
                     @if (! $isClientUser && ($msg->translated_display_text ?? $msg->display_text))
                         <div
-                            class="flex items-center self-center opacity-0 group-hover:opacity-100 transition-opacity {{ $msg->isOutbound() ? 'order-first pr-1' : 'pl-1' }}"
+                            class="flex items-center self-center transition-opacity {{ $msg->isOutbound() ? 'order-first pr-1' : 'pl-1' }}"
+                            x-bind:class="showActions
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover:opacity-100'"
                             x-show="!selectionMode"
                             x-on:click.stop
+                            x-on:click.outside="showActions = false"
                         >
                             <flux:dropdown position="bottom" align="{{ $msg->isOutbound() ? 'start' : 'end' }}">
-                                <flux:button variant="ghost" size="xs" square icon="ellipsis-vertical" aria-label="Message actions" />
+                                <flux:button type="button" variant="ghost" size="xs" square icon="ellipsis-vertical" aria-label="Message actions" x-on:click.stop="showActions = true" />
                                 <flux:menu>
                                     @if ($this->messageAllowsTaskCreation($msg))
                                         <flux:menu.item icon="calendar-date-range" wire:click="createTaskFromMessage({{ $msg->id }})">
@@ -634,7 +687,7 @@
                                     </flux:menu.item>
                                     <flux:menu.item
                                         icon="clipboard"
-                                        x-on:click="navigator.clipboard.writeText(@js($msg->translated_display_text ?? $msg->display_text)); $flux.toast({ text: 'Message copied', variant: 'success' })"
+                                        x-on:click="navigator.clipboard.writeText(showOriginal ? @js($originalTextForUi) : @js($translatedTextForUi)); $flux.toast({ text: 'Message copied', variant: 'success' })"
                                     >
                                         Copy Text
                                     </flux:menu.item>

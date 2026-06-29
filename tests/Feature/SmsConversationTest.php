@@ -327,6 +327,35 @@ describe('forwarding messages', function (): void {
         expect($rendered)->not->toBeNull();
         expect($rendered->translated_display_text)->toBe('Start');
     });
+
+    it('adds a language badge and original toggle metadata when source language differs from viewer', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_number' => '+12245550001',
+            'text' => 'Good morning',
+            'status' => 'sent',
+            'raw_payload' => [
+                'original_text' => 'Dzien dobry',
+                'sender_language' => 'Polish',
+                'recipient_language' => 'English',
+            ],
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $visible = $component->instance()->processedMessages['visible'];
+        $rendered = $visible->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        expect($rendered->language_badge)->toBe('PL');
+        expect($rendered->show_original_toggle)->toBeTrue();
+        expect($rendered->original_display_text)->toBe('Dzien dobry');
+    });
 });
 
 describe('scheduled messages', function (): void {

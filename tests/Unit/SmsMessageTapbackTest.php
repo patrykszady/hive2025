@@ -46,3 +46,11 @@ it('parses Hebrew tapback (liked) using Hebrew Gershayim quotes', function () {
         ->and($parsed['emoji'])->toBe('👍')
         ->and($parsed['quoted'])->toContain('Mark knows of the delay');
 });
+
+it('repairs mojibake in display text and strips signature', function () {
+    $msg = new SmsMessage([
+        'text' => "Hi , tak bÄ™dzie miÄ™dzy 1-2 pm\n-PS",
+    ]);
+
+    expect($msg->display_text)->toBe('Hi , tak będzie między 1-2 pm');
+});

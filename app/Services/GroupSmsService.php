@@ -216,21 +216,16 @@ class GroupSmsService
                     continue;
                 }
 
-                if (is_string($user->first_name) && $user->first_name !== '') {
-                    $names->push($user->first_name);
+                $displayFirstName = $this->resolveDisplayFirstName($user);
+                if ($displayFirstName !== '') {
+                    $names->push($displayFirstName);
                 }
             }
         } elseif ($thread->subjectVendor) {
             // Handle vendor threads
             $vendor = $thread->subjectVendor;
 
-            $businessPhone = $vendor->getRawOriginal('business_phone');
-            if (is_string($businessPhone) && $businessPhone !== '') {
-                $businessPhoneE164 = self::formatE164($businessPhone);
-                if ($participants->contains($businessPhoneE164)) {
-                    $names->push($vendor->short_name ?: $vendor->name);
-                }
-            }
+            $vendorUserNames = collect();
 
             foreach ($vendor->users as $user) {
                 $cellPhone = $user->getRawOriginal('cell_phone');
@@ -243,13 +238,36 @@ class GroupSmsService
                     continue;
                 }
 
-                if (is_string($user->first_name) && $user->first_name !== '') {
-                    $names->push($user->first_name);
+                $displayFirstName = $this->resolveDisplayFirstName($user);
+                if ($displayFirstName !== '') {
+                    $vendorUserNames->push($displayFirstName);
+                }
+            }
+
+            if ($vendorUserNames->isNotEmpty()) {
+                return $vendorUserNames->filter()->unique()->join(', ', ' & ');
+            }
+
+            $businessPhone = $vendor->getRawOriginal('business_phone');
+            if (is_string($businessPhone) && $businessPhone !== '') {
+                $businessPhoneE164 = self::formatE164($businessPhone);
+                if ($participants->contains($businessPhoneE164)) {
+                    $names->push($vendor->short_name ?: $vendor->name);
                 }
             }
         }
 
         return $names->filter()->unique()->join(', ', ' & ');
+    }
+
+    private function resolveDisplayFirstName(object $user): string
+    {
+        $nickname = trim((string) ($user->nickname ?? ''));
+        if ($nickname !== '') {
+            return $nickname;
+        }
+
+        return trim((string) ($user->first_name ?? ''));
     }
 
     /**

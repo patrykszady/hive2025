@@ -49,6 +49,7 @@ class Task extends Model
         $timeSettings = is_object($options) ? ($options->time_settings ?? null) : ($options['time_settings'] ?? null);
         $dateKey = $startDate->format('Y-m-d');
         $startTime = null;
+        $endTime = null;
 
         if ($timeSettings) {
             $daySettings = is_object($timeSettings) ? ($timeSettings->$dateKey ?? null) : ($timeSettings[$dateKey] ?? null);
@@ -56,6 +57,7 @@ class Task extends Model
                 $useTime = is_object($daySettings) ? ($daySettings->use_time ?? false) : ($daySettings['use_time'] ?? false);
                 if ($useTime) {
                     $startTime = is_object($daySettings) ? ($daySettings->start_time ?? null) : ($daySettings['start_time'] ?? null);
+                    $endTime = is_object($daySettings) ? ($daySettings->end_time ?? null) : ($daySettings['end_time'] ?? null);
                 }
             }
         }
@@ -63,8 +65,14 @@ class Task extends Model
         $dateStr = $startDate->format('D, M j, Y');
 
         if ($startTime && ! $hasMultipleDays) {
-            $timeFormatted = Carbon::createFromFormat('H:i', $startTime)->format('gA');
-            $dateStr .= " @ {$timeFormatted}";
+            $startFormatted = Carbon::createFromFormat('H:i', $startTime)->format('gA');
+
+            if (is_string($endTime) && $endTime !== '' && $endTime !== $startTime) {
+                $endFormatted = Carbon::createFromFormat('H:i', $endTime)->format('gA');
+                $dateStr .= " @ {$startFormatted} - {$endFormatted}";
+            } else {
+                $dateStr .= " @ {$startFormatted}";
+            }
         }
 
         if ($hasMultipleDays) {

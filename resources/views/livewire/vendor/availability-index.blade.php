@@ -388,32 +388,26 @@
         @endif
 
         {{-- Registration CTA --}}
-        @guest
-            @php
-                $ctaCompany = ($tasks->first() ?? $pendingTasks->first() ?? $pastTasks->first())?->owner;
-                $ctaCompanyName = $ctaCompany?->name ?? 'Your contractor';
-            @endphp
-            <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
-                <div class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
-                    <x-hive-logo class="size-7" />
-                </div>
-                <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Join <a href="{{ url('/') }}" class="underline">Hive Contractors</a></flux:heading>
-                <flux:text class="mt-2 text-sm text-indigo-700 dark:text-indigo-300">
-                    {{ $ctaCompanyName }} uses <a href="{{ url('/') }}" class="underline">Hive Contractors</a> to manage projects in one place. Finances, Estimates, Timesheets, Schedules, and so much more.
-                </flux:text>
-                <flux:text class="mt-2 text-sm text-indigo-700 dark:text-indigo-300">
-                    Join <a href="{{ url('/') }}" class="underline">Hive Contractors</a> to connect with {{ $ctaCompanyName }} today to manage your construction projects, better, together.
-                </flux:text>
-                <div class="mt-4 flex items-center justify-center gap-3">
-                    <flux:button variant="primary" href="{{ route('registration') }}">
-                        Register
-                    </flux:button>
-                    <flux:button href="{{ route('login') }}">
-                        Login
-                    </flux:button>
-                </div>
+        <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
+            <div class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
+                <x-hive-logo class="size-7" />
             </div>
-        @endguest
+            <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Join Hive Contractors</flux:heading>
+            <flux:text class="mt-2 text-sm text-indigo-700 dark:text-indigo-300">
+                Register a Hive account to confirm availability, update arrival times, and stay connected with Hive Contractors.
+            </flux:text>
+            <flux:text class="mt-2 text-sm text-indigo-700 dark:text-indigo-300">
+                You’ll also be able to see project details, notifications, and schedule changes in one place.
+            </flux:text>
+            <div class="mt-4 flex items-center justify-center gap-3">
+                <flux:button variant="primary" href="{{ route('registration') }}">
+                    Register
+                </flux:button>
+                <flux:button href="{{ route('login') }}">
+                    Login
+                </flux:button>
+            </div>
+        </div>
 
         <x-public-schedule-footer />
     </div>

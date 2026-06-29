@@ -412,7 +412,7 @@ class SendScheduleSms extends Command
         try {
             $notification = new ClientScheduleSmsNotification(
                 $project,
-                $user->first_name ?? 'there',
+                $user->nickname ?: ($user->first_name ?? 'there'),
                 $type,
                 $tasks
             );

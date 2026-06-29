@@ -355,7 +355,20 @@ class SmsConversation extends Component
 
         $sentAt = $message->created_at->copy()->setTimezone(vendor_timezone());
 
+        $isTimeRangeReply = $this->extractTimeRangeFromReply($text) !== null;
+        $scheduleReplyFallback = $isTimeRangeReply
+            ? $this->fallbackExtractFromScheduleReply($message, $sentAt)
+            : null;
+
         $extracted = $extractor->extract($text, $sentAt);
+
+        if ($scheduleReplyFallback && ($scheduleReplyFallback['has_task'] ?? false) && ($scheduleReplyFallback['title'] ?? '') !== '') {
+            $extracted = $scheduleReplyFallback;
+        }
+
+        if (! $extracted || ! $extracted['has_task'] || $extracted['title'] === '') {
+            $extracted = $this->fallbackExtractFromScheduleReply($message, $sentAt);
+        }
 
         if (! $extracted || ! $extracted['has_task'] || $extracted['title'] === '') {
             Flux::toast(variant: 'warning', heading: 'No Task Found', text: 'No schedulable task was found in this message.', duration: 4000, position: 'top right');
@@ -364,7 +377,34 @@ class SmsConversation extends Component
         }
 
         $thread = SmsGroupThread::find($this->threadId);
-        $client = $thread?->client;
+        $matchedTask = null;
+        $matchedTaskId = isset($extracted['task_id']) && is_numeric($extracted['task_id'])
+            ? (int) $extracted['task_id']
+            : null;
+
+        if ($matchedTaskId) {
+            $matchedTask = Task::query()
+                ->with('project.client')
+                ->find($matchedTaskId);
+        }
+
+        $vendorId = $thread?->subject_vendor_id ?? $matchedTask?->vendor_id;
+        $client = $matchedTask?->project?->client ?? $thread?->client;
+
+        $projectId = null;
+        if ($matchedTask?->project_id) {
+            $projectId = (int) $matchedTask->project_id;
+        } elseif ($client) {
+            $projectId = $this->resolveClientProjectId($client, $thread, $extracted['project_hint']);
+        } elseif ($thread?->project_id) {
+            $projectId = (int) $thread->project_id;
+        } elseif ($vendorId) {
+            $projectId = $this->resolveVendorProjectId($vendorId, $extracted['project_hint']);
+        }
+
+        if (! $client && $projectId) {
+            $client = Project::query()->with('client')->find($projectId)?->client;
+        }
 
         if (! $client) {
             Flux::toast(variant: 'warning', heading: 'No Client', text: 'Assign a client to this conversation before creating a task.', duration: 4500, position: 'top right');
@@ -372,20 +412,48 @@ class SmsConversation extends Component
             return;
         }
 
-        $projectId = $this->resolveClientProjectId($client, $thread, $extracted['project_hint']);
-
         if (! $projectId) {
             Flux::toast(variant: 'warning', heading: 'No Project', text: 'This client has no project to attach the task to.', duration: 4500, position: 'top right');
 
             return;
         }
 
+        if (! $matchedTask && $projectId) {
+            $matchedTask = Task::query()
+                ->where('project_id', $projectId)
+                ->where(function ($titleQuery) use ($extracted) {
+                    $title = strtolower(trim((string) ($extracted['title'] ?? '')));
+                    if ($title === '') {
+                        return;
+                    }
+
+                    $titleQuery->whereRaw('LOWER(TRIM(title)) = ?', [$title])
+                        ->orWhereRaw('LOWER(title) LIKE ?', ['%' . $title . '%']);
+                })
+                ->when(! empty($extracted['date']), function ($dateQuery) use ($extracted) {
+                    $date = (string) $extracted['date'];
+
+                    $dateQuery->where(function ($innerDateQuery) use ($date) {
+                        $innerDateQuery->whereDate('start_date', $date)
+                            ->orWhere(function ($rangeQuery) use ($date) {
+                                $rangeQuery->whereNotNull('start_date')
+                                    ->whereNotNull('end_date')
+                                    ->whereDate('start_date', '<=', $date)
+                                    ->whereDate('end_date', '>=', $date);
+                            });
+                    });
+                })
+                ->latest('id')
+                ->first();
+        }
+
         $this->dispatch('prefillTaskFromSms', payload: [
+            'task_id' => $matchedTask?->id ?? ($extracted['task_id'] ?? null),
             'title' => $extracted['title'],
             'type' => $extracted['type'],
             'project_id' => $projectId,
             'client_id' => $client->id,
-            'vendor_id' => $thread->subject_vendor_id,
+            'vendor_id' => $vendorId,
             'date' => $extracted['date'],
             'start_time' => $extracted['start_time'],
             'end_time' => $extracted['end_time'],
@@ -396,7 +464,248 @@ class SmsConversation extends Component
                 ->map(fn (string $text) => ['text' => $text, 'completed' => false])
                 ->values()
                 ->all(),
+            'additional_tasks' => collect($extracted['additional_tasks'] ?? [])
+                ->map(fn (array $task) => [
+                    'title' => $task['title'],
+                    'type' => $task['type'] ?? 'Task',
+                    'date' => $task['date'] ?? null,
+                    'start_time' => $task['start_time'] ?? null,
+                    'end_time' => $task['end_time'] ?? null,
+                    'user_ids' => $this->resolveAssigneeUserIds($task['assignee_names'] ?? []),
+                ])
+                ->all(),
+            'multi_time' => preg_match_all('/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i', $text) >= 2,
         ])->to(TaskCreate::class);
+    }
+
+    /**
+     * Fallback extraction for short time-only replies that reference the
+     * previous "Confirm Tasks" blast in the same thread.
+     *
+     * @return array{
+     *     has_task: bool,
+    *     task_id: ?int,
+     *     title: string,
+     *     type: string,
+     *     date: ?string,
+     *     start_time: ?string,
+     *     end_time: ?string,
+     *     project_hint: ?string,
+     *     assignee_names: array<int, string>,
+     *     checklist: array<int, string>
+     * }|null
+     */
+    protected function fallbackExtractFromScheduleReply(SmsMessage $message, Carbon $sentAt): ?array
+    {
+        $currentText = trim((string) $message->display_text);
+        if ($currentText === '') {
+            return null;
+        }
+
+        $timeRange = $this->extractTimeRangeFromReply($currentText);
+        if ($timeRange === null) {
+            return null;
+        }
+
+        $previous = SmsMessage::query()
+            ->where('thread_id', $message->thread_id)
+            ->where('id', '<', $message->id)
+            ->where('direction', SmsMessage::DIRECTION_OUTBOUND)
+            ->whereNotNull('text')
+            ->where('text', 'like', '%Confirm Tasks:%')
+            ->latest('id')
+            ->first();
+
+        if (! $previous) {
+            return null;
+        }
+
+        $previousText = trim((string) ($previous->display_text ?? ''));
+        if ($previousText === '') {
+            return null;
+        }
+
+        if (! preg_match('/^\s*-\s*(.+?)\s*$/m', $previousText, $taskMatch)) {
+            return null;
+        }
+
+        $title = trim((string) ($taskMatch[1] ?? ''));
+        if ($title === '') {
+            return null;
+        }
+
+        $date = $this->extractDateFromScheduleBlast($previousText, $previous->created_at?->copy()->setTimezone(vendor_timezone()) ?? $sentAt);
+        $matchedTaskId = collect((array) data_get($previous->raw_payload, 'scheduled_task_ids', []))
+            ->map(static fn ($id) => is_numeric($id) ? (int) $id : null)
+            ->filter(static fn (?int $id) => $id !== null && $id > 0)
+            ->first();
+
+        if (! $matchedTaskId) {
+            $matchedTaskId = $this->resolveScheduledReplyTaskId($message->thread_id, $title, $date);
+        }
+
+        return [
+            'has_task' => true,
+            'task_id' => $matchedTaskId,
+            'title' => $title,
+            'type' => 'Task',
+            'date' => $date,
+            'start_time' => $timeRange['start_time'],
+            'end_time' => $timeRange['end_time'],
+            'project_hint' => null,
+            'assignee_names' => [],
+            'checklist' => [],
+        ];
+    }
+
+    protected function resolveScheduledReplyTaskId(?int $threadId, string $title, ?string $date): ?int
+    {
+        if (! $threadId) {
+            return null;
+        }
+
+        $thread = SmsGroupThread::find($threadId);
+        if (! $thread) {
+            return null;
+        }
+
+        $normalizedTitle = strtolower(trim($title));
+        if ($normalizedTitle === '') {
+            return null;
+        }
+
+        $query = Task::query()
+            ->where(function ($titleQuery) use ($normalizedTitle) {
+                $titleQuery->whereRaw('LOWER(TRIM(title)) = ?', [$normalizedTitle])
+                    ->orWhereRaw('LOWER(title) LIKE ?', ['%' . $normalizedTitle . '%']);
+            });
+
+        if ($thread->project_id) {
+            $query->where('project_id', $thread->project_id);
+        } elseif ($thread->client_id) {
+            $projectIds = Project::query()
+                ->where('client_id', $thread->client_id)
+                ->pluck('id')
+                ->all();
+
+            if ($projectIds === []) {
+                return null;
+            }
+
+            $query->whereIn('project_id', $projectIds);
+        } elseif ($thread->subject_vendor_id) {
+            $query->where('vendor_id', $thread->subject_vendor_id);
+        }
+
+        if ($date) {
+            $query->where(function ($dateQuery) use ($date) {
+                $dateQuery->whereDate('start_date', $date)
+                    ->orWhere(function ($rangeQuery) use ($date) {
+                        $rangeQuery->whereNotNull('start_date')
+                            ->whereNotNull('end_date')
+                            ->whereDate('start_date', '<=', $date)
+                            ->whereDate('end_date', '>=', $date);
+                    });
+            });
+        }
+
+        return $query->latest('id')->value('id');
+    }
+
+    protected function resolveVendorProjectId(int $vendorId, ?string $hint): ?int
+    {
+        $vendorProjects = Project::query()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->with('latestStatus')
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($vendorProjects->isEmpty()) {
+            return null;
+        }
+
+        if ($hint) {
+            $best = $vendorProjects
+                ->map(fn (Project $project) => [
+                    'id' => (int) $project->id,
+                    'score' => $this->projectMatchScore($hint, (string) ($project->getRawOriginal('project_name') ?? $project->project_name)),
+                ])
+                ->sortByDesc('score')
+                ->first();
+
+            if ($best && $best['score'] > 0) {
+                return $best['id'];
+            }
+        }
+
+        return (int) $vendorProjects->first()->id;
+    }
+
+    /**
+     * @return array{start_time: ?string, end_time: ?string}|null
+     */
+    protected function extractTimeRangeFromReply(string $text): ?array
+    {
+        $normalized = strtolower(trim($text));
+
+        if (preg_match('/\b(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i', $normalized, $m) === 1) {
+            $startHour = (int) $m[1];
+            $startMin = isset($m[2]) && $m[2] !== '' ? (int) $m[2] : 0;
+            $endHour = (int) $m[3];
+            $endMin = isset($m[4]) && $m[4] !== '' ? (int) $m[4] : 0;
+            $meridiem = strtolower((string) $m[5]);
+
+            $start = $this->to24Hour($startHour, $startMin, $meridiem);
+            $end = $this->to24Hour($endHour, $endMin, $meridiem);
+
+            if ($start === null || $end === null) {
+                return null;
+            }
+
+            return [
+                'start_time' => $start,
+                'end_time' => $end,
+            ];
+        }
+
+        return null;
+    }
+
+    protected function to24Hour(int $hour, int $minute, string $meridiem): ?string
+    {
+        if ($hour < 1 || $hour > 12 || $minute < 0 || $minute > 59) {
+            return null;
+        }
+
+        $hour = $hour % 12;
+        if ($meridiem === 'pm') {
+            $hour += 12;
+        }
+
+        return sprintf('%02d:%02d', $hour, $minute);
+    }
+
+    protected function extractDateFromScheduleBlast(string $blastText, Carbon $fallbackBaseDate): ?string
+    {
+        if (preg_match('/\b(\d{1,2})\/(\d{1,2})\b/', $blastText, $md) === 1) {
+            $month = (int) ($md[1] ?? 0);
+            $day = (int) ($md[2] ?? 0);
+            if ($month >= 1 && $month <= 12 && $day >= 1 && $day <= 31) {
+                return Carbon::create($fallbackBaseDate->year, $month, $day, 0, 0, 0, $fallbackBaseDate->getTimezone())
+                    ->toDateString();
+            }
+        }
+
+        $lower = strtolower($blastText);
+        if (str_contains($lower, 'tomorrow')) {
+            return $fallbackBaseDate->copy()->addDay()->toDateString();
+        }
+
+        if (str_contains($lower, 'today')) {
+            return $fallbackBaseDate->toDateString();
+        }
+
+        return null;
     }
 
     /**
@@ -1699,6 +2008,17 @@ class SmsConversation extends Component
         $translator = app(SmsTranslationService::class);
         $withoutTapbacks->each(function (SmsMessage $message) use ($viewerLanguage, $translator): void {
             $message->translated_display_text = $this->messageDisplayTextForViewer($message, $viewerLanguage, $translator);
+            $message->original_display_text = $this->messageOriginalTextForViewer($message);
+
+            $languageMeta = $this->messageLanguageMetaForViewer(
+                $message,
+                $viewerLanguage,
+                (string) ($message->translated_display_text ?? ''),
+                (string) ($message->original_display_text ?? '')
+            );
+
+            $message->language_badge = $languageMeta['badge'];
+            $message->show_original_toggle = $languageMeta['show_original_toggle'];
         });
 
         return [
@@ -1756,6 +2076,108 @@ class SmsConversation extends Component
         }
 
         return $translator->translate($displayText, $viewerLanguage);
+    }
+
+    protected function messageOriginalTextForViewer(SmsMessage $message): ?string
+    {
+        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
+        $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
+
+        if ($originalText !== '') {
+            return $originalText;
+        }
+
+        $displayText = trim((string) $message->display_text);
+
+        return $displayText !== '' ? $displayText : null;
+    }
+
+    /**
+     * @return array{badge: ?string, show_original_toggle: bool}
+     */
+    protected function messageLanguageMetaForViewer(
+        SmsMessage $message,
+        string $viewerLanguage,
+        string $translatedText,
+        string $originalText,
+    ): array {
+        $sourceLanguage = $this->messageSourceLanguage($message, $originalText);
+        $badge = $this->languageBadgeForLanguage($sourceLanguage);
+
+        if ($badge === null || $sourceLanguage === null) {
+            return ['badge' => null, 'show_original_toggle' => false];
+        }
+
+        if (strcasecmp($sourceLanguage, $viewerLanguage) === 0) {
+            return ['badge' => null, 'show_original_toggle' => false];
+        }
+
+        $showToggle = trim($translatedText) !== ''
+            && trim($originalText) !== ''
+            && strcmp(trim($translatedText), trim($originalText)) !== 0;
+
+        return [
+            'badge' => $badge,
+            'show_original_toggle' => $showToggle,
+        ];
+    }
+
+    protected function messageSourceLanguage(SmsMessage $message, string $originalText): ?string
+    {
+        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
+        $senderLanguage = trim((string) ($rawPayload['sender_language'] ?? ''));
+
+        if ($senderLanguage !== '') {
+            return $this->normalizeLanguage($senderLanguage);
+        }
+
+        return $this->inferSupportedLanguageFromText($originalText);
+    }
+
+    protected function languageBadgeForLanguage(?string $language): ?string
+    {
+        if ($language === null || $language === '') {
+            return null;
+        }
+
+        return match ($this->normalizeLanguage($language)) {
+            'English' => 'EN',
+            'Spanish' => 'ES',
+            'Polish' => 'PL',
+            default => null,
+        };
+    }
+
+    protected function inferSupportedLanguageFromText(string $text): ?string
+    {
+        $normalized = mb_strtolower(trim($text));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (preg_match('/[ąćęłńóśźż]/u', $normalized) === 1) {
+            return 'Polish';
+        }
+
+        if (preg_match('/[áéíóúñ¿¡]/u', $normalized) === 1) {
+            return 'Spanish';
+        }
+
+        $polishHints = ['dziekuje', 'prosze', 'czesc', 'jutro', 'witam', 'tak', 'nie'];
+        foreach ($polishHints as $hint) {
+            if (str_contains($normalized, $hint)) {
+                return 'Polish';
+            }
+        }
+
+        $spanishHints = ['hola', 'gracias', 'manana', 'por favor', 'buenos', 'buenas', 'que tal'];
+        foreach ($spanishHints as $hint) {
+            if (str_contains($normalized, $hint)) {
+                return 'Spanish';
+            }
+        }
+
+        return null;
     }
 
     private function looksLikeTranslationPromptArtifact(string $text): bool

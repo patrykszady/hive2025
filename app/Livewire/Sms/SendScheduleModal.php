@@ -3,6 +3,7 @@
 namespace App\Livewire\Sms;
 
 use App\Models\Project;
+use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\Task;
 use App\Models\User;
@@ -367,7 +368,7 @@ class SendScheduleModal extends Component
 
         $greeting = $this->buildRecipientGreeting();
 
-        $intro = $this->translateText('confirm_tasks') . ':';
+        $intro = $this->scheduleIntroLabel() . ':';
 
         // Build task lines grouped by day (matching digest format)
         $today = Carbon::today(browser_timezone());
@@ -481,12 +482,12 @@ class SendScheduleModal extends Component
         $subjectVendor = $this->thread?->subjectVendor;
         if ($subjectVendor) {
             $token = $subjectVendor->getOrCreateAvailabilityToken();
-            $linksText = "\n" . $this->translateText('confirm_schedule') . ": {$baseUrl}/v/{$token}";
+            $linksText = "\n" . $this->scheduleLinkLabel() . ": {$baseUrl}/v/{$token}";
         } else {
             $firstProject = $allTasks->first()?->project;
             if ($firstProject) {
                 $token = $firstProject->getOrCreateScheduleToken();
-                $linksText = "\n" . $this->translateText('confirm_schedule') . ": {$baseUrl}/s/{$token}";
+                $linksText = "\n" . $this->scheduleLinkLabel() . ": {$baseUrl}/s/{$token}";
             } else {
                 $link = $this->buildScheduleLink();
                 if ($link) {
@@ -530,14 +531,10 @@ class SendScheduleModal extends Component
                 : ($this->vendorUserGreeting() ?: $this->translateText('hi') . ',');
         }
 
-        $names = $thread?->client?->users
-                ?->map(fn (User $user) => $this->displayFirstName($user))
-                ->filter()
-                ->values()
-                ->all() ?? [];
+        $clientName = trim((string) (Client::withoutGlobalScopes()->with('users')->find($thread?->client_id)?->first_names ?? ''));
 
-        return count($names) > 0
-            ? $this->translateText('hi') . ' ' . collect($names)->join(', ', ' & ') . ','
+        return $clientName !== ''
+            ? $this->translateText('hi') . ' ' . $clientName . ','
             : $this->translateText('hi') . ',';
     }
 
@@ -562,7 +559,21 @@ class SendScheduleModal extends Component
         $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
         $token = $project->getOrCreateScheduleToken();
 
-        return $this->translateText('confirm_schedule') . ": {$baseUrl}/s/{$token}";
+        return $this->scheduleLinkLabel() . ": {$baseUrl}/s/{$token}";
+    }
+
+    protected function scheduleIntroLabel(): string
+    {
+        return $this->thread?->subject_vendor_id
+            ? $this->translateText('confirm_tasks')
+            : 'Upcoming tasks';
+    }
+
+    protected function scheduleLinkLabel(): string
+    {
+        return $this->thread?->subject_vendor_id
+            ? $this->translateText('confirm_schedule')
+            : 'View Schedule';
     }
 
     protected function vendorUserGreeting(): ?string

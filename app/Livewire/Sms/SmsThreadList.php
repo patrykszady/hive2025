@@ -276,7 +276,7 @@ class SmsThreadList extends Component
             ->all();
 
         $users = User::whereIn('cell_phone', $needles)
-            ->get(['id', 'first_name', 'last_name', 'cell_phone'])
+            ->get(['id', 'first_name', 'last_name', 'nickname', 'cell_phone'])
             ->keyBy(fn ($u) => preg_replace('/[^0-9]/', '', (string) $u->cell_phone));
 
         $vendors = Vendor::whereIn('business_phone', $needles)
@@ -289,7 +289,10 @@ class SmsThreadList extends Component
             $name = null;
             foreach ($candidateKeys as $key) {
                 if ($user = $users->get($key)) {
-                    $full = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+                    $firstName = trim((string) ($user->nickname ?? '')) !== ''
+                        ? trim((string) $user->nickname)
+                        : trim((string) ($user->first_name ?? ''));
+                    $full = trim($firstName . ' ' . ($user->last_name ?? ''));
                     if ($full !== '') {
                         $name = $full;
                         break;

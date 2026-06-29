@@ -238,7 +238,7 @@ class SmsNewThread extends Component
                     $this->recipients[] = [
                         'number' => $e164,
                         'display' => $this->formatDisplay($user->getRawOriginal('cell_phone')),
-                        'label' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                        'label' => $this->displayName($user),
                     ];
                 }
             }
@@ -247,12 +247,36 @@ class SmsNewThread extends Component
 
     private function setDefaultMessageFromVendor(Vendor $vendor): void
     {
-        $recipientNames = collect($this->recipients)
-            ->pluck('label')
-            ->map(fn ($name) => explode(' ', trim($name))[0])
+        $recipientNumbers = collect($this->recipients)
+            ->pluck('number')
+            ->map(fn (string $phone): string => GroupSmsService::formatE164($phone))
+            ->all();
+
+        $recipientNames = collect($vendor->users)
+            ->map(function (User $user) use ($recipientNumbers): ?string {
+                $rawPhone = $user->getRawOriginal('cell_phone');
+                if (! is_string($rawPhone) || $rawPhone === '') {
+                    return null;
+                }
+
+                if (! in_array(GroupSmsService::formatE164($rawPhone), $recipientNumbers, true)) {
+                    return null;
+                }
+
+                return $this->displayFirstName($user);
+            })
             ->filter()
             ->unique()
             ->join(', ', ' & ');
+
+        if ($recipientNames === '') {
+            $recipientNames = collect($this->recipients)
+                ->pluck('label')
+                ->map(fn ($name) => explode(' ', trim($name))[0])
+                ->filter()
+                ->unique()
+                ->join(', ', ' & ');
+        }
 
         if ($recipientNames === '') {
             $recipientNames = $vendor->short_name ?: $vendor->name;
@@ -348,10 +372,7 @@ class SmsNewThread extends Component
         }
 
         $e164 = GroupSmsService::formatE164($rawPhone);
-        $label = trim(implode(' ', array_filter([
-            (string) ($user->first_name ?? ''),
-            (string) ($user->last_name ?? ''),
-        ])));
+        $label = $this->displayName($user);
 
         return [
             'number' => $e164,
@@ -408,6 +429,24 @@ class SmsNewThread extends Component
         }
 
         $this->message = "Hi {$recipientNames},\n" . GroupSmsService::START_CONSENT_TEXT;
+    }
+
+    private function displayFirstName(User $user): string
+    {
+        $nickname = trim((string) ($user->nickname ?? ''));
+        if ($nickname !== '') {
+            return $nickname;
+        }
+
+        return trim((string) ($user->first_name ?? ''));
+    }
+
+    private function displayName(User $user): string
+    {
+        $firstName = $this->displayFirstName($user);
+        $lastName = trim((string) ($user->last_name ?? ''));
+
+        return trim($firstName . ' ' . $lastName);
     }
 
     /**
@@ -505,7 +544,7 @@ class SmsNewThread extends Component
             ->first();
 
         if ($user) {
-            return trim($user->first_name . ' ' . $user->last_name);
+            return $this->displayName($user);
         }
 
         // Search vendors by business_phone

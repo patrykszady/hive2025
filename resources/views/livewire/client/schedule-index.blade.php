@@ -41,6 +41,7 @@
                 :later-tasks="$this->laterTasks"
                 :task-count="$this->taskCount"
                 :unscheduled-tasks="$this->unscheduledTasks"
+                :pending-tasks-expanded="false"
                 :show-avatars="false"
                 :clickable="false"
                 :show-project-info="$this->hasMultipleProjects"

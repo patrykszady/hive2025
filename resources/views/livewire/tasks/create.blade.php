@@ -24,6 +24,17 @@
             get activeClasses() { return this.tabClasses[this.taskType] || this.tabClasses.Task }
         }" 
         @reset-tabs.window="activeTab = 'details'"
+        @task-modal-focus-arrival-times.window="
+            activeTab = 'schedule';
+            $nextTick(() => {
+                setTimeout(() => {
+                    const arrivalSection = $el.querySelector('[data-arrival-times-section]');
+                    if (arrivalSection) {
+                        arrivalSection.scrollIntoView({ behavior: 'auto', block: 'start' });
+                    }
+                }, 120);
+            });
+        "
     >
         <div class="border-b border-gray-200 mb-4 overflow-x-auto overflow-y-hidden">
             <nav class="-mb-px flex min-w-max whitespace-nowrap space-x-8">
@@ -291,7 +302,7 @@
 
                     {{-- TIME SETTINGS --}}
                     @if(!empty($form->dates))
-                        <flux:field>
+                        <flux:field data-arrival-times-section>
                             <div class="flex items-center justify-between">
                                 <flux:label>Arrival Time</flux:label>
                                 <flux:switch

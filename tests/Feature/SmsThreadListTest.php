@@ -153,3 +153,31 @@ it('shows only threads where the client user is a participant', function (): voi
         ->assertSeeHtml('wire:key="thread-' . $marksThread->id . '"')
         ->assertDontSeeHtml('wire:key="thread-' . $gailsThread->id . '"');
 });
+
+it('prefers nickname over first name when resolving participant display names', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $viewer = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Tester',
+        'email' => 'patryk.nickname-list@example.com',
+        'cell_phone' => '2245551111',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    User::query()->create([
+        'first_name' => 'Stanislaw',
+        'last_name' => 'Palupski',
+        'nickname' => 'Stan',
+        'email' => 'stan.nickname-list@example.com',
+        'cell_phone' => '12245550003',
+    ]);
+
+    $this->actingAs($viewer);
+
+    $display = Livewire::test(SmsThreadList::class, ['isClientUser' => false])
+        ->instance()
+        ->resolvePhoneDisplay('+12245550003');
+
+    expect($display)->toBe('Stan Palupski');
+});

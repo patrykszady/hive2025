@@ -311,3 +311,19 @@ it('shows reminder tasks that are owned by the same recipient vendor', function 
     Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
         ->assertSee('Vendor Reminder');
 });
+
+it('shows a vendor-specific registration cta at the bottom for guests', function (): void {
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'RG Tile',
+        'short_name' => 'RG',
+        'availability_token' => 'test-vendor-token-cta',
+        'options' => '{}',
+    ]);
+
+    Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
+        ->assertSee('Join Hive Contractors')
+        ->assertSee('Register a Hive account to confirm availability, update arrival times, and stay connected with Hive Contractors.')
+        ->assertSee('You’ll also be able to see project details, notifications, and schedule changes in one place.')
+        ->assertSee('Register')
+        ->assertSee('Login');
+});

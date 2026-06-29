@@ -2,10 +2,12 @@
 
 use App\Livewire\Sms\SmsNewThread;
 use App\Models\SmsGroupThread;
+use App\Models\SmsMessage;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -174,4 +176,78 @@ it('sent vendor consent message uses first name for recipient greeting', functio
         ->set('message', "Hi Jaroslaw,\n" . GroupSmsService::START_CONSENT_TEXT)
         ->call('send')
         ->assertHasNoErrors();
+});
+
+it('uses vendor participant nickname for consent greeting when available', function (): void {
+    Queue::fake();
+
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+    ]);
+
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'Stan Palupski Construction',
+        'business_phone' => '2245559900',
+    ]);
+
+    $ownerUser = User::query()->create([
+        'first_name' => 'Stanislaw',
+        'last_name' => 'Palupski',
+        'nickname' => 'Stan',
+        'email' => 'stan.owner@example.com',
+        'cell_phone' => '2245558800',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $subjectVendor->users()->attach($ownerUser->id, [
+        'is_employed' => true,
+        'role_id' => 1,
+    ]);
+
+    $thread = app(GroupSmsService::class)->sendNewGroup(
+        ['2245559900', '2245558800'],
+        'Ignored manual text',
+        null,
+        null,
+        null,
+        $ownerVendor->id,
+        $subjectVendor->id,
+    );
+
+    $consentMessage = SmsMessage::query()
+        ->where('thread_id', $thread->id)
+        ->firstOrFail();
+
+    expect($consentMessage->text)
+        ->toStartWith("Hi Stan,\n" . GroupSmsService::START_CONSENT_TEXT)
+        ->and($consentMessage->text)->not->toContain('Stanislaw')
+        ->and($consentMessage->text)->not->toContain('Stan Palupski Construction');
+});
+
+it('uses nickname-first labels in vendor recipient presets', function (): void {
+    $vendor = Vendor::factory()->create([
+        'business_name' => 'Stan Palupski Construction',
+        'business_phone' => '2245559900',
+    ]);
+
+    $user = User::query()->create([
+        'first_name' => 'Stanislaw',
+        'last_name' => 'Palupski',
+        'nickname' => 'Stan',
+        'email' => 'stan.preset@example.com',
+        'cell_phone' => '2245558800',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $vendor->users()->attach($user->id, [
+        'is_employed' => true,
+        'role_id' => 1,
+    ]);
+
+    $options = (new SmsNewThread())->buildVendorRecipientPresetOptions($vendor, []);
+
+    $labels = collect($options)->pluck('label')->all();
+
+    expect($labels)->toContain('Stan Palupski')
+        ->and(collect($labels)->join(' | '))->not->toContain('Stanislaw Palupski');
 });

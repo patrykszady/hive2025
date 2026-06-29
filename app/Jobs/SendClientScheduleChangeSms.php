@@ -189,7 +189,7 @@ class SendClientScheduleChangeSms implements ShouldQueue, ShouldBeUnique
         try {
             $notification = new ClientScheduleSmsNotification(
                 $project,
-                $user->first_name ?? 'there',
+                $user->nickname ?: ($user->first_name ?? 'there'),
                 'changed',
                 $tasks
             );

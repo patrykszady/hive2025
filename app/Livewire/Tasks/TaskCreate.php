@@ -37,6 +37,9 @@ class TaskCreate extends Component
     public $lagDays = 0;
     public $showCompletedChecklist = false;
 
+    /** @var array<int, array<string, mixed>> */
+    public $pendingSmsTasks = [];
+
     public $view_text = [
         'card_title' => 'Create Task',
         'button_text' => 'Create',
@@ -477,6 +480,7 @@ class TaskCreate extends Component
     {
         $this->form->reset();
         $this->resetErrorBag();
+        $this->pendingSmsTasks = [];
         $this->selectedPredecessorId = null;
         $this->dependencyType = 'finish_to_start';
         $this->lagDays = 0;
@@ -957,17 +961,49 @@ class TaskCreate extends Component
      * full editor (edit mode) so every option — Dates, Notes/Checklist,
      * Dependencies, History — is available for review and refinement.
      *
-     * @param  array{title?: ?string, type?: ?string, project_id?: ?int, client_id?: ?int, vendor_id?: ?int, date?: ?string, start_time?: ?string, end_time?: ?string, user_ids?: array<int, int>, checklist?: array<int, array{text: string, completed: bool}>}  $payload
+      * @param  array{task_id?: ?int, title?: ?string, type?: ?string, project_id?: ?int, client_id?: ?int, vendor_id?: ?int, date?: ?string, start_time?: ?string, end_time?: ?string, user_ids?: array<int, int>, checklist?: array<int, array{text: string, completed: bool}>}  $payload
      */
     public function prefillTaskFromSms(array $payload): void
     {
         $this->resetFormFields();
-        $this->setupViewText('create');
 
         $clientId = isset($payload['client_id']) ? (int) $payload['client_id'] : null;
         $projectId = isset($payload['project_id']) ? (int) $payload['project_id'] : null;
+        $vendorId = ! empty($payload['vendor_id']) ? (int) $payload['vendor_id'] : null;
 
-        if ($clientId) {
+        $this->pendingSmsTasks = collect($payload['additional_tasks'] ?? [])
+            ->filter(fn ($row) => is_array($row) && trim((string) ($row['title'] ?? '')) !== '')
+            ->map(fn (array $row) => [
+                'title' => $row['title'],
+                'type' => $row['type'] ?? 'Task',
+                'project_id' => $projectId,
+                'client_id' => $clientId,
+                'vendor_id' => $vendorId,
+                'date' => $row['date'] ?? null,
+                'start_time' => $row['start_time'] ?? null,
+                'end_time' => $row['end_time'] ?? null,
+                'user_ids' => $row['user_ids'] ?? [],
+                'checklist' => [],
+                'multi_time' => true,
+            ])
+            ->values()
+            ->all();
+
+        $existingTaskId = isset($payload['task_id']) ? (int) $payload['task_id'] : null;
+        $existingTask = $existingTaskId ? Task::query()->find($existingTaskId) : null;
+
+        if (! $existingTask && $projectId) {
+            $existingTask = $this->findSimilarSmsTask($projectId, (string) ($payload['title'] ?? ''), $payload['date'] ?? null);
+        }
+
+        if ($existingTask) {
+            $this->ensureProjectOptionLoaded((int) $existingTask->project_id);
+            $this->form->setTask($existingTask);
+        }
+
+        $this->setupViewText($existingTask ? 'edit' : 'create');
+
+        if (! $existingTask && $clientId) {
             $this->projects = Project::query()
                 ->where('client_id', $clientId)
                 ->with('latestStatus')
@@ -976,7 +1012,7 @@ class TaskCreate extends Component
                 ->all();
         }
 
-        if ($projectId) {
+        if (! $existingTask && $projectId) {
             $this->form->project_id = $projectId;
             $this->ensureProjectOptionLoaded($projectId);
         }
@@ -1011,19 +1047,35 @@ class TaskCreate extends Component
         $date = ! empty($payload['date']) ? Carbon::parse($payload['date'])->format('Y-m-d') : null;
 
         if ($date) {
-            $this->form->dates = [$date];
+            $dates = $existingTask
+                ? collect($this->form->dates)->push($date)->filter()->unique()->values()->all()
+                : [$date];
+
+            $this->form->dates = $dates;
 
             $startTime = $payload['start_time'] ?? null;
 
             if (! empty($startTime)) {
-                $this->form->time_settings = [
-                    $date => [
-                        'use_time' => true,
-                        'start_time' => $startTime,
-                        'end_time' => $payload['end_time'] ?? $startTime,
-                    ],
+                $timeSettings = (array) $this->form->time_settings;
+                $timeSettings[$date] = [
+                    'use_time' => true,
+                    'start_time' => $startTime,
+                    'end_time' => $payload['end_time'] ?? $startTime,
                 ];
+                $this->form->time_settings = $timeSettings;
             }
+        }
+
+        if ($existingTask) {
+            $this->modal('task_create_form_modal')->show();
+
+            if (! empty($this->pendingSmsTasks) || ! empty($payload['multi_time'])) {
+                $this->dispatch('reset-tabs');
+            } else {
+                $this->dispatch('task-modal-focus-arrival-times');
+            }
+
+            return;
         }
 
         // Persist immediately and reopen in edit mode so the full task editor
@@ -1034,7 +1086,6 @@ class TaskCreate extends Component
 
         if (! $task instanceof Task) {
             $this->modal('task_create_form_modal')->show();
-            $this->dispatch('task-modal-opened');
 
             return;
         }
@@ -1045,7 +1096,65 @@ class TaskCreate extends Component
         $this->refreshPlannerComponents();
 
         $this->modal('task_create_form_modal')->show();
-        $this->dispatch('task-modal-opened');
+
+        if (! empty($this->pendingSmsTasks) || ! empty($payload['multi_time'])) {
+            $this->dispatch('reset-tabs');
+        } else {
+            $this->dispatch('task-modal-focus-arrival-times');
+        }
+    }
+
+    /**
+     * Open the next secondary task parsed from the same SMS, if any remain.
+     * Returns true when another task was opened so callers can skip closing.
+     */
+    protected function openNextPendingSmsTask(): bool
+    {
+        if (empty($this->pendingSmsTasks)) {
+            return false;
+        }
+
+        $next = array_shift($this->pendingSmsTasks);
+        $next['additional_tasks'] = $this->pendingSmsTasks;
+        $this->pendingSmsTasks = [];
+
+        $this->prefillTaskFromSms($next);
+
+        return true;
+    }
+
+    /**
+     * Find an existing task on the project with the same (or very similar) title
+     * so re-running the SMS task action edits it instead of creating a duplicate.
+     */
+    protected function findSimilarSmsTask(int $projectId, string $title, ?string $date): ?Task
+    {
+        $title = strtolower(trim($title));
+
+        if ($title === '') {
+            return null;
+        }
+
+        return Task::query()
+            ->where('project_id', $projectId)
+            ->where(function ($query) use ($title) {
+                $query->whereRaw('LOWER(TRIM(title)) = ?', [$title])
+                    ->orWhereRaw('LOWER(title) LIKE ?', ['%' . $title . '%'])
+                    ->orWhereRaw('? LIKE CONCAT(\'%\', LOWER(title), \'%\')', [$title]);
+            })
+            ->when(! empty($date), function ($query) use ($date) {
+                $query->where(function ($inner) use ($date) {
+                    $inner->whereDate('start_date', $date)
+                        ->orWhere(function ($range) use ($date) {
+                            $range->whereNotNull('start_date')
+                                ->whereNotNull('end_date')
+                                ->whereDate('start_date', '<=', $date)
+                                ->whereDate('end_date', '>=', $date);
+                        });
+                });
+            })
+            ->latest('id')
+            ->first();
     }
 
     public function editTask(int $task)
@@ -1149,6 +1258,8 @@ class TaskCreate extends Component
 
         $this->handleTaskOperation('complete');
         $this->showNotification('updated');
+
+        $this->openNextPendingSmsTask();
     }
 
     public function save()
@@ -1161,6 +1272,8 @@ class TaskCreate extends Component
 
         $this->handleTaskOperation('complete');
         $this->showNotification('created');
+
+        $this->openNextPendingSmsTask();
     }
 
     public function addDependency()

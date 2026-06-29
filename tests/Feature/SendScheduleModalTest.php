@@ -84,6 +84,81 @@ it('uses vendor short name in schedule greeting for vendor-subject threads', fun
         ->and($preview)->toContain('Confirm Schedule:');
 });
 
+it('uses client schedule wording for client threads', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-client@example.com',
+        'cell_phone' => '2245550098',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $clientUsers = collect([
+        ['first_name' => 'Carri', 'last_name' => 'Jones'],
+        ['first_name' => 'Debra', 'last_name' => 'Jones'],
+        ['first_name' => 'Alan', 'last_name' => 'Jones'],
+    ])->map(function (array $attributes) {
+        return User::query()->create(array_merge($attributes, [
+            'email' => strtolower($attributes['first_name']) . '.client.schedule@example.com',
+            'cell_phone' => fake()->unique()->numerify('224555####'),
+            'primary_vendor_id' => null,
+        ]));
+    });
+
+    $client->users()->attach($clientUsers->pluck('id')->all());
+
+    $project = Project::query()->create([
+        'project_name' => 'Client Schedule Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Demo',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+    ]);
+
+    Task::query()->create([
+        'title' => 'Carpentry',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Schedule Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)->toStartWith('Hi Carri, Debra & Alan,')
+        ->and($preview)->toContain('Upcoming tasks:')
+        ->and($preview)->toContain('Pending:')
+        ->and($preview)->toContain('View Schedule:')
+        ->and($preview)->not->toContain('Confirm Tasks:')
+        ->and($preview)->not->toContain('Confirm Schedule:');
+});
+
 it('uses vendor user nickname and preferred language when vendor short name is missing', function (): void {
     $ownerVendor = Vendor::factory()->create([
         'business_name' => 'GS Construction',
