@@ -90,45 +90,50 @@
                         $isFirstGroup = $loop->first;
                         $dayTaskCount = $dayTasks->count();
                     @endphp
-                    <div wire:key="schedule-day-{{ $date }}" class="space-y-3">
-                        {{-- Date Header --}}
-                        <div class="flex items-center gap-2">
-                            <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
-                                {{ $carbonDate->format('D, M j, Y') }}
-                            </flux:heading>
-                            <span
-                                x-data="{
-                                    badge: '{{ $serverDayBadge }}',
-                                    isFirst: {{ $isFirstGroup ? 'true' : 'false' }},
-                                    init() {
-                                        let p = '{{ $date }}'.split('-');
-                                        let d = new Date(p[0], p[1]-1, p[2]); d.setHours(0,0,0,0);
-                                        let t = new Date(); t.setHours(0,0,0,0);
-                                        let tm = new Date(t); tm.setDate(tm.getDate()+1);
-                                        this.badge = d.getTime() === t.getTime() ? 'today' : (d.getTime() === tm.getTime() ? 'tomorrow' : '');
-                                    }
-                                }"
-                                x-cloak
-                                class="contents"
-                            >
-                                <template x-if="badge === 'today'">
-                                    <flux:badge color="green" size="sm">Today</flux:badge>
-                                </template>
-                                <template x-if="badge === 'tomorrow'">
-                                    <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
-                                </template>
-                                <template x-if="isFirst && badge === ''">
-                                    <flux:badge color="sky" size="sm">Next Up</flux:badge>
-                                </template>
-                            </span>
+                    <div wire:key="schedule-day-{{ $date }}">
+                        <flux:accordion transition>
+                            <flux:accordion.item :expanded="$serverDayBadge !== 'today'">
+                                <flux:accordion.heading>
+                                    {{-- Date Header --}}
+                                    <div class="flex items-center gap-2">
+                                        <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
+                                            {{ $carbonDate->format('D, M j, Y') }}
+                                        </flux:heading>
+                                        <span
+                                            x-data="{
+                                                badge: '{{ $serverDayBadge }}',
+                                                isFirst: {{ $isFirstGroup ? 'true' : 'false' }},
+                                                init() {
+                                                    let p = '{{ $date }}'.split('-');
+                                                    let d = new Date(p[0], p[1]-1, p[2]); d.setHours(0,0,0,0);
+                                                    let t = new Date(); t.setHours(0,0,0,0);
+                                                    let tm = new Date(t); tm.setDate(tm.getDate()+1);
+                                                    this.badge = d.getTime() === t.getTime() ? 'today' : (d.getTime() === tm.getTime() ? 'tomorrow' : '');
+                                                }
+                                            }"
+                                            x-cloak
+                                            class="contents"
+                                        >
+                                            <template x-if="badge === 'today'">
+                                                <flux:badge color="green" size="sm">Today</flux:badge>
+                                            </template>
+                                            <template x-if="badge === 'tomorrow'">
+                                                <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
+                                            </template>
+                                            <template x-if="isFirst && badge === ''">
+                                                <flux:badge color="sky" size="sm">Next Up</flux:badge>
+                                            </template>
+                                        </span>
 
-                            <flux:badge color="zinc" size="sm">
-                                {{ $dayTaskCount }}
-                            </flux:badge>
-                        </div>
-
-                        @foreach($dayTasks as $task)
-                            <div wire:key="scheduled-task-{{ $date }}-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+                                        <flux:badge color="zinc" size="sm">
+                                            {{ $dayTaskCount }}
+                                        </flux:badge>
+                                    </div>
+                                </flux:accordion.heading>
+                                <flux:accordion.content>
+                                    <div class="space-y-3 mt-2">
+                                        @foreach($dayTasks as $task)
+                                            <div wire:key="scheduled-task-{{ $date }}-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
 
 
                         {{-- Task Card Content --}}
@@ -294,7 +299,11 @@
                             </div>
                         @endif
                     </div>
-                        @endforeach
+                                        @endforeach
+                                    </div>
+                                </flux:accordion.content>
+                            </flux:accordion.item>
+                        </flux:accordion>
                     </div>
                 @endforeach
             </div>

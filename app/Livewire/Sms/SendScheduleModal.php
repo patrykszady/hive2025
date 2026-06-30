@@ -185,7 +185,7 @@ class SendScheduleModal extends Component
 
         $vendorId = $this->thread?->subject_vendor_id;
 
-        return Task::whereIn('project_id', $projectIds)
+        $tasks = Task::whereIn('project_id', $projectIds)
             ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->whereNotNull('start_date')
@@ -195,6 +195,8 @@ class SendScheduleModal extends Component
             ->orderBy('start_date')
             ->orderBy('order')
             ->get();
+
+        return $this->filterVendorReminderVisibility($tasks);
     }
 
     /**
@@ -328,7 +330,7 @@ class SendScheduleModal extends Component
 
         $vendorId = $this->thread?->subject_vendor_id;
 
-        return Task::whereIn('project_id', $projectIds)
+        $tasks = Task::whereIn('project_id', $projectIds)
             ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->where(function ($query) {
@@ -336,6 +338,8 @@ class SendScheduleModal extends Component
             })
             ->orderBy('order')
             ->get();
+
+        return $this->filterVendorReminderVisibility($tasks);
     }
 
     /**
@@ -386,6 +390,8 @@ class SendScheduleModal extends Component
             ->orderBy('start_date')
             ->orderBy('order')
             ->get();
+
+        $candidates = $this->filterVendorReminderVisibility($candidates);
 
         if ($candidates->isEmpty()) {
             return collect();
@@ -467,7 +473,7 @@ class SendScheduleModal extends Component
             $carbonDate = Carbon::parse($dateStr);
             $isVendorSchedule = (bool) $this->thread?->subject_vendor_id;
             $shortDate = $isVendorSchedule
-                ? $carbonDate->format('l d/m')
+                ? $carbonDate->format('l m/d')
                 : $carbonDate->format('D n/j');
 
             if ($carbonDate->isSameDay($today)) {
@@ -480,7 +486,13 @@ class SendScheduleModal extends Component
 
             $showProject = (bool) $this->thread?->subject_vendor_id;
             $taskLines = $dayTasks->map(function (Task $task) use ($dateStr, $showProject) {
-                $line = '- ' . trim($task->title ?? 'Task');
+                $taskTitle = trim($task->title ?? 'Task');
+                $projectName = trim((string) ($task->project?->project_name ?? ''));
+                if ($projectName !== '') {
+                    $taskTitle .= " ({$projectName})";
+                }
+
+                $line = '- ' . $taskTitle;
 
                 // Use the model's getArrivalTimeLabel for consistent time formatting (e.g. 11AM-2PM)
                 $arrivalTime = $task->getArrivalTimeLabel($dateStr);
@@ -512,12 +524,18 @@ class SendScheduleModal extends Component
             $nextDateKey = $this->nextUpcomingDate;
             $nextDate = $nextDateKey ? Carbon::parse($nextDateKey) : Carbon::parse($nextTasks->first()->start_date);
             $dateLabel = $this->thread?->subject_vendor_id
-                ? $nextDate->format('l d/m')
+                ? $nextDate->format('l m/d')
                 : $nextDate->format('D n/j');
 
             $showProject = (bool) $this->thread?->subject_vendor_id;
             $taskLines = $nextTasks->map(function (Task $task) use ($nextDate, $showProject) {
-                $line = '- ' . trim($task->title ?? 'Task');
+                $taskTitle = trim($task->title ?? 'Task');
+                $projectName = trim((string) ($task->project?->project_name ?? ''));
+                if ($projectName !== '') {
+                    $taskTitle .= " ({$projectName})";
+                }
+
+                $line = '- ' . $taskTitle;
                 $arrivalTime = $task->getArrivalTimeLabel($nextDate->format('Y-m-d'));
                 if ($arrivalTime) {
                     $line .= " @ {$arrivalTime}";
@@ -544,7 +562,13 @@ class SendScheduleModal extends Component
         if ($pendingTasks->isNotEmpty()) {
             $showProject = (bool) $this->thread?->subject_vendor_id;
             $pendingLines = $pendingTasks->map(function (Task $task) use ($showProject) {
-                $line = '- ' . trim($task->title ?? 'Task');
+                $taskTitle = trim($task->title ?? 'Task');
+                $projectName = trim((string) ($task->project?->project_name ?? ''));
+                if ($projectName !== '') {
+                    $taskTitle .= " ({$projectName})";
+                }
+
+                $line = '- ' . $taskTitle;
                 if ($showProject && $task->project) {
                     $p = $task->project;
                     $street = trim((string) $p->address);
@@ -692,8 +716,8 @@ class SendScheduleModal extends Component
     protected function scheduleLinkLabel(): string
     {
         return $this->thread?->subject_vendor_id
-            ? 'View schedule'
-            : 'View Schedule';
+            ? 'Confirm Schedule'
+            : 'View schedule';
     }
 
     protected function vendorUserGreeting(): ?string
@@ -865,6 +889,24 @@ class SendScheduleModal extends Component
     }
 
     /**
+     * In vendor schedule threads, only show Reminder tasks created by the project owner vendor.
+     * This keeps vendor-to-vendor reminders out of the outbound schedule message.
+     *
+     * @param  \Illuminate\Support\Collection<int, Task>  $tasks
+     * @return \Illuminate\Support\Collection<int, Task>
+     */
+    protected function filterVendorReminderVisibility(\Illuminate\Support\Collection $tasks): \Illuminate\Support\Collection
+    {
+        if (! $this->thread?->subject_vendor_id) {
+            return $tasks;
+        }
+
+        return $tasks->filter(function (Task $task): bool {
+            return strcasecmp((string) $task->type, 'Reminder') !== 0;
+        })->values();
+    }
+
+    /**
      * Send the schedule message to the thread.
      */
     public function send(GroupSmsService $smsService, SmsTranslationService $translator): void
@@ -889,10 +931,9 @@ class SendScheduleModal extends Component
         $viewerLanguage = $translator->normalizeLanguage((string) (auth()->user()?->preferred_language ?: 'English'));
         $recipientLanguage = $translator->normalizeLanguage($this->recipientLanguage);
 
+        // Keep schedule text exactly as drafted in the modal (no auto-translation)
+        // so date headings, labels, and project details stay consistent.
         $outboundBody = $this->editableMessage;
-        if (trim($outboundBody) !== '' && strcasecmp($viewerLanguage, $recipientLanguage) !== 0) {
-            $outboundBody = $translator->translate($outboundBody, $recipientLanguage, $viewerLanguage);
-        }
 
         $text = $outboundBody . "\n-GSC";
 

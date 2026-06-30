@@ -68,9 +68,7 @@ class AvailabilityIndex extends Component
             ->where(function ($query) {
                 $query
                     ->where('type', '!=', 'Reminder')
-                    ->orWhereNull('type')
-                    ->orWhereColumn('belongs_to_vendor_id', 'vendor_id')
-                    ->orWhereNull('belongs_to_vendor_id');
+                    ->orWhereNull('type');
             })
             ->where(function ($q) {
                 $q->whereIn('vendor_status', [

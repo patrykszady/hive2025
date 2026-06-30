@@ -11,6 +11,7 @@ use App\Models\ProjectStatus;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux;
+use Illuminate\Support\Collection;
 use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Lazy;
@@ -43,8 +44,8 @@ class CardsIndex extends Component
     public ?int $filterVendorId = null;
     public array $filterUserIds = [];
 
-    /** Default Status filter: only "Active" projects. */
-    public const DEFAULT_STATUS_CODES = [6];
+    /** Default Status filter: Active, Service Call, Prep, and Scheduled projects (display order set by PLANNER_STATUS_PRIORITY). */
+    public const DEFAULT_STATUS_CODES = [4, 5, 6, 8];
     public array $filterStatusCodes = self::DEFAULT_STATUS_CODES;
 
     /** List view time window: 'upcoming' (today + future, default), 'past', or 'all'. */
@@ -74,7 +75,7 @@ class CardsIndex extends Component
     }
 
     private const PLANNER_PROJECT_STATUS_CODES = [4, 5, 6, 8]; // Prep, Scheduled, Active, Service Call
-    private const PLANNER_STATUS_PRIORITY = [8 => 1, 6 => 2, 4 => 3, 5 => 4]; // Service Call, Active, Prep, Scheduled
+    private const PLANNER_STATUS_PRIORITY = [6 => 1, 8 => 2, 4 => 3, 5 => 4]; // Active, Service Call, Prep, Scheduled
 
     protected $listeners = [
         'refreshComponent' => '$refresh',
@@ -248,6 +249,133 @@ class CardsIndex extends Component
             ->sortBy(fn (object $row): string => ($row->first_date ?? '9999-12-31')
                 .'-'.str_pad((string) $row->task->id, 10, '0', STR_PAD_LEFT))
             ->values();
+    }
+
+    /**
+     * [project, task] pairs from the filtered project set, with `users` and
+     * `project` relations resolved. Shared source for the mobile agenda views.
+     *
+     * @return \Illuminate\Support\Collection<int, array{0: Project, 1: Task}>
+     */
+    #[Computed]
+    public function mobileTaskPairs(): Collection
+    {
+        $pairs = $this->activeProjects
+            ->flatMap(fn (Project $project) => $project->tasks->map(fn (Task $task) => [$project, $task]))
+            ->reject(fn (array $pair) => $pair[1]->trashed())
+            ->values();
+
+        $userMap = User::whereIn('id', $pairs->flatMap(fn (array $pair) => $pair[1]->user_ids ?? [])->unique()->values())
+            ->get()
+            ->keyBy('id');
+
+        foreach ($pairs as [$project, $task]) {
+            $task->setRelation('project', $project);
+            $task->setRelation('users', collect($task->user_ids ?? [])
+                ->map(fn ($id) => $userMap->get((int) $id))
+                ->filter()
+                ->values());
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * Tasks grouped by date (Y-m-d) for the shared `upcoming-tasks-list` component
+     * used in the mobile agenda. Expands each task across its selected dates and
+     * honours the active date-range filter, bounded to the visible window.
+     *
+     * @return \Illuminate\Support\Collection<string, \Illuminate\Support\Collection<int, Task>>
+     */
+    #[Computed]
+    public function mobileGroupedTasks(): Collection
+    {
+        $today = browser_today()->format('Y-m-d');
+        $windowStart = $this->days->first()->format('Y-m-d');
+        $windowEnd = $this->days->last()->format('Y-m-d');
+
+        $grouped = collect();
+
+        foreach ($this->mobileTaskPairs as [$project, $task]) {
+            [$firstDate] = $this->taskPlannerDates($task);
+
+            // Undated tasks are surfaced separately via mobileUnscheduledTasks().
+            if ($firstDate === null) {
+                continue;
+            }
+
+            $dates = collect($task->options->dates ?? [])
+                ->filter()
+                ->map(fn ($date): string => (string) $date);
+
+            if ($dates->isEmpty()) {
+                $dates = collect([$firstDate]);
+            }
+
+            foreach ($dates->unique() as $dateStr) {
+                if ($dateStr < $windowStart || $dateStr > $windowEnd) {
+                    continue;
+                }
+
+                $inRange = match ($this->filterDateRange) {
+                    'past' => $dateStr < $today,
+                    'upcoming' => $dateStr >= $today,
+                    default => true,
+                };
+
+                if (! $inRange) {
+                    continue;
+                }
+
+                if (! $grouped->has($dateStr)) {
+                    $grouped[$dateStr] = collect();
+                }
+
+                $grouped[$dateStr]->push($task);
+            }
+        }
+
+        return $grouped
+            ->sortKeys()
+            ->map(fn (Collection $tasks, string $dateStr) => $tasks
+                ->sortBy(function (Task $task) use ($dateStr): string {
+                    $startTime = (string) data_get($task->options, "time_settings.$dateStr.start_time", '');
+                    $usesTime = (bool) data_get($task->options, "time_settings.$dateStr.use_time", false);
+
+                    return $usesTime && $startTime !== '' ? '0_'.$startTime : '1';
+                })
+                ->values());
+    }
+
+    /**
+     * Undated (pending) tasks across the filtered project set, for the mobile
+     * agenda's "Pending Tasks" section. Hidden when viewing past tasks only.
+     *
+     * @return \Illuminate\Support\Collection<int, Task>
+     */
+    #[Computed]
+    public function mobileUnscheduledTasks(): Collection
+    {
+        if ($this->filterDateRange === 'past') {
+            return collect();
+        }
+
+        return $this->mobileTaskPairs
+            ->filter(fn (array $pair) => $this->taskPlannerDates($pair[1])[0] === null)
+            ->map(fn (array $pair) => $pair[1])
+            ->values();
+    }
+
+    /**
+     * Distinct task count for the mobile agenda badge.
+     */
+    #[Computed]
+    public function mobileTaskCount(): int
+    {
+        return $this->mobileGroupedTasks->flatten()->pluck('id')
+            ->merge($this->mobileUnscheduledTasks->pluck('id'))
+            ->unique()
+            ->count();
     }
 
     /**

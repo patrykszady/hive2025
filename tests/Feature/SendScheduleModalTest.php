@@ -81,7 +81,8 @@ it('uses vendor short name in schedule greeting for vendor-subject threads', fun
 
     expect($preview)->toStartWith('Hello Smartech,')
         ->and($preview)->toContain('Upcoming tasks:')
-        ->and($preview)->toContain('View schedule:');
+        ->and($preview)->toContain('- Foundation (Vendor Thread Project)')
+        ->and($preview)->toContain('Confirm Schedule:');
 });
 
 it('uses client schedule wording for client threads', function (): void {
@@ -154,7 +155,7 @@ it('uses client schedule wording for client threads', function (): void {
     expect($preview)->toStartWith('Hi Carri, Debra & Alan,')
         ->and($preview)->toContain('Upcoming tasks:')
         ->and($preview)->toContain('Pending:')
-        ->and($preview)->toContain('View Schedule:')
+        ->and($preview)->toContain('View schedule:')
         ->and($preview)->not->toContain('Confirm Tasks:')
         ->and($preview)->not->toContain('Confirm Schedule:');
 });
@@ -296,9 +297,12 @@ it('uses vendor user nickname and preferred language when vendor short name is m
         ->call('open', $thread->id)
         ->get('previewMessage');
 
+    $expectedTodayHeading = 'Today ' . today()->format('l m/d') . ':';
+
     expect($preview)->toStartWith('Hello Rg Tile,')
         ->and($preview)->toContain('Upcoming tasks:')
-        ->and($preview)->toContain('View schedule:')
+        ->and($preview)->toContain('Confirm Schedule:')
+        ->and($preview)->toContain($expectedTodayHeading)
         ->and($preview)->not->toContain('Potwierdz zadania:')
         ->and($preview)->not->toContain('Potwierdz plan:');
 });
@@ -412,6 +416,89 @@ it('refreshes editable schedule message text after task updates', function (): v
         ->assertSet('editableMessage', $component->instance()->previewMessage);
 
     expect($component->get('editableMessage'))->toContain('After Update Title');
+});
+
+it('hides reminder tasks in vendor schedule previews', function (): void {
+    $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $ownerUser = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-reminders@example.com',
+        'cell_phone' => '2245550188',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $this->actingAs($ownerUser);
+
+    $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile']);
+    $subjectVendor->short_name = 'RG Tile';
+    $subjectVendor->save();
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Vendor Reminder Filter Project',
+        'client_id' => $client->id,
+        'address' => '999 Main St',
+        'city' => 'Palatine',
+        'state' => 'IL',
+        'zip_code' => 60067,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Install Tile',
+        'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+    ]);
+
+    Task::withoutEvents(function () use ($project, $subjectVendor, $ownerVendor, $ownerUser): void {
+        Task::query()->create([
+            'title' => 'Vendor Internal Reminder',
+            'project_id' => $project->id,
+            'vendor_id' => $subjectVendor->id,
+            'belongs_to_vendor_id' => $subjectVendor->id,
+            'created_by_user_id' => $ownerUser->id,
+            'order' => 10,
+            'type' => 'Reminder',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+
+        Task::query()->create([
+            'title' => 'GS Reminder',
+            'project_id' => $project->id,
+            'vendor_id' => $subjectVendor->id,
+            'belongs_to_vendor_id' => $ownerVendor->id,
+            'created_by_user_id' => $ownerUser->id,
+            'order' => 11,
+            'type' => 'Reminder',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+    });
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Vendor Reminder Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550077'],
+        'vendor_id' => $ownerVendor->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain('Install Tile')
+        ->not->toContain('GS Reminder')
+        ->not->toContain('Vendor Internal Reminder');
 });
 
 it('dispatches addTask when using the date-level add-task action', function (): void {
@@ -576,6 +663,93 @@ it('creates a no-date scheduled draft and does not mark vendor status requested 
     expect($scheduled)->not->toBeNull();
     expect($scheduled->scheduled_at)->toBeNull();
     expect($task->fresh()->vendor_status)->toBeNull();
+});
+
+it('does not auto-translate schedule modal message text on send', function (): void {
+    $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $ownerUser = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'preferred_language' => 'English',
+        'email' => 'owner.schedule-modal-no-translate@example.com',
+        'cell_phone' => '2245550899',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $this->actingAs($ownerUser);
+
+    $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile']);
+    $subjectVendor->short_name = 'RG Tile';
+    $subjectVendor->save();
+
+    $subjectUser = User::query()->create([
+        'first_name' => 'Grzegorz',
+        'last_name' => 'Szady',
+        'preferred_language' => 'Polish',
+        'email' => 'rg.schedule-modal-no-translate@example.com',
+        'cell_phone' => '2245550898',
+        'primary_vendor_id' => $subjectVendor->id,
+    ]);
+
+    $subjectVendor->users()->attach($subjectUser->id, [
+        'is_employed' => true,
+        'role_id' => 1,
+    ]);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Primary Bath',
+        'client_id' => $client->id,
+        'address' => '215 W Huron St',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => 60654,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Tiles',
+        'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id,
+        'type' => 'Task',
+        'start_date' => today()->addDay(),
+        'end_date' => today()->addDay(),
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Vendor Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $ownerVendor->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $thread->threadParticipants()->create([
+        'phone_number' => '+12245550001',
+        'opted_in_at' => now(),
+    ]);
+
+    $editable = "Hello RG Tile,\nUpcoming tasks:\n\nTomorrow Wednesday 07/01:\n- Tiles (Primary Bath)\n  215 W Huron St\n  Chicago, IL 60654\n\nConfirm Schedule: https://dev.hive.contractors/v/82539ea820e3a918";
+
+    Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->set('editableMessage', $editable)
+        ->call('send');
+
+    $sent = \App\Models\SmsMessage::query()
+        ->where('thread_id', $thread->id)
+        ->latest('id')
+        ->first();
+
+    expect($sent)->not->toBeNull();
+    expect((string) $sent->text)->toContain('Hello RG Tile,')
+        ->and((string) $sent->text)->toContain('Upcoming tasks:')
+        ->and((string) $sent->text)->toContain('Confirm Schedule:')
+        ->and((string) $sent->text)->not->toContain('Cześć')
+        ->and((string) $sent->text)->not->toContain('Nadchodzące zadania')
+        ->and((string) $sent->text)->not->toContain('Potwierdź harmonogram');
 });
 
 it('shows a multi-day task on each day in the preview window when options dates are missing', function (): void {

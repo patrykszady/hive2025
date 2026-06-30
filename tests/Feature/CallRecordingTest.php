@@ -2,6 +2,7 @@
 
 use App\Jobs\PurgeOldCallRecordings;
 use App\Jobs\SummarizeCallTranscript;
+use App\Jobs\TranscribeCallRecording;
 use App\Models\CallLog;
 use App\Models\CallTranscript;
 use Illuminate\Database\Schema\Blueprint;
@@ -512,6 +513,105 @@ it('labels voicemail and the caller from speaker_map on an inbound voicemail', f
     // The IVR speaker is overlaid as Voicemail; the human is the caller.
     expect($map['Speaker A'])->toBe('Voicemail');
     expect($map['Speaker B'])->toBe('Zora');
+});
+
+it('identifies speaker roles via the AssemblyAI LLM Gateway by default', function () {
+    config()->set('call_recording.transcription.speaker_identification_driver', 'assemblyai');
+    config()->set('call_recording.summarization.assemblyai_model', 'claude-sonnet-4-6');
+    config()->set('services.assemblyai.api_key', 'test-aai-key');
+
+    \DB::table('users')->insert([
+        ['id' => 921, 'name' => 'Patryk Szady', 'first_name' => 'Patryk', 'last_name' => 'Szady', 'cell_phone' => '2247354200'],
+        ['id' => 922, 'name' => 'Richard Egger', 'first_name' => 'Richard', 'last_name' => 'Egger', 'cell_phone' => '3097815746'],
+    ]);
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'cc-spk-aai',
+        'direction' => 'outgoing',
+        'from_number' => '+12247354200',
+        'to_number' => '+13097815746',
+        'status' => 'completed',
+        'metadata' => ['user_phone' => '+12247354200'],
+    ]);
+
+    $segments = [
+        ['speaker' => 'Speaker A', 'speaker_id' => 'A', 'start' => 0.0, 'end' => 2.0, 'text' => "I'll send you an invoice for the bathrooms tonight."],
+        ['speaker' => 'Speaker B', 'speaker_id' => 'B', 'start' => 2.0, 'end' => 4.0, 'text' => 'Great, thanks for following up on my project.'],
+    ];
+
+    Http::fake([
+        'llm-gateway.assemblyai.com/*' => Http::response([
+            'choices' => [[
+                'message' => ['content' => json_encode([
+                    'speakers' => [
+                        ['label' => 'A', 'role' => 'agent'],
+                        ['label' => 'B', 'role' => 'other'],
+                    ],
+                ])],
+            ]],
+        ], 200),
+    ]);
+
+    $job = new TranscribeCallRecording($callLog->id);
+    $method = new ReflectionMethod($job, 'identifySpeakers');
+    $method->setAccessible(true);
+    $map = $method->invoke($job, $segments, $callLog);
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'llm-gateway.assemblyai.com')
+        && $request['model'] === 'claude-sonnet-4-6');
+
+    expect($map)->toBe(['A' => 'Patryk Szady', 'B' => 'Richard Egger']);
+});
+
+it('falls back to OpenAI for speaker roles when the AssemblyAI LLM Gateway is not accessible', function () {
+    config()->set('call_recording.transcription.speaker_identification_driver', 'assemblyai');
+    config()->set('services.assemblyai.api_key', 'test-aai-key');
+    config()->set('services.openai.api_key', 'test-openai-key');
+
+    \DB::table('users')->insert([
+        ['id' => 931, 'name' => 'Patryk Szady', 'first_name' => 'Patryk', 'last_name' => 'Szady', 'cell_phone' => '2247354200'],
+        ['id' => 932, 'name' => 'Richard Egger', 'first_name' => 'Richard', 'last_name' => 'Egger', 'cell_phone' => '3097815746'],
+    ]);
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'cc-spk-fallback',
+        'direction' => 'outgoing',
+        'from_number' => '+12247354200',
+        'to_number' => '+13097815746',
+        'status' => 'completed',
+        'metadata' => ['user_phone' => '+12247354200'],
+    ]);
+
+    $segments = [
+        ['speaker' => 'Speaker A', 'speaker_id' => 'A', 'start' => 0.0, 'end' => 2.0, 'text' => "I'll send you an invoice for the bathrooms tonight."],
+        ['speaker' => 'Speaker B', 'speaker_id' => 'B', 'start' => 2.0, 'end' => 4.0, 'text' => 'Great, thanks for following up on my project.'],
+    ];
+
+    Http::fake([
+        'llm-gateway.assemblyai.com/*' => Http::response([
+            'error' => 'Your account does not have access to LLM Gateway.',
+        ], 401),
+        'api.openai.com/*' => Http::response([
+            'choices' => [[
+                'message' => ['content' => json_encode([
+                    'speakers' => [
+                        ['label' => 'A', 'role' => 'agent'],
+                        ['label' => 'B', 'role' => 'other'],
+                    ],
+                ])],
+            ]],
+        ], 200),
+    ]);
+
+    $job = new TranscribeCallRecording($callLog->id);
+    $method = new ReflectionMethod($job, 'identifySpeakers');
+    $method->setAccessible(true);
+    $map = $method->invoke($job, $segments, $callLog);
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'llm-gateway.assemblyai.com'));
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'api.openai.com'));
+
+    expect($map)->toBe(['A' => 'Patryk Szady', 'B' => 'Richard Egger']);
 });
 
 it('purges only the given recordings and their transcripts via the command', function () {

@@ -536,7 +536,7 @@ class Registration extends Component
 
     public function prepareUserForPasskey(): bool
     {
-        Log::channel('single')->info('prepareUserForPasskey: Starting', [
+        Log::channel('passkey')->info('prepareUserForPasskey: Starting', [
             'user_id' => $this->user?->id,
             'session_id' => session()->getId(),
         ]);
@@ -552,7 +552,7 @@ class Registration extends Component
         }
 
         $this->user->save();
-        Log::channel('single')->info('prepareUserForPasskey: User saved', ['user_id' => $this->user->id]);
+        Log::channel('passkey')->info('prepareUserForPasskey: User saved', ['user_id' => $this->user->id]);
 
         // Log in the user so WebAuthn can register the passkey
         // Note: User is not marked as "registered" until passkey succeeds
@@ -563,7 +563,7 @@ class Registration extends Component
         // We'll regenerate the session after successful passkey registration.
         session()->put(Auth::guard()->getName(), $this->user->getAuthIdentifier());
         Auth::setUser($this->user);
-        Log::channel('single')->info('prepareUserForPasskey: User logged in (session NOT regenerated)', [
+        Log::channel('passkey')->info('prepareUserForPasskey: User logged in (session NOT regenerated)', [
             'user_id' => $this->user->id,
             'session_id' => session()->getId(),
             'auth_check' => Auth::check(),
@@ -571,7 +571,7 @@ class Registration extends Component
         
         // Save state so we can complete registration
         $this->saveStateToSession();
-        Log::channel('single')->info('prepareUserForPasskey: State saved, returning true');
+        Log::channel('passkey')->info('prepareUserForPasskey: State saved, returning true');
         
         return true;
     }

@@ -1797,7 +1797,7 @@ class TransactionController extends Controller
                 $matchingSubsets = [];
                 foreach ($results as $result) {
                     $sum = number_format($result['sum'], 2, '.', '');
-                    if ($sum == number_format($transaction->amount, 2, '.', '')) {
+                    if ($sum == number_format($transaction->amount, 2, '.', '') && count($result['expenses']) > 1) {
                         $matchingSubsets[] = $result;
                     }
                 }

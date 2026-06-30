@@ -141,7 +141,7 @@ Route::get('telnyx-audio/{filename}', function (string $filename) {
 // Passkey debug logging endpoint (temporary for debugging)
 Route::post('api/passkey-debug-log', function () {
     $data = request()->all();
-    Log::channel('single')->info('PasskeyJS: ' . ($data['message'] ?? 'No message'), [
+    Log::channel('passkey')->info('PasskeyJS: ' . ($data['message'] ?? 'No message'), [
         'level' => $data['level'] ?? 'info',
         'data' => $data['data'] ?? [],
         'timestamp' => $data['timestamp'] ?? null,

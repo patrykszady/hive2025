@@ -106,11 +106,26 @@ PROMPT;
             ],
         ];
 
+        Log::channel('call_ai')->info('Summarization started', [
+            'transcript_id' => $transcript->id,
+            'call_log_id' => $callLog?->id,
+            'driver' => $driver,
+            'direction' => $direction,
+            'language' => $transcript->language,
+            'transcript_chars' => strlen((string) $transcript->text),
+        ]);
+
         [$parsed, $usedModel] = $driver === 'openai'
             ? $this->summarizeWithOpenAI($transcript, $system, $user, $schema)
             : $this->summarizeWithAssemblyAI($transcript, $system, $user, $schema);
 
         if (! is_array($parsed)) {
+            Log::channel('call_ai')->warning('Summarization produced no usable output', [
+                'transcript_id' => $transcript->id,
+                'call_log_id' => $callLog?->id,
+                'driver' => $driver,
+            ]);
+
             return;
         }
 
@@ -125,6 +140,17 @@ PROMPT;
             'sentiment' => $parsed['sentiment'] ?? null,
             'caller_intent' => $parsed['caller_intent'] ?? null,
             'summarized_at' => now(),
+        ]);
+
+        Log::channel('call_ai')->info('Summarization complete', [
+            'transcript_id' => $transcript->id,
+            'call_log_id' => $callLog?->id,
+            'requested_driver' => $driver,
+            'model_used' => $usedModel,
+            'action_items' => count($parsed['action_items'] ?? []),
+            'next_steps' => count($parsed['next_steps'] ?? []),
+            'summary_chars' => strlen((string) ($parsed['summary'] ?? '')),
+            'recording_has_no_message' => (bool) ($parsed['recording_has_no_message'] ?? false),
         ]);
 
         // If the recording turned out to contain no real message or conversation
@@ -314,6 +340,11 @@ PROMPT;
             return [null, $model];
         }
 
+        Log::channel('call_ai')->debug('Summarizing via AssemblyAI LLM Gateway', [
+            'transcript_id' => $transcript->id,
+            'model' => $model,
+        ]);
+
         $response = Http::withHeaders(['authorization' => $apiKey])
             ->timeout(90)
             ->post('https://llm-gateway.assemblyai.com/v1/chat/completions', [
@@ -339,7 +370,12 @@ PROMPT;
             // (401/403) fall back to OpenAI so summaries still generate instead
             // of silently producing empty output.
             if (in_array($response->status(), [401, 403], true) && config('services.openai.api_key')) {
-                Log::info('SummarizeCallTranscript: AssemblyAI LLM Gateway unavailable, falling back to OpenAI', [
+                Log::debug('SummarizeCallTranscript: AssemblyAI LLM Gateway unavailable, falling back to OpenAI', [
+                    'transcript_id' => $transcript->id,
+                    'status' => $response->status(),
+                ]);
+
+                Log::channel('call_ai')->warning('AssemblyAI LLM Gateway unavailable, falling back to OpenAI', [
                     'transcript_id' => $transcript->id,
                     'status' => $response->status(),
                 ]);
@@ -351,6 +387,10 @@ PROMPT;
                 'transcript_id' => $transcript->id,
                 'status' => $response->status(),
                 'body' => $response->json(),
+            ]);
+            Log::channel('call_ai')->error('AssemblyAI LLM Gateway request failed', [
+                'transcript_id' => $transcript->id,
+                'status' => $response->status(),
             ]);
             $this->fail(new \RuntimeException('AssemblyAI LLM Gateway request failed: ' . $response->status()));
             return [null, $model];
@@ -383,6 +423,11 @@ PROMPT;
             Log::warning('SummarizeCallTranscript: OPENAI_API_KEY not configured');
             return [null, $model];
         }
+
+        Log::channel('call_ai')->debug('Summarizing via OpenAI', [
+            'transcript_id' => $transcript->id,
+            'model' => $model,
+        ]);
 
         $response = Http::withToken($apiKey)
             ->timeout(60)

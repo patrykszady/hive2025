@@ -106,13 +106,25 @@
             @endif
         </div>
 
-        {{-- Spacer pushes the view controls to the right edge on mobile --}}
-        <div class="flex-1 lg:hidden"></div>
+        {{-- Mobile date-range segmented control (kept on the toolbar row to save vertical space) --}}
+        <div class="flex-1 lg:hidden flex justify-center min-w-0">
+            <div class="flex items-center gap-0.5 p-0.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg">
+                @foreach (['upcoming' => 'Upcoming', 'past' => 'Past', 'all' => 'All'] as $rangeKey => $rangeLabel)
+                    <button
+                        type="button"
+                        wire:click="$set('filterDateRange', '{{ $rangeKey }}')"
+                        class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors {{ $filterDateRange === $rangeKey ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-600 dark:text-zinc-300' }}"
+                    >
+                        {{ $rangeLabel }}
+                    </button>
+                @endforeach
+            </div>
+        </div>
 
         {{-- View controls --}}
         <div class="flex items-center gap-1 shrink-0">
-        {{-- View Toggle --}}
-        <div class="flex items-center gap-1 p-1 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg">
+        {{-- View Toggle (desktop only — mobile uses the agenda view) --}}
+        <div class="hidden lg:flex items-center gap-1 p-1 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg">
             <flux:button
                 wire:click="$set('viewMode', 'cards')"
                 variant="subtle"
@@ -148,8 +160,8 @@
         </div>
 
         @if ($viewMode === 'gantt')
-            {{-- Zoom switcher (only visible on gantt) --}}
-            <div class="flex bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg overflow-hidden">
+            {{-- Zoom switcher (only visible on gantt, desktop only) --}}
+            <div class="hidden lg:flex bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg overflow-hidden">
                 @foreach (['day' => 'Day', 'week' => 'Week', 'month' => 'Month'] as $zoomKey => $zoomLabel)
                     <flux:button
                         wire:click="$set('ganttZoom', '{{ $zoomKey }}')"
@@ -294,6 +306,11 @@
             </div>
         </div>
     </flux:modal>
+
+    {{-- ============================================================= --}}
+    {{-- Desktop views (cards / table / list / gantt) \u2014 lg and up only --}}
+    {{-- ============================================================= --}}
+    <div class="hidden lg:flex flex-1 flex-col min-h-0">
 
     <!-- Planner Cards - 14 Day Kanban View -->
     @if ($viewMode === 'cards')
@@ -1025,6 +1042,31 @@
             'days' => $this->days,
         ])
     @endif
+
+    </div>
+    {{-- /Desktop views --}}
+
+    {{-- ============================================================= --}}
+    {{-- Mobile agenda view (below lg) \u2014 vertical, day-grouped list --}}
+    {{-- ============================================================= --}}
+    <div class="lg:hidden flex flex-1 flex-col min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-y-auto">
+        <div class="p-3">
+            <x-upcoming-tasks-list
+                :grouped-tasks="$this->mobileGroupedTasks"
+                :unscheduled-tasks="$this->mobileUnscheduledTasks"
+                :task-count="$this->mobileTaskCount"
+                :show-avatars="true"
+                :clickable="true"
+                :show-project-info="true"
+                :show-vendor-info="true"
+                :show-notifications="false"
+                :pending-tasks-expanded="false"
+                title="Tasks"
+                empty-message="No tasks found for the selected filters."
+            />
+        </div>
+    </div>
+    {{-- /Mobile agenda --}}
 
     {{-- Task Create Modal --}}
     <livewire:tasks.task-create :projects="$projects" :employees="$employees" :vendors="$vendors"/>

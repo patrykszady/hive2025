@@ -169,5 +169,19 @@ return [
             'level' => 'debug',
             'days' => 90,
         ],
+
+        'call_ai' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/call_ai.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
+        'passkey' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/passkey.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
     ],
 ];

@@ -62,6 +62,13 @@ class TranscribeCallRecording implements ShouldQueue
             'status' => CallTranscript::STATUS_TRANSCRIBING,
         ]);
 
+        Log::channel('call_ai')->info('Transcription started', [
+            'call_log_id' => $callLog->id,
+            'transcript_id' => $transcript->id,
+            'driver' => $driver,
+            'direction' => $callLog->direction,
+        ]);
+
         try {
             if ($driver === 'assemblyai') {
                 $this->runAssemblyAI($callLog, $transcript, $absolutePath);
@@ -284,17 +291,21 @@ class TranscribeCallRecording implements ShouldQueue
         $intelligence = $this->extractIntelligence($body);
 
         // Decide which diarized speaker is the Hive agent vs. the external
-        // party from the conversation content (see identifySpeakersWithOpenAI).
+        // party from the conversation content (see identifySpeakers).
         // Enrichment only — a failure here must not fail the transcription, so
         // it's wrapped and best-effort.
         $speakerMap = [];
         if (config('call_recording.transcription.speaker_identification', true) && $segments !== []) {
             try {
-                $speakerMap = $this->identifySpeakersWithOpenAI($segments, $callLog);
+                $speakerMap = $this->identifySpeakers($segments, $callLog);
             } catch (\Throwable $e) {
                 Log::channel('telnyx')->warning('Speaker identification failed', [
                     'call_log_id' => $callLog->id,
                     'assemblyai_id' => $transcriptId,
+                    'error' => $e->getMessage(),
+                ]);
+                Log::channel('call_ai')->warning('Speaker identification failed', [
+                    'call_log_id' => $callLog->id,
                     'error' => $e->getMessage(),
                 ]);
             }
@@ -323,6 +334,16 @@ class TranscribeCallRecording implements ShouldQueue
             'call_log_id' => $callLog->id,
             'transcript_id' => $transcript->id,
             'assemblyai_id' => $transcriptId,
+            'language' => $detectedLanguage,
+            'utterances' => count($segments),
+            'chars' => strlen($text),
+            'speaker_map' => $speakerMap ?: null,
+            'intelligence' => array_keys($intelligence),
+        ]);
+
+        Log::channel('call_ai')->info('AssemblyAI transcription complete', [
+            'call_log_id' => $callLog->id,
+            'transcript_id' => $transcript->id,
             'language' => $detectedLanguage,
             'utterances' => count($segments),
             'chars' => strlen($text),
@@ -382,15 +403,15 @@ class TranscribeCallRecording implements ShouldQueue
      * (the agent is sometimes the first labelled speaker, sometimes the
      * second), and being addressed by name ("Patryk?") is easily mistaken for
      * being that person — so a content-based role decision is the only robust
-     * signal we have.
+     * signal we have. The LLM call defaults to AssemblyAI's LLM Gateway
+     * (single vendor) and falls back to OpenAI on 401/403.
      *
      * @param  array<int, array<string, mixed>>  $segments
      * @return array<string, string>
      */
-    protected function identifySpeakersWithOpenAI(array $segments, CallLog $callLog): array
+    protected function identifySpeakers(array $segments, CallLog $callLog): array
     {
-        $apiKey = config('services.openai.api_key');
-        if (! $apiKey || $segments === []) {
+        if ($segments === []) {
             return [];
         }
 
@@ -450,49 +471,35 @@ class TranscribeCallRecording implements ShouldQueue
             . "Transcript (each line prefixed with its speaker label):\n"
             . implode("\n", $lines);
 
-        $response = Http::withToken($apiKey)
-            ->timeout(60)
-            ->post('https://api.openai.com/v1/chat/completions', [
-                'model' => config('call_recording.summarization.model', 'gpt-4o'),
-                'messages' => [
-                    ['role' => 'system', 'content' => $system],
-                    ['role' => 'user', 'content' => $user],
-                ],
-                'response_format' => [
-                    'type' => 'json_schema',
-                    'json_schema' => [
-                        'name' => 'speaker_roles',
-                        'strict' => true,
-                        'schema' => [
-                            'type' => 'object',
-                            'additionalProperties' => false,
-                            'properties' => [
-                                'speakers' => [
-                                    'type' => 'array',
-                                    'items' => [
-                                        'type' => 'object',
-                                        'additionalProperties' => false,
-                                        'properties' => [
-                                            'label' => ['type' => 'string'],
-                                            'role' => ['type' => 'string', 'enum' => ['agent', 'other']],
-                                        ],
-                                        'required' => ['label', 'role'],
-                                    ],
-                                ],
-                            ],
-                            'required' => ['speakers'],
+        $schema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'properties' => [
+                'speakers' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'properties' => [
+                            'label' => ['type' => 'string'],
+                            'role' => ['type' => 'string', 'enum' => ['agent', 'other']],
                         ],
+                        'required' => ['label', 'role'],
                     ],
                 ],
-            ]);
+            ],
+            'required' => ['speakers'],
+        ];
 
-        if (! $response->successful()) {
-            throw new \RuntimeException('openai_speaker_id_http_' . $response->status() . ': ' . $response->body());
-        }
-
-        $content = data_get($response->json(), 'choices.0.message.content');
-        $parsed = is_string($content) ? json_decode($content, true) : null;
-        $speakers = is_array($parsed) ? ($parsed['speakers'] ?? []) : [];
+        $driver = config('call_recording.transcription.speaker_identification_driver', 'assemblyai');
+        Log::channel('call_ai')->debug('Identifying speaker roles', [
+            'call_log_id' => $callLog->id,
+            'driver' => $driver,
+            'labels' => $labels,
+        ]);
+        $speakers = $driver === 'openai'
+            ? $this->requestSpeakerRolesWithOpenAI($system, $user, $schema)
+            : $this->requestSpeakerRolesWithAssemblyAI($system, $user, $schema);
 
         $map = [];
         foreach ($speakers as $entry) {
@@ -508,6 +515,116 @@ class TranscribeCallRecording implements ShouldQueue
         }
 
         return $map;
+    }
+
+    /**
+     * Run the speaker-role classification prompt through AssemblyAI's LLM
+     * Gateway (OpenAI-compatible chat completions with structured outputs).
+     * Falls back to OpenAI when the gateway is unavailable (401/403) so
+     * diarized labels still get named.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<int, array<string, mixed>>
+     */
+    protected function requestSpeakerRolesWithAssemblyAI(string $system, string $user, array $schema): array
+    {
+        $apiKey = config('services.assemblyai.api_key');
+        if (! $apiKey) {
+            return $this->requestSpeakerRolesWithOpenAI($system, $user, $schema);
+        }
+
+        $response = Http::withHeaders(['authorization' => $apiKey])
+            ->timeout(60)
+            ->post('https://llm-gateway.assemblyai.com/v1/chat/completions', [
+                'model' => config('call_recording.summarization.assemblyai_model', 'claude-sonnet-4-6'),
+                'messages' => [
+                    ['role' => 'system', 'content' => $system],
+                    ['role' => 'user', 'content' => $user],
+                ],
+                'max_tokens' => 300,
+                'response_format' => [
+                    'type' => 'json_schema',
+                    'json_schema' => [
+                        'name' => 'speaker_roles',
+                        'strict' => true,
+                        'schema' => $schema,
+                    ],
+                ],
+                'post_processing_steps' => [['type' => 'json-repair']],
+            ]);
+
+        if (! $response->successful()) {
+            if (in_array($response->status(), [401, 403], true) && config('services.openai.api_key')) {
+                Log::debug('Speaker identification: AssemblyAI LLM Gateway unavailable, falling back to OpenAI', [
+                    'status' => $response->status(),
+                ]);
+
+                Log::channel('call_ai')->warning('Speaker identification: AssemblyAI LLM Gateway unavailable, falling back to OpenAI', [
+                    'status' => $response->status(),
+                ]);
+
+                return $this->requestSpeakerRolesWithOpenAI($system, $user, $schema);
+            }
+
+            throw new \RuntimeException('assemblyai_speaker_id_http_' . $response->status() . ': ' . $response->body());
+        }
+
+        return $this->parseSpeakerRoles($response->json());
+    }
+
+    /**
+     * Run the speaker-role classification prompt through OpenAI chat
+     * completions (fallback driver).
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<int, array<string, mixed>>
+     */
+    protected function requestSpeakerRolesWithOpenAI(string $system, string $user, array $schema): array
+    {
+        $apiKey = config('services.openai.api_key');
+        if (! $apiKey) {
+            return [];
+        }
+
+        $response = Http::withToken($apiKey)
+            ->timeout(60)
+            ->post('https://api.openai.com/v1/chat/completions', [
+                'model' => config('call_recording.summarization.model', 'gpt-4o'),
+                'messages' => [
+                    ['role' => 'system', 'content' => $system],
+                    ['role' => 'user', 'content' => $user],
+                ],
+                'response_format' => [
+                    'type' => 'json_schema',
+                    'json_schema' => [
+                        'name' => 'speaker_roles',
+                        'strict' => true,
+                        'schema' => $schema,
+                    ],
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('openai_speaker_id_http_' . $response->status() . ': ' . $response->body());
+        }
+
+        return $this->parseSpeakerRoles($response->json());
+    }
+
+    /**
+     * Pull the `speakers` array out of an OpenAI-compatible chat completion
+     * response body.
+     *
+     * @param  array<string, mixed>|null  $body
+     * @return array<int, array<string, mixed>>
+     */
+    protected function parseSpeakerRoles(?array $body): array
+    {
+        $content = data_get($body, 'choices.0.message.content');
+        $parsed = is_string($content) ? json_decode($content, true) : null;
+        $speakers = is_array($parsed) ? ($parsed['speakers'] ?? []) : [];
+
+        return is_array($speakers) ? $speakers : [];
     }
 
     /**

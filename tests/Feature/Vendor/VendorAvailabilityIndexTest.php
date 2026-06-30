@@ -228,7 +228,7 @@ it('lists a multi-date task under each of its scheduled dates', function () {
         ]);
 });
 
-it('hides reminder tasks owned by another company from the vendor availability page', function () {
+it('hides reminder tasks owned by the creating company on the vendor availability page', function () {
     $ownerVendor = Vendor::factory()->create([
         'business_name' => 'GS Construction',
         'short_name' => 'GS',
@@ -273,7 +273,13 @@ it('hides reminder tasks owned by another company from the vendor availability p
         ->assertDontSee('Owner Reminder');
 });
 
-it('shows reminder tasks that are owned by the same recipient vendor', function () {
+it('hides reminder tasks that are owned by the recipient vendor', function () {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'short_name' => 'GS',
+        'options' => '{}',
+    ]);
+
     $subjectVendor = Vendor::factory()->create([
         'business_name' => 'RG Tile',
         'short_name' => 'RG',
@@ -290,7 +296,7 @@ it('shows reminder tasks that are owned by the same recipient vendor', function 
         'city' => 'Cary',
         'state' => 'IL',
         'zip_code' => '60013',
-        'belongs_to_vendor_id' => $subjectVendor->id,
+        'belongs_to_vendor_id' => $ownerVendor->id,
     ]));
 
     $futureDate = now()->addDays(2)->startOfDay();
@@ -309,7 +315,7 @@ it('shows reminder tasks that are owned by the same recipient vendor', function 
     ]));
 
     Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
-        ->assertSee('Vendor Reminder');
+        ->assertDontSee('Vendor Reminder');
 });
 
 it('shows a vendor-specific registration cta at the bottom for guests', function (): void {
