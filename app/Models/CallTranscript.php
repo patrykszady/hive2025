@@ -70,6 +70,20 @@ class CallTranscript extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        // Re-index the parent call so transcript/summary text becomes
+        // searchable on the calls tab as soon as it's available.
+        $touch = function (self $transcript): void {
+            if ($transcript->call_log_id) {
+                CallLog::find($transcript->call_log_id)?->searchable();
+            }
+        };
+
+        static::saved($touch);
+        static::deleted($touch);
+    }
+
     public function callLog(): BelongsTo
     {
         return $this->belongsTo(CallLog::class);

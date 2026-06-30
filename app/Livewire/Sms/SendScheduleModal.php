@@ -536,11 +536,40 @@ class SendScheduleModal extends Component
                 : ($this->vendorUserGreeting() ?: 'Hello,');
         }
 
-        $clientName = trim((string) (Client::withoutGlobalScopes()->with('users')->find($thread?->client_id)?->first_names ?? ''));
+        $clientName = trim($this->clientFirstNamesForGreeting($thread?->client_id));
 
         return $clientName !== ''
             ? $this->translateText('hi') . ' ' . $clientName . ','
             : $this->translateText('hi') . ',';
+    }
+
+    protected function clientFirstNamesForGreeting(?int $clientId): string
+    {
+        if (! $clientId) {
+            return '';
+        }
+
+        $client = Client::withoutGlobalScopes()->with('users:id,first_name,nickname')->find($clientId);
+
+        if (! $client) {
+            return '';
+        }
+
+        if (trim((string) $client->business_name) !== '') {
+            return trim((string) $client->first_names);
+        }
+
+        $firstNames = $client->users
+            ->map(fn (User $user) => trim((string) ($user->nickname ?: $user->first_name)))
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($firstNames === []) {
+            return trim((string) $client->first_names);
+        }
+
+        return collect($firstNames)->join(', ', ' & ');
     }
 
     /**

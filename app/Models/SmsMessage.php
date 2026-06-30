@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Laravel\Scout\Searchable;
 
 class SmsMessage extends Model
 {
+    use Searchable;
+
     public const DIRECTION_INBOUND = 'inbound';
 
     public const DIRECTION_OUTBOUND = 'outbound';
@@ -50,6 +53,38 @@ class SmsMessage extends Model
 
         static::saved($touch);
         static::deleted($touch);
+    }
+
+    /**
+     * Dedicated Meilisearch index for full message-body search (covers the
+     * entire thread history, not just the recent messages embedded in the
+     * SmsGroupThread index).
+     */
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'sms_messages_index_dev' : 'sms_messages_index';
+    }
+
+    /**
+     * Only index messages that carry searchable body text.
+     */
+    public function shouldBeSearchable(): bool
+    {
+        return filled(trim((string) $this->text));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toSearchableArray(): array
+    {
+        return [
+            'id' => (int) $this->id,
+            'thread_id' => $this->thread_id ? (int) $this->thread_id : null,
+            'text' => mb_substr((string) ($this->display_text ?? $this->text ?? ''), 0, 2000),
+            'from_number' => (string) ($this->from_number ?? ''),
+            'created_at_unix' => optional($this->created_at)->timestamp ?? 0,
+        ];
     }
 
     /**

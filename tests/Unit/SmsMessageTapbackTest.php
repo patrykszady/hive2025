@@ -2,6 +2,8 @@
 
 use App\Models\SmsMessage;
 
+uses(Tests\TestCase::class);
+
 it('parses Polish tapback with non-breaking space inside reaction name', function () {
     // Real production text — note the U+00A0 (non-breaking space) between "w" and "górę"
     $text = "Dodano \u{201e}kciuk w\u{00a0}górę\u{201d} do \u{201e}Siema Grzesiek, będziemy używać ten numer zęby Grzesiek i ja mieliśmy te same informacje cały czas. - Patryk\n-PS\u{201d}";
@@ -53,4 +55,24 @@ it('repairs mojibake in display text and strips signature', function () {
     ]);
 
     expect($msg->display_text)->toBe('Hi , tak będzie między 1-2 pm');
+});
+
+it('builds a searchable array from the cleaned display text', function () {
+    $msg = new SmsMessage([
+        'thread_id' => 7,
+        'from_number' => '+13125550123',
+        'text' => "Hi , tak bÄ™dzie miÄ™dzy 1-2 pm\n-PS",
+    ]);
+
+    $array = $msg->toSearchableArray();
+
+    expect($array['thread_id'])->toBe(7)
+        ->and($array['from_number'])->toBe('+13125550123')
+        ->and($array['text'])->toBe('Hi , tak będzie między 1-2 pm');
+});
+
+it('only indexes messages that have body text', function () {
+    expect((new SmsMessage(['text' => 'hello']))->shouldBeSearchable())->toBeTrue()
+        ->and((new SmsMessage(['text' => '   ']))->shouldBeSearchable())->toBeFalse()
+        ->and((new SmsMessage(['text' => null]))->shouldBeSearchable())->toBeFalse();
 });

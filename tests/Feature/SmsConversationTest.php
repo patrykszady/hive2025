@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
 it('filters client users down to actual thread participants', function (): void {
@@ -383,6 +384,187 @@ describe('forwarding messages', function (): void {
         expect($rendered)->not->toBeNull();
         expect($rendered->language_badge)->toBeNull();
         expect($rendered->show_original_toggle)->toBeFalse();
+    });
+
+    it('does not translate schedule modal messages in conversation view', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $user->update(['preferred_language' => 'Polish']);
+
+        $scheduleBody = "Upcoming tasks:\n\nNext on Thursday 02/07:\n- Measure Windows\n1400 Kenilwood Lane\nRiverwoods, IL 60015\n- Measure Windows\n3154 Violet Ln\nNorthbrook, IL 60062\n\nSee the schedule: https://hive.contractors/v/86cb28b368149494";
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_number' => '+12245550001',
+            'text' => $scheduleBody,
+            'status' => 'sent',
+            'raw_payload' => [
+                'source' => 'send_schedule_modal',
+                'original_text' => 'Nadchodzace zadania',
+                'sender_language' => 'Polish',
+                'recipient_language' => 'English',
+            ],
+        ]);
+
+        $this->actingAs($user->fresh());
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $visible = $component->instance()->processedMessages['visible'];
+        $rendered = $visible->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        expect($rendered->translated_display_text)->toBe($scheduleBody);
+        expect($rendered->original_display_text)->toBe($scheduleBody);
+        expect($rendered->language_badge)->toBeNull();
+        expect($rendered->show_original_toggle)->toBeFalse();
+    });
+
+    it('does not call the translation API for English messages viewed by an English user', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        config(['services.openai.api_key' => 'test-key']);
+        Http::fake([
+            'api.openai.com/*' => Http::response([
+                'choices' => [['message' => ['content' => 'SHOULD NOT BE USED']]],
+            ]),
+        ]);
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'Hi, can you please send me the project schedule today?',
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        expect($rendered->translated_display_text)->toBe('Hi, can you please send me the project schedule today?');
+        Http::assertNothingSent();
+    });
+
+    it('still translates a clearly foreign message for an English viewer', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        config(['services.openai.api_key' => 'test-key']);
+        Http::fake([
+            'api.openai.com/*' => Http::response([
+                'choices' => [['message' => ['content' => 'Good morning, see you tomorrow']]],
+            ]),
+        ]);
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'Dzień dobry, do zobaczenia jutro',
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        expect($rendered->translated_display_text)->toBe('Good morning, see you tomorrow');
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'api.openai.com'));
+    });
+
+    it('refreshes and marks read when an incoming message targets the open thread', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+
+        $component->call('handleIncomingMessage', ['threadId' => $source->id])
+            ->assertDispatched('sms-new-message-received');
+    });
+
+    it('ignores incoming messages for a different thread', function (): void {
+        ['user' => $user, 'source' => $source, 'target' => $target] = makeForwardingFixture();
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+
+        $component->call('handleIncomingMessage', ['threadId' => $target->id])
+            ->assertNotDispatched('sms-new-message-received');
+    });
+});
+
+describe('thread header naming', function (): void {
+    uses(RefreshDatabase::class);
+
+    it('shows client nickname in the conversation header', function (): void {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+        $viewer = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'conversation-header-nickname-' . uniqid() . '@example.com',
+            'cell_phone' => '2245553113',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $client = Client::factory()->create([
+            'business_name' => null,
+        ]);
+
+        $bonnie = User::query()->create([
+            'first_name' => 'Bonnie',
+            'last_name' => 'Bates',
+            'email' => 'bonnie.conversation-header@example.com',
+            'cell_phone' => '2245554211',
+            'primary_vendor_id' => null,
+        ]);
+
+        $bradley = User::query()->create([
+            'first_name' => 'Bradley',
+            'nickname' => 'Brad',
+            'last_name' => 'Bates',
+            'email' => 'brad.conversation-header@example.com',
+            'cell_phone' => '2245554212',
+            'primary_vendor_id' => null,
+        ]);
+
+        $client->users()->attach([$bonnie->id, $bradley->id]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Bonnie & Bradley Bates',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245554211', '+12245554212'],
+            'client_id' => $client->id,
+            'vendor_id' => $ownerVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245554211',
+            'opted_in_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245554212',
+            'opted_in_at' => now(),
+        ]);
+
+        $this->actingAs($viewer);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->assertSee('Brad Bates')
+            ->assertSee('Bonnie');
     });
 });
 

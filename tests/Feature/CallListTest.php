@@ -223,3 +223,70 @@ it('shows only calls related to the current client user phone number', function 
         ->assertSee('Mark Personal Call')
         ->assertDontSee('Other Contractor Call');
 });
+
+it('includes transcript text and phone digit variants in the call searchable array', function () {
+    $call = CallLog::factory()->create([
+        'direction' => 'incoming',
+        'from_number' => '+13125559876',
+        'to_number' => '+12249993880',
+        'caller_name' => 'Jane Doe',
+        'notes' => 'follow up about the deck',
+        'status' => CallLog::STATUS_COMPLETED,
+    ]);
+
+    \App\Models\CallTranscript::create([
+        'call_log_id' => $call->id,
+        'text' => 'We discussed the bathroom remodel timeline.',
+        'summary' => 'Bathroom remodel scheduling call.',
+        'status' => \App\Models\CallTranscript::STATUS_READY,
+    ]);
+
+    $array = $call->fresh()->toSearchableArray();
+
+    expect($array['caller_name'])->toBe('Jane Doe')
+        ->and($array['notes'])->toBe('follow up about the deck')
+        ->and($array['transcript_text'])->toContain('bathroom remodel timeline')
+        ->and($array['transcript_text'])->toContain('Bathroom remodel scheduling')
+        ->and($array['phone_digits'])->toContain('9876')
+        ->and($array['phone_digits'])->toContain('3125559876');
+});
+
+it('resets the limit and selection when the search term changes', function () {
+    $component = new CallList();
+    $component->limit = 75;
+    $component->selectedCallId = 42;
+
+    $component->search = 'kitchen';
+    $component->updatedSearch();
+
+    expect($component->limit)->toBe(25)
+        ->and($component->selectedCallId)->toBeNull();
+});
+
+it('filters the call list by search term', function () {
+    config(['scout.driver' => 'collection']);
+
+    $user = makeCallListUser();
+
+    CallLog::factory()->create([
+        'direction' => 'incoming',
+        'from_number' => '+13125550001',
+        'to_number' => '+12249993880',
+        'caller_name' => 'Kitchen Remodel Caller',
+        'status' => CallLog::STATUS_COMPLETED,
+    ]);
+
+    CallLog::factory()->create([
+        'direction' => 'incoming',
+        'from_number' => '+13125550002',
+        'to_number' => '+12249993880',
+        'caller_name' => 'Basement Caller',
+        'status' => CallLog::STATUS_COMPLETED,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CallList::class)
+        ->set('search', 'Kitchen')
+        ->assertSee('Kitchen Remodel Caller')
+        ->assertDontSee('Basement Caller');
+});

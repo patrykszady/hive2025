@@ -76,6 +76,37 @@ class TaskCreate extends Component
         $this->projects = array_values(array_merge([$project], (array) $this->projects));
     }
 
+    /**
+     * Pick the project to pre-select when creating a task for a client.
+     *
+     * Prefers the most recently created project whose latest status is
+     * "Active" (status code 6), then the most recent project that is not
+     * Complete (7) or Cancelled (10), and finally the most recent project
+     * overall. Expects the collection already ordered latest-first.
+     *
+     * @param  \Illuminate\Support\Collection<int, Project>  $projects
+     */
+    private function preferredClientProject($projects): ?Project
+    {
+        if ($projects->isEmpty()) {
+            return null;
+        }
+
+        $activeProject = $projects->first(
+            fn (Project $project) => (int) ($project->latestStatus->status_code ?? 0) === 6
+        );
+
+        if ($activeProject) {
+            return $activeProject;
+        }
+
+        $openProject = $projects->first(
+            fn (Project $project) => ! in_array((int) ($project->latestStatus->status_code ?? 0), [7, 10], true)
+        );
+
+        return $openProject ?? $projects->first();
+    }
+
     #[Computed]
     public function taskTypeTextClasses(): array
     {
@@ -928,12 +959,21 @@ class TaskCreate extends Component
         }
 
         if ($client_id) {
-            $this->projects = Project::query()
+            $clientProjects = Project::query()
                 ->where('client_id', $client_id)
                 ->with('latestStatus')
                 ->orderByDesc('created_at')
-                ->get()
-                ->all();
+                ->get();
+
+            $this->projects = $clientProjects->all();
+
+            if (! $this->form->project_id) {
+                $preferredProject = $this->preferredClientProject($clientProjects);
+
+                if ($preferredProject) {
+                    $this->form->project_id = $preferredProject->id;
+                }
+            }
         }
 
         if (!$project_id && !$client_id && auth()->user()?->primary_vendor_id) {

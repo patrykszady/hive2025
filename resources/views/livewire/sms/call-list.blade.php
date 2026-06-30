@@ -73,6 +73,14 @@
 
     {{-- Filter tabs --}}
     <div class="mb-3 sticky top-0 z-10">
+        <flux:input
+            wire:model.live.debounce.350ms="search"
+            icon="magnifying-glass"
+            placeholder="Search calls, numbers, transcripts…"
+            size="sm"
+            clearable
+            class="mb-2"
+        />
         <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1 !rounded-lg !bg-zinc-100 dark:!bg-zinc-800 !p-0.5">
             <flux:tab name="all">All</flux:tab>
             <flux:tab name="missed">Missed</flux:tab>
@@ -85,7 +93,7 @@
     <div class="relative min-h-0">
         <div
             wire:loading
-            wire:target="callFilter,$refresh,loadMore"
+            wire:target="callFilter,$refresh,loadMore,search"
             class="absolute inset-0 z-20 pointer-events-none"
         >
             @include('livewire.sms.call-list-skeleton')

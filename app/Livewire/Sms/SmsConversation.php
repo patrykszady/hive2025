@@ -37,6 +37,12 @@ class SmsConversation extends Component
 
     private const ATTACHMENT_VALIDATION_RULE = 'nullable|file|mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm,m4v,3gp,avi';
 
+    /**
+     * Messages loaded when a thread is first opened. Kept small so switching
+     * threads paints quickly; older messages stream in on scroll.
+     */
+    private const INITIAL_MESSAGE_LIMIT = 10;
+
     public ?int $threadId = null;
 
     public string $newMessage = '';
@@ -74,7 +80,7 @@ class SmsConversation extends Component
 
     protected ?int $lastMarkedMessageId = null;
 
-    public int $messageLimit = 30;
+    public int $messageLimit = self::INITIAL_MESSAGE_LIMIT;
 
     public bool $selectionMode = false;
 
@@ -111,7 +117,7 @@ class SmsConversation extends Component
 
         $this->threadId = $threadId;
         $this->authorizeThread();
-        $this->messageLimit = 30;
+        $this->messageLimit = self::INITIAL_MESSAGE_LIMIT;
         $this->newMessage = '';
         $this->attachment = null;
         $this->showImageLightbox = false;
@@ -199,12 +205,20 @@ class SmsConversation extends Component
         return array_values(array_unique([$rawPhone, '+' . $digits, $digits]));
     }
 
-    public function handleIncomingMessage($threadId = null): void
+    public function handleIncomingMessage($payload = null): void
     {
-        if ($threadId !== null && (int) $threadId !== $this->threadId) {
+        $incomingThreadId = is_array($payload)
+            ? ($payload['threadId'] ?? null)
+            : $payload;
+
+        if ($incomingThreadId !== null && (int) $incomingThreadId !== (int) $this->threadId) {
+            // Message belongs to a different thread — don't repaint this pane.
+            $this->skipRender();
+
             return;
         }
 
+        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages);
         $this->markThreadAsRead();
         $this->dispatch('sms-new-message-received');
     }
@@ -310,7 +324,7 @@ class SmsConversation extends Component
 
     public function loadMoreMessages(): void
     {
-        $this->messageLimit += 50;
+        $this->messageLimit += 30;
     }
 
     /**
@@ -1659,7 +1673,7 @@ class SmsConversation extends Component
             return null;
         }
 
-        return SmsGroupThread::with([
+        $thread = SmsGroupThread::with([
             'project:id,address',
             'client',
             'client.users:id,first_name,last_name,nickname,preferred_language,cell_phone',
@@ -1668,6 +1682,22 @@ class SmsConversation extends Component
             'subjectVendor.users:id,first_name,last_name,nickname,preferred_language,cell_phone',
             'threadParticipants:id,thread_id,phone_number',
         ])->find($this->threadId);
+
+        if (! $thread) {
+            return null;
+        }
+
+        if (! $thread->client && $thread->client_id) {
+            $client = Client::withoutGlobalScopes()
+                ->with('users:id,first_name,last_name,nickname,preferred_language,cell_phone')
+                ->find($thread->client_id);
+
+            if ($client) {
+                $thread->setRelation('client', $client);
+            }
+        }
+
+        return $thread;
     }
 
     public function threadClientUsersFor(?Client $client): \Illuminate\Support\Collection
@@ -1874,7 +1904,7 @@ class SmsConversation extends Component
 
         return SmsMessage::where('thread_id', $this->threadId)
             ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'raw_payload', 'status', 'scheduled_at', 'created_at', 'sent_by_user_id'])
-            ->with('sentByUser:id,first_name,last_name')
+            ->with('sentByUser:id,first_name,last_name,nickname')
             ->orderByDesc('created_at')
             ->limit($this->messageLimit)
             ->get()
@@ -2045,6 +2075,10 @@ class SmsConversation extends Component
             return null;
         }
 
+        if ($this->shouldBypassViewerTranslation($message)) {
+            return $displayText;
+        }
+
         $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
         $senderLanguage = $this->normalizeLanguage((string) ($rawPayload['sender_language'] ?? ''));
         $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
@@ -2068,6 +2102,10 @@ class SmsConversation extends Component
         }
 
         if ($viewerLanguage === 'English') {
+            if ($this->viewerAlreadySpeaksMessageLanguage($message, 'English', $displayText)) {
+                return $displayText;
+            }
+
             return $translator->translate($displayText, 'English');
         }
 
@@ -2075,11 +2113,40 @@ class SmsConversation extends Component
             return $originalText;
         }
 
+        if ($this->viewerAlreadySpeaksMessageLanguage($message, $viewerLanguage, $displayText)) {
+            return $displayText;
+        }
+
         return $translator->translate($displayText, $viewerLanguage);
+    }
+
+    /**
+     * Whether a message is already in the viewer's language, so it can be
+     * shown verbatim without a (slow) translation round-trip.
+     *
+     * When the source language can't be determined we assume it already
+     * matches the viewer to avoid translating same-language text on every
+     * render — the dominant case for English office users.
+     */
+    protected function viewerAlreadySpeaksMessageLanguage(SmsMessage $message, string $viewerLanguage, string $candidateText): bool
+    {
+        $sourceLanguage = $this->messageSourceLanguage($message, $candidateText);
+
+        if ($sourceLanguage === null) {
+            return true;
+        }
+
+        return strcasecmp($sourceLanguage, $viewerLanguage) === 0;
     }
 
     protected function messageOriginalTextForViewer(SmsMessage $message): ?string
     {
+        if ($this->shouldBypassViewerTranslation($message)) {
+            $displayText = trim((string) $message->display_text);
+
+            return $displayText !== '' ? $displayText : null;
+        }
+
         $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
         $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
 
@@ -2101,6 +2168,10 @@ class SmsConversation extends Component
         string $translatedText,
         string $originalText,
     ): array {
+        if ($this->shouldBypassViewerTranslation($message)) {
+            return ['badge' => null, 'show_original_toggle' => false];
+        }
+
         $sourceLanguage = $this->messageSourceLanguage($message, $originalText);
         $badge = $this->languageBadgeForLanguage($sourceLanguage);
 
@@ -2120,6 +2191,13 @@ class SmsConversation extends Component
             'badge' => $badge,
             'show_original_toggle' => $showToggle,
         ];
+    }
+
+    protected function shouldBypassViewerTranslation(SmsMessage $message): bool
+    {
+        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
+
+        return (string) ($rawPayload['source'] ?? '') === 'send_schedule_modal';
     }
 
     protected function messageSourceLanguage(SmsMessage $message, string $originalText): ?string
@@ -2418,6 +2496,53 @@ class SmsConversation extends Component
         }
 
         return trim($first . ' ' . trim((string) $user->last_name));
+    }
+
+    public function clientDisplayNameForThread(?SmsGroupThread $thread): string
+    {
+        if (! $thread?->client) {
+            return '';
+        }
+
+        if (trim((string) $thread->client->business_name) !== '') {
+            return (string) $thread->client->name;
+        }
+
+        $users = $this->threadClientUsersFor($thread->client);
+
+        if ($users->isEmpty()) {
+            return (string) $thread->client->name;
+        }
+
+        if ($users->count() === 1) {
+            return $this->preferredUserDisplayName($users->first(), true);
+        }
+
+        $nameGroups = $users
+            ->groupBy(fn (User $user) => trim((string) ($user->last_name ?? '')))
+            ->map(function ($lastNameGroup, $lastName) {
+                if ($lastNameGroup->count() === 1) {
+                    return $this->preferredUserDisplayName($lastNameGroup->first(), true);
+                }
+
+                $firstNames = $lastNameGroup
+                    ->map(fn (User $user) => $this->preferredUserDisplayName($user, false))
+                    ->filter()
+                    ->values()
+                    ->all();
+
+                return trim($this->oxfordJoin($firstNames) . ' ' . $lastName);
+            })
+            ->filter()
+            ->values()
+            ->all();
+
+        return $this->oxfordJoin($nameGroups);
+    }
+
+    protected function oxfordJoin(array $items): string
+    {
+        return collect($items)->filter()->values()->join(', ', ' & ');
     }
 
     protected function markThreadAsRead(): void

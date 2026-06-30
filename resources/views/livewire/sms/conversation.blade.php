@@ -80,9 +80,7 @@
             // When set, the header renders these parts individually so only the
             // client-user portions are wrapped in the client link.
             $headerParts = null;
-            if ($this->thread->name) {
-                $headerTitle = $this->thread->name;
-            } elseif ($this->thread->client) {
+            if ($this->thread->client) {
                 $clientUserByPhone = $this->thread->client->users
                     ->mapWithKeys(fn ($u) => [$u->routeNotificationForTelnyx() => $u])
                     ->filter(fn ($u, $phone) => is_string($phone) && $phone !== '');
@@ -90,13 +88,13 @@
                     && $participantPhones->diff($clientUserByPhone->keys())->isEmpty();
 
                 if ($participantsMatchClientUsers) {
-                    $headerTitle = $this->thread->client->name;
+                    $headerTitle = $this->clientDisplayNameForThread($this->thread);
                 } else {
                     $headerParts = $participantPhones->map(function ($phone) use ($clientUserByPhone) {
                         $user = $clientUserByPhone->get($phone);
                         return [
                             'label' => $user
-                                ? trim($user->first_name . ' ' . $user->last_name)
+                                ? trim(($user->nickname ?: $user->first_name) . ' ' . $user->last_name)
                                 : $this->resolvePhoneDisplay($phone),
                             'linkToClient' => (bool) $user,
                         ];
@@ -113,6 +111,8 @@
                 if ($vendorLabel !== '' && is_string($headerTitle) && ! str_contains($headerTitle, $vendorLabel)) {
                     $headerTitle .= ', ' . $vendorLabel;
                 }
+            } elseif ($this->thread->name) {
+                $headerTitle = $this->thread->name;
             } elseif ($this->thread->subjectVendor) {
                 $headerTitle = $this->thread->subjectVendor->short_name ?: $this->thread->subjectVendor->name;
             } elseif ($this->thread->project) {
@@ -174,18 +174,7 @@
                     "
                     aria-label="Back to conversations"
                 ></flux:button>
-                @if (! empty($this->thread->name_data))
-                    <flux:heading size="lg" class="mb-0 flex-1">
-                        @foreach ($this->thread->name_data as $i => $part)
-                            @if ($i > 0)<span class="text-zinc-400">,</span> @endif
-                            @if (! empty($part['client_id']))
-                                <a href="{{ route('clients.show', $part['client_id']) }}" wire:navigate.hover class="hover:underline">{{ $part['label'] }}</a>
-                            @else
-                                {{ $part['label'] }}
-                            @endif
-                        @endforeach
-                    </flux:heading>
-                @elseif ($this->thread->client)
+                @if ($this->thread->client)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
                         @if ($headerParts)
                             @foreach ($headerParts as $i => $part)
@@ -199,6 +188,17 @@
                         @else
                             <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
                         @endif
+                    </flux:heading>
+                @elseif (! empty($this->thread->name_data))
+                    <flux:heading size="lg" class="mb-0 flex-1">
+                        @foreach ($this->thread->name_data as $i => $part)
+                            @if ($i > 0)<span class="text-zinc-400">,</span> @endif
+                            @if (! empty($part['client_id']))
+                                <a href="{{ route('clients.show', $part['client_id']) }}" wire:navigate.hover class="hover:underline">{{ $part['label'] }}</a>
+                            @else
+                                {{ $part['label'] }}
+                            @endif
+                        @endforeach
                     </flux:heading>
                 @elseif ($this->thread->subjectVendor)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">

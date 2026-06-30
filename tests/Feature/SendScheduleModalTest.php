@@ -159,6 +159,73 @@ it('uses client schedule wording for client threads', function (): void {
         ->and($preview)->not->toContain('Confirm Schedule:');
 });
 
+it('uses client nickname in schedule greeting', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-client-nickname@example.com',
+        'cell_phone' => '2245550197',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $bonnie = User::query()->create([
+        'first_name' => 'Bonnie',
+        'last_name' => 'Bates',
+        'email' => 'bonnie.client.schedule@example.com',
+        'cell_phone' => '2245554011',
+        'primary_vendor_id' => null,
+    ]);
+    $bradley = User::query()->create([
+        'first_name' => 'Bradley',
+        'nickname' => 'Brad',
+        'last_name' => 'Bates',
+        'email' => 'brad.client.schedule@example.com',
+        'cell_phone' => '2245554012',
+        'primary_vendor_id' => null,
+    ]);
+    $client->users()->attach([$bonnie->id, $bradley->id]);
+
+    $project = Project::query()->create([
+        'project_name' => 'Client Nickname Schedule Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Demo',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Bonnie & Bradley Bates',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245554011', '+12245554012'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)->toStartWith('Hi Bonnie & Brad,')
+        ->and($preview)->not->toContain('Hi Bonnie & Bradley,');
+});
+
 it('uses vendor user nickname and preferred language when vendor short name is missing', function (): void {
     $ownerVendor = Vendor::factory()->create([
         'business_name' => 'GS Construction',

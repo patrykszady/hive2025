@@ -5,6 +5,8 @@ use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\Project;
 use App\Models\SmsGroupThread;
+use App\Models\SmsMessage;
+use App\Models\CallLog;
 use App\Models\Transaction;
 use App\Models\Vendor;
 
@@ -218,6 +220,20 @@ return [
                 'filterableAttributes' => ['vendor_visibility_ids', 'client_id', 'subject_vendor_id'],
                 'sortableAttributes' => ['last_activity_at_unix'],
                 'searchableAttributes' => ['participants', 'participant_digits', 'project_address', 'client_name', 'client_user_names', 'vendor_name', 'last_message_text'],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            SmsMessage::class => [
+                'filterableAttributes' => ['thread_id'],
+                'sortableAttributes' => ['created_at_unix'],
+                'searchableAttributes' => ['text', 'from_number'],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            CallLog::class => [
+                'filterableAttributes' => ['direction', 'status'],
+                'sortableAttributes' => ['created_at_unix'],
+                'searchableAttributes' => ['caller_name', 'from_number', 'to_number', 'phone_digits', 'notes', 'transcript_text'],
                 'typoTolerance' => ['enabled' => true],
             ],
         ],

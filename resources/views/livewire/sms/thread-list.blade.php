@@ -140,24 +140,26 @@
                                 }
                             @endphp
                             {{ $participantLabels->implode(', ') }}
-                        @elseif ($thread->name)
-                            {{ $thread->name }}
-                        @elseif ($thread->client)
+                        @elseif ($thread->client_id)
                             @php
-                                $clientUserPhones = $thread->client->users
+                                $threadClientUsers = $this->threadClientUsersForDisplay($thread);
+                                $clientUserPhones = $threadClientUsers
                                     ->map(fn ($u) => $u->routeNotificationForTelnyx())
                                     ->filter()
                                     ->values();
                                 $partPhones = $thread->threadParticipants->pluck('phone_number')->filter()->values();
                                 $extraPhones = $partPhones->diff($clientUserPhones)->values();
                                 $missingClientUsers = $clientUserPhones->diff($partPhones)->isNotEmpty();
+                                $clientLabel = $this->clientDisplayNameForThread($thread);
                             @endphp
                             @if ($missingClientUsers && $extraPhones->isEmpty())
                                 {{-- Subset of client users only — list participants --}}
                                 {{ $partPhones->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
                             @else
-                                {{ $thread->client->name }}@if ($extraPhones->isNotEmpty())<span class="text-zinc-400 dark:text-zinc-500">, {{ $extraPhones->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}</span>@endif
+                                {{ $clientLabel }}@if ($extraPhones->isNotEmpty())<span class="text-zinc-400 dark:text-zinc-500">, {{ $extraPhones->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}</span>@endif
                             @endif
+                        @elseif ($thread->name)
+                            {{ $thread->name }}
                         @elseif ($thread->project)
                             {{ $thread->project->address }}
                         @else
@@ -181,13 +183,13 @@
                     @if ($thread->latestMessage)
                         @php
                             $tapback = $thread->latestMessage->parseTapback();
-                            $previewText = preg_replace('/\s*-(PS|GS|GSC)\s*$/', '', trim((string) $thread->latestMessage->text));
+                            $previewText = trim((string) ($thread->latestMessage->display_text ?? $thread->latestMessage->text));
 
                             $previewPrefix = null;
                             if ($thread->latestMessage->isOutbound()) {
                                 $previewPrefix = $isClientUser
                                     ? 'GS Construciton:'
-                                    : ($thread->latestMessage->sent_by_user_id === auth()->id() ? 'You:' : ($thread->latestMessage->sentByUser?->first_name ?? 'GS Crew') . ':');
+                                    : ($thread->latestMessage->sent_by_user_id === auth()->id() ? 'You:' : (($thread->latestMessage->sentByUser?->nickname ?: $thread->latestMessage->sentByUser?->first_name) ?? 'GS Crew') . ':');
                             } elseif ($thread->latestMessage->isInbound()) {
                                 $sender = $this->resolvePreviewSender($thread->latestMessage->from_number, $thread);
                                 $previewPrefix = $sender ? $sender . ':' : null;
