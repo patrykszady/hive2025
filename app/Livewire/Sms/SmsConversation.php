@@ -5,6 +5,7 @@ namespace App\Livewire\Sms;
 use App\Livewire\Sms\SmsIndex;
 use App\Livewire\Sms\SmsNewThread;
 use App\Livewire\Tasks\TaskCreate;
+use App\Models\BlockedCaller;
 use App\Models\CallLog;
 use App\Models\Client;
 use App\Models\Project;
@@ -895,6 +896,101 @@ class SmsConversation extends Component
         unset($this->thread);
 
         Flux::toast('Thread updated.');
+    }
+
+    /**
+     * Mark the current thread's external participant numbers as spam.
+     */
+    public function markThreadAsSpam(): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $targets = $this->threadSpamTargetPhones();
+
+        if ($targets === []) {
+            Flux::toast(variant: 'warning', heading: 'No Number', text: 'No external participant number found for this thread.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        foreach ($targets as $phone) {
+            BlockedCaller::firstOrCreate(
+                ['phone_number' => $phone],
+                ['reason' => 'Manually marked as spam from messages', 'blocked_by_user_id' => auth()->id(), 'auto_blocked' => false]
+            );
+        }
+
+        $count = count($targets);
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Marked as Spam',
+            text: $count === 1
+                ? ($this->resolvePhoneDisplay($targets[0]) . ' has been blocked.')
+                : ($count . ' participant numbers have been blocked.'),
+            duration: 5000,
+            position: 'top right'
+        );
+    }
+
+    /**
+     * Remove the current thread's external participant numbers from spam block list.
+     */
+    public function unblockThreadSpam(): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $targets = $this->threadSpamTargetPhones();
+
+        if ($targets === []) {
+            Flux::toast(variant: 'warning', heading: 'No Number', text: 'No external participant number found for this thread.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        $deleted = BlockedCaller::query()->whereIn('phone_number', $targets)->delete();
+
+        if ($deleted === 0) {
+            Flux::toast(variant: 'warning', heading: 'Not Blocked', text: 'Thread participant numbers are not currently blocked.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        Flux::toast(variant: 'success', heading: 'Unblocked', text: 'Thread participant numbers were removed from blocked list.', duration: 5000, position: 'top right');
+    }
+
+    public function hasBlockedThreadSpamTargets(): bool
+    {
+        $targets = $this->threadSpamTargetPhones();
+
+        if ($targets === []) {
+            return false;
+        }
+
+        return BlockedCaller::query()->whereIn('phone_number', $targets)->exists();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function threadSpamTargetPhones(): array
+    {
+        if (! $this->thread) {
+            return [];
+        }
+
+        $targets = collect()
+            ->merge($this->thread->threadParticipants?->pluck('phone_number')->all() ?? [])
+            ->merge(is_array($this->thread->participants) ? $this->thread->participants : [])
+            ->filter(fn ($phone) => is_string($phone) && trim($phone) !== '')
+            ->map(fn ($phone) => $this->normalizeDialTarget($phone))
+            ->filter(fn ($phone) => is_string($phone) && $phone !== '')
+            ->reject(fn ($phone) => GroupSmsService::isOurNumber($phone))
+            ->unique()
+            ->values();
+
+        return $targets->all();
     }
 
     #[Computed]

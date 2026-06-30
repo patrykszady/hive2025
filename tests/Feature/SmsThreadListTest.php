@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Sms\SmsThreadList;
+use App\Models\BlockedCaller;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
@@ -290,4 +291,45 @@ it('renders decoded latest message preview text on cards', function (): void {
         ->assertSee('You:')
         ->assertSee('Cześć Stan Palupski Con...')
         ->assertDontSee('CzeÅ›Ä‡ Stan Palupski Con...');
+});
+
+it('shows spam badge and muted styling when a thread participant is blocked', function (): void {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+    ]);
+
+    $user = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Tester',
+        'email' => 'patryk.thread-list-spam@example.com',
+        'cell_phone' => '2245551111',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Spam Prospect',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $ownerVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    SmsThreadParticipant::query()->create([
+        'thread_id' => $thread->id,
+        'phone_number' => '+12245550001',
+    ]);
+
+    BlockedCaller::query()->create([
+        'phone_number' => '+12245550001',
+        'reason' => 'Manually marked as spam from messages',
+        'blocked_by_user_id' => $user->id,
+        'auto_blocked' => false,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test(SmsThreadList::class, ['isClientUser' => false])
+        ->assertSeeHtml('wire:key="thread-' . $thread->id . '"')
+        ->assertSeeHtml('bg-amber-100')
+        ->assertSeeHtml('opacity-65 grayscale');
 });

@@ -220,7 +220,7 @@ it('shows only calls related to the current client user phone number', function 
 
     Livewire::actingAs($clientUser)
         ->test(CallList::class)
-        ->assertSee('Mark Personal Call')
+        ->assertSee('Mark Brodson')
         ->assertDontSee('Other Contractor Call');
 });
 
@@ -289,4 +289,28 @@ it('filters the call list by search term', function () {
         ->set('search', 'Kitchen')
         ->assertSee('Kitchen Remodel Caller')
         ->assertDontSee('Basement Caller');
+});
+
+it('prefers known contact name over stale caller_name in call list display', function () {
+    $user = makeCallListUser();
+
+    User::query()->create([
+        'first_name' => 'Andrea',
+        'last_name' => 'Wood',
+        'email' => 'andrea.call-list@example.test',
+        'cell_phone' => '7086697081',
+    ]);
+
+    CallLog::factory()->create([
+        'direction' => 'incoming',
+        'from_number' => '+17086697081',
+        'to_number' => '+12249993880',
+        'caller_name' => 'WOOD ANDREA',
+        'status' => CallLog::STATUS_COMPLETED,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CallList::class)
+        ->assertSee('Andrea Wood')
+        ->assertDontSee('WOOD ANDREA');
 });

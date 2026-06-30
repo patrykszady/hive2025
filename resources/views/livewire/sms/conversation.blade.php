@@ -232,6 +232,15 @@
                             <flux:menu.item icon="arrow-right-circle" wire:click="toggleSelectionMode">
                                 Forward messages
                             </flux:menu.item>
+                            @if ($this->hasBlockedThreadSpamTargets())
+                                <flux:menu.item icon="no-symbol" wire:click="unblockThreadSpam">
+                                    Unblock Number
+                                </flux:menu.item>
+                            @else
+                                <flux:menu.item icon="exclamation-triangle" wire:click="markThreadAsSpam">
+                                    Mark as Spam
+                                </flux:menu.item>
+                            @endif
                             <flux:separator />
                             <flux:menu.item variant="danger" icon="trash" x-on:click="$wire.showDeleteConfirm = true">
                                 Delete Thread
@@ -664,7 +673,7 @@
                             @endif
                         </p>
                     </div>
-                    @if (! $isClientUser && ($msg->translated_display_text ?? $msg->display_text))
+                    @if (! $isClientUser && (($msg->translated_display_text ?? $msg->display_text) || $msg->hasMedia()))
                         <div
                             class="flex items-center self-center transition-opacity {{ $msg->isOutbound() ? 'order-first pr-1' : 'pl-1' }}"
                             x-bind:class="showActions
@@ -685,12 +694,14 @@
                                     <flux:menu.item icon="arrow-right-circle" wire:click="forwardSingleMessage({{ $msg->id }})">
                                         Forward
                                     </flux:menu.item>
-                                    <flux:menu.item
-                                        icon="clipboard"
-                                        x-on:click="navigator.clipboard.writeText(showOriginal ? @js($originalTextForUi) : @js($translatedTextForUi)); $flux.toast({ text: 'Message copied', variant: 'success' })"
-                                    >
-                                        Copy Text
-                                    </flux:menu.item>
+                                    @if (($msg->translated_display_text ?? $msg->display_text))
+                                        <flux:menu.item
+                                            icon="clipboard"
+                                            x-on:click="navigator.clipboard.writeText(showOriginal ? @js($originalTextForUi) : @js($translatedTextForUi)); $flux.toast({ text: 'Message copied', variant: 'success' })"
+                                        >
+                                            Copy Text
+                                        </flux:menu.item>
+                                    @endif
                                 </flux:menu>
                             </flux:dropdown>
                         </div>
@@ -862,7 +873,7 @@
             :closable="false"
             variant="bare"
             class="!p-0"
-            style="width:auto;max-width:96vw;height:auto;max-height:94vh;padding:0;"
+            style="width:96vw;max-width:96vw;height:94vh;max-height:94vh;padding:0;margin:auto;"
         >
             <div
                 x-data="{
@@ -1139,8 +1150,8 @@
                 @keydown.right.window="$wire.showImageLightbox && !isZoomed && next()"
                 @keydown.escape.window="$wire.showImageLightbox && closeLightbox()"
                 @keydown.space.window="if ($wire.showImageLightbox && currentIsVideo) { $event.preventDefault(); toggleVideoPlayback(); }"
-                class="relative"
-                style="width:auto;max-width:96vw;height:auto;max-height:94vh;"
+                class="relative flex items-center justify-center"
+                style="width:96vw;max-width:96vw;height:94vh;max-height:94vh;"
             >
                 {{-- Image counter --}}
                 <div

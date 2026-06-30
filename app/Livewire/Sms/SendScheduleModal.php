@@ -215,22 +215,66 @@ class SendScheduleModal extends Component
 
         foreach ($tasks as $task) {
             $selectedDates = (array) data_get($task->options, 'dates', []);
+            $addedDateKeys = [];
 
-            if (! empty($selectedDates)) {
-                foreach ($selectedDates as $dateStr) {
+            foreach ($selectedDates as $rawDate) {
+                $normalizedDate = $this->normalizeTaskDateKey($rawDate);
+
+                if (! $normalizedDate || isset($addedDateKeys[$normalizedDate])) {
+                    continue;
+                }
+
+                if ($normalizedDate >= $todayStr && $normalizedDate <= $endDateStr) {
+                    if (! $grouped->has($normalizedDate)) {
+                        $grouped[$normalizedDate] = collect();
+                    }
+
+                    $grouped[$normalizedDate]->push($task);
+                    $addedDateKeys[$normalizedDate] = true;
+                }
+            }
+
+            // Fallback for tasks without usable options.dates: include each day in
+            // the stored start/end range, constrained to the current preview window.
+            if ($addedDateKeys === []) {
+                $start = $task->start_date?->copy()->startOfDay();
+                $end = $task->end_date?->copy()->startOfDay();
+
+                if (! $start && ! $end) {
+                    continue;
+                }
+
+                if (! $start) {
+                    $start = $end?->copy();
+                }
+
+                if (! $end) {
+                    $end = $start?->copy();
+                }
+
+                if (! $start || ! $end) {
+                    continue;
+                }
+
+                if ($end->lt($start)) {
+                    [$start, $end] = [$end, $start];
+                }
+
+                $cursor = $start->copy();
+
+                while ($cursor->lte($end)) {
+                    $dateStr = $cursor->format('Y-m-d');
+
                     if ($dateStr >= $todayStr && $dateStr <= $endDateStr) {
                         if (! $grouped->has($dateStr)) {
                             $grouped[$dateStr] = collect();
                         }
+
                         $grouped[$dateStr]->push($task);
                     }
+
+                    $cursor->addDay();
                 }
-            } else {
-                $dateStr = $task->start_date->format('Y-m-d');
-                if (! $grouped->has($dateStr)) {
-                    $grouped[$dateStr] = collect();
-                }
-                $grouped[$dateStr]->push($task);
             }
         }
 
@@ -253,6 +297,19 @@ class SendScheduleModal extends Component
         }
 
         return $grouped->sortKeys();
+    }
+
+    protected function normalizeTaskDateKey(mixed $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse(trim($value), browser_timezone())->format('Y-m-d');
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -320,28 +377,56 @@ class SendScheduleModal extends Component
 
         $vendorId = $this->thread?->subject_vendor_id;
 
-        $firstTask = Task::whereIn('project_id', $projectIds)
-            ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
-            ->whereNotNull('start_date')
-            ->whereNotNull('end_date')
-            ->whereDate('start_date', '>=', $afterDate)
-            ->orderBy('start_date')
-            ->orderBy('order')
-            ->first();
-
-        if (! $firstTask) {
-            return collect();
-        }
-
-        return Task::whereIn('project_id', $projectIds)
+        $candidates = Task::whereIn('project_id', $projectIds)
             ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('start_date', $firstTask->start_date)
+            ->whereDate('end_date', '>=', $afterDate)
             ->orderBy('start_date')
             ->orderBy('order')
             ->get();
+
+        if ($candidates->isEmpty()) {
+            return collect();
+        }
+
+        $firstDate = $this->firstFutureScheduledDate($candidates, $afterDate);
+
+        if (! $firstDate) {
+            return collect();
+        }
+
+        return $candidates
+            ->filter(fn (Task $task) => $this->taskScheduledOnDate($task, $firstDate))
+            ->sortBy(function (Task $task) use ($firstDate) {
+                $startTime = (string) data_get($task->options, "time_settings.$firstDate.start_time", '');
+                $usesTime = (bool) data_get($task->options, "time_settings.$firstDate.use_time", false);
+                $hasTime = $usesTime && $startTime !== '';
+
+                return [
+                    $hasTime ? 0 : 1,
+                    $hasTime ? $startTime : '99:99',
+                    (int) ($task->order ?? 0),
+                    (int) $task->id,
+                ];
+            })
+            ->values();
+    }
+
+    #[Computed]
+    public function nextUpcomingDate(): ?string
+    {
+        $tasks = $this->nextUpcomingTasks;
+
+        if ($tasks->isEmpty()) {
+            return null;
+        }
+
+        $today = Carbon::today(browser_timezone());
+        $afterDate = $today->copy()->addDays($this->daysAhead)->format('Y-m-d');
+
+        return $this->firstFutureScheduledDate($tasks, $afterDate);
     }
 
     /**
@@ -424,7 +509,8 @@ class SendScheduleModal extends Component
 
         // Add next upcoming tasks beyond the 3-day window
         if ($nextTasks->isNotEmpty()) {
-            $nextDate = Carbon::parse($nextTasks->first()->start_date);
+            $nextDateKey = $this->nextUpcomingDate;
+            $nextDate = $nextDateKey ? Carbon::parse($nextDateKey) : Carbon::parse($nextTasks->first()->start_date);
             $dateLabel = $this->thread?->subject_vendor_id
                 ? $nextDate->format('l d/m')
                 : $nextDate->format('D n/j');
@@ -705,6 +791,77 @@ class SendScheduleModal extends Component
         $language = $this->languageKey();
 
         return $translations[$language][$key] ?? $translations['en'][$key] ?? $key;
+    }
+
+    protected function firstFutureScheduledDate(\Illuminate\Support\Collection $tasks, string $minDate): ?string
+    {
+        $dates = collect();
+
+        foreach ($tasks as $task) {
+            foreach ($this->taskScheduledDateKeys($task) as $dateKey) {
+                if ($dateKey >= $minDate) {
+                    $dates->push($dateKey);
+                }
+            }
+        }
+
+        return $dates->filter()->sort()->values()->first();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function taskScheduledDateKeys(Task $task): array
+    {
+        $dateKeys = collect();
+
+        foreach ((array) data_get($task->options, 'dates', []) as $rawDate) {
+            $normalizedDate = $this->normalizeTaskDateKey($rawDate);
+            if ($normalizedDate) {
+                $dateKeys->push($normalizedDate);
+            }
+        }
+
+        if ($dateKeys->isNotEmpty()) {
+            return $dateKeys->unique()->sort()->values()->all();
+        }
+
+        $start = $task->start_date?->copy()->startOfDay();
+        $end = $task->end_date?->copy()->startOfDay();
+
+        if (! $start && ! $end) {
+            return [];
+        }
+
+        if (! $start) {
+            $start = $end?->copy();
+        }
+
+        if (! $end) {
+            $end = $start?->copy();
+        }
+
+        if (! $start || ! $end) {
+            return [];
+        }
+
+        if ($end->lt($start)) {
+            [$start, $end] = [$end, $start];
+        }
+
+        $cursor = $start->copy();
+
+        while ($cursor->lte($end)) {
+            $dateKeys->push($cursor->format('Y-m-d'));
+            $cursor->addDay();
+        }
+
+        return $dateKeys->unique()->sort()->values()->all();
+    }
+
+    protected function taskScheduledOnDate(Task $task, string $dateKey): bool
+    {
+        return in_array($dateKey, $this->taskScheduledDateKeys($task), true);
     }
 
     /**

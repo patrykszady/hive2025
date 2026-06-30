@@ -2,6 +2,7 @@
 
 use App\Livewire\Sms\SmsConversation;
 use App\Livewire\Sms\SmsNewThread;
+use App\Models\BlockedCaller;
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\SmsGroupThread;
@@ -479,6 +480,25 @@ describe('forwarding messages', function (): void {
         Http::assertSent(fn ($request) => str_contains($request->url(), 'api.openai.com'));
     });
 
+    it('shows the 3-dot actions menu for image-only messages', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $imageOnly = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => '',
+            'media_urls' => ['/storage/sms-attachments/image-only.jpg'],
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $source->id])
+            ->assertSeeHtml('forwardSingleMessage(' . $imageOnly->id . ')');
+    });
+
     it('refreshes and marks read when an incoming message targets the open thread', function (): void {
         ['user' => $user, 'source' => $source] = makeForwardingFixture();
 
@@ -565,6 +585,85 @@ describe('thread header naming', function (): void {
         Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
             ->assertSee('Brad Bates')
             ->assertSee('Bonnie');
+    });
+});
+
+describe('thread spam actions', function (): void {
+    uses(RefreshDatabase::class);
+
+    function makeSpamFixture(): array
+    {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'sms-spam-' . uniqid() . '@example.com',
+            'cell_phone' => '2245557111',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Spam Thread',
+            'from_number' => '+12249993880',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        return compact('user', 'thread');
+    }
+
+    it('marks thread participant numbers as spam', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeSpamFixture();
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->call('markThreadAsSpam');
+
+        $blocked = BlockedCaller::query()->where('phone_number', '+12245550001')->first();
+
+        expect($blocked)->not->toBeNull();
+        expect($blocked->reason)->toBe('Manually marked as spam from messages')
+            ->and($blocked->blocked_by_user_id)->toBe($user->id)
+            ->and($blocked->auto_blocked)->toBeFalse();
+    });
+
+    it('does not duplicate blocked entries when marking same thread as spam twice', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeSpamFixture();
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->call('markThreadAsSpam')
+            ->call('markThreadAsSpam');
+
+        expect(BlockedCaller::query()->where('phone_number', '+12245550001')->count())->toBe(1);
+    });
+
+    it('unblocks thread participant numbers', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeSpamFixture();
+
+        BlockedCaller::query()->create([
+            'phone_number' => '+12245550001',
+            'reason' => 'Manually marked as spam from messages',
+            'blocked_by_user_id' => $user->id,
+            'auto_blocked' => false,
+        ]);
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->call('unblockThreadSpam');
+
+        expect(BlockedCaller::query()->where('phone_number', '+12245550001')->exists())->toBeFalse();
     });
 });
 

@@ -341,6 +341,56 @@ it('falls back to OpenAI when the AssemblyAI LLM Gateway is not accessible', fun
     expect($transcript->summarized_at)->not->toBeNull();
 });
 
+it('normalizes hallucinated month names using weekday ordinal hints from transcript', function () {
+    config()->set('call_recording.summarization.driver', 'openai');
+    config()->set('services.openai.api_key', 'test-key');
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'cc-date-fix',
+        'direction' => 'incoming',
+        'from_number' => '+15551234567',
+        'to_number' => '+12247354200',
+        'status' => 'completed',
+        'created_at' => '2026-06-29 12:00:00',
+        'updated_at' => '2026-06-29 12:00:00',
+    ]);
+
+    $transcript = CallTranscript::create([
+        'call_log_id' => $callLog->id,
+        'engine' => 'assemblyai',
+        'language' => 'en',
+        'text' => 'Speaker A: I can pencil you in for Thursday the 9th. Speaker B: End of next week works for me.',
+        'status' => CallTranscript::STATUS_READY,
+    ]);
+
+    $summary = [
+        'summary' => 'They agreed to start around November 9th after prep work.',
+        'action_items' => ['Pencil in work for November 9th'],
+        'topics' => ['schedule'],
+        'next_steps' => ['Start around November 9th'],
+        'sentiment' => 'neutral',
+        'caller_intent' => 'schedule_service',
+        'recording_has_no_message' => false,
+    ];
+
+    Http::fake([
+        'api.openai.com/*' => Http::response([
+            'choices' => [[
+                'message' => ['content' => json_encode($summary)],
+            ]],
+        ], 200),
+    ]);
+
+    (new SummarizeCallTranscript($transcript->id))->handle();
+
+    $transcript->refresh();
+
+    expect($transcript->summary)->toContain('July 9th')
+        ->and($transcript->summary)->not->toContain('November 9th')
+        ->and($transcript->action_items[0])->toContain('July 9th')
+        ->and($transcript->next_steps[0])->toContain('July 9th');
+});
+
 it('purges expired call recordings, transcripts, and stored audio', function () {
     Storage::fake('local');
     Storage::disk('local')->put('public/call-recordings/test.mp3', 'fake-audio');

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sms;
 
+use App\Models\BlockedCaller;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
@@ -257,6 +258,80 @@ class SmsThreadList extends Component
     public function select(int $threadId): void
     {
         $this->dispatch('threadSelected', threadId: $threadId)->to(SmsIndex::class);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function blockedPhones(): array
+    {
+        return BlockedCaller::query()
+            ->pluck('phone_number')
+            ->filter(fn ($phone) => is_string($phone) && trim($phone) !== '')
+            ->values()
+            ->all();
+    }
+
+    public function threadIsSpam(SmsGroupThread $thread): bool
+    {
+        $blockedMap = collect($this->blockedPhones)
+            ->flatMap(fn (string $phone) => $this->phoneMatchCandidates($phone))
+            ->flip();
+
+        if ($blockedMap->isEmpty()) {
+            return false;
+        }
+
+        $participantPhones = $thread->threadParticipants
+            ->pluck('phone_number')
+            ->filter(fn ($phone) => is_string($phone) && trim($phone) !== '')
+            ->values();
+
+        foreach ($participantPhones as $phone) {
+            foreach ($this->phoneMatchCandidates($phone) as $candidate) {
+                if ($blockedMap->has($candidate)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function phoneMatchCandidates(string $phone): array
+    {
+        $digits = preg_replace('/\D/', '', $phone);
+
+        if (! is_string($digits) || $digits === '') {
+            return [];
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $ten = substr($digits, 1);
+
+            return array_values(array_unique([
+                $digits,
+                '+1' . $ten,
+                $ten,
+            ]));
+        }
+
+        if (strlen($digits) === 10) {
+            return array_values(array_unique([
+                $digits,
+                '1' . $digits,
+                '+1' . $digits,
+            ]));
+        }
+
+        return array_values(array_unique([
+            $digits,
+            '+' . $digits,
+        ]));
     }
 
     /**

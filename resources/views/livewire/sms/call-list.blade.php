@@ -124,11 +124,14 @@
 
             $resolvedName = $otherNumber ? $this->resolvePhoneDisplay($otherNumber) : null;
             $formattedOther = $otherNumber ? $this->formatPhone($otherNumber) : null;
+            $isKnownContact = $otherNumber ? $this->isKnownContact($otherNumber) : false;
 
-            // Use caller_name from the call record if meaningful, otherwise resolved name
-            $displayName = ($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
-                ? $call->caller_name
-                : ($resolvedName ?? 'Unknown');
+            // Prefer resolved known contacts (users/vendors) over stale CNAM names.
+            $displayName = $isKnownContact
+                ? ($resolvedName ?? 'Unknown')
+                : (($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
+                    ? $call->caller_name
+                    : ($resolvedName ?? 'Unknown'));
 
             // Show formatted phone as secondary only when display name differs from it
             $secondaryNumber = ($formattedOther && $displayName !== $formattedOther)

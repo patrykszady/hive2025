@@ -577,3 +577,189 @@ it('creates a no-date scheduled draft and does not mark vendor status requested 
     expect($scheduled->scheduled_at)->toBeNull();
     expect($task->fresh()->vendor_status)->toBeNull();
 });
+
+it('shows a multi-day task on each day in the preview window when options dates are missing', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-multiday@example.com',
+        'cell_phone' => '2245550699',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Client Schedule Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Demo',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today()->copy()->addDay(),
+        'options' => [],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Schedule Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $component = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id);
+
+    $grouped = $component->get('groupedUpcomingTasks');
+    $todayKey = today()->format('Y-m-d');
+    $tomorrowKey = today()->copy()->addDay()->format('Y-m-d');
+
+    expect($grouped->get($todayKey)?->pluck('title')->contains('Demo'))->toBeTrue()
+        ->and($grouped->get($tomorrowKey)?->pluck('title')->contains('Demo'))->toBeTrue();
+});
+
+it('normalizes non-iso task option dates so all scheduled days are shown', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-date-format@example.com',
+        'cell_phone' => '2245550799',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Client Schedule Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    $todayKey = today()->format('Y-m-d');
+    $tomorrowKey = today()->copy()->addDay()->format('Y-m-d');
+
+    Task::query()->create([
+        'title' => 'Demo',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+        'options' => [
+            'dates' => [$todayKey, today()->copy()->addDay()->format('n/j/y')],
+        ],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Schedule Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $component = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id);
+
+    $grouped = $component->get('groupedUpcomingTasks');
+
+    expect($grouped->get($todayKey)?->pluck('title')->contains('Demo'))->toBeTrue()
+        ->and($grouped->get($tomorrowKey)?->pluck('title')->contains('Demo'))->toBeTrue();
+});
+
+it('includes carry-over multi-day tasks in next up when they are scheduled on the next-up day', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-next-up@example.com',
+        'cell_phone' => '2245550899',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Client Schedule Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    $dayThree = today()->copy()->addDays(2);
+    $dayFour = today()->copy()->addDays(3);
+
+    Task::query()->create([
+        'title' => 'Demo',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => $dayThree,
+        'end_date' => $dayFour,
+        'options' => [
+            'dates' => [$dayThree->format('Y-m-d'), $dayFour->format('Y-m-d')],
+            'time_settings' => [
+                $dayThree->format('Y-m-d') => ['use_time' => true, 'start_time' => '08:00', 'end_time' => '08:00'],
+                $dayFour->format('Y-m-d') => ['use_time' => true, 'start_time' => '08:00', 'end_time' => '08:00'],
+            ],
+        ],
+    ]);
+
+    Task::query()->create([
+        'title' => 'Measure Windows',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => $dayFour,
+        'end_date' => $dayFour,
+        'options' => [
+            'dates' => [$dayFour->format('Y-m-d')],
+        ],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Schedule Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $component = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id);
+
+    $nextDate = $component->get('nextUpcomingDate');
+    $nextTitles = $component->get('nextUpcomingTasks')->pluck('title')->values()->all();
+
+    expect($nextDate)->toBe($dayFour->format('Y-m-d'))
+        ->and($nextTitles)->toContain('Demo')
+        ->and($nextTitles)->toContain('Measure Windows');
+});

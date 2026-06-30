@@ -61,6 +61,9 @@
         </div>
     </div>
     @forelse ($this->threads as $thread)
+        @php
+            $isSpamThread = $this->threadIsSpam($thread);
+        @endphp
         <button
             wire:key="thread-{{ $thread->id }}"
             x-on:click="
@@ -74,7 +77,7 @@
                 Livewire.dispatch('loadThread', { threadId: {{ $thread->id }} });
                 Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }}, skipConversationLoad: true });
             "
-            class="w-full text-left px-3 py-2.5 rounded-lg"
+            class="w-full text-left px-3 py-2.5 rounded-lg {{ $isSpamThread ? 'opacity-65 grayscale' : '' }}"
             x-bind:class="$store.sms.threadId === {{ $thread->id }}
                 ? 'bg-zinc-100 dark:bg-zinc-700'
                 : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
@@ -169,6 +172,11 @@
                         @if ($thread->scheduled_messages_count > 0)
                             <span class="shrink-0 inline-flex items-center justify-center size-5 rounded bg-amber-100 dark:bg-amber-900/40">
                                 <flux:icon name="clock" class="size-3.5 text-amber-600 dark:text-amber-400" />
+                            </span>
+                        @endif
+                        @if ($isSpamThread)
+                            <span class="shrink-0 inline-flex items-center justify-center size-4 rounded bg-amber-100 dark:bg-amber-900/40" title="Spam">
+                                <flux:icon name="shield-exclamation" class="size-3 text-amber-600 dark:text-amber-400" />
                             </span>
                         @endif
                     </p>

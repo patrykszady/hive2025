@@ -120,18 +120,24 @@
 
                             {{-- Next upcoming tasks beyond the 3-day window --}}
                             @if ($this->nextUpcomingTasks->isNotEmpty())
-                                @php $nextTasks = $this->nextUpcomingTasks; @endphp
+                                @php
+                                    $nextTasks = $this->nextUpcomingTasks;
+                                    $nextDateKey = $this->nextUpcomingDate;
+                                    $nextDate = $nextDateKey
+                                        ? \Carbon\Carbon::parse($nextDateKey)
+                                        : \Carbon\Carbon::parse($nextTasks->first()->start_date);
+                                @endphp
                                 <div wire:key="day-next-up" class="space-y-2">
                                     <div class="flex items-center gap-2 min-h-6">
                                         <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
-                                            {{ \Carbon\Carbon::parse($nextTasks->first()->start_date)->format('D, M j, Y') }}
+                                            {{ $nextDate->format('D, M j, Y') }}
                                         </flux:heading>
                                         <flux:badge color="sky" size="sm">Next Up</flux:badge>
                                     </div>
                                     @include('components.upcoming-tasks-list-tasks', [
                                         'tasks' => $nextTasks,
-                                        'date' => $nextTasks->first()->start_date->format('Y-m-d'),
-                                        'carbonDate' => \Carbon\Carbon::parse($nextTasks->first()->start_date),
+                                        'date' => $nextDate->format('Y-m-d'),
+                                        'carbonDate' => $nextDate,
                                         'showAvatars' => true,
                                         'clickable' => true,
                                         'showProjectInfo' => count($this->clientProjectIds) > 1,
