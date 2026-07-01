@@ -488,7 +488,7 @@ class SendScheduleModal extends Component
             $taskLines = $dayTasks->map(function (Task $task) use ($dateStr, $showProject) {
                 $taskTitle = trim($task->title ?? 'Task');
                 $projectName = trim((string) ($task->project?->project_name ?? ''));
-                if ($projectName !== '') {
+                if ($showProject && $projectName !== '') {
                     $taskTitle .= " ({$projectName})";
                 }
 
@@ -531,7 +531,7 @@ class SendScheduleModal extends Component
             $taskLines = $nextTasks->map(function (Task $task) use ($nextDate, $showProject) {
                 $taskTitle = trim($task->title ?? 'Task');
                 $projectName = trim((string) ($task->project?->project_name ?? ''));
-                if ($projectName !== '') {
+                if ($showProject && $projectName !== '') {
                     $taskTitle .= " ({$projectName})";
                 }
 
@@ -564,7 +564,7 @@ class SendScheduleModal extends Component
             $pendingLines = $pendingTasks->map(function (Task $task) use ($showProject) {
                 $taskTitle = trim($task->title ?? 'Task');
                 $projectName = trim((string) ($task->project?->project_name ?? ''));
-                if ($projectName !== '') {
+                if ($showProject && $projectName !== '') {
                     $taskTitle .= " ({$projectName})";
                 }
 
