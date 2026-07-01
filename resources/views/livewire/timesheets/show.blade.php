@@ -1,5 +1,5 @@
 <div class="grid grid-cols-4 gap-4 xl:relative sm:px-6 lg:max-w-5xl">
-    <div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
+    <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-5">
         {{-- TIMESHEET DETAILS --}}
         <x-lists.details_card>
             {{-- HEADING --}}
@@ -32,14 +32,14 @@
                 @endif
             </x-slot:actions>
 
-            <div class="space-y-2">
-                <flux:table>
+            <div class="space-y-2" x-data="{ hoveredPaymentGroup: null }">
+                <flux:table class="w-full">
                     <flux:table.columns>
                         <flux:table.column>Amount</flux:table.column>
-                        <flux:table.column>Hours</flux:table.column>
+                        <flux:table.column class="w-14">Hours</flux:table.column>
                         <flux:table.column>Project</flux:table.column>
                         <flux:table.column>Payment</flux:table.column>
-                        <flux:table.column>Status</flux:table.column>
+                        <flux:table.column class="w-16">Status</flux:table.column>
                     </flux:table.columns>
 
                     <flux:table.rows>
@@ -49,34 +49,46 @@
                                     <a
                                         wire:navigate.hover
                                         href="{{$timesheet->check ? route('checks.show', $timesheet->check->id) : (!$timesheet->check && $timesheet->check_id ? '' : (auth()->user()->vendor_role === 'Admin' ? route('timesheets.payment', $timesheet->user_id) : ''))}}"
-                                        class="hover:underline"
+                                        class="transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
                                     >
                                         {{ money($timesheet->amount) }}
                                     </a>
                                 </flux:table.cell>
-                                <flux:table.cell>{{ $timesheet->hours}}</flux:table.cell>
+                                <flux:table.cell class="whitespace-nowrap">{{ $timesheet->hours}}</flux:table.cell>
                                 <flux:table.cell>
                                     <a
                                         wire:navigate.hover
                                         href="{{route('projects.show', $timesheet->project->id)}}"
-                                        class="hover:underline"
+                                        class="block truncate transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
                                     >
                                         {{ Str::limit($timesheet->project->name, 15) }}
                                     </a>
                                 </flux:table.cell>
 
                                 @if($timesheet->check)
-                                    <flux:table.cell>
+                                    <flux:table.cell
+                                        x-on:mouseenter="hoveredPaymentGroup = '{{ $timesheet->payment_group_key }}'"
+                                        x-on:mouseleave="hoveredPaymentGroup = null"
+                                    >
                                         <a
                                             wire:navigate.hover
                                             href="{{ route('checks.show', $timesheet->check->id) }}"
-                                            class="hover:underline"
+                                            class="block truncate transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
+                                            x-bind:class="hoveredPaymentGroup && hoveredPaymentGroup === '{{ $timesheet->payment_group_key }}' ? 'text-indigo-600 dark:text-indigo-400' : ''"
                                         >
-                                            {{ $timesheet->check->check_type != 'Check' ? $timesheet->check->check_type . ' #' . $timesheet->check->id : $timesheet->check->check_number }}
+                                            {{ $timesheet->check->check_type != 'Check' ? Str::substr($timesheet->check->check_type, 0, 1) . ' #' . $timesheet->check->id : $timesheet->check->check_number }}
                                         </a>
                                     </flux:table.cell>
                                 @elseif(!$timesheet->check && $timesheet->check_id && !$timesheet->vendor_id)
-                                    <flux:table.cell>Paid By</flux:table.cell>
+                                    <flux:table.cell
+                                        x-on:mouseenter="hoveredPaymentGroup = '{{ $timesheet->payment_group_key }}'"
+                                        x-on:mouseleave="hoveredPaymentGroup = null"
+                                    >
+                                        <span
+                                            class="transition-colors"
+                                            x-bind:class="hoveredPaymentGroup && hoveredPaymentGroup === '{{ $timesheet->payment_group_key }}' ? 'text-indigo-600 dark:text-indigo-400' : ''"
+                                        >Paid By</span>
+                                    </flux:table.cell>
                                 @else
                                     <flux:table.cell></flux:table.cell>
                                 @endif
@@ -116,4 +128,5 @@
             @include('livewire.timesheets._daily_hours')
         @endforeach
     </div>
+
 </div>

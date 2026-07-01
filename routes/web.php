@@ -168,6 +168,15 @@ Route::middleware('guest')->group(function () {
     Route::get('registration', Registration::class)->name('registration');
 });
 
+// Dev-only auth bypass: log in as a given user id (defaults to 1).
+if (app()->environment('local')) {
+    Route::get('dev-login/{user}', function (\App\Models\User $user) {
+        \Illuminate\Support\Facades\Auth::login($user);
+
+        return redirect()->intended(route('dashboard'));
+    })->name('dev-login');
+}
+
 // Public marketing feature pages (no auth required)
 Route::prefix('welcome')->name('welcome.')->group(function () {
     Route::view('finances', 'welcome.finances')->name('finances');

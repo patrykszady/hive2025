@@ -7,6 +7,7 @@ use App\Models\Project;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\CallLog;
+use App\Models\Timesheet;
 use App\Models\Transaction;
 use App\Models\Vendor;
 
@@ -162,7 +163,18 @@ return [
                     '*', 'expense_status', 'status'
                 ],
             ],
-            
+
+            Timesheet::class => [
+                'filterableAttributes' => [
+                    'id', 'vendor_id', 'user_id', 'project_id', 'check_id', 'paid_by',
+                    'is_paid', '__soft_deleted', 'amount', 'hours', 'date',
+                ],
+                'sortableAttributes' => ['date', 'amount', 'hours'],
+                'searchableAttributes' => ['user_name', 'note', 'invoice', 'amount'],
+                'typoTolerance' => ['enabled' => true],
+                'rankingRules' => ['sort', 'exactness'],
+            ],
+
             Transaction::class => [
                 'filterableAttributes'=> [
                     'vendor_id', 'deposit', 'transaction_date', 'posted_date', 
@@ -173,7 +185,6 @@ return [
                 'typoTolerance' => ['enabled' => true],
                 'rankingRules' => ['sort', 'exactness'],
             ],
-            
             Vendor::class => [
                 'filterableAttributes'=> ['business_type', 'business_name'],
                 'sortableAttributes' => ['business_name', 'ytd_expense_sum', 'created_at'],

@@ -32,6 +32,14 @@ class TimesheetShow extends Component
                 ->get()
                 ->each(function ($item, $key){
                     $item->status = $item->paid_by ? 'Paid By' : ($item->check_id ? 'Paid' : (auth()->user()->vendor_role == 'Admin' ? 'Pay' : 'Not Paid'));
+
+                    if (! is_null($item->check_id)) {
+                        $item->payment_group_key = 'check:' . $item->check_id;
+                    } elseif (! is_null($item->paid_by)) {
+                        $item->payment_group_key = 'paid_by:' . $item->paid_by;
+                    } else {
+                        $item->payment_group_key = null;
+                    }
                 });
 
         $this->not_paid = $this->weekly_hours->pluck('status')->every(function ($value) {
