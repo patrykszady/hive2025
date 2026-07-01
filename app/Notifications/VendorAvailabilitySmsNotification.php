@@ -9,8 +9,6 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Notifications\Notification;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 class VendorAvailabilitySmsNotification extends Notification implements ShouldQueue
 {
@@ -137,7 +135,7 @@ class VendorAvailabilitySmsNotification extends Notification implements ShouldQu
         $token = $vendor->getOrCreateAvailabilityToken();
 
         // Use short /v/{token} route
-        return $baseUrl . "/v/{$token}";
+        return app(\App\Services\UrlShortener::class)->shorten($baseUrl . "/v/{$token}");
     }
 
     /**
@@ -210,43 +208,6 @@ class VendorAvailabilitySmsNotification extends Notification implements ShouldQu
         }
 
         return $dateStr;
-    }
-
-    /**
-     * Shorten a URL using v.gd API.
-     */
-    protected function shortenUrl(string $url): ?string
-    {
-        try {
-            $response = Http::timeout(5)->get('https://v.gd/create.php', [
-                'format' => 'simple',
-                'url' => $url,
-            ]);
-
-            if ($response->successful()) {
-                $shortUrl = trim($response->body());
-                
-                Log::channel('vendor_sms')->info("URL shortened via v.gd", [
-                    'original_url' => $url,
-                    'short_url' => $shortUrl,
-                ]);
-                
-                return $shortUrl;
-            }
-            
-            Log::channel('vendor_sms')->warning("v.gd API returned non-success", [
-                'original_url' => $url,
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-        } catch (\Exception $e) {
-            Log::channel('vendor_sms')->error("v.gd shortening failed", [
-                'original_url' => $url,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        return null;
     }
 
     /**

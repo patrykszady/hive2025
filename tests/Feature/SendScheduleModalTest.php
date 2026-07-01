@@ -297,7 +297,7 @@ it('uses vendor user nickname and preferred language when vendor short name is m
         ->call('open', $thread->id)
         ->get('previewMessage');
 
-    $expectedTodayHeading = 'Today ' . today()->format('l m/d') . ':';
+    $expectedTodayHeading = 'Today ' . today()->format('D m/d') . ':';
 
     expect($preview)->toStartWith('Hello Rg Tile,')
         ->and($preview)->toContain('Upcoming tasks:')

@@ -235,6 +235,11 @@ Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availabili
 // Short URL for client schedule SMS
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
 
+// Internal tiny links — 302 straight to the destination (no interstitial)
+Route::get('l/{code}', \App\Http\Controllers\ShortLinkController::class)
+    ->where('code', '[A-Za-z0-9]+')
+    ->name('short-link.redirect');
+
 // Public lien waiver signing (token-based, no auth)
 Route::get('lw/{token}', \App\Livewire\LienWaivers\Show::class)->name('lien-waivers.public-sign');
 

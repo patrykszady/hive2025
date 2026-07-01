@@ -1010,9 +1010,7 @@
                         {{-- Task status (vendor status) --}}
                         <flux:table.cell>
                             @if ($task->vendor_status)
-                                <flux:badge size="sm" :color="$task->vendor_status_ui['flux'] ?? 'zinc'" :icon="$task->vendor_status_ui['icon'] ?? null" inset="top bottom">
-                                    {{ $task->vendor_status_ui['label'] ?? $task->vendor_status }}
-                                </flux:badge>
+                                <x-task-status-badge :status="$task->vendor_status" />
                             @elseif ((int) ($task->progress ?? 0) >= 100)
                                 <flux:badge size="sm" color="green" icon="check-circle" inset="top bottom">Completed</flux:badge>
                             @else

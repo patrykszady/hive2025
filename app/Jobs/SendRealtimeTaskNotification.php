@@ -339,7 +339,8 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
         if ($project) {
             $baseUrl = config('app.dev_webhook_url') ?: rtrim((string) config('app.url'), '/');
             $token = $project->getOrCreateScheduleToken();
-            $message .= "\n\nView Schedule: {$baseUrl}/s/{$token}";
+            $scheduleUrl = app(\App\Services\UrlShortener::class)->shorten("{$baseUrl}/s/{$token}");
+            $message .= "\n\nView Schedule: {$scheduleUrl}";
         }
 
         $message .= "\n-GSC";

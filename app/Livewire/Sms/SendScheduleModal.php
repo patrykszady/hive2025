@@ -473,7 +473,7 @@ class SendScheduleModal extends Component
             $carbonDate = Carbon::parse($dateStr);
             $isVendorSchedule = (bool) $this->thread?->subject_vendor_id;
             $shortDate = $isVendorSchedule
-                ? $carbonDate->format('l m/d')
+                ? $carbonDate->format('D m/d')
                 : $carbonDate->format('D n/j');
 
             if ($carbonDate->isSameDay($today)) {
@@ -524,7 +524,7 @@ class SendScheduleModal extends Component
             $nextDateKey = $this->nextUpcomingDate;
             $nextDate = $nextDateKey ? Carbon::parse($nextDateKey) : Carbon::parse($nextTasks->first()->start_date);
             $dateLabel = $this->thread?->subject_vendor_id
-                ? $nextDate->format('l m/d')
+                ? $nextDate->format('D m/d')
                 : $nextDate->format('D n/j');
 
             $showProject = (bool) $this->thread?->subject_vendor_id;
@@ -597,12 +597,14 @@ class SendScheduleModal extends Component
         $subjectVendor = $this->thread?->subjectVendor;
         if ($subjectVendor) {
             $token = $subjectVendor->getOrCreateAvailabilityToken();
-            $linksText = "\n" . $this->scheduleLinkLabel() . ": {$baseUrl}/v/{$token}";
+            $scheduleUrl = app(\App\Services\UrlShortener::class)->shorten("{$baseUrl}/v/{$token}");
+            $linksText = "\n" . $this->scheduleLinkLabel() . ": {$scheduleUrl}";
         } else {
             $firstProject = $allTasks->first()?->project;
             if ($firstProject) {
                 $token = $firstProject->getOrCreateScheduleToken();
-                $linksText = "\n" . $this->scheduleLinkLabel() . ": {$baseUrl}/s/{$token}";
+                $scheduleUrl = app(\App\Services\UrlShortener::class)->shorten("{$baseUrl}/s/{$token}");
+                $linksText = "\n" . $this->scheduleLinkLabel() . ": {$scheduleUrl}";
             } else {
                 $link = $this->buildScheduleLink();
                 if ($link) {
@@ -703,7 +705,9 @@ class SendScheduleModal extends Component
         $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
         $token = $project->getOrCreateScheduleToken();
 
-        return $this->scheduleLinkLabel() . ": {$baseUrl}/s/{$token}";
+        $scheduleUrl = app(\App\Services\UrlShortener::class)->shorten("{$baseUrl}/s/{$token}");
+
+        return $this->scheduleLinkLabel() . ": {$scheduleUrl}";
     }
 
     protected function scheduleIntroLabel(): string

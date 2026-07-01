@@ -163,7 +163,7 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
         $devWebhookUrl = config('app.dev_webhook_url');
         $baseUrl = $devWebhookUrl ?: (string) config('app.url');
 
-        return $baseUrl . '/hub';
+        return app(\App\Services\UrlShortener::class)->shorten($baseUrl . '/hub');
     }
 
     /**

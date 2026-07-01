@@ -112,7 +112,7 @@ class ClientScheduleSmsNotification extends Notification implements ShouldQueue
         $token = $project->getOrCreateScheduleToken();
 
         // Use short /s/{token} route
-        return $baseUrl . "/s/{$token}";
+        return app(\App\Services\UrlShortener::class)->shorten($baseUrl . "/s/{$token}");
     }
 
     /**

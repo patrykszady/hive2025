@@ -79,7 +79,7 @@ class VendorScheduleSmsNotification extends Notification implements ShouldQueue
 
         $token = $this->vendor->getOrCreateAvailabilityToken();
 
-        return $baseUrl . "/v/{$token}";
+        return app(\App\Services\UrlShortener::class)->shorten($baseUrl . "/v/{$token}");
     }
 
     protected function formatFullAddress(?object $project): string

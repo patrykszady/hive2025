@@ -1,10 +1,13 @@
 <div class="min-h-screen bg-zinc-100 dark:bg-zinc-900">
     {{-- Header --}}
-    <div class="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 px-4 py-6">
-        <div class="max-w-lg mx-auto text-center">
-            <flux:heading size="xl">Task Availability</flux:heading>
+    <div class="border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800">
+        <div class="max-w-lg mx-auto flex items-center gap-2.5">
+            <a href="https://hive.contractors" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2.5">
+                <x-hive-logo class="size-6 shrink-0" />
+                <span class="text-base font-semibold text-zinc-900 dark:text-white">Hive Contractors</span>
+            </a>
             @if($valid && $vendor)
-                <flux:subheading class="mt-1">Hi {{ $vendor->short_name ?? $vendor->name }}!</flux:subheading>
+                <span class="ml-auto text-sm text-zinc-500 dark:text-zinc-400">Hi {{ $vendor->short_name ?? $vendor->name }}!</span>
             @endif
         </div>
     </div>
@@ -82,231 +85,89 @@
 
             {{-- Upcoming Confirmed Tasks (grouped by date, matching hub UI) --}}
             @if($groupedTasks->isNotEmpty())
-            <div class="space-y-5">
-                @foreach($groupedTasks as $date => $dayTasks)
-                    @php
-                        $carbonDate = \Carbon\Carbon::parse($date);
-                        $serverDayBadge = $carbonDate->isToday() ? 'today' : ($carbonDate->isTomorrow() ? 'tomorrow' : '');
-                        $isFirstGroup = $loop->first;
-                        $dayTaskCount = $dayTasks->count();
-                    @endphp
-                    <div wire:key="schedule-day-{{ $date }}">
-                        <flux:accordion transition>
-                            <flux:accordion.item :expanded="$serverDayBadge !== 'today'">
-                                <flux:accordion.heading>
-                                    {{-- Date Header --}}
-                                    <div class="flex items-center gap-2">
-                                        <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
-                                            {{ $carbonDate->format('D, M j, Y') }}
-                                        </flux:heading>
-                                        <span
-                                            x-data="{
-                                                badge: '{{ $serverDayBadge }}',
-                                                isFirst: {{ $isFirstGroup ? 'true' : 'false' }},
-                                                init() {
-                                                    let p = '{{ $date }}'.split('-');
-                                                    let d = new Date(p[0], p[1]-1, p[2]); d.setHours(0,0,0,0);
-                                                    let t = new Date(); t.setHours(0,0,0,0);
-                                                    let tm = new Date(t); tm.setDate(tm.getDate()+1);
-                                                    this.badge = d.getTime() === t.getTime() ? 'today' : (d.getTime() === tm.getTime() ? 'tomorrow' : '');
-                                                }
-                                            }"
-                                            x-cloak
-                                            class="contents"
-                                        >
-                                            <template x-if="badge === 'today'">
-                                                <flux:badge color="green" size="sm">Today</flux:badge>
-                                            </template>
-                                            <template x-if="badge === 'tomorrow'">
-                                                <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
-                                            </template>
-                                            <template x-if="isFirst && badge === ''">
-                                                <flux:badge color="sky" size="sm">Next Up</flux:badge>
-                                            </template>
-                                        </span>
-
-                                        <flux:badge color="zinc" size="sm">
-                                            {{ $dayTaskCount }}
-                                        </flux:badge>
-                                    </div>
-                                </flux:accordion.heading>
-                                <flux:accordion.content>
-                                    <div class="space-y-3 mt-2">
-                                        @foreach($dayTasks as $task)
-                                            <div wire:key="scheduled-task-{{ $date }}-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-
-
-                        {{-- Task Card Content --}}
-                        <div class="p-3">
-                            <div class="flex items-start justify-between gap-2 min-w-0">
-                                <div class="flex items-center gap-2 min-w-0">
-                                    <flux:heading size="sm" class="min-w-0 truncate">
-                                        {{ $task->title }}
-                                    </flux:heading>
-                                    <flux:badge size="sm" :color="data_get($task->type_ui, 'flux', 'sky')" inset="top bottom">
-                                        {{ $task->type ?? 'Task' }}
-                                    </flux:badge>
-                                </div>
-                                @if($task->vendor_status === 'confirmed')
-                                    <flux:badge color="green" size="sm" icon="check">Confirmed</flux:badge>
-                                @elseif($task->vendor_status === 'rejected')
-                                    <flux:badge color="red" size="sm" icon="x-mark">Declined</flux:badge>
-                                @elseif($task->vendor_status === 'proposed')
-                                    <flux:badge color="indigo" size="sm" icon="calendar">Proposed</flux:badge>
-                                @else
-                                    <flux:badge color="yellow" size="sm">Pending</flux:badge>
-                                @endif
-                            </div>
-
-                            {{-- Project & Date Info --}}
-                            <div class="mt-2 space-y-1">
-                                @if($task->project?->address)
-                                    @php
-                                        $cityState = collect([
-                                            $task->project?->city,
-                                            $task->project?->state,
-                                        ])->filter()->implode(', ');
-
-                                        $cityStateZip = trim(implode(' ', array_filter([
-                                            $cityState,
-                                            $task->project?->zip_code,
-                                        ])));
-                                    @endphp
-
-                                    <div class="flex items-start gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-                                        <flux:icon.map-pin class="size-4 shrink-0 mt-0.5" />
-                                        <a 
-                                            href="{{ $task->project->getAddressMapURI() }}" 
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            class="hover:underline hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
-                                        >
-                                            <div class="truncate">{{ $task->project->address }}</div>
-                                            @if($cityStateZip)
-                                                <div>{{ $cityStateZip }}</div>
-                                            @endif
-                                        </a>
-                                    </div>
-                                @else
-                                    <flux:subheading class="truncate">No location</flux:subheading>
-                                @endif
-                                
+                <?php $renderedTaskIds = []; ?>
+                <div class="space-y-5">
+                    @foreach($groupedTasks as $date => $dayTasks)
+                        <x-schedule.day-group :date="$date" :count="$dayTasks->count()" :is-first="$loop->first">
+                            @foreach($dayTasks as $task)
                                 @php
-                                    $startDate = $task->start_date?->format('Ymd\THis');
-                                    $endDate = $task->end_date?->format('Ymd\THis') ?? $task->start_date?->addHours(2)->format('Ymd\THis');
-                                    $location = $task->project?->full_address ?? '';
-                                    $description = 'Task for ' . ($task->owner?->name ?? 'Hive');
-                                    
-                                    $icsContent = "BEGIN:VCALENDAR\r\n"
-                                        . "VERSION:2.0\r\n"
-                                        . "BEGIN:VEVENT\r\n"
-                                        . "DTSTART:{$startDate}\r\n"
-                                        . "DTEND:{$endDate}\r\n"
-                                        . "SUMMARY:{$task->title}\r\n"
-                                        . "LOCATION:{$location}\r\n"
-                                        . "DESCRIPTION:{$description}\r\n"
-                                        . "END:VEVENT\r\n"
-                                        . "END:VCALENDAR";
-                                    
-                                    $calendarUrl = 'data:text/calendar;charset=utf-8,' . rawurlencode($icsContent);
+                                    $showFooter = ! in_array($task->id, $renderedTaskIds, true);
+                                    if ($showFooter) {
+                                        $renderedTaskIds[] = $task->id;
+                                    }
+
+                                    $footerType = null;
+                                    if ($showFooter && in_array((string) $task->vendor_status, ['requested', 'proposed'], true)) {
+                                        $footerType = 'actions';
+                                    } elseif ($showFooter && $task->vendor_status === 'confirmed') {
+                                        $footerType = 'confirmed';
+                                    }
                                 @endphp
-                                <div class="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-                                    <flux:icon.clock class="size-4 shrink-0" />
-                                    <a 
-                                        href="{{ $calendarUrl }}"
-                                        download="{{ Str::slug($task->title) }}.ics"
-                                        class="hover:underline hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
-                                    >{{ $task->date_with_time }}</a>
-                                </div>
-                            </div>
+                                <x-schedule.task-card wire:key="scheduled-task-{{ $date }}-{{ $task->id }}">
+                                    <x-schedule.task-card-body :task="$task" :date="$date" :show-project="true" />
 
-                            {{-- Owner Avatar Row --}}
-                            @if($task->owner)
-                                <div class="flex items-center gap-2 mt-3 min-w-0">
-                                    <flux:avatar
-                                        circle
-                                        size="xs"
-                                        name="{{ $task->owner->full_name ?? $task->owner->name }}"
-                                        color="auto"
-                                        color:seed="{{ $task->owner->id }}"
-                                    />
-                                    <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">
-                                        {{ $task->owner->short_name ?? $task->owner->name }}
-                                    </span>
-                                </div>
-                            @endif
-                        </div>
-
-                        {{-- Action Buttons --}}
-                        @if(in_array($task->vendor_status, ['requested', 'proposed']))
-                            <div class="flex border-t border-zinc-200 dark:border-zinc-700">
-                                <button 
-                                    wire:click="confirm({{ $task->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:loading.class="opacity-60 cursor-wait"
-                                    wire:target="confirm({{ $task->id }})"
-                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
-                                >
-                                    <flux:icon.check class="size-5" />
-                                    <span class="hidden sm:inline">I'm Available</span>
-                                    <span class="sm:hidden">Yes</span>
-                                </button>
-                                <button 
-                                    wire:click="openProposeDatesModal({{ $task->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:loading.class="opacity-60 cursor-wait"
-                                    wire:target="openProposeDatesModal({{ $task->id }})"
-                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
-                                >
-                                    <flux:icon.calendar class="size-5" />
-                                    <span class="hidden sm:inline">Change Dates</span>
-                                    <span class="sm:hidden">Change</span>
-                                </button>
-                                <button 
-                                    wire:click="reject({{ $task->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:loading.class="opacity-60 cursor-wait"
-                                    wire:target="reject({{ $task->id }})"
-                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                                >
-                                    <flux:icon.x-mark class="size-5" />
-                                    <span class="hidden sm:inline">Not Available</span>
-                                    <span class="sm:hidden">No</span>
-                                </button>
-                            </div>
-                        @elseif($task->vendor_status === 'confirmed')
-                            <div class="flex border-t border-zinc-200 dark:border-zinc-700">
-                                <button 
-                                    wire:click="openProposeDatesModal({{ $task->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:loading.class="opacity-60 cursor-wait"
-                                    wire:target="openProposeDatesModal({{ $task->id }})"
-                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
-                                >
-                                    <flux:icon.calendar class="size-5" />
-                                    Change Dates
-                                </button>
-                                <button 
-                                    wire:click="markPending({{ $task->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:loading.class="opacity-60 cursor-wait"
-                                    wire:target="markPending({{ $task->id }})"
-                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                                >
-                                    <flux:icon.x-mark class="size-5" />
-                                    Not Available
-                                </button>
-                            </div>
-                        @endif
-                    </div>
-                                        @endforeach
-                                    </div>
-                                </flux:accordion.content>
-                            </flux:accordion.item>
-                        </flux:accordion>
-                    </div>
-                @endforeach
-            </div>
+                                    @if($footerType)
+                                        <x-slot:footer>
+                                            @if($footerType === 'actions')
+                                                <button
+                                                    wire:click="confirm({{ $task->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:loading.class="opacity-60 cursor-wait"
+                                                    wire:target="confirm({{ $task->id }})"
+                                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
+                                                >
+                                                    <flux:icon.check class="size-5" />
+                                                    <span>Available</span>
+                                                </button>
+                                                <button
+                                                    wire:click="openProposeDatesModal({{ $task->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:loading.class="opacity-60 cursor-wait"
+                                                    wire:target="openProposeDatesModal({{ $task->id }})"
+                                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
+                                                >
+                                                    <flux:icon.calendar class="size-5" />
+                                                    <span>Change</span>
+                                                </button>
+                                                <button
+                                                    wire:click="reject({{ $task->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:loading.class="opacity-60 cursor-wait"
+                                                    wire:target="reject({{ $task->id }})"
+                                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                >
+                                                    <flux:icon.x-mark class="size-5" />
+                                                    <span>Decline</span>
+                                                </button>
+                                            @else
+                                                <button
+                                                    wire:click="openProposeDatesModal({{ $task->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:loading.class="opacity-60 cursor-wait"
+                                                    wire:target="openProposeDatesModal({{ $task->id }})"
+                                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
+                                                >
+                                                    <flux:icon.calendar class="size-5" />
+                                                    Change
+                                                </button>
+                                                <button
+                                                    wire:click="markPending({{ $task->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:loading.class="opacity-60 cursor-wait"
+                                                    wire:target="markPending({{ $task->id }})"
+                                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                >
+                                                    <flux:icon.x-mark class="size-5" />
+                                                    Decline
+                                                </button>
+                                            @endif
+                                        </x-slot:footer>
+                                    @endif
+                                </x-schedule.task-card>
+                            @endforeach
+                        </x-schedule.day-group>
+                    @endforeach
+                </div>
             @endif
 
             {{-- Pending Tasks: unscheduled (no dates), expanded accordion --}}

@@ -281,7 +281,55 @@
                 </flux:accordion>
             @endif
 
+            @if($publicView)
+                @php
+                    $publicToday = browser_date() ?? now()->format('Y-m-d');
+                    $publicPastTasks   = $groupedTasks->filter(fn ($t, $d) => $d < $publicToday && $t->isNotEmpty());
+                    $publicUpcoming    = $groupedTasks->filter(fn ($t, $d) => $d >= $publicToday && $t->isNotEmpty());
+                    $publicFirstDate   = $publicUpcoming->keys()->first();
+                @endphp
+
+                @if($publicPastTasks->isNotEmpty())
+                    <flux:accordion transition>
+                        <flux:accordion.item>
+                            <flux:accordion.heading>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-zinc-500 dark:text-zinc-400">Past Tasks</span>
+                                    <flux:badge color="zinc" size="sm">{{ $publicPastTasks->flatten()->count() }}</flux:badge>
+                                </div>
+                            </flux:accordion.heading>
+                            <flux:accordion.content>
+                                <div class="space-y-3 mt-2">
+                                    @foreach($publicPastTasks as $date => $tasks)
+                                        <x-schedule.day-group :date="$date" :count="$tasks->count()">
+                                            @foreach($tasks as $task)
+                                                <x-schedule.task-card wire:key="public-past-{{ $date }}-{{ $task->id }}">
+                                                    <x-schedule.task-card-body :task="$task" :date="$date" :show-owner="$showAvatars" :show-status="true" :show-address="false" />
+                                                </x-schedule.task-card>
+                                            @endforeach
+                                        </x-schedule.day-group>
+                                    @endforeach
+                                </div>
+                            </flux:accordion.content>
+                        </flux:accordion.item>
+                    </flux:accordion>
+                @endif
+
+                @foreach($publicUpcoming as $date => $tasks)
+                    <x-schedule.day-group :date="$date" :count="$tasks->count()" :is-first="$date === $publicFirstDate">
+                        @foreach($tasks as $task)
+                            <x-schedule.task-card wire:key="public-scheduled-{{ $date }}-{{ $task->id }}">
+                                <x-schedule.task-card-body :task="$task" :date="$date" :show-owner="$showAvatars" :show-status="true" :show-address="false" />
+                            </x-schedule.task-card>
+                        @endforeach
+                    </x-schedule.day-group>
+                @endforeach
+            @endif
+
             @foreach($groupedTasks as $date => $tasks)
+                @if($publicView)
+                    @continue
+                @endif
                 @php
                     $carbonDate = \Carbon\Carbon::parse($date);
                     $isWeekend = $carbonDate->isWeekend();
@@ -366,7 +414,7 @@
                     {{-- Date Header - min-h-6 reserves space for badge to prevent layout shift --}}
                     <div class="flex items-center gap-2 min-h-6">
                         <flux:heading size="sm" class="{{ $serverTextColor }}" ::class="textColorClass">
-                            {{ $carbonDate->format('D, M j, Y') }}
+                            {{ $carbonDate->format('D, M j') }}
                         </flux:heading>
 
                         {{-- Badges: server-rendered visible immediately, Alpine hides/shows on init --}}
@@ -420,7 +468,7 @@
                                     <div class="space-y-2">
                                         <div class="flex items-center gap-2 min-h-6">
                                             <flux:heading size="sm" class="text-zinc-500 dark:text-zinc-400">
-                                                {{ $carbonDate->format('D, M j, Y') }}
+                                                {{ $carbonDate->format('D, M j') }}
                                             </flux:heading>
                                         </div>
 
