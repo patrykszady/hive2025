@@ -62,7 +62,7 @@ class MeetTaskCalendarService
             return;
         }
 
-        [$startAt, $endAt, $timezone] = $this->resolveDateRange($task);
+        [$when, $startAt, $endAt, $timezone, $allDay] = $this->resolveDateRange($task);
 
         $meetConfig = (array) config('nylas.meet', []);
         $conferencingProvider = (string) ($meetConfig['conferencing_provider'] ?? 'Microsoft Teams');
@@ -78,12 +78,7 @@ class MeetTaskCalendarService
                 ->map(fn (string $email) => ['email' => $email])
                 ->values()
                 ->all(),
-            'when' => [
-                'start_time' => $startAt->timestamp,
-                'end_time' => $endAt->timestamp,
-                'start_timezone' => $timezone,
-                'end_timezone' => $timezone,
-            ],
+            'when' => $when,
             'conferencing' => [
                 'provider' => $conferencingProvider,
                 'autocreate' => (object) [],
@@ -149,6 +144,7 @@ class MeetTaskCalendarService
                 'location' => $payload['location'] ?? null,
                 'start_time' => $startAt->toIso8601String(),
                 'end_time' => $endAt->toIso8601String(),
+                'all_day' => $allDay,
                 'dev_override_recipient' => app()->environment(['local', 'development', 'testing'])
                     ? config('nylas.meet.dev_recipient', 'patryk.szady@live.com')
                     : null,
@@ -234,7 +230,7 @@ class MeetTaskCalendarService
         $task->loadMissing(['project.client.users', 'project.createdByVendor', 'vendor']);
 
         $recipientEmails = $this->resolveRecipientEmails($task);
-        [$startAt, $endAt, $timezone] = $this->resolveDateRange($task);
+        [$when, $startAt, $endAt, $timezone, $allDay] = $this->resolveDateRange($task);
 
         $payload = [
             'calendar_id' => $calendarId,
@@ -245,12 +241,7 @@ class MeetTaskCalendarService
                 ->map(fn (string $email) => ['email' => $email])
                 ->values()
                 ->all(),
-            'when' => [
-                'start_time' => $startAt->timestamp,
-                'end_time' => $endAt->timestamp,
-                'start_timezone' => $timezone,
-                'end_timezone' => $timezone,
-            ],
+            'when' => $when,
         ];
 
         $response = $this->nylasService->updateEvent($grantId, $eventId, $payload);
@@ -262,6 +253,7 @@ class MeetTaskCalendarService
                 'grant_id' => $grantId,
                 'start_time' => $startAt->toIso8601String(),
                 'end_time' => $endAt->toIso8601String(),
+                'all_day' => $allDay,
             ]);
 
             return;
@@ -372,9 +364,12 @@ class MeetTaskCalendarService
             return collect([$devRecipient])->filter();
         }
 
-        // meeting_participants is the single source of truth — it already contains
-        // team members, client users, vendor contacts, and any manually-added emails.
-        return collect((array) ($task->options->meeting_participants ?? []))
+        // meeting_participants remains the primary source, but always merge in
+        // owner-company contact fallbacks so PMG/company recipients are not skipped.
+        $meetingParticipants = collect((array) ($task->options->meeting_participants ?? []));
+
+        return $meetingParticipants
+            ->merge($this->resolveOwnerAndVendorContactEmails($task))
             ->filter(fn (?string $email) => is_string($email) && $email !== '')
             ->map(fn (string $email) => strtolower(trim($email)))
             ->unique()
@@ -388,24 +383,96 @@ class MeetTaskCalendarService
         $dateKey = $startDate->format('Y-m-d');
 
         $daySettings = (array) data_get($task->options, "time_settings.$dateKey", []);
-        $startTime = $daySettings['start_time'] ?? null;
-        $endTime = $daySettings['end_time'] ?? null;
+        $usesTime = (bool) ($daySettings['use_time'] ?? false);
+        $startTime = is_string($daySettings['start_time'] ?? null)
+            ? trim((string) $daySettings['start_time'])
+            : null;
+        $endTime = is_string($daySettings['end_time'] ?? null)
+            ? trim((string) $daySettings['end_time'])
+            : null;
 
-        if (is_string($startTime) && $startTime !== '') {
+        if ($usesTime && is_string($startTime) && $startTime !== '') {
             $startAt = Carbon::parse("{$dateKey} {$startTime}", $timezone);
             $endAt = is_string($endTime) && $endTime !== ''
                 ? Carbon::parse("{$dateKey} {$endTime}", $timezone)
                 : $startAt->copy()->addHour();
-        } else {
-            $startAt = Carbon::parse("{$dateKey} 09:00", $timezone);
-            $endAt = Carbon::parse("{$dateKey} 10:00", $timezone);
+
+            if ($endAt->lessThanOrEqualTo($startAt)) {
+                $endAt = $startAt->copy()->addHour();
+            }
+
+            return [[
+                'start_time' => $startAt->timestamp,
+                'end_time' => $endAt->timestamp,
+                'start_timezone' => $timezone,
+                'end_timezone' => $timezone,
+            ], $startAt, $endAt, $timezone, false];
         }
 
-        if ($endAt->lessThanOrEqualTo($startAt)) {
-            $endAt = $startAt->copy()->addHour();
+        $allDayDate = $startDate->copy()->setTimezone($timezone)->format('Y-m-d');
+        $startAt = Carbon::parse("{$allDayDate} 00:00", $timezone);
+        $endAt = Carbon::parse("{$allDayDate} 23:59", $timezone);
+
+        return [[
+            'date' => $allDayDate,
+        ], $startAt, $endAt, $timezone, true];
+    }
+
+    private function resolveOwnerAndVendorContactEmails(Task $task): Collection
+    {
+        $emails = collect();
+
+        $addEmail = static function ($value) use (&$emails): void {
+            $email = strtolower(trim((string) $value));
+            if ($email !== '') {
+                $emails->push($email);
+            }
+        };
+
+        // Direct contact for the selected vendor (the sub being scheduled).
+        $selectedVendor = $task->vendor;
+        if ($selectedVendor) {
+            $addEmail($selectedVendor->email ?? null);
+            $addEmail($selectedVendor->business_email ?? null);
         }
 
-        return [$startAt, $endAt, $timezone];
+        // Company mailboxes for the owning company and the selected vendor.
+        // The owning company's direct business email is intentionally excluded.
+        $vendorIds = collect([
+            $task->project?->belongs_to_vendor_id,
+            $task->belongs_to_vendor_id,
+            $task->vendor_id,
+        ])
+            ->filter(fn ($id) => is_numeric($id) && (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($vendorIds->isNotEmpty()) {
+            $emails = $emails->merge(
+                CompanyEmail::withoutGlobalScopes()
+                    ->whereIn('vendor_id', $vendorIds->all())
+                    ->whereNotNull('email')
+                    ->pluck('email')
+            );
+        }
+
+        $ownerBusinessEmails = collect([
+            $task->project?->createdByVendor?->email ?? null,
+            $task->project?->createdByVendor?->business_email ?? null,
+            $task->owner?->email ?? null,
+            $task->owner?->business_email ?? null,
+        ])
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+            ->map(fn (string $email) => strtolower(trim($email)))
+            ->all();
+
+        return $emails
+            ->filter(fn (?string $email) => is_string($email) && trim($email) !== '')
+            ->map(fn (string $email) => strtolower(trim($email)))
+            ->reject(fn (string $email) => in_array($email, $ownerBusinessEmails, true))
+            ->unique()
+            ->values();
     }
 
     private function buildDescription(Task $task, Collection $recipientEmails): string

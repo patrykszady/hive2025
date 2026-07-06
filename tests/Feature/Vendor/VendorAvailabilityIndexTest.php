@@ -103,6 +103,126 @@ it('opens and saves dates for an unscheduled null-status task', function () {
         ->and($task->end_date?->format('Y-m-d'))->toBe('2026-05-10');
 });
 
+it('exposes homeowner submitted times and applies one to the proposal', function () {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'short_name' => 'GS',
+        'options' => '{}',
+    ]);
+
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'Smartech Electric',
+        'short_name' => 'SE',
+        'availability_token' => 'test-vendor-token-preferred',
+        'options' => '{}',
+    ]);
+
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Test Project',
+        'client_id' => $client->id,
+        'address' => '239 Perth Rd',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => '60013',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Fix Electrical Outlet',
+        'type' => 'task',
+        'order' => 1,
+        'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+        'created_by_user_id' => 1,
+        'vendor_status' => null,
+    ]));
+
+    $project->forceFill([
+        'service_availability' => [
+            'slots' => [
+                ['date' => '2026-07-08', 'time' => 'Anytime'],
+                ['date' => '2026-07-09', 'time' => '7-9 AM'],
+                ['date' => '2026-07-13', 'time' => '3-5 PM'],
+            ],
+            'submitted_at' => now()->toIso8601String(),
+            'task_ids' => [$task->id],
+        ],
+    ])->saveQuietly();
+
+    $component = Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
+        ->call('openProposeDatesModal', $task->id);
+
+    $slots = $component->instance()->proposedPreferredSlots();
+
+    expect($slots)->toHaveCount(3)
+        ->and($slots[0]['date'])->toBe('2026-07-08')
+        ->and(collect($slots[1]['times'])->pluck('time')->all())->toBe(['7-9 AM']);
+
+    $component->call('applyPreferredSlot', '2026-07-09', '7-9 AM')
+        ->assertSet('proposedDates', ['2026-07-09'])
+        ->assertSet('proposedTimeSettings.2026-07-09.use_time', true)
+        ->assertSet('proposedTimeSettings.2026-07-09.start_time', '07:00')
+        ->assertSet('proposedTimeSettings.2026-07-09.end_time', '09:00');
+});
+
+it('hides homeowner submitted times for a task not covered by the submission', function () {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'short_name' => 'GS',
+        'options' => '{}',
+    ]);
+
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'Smartech Electric',
+        'short_name' => 'SE',
+        'availability_token' => 'test-vendor-token-uncovered',
+        'options' => '{}',
+    ]);
+
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Test Project',
+        'client_id' => $client->id,
+        'address' => '239 Perth Rd',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => '60013',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Fix Cabinet',
+        'type' => 'task',
+        'order' => 1,
+        'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+        'created_by_user_id' => 1,
+        'vendor_status' => null,
+    ]));
+
+    $project->forceFill([
+        'service_availability' => [
+            'slots' => [
+                ['date' => '2026-07-08', 'time' => 'Anytime'],
+            ],
+            'submitted_at' => now()->toIso8601String(),
+            'task_ids' => [$task->id + 999],
+        ],
+    ])->saveQuietly();
+
+    $slots = Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
+        ->call('openProposeDatesModal', $task->id)
+        ->instance()
+        ->proposedPreferredSlots();
+
+    expect($slots)->toBe([]);
+});
+
 it('groups upcoming scheduled tasks by date with date headers', function () {
     $ownerVendor = Vendor::factory()->create([
         'business_name' => 'GS Construction',

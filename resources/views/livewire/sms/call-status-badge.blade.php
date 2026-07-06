@@ -1,4 +1,4 @@
-<div class="flex items-center gap-2" wire:poll.5s="updateCallStatus">
+<div class="flex items-center gap-2">
     @if ($activeCallId)
         <flux:badge color="green" icon="phone">
             <span>In a call</span>

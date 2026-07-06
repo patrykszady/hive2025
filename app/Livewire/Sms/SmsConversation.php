@@ -391,6 +391,22 @@ class SmsConversation extends Component
             return;
         }
 
+        $checklistItems = collect($extracted['checklist'] ?? [])
+            ->map(fn ($item) => trim((string) $item))
+            ->filter()
+            ->values();
+
+        if ($checklistItems->isEmpty()) {
+            $checklistItems = collect($this->fallbackChecklistFromMessage($text, (string) ($extracted['title'] ?? '')));
+        }
+
+        $smsImageUrls = collect(is_array($message->media_urls) ? $message->media_urls : [])
+            ->filter(fn ($url) => is_string($url) && SmsMessage::isImageUrl($url))
+            ->map(fn (string $url) => $this->mediaUrl($url))
+            ->unique()
+            ->values()
+            ->all();
+
         $thread = SmsGroupThread::find($this->threadId);
         $matchedTask = null;
         $matchedTaskId = isset($extracted['task_id']) && is_numeric($extracted['task_id'])
@@ -473,12 +489,13 @@ class SmsConversation extends Component
             'start_time' => $extracted['start_time'],
             'end_time' => $extracted['end_time'],
             'user_ids' => $this->resolveAssigneeUserIds($extracted['assignee_names']),
-            'checklist' => collect($extracted['checklist'])
+            'checklist' => $checklistItems
                 ->map(fn ($item) => trim((string) $item))
                 ->filter()
                 ->map(fn (string $text) => ['text' => $text, 'completed' => false])
                 ->values()
                 ->all(),
+            'sms_media_urls' => $smsImageUrls,
             'additional_tasks' => collect($extracted['additional_tasks'] ?? [])
                 ->map(fn (array $task) => [
                     'title' => $task['title'],
@@ -491,6 +508,39 @@ class SmsConversation extends Component
                 ->all(),
             'multi_time' => preg_match_all('/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i', $text) >= 2,
         ])->to(TaskCreate::class);
+    }
+
+    /**
+     * Build simple checklist rows from multi-sentence issue reports when AI
+     * does not return checklist items.
+     *
+     * @return array<int, string>
+     */
+    protected function fallbackChecklistFromMessage(string $text, string $title): array
+    {
+        $sentences = preg_split('/[\.!?\n]+/', $text) ?: [];
+        $titleNeedle = Str::lower(trim($title));
+
+        $items = collect($sentences)
+            ->map(fn (string $sentence) => trim($sentence))
+            ->filter(fn (string $sentence) => mb_strlen($sentence) >= 12)
+            ->map(function (string $sentence): string {
+                $sentence = preg_replace('/^\s*(also|and|plus)\b[\s,:-]*/i', '', $sentence) ?? $sentence;
+                $sentence = preg_replace('/^\s*as\s+i\s+indicated\b[\s,:-]*/i', '', $sentence) ?? $sentence;
+
+                return ucfirst(trim($sentence));
+            })
+            ->filter(function (string $sentence) use ($titleNeedle): bool {
+                if ($titleNeedle === '') {
+                    return true;
+                }
+
+                return ! Str::contains(Str::lower($sentence), $titleNeedle);
+            })
+            ->unique()
+            ->values();
+
+        return $items->take(5)->all();
     }
 
     /**

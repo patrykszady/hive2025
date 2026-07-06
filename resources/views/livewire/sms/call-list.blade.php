@@ -73,14 +73,6 @@
 
     {{-- Filter tabs --}}
     <div class="mb-3 sticky top-0 z-10">
-        <flux:input
-            wire:model.live.debounce.350ms="search"
-            icon="magnifying-glass"
-            placeholder="Search calls, numbers, transcripts…"
-            size="sm"
-            clearable
-            class="mb-2"
-        />
         <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1 !rounded-lg !bg-zinc-100 dark:!bg-zinc-800 !p-0.5">
             <flux:tab name="all">All</flux:tab>
             <flux:tab name="missed">Missed</flux:tab>
@@ -93,7 +85,7 @@
     <div class="relative min-h-0">
         <div
             wire:loading
-            wire:target="callFilter,$refresh,loadMore,search"
+            wire:target="callFilter,$refresh,loadMore"
             class="absolute inset-0 z-20 pointer-events-none"
         >
             @include('livewire.sms.call-list-skeleton')
@@ -124,14 +116,11 @@
 
             $resolvedName = $otherNumber ? $this->resolvePhoneDisplay($otherNumber) : null;
             $formattedOther = $otherNumber ? $this->formatPhone($otherNumber) : null;
-            $isKnownContact = $otherNumber ? $this->isKnownContact($otherNumber) : false;
 
-            // Prefer resolved known contacts (users/vendors) over stale CNAM names.
-            $displayName = $isKnownContact
-                ? ($resolvedName ?? 'Unknown')
-                : (($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
-                    ? $call->caller_name
-                    : ($resolvedName ?? 'Unknown'));
+            // Use caller_name from the call record if meaningful, otherwise resolved name
+            $displayName = ($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
+                ? $call->caller_name
+                : ($resolvedName ?? 'Unknown');
 
             // Show formatted phone as secondary only when display name differs from it
             $secondaryNumber = ($formattedOther && $displayName !== $formattedOther)

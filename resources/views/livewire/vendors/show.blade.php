@@ -6,12 +6,12 @@
                 <livewire:vendors.vendor-details :vendor="$vendor" :expanded="true" />
             </div>
 
-            {{-- VENDOR TIMELINE --}}
-            {{-- @if($vendor->business_type != 'Retail')
-                <div class="h-100">
-                    <livewire:planner.cards-index type="vendor" :vendor-id="$vendor->id" />
+            {{-- VENDOR TASKS --}}
+            @if($vendor->business_type != 'Retail')
+                <div class="col-span-4 lg:col-span-2">
+                    <livewire:vendors.vendor-task-list :vendor="$vendor" :key="'vendor-tasks-'.$vendor->id" />
                 </div>
-            @endif --}}
+            @endif
 
             {{-- EXPENSES --}}
             @if(in_array($vendor->business_type, ["Retail"]))

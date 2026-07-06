@@ -10,6 +10,7 @@
     'showNotifications' => true,
     'publicView' => false,
     'pendingTasksExpanded' => true,
+    'laterTasksExpanded' => false,
     'title' => 'Tasks',
     'emptyMessage' => 'No tasks upcoming for this project.',
     'projectId' => null,
@@ -132,6 +133,7 @@
                                                                             {{ $task->title }}
                                                                         </flux:heading>
                                                                     </div>
+                                                                    <x-task-preferred-indicator :task="$task" />
                                                                 </div>
                                                                 @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
@@ -166,6 +168,7 @@
                                                                             {{ $task->title }}
                                                                         </flux:heading>
                                                                     </div>
+                                                                    <x-task-preferred-indicator :task="$task" />
                                                                 </div>
                                                                 @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
@@ -216,6 +219,7 @@
                                                             {{ $task->title }}
                                                         </flux:heading>
                                                     </div>
+                                                    <x-task-preferred-indicator :task="$task" />
                                                 </div>
                                                 @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
@@ -250,6 +254,7 @@
                                                             {{ $task->title }}
                                                         </flux:heading>
                                                     </div>
+                                                    <x-task-preferred-indicator :task="$task" />
                                                 </div>
                                                 @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
@@ -326,169 +331,64 @@
                 @endforeach
             @endif
 
-            @foreach($groupedTasks as $date => $tasks)
-                @if($publicView)
-                    @continue
-                @endif
+            @if(! $publicView)
                 @php
-                    $carbonDate = \Carbon\Carbon::parse($date);
-                    $isWeekend = $carbonDate->isWeekend();
-                    $hasTasks = $tasks->isNotEmpty();
-
-                    // Server-side pre-compute using browser date (session/cookie) for instant render
-                    $browserToday = browser_date() ?? now()->format('Y-m-d');
-                    $browserTomorrow = \Carbon\Carbon::parse($browserToday)->addDay()->format('Y-m-d');
-                    $browserYesterday = \Carbon\Carbon::parse($browserToday)->subDay()->format('Y-m-d');
-
-                    $serverBadge = match($date) {
-                        $browserToday => 'today',
-                        $browserTomorrow => 'tomorrow',
-                        $browserYesterday => 'yesterday',
-                        default => '',
-                    };
-                    $serverIsPast = $date < $browserToday;
-                    $serverOpacity = match(true) {
-                        $serverIsPast && !$hasTasks && $isWeekend => 'opacity-30',
-                        $serverIsPast && !$hasTasks => 'opacity-40',
-                        $serverIsPast && $hasTasks => 'opacity-50',
-                        $isWeekend && !$hasTasks => 'opacity-50',
-                        default => '',
-                    };
-                    $serverTextColor = match(true) {
-                        $serverBadge === 'today' => 'text-indigo-600 dark:text-indigo-400',
-                        $serverIsPast || $isWeekend => 'text-zinc-400 dark:text-zinc-500',
-                        default => 'text-zinc-700 dark:text-zinc-300',
-                    };
+                    $nonPublicToday = browser_date() ?? now()->format('Y-m-d');
+                    $nonPublicPast = $groupedTasks->filter(fn ($t, $d) => $d < $nonPublicToday && $t->isNotEmpty());
+                    $nonPublicCurrent = $groupedTasks->filter(fn ($t, $d) => $d >= $nonPublicToday);
                 @endphp
-                
-                {{-- Server pre-computes badge/opacity/color; Alpine confirms using browser timezone --}}
-                <div 
-                    class="space-y-2 {{ $serverOpacity }}"
-                    x-data="{
-                        date: '{{ $date }}',
-                        isWeekend: {{ $isWeekend ? 'true' : 'false' }},
-                        hasTasks: {{ $hasTasks ? 'true' : 'false' }},
-                        badge: '{{ $serverBadge }}',
-                        isPast: {{ $serverIsPast ? 'true' : 'false' }},
-                        opacityClass: '{{ $serverOpacity }}',
-                        textColorClass: '{{ $serverTextColor }}',
-                        init() {
-                            const parts = this.date.split('-');
-                            const d = new Date(parts[0], parts[1] - 1, parts[2]);
-                            d.setHours(0, 0, 0, 0);
-                            
-                            const now = new Date();
-                            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                            const tomorrow = new Date(today);
-                            tomorrow.setDate(tomorrow.getDate() + 1);
-                            
-                            const yesterday = new Date(today);
-                            yesterday.setDate(yesterday.getDate() - 1);
-                            
-                            this.isPast = d.getTime() < today.getTime();
-                            this.badge = d.getTime() === today.getTime() ? 'today' 
-                                : (d.getTime() === tomorrow.getTime() ? 'tomorrow' 
-                                : (d.getTime() === yesterday.getTime() ? 'yesterday' : ''));
-                            
-                            if (this.isPast && !this.hasTasks) {
-                                this.opacityClass = this.isWeekend ? 'opacity-30' : 'opacity-40';
-                            } else if (this.isPast && this.hasTasks) {
-                                this.opacityClass = 'opacity-50';
-                            } else if (this.isWeekend && !this.hasTasks) {
-                                this.opacityClass = 'opacity-50';
-                            } else {
-                                this.opacityClass = '';
-                            }
-                            
-                            if (this.badge === 'today') {
-                                this.textColorClass = 'text-indigo-600 dark:text-indigo-400';
-                            } else if (this.isPast || this.isWeekend) {
-                                this.textColorClass = 'text-zinc-400 dark:text-zinc-500';
-                            } else {
-                                this.textColorClass = 'text-zinc-700 dark:text-zinc-300';
-                            }
-                        }
-                    }"
-                    :class="opacityClass"
-                >
-                    {{-- Date Header - min-h-6 reserves space for badge to prevent layout shift --}}
-                    <div class="flex items-center gap-2 min-h-6">
-                        <flux:heading size="sm" class="{{ $serverTextColor }}" ::class="textColorClass">
-                            {{ $carbonDate->format('D, M j') }}
-                        </flux:heading>
 
-                        {{-- Badges: server-rendered visible immediately, Alpine hides/shows on init --}}
-                        <span x-show="badge === 'today'" @if($serverBadge !== 'today') style="display:none" @endif>
-                            <flux:badge color="indigo" size="sm">Today</flux:badge>
-                        </span>
-                        <span x-show="badge === 'tomorrow'" @if($serverBadge !== 'tomorrow') style="display:none" @endif>
-                            <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
-                        </span>
-                        <span x-show="badge === 'yesterday'" @if($serverBadge !== 'yesterday') style="display:none" @endif>
-                            <flux:badge color="zinc" size="sm">Yesterday</flux:badge>
-                        </span>
-                    </div>
-                    
-                    @include('components.upcoming-tasks-list-tasks', [
-                        'tasks' => $tasks,
-                        'date' => $date,
-                        'carbonDate' => $carbonDate,
-                        'showAvatars' => $showAvatars,
-                        'clickable' => $clickable,
-                        'showProjectInfo' => $showProjectInfo,
-                        'showVendorInfo' => $showVendorInfo,
-                        'publicView' => $publicView,
-                    ])
-                </div>
-            @endforeach
-
-            {{-- Later tasks beyond the displayed week --}}
-            @if($laterTasks && $laterTasks->isNotEmpty())
-                <flux:accordion transition>
-                    <flux:accordion.item>
-                        <flux:accordion.heading>
-                            <div class="flex items-center gap-2">
-                                <span class="text-amber-600 dark:text-amber-400">Later</span>
-                                <flux:badge color="amber" size="sm">{{ $laterTasks->flatten()->count() }}</flux:badge>
-                                @php
-                                    $nextLaterDate = \Carbon\Carbon::parse($laterTasks->keys()->first());
-                                    $daysUntil = (int) now()->startOfDay()->diffInDays($nextLaterDate, false);
-                                @endphp
-                                <span class="text-xs text-zinc-400 dark:text-zinc-500 italic">
-                                    Next task in {{ $daysUntil }} {{ Str::plural('day', $daysUntil) }} ({{ $nextLaterDate->format('D, M j') }})
-                                </span>
-                            </div>
-                        </flux:accordion.heading>
-                        <flux:accordion.content>
-                            <div class="space-y-4">
-                                @foreach($laterTasks as $date => $tasks)
-                                    @php
-                                        $carbonDate = \Carbon\Carbon::parse($date);
-                                    @endphp
-                                    <div class="space-y-2">
-                                        <div class="flex items-center gap-2 min-h-6">
-                                            <flux:heading size="sm" class="text-zinc-500 dark:text-zinc-400">
-                                                {{ $carbonDate->format('D, M j') }}
-                                            </flux:heading>
-                                        </div>
-
-                                        @include('components.upcoming-tasks-list-tasks', [
-                                            'tasks' => $tasks,
+                @if($nonPublicPast->isNotEmpty())
+                    <flux:accordion transition>
+                        <flux:accordion.item>
+                            <flux:accordion.heading>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-zinc-500 dark:text-zinc-400">Past Tasks</span>
+                                    <flux:badge color="zinc" size="sm">{{ $nonPublicPast->flatten()->count() }}</flux:badge>
+                                </div>
+                            </flux:accordion.heading>
+                            <flux:accordion.content>
+                                <div class="space-y-4 mt-2">
+                                    @foreach($nonPublicPast as $date => $tasks)
+                                        @include('components.upcoming-tasks-list-day', [
                                             'date' => $date,
-                                            'carbonDate' => $carbonDate,
+                                            'tasks' => $tasks,
                                             'showAvatars' => $showAvatars,
                                             'clickable' => $clickable,
                                             'showProjectInfo' => $showProjectInfo,
                                             'showVendorInfo' => $showVendorInfo,
                                             'publicView' => $publicView,
                                         ])
-                                    </div>
-                                @endforeach
-                            </div>
-                        </flux:accordion.content>
-                    </flux:accordion.item>
-                </flux:accordion>
+                                    @endforeach
+                                </div>
+                            </flux:accordion.content>
+                        </flux:accordion.item>
+                    </flux:accordion>
+                @endif
+
+                @foreach($nonPublicCurrent as $date => $tasks)
+                    @include('components.upcoming-tasks-list-day', [
+                        'date' => $date,
+                        'tasks' => $tasks,
+                        'showAvatars' => $showAvatars,
+                        'clickable' => $clickable,
+                        'showProjectInfo' => $showProjectInfo,
+                        'showVendorInfo' => $showVendorInfo,
+                        'publicView' => $publicView,
+                    ])
+                @endforeach
             @endif
+
+            {{-- Later tasks beyond the displayed week --}}
+            @include('components.upcoming-tasks-list-later', [
+                'laterTasks' => $laterTasks,
+                'showAvatars' => $showAvatars,
+                'clickable' => $clickable,
+                'showProjectInfo' => $showProjectInfo,
+                'showVendorInfo' => $showVendorInfo,
+                'publicView' => $publicView,
+                'expanded' => $laterTasksExpanded,
+            ])
         </div>
     @endif
 </x-island-card>

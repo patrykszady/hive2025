@@ -43,6 +43,7 @@
             $showDayCounter = $totalDays > 1 && $currentDay > 0;
         }
     }
+
 @endphp
 
 <div class="flex items-start justify-between gap-2 min-w-0">
@@ -59,11 +60,14 @@
             </span>
         @endif
     </div>
-    @if($showDayCounter && ! ($hideDayCounter ?? false))
-        <span class="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-            {{ $currentDay }}/{{ $totalDays }}
-        </span>
-    @endif
+    <div class="flex items-center gap-2 shrink-0">
+        <x-task-preferred-indicator :task="$task" />
+        @if($showDayCounter && ! ($hideDayCounter ?? false))
+            <span class="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                {{ $currentDay }}/{{ $totalDays }}
+            </span>
+        @endif
+    </div>
 </div>
 
 @if(($showProjectInfo ?? false) && $task->project)

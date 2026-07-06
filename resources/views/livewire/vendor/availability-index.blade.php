@@ -291,6 +291,48 @@
 
         <flux:separator variant="subtle" />
 
+        @php($preferredSlots = $this->proposedPreferredSlots())
+        @if(!empty($preferredSlots))
+            <div class="rounded-xl border border-indigo-200 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/20">
+                <div class="flex items-center gap-2">
+                    <flux:icon.calendar-days class="size-4 text-indigo-600 dark:text-indigo-400" />
+                    <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Homeowner submitted times</flux:heading>
+                </div>
+                <flux:text class="mt-0.5 text-xs text-indigo-700/80 dark:text-indigo-300/80">
+                    Tap a time frame to add it to this task's schedule.
+                </flux:text>
+
+                <div class="mt-3 space-y-2.5">
+                    @foreach($preferredSlots as $slot)
+                        <div wire:key="vpref-{{ $slot['date'] }}" class="flex flex-wrap items-center gap-2">
+                            <span class="w-20 shrink-0 text-xs font-medium text-indigo-900 dark:text-indigo-100">
+                                {{ $slot['label'] }}
+                            </span>
+                            <div class="flex flex-wrap gap-1.5">
+                                @foreach($slot['times'] as $slotTime)
+                                    <button
+                                        type="button"
+                                        wire:key="vpref-{{ $slot['date'] }}-{{ $slotTime['time'] }}"
+                                        wire:click="applyPreferredSlot('{{ $slot['date'] }}', '{{ $slotTime['time'] }}')"
+                                        @class([
+                                            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition',
+                                            'border-indigo-500 bg-indigo-600 text-white shadow-sm dark:border-indigo-400 dark:bg-indigo-500' => $slotTime['applied'],
+                                            'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-700 dark:bg-zinc-800 dark:text-indigo-200 dark:hover:border-indigo-500' => ! $slotTime['applied'],
+                                        ])
+                                    >
+                                        @if($slotTime['applied'])
+                                            <flux:icon.check variant="micro" class="size-3" />
+                                        @endif
+                                        {{ $slotTime['time'] }}
+                                    </button>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
+
         {{-- Dates Calendar --}}
         <flux:field>
             <flux:label>Select Days</flux:label>

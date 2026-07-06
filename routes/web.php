@@ -3,6 +3,7 @@
 use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\ExpenseAutoMatchController;
 use App\Http\Controllers\LeadController;
+use App\Http\Controllers\ShortLinkController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\PushSubscriptionController;
@@ -141,7 +142,7 @@ Route::get('telnyx-audio/{filename}', function (string $filename) {
 // Passkey debug logging endpoint (temporary for debugging)
 Route::post('api/passkey-debug-log', function () {
     $data = request()->all();
-    Log::channel('passkey')->info('PasskeyJS: ' . ($data['message'] ?? 'No message'), [
+    Log::channel('single')->info('PasskeyJS: ' . ($data['message'] ?? 'No message'), [
         'level' => $data['level'] ?? 'info',
         'data' => $data['data'] ?? [],
         'timestamp' => $data['timestamp'] ?? null,
@@ -167,15 +168,6 @@ Route::middleware('guest')->group(function () {
 
     Route::get('registration', Registration::class)->name('registration');
 });
-
-// Dev-only auth bypass: log in as a given user id (defaults to 1).
-if (app()->environment('local')) {
-    Route::get('dev-login/{user}', function (\App\Models\User $user) {
-        \Illuminate\Support\Facades\Auth::login($user);
-
-        return redirect()->intended(route('dashboard'));
-    })->name('dev-login');
-}
 
 // Public marketing feature pages (no auth required)
 Route::prefix('welcome')->name('welcome.')->group(function () {
@@ -230,6 +222,7 @@ Route::permanentRedirect('legal/terms', '/welcome/legal/terms');
 // Short URLs for SMS
 Route::permanentRedirect('p', '/welcome/legal/privacy');
 Route::permanentRedirect('t', '/welcome/legal/terms');
+Route::get('l/{code}', ShortLinkController::class)->name('short-links.redirect');
 
 // Passkey setup page (requires auth)
 Route::middleware('auth')->group(function () {
@@ -243,11 +236,6 @@ Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availabili
 
 // Short URL for client schedule SMS
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
-
-// Internal tiny links — 302 straight to the destination (no interstitial)
-Route::get('l/{code}', \App\Http\Controllers\ShortLinkController::class)
-    ->where('code', '[A-Za-z0-9]+')
-    ->name('short-link.redirect');
 
 // Public lien waiver signing (token-based, no auth)
 Route::get('lw/{token}', \App\Livewire\LienWaivers\Show::class)->name('lien-waivers.public-sign');

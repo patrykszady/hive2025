@@ -123,16 +123,6 @@ return [
         'speaker_identification' => (bool) env('CALL_TRANSCRIPTION_SPEAKER_IDENTIFICATION', true),
 
         /*
-        | LLM provider used to classify each diarized speaker's ROLE (Hive
-        | agent vs. external party) from the conversation content. We never
-        | ask the model to name speakers — names come from our own call
-        | records — so it can neither hallucinate nor swap them. Defaults to
-        | AssemblyAI's LLM Gateway (single vendor) and automatically falls back
-        | to OpenAI when the gateway returns 401/403.
-        */
-        'speaker_identification_driver' => env('CALL_SPEAKER_IDENTIFICATION_DRIVER', 'assemblyai'), // assemblyai|openai
-
-        /*
         | AssemblyAI Audio Intelligence add-ons. These run inline with the
         | transcription request and their results are stored in the
         | transcript's `intelligence` JSON column. Entity detection is
@@ -187,7 +177,7 @@ return [
     */
     'summarization' => [
         'enabled' => (bool) env('CALL_SUMMARIZATION_ENABLED', true),
-        'driver' => env('CALL_SUMMARIZATION_DRIVER', 'assemblyai'), // assemblyai|openai
+        'driver' => env('CALL_SUMMARIZATION_DRIVER', 'openai'), // assemblyai|openai
         // OpenAI model (used when driver = openai).
         'model' => env('CALL_SUMMARIZATION_MODEL', 'gpt-4o'),
         // AssemblyAI LLM Gateway model (used when driver = assemblyai). Must

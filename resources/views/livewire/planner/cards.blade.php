@@ -935,7 +935,10 @@
                     >
                         {{-- Task name --}}
                         <flux:table.cell variant="strong" class="whitespace-normal {{ $vline }}">
-                            <span class="font-medium text-zinc-800 dark:text-zinc-200">{{ $task->title }}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="font-medium text-zinc-800 dark:text-zinc-200">{{ $task->title }}</span>
+                                <x-task-preferred-indicator :task="$task" />
+                            </div>
                         </flux:table.cell>
 
                         {{-- Project (address) --}}

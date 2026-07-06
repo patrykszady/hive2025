@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sms;
 
+use App\Livewire\Concerns\HasLaterTasks;
 use App\Models\Project;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
@@ -11,12 +12,15 @@ use App\Services\GroupSmsService;
 use App\Services\SmsTranslationService;
 use Carbon\Carbon;
 use Flux;
+use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
 class SendScheduleModal extends Component
 {
+    use HasLaterTasks;
+
     public bool $showModal = false;
 
     public ?int $threadId = null;
@@ -26,6 +30,11 @@ class SendScheduleModal extends Component
     public bool $scheduleWithoutDate = false;
 
     protected int $daysAhead = 3;
+
+    /**
+     * Service Call project status code.
+     */
+    private const SERVICE_CALL_STATUS_CODE = 8;
 
     #[On('openScheduleModal')]
     public function open(int $threadId): void
@@ -50,6 +59,7 @@ class SendScheduleModal extends Component
             $this->groupedUpcomingTasks,
             $this->pendingTasks,
             $this->nextUpcomingTasks,
+            $this->laterTasks,
             $this->selectedTaskIds,
             $this->previewMessage,
         );
@@ -64,6 +74,17 @@ class SendScheduleModal extends Component
         $this->dispatch(
             'addTask',
             date: $date,
+            vendor_id: $thread?->subject_vendor_id,
+            client_id: $thread?->client_id,
+        )->to('tasks.task-create');
+    }
+
+    public function openCreateTask(): void
+    {
+        $thread = $this->thread;
+
+        $this->dispatch(
+            'addTask',
             vendor_id: $thread?->subject_vendor_id,
             client_id: $thread?->client_id,
         )->to('tasks.task-create');
@@ -331,7 +352,7 @@ class SendScheduleModal extends Component
         $vendorId = $this->thread?->subject_vendor_id;
 
         $tasks = Task::whereIn('project_id', $projectIds)
-            ->with(['vendor', 'project.client', 'project.latestStatus'])
+            ->with(['vendor', 'project.client', 'project.latestStatus', 'project.createdByVendor'])
             ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->where(function ($query) {
                 $query->whereNull('start_date')->orWhereNull('end_date');
@@ -436,6 +457,38 @@ class SendScheduleModal extends Component
     }
 
     /**
+     * Base query for "Later" tasks: scheduled tasks across the thread's projects,
+     * honoring the same vendor-reminder visibility rule as the other windows.
+     */
+    protected function laterTasksBaseQuery(): Builder
+    {
+        $projectIds = $this->clientProjectIds;
+        $vendorId = $this->thread?->subject_vendor_id;
+
+        return Task::query()
+            ->whereIn('project_id', $projectIds ?: [0])
+            ->when($vendorId, fn (Builder $query) => $query
+                ->where('vendor_id', $vendorId)
+                ->whereRaw('LOWER(type) != ?', ['reminder']))
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date');
+    }
+
+    /**
+     * "Later" tasks begin the day after the "Next Up" day (or the preview window
+     * end when there is no next-up day), so they never duplicate shown tasks.
+     */
+    protected function laterTasksWindowEnd(): string
+    {
+        $today = Carbon::today(browser_timezone());
+        $windowEnd = $today->copy()->addDays($this->daysAhead - 1)->format('Y-m-d');
+
+        $nextDate = $this->nextUpcomingDate;
+
+        return $nextDate && $nextDate > $windowEnd ? $nextDate : $windowEnd;
+    }
+
+    /**
      * Build the schedule message text matching the morning/night digest format.
      */
     #[Computed]
@@ -459,7 +512,10 @@ class SendScheduleModal extends Component
 
         $greeting = $this->buildRecipientGreeting();
 
-        $intro = $this->scheduleIntroLabel() . ':';
+        $invite = $this->serviceCallInviteLine();
+
+        $hasUpcomingWindowTasks = $grouped->contains(fn ($tasks) => $tasks->isNotEmpty());
+        $intro = $hasUpcomingWindowTasks ? $this->scheduleIntroLabel() . ':' : '';
 
         // Build task lines grouped by day (matching digest format)
         $today = Carbon::today(browser_timezone());
@@ -558,10 +614,18 @@ class SendScheduleModal extends Component
             $daySections[] = $this->scheduleDayLabel('next_up') . " {$dateLabel}:\n{$taskLines}";
         }
 
-        // Add pending tasks section
+        // Add pending tasks section. For client threads, Service Call pending items
+        // are shown in the top availability block and omitted here.
         if ($pendingTasks->isNotEmpty()) {
             $showProject = (bool) $this->thread?->subject_vendor_id;
-            $pendingLines = $pendingTasks->map(function (Task $task) use ($showProject) {
+            $pendingForSection = $showProject
+                ? $pendingTasks
+                : $pendingTasks->reject(
+                    fn (Task $task): bool => (int) ($task->project?->latestStatus?->status_code ?? 0) === self::SERVICE_CALL_STATUS_CODE
+                )->values();
+
+            if ($pendingForSection->isNotEmpty()) {
+                $pendingLines = $pendingForSection->map(function (Task $task) use ($showProject) {
                 $taskTitle = trim($task->title ?? 'Task');
                 $projectName = trim((string) ($task->project?->project_name ?? ''));
                 if ($showProject && $projectName !== '') {
@@ -584,7 +648,15 @@ class SendScheduleModal extends Component
                 return $line;
             })->implode("\n");
 
-            $daySections[] = $this->scheduleDayLabel('pending') . ":\n{$pendingLines}";
+                $daySections[] = $this->scheduleDayLabel('pending') . ":\n{$pendingLines}";
+            }
+        }
+
+        // Compact "Later" summary — count only; details live on the schedule link.
+        $laterCount = $this->laterTasks->flatten()->unique('id')->count();
+        if ($laterCount > 0) {
+            $laterWord = $laterCount === 1 ? 'task' : 'tasks';
+            $daySections[] = $this->scheduleDayLabel('later') . " ({$laterCount} {$laterWord})";
         }
 
         $body = implode("\n\n", $daySections);
@@ -613,7 +685,74 @@ class SendScheduleModal extends Component
             }
         }
 
-        return "{$greeting}\n{$intro}\n\n{$body}\n{$linksText}";
+        if ($invite !== '' && $intro !== '') {
+            $header = "{$greeting}\n{$invite}\n\n{$intro}";
+        } elseif ($invite !== '') {
+            $header = "{$greeting}\n{$invite}";
+        } elseif ($intro !== '') {
+            $header = "{$greeting}\n\n{$intro}";
+        } else {
+            $header = $greeting;
+        }
+
+        return "{$header}\n\n{$body}\n{$linksText}";
+    }
+
+    /**
+     * Client-facing invite shown before the task list when the client has a
+     * pending Service Call task, asking them to share availability.
+     */
+    protected function serviceCallInviteLine(): string
+    {
+        if ($this->thread?->subject_vendor_id) {
+            return '';
+        }
+
+        $serviceCallTasks = $this->pendingTasks->filter(
+            fn (Task $task): bool => (int) ($task->project?->latestStatus?->status_code ?? 0) === self::SERVICE_CALL_STATUS_CODE
+        );
+
+        if ($serviceCallTasks->isEmpty()) {
+            return '';
+        }
+
+        $vendor = $serviceCallTasks->first()->project?->createdByVendor;
+        $contractor = trim((string) ($vendor?->short_name ?: $vendor?->name ?: ''));
+
+        if ($contractor === '') {
+            $contractor = 'your contractor';
+        }
+
+        $serviceCallCount = $serviceCallTasks->count();
+        $serviceCallLabel = $serviceCallCount === 1
+            ? 'for this service call'
+            : 'for these service calls';
+
+        $inviteText = match ($this->languageKey()) {
+            'pl' => "Podaj swoja dostepnosc dla {$contractor}:",
+            'es' => "Comparte tu disponibilidad para {$contractor}:",
+            default => "Share availability with {$contractor} {$serviceCallLabel}:",
+        };
+
+        $scheduleLinkLine = $this->buildScheduleLink();
+        $inlineScheduleLine = '';
+        if ($scheduleLinkLine !== '') {
+            $parts = explode(':', $scheduleLinkLine, 2);
+            $scheduleUrl = trim((string) ($parts[1] ?? ''));
+            if ($scheduleUrl !== '') {
+                $inlineScheduleLine = "Schedule: {$scheduleUrl}";
+            }
+        }
+
+        $itemLines = $serviceCallTasks
+            ->map(fn (Task $task): string => '- ' . trim((string) ($task->title ?? 'Task')))
+            ->implode("\n");
+
+        if ($inlineScheduleLine !== '') {
+            return "{$inviteText}\n{$itemLines}\n{$inlineScheduleLine}";
+        }
+
+        return "{$inviteText}\n{$itemLines}";
     }
 
     /**
@@ -747,6 +886,7 @@ class SendScheduleModal extends Component
                 'tomorrow' => 'Tomorrow',
                 'next_up' => 'Next up',
                 'pending' => 'Pending',
+                'later' => 'Later',
                 default => $key,
             };
         }
@@ -795,6 +935,7 @@ class SendScheduleModal extends Component
                 'tomorrow' => 'Tomorrow',
                 'next_up' => 'Next up',
                 'pending' => 'Pending',
+                'later' => 'Later',
             ],
             'pl' => [
                 'hi' => 'Czesc',
@@ -804,6 +945,7 @@ class SendScheduleModal extends Component
                 'tomorrow' => 'Jutro',
                 'next_up' => 'Nastepnie',
                 'pending' => 'Oczekujace',
+                'later' => 'Pozniej',
             ],
             'es' => [
                 'hi' => 'Hola',
@@ -813,6 +955,7 @@ class SendScheduleModal extends Component
                 'tomorrow' => 'Manana',
                 'next_up' => 'Proximo',
                 'pending' => 'Pendientes',
+                'later' => 'Mas tarde',
             ],
         ];
 

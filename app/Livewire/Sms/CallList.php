@@ -28,8 +28,6 @@ class CallList extends Component
 
     public string $callFilter = 'all';
 
-    public string $search = '';
-
     #[Url(as: 'callId', except: null)]
     public ?int $selectedCallId = null;
 
@@ -105,12 +103,6 @@ class CallList extends Component
     public function updatedCallFilter(): void
     {
         $this->normalizeCallFilter();
-        $this->limit = 25;
-        $this->selectedCallId = null;
-    }
-
-    public function updatedSearch(): void
-    {
         $this->limit = 25;
         $this->selectedCallId = null;
     }
@@ -197,36 +189,9 @@ class CallList extends Component
         $user = auth()->user();
         $ourNumbers = config('services.telnyx.numbers', []);
 
-        // Resolve a full-text search to a set of matching call IDs via
-        // Meilisearch (covers caller name, phone numbers, notes, and the
-        // transcript). Falls back to a SQL LIKE if the index is unavailable.
-        $search = trim($this->search);
-        $searchIds = null;
-        $searchFailed = false;
-        if ($search !== '') {
-            try {
-                $searchIds = CallLog::search($search)
-                    ->take(200)
-                    ->keys()
-                    ->map(fn ($id) => (int) $id)
-                    ->all();
-            } catch (\Throwable $e) {
-                report($e);
-                $searchFailed = true;
-            }
-        }
-
         $rawCalls = CallLog::query()
             ->with('transcript')
             ->visibleToMessagesUser($user)
-            ->when($search !== '' && ! $searchFailed, fn ($q) => $q->whereIn('id', $searchIds ?? []))
-            ->when($search !== '' && $searchFailed, fn ($q) => $q->where(function ($inner) use ($search) {
-                $like = '%' . $search . '%';
-                $inner->where('caller_name', 'like', $like)
-                    ->orWhere('from_number', 'like', $like)
-                    ->orWhere('to_number', 'like', $like)
-                    ->orWhere('notes', 'like', $like);
-            }))
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
             ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
             ->when($this->callFilter === 'blocked', fn ($q) => $q->where('status', CallLog::STATUS_BLOCKED))

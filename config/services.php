@@ -3,10 +3,6 @@
 return [
     'ffmpeg_path' => env('FFMPEG_PATH', '/usr/bin/ffmpeg'),
 
-    'url_shortener' => [
-        'enabled' => env('URL_SHORTENER_ENABLED', true),
-    ],
-
     'plaid' => [
         'env' => env('PLAID_ENV'),
         'client_id' => env('PLAID_CLIENT_ID'),

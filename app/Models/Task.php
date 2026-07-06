@@ -99,6 +99,111 @@ class Task extends Model
     }
 
     /**
+     * Maps a homeowner-selected time frame to its arrival start time.
+     *
+     * @var array<string, string>
+     */
+    private const SERVICE_TIME_FRAME_STARTS = [
+        '7-9 AM' => '07:00',
+        '9-11 AM' => '09:00',
+        '11-1 PM' => '11:00',
+        '1-3 PM' => '13:00',
+        '3-5 PM' => '15:00',
+    ];
+
+    /**
+     * Whether the project has homeowner-submitted preferred service times.
+     */
+    public function projectHasHomeownerPreferredTimes(): bool
+    {
+        return ! empty(data_get($this->project?->service_availability, 'slots'));
+    }
+
+    /**
+     * Whether one of the homeowner's preferred service times has been scheduled
+     * onto this task (matching date + arrival time frame).
+     */
+    public function hasScheduledHomeownerPreferredTime(): bool
+    {
+        $slots = (array) data_get($this->project?->service_availability, 'slots', []);
+
+        if (empty($slots)) {
+            return false;
+        }
+
+        $selectedDates = (array) data_get($this->options, 'dates', []);
+
+        foreach ($slots as $slot) {
+            $date = is_array($slot) ? ($slot['date'] ?? null) : null;
+            $time = is_array($slot) ? ($slot['time'] ?? null) : null;
+
+            if ($date === null || $time === null || ! in_array($date, $selectedDates, true)) {
+                continue;
+            }
+
+            $setting = (array) data_get($this->options, "time_settings.$date", []);
+            $frameStart = self::SERVICE_TIME_FRAME_STARTS[$time] ?? null;
+
+            if ($frameStart === null) {
+                if (empty($setting['use_time'])) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (! empty($setting['use_time']) && ($setting['start_time'] ?? null) === $frameStart) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether this specific task was included in the homeowner's submitted
+     * preferred times. When the submission recorded no task ids we can't tell
+     * per task, so we assume it is covered.
+     */
+    public function coveredByHomeownerPreferredTimes(): bool
+    {
+        $savedTaskIds = collect((array) data_get($this->project?->service_availability, 'task_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->all();
+
+        if ($savedTaskIds === []) {
+            return true;
+        }
+
+        return in_array((int) $this->id, $savedTaskIds, true);
+    }
+
+    /**
+     * The homeowner preferred-time indicator state for this task:
+     * 'scheduled' when the task already has a date (green), 'schedule' when the
+     * homeowner submitted times covering this task but it is still unscheduled
+     * (red), 'pending' when the homeowner has not chosen times for this task yet
+     * (orange), otherwise null.
+     */
+    public function preferredTimeIndicator(): ?string
+    {
+        if (! $this->projectHasHomeownerPreferredTimes()) {
+            return null;
+        }
+
+        if ($this->hasScheduledHomeownerPreferredTime() || ! empty($this->start_date)) {
+            return 'scheduled';
+        }
+
+        if (! $this->coveredByHomeownerPreferredTimes()) {
+            return 'pending';
+        }
+
+        return 'schedule';
+    }
+
+    /**
      * Get the previous arrival time label before the most recent change.
      *
      * Queries the activity log for the most recent time_settings change

@@ -1,7 +1,15 @@
 <?php
 
+use App\Models\Client;
+use App\Models\Project;
+use App\Models\Task;
+use App\Models\Vendor;
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Tasks\TaskCreate;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
+
+uses(RefreshDatabase::class);
 
 it('defaults meeting location type to in_person', function (): void {
     $form = new TaskForm(new TaskCreate(), 'form');
@@ -99,4 +107,136 @@ it('removeMeetingParticipant removes by index and reindexes', function (): void 
 
     expect($component->form->meeting_participants)
         ->toBe(['john@example.com', 'bob@example.com']);
+});
+
+it('includes selected vendor contact and excludes owner company business email in default meeting participants', function (): void {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'business_email' => 'crew@gs.construction',
+    ]);
+
+    $selectedVendor = Vendor::factory()->create([
+        'business_name' => 'PMG Carpentry',
+        'business_email' => 'pmg@example.test',
+    ]);
+
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Framing/Foundation Consult',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+
+    $component = Livewire::test(TaskCreate::class)
+        ->set('form.type', 'Meet')
+        ->set('form.vendor_id', $selectedVendor->id)
+        ->set('form.project_id', $project->id);
+
+    $participants = $component->get('form.meeting_participants');
+
+    expect($participants)
+        ->toContain('pmg@example.test')
+        ->not->toContain('crew@gs.construction');
+});
+
+it('merges selected vendor contact when editing an existing meet task', function (): void {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'business_email' => 'crew@gs.construction',
+    ]);
+
+    $selectedVendor = Vendor::factory()->create([
+        'business_name' => 'PMG Carpentry',
+        'business_email' => 'pmg@example.test',
+    ]);
+
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Framing/Foundation Consult',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Framing/Foundation Consult',
+        'type' => 'Meet',
+        'order' => 1,
+        'project_id' => $project->id,
+        'vendor_id' => $selectedVendor->id,
+        'user_ids' => [],
+        'notes' => null,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+        'created_by_user_id' => 1,
+        'options' => [
+            'meeting_participants' => ['external@example.test'],
+        ],
+    ]));
+
+    $component = Livewire::test(TaskCreate::class)
+        ->call('editTask', $task->id);
+
+    $participants = $component->get('form.meeting_participants');
+
+    expect($participants)
+        ->toContain('external@example.test')
+        ->toContain('pmg@example.test');
+});
+
+it('removes owner company business email from legacy participants when editing meet task', function (): void {
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'business_email' => 'crew@gs.construction',
+    ]);
+
+    $selectedVendor = Vendor::factory()->create([
+        'business_name' => 'PMG Carpentry',
+        'business_email' => 'pmg@example.test',
+    ]);
+
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Framing/Foundation Consult',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Framing/Foundation Consult',
+        'type' => 'Meet',
+        'order' => 1,
+        'project_id' => $project->id,
+        'vendor_id' => $selectedVendor->id,
+        'user_ids' => [],
+        'notes' => null,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+        'created_by_user_id' => 1,
+        'options' => [
+            'meeting_participants' => ['external@example.test', 'crew@gs.construction'],
+        ],
+    ]));
+
+    $component = Livewire::test(TaskCreate::class)
+        ->call('editTask', $task->id);
+
+    $participants = $component->get('form.meeting_participants');
+
+    expect($participants)
+        ->toContain('external@example.test')
+        ->toContain('pmg@example.test')
+        ->not->toContain('crew@gs.construction');
 });

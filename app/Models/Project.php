@@ -96,11 +96,21 @@ class Project extends Model
         return trim($first.' '.$rest);
     }
 
-    protected $fillable = ['project_name', 'client_id', 'belongs_to_vendor_id', 'created_by_user_id', 'note', 'timesheet_id', 'created_by_user_id', 'note', 'do_not_include', 'address', 'address_2', 'city', 'state', 'zip_code', 'created_at', 'updated_at'];
+    protected $fillable = ['project_name', 'client_id', 'belongs_to_vendor_id', 'created_by_user_id', 'note', 'timesheet_id', 'created_by_user_id', 'note', 'do_not_include', 'address', 'address_2', 'city', 'state', 'zip_code', 'service_availability', 'created_at', 'updated_at'];
 
     protected static function booted()
     {
         static::addGlobalScope(new ProjectScope);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'service_availability' => 'array',
+        ];
     }
 
     /**

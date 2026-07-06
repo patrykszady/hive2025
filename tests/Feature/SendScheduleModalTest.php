@@ -3,6 +3,7 @@
 use App\Livewire\Sms\SendScheduleModal;
 use App\Models\Client;
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use App\Models\SmsGroupThread;
 use App\Models\Task;
 use App\Models\User;
@@ -358,6 +359,187 @@ it('renders schedule modal task cards as clickable edit actions', function (): v
         ->assertSeeHtml("tasks.task-create', 'editTask'");
 });
 
+it('pads the scrollable task list so task card borders are not clipped', function (): void {
+    $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $ownerUser = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-padding@example.com',
+        'cell_phone' => '2245550188',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $this->actingAs($ownerUser);
+
+    $subjectVendor = Vendor::factory()->create(['business_name' => 'Smartech Electric']);
+    $subjectVendor->short_name = 'Smartech';
+    $subjectVendor->save();
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Vendor Thread Project',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => 60062,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Pending Task',
+        'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id,
+        'type' => 'Task',
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Vendor Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $ownerVendor->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->assertSeeHtml('overflow-y-auto px-1 py-1');
+});
+
+it('shows a Later section for tasks scheduled beyond the next-up day', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-later@example.com',
+        'cell_phone' => '2245550177',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Later Tasks Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    // Next-up task: first future day beyond the 3-day preview window.
+    Task::query()->create([
+        'title' => 'Next Up Task',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today()->addDays(4),
+        'end_date' => today()->addDays(4),
+    ]);
+
+    // Later task: several days beyond the next-up day.
+    Task::query()->create([
+        'title' => 'Later Task',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today()->addDays(7),
+        'end_date' => today()->addDays(7),
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->assertSee('Next Up Task')
+        ->assertSee('Later Task')
+        ->assertSee('Next task in');
+});
+
+it('includes a Later summary line in the schedule message', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-later-msg@example.com',
+        'cell_phone' => '2245550166',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Later Message Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    // Next-up task: first future day beyond the 3-day preview window.
+    Task::query()->create([
+        'title' => 'Next Up Task',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today()->addDays(4),
+        'end_date' => today()->addDays(4),
+    ]);
+
+    // Two later tasks on different days beyond the next-up day.
+    Task::query()->create([
+        'title' => 'Later A',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today()->addDays(7),
+        'end_date' => today()->addDays(7),
+    ]);
+
+    Task::query()->create([
+        'title' => 'Later B',
+        'project_id' => $project->id,
+        'vendor_id' => $vendor->id,
+        'type' => 'Task',
+        'start_date' => today()->addDays(9),
+        'end_date' => today()->addDays(9),
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain('Next up')
+        ->toContain('Later (2 tasks)')
+        ->not->toContain('Upcoming tasks:');
+});
+
 it('refreshes editable schedule message text after task updates', function (): void {
     $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
 
@@ -534,6 +716,252 @@ it('dispatches addTask when using the date-level add-task action', function (): 
         ->call('open', $thread->id)
         ->call('openCreateTaskForDate', today()->format('Y-m-d'))
         ->assertDispatched('addTask');
+});
+
+it('dispatches addTask when using the tasks-row add action without a date', function (): void {
+    $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $ownerUser = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-nodate-add@example.com',
+        'cell_phone' => '2245550398',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $this->actingAs($ownerUser);
+
+    $subjectVendor = Vendor::factory()->create(['business_name' => 'Smartech Electric']);
+    $subjectVendor->short_name = 'Smartech';
+    $subjectVendor->save();
+
+    $client = Client::factory()->create();
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Vendor Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $ownerVendor->id,
+        'client_id' => $client->id,
+        'subject_vendor_id' => $subjectVendor->id,
+        'last_activity_at' => now(),
+    ]);
+
+    Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->call('openCreateTask')
+        ->assertDispatched('addTask');
+});
+
+it('shows the service call invite block and does not duplicate service call items in Pending', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $vendor->short_name = 'GS Construction';
+    $vendor->save();
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-servicecall@example.com',
+        'cell_phone' => '2245550144',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Service Call Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 8,
+        'start_date' => now(),
+    ]));
+
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Fix Electrical Outlet',
+        'type' => 'Task',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => 1,
+    ]));
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain("Share availability with GS Construction for this service call:")
+        ->toContain('View schedule: ')
+        ->toContain('- Fix Electrical Outlet')
+        ->toContain("- Fix Electrical Outlet\nSchedule: ")
+        ->not->toContain("Pending:\n- Fix Electrical Outlet")
+        ->not->toContain('(Share availability)');
+
+    expect(strpos($preview, "Share availability with"))
+        ->toBeLessThan(strpos($preview, 'Schedule:'));
+
+    expect(strpos($preview, '- Fix Electrical Outlet'))
+        ->toBeLessThan(strpos($preview, 'Schedule:'));
+
+    expect(substr_count($preview, 'View schedule:'))
+        ->toBe(1);
+
+    expect($preview)->not->toContain('Upcoming tasks:');
+});
+
+it('uses plural service call wording when multiple service call tasks exist', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $vendor->short_name = 'GS Construction';
+    $vendor->save();
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-servicecall-multiple@example.com',
+        'cell_phone' => '2245550145',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Service Call Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 8,
+        'start_date' => now(),
+    ]));
+
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Fix Electrical Outlet',
+        'type' => 'Task',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => 1,
+    ]));
+
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Inspect Breaker Panel',
+        'type' => 'Task',
+        'order' => 2,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => 1,
+    ]));
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain("Share availability with GS Construction for these service calls:")
+        ->toContain('View schedule: ')
+        ->toContain('- Fix Electrical Outlet')
+        ->toContain('- Inspect Breaker Panel')
+        ->toContain("- Inspect Breaker Panel\nSchedule: ");
+
+    expect(strpos($preview, '- Inspect Breaker Panel'))
+        ->toBeLessThan(strpos($preview, 'Schedule:'));
+
+    expect(substr_count($preview, 'View schedule:'))
+        ->toBe(1);
+});
+
+it('does not add share availability text for non service call client threads', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-non-servicecall@example.com',
+        'cell_phone' => '2245550133',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Active Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 6,
+        'start_date' => now(),
+    ]));
+
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Fix Electrical Outlet',
+        'type' => 'Task',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => 1,
+    ]));
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->not->toContain('(Share availability)')
+        ->not->toContain('Share times with');
 });
 
 it('sets vendor status to requested only after sending the vendor schedule message', function (): void {

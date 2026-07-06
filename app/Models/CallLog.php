@@ -9,12 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Laravel\Scout\Searchable;
 
 class CallLog extends Model
 {
     use HasFactory;
-    use Searchable;
     // Status constants
     public const STATUS_INITIATED = 'initiated';
     public const STATUS_ANSWERED = 'answered';
@@ -87,74 +85,6 @@ class CallLog extends Model
             'answered_at' => 'datetime',
             'ended_at' => 'datetime',
         ];
-    }
-
-    /**
-     * Dedicated Meilisearch index powering the calls tab search box.
-     */
-    public function searchableAs(): string
-    {
-        return app()->environment('local') ? 'call_logs_index_dev' : 'call_logs_index';
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function toSearchableArray(): array
-    {
-        $this->loadMissing('transcript:id,call_log_id,text,summary');
-
-        return [
-            'id' => (int) $this->id,
-            'caller_name' => (string) ($this->caller_name ?? ''),
-            'from_number' => (string) ($this->from_number ?? ''),
-            'to_number' => (string) ($this->to_number ?? ''),
-            'phone_digits' => $this->searchablePhoneDigits(),
-            'direction' => (string) ($this->direction ?? ''),
-            'status' => (string) ($this->status ?? ''),
-            'notes' => (string) ($this->notes ?? ''),
-            'transcript_text' => mb_substr(
-                trim((string) ($this->transcript?->summary ?? '') . ' ' . (string) ($this->transcript?->text ?? '')),
-                0,
-                4000
-            ),
-            'created_at_unix' => optional($this->created_at)->timestamp ?? 0,
-        ];
-    }
-
-    /**
-     * Trailing-digit variants of both call numbers so partial phone searches
-     * (e.g. "6349") match.
-     *
-     * @return array<int, string>
-     */
-    protected function searchablePhoneDigits(): array
-    {
-        return collect([$this->from_number, $this->to_number])
-            ->flatMap(function ($phone) {
-                $digits = preg_replace('/\D/', '', (string) $phone);
-                if (! is_string($digits) || $digits === '') {
-                    return [];
-                }
-
-                $variants = [$digits];
-                $len = strlen($digits);
-                if ($len > 10) {
-                    $variants[] = substr($digits, -10);
-                }
-                if ($len >= 7) {
-                    $variants[] = substr($digits, -7);
-                }
-                if ($len >= 4) {
-                    $variants[] = substr($digits, -4);
-                }
-
-                return $variants;
-            })
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
     }
 
     public function project(): BelongsTo

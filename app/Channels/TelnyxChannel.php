@@ -3,8 +3,11 @@
 namespace App\Channels;
 
 use App\Notifications\ClientScheduleSmsNotification;
+use App\Notifications\ClientServiceAvailabilityNotification;
+use App\Notifications\ClientServiceScheduledNotification;
 use App\Notifications\TeamTaskSmsNotification;
 use App\Notifications\VendorAvailabilitySmsNotification;
+use App\Notifications\VendorClientTimesRequestNotification;
 use App\Notifications\VendorScheduleSmsNotification;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Http;
@@ -32,8 +35,11 @@ class TelnyxChannel
         $phone = $notifiable->routeNotificationFor('telnyx');
             
         $isVendorSms = $notification instanceof VendorAvailabilitySmsNotification
-            || $notification instanceof VendorScheduleSmsNotification;
-        $isClientScheduleSms = $notification instanceof ClientScheduleSmsNotification;
+            || $notification instanceof VendorScheduleSmsNotification
+            || $notification instanceof VendorClientTimesRequestNotification
+            || $notification instanceof ClientServiceAvailabilityNotification;
+        $isClientScheduleSms = $notification instanceof ClientScheduleSmsNotification
+            || $notification instanceof ClientServiceScheduledNotification;
         $isTeamTaskSms = $notification instanceof TeamTaskSmsNotification;
 
         $logChannel = match (true) {
@@ -52,7 +58,10 @@ class TelnyxChannel
             && ($notification instanceof TeamTaskSmsNotification
                 || $notification instanceof VendorAvailabilitySmsNotification
                 || $notification instanceof VendorScheduleSmsNotification
-                || $notification instanceof ClientScheduleSmsNotification)
+                || $notification instanceof VendorClientTimesRequestNotification
+                || $notification instanceof ClientServiceAvailabilityNotification
+                || $notification instanceof ClientScheduleSmsNotification
+                || $notification instanceof ClientServiceScheduledNotification)
         ) {
             $originalPhone = $phone;
             $phone = config('services.telnyx.dev_to', '+18474304439');
@@ -174,10 +183,22 @@ class TelnyxChannel
             return $notification->project->createdByVendor;
         }
 
+        if ($notification instanceof ClientServiceScheduledNotification) {
+            return $notification->project->createdByVendor;
+        }
+
         if ($notification instanceof VendorScheduleSmsNotification) {
             $task = $notification->tasks->first();
 
             return $task?->project?->createdByVendor;
+        }
+
+        if ($notification instanceof ClientServiceAvailabilityNotification) {
+            return $notification->project->createdByVendor;
+        }
+
+        if ($notification instanceof VendorClientTimesRequestNotification) {
+            return $notification->project->createdByVendor;
         }
 
         if ($notification instanceof VendorAvailabilitySmsNotification) {
@@ -199,16 +220,19 @@ class TelnyxChannel
 
     private function smsOptionKeyFor(Notification $notification): ?string
     {
-        if ($notification instanceof ClientScheduleSmsNotification) {
+        if ($notification instanceof ClientScheduleSmsNotification
+            || $notification instanceof ClientServiceScheduledNotification
+        ) {
             return 'sms_client_enabled';
         }
 
         if ($notification instanceof VendorScheduleSmsNotification
             || $notification instanceof VendorAvailabilitySmsNotification
+            || $notification instanceof VendorClientTimesRequestNotification
+            || $notification instanceof ClientServiceAvailabilityNotification
         ) {
             return 'sms_vendor_enabled';
         }
-
         if ($notification instanceof TeamTaskSmsNotification) {
             return 'sms_team_enabled';
         }

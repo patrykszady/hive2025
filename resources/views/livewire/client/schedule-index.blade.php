@@ -30,46 +30,53 @@
                 </div>
                 <flux:text class="text-zinc-600 dark:text-zinc-400">{{ $message }}</flux:text>
             </flux:card>
-        @elseif($this->groupedTasks->isEmpty())
-            {{-- No Upcoming Tasks --}}
-            <flux:card class="text-center">
-                <div class="w-16 h-16 mx-auto mb-4 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
-                    <flux:icon.check class="size-8 text-green-600 dark:text-green-400" />
-                </div>
-                <flux:text class="text-zinc-600 dark:text-zinc-400">No tasks upcoming.</flux:text>
-            </flux:card>
         @else
-            <x-upcoming-tasks-list
-                :grouped-tasks="$this->groupedTasks"
-                :later-tasks="$this->laterTasks"
-                :task-count="$this->taskCount"
-                :unscheduled-tasks="$this->unscheduledTasks"
-                :pending-tasks-expanded="false"
-                :show-avatars="false"
-                :clickable="false"
-                :show-project-info="$this->hasMultipleProjects"
-                :show-notifications="false"
-                :public-view="true"
-            />
+            @if($this->isServiceCall && $this->unscheduledTasks->isNotEmpty())
+                @include('livewire.client.partials.service-availability')
+            @endif
 
-            {{-- Registration CTA --}}
-            @guest
-                <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
-                    <a href="{{ route('welcome.homeowners') }}" target="_blank" rel="noopener noreferrer" class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
-                        <x-hive-logo class="size-7" />
-                    </a>
-                    <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Join your Project Hive</flux:heading>
-                    <flux:text class="mt-1 text-sm text-indigo-700 dark:text-indigo-300">Register a Hive account to get schedule updates, notifications, and project details.</flux:text>
-                    <div class="mt-4 flex items-center justify-center gap-3">
-                        <flux:button variant="primary" href="{{ route('registration') }}">
-                            Register
-                        </flux:button>
-                        <flux:button href="{{ route('login') }}">
-                            Login
-                        </flux:button>
+            @if($this->groupedTasks->isEmpty())
+                {{-- No Upcoming Tasks --}}
+                <flux:card class="text-center">
+                    <div class="w-16 h-16 mx-auto mb-4 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                        <flux:icon.check class="size-8 text-green-600 dark:text-green-400" />
                     </div>
-                </div>
-            @endguest
+                    <flux:text class="text-zinc-600 dark:text-zinc-400">No tasks upcoming.</flux:text>
+                </flux:card>
+            @else
+                <x-upcoming-tasks-list
+                    :grouped-tasks="$this->groupedTasks"
+                    :later-tasks="$this->laterTasks"
+                    :task-count="$this->taskCount"
+                    :unscheduled-tasks="$this->unscheduledTasks"
+                    :pending-tasks-expanded="false"
+                    :later-tasks-expanded="true"
+                    :show-avatars="false"
+                    :clickable="false"
+                    :show-project-info="$this->hasMultipleProjects"
+                    :show-notifications="false"
+                    :public-view="true"
+                />
+
+                {{-- Registration CTA --}}
+                @guest
+                    <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
+                        <a href="{{ route('welcome.homeowners') }}" target="_blank" rel="noopener noreferrer" class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
+                            <x-hive-logo class="size-7" />
+                        </a>
+                        <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Join your Project Hive</flux:heading>
+                        <flux:text class="mt-1 text-sm text-indigo-700 dark:text-indigo-300">Register a Hive account to get schedule updates, notifications, and project details.</flux:text>
+                        <div class="mt-4 flex items-center justify-center gap-3">
+                            <flux:button variant="primary" href="{{ route('registration') }}">
+                                Register
+                            </flux:button>
+                            <flux:button href="{{ route('login') }}">
+                                Login
+                            </flux:button>
+                        </div>
+                    </div>
+                @endguest
+            @endif
         @endif
 
         {{-- Footer --}}

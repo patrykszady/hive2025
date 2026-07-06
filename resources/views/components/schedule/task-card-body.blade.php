@@ -78,7 +78,11 @@
             </span>
         @endif
         @if($showStatus)
-            <x-task-status-badge :status="$task->vendor_status" />
+            @if($task->preferredTimeIndicator())
+                <x-task-preferred-indicator :task="$task" />
+            @else
+                <x-task-status-badge :status="$task->vendor_status" />
+            @endif
         @endif
     </div>
 </div>

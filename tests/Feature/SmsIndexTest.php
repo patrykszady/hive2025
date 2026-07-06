@@ -1,10 +1,12 @@
 <?php
 
 use App\Livewire\Sms\SmsIndex;
+use App\Livewire\Tasks\TaskCreate;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\SmsThreadParticipant;
 use App\Models\User;
+use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
@@ -141,5 +143,43 @@ it('dispatches loadThread by default but skips it when requested', function (): 
         ->call('selectThread', $thread->id, true)
         ->assertSet('threadId', $thread->id)
         ->assertNotDispatched('loadThread');
+});
+
+it('mounts the task edit modal for staff so schedule task cards can open it', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $admin = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.sms-task-modal@example.com',
+        'cell_phone' => '2245550155',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $vendor->users()->attach($admin->id, ['is_employed' => true, 'role_id' => 1]);
+
+    $this->actingAs($admin);
+
+    Livewire::test(SmsIndex::class)
+        ->assertSet('isClientUser', false)
+        ->assertSeeLivewire(TaskCreate::class);
+});
+
+it('does not mount the task edit modal for client users', function (): void {
+    $clientUser = User::query()->create([
+        'first_name' => 'Client',
+        'last_name' => 'Viewer',
+        'email' => 'client-viewer.task-modal@example.com',
+        'cell_phone' => '3128230577',
+        'primary_vendor_id' => null,
+    ]);
+
+    $client = Client::factory()->create(['business_name' => 'Brodson Family']);
+    $client->users()->attach($clientUser->id);
+
+    $this->actingAs($clientUser);
+
+    Livewire::test(SmsIndex::class)
+        ->assertSet('isClientUser', true)
+        ->assertDontSeeLivewire(TaskCreate::class);
 });
 

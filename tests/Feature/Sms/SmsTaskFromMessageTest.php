@@ -144,6 +144,89 @@ it('extracts a hive task from a message via the 3-dot action and prefills the ta
         });
 });
 
+it('builds checklist items from multi-issue message text and carries sms image urls', function (): void {
+    config(['services.openai.api_key' => 'test-key']);
+
+    Http::fake([
+        'api.openai.com/*' => Http::response(fakeOpenAiTaskResponse([
+            'has_task' => true,
+            'title' => 'Trim Repair',
+            'type' => 'Task',
+            'date' => null,
+            'start_time' => null,
+            'end_time' => null,
+            'project_hint' => 'kitchen',
+            'assignee_names' => [],
+            'checklist' => [],
+            'additional_tasks' => [],
+        ])),
+    ]);
+
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.sms-checklist-images@example.com',
+        'cell_phone' => '2245550399',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $vendor->users()->attach($user->id, ['is_employed' => true, 'role_id' => 1]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Kitchen Service',
+        'client_id' => $client->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'address' => '123 Main St',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => 60601,
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'project_id' => $project->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $message = SmsMessage::query()->create([
+        'thread_id' => $thread->id,
+        'direction' => SmsMessage::DIRECTION_INBOUND,
+        'from_number' => '+12245550001',
+        'to_numbers' => ['+12245554444'],
+        'text' => 'Trim from hidden pantry fell off. Also as I indicated the trim by microwave is rubbing against microwave when opening',
+        'media_urls' => ['sms-media/example-one.jpg', 'sms-media/example-two.jpg'],
+        'created_at' => Carbon::parse('2026-07-01 09:00:00'),
+    ]);
+
+    Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+        ->call('createTaskFromMessage', $message->id)
+        ->assertDispatched('prefillTaskFromSms', function (string $event, array $params) use ($project, $client): bool {
+            $payload = $params['payload'];
+
+            return $payload['title'] === 'Trim Repair'
+                && (int) $payload['project_id'] === $project->id
+                && (int) $payload['client_id'] === $client->id
+                && is_array($payload['checklist'])
+                && count($payload['checklist']) === 2
+                && str_contains(strtolower((string) ($payload['checklist'][0]['text'] ?? '')), 'trim from hidden pantry fell off')
+                && str_contains(strtolower((string) ($payload['checklist'][1]['text'] ?? '')), 'trim by microwave is rubbing')
+                && is_array($payload['sms_media_urls'])
+                && count($payload['sms_media_urls']) === 2
+                && str_contains((string) $payload['sms_media_urls'][0], '/files/sms_media/')
+                && str_contains((string) $payload['sms_media_urls'][1], '/files/sms_media/');
+        });
+});
+
 it('uses previous confirm-tasks message context for time-only replies', function (): void {
     $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
 

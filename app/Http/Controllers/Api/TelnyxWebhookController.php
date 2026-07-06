@@ -10,7 +10,6 @@ use App\Jobs\SendIncomingCallBrowserNotifications;
 use App\Jobs\SendVoicemailBrowserNotifications;
 use App\Jobs\StoreCallRecording;
 use App\Jobs\StoreSmsMedia;
-use App\Models\BlockedCaller;
 use App\Models\CallLog;
 use App\Models\CallTranscript;
 use App\Models\Client;
@@ -4579,17 +4578,6 @@ class TelnyxWebhookController extends Controller
             'media_count' => count($mediaUrls),
             'type' => $data['type'] ?? null,
         ]);
-
-        $normalizedFrom = is_string($from) ? GroupSmsService::formatE164($from) : null;
-        if ($normalizedFrom && BlockedCaller::isBlocked($normalizedFrom)) {
-            Log::channel('telnyx')->info('Inbound SMS from blocked caller ignored', [
-                'from' => $normalizedFrom,
-                'to' => $to,
-                'message_id' => $data['id'] ?? null,
-            ]);
-
-            return response()->json(['status' => 'ok', 'message' => 'blocked caller ignored']);
-        }
 
         $normalizedText = strtoupper(trim($text));
         if (in_array($normalizedText, ['START', 'STOP', 'HELP'], true)) {

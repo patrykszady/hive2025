@@ -278,6 +278,55 @@
             <!-- Select Days and Arrival Time Panel -->
             <div x-show="activeTab === 'schedule'">
                 <div class="relative">
+                    {{-- HOMEOWNER PREFERRED TIMES --}}
+                    @if($this->servicePreferredSlots)
+                        <div class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-800 dark:bg-indigo-900/20">
+                            <div class="flex items-center gap-2">
+                                <flux:icon.calendar-days class="size-4 text-indigo-600 dark:text-indigo-400" />
+                                <flux:text class="text-sm font-semibold text-indigo-900 dark:text-indigo-100">
+                                    Homeowner submitted times
+                                </flux:text>
+                            </div>
+                            <flux:text class="mt-0.5 text-xs text-indigo-700/80 dark:text-indigo-300/80">
+                                Tap a time frame to add it to this task's schedule.
+                            </flux:text>
+
+                            <div class="mt-3 space-y-2.5">
+                                @foreach($this->servicePreferredSlots as $slot)
+                                    <div wire:key="pref-{{ $slot['date'] }}" class="flex flex-wrap items-center gap-2">
+                                        <span class="w-20 shrink-0 text-xs font-medium text-indigo-900 dark:text-indigo-100">
+                                            {{ $slot['label'] }}
+                                        </span>
+                                        <div class="flex flex-wrap gap-1.5">
+                                            @foreach($slot['times'] as $slotTime)
+                                                <button
+                                                    type="button"
+                                                    wire:key="pref-{{ $slot['date'] }}-{{ $slotTime['time'] }}"
+                                                    wire:click="applyServicePreferredSlot('{{ $slot['date'] }}', '{{ $slotTime['time'] }}')"
+                                                    @class([
+                                                        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition',
+                                                        'border-indigo-500 bg-indigo-600 text-white shadow-sm dark:border-indigo-400 dark:bg-indigo-500' => $slotTime['applied'],
+                                                        'border-indigo-200 bg-white text-indigo-700 hover:border-indigo-300 dark:border-indigo-700 dark:bg-zinc-800 dark:text-indigo-200 dark:hover:border-indigo-500' => ! $slotTime['applied'],
+                                                    ])
+                                                >
+                                                    @if($slotTime['applied'])
+                                                        <flux:icon.check variant="micro" class="size-3" />
+                                                    @endif
+                                                    {{ $slotTime['time'] }}
+                                                </button>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @elseif($this->showAwaitingClientAvailabilityCard)
+                        <flux:callout class="mb-4" color="amber" icon="calendar-days">
+                            <flux:callout.heading>Awaiting client availability</flux:callout.heading>
+                            <flux:callout.text>Client has not submitted preferred times yet.</flux:callout.text>
+                        </flux:callout>
+                    @endif
+
                     {{-- DATES --}}
                     <flux:field>
                         <div class="mb-2 flex items-center gap-2">
@@ -402,6 +451,26 @@
             <div x-show="activeTab === 'notes'" x-effect="if (activeTab === 'notes') $nextTick(() => { $el.querySelector('textarea')?.dispatchEvent(new Event('input', { bubbles: true })) })">
                 <div class="relative">
                     <div class="space-y-4">
+                        {{-- SMS IMAGES --}}
+                        @if(!empty($this->taskSmsMediaUrls))
+                            <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-900/30">
+                                <div class="mb-2 flex items-center gap-2">
+                                    <flux:icon.photo class="size-4 text-zinc-500" />
+                                    <flux:text class="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                        Task Images From Message
+                                    </flux:text>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                    @foreach($this->taskSmsMediaUrls as $index => $url)
+                                        <a href="{{ $url }}" target="_blank" rel="noopener noreferrer" wire:key="task-sms-media-{{ $index }}" class="block overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+                                            <img src="{{ $url }}" alt="Task image {{ $index + 1 }}" class="h-24 w-full object-cover" loading="lazy" />
+                                        </a>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+
                         {{-- NOTES --}}
                         <flux:composer
                             wire:model="form.notes"

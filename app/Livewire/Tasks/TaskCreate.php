@@ -48,6 +48,19 @@ class TaskCreate extends Component
 
     protected $listeners = ['editTask', 'addTask', 'prefillTaskFromSms'];
 
+    /**
+     * Maps a homeowner-selected time frame to concrete arrival start/end times.
+     *
+     * @var array<string, array{start: string, end: string}>
+     */
+    private const SERVICE_TIME_FRAMES = [
+        '7-9 AM' => ['start' => '07:00', 'end' => '09:00'],
+        '9-11 AM' => ['start' => '09:00', 'end' => '11:00'],
+        '11-1 PM' => ['start' => '11:00', 'end' => '13:00'],
+        '1-3 PM' => ['start' => '13:00', 'end' => '15:00'],
+        '3-5 PM' => ['start' => '15:00', 'end' => '17:00'],
+    ];
+
     private function ensureProjectOptionLoaded(?int $projectId): void
     {
         if (! $projectId) {
@@ -155,7 +168,7 @@ class TaskCreate extends Component
     }
 
     /**
-     * Build the available meeting contacts list (client users + team members + vendor).
+     * Build the available meeting contacts list (client users + team members).
      *
      * @return array<int, array{email: string, name: string, group: string}>
      */
@@ -193,14 +206,15 @@ class TaskCreate extends Component
             $taggedEmails = $taggedEmails->merge($teamContacts->pluck('email'));
         }
 
-        // Selected vendor contact
-        if ($this->form->vendor_id) {
-            $selectedVendor = Vendor::find($this->form->vendor_id);
-            $vendorEmail = strtolower(trim((string) ($selectedVendor->email ?? '')));
+        // Selected vendor contact (the sub being scheduled for the meeting)
+        if ($this->form->vendor_id && is_numeric($this->form->vendor_id)) {
+            $selectedVendor = Vendor::withoutGlobalScopes()->find((int) $this->form->vendor_id);
+            $vendorEmail = strtolower(trim((string) ($selectedVendor?->email ?? $selectedVendor?->business_email ?? '')));
+
             if ($vendorEmail !== '' && ! $taggedEmails->contains($vendorEmail)) {
                 $contacts->push([
                     'email' => $vendorEmail,
-                    'name' => trim((string) ($selectedVendor->business_name ?? '')),
+                    'name' => trim((string) ($selectedVendor?->business_name ?? '')),
                     'group' => 'Vendor',
                 ]);
                 $taggedEmails->push($vendorEmail);
@@ -250,6 +264,220 @@ class TaskCreate extends Component
         }
 
         return count($this->form->dates);
+    }
+
+    /**
+     * The homeowner's submitted preferred service times for the current project,
+     * grouped by day, with per-time applied state for the schedule picker.
+     *
+     * @return array<int, array{date: string, label: string, times: array<int, array{time: string, applied: bool}>}>
+     */
+    #[Computed]
+    public function servicePreferredSlots(): array
+    {
+        if (! $this->form->project_id) {
+            return [];
+        }
+
+        // Homeowner preferred times only apply to unscheduled/pending tasks. Once a
+        // task has a persisted start date it's already scheduled, so hide the picker.
+        if ($this->form->task?->start_date) {
+            return [];
+        }
+
+        $project = Project::find($this->form->project_id);
+        if (! $project || ! $this->currentTaskCoveredByPreferredTimes($project)) {
+            return [];
+        }
+
+        $slots = (array) ($project?->service_availability['slots'] ?? []);
+
+        if (empty($slots)) {
+            return [];
+        }
+
+        return collect($slots)
+            ->filter(fn ($slot) => is_array($slot) && isset($slot['date'], $slot['time']))
+            ->groupBy('date')
+            ->sortKeys()
+            ->map(fn ($group, string $date) => [
+                'date' => $date,
+                'label' => Carbon::parse($date)->format('D, M j'),
+                'times' => $group
+                    ->pluck('time')
+                    ->unique()
+                    ->values()
+                    ->map(fn (string $time) => [
+                        'time' => $time,
+                        'applied' => $this->servicePreferredSlotIsApplied($date, $time),
+                    ])
+                    ->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Show the pending availability cue for service-call tasks when there are
+     * no currently-applicable homeowner-submitted slots to apply.
+     */
+    #[Computed]
+    public function showAwaitingClientAvailabilityCard(): bool
+    {
+        if (! $this->form->project_id) {
+            return false;
+        }
+
+        if ($this->form->task?->start_date) {
+            return false;
+        }
+
+        if ($this->servicePreferredSlots() !== []) {
+            return false;
+        }
+
+        $project = Project::query()
+            ->with('latestStatus')
+            ->find($this->form->project_id);
+
+        if (! $project) {
+            return false;
+        }
+
+        return (int) ($project->latestStatus->status_code ?? 0) === 8;
+    }
+
+    /**
+     * Whether the homeowner's submitted preferred times cover the task currently
+     * being edited. Tasks recorded in the saved task_ids are covered; when no
+     * task ids were recorded (legacy submissions) every pending task is treated
+     * as covered.
+     */
+    protected function currentTaskCoveredByPreferredTimes(Project $project): bool
+    {
+        if ((array) data_get($project->service_availability, 'slots', []) === []) {
+            return false;
+        }
+
+        $savedTaskIds = collect((array) data_get($project->service_availability, 'task_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->all();
+
+        if ($savedTaskIds === []) {
+            return true;
+        }
+
+        $taskId = (int) ($this->form->task?->id ?? 0);
+
+        return $taskId > 0 && in_array($taskId, $savedTaskIds, true);
+    }
+
+    /**
+     * When the homeowner submitted their availability (ISO string), if any.
+     */
+    #[Computed]
+    public function servicePreferredSubmittedAt(): ?string
+    {
+        if (! $this->form->project_id) {
+            return null;
+        }
+
+        $project = Project::find($this->form->project_id);
+
+        return $project?->service_availability['submitted_at'] ?? null;
+    }
+
+    /**
+     * Whether the given preferred day + time frame is currently applied to the task.
+     */
+    protected function servicePreferredSlotIsApplied(string $date, string $time): bool
+    {
+        if (! in_array($date, (array) $this->form->dates, true)) {
+            return false;
+        }
+
+        $setting = $this->form->time_settings[$date] ?? [];
+        $frame = self::SERVICE_TIME_FRAMES[$time] ?? null;
+
+        if ($frame === null) {
+            // "Anytime" — applied when the date is selected without a specific arrival time.
+            return empty($setting['use_time']);
+        }
+
+        return ! empty($setting['use_time'])
+            && ($setting['start_time'] ?? null) === $frame['start'];
+    }
+
+    /**
+     * Remove any homeowner-preferred slots currently applied to the task schedule.
+     */
+    protected function clearAppliedServicePreferredSlots(): void
+    {
+        if (! $this->form->project_id) {
+            return;
+        }
+
+        $project = Project::find($this->form->project_id);
+        $slots = (array) ($project?->service_availability['slots'] ?? []);
+
+        foreach ($slots as $slot) {
+            if (! is_array($slot) || ! isset($slot['date'], $slot['time'])) {
+                continue;
+            }
+
+            if (! $this->servicePreferredSlotIsApplied($slot['date'], $slot['time'])) {
+                continue;
+            }
+
+            $this->form->dates = array_values(
+                array_filter((array) $this->form->dates, fn ($d) => $d !== $slot['date'])
+            );
+            unset($this->form->time_settings[$slot['date']]);
+        }
+    }
+
+    /**
+     * Apply a homeowner-preferred day + time frame to the task schedule.
+     *
+     * Only one homeowner-preferred slot can be applied at a time; selecting a new
+     * slot clears any previously applied one, and re-selecting the active slot
+     * removes it.
+     */
+    public function applyServicePreferredSlot(string $date, string $time): void
+    {
+        $alreadyApplied = $this->servicePreferredSlotIsApplied($date, $time);
+
+        $this->clearAppliedServicePreferredSlots();
+
+        if ($alreadyApplied) {
+            return;
+        }
+
+        if (! in_array($date, (array) $this->form->dates, true)) {
+            $this->form->dates[] = $date;
+            sort($this->form->dates);
+        }
+
+        $frame = self::SERVICE_TIME_FRAMES[$time] ?? null;
+
+        if ($frame === null) {
+            $this->form->time_settings[$date] = array_merge(
+                $this->form->time_settings[$date] ?? [],
+                ['use_time' => false],
+            );
+
+            return;
+        }
+
+        $this->form->time_settings[$date] = array_merge(
+            $this->form->time_settings[$date] ?? [],
+            [
+                'use_time' => true,
+                'start_time' => $frame['start'],
+                'end_time' => $frame['end'],
+            ],
+        );
     }
 
     #[Computed]
@@ -596,9 +824,44 @@ class TaskCreate extends Component
     {
         $defaults = $this->resolveDefaultMeetingParticipants();
         $current = $this->form->meeting_participants;
+        $excluded = $this->resolveExcludedMeetingParticipants();
 
         $this->form->meeting_participants = collect($defaults)
             ->merge($current)
+            ->map(fn (string $email) => strtolower(trim($email)))
+            ->reject(fn (string $email) => in_array($email, $excluded, true))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Resolve emails that must never be auto-kept in Participants.
+     *
+     * The owning company's direct business email (e.g. a generic "crew@" inbox)
+     * should not appear as a meeting attendee.
+     *
+     * @return string[]
+     */
+    private function resolveExcludedMeetingParticipants(): array
+    {
+        $ownerVendorId = null;
+
+        if ($this->form->project_id) {
+            $project = \App\Models\Project::find($this->form->project_id);
+            $ownerVendorId = is_numeric($project?->belongs_to_vendor_id)
+                ? (int) $project->belongs_to_vendor_id
+                : null;
+        }
+
+        if (! is_int($ownerVendorId) || $ownerVendorId <= 0) {
+            return [];
+        }
+
+        $ownerVendor = Vendor::withoutGlobalScopes()->find($ownerVendorId);
+
+        return collect([$ownerVendor?->email ?? null, $ownerVendor?->business_email ?? null])
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
             ->map(fn (string $email) => strtolower(trim($email)))
             ->unique()
             ->values()
@@ -606,7 +869,7 @@ class TaskCreate extends Component
     }
 
     /**
-     * Resolve default meeting participant emails from team members, client, and vendor.
+     * Resolve default meeting participant emails from team members, client, and selected vendor.
      *
      * @return string[]
      */
@@ -637,10 +900,11 @@ class TaskCreate extends Component
             }
         }
 
-        // Vendor email (primary contact) from selected vendor
-        if ($this->form->vendor_id) {
-            $vendor = Vendor::find($this->form->vendor_id);
-            $vendorEmail = trim((string) ($vendor->email ?? ''));
+        // Selected vendor contact (e.g. the sub being scheduled for the meeting)
+        if ($this->form->vendor_id && is_numeric($this->form->vendor_id)) {
+            $vendor = Vendor::withoutGlobalScopes()->find((int) $this->form->vendor_id);
+            $vendorEmail = trim((string) ($vendor?->email ?? $vendor?->business_email ?? ''));
+
             if ($vendorEmail !== '') {
                 $emails->push($vendorEmail);
             }
@@ -1001,7 +1265,7 @@ class TaskCreate extends Component
      * full editor (edit mode) so every option — Dates, Notes/Checklist,
      * Dependencies, History — is available for review and refinement.
      *
-      * @param  array{task_id?: ?int, title?: ?string, type?: ?string, project_id?: ?int, client_id?: ?int, vendor_id?: ?int, date?: ?string, start_time?: ?string, end_time?: ?string, user_ids?: array<int, int>, checklist?: array<int, array{text: string, completed: bool}>}  $payload
+        * @param  array{task_id?: ?int, title?: ?string, type?: ?string, project_id?: ?int, client_id?: ?int, vendor_id?: ?int, date?: ?string, start_time?: ?string, end_time?: ?string, user_ids?: array<int, int>, checklist?: array<int, array{text: string, completed: bool}>, sms_media_urls?: array<int, string>}  $payload
      */
     public function prefillTaskFromSms(array $payload): void
     {
@@ -1039,6 +1303,10 @@ class TaskCreate extends Component
         if ($existingTask) {
             $this->ensureProjectOptionLoaded((int) $existingTask->project_id);
             $this->form->setTask($existingTask);
+
+            if ($this->form->type === 'Meet') {
+                $this->syncMeetingParticipants();
+            }
         }
 
         $this->setupViewText($existingTask ? 'edit' : 'create');
@@ -1107,6 +1375,8 @@ class TaskCreate extends Component
         }
 
         if ($existingTask) {
+            $this->attachSmsMediaToTask($existingTask, (array) ($payload['sms_media_urls'] ?? []));
+
             $this->modal('task_create_form_modal')->show();
 
             if (! empty($this->pendingSmsTasks) || ! empty($payload['multi_time'])) {
@@ -1131,7 +1401,13 @@ class TaskCreate extends Component
         }
 
         $this->ensureProjectOptionLoaded((int) $task->project_id);
+        $this->attachSmsMediaToTask($task, (array) ($payload['sms_media_urls'] ?? []));
         $this->form->setTask($task);
+
+        if ($this->form->type === 'Meet') {
+            $this->syncMeetingParticipants();
+        }
+
         $this->setupViewText('edit');
         $this->refreshPlannerComponents();
 
@@ -1142,6 +1418,59 @@ class TaskCreate extends Component
         } else {
             $this->dispatch('task-modal-focus-arrival-times');
         }
+    }
+
+    /**
+     * Merge SMS image URLs into task options for follow-up context.
+     *
+     * @param  array<int, string>  $urls
+     */
+    protected function attachSmsMediaToTask(Task $task, array $urls): void
+    {
+        $cleanUrls = collect($urls)
+            ->filter(fn ($url) => is_string($url) && trim($url) !== '')
+            ->map(fn ($url) => trim((string) $url))
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($cleanUrls === []) {
+            return;
+        }
+
+        $options = (array) ($task->options ?? []);
+        $existingUrls = collect((array) ($options['sms_media_urls'] ?? []))
+            ->filter(fn ($url) => is_string($url) && trim($url) !== '')
+            ->map(fn ($url) => trim((string) $url));
+
+        $options['sms_media_urls'] = $existingUrls
+            ->merge($cleanUrls)
+            ->unique()
+            ->values()
+            ->all();
+
+        $task->update(['options' => $options]);
+        $task->refresh();
+    }
+
+    /**
+     * SMS images attached to this task via Create Task from Message flow.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function taskSmsMediaUrls(): array
+    {
+        if (! $this->form->task) {
+            return [];
+        }
+
+        return collect((array) data_get($this->form->task->options, 'sms_media_urls', []))
+            ->filter(fn ($url) => is_string($url) && trim($url) !== '')
+            ->map(fn ($url) => trim((string) $url))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -1209,6 +1538,10 @@ class TaskCreate extends Component
         
         // Simply use the task as-is without reloading
         $this->form->setTask($task);
+
+        if ($this->form->type === 'Meet') {
+            $this->syncMeetingParticipants();
+        }
         
         $this->modal('task_create_form_modal')->show();
         $this->dispatch('task-modal-opened');

@@ -28,12 +28,9 @@
 
             $resolvedName = $otherNumber ? $this->resolvePhoneDisplay($otherNumber) : null;
             $formattedOther = $otherNumber ? $this->formatPhone($otherNumber) : null;
-            $isKnownContact = $otherNumber ? $this->isKnownContact($otherNumber) : false;
-            $displayName = $isKnownContact
-                ? ($resolvedName ?? 'Unknown')
-                : (($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
-                    ? $call->caller_name
-                    : ($resolvedName ?? 'Unknown'));
+            $displayName = ($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
+                ? $call->caller_name
+                : ($resolvedName ?? 'Unknown');
             $effectiveStatus = $this->effectiveStatus($call);
             $dur = $call->duration_seconds ? abs($call->duration_seconds) : 0;
         @endphp

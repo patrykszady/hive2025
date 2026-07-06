@@ -1,12 +1,7 @@
 <?php
 
-use App\Models\BlockedCaller;
-use App\Models\SmsMessage;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
-
-uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Cache::flush();
@@ -143,41 +138,4 @@ it('ignores a duplicate messaging webhook event by id', function () {
     $this->postJson('/webhooks/telnyx/messaging', $payload)
         ->assertSuccessful()
         ->assertJson(['message' => 'duplicate event ignored']);
-});
-
-it('ignores inbound SMS from a blocked caller', function () {
-    config([
-        'services.telnyx.public_key' => null,
-        'services.telnyx.from' => '+12249993880',
-        'services.telnyx.numbers' => ['+12249993880'],
-    ]);
-
-    BlockedCaller::query()->create([
-        'phone_number' => '+12245550001',
-        'reason' => 'Manually marked as spam from messages',
-        'blocked_by_user_id' => null,
-        'auto_blocked' => false,
-    ]);
-
-    $payload = [
-        'data' => [
-            'id' => 'evt-msg-blocked-1',
-            'event_type' => 'message.received',
-            'payload' => [
-                'id' => 'msg-blocked-1',
-                'from' => ['phone_number' => '+12245550001'],
-                'to' => [
-                    ['phone_number' => '+12249993880'],
-                ],
-                'text' => 'spam text',
-                'media' => [],
-            ],
-        ],
-    ];
-
-    $this->postJson('/webhooks/telnyx/messaging', $payload)
-        ->assertSuccessful()
-        ->assertJson(['message' => 'blocked caller ignored']);
-
-    expect(SmsMessage::query()->count())->toBe(0);
 });

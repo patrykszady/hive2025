@@ -27,6 +27,19 @@ class AvailabilityIndex extends Component
     public array $proposedDates = [];
     public array $proposedTimeSettings = [];
 
+    /**
+     * Homeowner-selectable arrival time frames and their start/end times.
+     *
+     * @var array<string, array{start: string, end: string}>
+     */
+    private const SERVICE_TIME_FRAMES = [
+        '7-9 AM' => ['start' => '07:00', 'end' => '09:00'],
+        '9-11 AM' => ['start' => '09:00', 'end' => '11:00'],
+        '11-1 PM' => ['start' => '11:00', 'end' => '13:00'],
+        '1-3 PM' => ['start' => '13:00', 'end' => '15:00'],
+        '3-5 PM' => ['start' => '15:00', 'end' => '17:00'],
+    ];
+
     public function mount(string $token): void
     {
         $this->token = $token;
@@ -429,6 +442,154 @@ class AvailabilityIndex extends Component
         $this->proposingTaskId = null;
         $this->proposedDates = [];
         $this->proposedTimeSettings = [];
+    }
+
+    /**
+     * Homeowner submitted preferred times for the task being scheduled, grouped
+     * by day with per-time applied state. Empty unless the project has submitted
+     * times covering this task.
+     *
+     * @return array<int, array{date: string, label: string, times: array<int, array{time: string, applied: bool}>}>
+     */
+    public function proposedPreferredSlots(): array
+    {
+        if (! $this->proposingTaskId) {
+            return [];
+        }
+
+        $task = Task::with('project')->find($this->proposingTaskId);
+        $project = $task?->project;
+
+        if (! $project) {
+            return [];
+        }
+
+        $slots = (array) data_get($project->service_availability, 'slots', []);
+
+        if ($slots === []) {
+            return [];
+        }
+
+        $savedTaskIds = collect((array) data_get($project->service_availability, 'task_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->all();
+
+        if ($savedTaskIds !== [] && ! in_array((int) $task->id, $savedTaskIds, true)) {
+            return [];
+        }
+
+        return collect($slots)
+            ->filter(fn ($slot) => is_array($slot) && isset($slot['date'], $slot['time']))
+            ->groupBy('date')
+            ->sortKeys()
+            ->map(fn ($group, string $date) => [
+                'date' => $date,
+                'label' => Carbon::parse($date)->format('D, M j'),
+                'times' => $group
+                    ->pluck('time')
+                    ->unique()
+                    ->values()
+                    ->map(fn (string $time) => [
+                        'time' => $time,
+                        'applied' => $this->preferredSlotIsApplied($date, $time),
+                    ])
+                    ->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Whether the given preferred day + time frame is currently applied to the
+     * proposed schedule.
+     */
+    protected function preferredSlotIsApplied(string $date, string $time): bool
+    {
+        if (! in_array($date, (array) $this->proposedDates, true)) {
+            return false;
+        }
+
+        $setting = $this->proposedTimeSettings[$date] ?? [];
+        $frame = self::SERVICE_TIME_FRAMES[$time] ?? null;
+
+        if ($frame === null) {
+            return empty($setting['use_time']);
+        }
+
+        return ! empty($setting['use_time'])
+            && ($setting['start_time'] ?? null) === $frame['start'];
+    }
+
+    /**
+     * Remove any homeowner-preferred slots currently applied to the proposal.
+     */
+    protected function clearAppliedPreferredSlots(): void
+    {
+        if (! $this->proposingTaskId) {
+            return;
+        }
+
+        $task = Task::with('project')->find($this->proposingTaskId);
+        $slots = (array) data_get($task?->project?->service_availability, 'slots', []);
+
+        foreach ($slots as $slot) {
+            if (! is_array($slot) || ! isset($slot['date'], $slot['time'])) {
+                continue;
+            }
+
+            if (! $this->preferredSlotIsApplied($slot['date'], $slot['time'])) {
+                continue;
+            }
+
+            $this->proposedDates = array_values(
+                array_filter((array) $this->proposedDates, fn ($d) => $d !== $slot['date'])
+            );
+            unset($this->proposedTimeSettings[$slot['date']]);
+        }
+    }
+
+    /**
+     * Apply a homeowner-preferred day + time frame to the proposed schedule.
+     *
+     * Only one homeowner-preferred slot can be applied at a time; selecting a new
+     * slot clears any previously applied one, and re-selecting the active slot
+     * removes it.
+     */
+    public function applyPreferredSlot(string $date, string $time): void
+    {
+        $alreadyApplied = $this->preferredSlotIsApplied($date, $time);
+
+        $this->clearAppliedPreferredSlots();
+
+        if ($alreadyApplied) {
+            return;
+        }
+
+        if (! in_array($date, (array) $this->proposedDates, true)) {
+            $this->proposedDates[] = $date;
+            sort($this->proposedDates);
+        }
+
+        $frame = self::SERVICE_TIME_FRAMES[$time] ?? null;
+
+        if ($frame === null) {
+            $this->proposedTimeSettings[$date] = array_merge(
+                $this->proposedTimeSettings[$date] ?? [],
+                ['use_time' => false],
+            );
+
+            return;
+        }
+
+        $this->proposedTimeSettings[$date] = array_merge(
+            $this->proposedTimeSettings[$date] ?? [],
+            [
+                'use_time' => true,
+                'start_time' => $frame['start'],
+                'end_time' => $frame['end'],
+            ],
+        );
     }
 
     public function render()

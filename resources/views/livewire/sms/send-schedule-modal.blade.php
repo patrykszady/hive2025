@@ -10,14 +10,25 @@
             @else
                 {{-- Task list --}}
                 <div class="space-y-1">
-                    <flux:text class="text-sm font-medium">Tasks</flux:text>
+                    <div class="flex items-center gap-2">
+                        <flux:text class="text-sm font-medium">Tasks</flux:text>
+                        <flux:button
+                            variant="subtle"
+                            icon="plus"
+                            size="xs"
+                            class="ml-auto"
+                            wire:click="openCreateTask"
+                            tooltip="Add task without date"
+                            aria-label="Add task without date"
+                        />
+                    </div>
                     @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty() && $this->nextUpcomingTasks->isEmpty())
                         <div class="py-6 text-center">
                             <flux:icon name="calendar" class="mx-auto h-8 w-8 text-zinc-300 dark:text-zinc-600" />
                             <flux:text class="mt-2 text-sm text-zinc-400">No upcoming tasks</flux:text>
                         </div>
                     @else
-                        <div class="max-h-96 overflow-y-auto space-y-4">
+                        <div class="-mx-1 max-h-96 overflow-y-auto px-1 py-1 space-y-4">
                             @foreach ($this->groupedUpcomingTasks as $date => $tasks)
                                 @php
                                     $carbonDate = \Carbon\Carbon::parse($date);
@@ -167,6 +178,16 @@
                                     ])
                                 </div>
                             @endif
+
+                            {{-- Later tasks beyond the next-up day --}}
+                            @include('components.upcoming-tasks-list-later', [
+                                'laterTasks' => $this->laterTasks,
+                                'showAvatars' => true,
+                                'clickable' => true,
+                                'showProjectInfo' => count($this->clientProjectIds) > 1,
+                                'showVendorInfo' => true,
+                                'publicView' => false,
+                            ])
                         </div>
                     @endif
                 </div>

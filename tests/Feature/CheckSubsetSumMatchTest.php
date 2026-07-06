@@ -174,3 +174,65 @@ it('prefers an all-before-check-date transfer group over a date-tighter group co
         ->and($beforeC->refresh()->check_id)->toBe($check->id)
         ->and($afterDecoy->refresh()->check_id)->toBeNull();
 });
+
+it('never matches a personal transfer check to same-sum transfers sent to a different person', function () {
+    $bankAccount = makeTransferCheckBankAccount();
+
+    $patryk = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Szady',
+        'email' => 'patryk-'.uniqid().'@example.com',
+        'cell_phone' => '5551234567',
+        'password' => bcrypt('password'),
+        'primary_vendor_id' => $bankAccount->vendor_id,
+    ]);
+
+    // $450 personal Venmo transfer check to Patryk, dated 06/03.
+    $check = Check::create([
+        'check_type' => 'Transfer',
+        'check_number' => '3836',
+        'date' => '2026-06-03',
+        'amount' => 450.00,
+        'bank_account_id' => $bankAccount->id,
+        'belongs_to_vendor_id' => $bankAccount->vendor_id,
+        'user_id' => $patryk->id,
+        'created_by_user_id' => $patryk->id,
+    ]);
+
+    // Correct match: three Venmo transfers to Patryk that sum to $450. The recipient
+    // is only present in the raw bank memo (details.original_description).
+    $venmo = collect([
+        ['date' => '2026-06-02', 'amount' => 50.00],
+        ['date' => '2026-06-03', 'amount' => 200.00],
+        ['date' => '2026-06-03', 'amount' => 200.00],
+    ])->map(fn ($t) => Transaction::create([
+        'transaction_date' => $t['date'],
+        'amount' => $t['amount'],
+        'bank_account_id' => $bankAccount->id,
+        'check_number' => '1010101',
+        'plaid_merchant_description' => 'Venmo',
+        'details' => [
+            'original_description' => 'DEBIT PURCHASE '.$t['date'].' 4849 VENMO *PATRYK SZADY 8558124430 NY 26155',
+        ],
+    ]));
+
+    // Decoy: three Zelle transfers to GRZEGORZ that ALSO sum to $450.
+    $zelle = collect([
+        ['date' => '2026-05-28', 'amount' => 50.00, 'ref' => 'CTIMzmg1FbUn'],
+        ['date' => '2026-05-31', 'amount' => 200.00, 'ref' => 'CTIbfs06OLVA'],
+        ['date' => '2026-06-09', 'amount' => 200.00, 'ref' => 'CTILVJ86Htls'],
+    ])->map(fn ($t) => Transaction::create([
+        'transaction_date' => $t['date'],
+        'amount' => $t['amount'],
+        'bank_account_id' => $bankAccount->id,
+        'check_number' => '1010101',
+        'plaid_merchant_description' => 'ZELLE DEBIT PAY ID '.$t['ref'].' ORG ID CTI NAME GRZEGORZ',
+    ]));
+
+    app(TransactionController::class)->add_check_id_to_transactions();
+
+    // The Venmo transfers to Patryk are linked; the GRZEGORZ Zelle transfers are never touched.
+    expect($venmo->every(fn ($t) => $t->refresh()->check_id === $check->id))->toBeTrue()
+        ->and($zelle->every(fn ($t) => $t->refresh()->check_id === null))->toBeTrue();
+});
+

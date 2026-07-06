@@ -2289,21 +2289,37 @@ class TransactionController extends Controller
         // This ensures we only match transactions to the same person
         if ($check->check_type === 'Transfer') {
             $transactionsByPayee = $transactions->groupBy(function ($t) {
-                return $this->extractPayeeNameFromDescription($t->plaid_merchant_description);
+                return $this->extractPayeeNameFromTransaction($t);
             });
 
-            // When the check has a known vendor, only consider payee groups whose extracted
-            // name matches the vendor's business name. This prevents subset-sum from greedily
-            // grabbing same-amount transactions sent to a *different* person before the real
-            // single-transaction match has had a chance to land (e.g., a $1,250 check to
-            // "Morenos Drywall" being matched to $150+$1,100 of Zelle transfers to "Grzegorz"
-            // because the check ran through the matcher hours before the real Morenos
-            // transaction posted). If no payee group matches the vendor, we leave the check
-            // unmatched so a later cron pass can match it correctly.
-            $vendorBusinessName = $check->vendor?->business_name;
-            if ($vendorBusinessName) {
+            // Only consider payee groups whose extracted name matches the party the check
+            // was paid to. This prevents subset-sum from greedily grabbing same-amount
+            // transactions sent to a *different* person before the real match lands (e.g.,
+            // a $1,250 check to "Morenos Drywall" matched to $150+$1,100 of Zelle transfers
+            // to "Grzegorz", or a $450 Venmo check to "Patryk Szady" matched to three
+            // Zelle transfers to "Grzegorz" that happen to sum to $450). If no payee group
+            // matches, we leave the check unmatched so a later pass can match it correctly.
+            //
+            // The paid-to identity is the check's vendor business name, or — for personal
+            // transfer checks with no vendor — the linked user's name. When gating by user
+            // we still allow payee groups whose name could not be resolved (e.g., generic
+            // "Venmo" memos with no recipient in the bank description), since those are
+            // ambiguous rather than provably wrong.
+            $payeeIdentity = $check->vendor?->business_name;
+            $allowUnresolvedPayee = false;
+
+            if (! $payeeIdentity && $check->user_id) {
+                $checkUser = $check->user;
+                $userName = trim(($checkUser?->first_name ?? '').' '.($checkUser?->last_name ?? ''));
+                $payeeIdentity = $userName !== '' ? $userName : null;
+                $allowUnresolvedPayee = true;
+            }
+
+            if ($payeeIdentity) {
                 $transactionsByPayee = $transactionsByPayee->filter(
-                    fn ($_payeeTransactions, $payeeName) => $this->payeeNameMatchesVendor($payeeName, $vendorBusinessName)
+                    fn ($_payeeTransactions, $payeeName) => (
+                        $allowUnresolvedPayee && ! $this->payeeNameIsResolvable((string) $payeeName)
+                    ) || $this->payeeNameMatchesVendor((string) $payeeName, $payeeIdentity)
                 );
             }
 
@@ -2327,6 +2343,29 @@ class TransactionController extends Controller
             $transactions = $transactions->take(14);
             $this->trySubsetSumMatch($check, $transactions);
         }
+    }
+
+    /**
+     * Extract the payee name for a transaction, preferring the raw bank memo for
+     * Venmo transfers. Venmo transactions carry a generic "Venmo" merchant
+     * description; the actual recipient only appears in the original bank
+     * description (details.original_description), e.g.
+     * "DEBIT PURCHASE Jun 02 4849 VENMO *PATRYK SZADY 8558124430 NY". Resolving
+     * the person from there keeps different people's Venmo transfers in separate
+     * payee groups so subset-sum can't mix them.
+     */
+    protected function extractPayeeNameFromTransaction(Transaction $transaction): string
+    {
+        $description = (string) $transaction->plaid_merchant_description;
+        $originalDescription = (string) ($transaction->details['original_description'] ?? '');
+
+        if (stripos($description, 'venmo') !== false || stripos($originalDescription, 'venmo') !== false) {
+            if (preg_match('/VENMO\s*\*?\s*([A-Z][A-Za-z\'\-]+(?:\s+[A-Z][A-Za-z\'\-]+)*)/i', $originalDescription, $matches)) {
+                return strtoupper(trim($matches[1]));
+            }
+        }
+
+        return $this->extractPayeeNameFromDescription($transaction->plaid_merchant_description);
     }
 
     /**
@@ -2355,6 +2394,44 @@ class TransactionController extends Controller
     }
 
     /**
+     * Tokenize a payee/vendor name into comparable tokens: uppercase, strip
+     * non-letters, drop short tokens and common business/transfer stopwords.
+     *
+     * @return array<int, string>
+     */
+    protected function tokenizePayeeName(string $value): array
+    {
+        $value = strtoupper($value);
+        // Replace any non-letter character with a space so "Morenos Drywall, Inc"
+        // and "MORENOS-DRYWALL" tokenize the same way.
+        $value = preg_replace('/[^A-Z]+/', ' ', $value);
+        $tokens = preg_split('/\s+/', trim($value)) ?: [];
+
+        $stopwords = [
+            'INC', 'LLC', 'LTD', 'CORP', 'CORPORATION', 'CO', 'COMPANY',
+            'THE', 'AND', 'OF', 'A', 'AN',
+            'NAME', 'ID', 'ORG', 'REF', 'CONF', 'PAY', 'PAYMENT',
+            'ZELLE', 'VENMO', 'CASHOUT', 'DEBIT', 'CREDIT', 'TRANSFER',
+            'CTI', 'JPM', 'BOA', 'CHASE', 'UNKNOWN',
+        ];
+
+        return array_values(array_filter(
+            $tokens,
+            fn ($t) => strlen($t) >= 4 && !in_array($t, $stopwords, true)
+        ));
+    }
+
+    /**
+     * Whether a payee-group key contains an actual, comparable name (rather than a
+     * generic marker like "VENMO" or "unknown"). Used to decide whether a group
+     * can be gated against the check's paid-to identity.
+     */
+    protected function payeeNameIsResolvable(string $payeeName): bool
+    {
+        return ! empty($this->tokenizePayeeName($payeeName));
+    }
+
+    /**
      * Decide whether a payee name extracted from a transaction description plausibly
      * refers to the same party as a check's vendor business name. Used to gate
      * Transfer-check subset-sum matching so we don't link a check for vendor X to
@@ -2365,29 +2442,8 @@ class TransactionController extends Controller
      */
     protected function payeeNameMatchesVendor(string $payeeName, string $vendorBusinessName): bool
     {
-        $tokenize = function (string $value): array {
-            $value = strtoupper($value);
-            // Replace any non-letter character with a space so "Morenos Drywall, Inc"
-            // and "MORENOS-DRYWALL" tokenize the same way.
-            $value = preg_replace('/[^A-Z]+/', ' ', $value);
-            $tokens = preg_split('/\s+/', trim($value)) ?: [];
-
-            $stopwords = [
-                'INC', 'LLC', 'LTD', 'CORP', 'CORPORATION', 'CO', 'COMPANY',
-                'THE', 'AND', 'OF', 'A', 'AN',
-                'NAME', 'ID', 'ORG', 'REF', 'CONF', 'PAY', 'PAYMENT',
-                'ZELLE', 'VENMO', 'CASHOUT', 'DEBIT', 'CREDIT', 'TRANSFER',
-                'CTI', 'JPM', 'BOA', 'CHASE',
-            ];
-
-            return array_values(array_filter(
-                $tokens,
-                fn ($t) => strlen($t) >= 4 && !in_array($t, $stopwords, true)
-            ));
-        };
-
-        $payeeTokens = $tokenize($payeeName);
-        $vendorTokens = $tokenize($vendorBusinessName);
+        $payeeTokens = $this->tokenizePayeeName($payeeName);
+        $vendorTokens = $this->tokenizePayeeName($vendorBusinessName);
 
         if (empty($payeeTokens) || empty($vendorTokens)) {
             return false;

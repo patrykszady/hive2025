@@ -6,6 +6,7 @@ use App\Jobs\DeleteMeetTaskCalendarEvent;
 use App\Jobs\SendBatchVendorAvailabilitySms;
 use App\Jobs\SendPendingTaskReminderToClients;
 use App\Jobs\SendRealtimeTaskNotification;
+use App\Jobs\SendServiceCallScheduledSmsToClient;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\Vendor;
@@ -29,6 +30,9 @@ class TaskObserver
         // Send task reminder email to unregistered client users (15-min delay for batching)
         SendPendingTaskReminderToClients::dispatch($task->project_id)
             ->delay(now()->addMinutes(15));
+
+        // Text the homeowner the scheduled service-call tasks (batched, 5-min delay)
+        $this->queueServiceCallClientNotification($task);
     }
 
     public function creating(Task $task): void
@@ -118,6 +122,13 @@ class TaskObserver
         if ($vendorChanged || ($datesChanged && $isFromDashboard) || $needsStatusSet) {
             $this->queueVendorNotificationIfNeeded($task);
         }
+
+        // Text the homeowner the scheduled service-call tasks whenever a task is
+        // scheduled or rescheduled (batched, 5-min delay). The job filters to
+        // Service Call projects, so non-service-call updates are ignored.
+        if ($datesChanged && $task->start_date) {
+            $this->queueServiceCallClientNotification($task);
+        }
     }
 
     public function updating(Task $task): void
@@ -174,6 +185,26 @@ class TaskObserver
         }
 
         DeleteMeetTaskCalendarEvent::dispatch($task->id, $eventMeta);
+    }
+
+    /**
+     * Queue the batched homeowner "your service is scheduled" SMS when a task
+     * has a start date. The delay groups multiple tasks scheduled in quick
+     * succession into a single text, deferring to business hours when needed.
+     */
+    private function queueServiceCallClientNotification(Task $task): void
+    {
+        if (! $task->start_date) {
+            return;
+        }
+
+        $smsService = app(SmsScheduleService::class);
+
+        $sendAt = $smsService->isWithinBusinessHours()
+            ? now()->addMinutes(5)
+            : $smsService->getNextBusinessHoursStart();
+
+        SendServiceCallScheduledSmsToClient::dispatch($task->project_id)->delay($sendAt);
     }
 
     /**
