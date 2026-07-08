@@ -18,27 +18,32 @@ class PostDeployBackfill extends Command
     {
         // ── 1. Restart queue workers so they load the new job code ────────
         if (! $this->option('skip-horizon')) {
-            $this->info('1/4 Restarting Horizon workers…');
+            $this->info('1/5 Restarting Horizon workers…');
             Artisan::call('horizon:terminate');
             $this->line('    horizon:terminate sent (supervisor restarts it automatically).');
         } else {
-            $this->line('1/4 Skipped Horizon restart.');
+            $this->line('1/5 Skipped Horizon restart.');
         }
 
         // ── 2. Reindex threads (new has_client / has_subject_vendor flags) ─
         if (! $this->option('skip-scout')) {
-            $this->info('2/4 Reindexing SMS threads search index…');
+            $this->info('2/5 Reindexing SMS threads search index…');
             Artisan::call('scout:reindex', ['--models' => ['App\Models\SmsGroupThread']], $this->getOutput());
         } else {
-            $this->line('2/4 Skipped Scout reindex.');
+            $this->line('2/5 Skipped Scout reindex.');
         }
 
-        // ── 3. Backfill agent names into historical speaker maps ──────────
-        $this->info('3/4 Backfilling speaker maps (agent names) from stored segments…');
+        // ── 3. Transcribe every call that still needs it ───────────────────
+        //    (no transcript yet, previously failed, or stuck mid-transcription)
+        $this->info('3/5 Transcribing + summarizing all calls without AI content…');
+        Artisan::call('calls:process-recordings', ['--retry-failed' => true, '--all' => true], $this->getOutput());
+
+        // ── 4. Backfill agent names into historical speaker maps ──────────
+        $this->info('4/5 Backfilling speaker maps (agent names) from stored segments…');
         Artisan::call('calls:process-recordings', ['--reidentify-speakers' => true, '--all' => true], $this->getOutput());
 
-        // ── 4. Regenerate AI summaries that reference a generic "Agent" ───
-        $this->info('4/4 Regenerating AI summaries that mention "Agent"…');
+        // ── 5. Regenerate AI summaries that reference a generic "Agent" ───
+        $this->info('5/5 Regenerating AI summaries that mention "Agent"…');
 
         $cleared = 0;
         CallTranscript::query()
