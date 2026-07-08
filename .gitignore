@@ -31,3 +31,4 @@ auth.json
 data.ms/
 *.mdb
 mailtrap-mcp/
+.claude/settings.local.json

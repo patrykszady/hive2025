@@ -665,6 +665,97 @@ describe('thread spam actions', function (): void {
 
         expect(BlockedCaller::query()->where('phone_number', '+12245550001')->exists())->toBeFalse();
     });
+
+    it('dispatches sms-spam-changed so the thread list repaints', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeSpamFixture();
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->call('markThreadAsSpam')
+            ->assertDispatched('sms-spam-changed')
+            ->call('unblockThreadSpam')
+            ->assertDispatched('sms-spam-changed');
+    });
+});
+
+describe('poll fallback', function (): void {
+    uses(RefreshDatabase::class);
+
+    function makePollFixture(): array
+    {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'sms-poll-' . uniqid() . '@example.com',
+            'cell_phone' => '2245557111',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Poll Thread',
+            'from_number' => '+12249993880',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        return compact('user', 'thread');
+    }
+
+    it('skips rendering when nothing changed', function (): void {
+        ['user' => $user, 'thread' => $thread] = makePollFixture();
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $thread->id]);
+        $fingerprint = $component->get('pollFingerprint');
+
+        expect($fingerprint)->not->toBeNull();
+
+        $component->call('pollForUpdates')
+            ->assertSet('pollFingerprint', $fingerprint);
+    });
+
+    it('picks up messages that arrived without a broadcast', function (): void {
+        ['user' => $user, 'thread' => $thread] = makePollFixture();
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $thread->id]);
+        $fingerprint = $component->get('pollFingerprint');
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'from_number' => '+12245550001',
+            'text' => 'Missed broadcast message',
+            'direction' => 'inbound',
+            'status' => 'received',
+        ]);
+
+        $component->call('pollForUpdates')
+            ->assertSee('Missed broadcast message');
+
+        expect($component->get('pollFingerprint'))->not->toBe($fingerprint);
+    });
+
+    it('skips rendering when no thread is selected', function (): void {
+        ['user' => $user] = makePollFixture();
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => null])
+            ->call('pollForUpdates')
+            ->assertSet('pollFingerprint', null);
+    });
 });
 
 describe('scheduled messages', function (): void {
@@ -946,6 +1037,159 @@ describe('scheduled messages', function (): void {
         expect($fresh->text)->toBe("Draft body here\n{$expectedSignature}");
         expect($fresh->sent_by_user_id)->toBe($sender->id);
         expect($fresh->text)->not->toContain('-PS');
+    });
+});
+
+describe('remote message edits', function (): void {
+    uses(RefreshDatabase::class);
+
+    function makeEditFixture(): array
+    {
+        $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+        $user = User::query()->create([
+            'first_name' => 'Patryk',
+            'last_name' => 'Tester',
+            'email' => 'edit-test-' . uniqid() . '@example.com',
+            'cell_phone' => '2245551111',
+            'primary_vendor_id' => $ownerVendor->id,
+        ]);
+
+        $thread = SmsGroupThread::query()->create([
+            'name' => 'Edit Thread',
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $ownerVendor->id,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::query()->create([
+            'thread_id' => $thread->id,
+            'phone_number' => '+12245550001',
+            'opted_in_at' => now(),
+        ]);
+
+        return compact('user', 'thread');
+    }
+
+    it('applies a Spanish "Editado como" edit to the original message and hides the notification', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeEditFixture();
+
+        $original = SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'text' => 'Re Axel product for the front entrance: I just spoke to my rep and he said that the siding can be mitered for a column casing.',
+            'status' => 'received',
+            'created_at' => now()->subMinutes(2),
+        ]);
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'text' => "Editado como: \u{201c}Re Azek product for the front entrance: I just spoke to my rep and he said that the siding can be mitered for a column casing.\u{201d}",
+            'status' => 'received',
+            'created_at' => now()->subMinute(),
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $thread->id]);
+        $processed = $component->instance()->processedMessages;
+
+        expect($processed['visible'])->toHaveCount(1);
+
+        $visible = $processed['visible']->first();
+        expect((int) $visible->id)->toBe((int) $original->id)
+            ->and($visible->text)->toContain('Re Azek product')
+            ->and($visible->was_edited)->toBeTrue();
+
+        $component->assertSee('(Edited)')
+            ->assertSee('Re Azek product')
+            ->assertDontSee('Editado como');
+    });
+
+    it('applies an English "Edited to" edit', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeEditFixture();
+
+        $original = SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'text' => 'We can meet Thurdsay at 9am to walk the site.',
+            'status' => 'received',
+            'created_at' => now()->subMinutes(2),
+        ]);
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'text' => 'Edited to "We can meet Thursday at 9am to walk the site."',
+            'status' => 'received',
+            'created_at' => now()->subMinute(),
+        ]);
+
+        $this->actingAs($user);
+
+        $processed = Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->instance()->processedMessages;
+
+        expect($processed['visible'])->toHaveCount(1)
+            ->and($processed['visible']->first()->text)->toContain('Thursday')
+            ->and($processed['visible']->first()->was_edited)->toBeTrue()
+            ->and((int) $processed['visible']->first()->id)->toBe((int) $original->id);
+    });
+
+    it('leaves an edit notification visible when no original message matches', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeEditFixture();
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'text' => 'Completely unrelated message about invoices.',
+            'status' => 'received',
+            'created_at' => now()->subMinutes(2),
+        ]);
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'text' => 'Edited to "The crew will arrive tomorrow with the scaffolding equipment."',
+            'status' => 'received',
+            'created_at' => now()->subMinute(),
+        ]);
+
+        $this->actingAs($user);
+
+        $processed = Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->instance()->processedMessages;
+
+        // No confident match → keep both messages, don't guess.
+        expect($processed['visible'])->toHaveCount(2);
+    });
+
+    it('does not treat a normal message as an edit', function (): void {
+        ['user' => $user, 'thread' => $thread] = makeEditFixture();
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'text' => 'The permit was edited to reflect the new address.',
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user);
+
+        $processed = Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+            ->instance()->processedMessages;
+
+        expect($processed['visible'])->toHaveCount(1)
+            ->and($processed['visible']->first()->was_edited ?? false)->toBeFalse();
     });
 });
 

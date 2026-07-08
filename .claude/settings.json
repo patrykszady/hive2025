@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mysql -h 127.0.0.1 -u homestead -psecret gs22 -e \"SELECT ct.call_log_id, ct.status, ct.engine, LENGTH\\(ct.text\\) chars, ct.summary IS NOT NULL AS has_summary FROM call_transcripts ct WHERE ct.call_log_id IN \\(1622,1621,1626,1629,1630,1634,1635\\) ORDER BY ct.call_log_id; SELECT status, COUNT\\(*\\) FROM call_transcripts GROUP BY status;\")",
+      "Bash(mysql -h 127.0.0.1 -u homestead -psecret gs22 -e \"SELECT id, call_log_id, status, engine, failure_reason FROM call_transcripts WHERE id = 213 OR call_log_id = 1626;\")",
+      "Bash(mysql -h 127.0.0.1 -u homestead -psecret gs22 -e \"SELECT id, status, recording_path IS NOT NULL AS has_rec, has_voicemail FROM call_logs WHERE id = 1626;\")",
+      "Bash(mysql -h 127.0.0.1 -u homestead -psecret gs22 -e ' *)"
+    ]
+  }
+}

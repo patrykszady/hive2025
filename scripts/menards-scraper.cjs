@@ -257,20 +257,33 @@ async function handleImpervaChallenge(page) {
                     log(`  Anti-captcha balance: $${balanceData.balance}`);
 
                     // ── Step 1: Submit hCaptcha via createTask ──
+                    // ERROR_NO_SLOT_AVAILABLE is transient (no idle workers at our
+                    // max bid) — retry with backoff instead of failing the whole run.
                     const pageUrl = page.url() || 'https://www.menards.com/main/login.html';
                     log('  Submitting hCaptcha to anti-captcha…');
-                    const createResp = await httpJsonPost('https://api.anti-captcha.com/createTask', {
-                        clientKey: config.captchaApiKey,
-                        task: {
-                            type: 'HCaptchaTaskProxyless',
-                            websiteURL: pageUrl,
-                            websiteKey: hcaptchaData.sitekey,
-                        },
-                    });
-                    log(`  createTask response: ${createResp.trim()}`);
-                    const createData = JSON.parse(createResp);
-                    if (createData.errorId !== 0) {
-                        throw new Error(`createTask failed: ${createData.errorCode} — ${createData.errorDescription}`);
+                    let createData = null;
+                    const CREATE_ATTEMPTS = 8;
+                    for (let createAttempt = 1; createAttempt <= CREATE_ATTEMPTS; createAttempt++) {
+                        const createResp = await httpJsonPost('https://api.anti-captcha.com/createTask', {
+                            clientKey: config.captchaApiKey,
+                            task: {
+                                type: 'HCaptchaTaskProxyless',
+                                websiteURL: pageUrl,
+                                websiteKey: hcaptchaData.sitekey,
+                            },
+                        });
+                        log(`  createTask response: ${createResp.trim()}`);
+                        createData = JSON.parse(createResp);
+
+                        if (createData.errorId === 0) break;
+
+                        if (createData.errorCode !== 'ERROR_NO_SLOT_AVAILABLE' || createAttempt === CREATE_ATTEMPTS) {
+                            throw new Error(`createTask failed: ${createData.errorCode} — ${createData.errorDescription}`);
+                        }
+
+                        const backoff = Math.min(15000 * createAttempt, 60000);
+                        log(`  No anti-captcha workers available — retry ${createAttempt}/${CREATE_ATTEMPTS - 1} in ${backoff / 1000}s…`);
+                        await sleep(backoff);
                     }
 
                     const taskId = createData.taskId;
@@ -335,6 +348,14 @@ async function handleImpervaChallenge(page) {
                     return true;
                 } catch (err) {
                     log(`  Manual hCaptcha solve failed: ${err.message}`);
+
+                    // Transient captcha-capacity outage: nothing we can do this
+                    // run — exit with EX_TEMPFAIL (75) so the artisan command
+                    // logs a skip (not an error) and the next scheduled run retries.
+                    if (err.message.includes('ERROR_NO_SLOT_AVAILABLE')) {
+                        log('  SKIP: anti-captcha has no idle workers — deferring to the next scheduled run');
+                        process.exit(75);
+                    }
                 }
             } else {
                 log('  Could not find hCaptcha sitekey in iframe');
@@ -355,7 +376,17 @@ async function login(page) {
     });
     log(`  HTTP status: ${response ? response.status() : 'no response'}`);
     log(`  Final URL: ${page.url()}`);
-    log(`  Page title: ${await page.title()}`);
+    // Imperva's sensor can trigger a quick re-navigation right after load,
+    // destroying the execution context mid-call — tolerate it and settle.
+    try {
+        log(`  Page title: ${await page.title()}`);
+    } catch (err) {
+        log(`  Page title unavailable (navigation in flight: ${err.message}) — waiting for page to settle…`);
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+        await sleep(2000);
+        log(`  URL after settle: ${page.url()}`);
+        log(`  Page title: ${await page.title().catch(() => '(unavailable)')}`);
+    }
 
     // Check for Imperva/hCaptcha WAF challenge before anything else
     const impervaHandled = await handleImpervaChallenge(page);

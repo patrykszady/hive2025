@@ -559,3 +559,39 @@ it('is idempotent and skips calls that are already clean', function () {
         ->assertSuccessful();
 });
 
+
+it('resolves the answering agent on incoming calls via forwarded_to', function () {
+    if (! Schema::hasColumn('call_logs', 'forwarded_to')) {
+        Schema::table('call_logs', function (Blueprint $table): void {
+            $table->string('forwarded_to')->nullable();
+        });
+    }
+
+    // Skip observers — this suite's minimal schema lacks the side-effect
+    // tables (notification_settings, client_user) the User observer touches.
+    $agent = \App\Models\User::withoutEvents(fn () => \App\Models\User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Szady',
+        'cell_phone' => '2249993880',
+    ]));
+
+    $incoming = CallLog::query()->create([
+        'direction' => 'incoming',
+        'from_number' => '+17085551234',
+        'to_number' => '+12247354200',
+        'forwarded_to' => '2249993880',
+        'status' => 'completed',
+    ]);
+
+    expect($incoming->agentUser()?->id)->toBe($agent->id);
+
+    // Outgoing calls still resolve via from_number.
+    $outgoing = CallLog::query()->create([
+        'direction' => 'outgoing',
+        'from_number' => '+12249993880',
+        'to_number' => '+17085551234',
+        'status' => 'completed',
+    ]);
+
+    expect($outgoing->agentUser()?->id)->toBe($agent->id);
+});

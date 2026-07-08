@@ -3,6 +3,10 @@
 return [
     'ffmpeg_path' => env('FFMPEG_PATH', '/usr/bin/ffmpeg'),
 
+    'url_shortener' => [
+        'enabled' => env('URL_SHORTENER_ENABLED', true),
+    ],
+
     'plaid' => [
         'env' => env('PLAID_ENV'),
         'client_id' => env('PLAID_CLIENT_ID'),
@@ -11,6 +15,7 @@ return [
 
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
+        'task_extraction_model' => env('OPENAI_TASK_EXTRACTION_MODEL', 'gpt-4.1'),
     ],
 
     'assemblyai' => [

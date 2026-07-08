@@ -1283,6 +1283,7 @@ class TaskCreate extends Component
                 'project_id' => $projectId,
                 'client_id' => $clientId,
                 'vendor_id' => $vendorId,
+                'notes' => $row['notes'] ?? null,
                 'date' => $row['date'] ?? null,
                 'start_time' => $row['start_time'] ?? null,
                 'end_time' => $row['end_time'] ?? null,
@@ -1332,6 +1333,10 @@ class TaskCreate extends Component
         $type = $payload['type'] ?? 'Task';
         if (in_array($type, ['Task', 'Milestone', 'Meet', 'Reminder'], true)) {
             $this->form->type = $type;
+        }
+
+        if (! $existingTask && ! empty($payload['notes']) && trim((string) $this->form->notes) === '') {
+            $this->form->notes = trim((string) $payload['notes']);
         }
 
         if (! empty($payload['vendor_id'])) {

@@ -695,6 +695,17 @@ class SendScheduleModal extends Component
             $header = $greeting;
         }
 
+        if ($body === '') {
+            // No scheduled/pending task sections to show. When a service-call
+            // invite is present it already includes an inline Schedule link, so
+            // the header is the entire message — avoid a duplicate bottom link.
+            if ($invite !== '') {
+                return $header;
+            }
+
+            return trim("{$header}\n{$linksText}");
+        }
+
         return "{$header}\n\n{$body}\n{$linksText}";
     }
 

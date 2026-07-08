@@ -377,6 +377,10 @@ class SmsGroupThread extends Model
             'vendor_visibility_ids' => $vendorVisibility->unique()->values()->all(),
             'client_id' => $this->client_id ? (int) $this->client_id : null,
             'subject_vendor_id' => $this->subject_vendor_id ? (int) $this->subject_vendor_id : null,
+            // 0/1 flags for the thread list subject filter — Scout's builder has
+            // no whereNotNull(), so "has a client/vendor" must be a plain where().
+            'has_client' => $this->client_id ? 1 : 0,
+            'has_subject_vendor' => $this->subject_vendor_id ? 1 : 0,
             'last_activity_at_unix' => optional($this->last_activity_at)->timestamp ?? 0,
         ];
     }

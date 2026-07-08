@@ -130,9 +130,37 @@
 
             window.addEventListener('sms-incoming', () => notifyIncoming());
             window.addEventListener('focus', () => stopFlashing());
+
+            // Catch-up refresh: broadcasts can be missed while the tab is
+            // hidden or the websocket is down, so re-sync the thread list and
+            // open conversation when we come back. Throttled so a
+            // visibilitychange + reconnect pair only refreshes once.
+            let lastCatchUp = 0;
+            const catchUpRefresh = () => {
+                const now = Date.now();
+                if (now - lastCatchUp < 3000) return;
+                lastCatchUp = now;
+                Livewire.dispatch('sms-refresh-threads');
+                Livewire.dispatch('refreshMessages');
+            };
+
             document.addEventListener('visibilitychange', () => {
-                if (!document.hidden) stopFlashing();
+                if (!document.hidden) {
+                    stopFlashing();
+                    catchUpRefresh();
+                }
             });
+
+            // Refresh after the websocket reconnects (skip the initial connect —
+            // the page just rendered fresh data).
+            try {
+                const connection = window.Echo?.connector?.pusher?.connection;
+                let hadConnection = connection?.state === 'connected';
+                connection?.bind('connected', () => {
+                    if (hadConnection) catchUpRefresh();
+                    hadConnection = true;
+                });
+            } catch (e) {}
 
             // Handle notification clicks from the service worker
             if (navigator.serviceWorker) {

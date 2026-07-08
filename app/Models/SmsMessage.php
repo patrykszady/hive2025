@@ -548,6 +548,70 @@ class SmsMessage extends Model
     }
 
     /**
+     * Prefixes Apple uses for the SMS fallback sent when an iMessage user
+     * edits a message delivered to a non-iMessage recipient, per sender locale.
+     * Arrives as: Edited to "new text" / Editado como: "nuevo texto"
+     */
+    public const REMOTE_EDIT_PREFIXES = [
+        'Edited to',       // English
+        'Editado como',    // Spanish
+        'Editado para',    // Portuguese
+        'Modifié en',      // French
+        'Modifiée en',     // French (alt)
+        'Bearbeitet in',   // German
+        'Bearbeitet zu',   // German (alt)
+        'Modificato in',   // Italian
+        'Zmieniono na',    // Polish
+        'Изменено на',     // Russian
+    ];
+
+    /**
+     * Parse a remote-edit notification message and return the replacement text.
+     *
+     * When an iPhone user edits a message that fell back to SMS, the carrier
+     * delivers a follow-up like: Editado como: "new text". Returns the new
+     * text so callers can apply it to the original message, or null when this
+     * message is not an edit notification.
+     */
+    public function parseRemoteEdit(): ?string
+    {
+        if (! $this->text) {
+            return null;
+        }
+
+        $text = self::repairMojibakeText(trim($this->text));
+
+        // Repair double-encoded UTF-8 mojibake (same paths as parseTapback).
+        if (preg_match('/\xC3[\x80-\xBF][\xC2-\xC5\xE2][\x80-\xBF]/', $text)
+            || preg_match('/\xC3[\x80-\xBF]\xC2[\x80-\xBF]/', $text)) {
+            $decoded = @mb_convert_encoding($text, 'Windows-1252', 'UTF-8');
+            if ($decoded !== false && $decoded !== '' && mb_check_encoding($decoded, 'UTF-8')) {
+                $text = $decoded;
+            }
+        }
+
+        foreach (self::REMOTE_EDIT_PREFIXES as $prefix) {
+            $escapedPrefix = preg_quote($prefix, '/');
+
+            // Standard/Unicode quotes, optional colon after the prefix.
+            if (preg_match('/^' . $escapedPrefix . '\s*:?\s*[\x{201c}"](.*?)[\x{201d}"]\s*$/su', $text, $matches)) {
+                $edited = trim($matches[1]);
+
+                return $edited !== '' ? $edited : null;
+            }
+
+            // Mojibake variant: â€œ as open, â€ (+U+009D) or end of string as close.
+            if (preg_match('/^' . $escapedPrefix . '\s*:?\s*\x{00e2}\x{20ac}\x{0153}(.*?)(?:\x{00e2}\x{20ac}\x{009d}|\x{00e2}\x{20ac}$)\s*$/su', $text, $matches)) {
+                $edited = trim(self::repairMojibakeText($matches[1]));
+
+                return $edited !== '' ? $edited : null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Generic multi-language tapback detection.
      *
      * Extracts quoted text from various Unicode quotation mark styles (guillemets,

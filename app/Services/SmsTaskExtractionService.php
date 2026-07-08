@@ -50,7 +50,7 @@ class SmsTaskExtractionService
         $sentWeekday = $sentAt->format('l');
 
         $system = <<<PROMPT
-You extract a single schedulable job/task from a text message exchanged on a construction-management platform.
+You extract one or more schedulable jobs/tasks from a text message exchanged on a construction-management platform. A single message often contains SEVERAL requests — capture EVERY one, not just the first.
 
 The message was sent on {$sentDate} ({$sentWeekday}). Resolve every relative date against that sent date and return an absolute calendar date (YYYY-MM-DD):
 - A bare weekday like "Tuesday" means the soonest Tuesday strictly after the sent date (never the same day it was sent).
@@ -59,20 +59,25 @@ The message was sent on {$sentDate} ({$sentWeekday}). Resolve every relative dat
 
 Convert clock ranges to 24-hour times. "7-8am" -> start_time 07:00, end_time 08:00. "between 2 and 4pm" -> 14:00 / 16:00. "around 8am" -> start_time 08:00 with end_time empty. If only one time is mentioned, set start_time and leave end_time empty. If no time is mentioned, leave both empty.
 
-title: a short, capitalized task name describing the work (e.g. "Tile/Grout Repair", "Roofing"). Do NOT include the room, time, person's name, or pleasantries.
-type: one of Task, Milestone, Meet, Reminder. Use "Meet" only for meetings/walkthroughs/consultations; otherwise default to "Task".
+title: a VERY short task name — 2 to 4 words max, a concise noun phrase (e.g. "Grout Repair", "Cabinet Trim", "Outlet Repair", "Roofing"). Name the thing to fix, NOT the symptom or impact. Never restate the sentence. Do NOT include the room, time, person's name, the word "impacting/affecting", or pleasantries. "The new trim on our cabinet is impacting the microwave drawer" -> title "Cabinet Trim" (NOT "Correct Cabinet Trim Impacting Microwave Drawer").
+type: one of Task, Milestone, Meet, Reminder. Use "Meet" for meetings, walkthroughs, consultations, or when the sender wants to talk/discuss something ("to discuss", "your thoughts on", "can we talk about") -> Meet; otherwise default to "Task".
 project_hint: any room, area, or project name referenced (e.g. "hall bath", "kitchen", "roof") or empty if none.
 assignee_names: ALWAYS capture the first name of any specific person the message names as doing the work, stopping by, picking up, delivering, or being onsite (e.g. "Greg is stopping by" -> ["Greg"]; "Jerry will be there" -> ["Jerry"]; "pickup person is Greg Szady" -> ["Greg"]). Use the first name exactly as written. Ignore people who are only being greeted or thanked, or the sender's own signature line (e.g. "-PS", "-GS"). Empty array only when no person is named as doing something.
-checklist: capture small actionable to-dos that are NOT their own scheduled job (e.g. "let's adjust your ring cameras" -> ["Adjust Ring cameras"]). Do not repeat the title verbatim. Empty array when there are none.
-additional_tasks: when the message describes MORE THAN ONE distinct crew/job/arrival, return the first as the main task above and put each OTHER one here. Each has its own title, type, date, start_time, end_time, project_hint, assignee_names (e.g. "we will be there 9am with materials, drywall guys at 10am" -> main task is the 9am materials delivery, additional_tasks has the 10am drywall crew). Empty array when there is only one job.
-has_task: true when the message describes concrete work happening or being scheduled (including a crew/worker arriving to do a job); false for chit-chat, confirmations with no work, or messages with no actionable job.
+checklist: capture small actionable to-dos as SHORT imperative phrases of 2 to 5 words each (e.g. "let's adjust your ring cameras" -> ["Adjust Ring cameras"]; "the trim is impacting the microwave drawer" -> ["Adjust cabinet trim"]). Never copy a full sentence — the original message is kept as the task notes. Do not repeat the title verbatim. Empty array when there are none.
+additional_tasks: when the message describes MORE THAN ONE distinct request/job/issue/crew/arrival, return the first as the main task above and put each OTHER one here. Each has its own title, type, date, start_time, end_time, project_hint, assignee_names, notes (e.g. "we will be there 9am with materials, drywall guys at 10am" -> main task is the 9am materials delivery, additional_tasks has the 10am drywall crew). A numbered or bulleted list ("1)", "2)", "-", "a.") of requests or punch-list items ALWAYS means one task per list item. Empty array when there is only one job.
+notes: for THIS task only, the exact portion of the message that describes it — the specific request/issue text in the client's own words, with any list number/bullet removed. EXCLUDE greetings ("Hi ..."), "hope all is well", sign-offs ("Thanks. Tom"), and the text of OTHER tasks. For a single-task message use the whole relevant sentence(s). Example: for item "1) grout repair at counter/backsplash interface" the notes are "grout repair at counter/backsplash interface".
+has_task: true whenever the message asks to schedule, perform, fix, repair, replace, inspect, review, or discuss any work — even when NO date or time is given (a request like "please add me to your schedule for the following..." or a punch list of issues still counts). false only for pure chit-chat, greetings, thanks, or confirmations with no actionable work.
 
 Worked example — if the message "Greg is stopping by onsite tomorrow. (Let's adjust your ring cameras on Monday)\n-PS" were sent on 2025-03-01 (Saturday), the correct output is:
-{"has_task": true, "title": "Onsite Visit", "type": "Task", "date": "2025-03-02", "start_time": null, "end_time": null, "project_hint": "", "assignee_names": ["Greg"], "checklist": ["Adjust Ring cameras"], "additional_tasks": []}
+{"has_task": true, "title": "Onsite Visit", "type": "Task", "date": "2025-03-02", "start_time": null, "end_time": null, "project_hint": "", "notes": "Greg is stopping by onsite tomorrow.", "assignee_names": ["Greg"], "checklist": ["Adjust Ring cameras"], "additional_tasks": []}
 This shows: the named worker ("Greg") goes in assignee_names, the parenthetical side task becomes a checklist item ("Adjust Ring cameras"), the "-PS" signature is ignored, and "tomorrow" resolves to the day after the sent date.
 
 Worked example — if the message "Hi Zora, we will be there around 9am with materials, drywall guys will be there around 10am.\nThank you" were sent on 2025-03-01, the correct output is two tasks:
-{"has_task": true, "title": "Materials Delivery", "type": "Task", "date": "2025-03-01", "start_time": "09:00", "end_time": null, "project_hint": "", "assignee_names": [], "checklist": [], "additional_tasks": [{"title": "Drywall Install", "type": "Task", "date": "2025-03-01", "start_time": "10:00", "end_time": null, "project_hint": "", "assignee_names": []}]}
+{"has_task": true, "title": "Materials Delivery", "type": "Task", "date": "2025-03-01", "start_time": "09:00", "end_time": null, "project_hint": "", "notes": "we will be there around 9am with materials", "assignee_names": [], "checklist": [], "additional_tasks": [{"title": "Drywall Install", "type": "Task", "date": "2025-03-01", "start_time": "10:00", "end_time": null, "project_hint": "", "notes": "drywall guys will be there around 10am", "assignee_names": []}]}
+
+Worked example — a punch list with no dates. If the message "Hi Patryk and Greg. Hope all is well. Please add me to your schedule for the following:\n1) grout repair at counter/backsplash interface\n2) outlet in pantry still shows open ground (initially flagged by the inspector)\n3) to discuss your thoughts on the cooktop which goes off and relights when drawers are opened.\nThanks. Tom" were sent on 2025-03-01, there are THREE tasks (has_task true, no dates):
+{"has_task": true, "title": "Grout Repair", "type": "Task", "date": null, "start_time": null, "end_time": null, "project_hint": "counter/backsplash", "notes": "grout repair at counter/backsplash interface", "assignee_names": [], "checklist": [], "additional_tasks": [{"title": "Repair Pantry Outlet (Open Ground)", "type": "Task", "date": null, "start_time": null, "end_time": null, "project_hint": "pantry", "notes": "outlet in pantry still shows open ground (initially flagged by the inspector)", "assignee_names": []}, {"title": "Discuss Cooktop Issue", "type": "Meet", "date": null, "start_time": null, "end_time": null, "project_hint": "kitchen", "notes": "to discuss your thoughts on the cooktop which goes off and relights when drawers are opened. Basically just wondering if you've run into this a lot on your other projects.", "assignee_names": []}]}
+This shows: each numbered item becomes its own task, its notes hold ONLY that item's text (number removed, no greetings/sign-off), a "to discuss" item is type Meet, and missing dates are null while has_task stays true.
 
 Return JSON only, matching the provided schema. Do not invent details that are not in the message.
 PROMPT;
@@ -80,7 +85,7 @@ PROMPT;
         $schema = [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['has_task', 'title', 'type', 'date', 'start_time', 'end_time', 'project_hint', 'assignee_names', 'checklist', 'additional_tasks'],
+            'required' => ['has_task', 'title', 'type', 'date', 'start_time', 'end_time', 'project_hint', 'notes', 'assignee_names', 'checklist', 'additional_tasks'],
             'properties' => [
                 'has_task' => ['type' => 'boolean'],
                 'title' => ['type' => 'string'],
@@ -89,6 +94,7 @@ PROMPT;
                 'start_time' => ['type' => ['string', 'null']],
                 'end_time' => ['type' => ['string', 'null']],
                 'project_hint' => ['type' => ['string', 'null']],
+                'notes' => ['type' => ['string', 'null']],
                 'assignee_names' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'checklist' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'additional_tasks' => [
@@ -96,7 +102,7 @@ PROMPT;
                     'items' => [
                         'type' => 'object',
                         'additionalProperties' => false,
-                        'required' => ['title', 'type', 'date', 'start_time', 'end_time', 'project_hint', 'assignee_names'],
+                        'required' => ['title', 'type', 'date', 'start_time', 'end_time', 'project_hint', 'notes', 'assignee_names'],
                         'properties' => [
                             'title' => ['type' => 'string'],
                             'type' => ['type' => 'string', 'enum' => ['Task', 'Milestone', 'Meet', 'Reminder']],
@@ -104,6 +110,7 @@ PROMPT;
                             'start_time' => ['type' => ['string', 'null']],
                             'end_time' => ['type' => ['string', 'null']],
                             'project_hint' => ['type' => ['string', 'null']],
+                            'notes' => ['type' => ['string', 'null']],
                             'assignee_names' => ['type' => 'array', 'items' => ['type' => 'string']],
                         ],
                     ],
@@ -111,7 +118,7 @@ PROMPT;
             ],
         ];
 
-        $model = config('services.openai.task_extraction_model', 'gpt-4o');
+        $model = config('services.openai.task_extraction_model', 'gpt-4.1');
 
         $response = Http::withToken($apiKey)
             ->timeout(45)
@@ -195,6 +202,7 @@ PROMPT;
             'start_time' => $startTime,
             'end_time' => $endTime,
             'project_hint' => $this->cleanString($parsed['project_hint'] ?? null),
+            'notes' => $this->cleanString($parsed['notes'] ?? null),
             'assignee_names' => $this->cleanStringList($parsed['assignee_names'] ?? null),
             'checklist' => $this->cleanStringList($parsed['checklist'] ?? null),
             'additional_tasks' => $this->normalizeAdditionalTasks($parsed['additional_tasks'] ?? null, $message, $sentAt),
@@ -243,6 +251,7 @@ PROMPT;
                 'start_time' => $startTime,
                 'end_time' => $this->cleanString($row['end_time'] ?? null),
                 'project_hint' => $this->cleanString($row['project_hint'] ?? null),
+                'notes' => $this->cleanString($row['notes'] ?? null),
                 'assignee_names' => $this->cleanStringList($row['assignee_names'] ?? null),
             ];
         }

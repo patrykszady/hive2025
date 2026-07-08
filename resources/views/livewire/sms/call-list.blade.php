@@ -25,7 +25,8 @@
             if (this.pullY >= 60 && !this.refreshing) {
                 this.refreshing = true;
                 this.pullY = 50;
-                $wire.$refresh().then(() => {
+                $wire.$refresh().finally(() => {
+                    /* finally: never leave the indicator stuck if the request fails */
                     this.refreshing = false;
                     this.pullY = 0;
                     this.pulling = false;
@@ -35,10 +36,53 @@
                 this.pulling = false;
             }
         },
+        /* Mouse-drag pull-to-refresh (desktop parity with the touch handlers).
+           Pointer events + capture so we keep receiving moves and the release
+           even when the cursor leaves the card or the browser window. */
+        mouseActive: false,
+        justPulled: false,
+        onPointerDown(e) {
+            if (e.pointerType !== 'mouse' || e.button !== 0 || this.refreshing) return;
+            if (this.$el.scrollTop === 0) {
+                this.startY = e.clientY;
+                this.pulling = true;
+                this.mouseActive = true;
+            }
+        },
+        onPointerMove(e) {
+            if (e.pointerType !== 'mouse' || !this.mouseActive || !this.pulling) return;
+            const dy = e.clientY - this.startY;
+            if (dy > 0 && this.$el.scrollTop === 0) {
+                /* Capture only once a real pull starts, so plain clicks on
+                   call rows are never intercepted. */
+                if (dy > 5 && !this.$el.hasPointerCapture(e.pointerId)) {
+                    try { this.$el.setPointerCapture(e.pointerId); } catch (err) {}
+                }
+                this.pullY = Math.min(dy * 0.4, 80);
+            } else {
+                this.pullY = 0;
+            }
+        },
+        onPointerUp(e) {
+            if (e.pointerType !== 'mouse' || !this.mouseActive) return;
+            this.mouseActive = false;
+            this.justPulled = this.pullY > 10;
+            try { this.$el.releasePointerCapture(e.pointerId); } catch (err) {}
+            this.onTouchEnd();
+        },
     }"
     x-on:touchstart.passive="onTouchStart($event)"
     x-on:touchmove="onTouchMove($event)"
     x-on:touchend="onTouchEnd()"
+    {{-- typeof guards keep tabs opened before a deploy from erroring: Livewire
+         morphs new bindings into the DOM but Alpine never re-runs x-data. --}}
+    x-on:pointerdown="typeof onPointerDown === 'function' && onPointerDown($event)"
+    x-on:pointermove="typeof onPointerMove === 'function' && onPointerMove($event)"
+    x-on:pointerup="typeof onPointerUp === 'function' && onPointerUp($event)"
+    x-on:pointercancel="typeof onPointerUp === 'function' && onPointerUp($event)"
+    {{-- Swallow the click that follows a mouse pull so it doesn't select a call. --}}
+    x-on:click.capture="if (typeof justPulled !== 'undefined' && justPulled) { $event.preventDefault(); $event.stopPropagation(); justPulled = false }"
+    x-bind:class="typeof mouseActive !== 'undefined' && mouseActive && pullY > 0 ? 'select-none cursor-grabbing' : ''"
     x-init="
         $nextTick(() => {
             if (! $store.sms.callId
@@ -73,6 +117,14 @@
 
     {{-- Filter tabs --}}
     <div class="mb-3 sticky top-0 z-10">
+        <flux:input
+            wire:model.live.debounce.350ms="search"
+            icon="magnifying-glass"
+            placeholder="Search calls, numbers, transcripts…"
+            size="sm"
+            clearable
+            class="mb-2"
+        />
         <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1 !rounded-lg !bg-zinc-100 dark:!bg-zinc-800 !p-0.5">
             <flux:tab name="all">All</flux:tab>
             <flux:tab name="missed">Missed</flux:tab>
@@ -85,7 +137,7 @@
     <div class="relative min-h-0">
         <div
             wire:loading
-            wire:target="callFilter,$refresh,loadMore"
+            wire:target="callFilter,$refresh,loadMore,search"
             class="absolute inset-0 z-20 pointer-events-none"
         >
             @include('livewire.sms.call-list-skeleton')
@@ -116,11 +168,14 @@
 
             $resolvedName = $otherNumber ? $this->resolvePhoneDisplay($otherNumber) : null;
             $formattedOther = $otherNumber ? $this->formatPhone($otherNumber) : null;
+            $isKnownContact = $otherNumber ? $this->isKnownContact($otherNumber) : false;
 
-            // Use caller_name from the call record if meaningful, otherwise resolved name
-            $displayName = ($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
-                ? $call->caller_name
-                : ($resolvedName ?? 'Unknown');
+            // Prefer resolved known contacts (users/vendors) over stale CNAM names.
+            $displayName = $isKnownContact
+                ? ($resolvedName ?? 'Unknown')
+                : (($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
+                    ? $call->caller_name
+                    : ($resolvedName ?? 'Unknown'));
 
             // Show formatted phone as secondary only when display name differs from it
             $secondaryNumber = ($formattedOther && $displayName !== $formattedOther)

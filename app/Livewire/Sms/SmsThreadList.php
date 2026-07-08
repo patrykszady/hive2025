@@ -40,6 +40,8 @@ class SmsThreadList extends Component
             'echo-private:sms.notifications,SmsMessageReceived' => 'handleNewMessage',
             'sms-thread-read' => '$refresh',
             'sms-schedule-changed' => '$refresh',
+            'sms-spam-changed' => '$refresh',
+            'sms-refresh-threads' => '$refresh',
         ];
     }
 
@@ -75,10 +77,11 @@ class SmsThreadList extends Component
                 if (! $user->is_browsing_as_client && $user->vendor?->id) {
                     $meili->where('vendor_visibility_ids', (int) $user->vendor->id);
                 }
+                // Scout's builder has no whereNotNull() — filter on indexed 0/1 flags.
                 if ($this->subjectFilter === 'client') {
-                    $meili->whereNotNull('client_id');
+                    $meili->where('has_client', 1);
                 } elseif ($this->subjectFilter === 'vendor') {
-                    $meili->whereNotNull('subject_vendor_id');
+                    $meili->where('has_subject_vendor', 1);
                 }
 
                 $ids = $meili->take(max($this->limit, 50))->keys()->all();

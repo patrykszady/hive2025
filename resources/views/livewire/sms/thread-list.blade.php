@@ -26,6 +26,8 @@
                 this.pullY = 50;
                 $wire.$refresh().then(() => {
                     Livewire.dispatch('refreshMessages');
+                }).finally(() => {
+                    /* finally: never leave the indicator stuck if the request fails */
                     this.refreshing = false;
                     this.pullY = 0;
                     this.pulling = false;
@@ -35,11 +37,57 @@
                 this.pulling = false;
             }
         },
+        /* Mouse-drag pull-to-refresh (desktop parity with the touch handlers).
+           Pointer events + capture so we keep receiving moves and the release
+           even when the cursor leaves the card or the browser window. */
+        mouseActive: false,
+        justPulled: false,
+        onPointerDown(e) {
+            if (e.pointerType !== 'mouse' || e.button !== 0 || this.refreshing) return;
+            if (this.$el.scrollTop === 0) {
+                this.startY = e.clientY;
+                this.pulling = true;
+                this.mouseActive = true;
+            }
+        },
+        onPointerMove(e) {
+            if (e.pointerType !== 'mouse' || !this.mouseActive || !this.pulling) return;
+            const dy = e.clientY - this.startY;
+            if (dy > 0 && this.$el.scrollTop === 0) {
+                /* Capture only once a real pull starts, so plain clicks on
+                   thread rows are never intercepted. */
+                if (dy > 5 && !this.$el.hasPointerCapture(e.pointerId)) {
+                    try { this.$el.setPointerCapture(e.pointerId); } catch (err) {}
+                }
+                this.pullY = Math.min(dy * 0.4, 80);
+            } else {
+                this.pullY = 0;
+            }
+        },
+        onPointerUp(e) {
+            if (e.pointerType !== 'mouse' || !this.mouseActive) return;
+            this.mouseActive = false;
+            this.justPulled = this.pullY > 10;
+            try { this.$el.releasePointerCapture(e.pointerId); } catch (err) {}
+            this.onTouchEnd();
+        },
     }"
     x-on:sms-thread-filter-changed.window="$nextTick(() => $el.scrollTop = 0)"
     x-on:touchstart.passive="onTouchStart($event)"
     x-on:touchmove="onTouchMove($event)"
     x-on:touchend="onTouchEnd()"
+    {{-- typeof guards keep tabs opened before a deploy from erroring: Livewire
+         morphs new bindings into the DOM but Alpine never re-runs x-data. --}}
+    x-on:pointerdown="typeof onPointerDown === 'function' && onPointerDown($event)"
+    x-on:pointermove="typeof onPointerMove === 'function' && onPointerMove($event)"
+    x-on:pointerup="typeof onPointerUp === 'function' && onPointerUp($event)"
+    x-on:pointercancel="typeof onPointerUp === 'function' && onPointerUp($event)"
+    {{-- Swallow the click that follows a mouse pull so it doesn't select a thread. --}}
+    x-on:click.capture="if (typeof justPulled !== 'undefined' && justPulled) { $event.preventDefault(); $event.stopPropagation(); justPulled = false }"
+    x-bind:class="typeof mouseActive !== 'undefined' && mouseActive && pullY > 0 ? 'select-none cursor-grabbing' : ''"
+    {{-- Safety-net poll: Echo is the primary realtime path; this catches
+         missed broadcasts (dropped websocket, failed dispatch). --}}
+    wire:poll.60s
     class="space-y-1 h-full scrollbar-gutter overflow-y-auto overscroll-contain"
     style="-webkit-overflow-scrolling: touch"
 >
@@ -206,6 +254,13 @@
                             // For tapback reactions, show clean emoji only
                             if ($tapback) {
                                 $previewText = $tapback['emoji'] ?? $tapback['reaction'];
+                            }
+
+                            // For remote edits ("Editado como: …"), preview the edited text
+                            // like iMessage would — not the carrier notification wrapper.
+                            $remoteEdit = $thread->latestMessage->parseRemoteEdit();
+                            if ($remoteEdit !== null) {
+                                $previewText = $remoteEdit;
                             }
                         @endphp
                         <p class="text-sm lg:text-xs text-zinc-400 dark:text-zinc-500 truncate mt-0.5">

@@ -355,6 +355,324 @@ it('splits a multi-time message into separate tasks with their own times', funct
         ->and($result['additional_tasks'][0]['start_time'])->toBe('10:00');
 });
 
+it('extracts a punch list of undated requests into multiple tasks', function (): void {
+    config(['services.openai.api_key' => 'test-key']);
+
+    Http::fake([
+        'api.openai.com/*' => Http::response(fakeOpenAiTaskResponse([
+            'has_task' => true,
+            'title' => 'Grout Repair',
+            'type' => 'Task',
+            'date' => null,
+            'start_time' => null,
+            'end_time' => null,
+            'project_hint' => 'counter/backsplash',
+            'notes' => 'grout repair at counter/backsplash interface',
+            'additional_tasks' => [
+                [
+                    'title' => 'Repair Pantry Outlet (Open Ground)',
+                    'type' => 'Task',
+                    'date' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'project_hint' => 'pantry',
+                    'notes' => 'outlet in pantry still shows open ground (initially flagged by the inspector)',
+                    'assignee_names' => [],
+                ],
+                [
+                    'title' => 'Discuss Cooktop Issue',
+                    'type' => 'Meet',
+                    'date' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'project_hint' => 'kitchen',
+                    'notes' => 'to discuss your thoughts on the cooktop',
+                    'assignee_names' => [],
+                ],
+            ],
+        ])),
+    ]);
+
+    $message = "Hi Patryk and Greg. Hope all is well. Please add me to your schedule for the following:\n"
+        . "1) grout repair at counter/backsplash interface\n"
+        . "2) outlet in pantry still shows open ground (initially flagged by the inspector)\n"
+        . "3) to discuss your thoughts on the cooktop which goes off and relights when drawers are opened.\n"
+        . 'Thanks. Tom';
+
+    $result = app(SmsTaskExtractionService::class)->extract(
+        $message,
+        Carbon::parse('2026-06-28 09:00:00'),
+    );
+
+    expect($result)->not->toBeNull()
+        ->and($result['has_task'])->toBeTrue()
+        ->and($result['title'])->toBe('Grout Repair')
+        ->and($result['date'])->toBeNull()
+        ->and($result['notes'])->toBe('grout repair at counter/backsplash interface')
+        ->and($result['additional_tasks'])->toHaveCount(2)
+        ->and($result['additional_tasks'][0]['title'])->toBe('Repair Pantry Outlet (Open Ground)')
+        ->and($result['additional_tasks'][0]['notes'])->toBe('outlet in pantry still shows open ground (initially flagged by the inspector)')
+        ->and($result['additional_tasks'][1]['title'])->toBe('Discuss Cooktop Issue')
+        ->and($result['additional_tasks'][1]['type'])->toBe('Meet');
+});
+
+it('queues undated punch-list items as separate tasks in the modal', function (): void {
+    config(['services.openai.api_key' => 'test-key']);
+
+    Http::fake([
+        'api.openai.com/*' => Http::response(fakeOpenAiTaskResponse([
+            'has_task' => true,
+            'title' => 'Grout Repair',
+            'type' => 'Task',
+            'date' => null,
+            'start_time' => null,
+            'end_time' => null,
+            'project_hint' => 'counter/backsplash',
+            'notes' => 'grout repair at counter/backsplash interface',
+            'additional_tasks' => [
+                [
+                    'title' => 'Repair Pantry Outlet (Open Ground)',
+                    'type' => 'Task',
+                    'date' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'project_hint' => 'pantry',
+                    'notes' => 'outlet in pantry still shows open ground',
+                    'assignee_names' => [],
+                ],
+                [
+                    'title' => 'Discuss Cooktop Issue',
+                    'type' => 'Meet',
+                    'date' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'project_hint' => 'kitchen',
+                    'notes' => 'to discuss your thoughts on the cooktop',
+                    'assignee_names' => [],
+                ],
+            ],
+        ])),
+    ]);
+
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.sms-punchlist@example.test',
+        'cell_phone' => '2245550190',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $vendor->users()->attach($user->id, ['is_employed' => true, 'role_id' => 1]);
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Kitchen Remodel',
+        'client_id' => $client->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => '60013',
+    ]);
+    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $message = SmsMessage::query()->create([
+        'thread_id' => $thread->id,
+        'direction' => SmsMessage::DIRECTION_INBOUND,
+        'from_number' => '+12245550001',
+        'to_numbers' => ['+12245554444'],
+        'text' => "Please add me to your schedule for the following:\n1) grout repair\n2) pantry outlet\n3) to discuss cooktop",
+        'created_at' => Carbon::parse('2026-06-28 09:00:00'),
+    ]);
+
+    Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+        ->call('createTaskFromMessage', $message->id)
+        ->assertDispatched('prefillTaskFromSms', function (string $event, array $params) use ($project): bool {
+            $payload = $params['payload'] ?? $params[0] ?? $params;
+
+            return $payload['title'] === 'Grout Repair'
+                && (int) $payload['project_id'] === $project->id
+                && $payload['notes'] === 'grout repair at counter/backsplash interface'
+                && count($payload['additional_tasks']) === 2
+                && $payload['additional_tasks'][0]['title'] === 'Repair Pantry Outlet (Open Ground)'
+                && $payload['additional_tasks'][0]['notes'] === 'outlet in pantry still shows open ground'
+                && $payload['additional_tasks'][1]['title'] === 'Discuss Cooktop Issue';
+        });
+});
+
+it('keeps a short title, stores the message as notes, and shortens the checklist', function (): void {
+    config(['services.openai.api_key' => 'test-key']);
+
+    Http::fake([
+        'api.openai.com/*' => Http::response(fakeOpenAiTaskResponse([
+            'has_task' => true,
+            'title' => 'Cabinet Trim',
+            'type' => 'Task',
+            'date' => null,
+            'start_time' => null,
+            'end_time' => null,
+            'project_hint' => 'kitchen',
+            'assignee_names' => [],
+            'checklist' => ['Adjust cabinet trim'],
+            'additional_tasks' => [],
+        ])),
+    ]);
+
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.sms-cabinet-trim@example.test',
+        'cell_phone' => '2245550191',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $vendor->users()->attach($user->id, ['is_employed' => true, 'role_id' => 1]);
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Kitchen Remodel',
+        'client_id' => $client->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => '60013',
+    ]);
+    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $message = SmsMessage::query()->create([
+        'thread_id' => $thread->id,
+        'direction' => SmsMessage::DIRECTION_INBOUND,
+        'from_number' => '+12245550001',
+        'to_numbers' => ['+12245554444'],
+        'text' => 'The new trim put on our cabinet is impacting the microwave drawer',
+        'created_at' => Carbon::parse('2026-06-28 09:00:00'),
+    ]);
+
+    Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+        ->call('createTaskFromMessage', $message->id)
+        ->assertDispatched('prefillTaskFromSms', function (string $event, array $params): bool {
+            $payload = $params['payload'] ?? $params[0] ?? $params;
+
+            return $payload['title'] === 'Cabinet Trim'
+                && str_word_count($payload['title']) <= 4
+                && $payload['notes'] === 'The new trim put on our cabinet is impacting the microwave drawer'
+                && count($payload['checklist']) === 1
+                && $payload['checklist'][0]['text'] === 'Adjust cabinet trim';
+        });
+});
+
+it('does not synthesize a checklist from the message when it is split into multiple tasks', function (): void {
+    config(['services.openai.api_key' => 'test-key']);
+
+    Http::fake([
+        'api.openai.com/*' => Http::response(fakeOpenAiTaskResponse([
+            'has_task' => true,
+            'title' => 'Grout Repair',
+            'type' => 'Task',
+            'date' => null,
+            'start_time' => null,
+            'end_time' => null,
+            'project_hint' => 'counter/backsplash',
+            'assignee_names' => [],
+            'checklist' => [],
+            'notes' => 'grout repair at counter/backsplash interface',
+            'additional_tasks' => [
+                [
+                    'title' => 'Repair Pantry Outlet (Open Ground)',
+                    'type' => 'Task',
+                    'date' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'project_hint' => 'pantry',
+                    'notes' => 'outlet in pantry still shows open ground',
+                    'assignee_names' => [],
+                ],
+            ],
+        ])),
+    ]);
+
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.sms-punchlist-checklist@example.test',
+        'cell_phone' => '2245550193',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $vendor->users()->attach($user->id, ['is_employed' => true, 'role_id' => 1]);
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Kitchen Remodel',
+        'client_id' => $client->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => '60013',
+    ]);
+    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $message = SmsMessage::query()->create([
+        'thread_id' => $thread->id,
+        'direction' => SmsMessage::DIRECTION_INBOUND,
+        'from_number' => '+12245550001',
+        'to_numbers' => ['+12245554444'],
+        'text' => "Hi Patryk and Greg. Hope all is well. Please add me to your schedule for the following:\n1) grout repair\n2) outlet in pantry still shows open ground",
+        'created_at' => Carbon::parse('2026-06-28 09:00:00'),
+    ]);
+
+    Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+        ->call('createTaskFromMessage', $message->id)
+        ->assertDispatched('prefillTaskFromSms', function (string $event, array $params): bool {
+            $payload = $params['payload'] ?? $params[0] ?? $params;
+
+            return $payload['title'] === 'Grout Repair'
+                && $payload['checklist'] === []
+                && $payload['notes'] === 'grout repair at counter/backsplash interface';
+        });
+});
+
 it('rolls a single-time late-day schedule message to tomorrow', function (): void {
     config(['services.openai.api_key' => 'test-key']);
 

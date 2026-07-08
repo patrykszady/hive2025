@@ -60,6 +60,17 @@ class ScrapeMenardsReceipts extends Command
             try {
                 $password = $rawPassword ? Crypt::decryptString($rawPassword) : null;
             } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+                // Value LOOKS like Laravel ciphertext but won't decrypt (wrong
+                // APP_KEY — e.g. dev copy of a prod database). Submitting the
+                // ciphertext as the password guarantees a confusing
+                // "Bad credentials" from Menards, so fail loudly instead.
+                if (is_string($rawPassword) && str_starts_with($rawPassword, 'eyJpdiI6')) {
+                    $this->error("Receipt account #{$receiptAccount->id} password is encrypted with a different APP_KEY and cannot be decrypted here.");
+                    $this->line('If this is a dev copy of the production DB, set the production APP_KEY locally or re-save the credentials.');
+
+                    return self::FAILURE;
+                }
+
                 // Fallback for legacy plaintext passwords
                 $password = $rawPassword;
             }
@@ -129,6 +140,18 @@ class ScrapeMenardsReceipts extends Command
             }
 
             if (! $result->successful()) {
+                // EX_TEMPFAIL (75): anti-captcha had no idle workers — a transient
+                // capacity outage, not a real failure. Skip quietly; the next
+                // scheduled run will try again.
+                if ($result->exitCode() === 75) {
+                    $this->warn('Skipped: anti-captcha has no idle workers right now — will retry on the next scheduled run.');
+                    Log::info('Menards scraper skipped — no anti-captcha workers available', [
+                        'output_dir' => $outputDir,
+                    ]);
+
+                    return self::SUCCESS;
+                }
+
                 $this->error('Scraper process failed (exit code ' . $result->exitCode() . ')');
 
                 // List debug files for diagnosis

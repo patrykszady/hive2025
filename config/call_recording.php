@@ -27,7 +27,9 @@ return [
     | https://developers.telnyx.com/api/call-control/start-recording
     |
     | Best practices for quality:
-    | - channels: dual recommended (captures both caller & agent separately for easier transcription)
+    | - channels: single — Telnyx dual-channel recordings bleed audio between
+    |   channels on bridged calls, which breaks diarization; a mono mix with
+    |   AssemblyAI speaker_labels is cleaner (see TranscribeCallRecording).
     | - format: wav (lossless PCM, best for transcription; mp3 is lossy)
     | - play_beep: true (audible compliance marker, especially important for two-party consent)
     |
@@ -37,7 +39,7 @@ return [
     | via services.telnyx.preferred_codecs (G722/OPUS/AMR-WB). wav simply stores
     | whatever the codec delivers without further loss.
     */
-    'channels' => env('CALL_RECORDING_CHANNELS', 'dual'),  // single|dual (dual captures each party separately)
+    'channels' => env('CALL_RECORDING_CHANNELS', 'single'),  // single|dual
     'format' => env('CALL_RECORDING_FORMAT', 'wav'),       // mp3|wav (wav is lossless, better for transcription)
     'play_beep' => (bool) env('CALL_RECORDING_PLAY_BEEP', false),
 
@@ -123,6 +125,16 @@ return [
         'speaker_identification' => (bool) env('CALL_TRANSCRIPTION_SPEAKER_IDENTIFICATION', true),
 
         /*
+        | LLM provider used to classify each diarized speaker's ROLE (Hive
+        | agent vs. external party) from the conversation content. We never
+        | ask the model to name speakers — names come from our own call
+        | records — so it can neither hallucinate nor swap them. Defaults to
+        | AssemblyAI's LLM Gateway (single vendor) and automatically falls back
+        | to OpenAI when the gateway returns 401/403.
+        */
+        'speaker_identification_driver' => env('CALL_SPEAKER_IDENTIFICATION_DRIVER', 'assemblyai'), // assemblyai|openai
+
+        /*
         | AssemblyAI Audio Intelligence add-ons. These run inline with the
         | transcription request and their results are stored in the
         | transcript's `intelligence` JSON column. Entity detection is
@@ -177,7 +189,7 @@ return [
     */
     'summarization' => [
         'enabled' => (bool) env('CALL_SUMMARIZATION_ENABLED', true),
-        'driver' => env('CALL_SUMMARIZATION_DRIVER', 'openai'), // assemblyai|openai
+        'driver' => env('CALL_SUMMARIZATION_DRIVER', 'assemblyai'), // assemblyai|openai
         // OpenAI model (used when driver = openai).
         'model' => env('CALL_SUMMARIZATION_MODEL', 'gpt-4o'),
         // AssemblyAI LLM Gateway model (used when driver = assemblyai). Must

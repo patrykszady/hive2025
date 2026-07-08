@@ -16,7 +16,8 @@ class ProcessCallRecordings extends Command
         {--queue : Dispatch jobs to the queue instead of running inline}
         {--call= : Process a specific call_log id only}
         {--retry-failed : Re-attempt transcripts previously marked failed}
-        {--force : Re-transcribe and re-summarize even if already completed}';
+        {--force : Re-transcribe and re-summarize even if already completed}
+        {--reidentify-speakers : Recompute speaker maps for ready transcripts from stored segments (no re-transcription)}';
 
     protected $description = 'Transcribe and summarize stored call recordings (replaces inline auto-dispatch)';
 
@@ -38,6 +39,11 @@ class ProcessCallRecordings extends Command
         $retryFailed = (bool) $this->option('retry-failed');
         $force = (bool) $this->option('force');
 
+        // Standalone mode: recompute speaker maps from stored segments and exit.
+        if ($this->option('reidentify-speakers')) {
+            return $this->reidentifySpeakers($specificId, $all ? null : $limit);
+        }
+
         $transcribed = 0;
         $summarized = 0;
 
@@ -51,6 +57,12 @@ class ProcessCallRecordings extends Command
                     $q->whereDoesntHave('transcript');
                     if ($retryFailed) {
                         $q->orWhereHas('transcript', fn ($t) => $t->where('status', CallTranscript::STATUS_FAILED));
+                        // Zombie recovery: a transcript stuck in `transcribing` for
+                        // over 30 minutes means its job died without running the
+                        // failure handler (worker killed, deploy restart) — retry it.
+                        $q->orWhereHas('transcript', fn ($t) => $t
+                            ->where('status', CallTranscript::STATUS_TRANSCRIBING)
+                            ->where('updated_at', '<', now()->subMinutes(30)));
                     }
                 });
             }
@@ -149,6 +161,68 @@ class ProcessCallRecordings extends Command
         if ($useQueue && $force && $transcribed > 0) {
             $this->warn('Note: with --queue --force, transcripts were reset and re-queued. Re-run this command (without --force) after the queue drains to summarize them.');
         }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Recompute speaker maps for ready transcripts from their stored segments
+     * (LLM role classification only — no AssemblyAI re-transcription). Used to
+     * backfill after agent-resolution improvements.
+     */
+    protected function reidentifySpeakers(?string $specificCallId, ?int $limit): int
+    {
+        $query = CallTranscript::query()
+            ->where('status', CallTranscript::STATUS_READY)
+            ->whereNotNull('segments')
+            ->with('callLog');
+
+        if ($specificCallId) {
+            $query->where('call_log_id', $specificCallId);
+        }
+
+        $query->orderByDesc('id');
+        if ($limit !== null) {
+            $query->limit($limit);
+        }
+
+        $transcripts = $query->get()->filter(fn ($t) => $t->callLog !== null);
+        $this->info('Re-identifying speakers for ' . $transcripts->count() . ' transcript(s)…');
+
+        $updated = 0;
+        foreach ($transcripts as $transcript) {
+            // The AssemblyAI LLM Gateway rate-limits bursts — retry 429s with
+            // backoff instead of losing the rest of the batch.
+            for ($attempt = 0; $attempt <= 5; $attempt++) {
+                try {
+                    $map = (new \App\Jobs\TranscribeCallRecording($transcript->call_log_id))
+                        ->reidentifySpeakers($transcript);
+
+                    if ($map !== []) {
+                        $updated++;
+                        $this->line("  call {$transcript->call_log_id}: " . json_encode($map, JSON_UNESCAPED_UNICODE));
+                    } else {
+                        $this->line("  call {$transcript->call_log_id}: (no confident map — left unchanged)");
+                    }
+                    break;
+                } catch (\Throwable $e) {
+                    if (str_contains($e->getMessage(), '429') && $attempt < 5) {
+                        $wait = 15 * ($attempt + 1);
+                        $this->line("  call {$transcript->call_log_id}: rate limited — waiting {$wait}s (retry " . ($attempt + 1) . '/5)…');
+                        sleep($wait);
+
+                        continue;
+                    }
+                    $this->error("  call {$transcript->call_log_id}: {$e->getMessage()}");
+                    break;
+                }
+            }
+
+            // Gentle pacing between requests.
+            usleep(500_000);
+        }
+
+        $this->info("Done. Updated speaker maps: {$updated}.");
 
         return self::SUCCESS;
     }

@@ -16,6 +16,14 @@ return [
             'days'   => 30,
         ],
 
+        // Realtime task notifications (TaskObserver, SendRealtimeTaskNotification)
+        'notification' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/notification.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'move_channel' => [
             'driver' => 'daily',
             'path' => storage_path('logs/move_channel.log'),

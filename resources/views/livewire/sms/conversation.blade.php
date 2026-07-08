@@ -1,5 +1,9 @@
 <div
     class="flex-1 min-h-0 flex flex-col"
+    {{-- Safety-net poll: cheap fingerprint check server-side; only repaints
+         when the thread's messages actually changed (missed broadcast,
+         scheduled message sending, delivery status update). --}}
+    wire:poll.30s="pollForUpdates"
     x-data="{
         switching: false,
         switchingTimer: null,
@@ -541,6 +545,9 @@
                         @if ($msg->isInbound())
                             <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 flex items-center gap-1">
                                 <span>{{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}</span>
+                                @if ($msg->was_edited ?? false)
+                                    <span class="italic">(Edited)</span>
+                                @endif
                                 @if ($languageBadge && $canToggleOriginal)
                                     <button
                                         type="button"
@@ -567,6 +574,9 @@
                                         x-text="@js($languageBadge)"
                                         :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
                                     ></button>
+                                @endif
+                                @if ($msg->was_edited ?? false)
+                                    <span class="italic">(Edited)</span>
                                 @endif
                                 <span>{{ $msg->sentByUser?->nickname ?: ($msg->sentByUser?->first_name ?? 'GS Crew') }}</span>
                             </p>
@@ -774,7 +784,9 @@
                                     @endphp
                                     <div
                                         wire:key="forward-thread-{{ $candidate->id }}"
-                                        x-show="q === '' || @js($haystack).includes(q.toLowerCase())"
+                                        {{-- typeof guard: during a Livewire morph this row can be
+                                             evaluated before its x-data scope re-attaches. --}}
+                                        x-show="typeof q === 'undefined' || q === '' || @js($haystack).includes(q.toLowerCase())"
                                     >
                                         <flux:radio
                                             :value="$candidate->id"
@@ -875,7 +887,14 @@
             class="!p-0"
             style="width:96vw;max-width:96vw;height:94vh;max-height:94vh;padding:0;margin:auto;"
         >
+            {{-- wire:ignore — Livewire must never morph this subtree: doing so
+                 re-evaluates child expressions against a torn Alpine scope
+                 ("currentIsVideo is not defined" errors). The lightbox is fully
+                 self-syncing at runtime: `images` refresh via the
+                 lightbox-images-updated event on every open, and the active
+                 item follows $wire.lightboxImageUrl via $watch. --}}
             <div
+                wire:ignore
                 x-data="{
                     images: @js($this->threadMedia),
                     currentIndex: 0,

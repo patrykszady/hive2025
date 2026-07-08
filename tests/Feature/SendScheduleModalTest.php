@@ -810,9 +810,9 @@ it('shows the service call invite block and does not duplicate service call item
 
     expect($preview)
         ->toContain("Share availability with GS Construction for this service call:")
-        ->toContain('View schedule: ')
         ->toContain('- Fix Electrical Outlet')
         ->toContain("- Fix Electrical Outlet\nSchedule: ")
+        ->not->toContain('View schedule:')
         ->not->toContain("Pending:\n- Fix Electrical Outlet")
         ->not->toContain('(Share availability)');
 
@@ -822,7 +822,7 @@ it('shows the service call invite block and does not duplicate service call item
     expect(strpos($preview, '- Fix Electrical Outlet'))
         ->toBeLessThan(strpos($preview, 'Schedule:'));
 
-    expect(substr_count($preview, 'View schedule:'))
+    expect(substr_count($preview, 'Schedule:'))
         ->toBe(1);
 
     expect($preview)->not->toContain('Upcoming tasks:');
@@ -894,15 +894,15 @@ it('uses plural service call wording when multiple service call tasks exist', fu
 
     expect($preview)
         ->toContain("Share availability with GS Construction for these service calls:")
-        ->toContain('View schedule: ')
         ->toContain('- Fix Electrical Outlet')
         ->toContain('- Inspect Breaker Panel')
-        ->toContain("- Inspect Breaker Panel\nSchedule: ");
+        ->toContain("- Inspect Breaker Panel\nSchedule: ")
+        ->not->toContain('View schedule:');
 
     expect(strpos($preview, '- Inspect Breaker Panel'))
         ->toBeLessThan(strpos($preview, 'Schedule:'));
 
-    expect(substr_count($preview, 'View schedule:'))
+    expect(substr_count($preview, 'Schedule:'))
         ->toBe(1);
 });
 

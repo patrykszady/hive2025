@@ -232,6 +232,46 @@ class SmsConversation extends Component
         $this->markThreadAsRead();
     }
 
+    /**
+     * Fingerprint of the rendered thread's messages, refreshed on every
+     * render. Lets {@see pollForUpdates()} detect changes with one cheap
+     * aggregate query instead of repainting the conversation blindly.
+     */
+    public ?string $pollFingerprint = null;
+
+    /**
+     * Safety-net poll: Echo websockets are the primary realtime path, but
+     * broadcasts can be missed (dropped connection, background tab, failed
+     * dispatch). Only repaints when a message was added, removed, or updated
+     * (e.g. a scheduled message transitioning to sent).
+     */
+    public function pollForUpdates(): void
+    {
+        if (! $this->threadId) {
+            $this->skipRender();
+
+            return;
+        }
+
+        if ($this->messagesFingerprint() === $this->pollFingerprint) {
+            $this->skipRender();
+
+            return;
+        }
+
+        $this->refreshMessages();
+    }
+
+    protected function messagesFingerprint(): string
+    {
+        $stats = SmsMessage::query()
+            ->where('thread_id', $this->threadId)
+            ->selectRaw('COUNT(*) as total, COALESCE(MAX(id), 0) as max_id, COALESCE(MAX(updated_at), "") as last_update')
+            ->first();
+
+        return $stats->total . ':' . $stats->max_id . ':' . $stats->last_update;
+    }
+
     public function updatedAttachment(): void
     {
         $this->validate([
@@ -396,7 +436,10 @@ class SmsConversation extends Component
             ->filter()
             ->values();
 
-        if ($checklistItems->isEmpty()) {
+        // Only synthesize a checklist from the raw message for single-task
+        // messages. When the message was split into multiple tasks, the extra
+        // "sentences" are the other tasks and greetings, not checklist items.
+        if ($checklistItems->isEmpty() && empty($extracted['additional_tasks'])) {
             $checklistItems = collect($this->fallbackChecklistFromMessage($text, (string) ($extracted['title'] ?? '')));
         }
 
@@ -485,6 +528,7 @@ class SmsConversation extends Component
             'project_id' => $projectId,
             'client_id' => $client->id,
             'vendor_id' => $vendorId,
+            'notes' => trim((string) ($extracted['notes'] ?? '')) !== '' ? $extracted['notes'] : $text,
             'date' => $extracted['date'],
             'start_time' => $extracted['start_time'],
             'end_time' => $extracted['end_time'],
@@ -503,6 +547,7 @@ class SmsConversation extends Component
                     'date' => $task['date'] ?? null,
                     'start_time' => $task['start_time'] ?? null,
                     'end_time' => $task['end_time'] ?? null,
+                    'notes' => $task['notes'] ?? null,
                     'user_ids' => $this->resolveAssigneeUserIds($task['assignee_names'] ?? []),
                 ])
                 ->all(),
@@ -973,6 +1018,9 @@ class SmsConversation extends Component
 
         $count = count($targets);
 
+        // Repaint the thread list so its spam indicator updates immediately.
+        $this->dispatch('sms-spam-changed');
+
         Flux::toast(
             variant: 'success',
             heading: 'Marked as Spam',
@@ -1006,6 +1054,9 @@ class SmsConversation extends Component
             Flux::toast(variant: 'warning', heading: 'Not Blocked', text: 'Thread participant numbers are not currently blocked.', duration: 4000, position: 'top right');
             return;
         }
+
+        // Repaint the thread list so its spam indicator updates immediately.
+        $this->dispatch('sms-spam-changed');
 
         Flux::toast(variant: 'success', heading: 'Unblocked', text: 'Thread participant numbers were removed from blocked list.', duration: 5000, position: 'top right');
     }
@@ -2135,6 +2186,58 @@ class SmsConversation extends Component
         $tapbackIds = collect();
         $reactionsMap = [];
 
+        // Remote edits (iMessage "Edited to …" SMS fallback): apply the new text
+        // to the original message and hide the notification, so the thread reads
+        // like iMessage — one bubble with an "Edited" marker. Runs before the
+        // tapback pass so reactions match against the edited text.
+        $editIds = collect();
+
+        foreach ($allMessages as $msg) {
+            $editedText = $msg->parseRemoteEdit();
+            if ($editedText === null) {
+                continue;
+            }
+
+            $editedNormalized = $this->normalizeTapbackMatchText($editedText);
+            if ($editedNormalized === '') {
+                continue;
+            }
+
+            // Original candidates: same sender & direction, sent before the edit,
+            // not itself an edit notification. Pick the most similar text.
+            $matched = $allMessages
+                ->filter(fn ($candidate) => $candidate->id !== $msg->id
+                    && ! $editIds->contains($candidate->id)
+                    && $candidate->direction === $msg->direction
+                    && $candidate->from_number === $msg->from_number
+                    && ($candidate->created_at === null || $msg->created_at === null || $candidate->created_at->lte($msg->created_at))
+                    && trim((string) $candidate->display_text) !== ''
+                    && $candidate->parseRemoteEdit() === null)
+                ->map(function ($candidate) use ($editedNormalized) {
+                    similar_text($this->normalizeTapbackMatchText((string) $candidate->display_text), $editedNormalized, $percent);
+
+                    return ['message' => $candidate, 'percent' => $percent];
+                })
+                ->sortByDesc('percent')
+                ->first();
+
+            // Only merge when we're confident which message was edited —
+            // otherwise leave the notification visible rather than lose it.
+            if (! $matched || $matched['percent'] < 40) {
+                continue;
+            }
+
+            $editIds->push($msg->id);
+
+            $original = $matched['message'];
+            // In-memory only: display_text derives from text, so downstream
+            // rendering/translation picks up the edited body. Never persisted.
+            $original->text = $editedText;
+            $original->was_edited = true;
+        }
+
+        $allMessages = $allMessages->reject(fn ($m) => $editIds->contains($m->id))->values();
+
         foreach ($allMessages as $msg) {
             $tapback = $msg->parseTapback();
             if (! $tapback || ! $tapback['emoji']) {
@@ -2554,6 +2657,10 @@ class SmsConversation extends Component
 
     public function render()
     {
+        // Keep the poll fingerprint in sync with what this render shows so
+        // pollForUpdates() only repaints on real changes.
+        $this->pollFingerprint = $this->threadId ? $this->messagesFingerprint() : null;
+
         // Snapshot the visible conversation to localStorage so the next time the
         // user navigates back to this thread we can paint it instantly while
         // Livewire re-hydrates in the background.
