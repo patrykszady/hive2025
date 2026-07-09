@@ -456,6 +456,29 @@ class ExpenseReceipts extends Model
         return (string) $value;
     }
 
+    /**
+     * Strip a leading PO/job-number field label the OCR captured with the value,
+     * e.g. "Job # or Name : 3143" → "3143", "PO #: 3143" → "3143". Leaves the
+     * string untouched when it doesn't start with a recognized label.
+     */
+    public static function stripPoFieldLabel(string $note): string
+    {
+        $trimmed = trim($note);
+
+        $pattern = '/^\s*(?:'
+            . 'job\s*(?:#\s*)?(?:or\s*)?(?:name)?'
+            . '|po\s*\/\s*job\s*name'
+            . '|po\s*(?:number|no|#)?'
+            . '|p\.?o\.?\s*#?'
+            . '|pro\s*jobname'
+            . ')\s*[:#-]\s*/i';
+
+        $stripped = preg_replace($pattern, '', $trimmed);
+
+        // Only accept the strip if it left a non-empty value.
+        return is_string($stripped) && trim($stripped) !== '' ? trim($stripped) : $trimmed;
+    }
+
     protected function notes(): Attribute
     {
         return Attribute::make(
@@ -500,9 +523,37 @@ class ExpenseReceipts extends Model
                     return $trimmed !== '' && $trimmed !== '0';
                 });
 
-                $unique = array_unique(array_map('trim', $filtered));
+                // Strip leading receipt form-field labels that the OCR captured
+                // alongside the value (e.g. "Job # or Name : 3143" → "3143").
+                $filtered = array_map(fn ($note) => static::stripPoFieldLabel((string) $note), $filtered);
 
-                return implode(' | ', $unique);
+                $unique = array_values(array_unique(array_map('trim', $filtered)));
+
+                // Containment dedup: drop a value that is already wholly contained
+                // in another (case-insensitive). The purchase_order "3143" is
+                // redundant when a handwritten note "Job # or Name : 3143" already
+                // includes it — keep only the more informative note.
+                $result = [];
+                foreach ($unique as $note) {
+                    $lower = mb_strtolower($note);
+                    $isContained = false;
+                    foreach ($unique as $other) {
+                        if ($other === $note) {
+                            continue;
+                        }
+                        $otherLower = mb_strtolower($other);
+                        // $note is redundant if a longer sibling contains it.
+                        if (mb_strlen($other) > mb_strlen($note) && str_contains($otherLower, $lower)) {
+                            $isContained = true;
+                            break;
+                        }
+                    }
+                    if (! $isContained) {
+                        $result[] = $note;
+                    }
+                }
+
+                return implode(' | ', $result);
             }
         );
     }

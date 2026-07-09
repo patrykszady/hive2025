@@ -43,6 +43,10 @@ class SmsIndex extends Component
             abort(403);
         }
 
+        // Visiting /messages resets the sidebar badge: it only counts unread
+        // messages newer than this stamp (per-thread unread stays intact).
+        $user->forceFill(['sms_last_seen_at' => now()])->saveQuietly();
+
         // Restore activeTab from session when not explicitly set in URL
         if (! request()->has('activeTab')) {
             $this->activeTab = session('sms_active_tab', 'messages');

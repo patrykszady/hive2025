@@ -99,6 +99,36 @@ class Task extends Model
     }
 
     /**
+     * Whether this task's scheduled time window on the given date is already
+     * over (e.g. a "7-7:30AM" arrival checked at 2PM). Tasks without a time
+     * set are never considered passed — they run all day.
+     */
+    public function timeHasPassedOn(string $date, ?string $timezone = null): bool
+    {
+        $settings = data_get($this->options, "time_settings.$date");
+        $settings = is_object($settings) ? (array) $settings : (array) ($settings ?? []);
+
+        if (empty($settings['use_time'])) {
+            return false;
+        }
+
+        $time = (string) ($settings['end_time'] ?? '');
+        if ($time === '') {
+            $time = (string) ($settings['start_time'] ?? '');
+        }
+        if ($time === '') {
+            return false;
+        }
+
+        try {
+            return Carbon::createFromFormat('Y-m-d H:i', "{$date} {$time}", $timezone ?: config('app.timezone'))
+                ->isPast();
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
+    /**
      * Maps a homeowner-selected time frame to its arrival start time.
      *
      * @var array<string, string>

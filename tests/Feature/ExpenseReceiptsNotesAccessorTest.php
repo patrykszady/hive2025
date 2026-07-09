@@ -74,4 +74,48 @@ class ExpenseReceiptsNotesAccessorTest extends TestCase
 
         $this->assertSame('', $receipt->notes);
     }
+
+    public function test_notes_strips_form_field_label_and_dedupes_redundant_purchase_order(): void
+    {
+        // Menards receipt: the handwritten note carries the "Job # or Name :"
+        // form label and the purchase_order repeats the same value. The notes
+        // accessor should strip the label and drop the redundant PO → "3143".
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order' => '3143',
+                'handwritten_notes' => ['Job # or Name : 3143'],
+            ],
+        ]);
+
+        $this->assertSame('3143', $receipt->notes);
+    }
+
+    public function test_strip_po_field_label_handles_common_labels(): void
+    {
+        $this->assertSame('3143', ExpenseReceipts::stripPoFieldLabel('Job # or Name : 3143'));
+        $this->assertSame('991', ExpenseReceipts::stripPoFieldLabel('Job Name - 991'));
+        $this->assertSame('42', ExpenseReceipts::stripPoFieldLabel('Job: 42'));
+        $this->assertSame('4820', ExpenseReceipts::stripPoFieldLabel('PO #: 4820'));
+        $this->assertSame('Smith Kitchen', ExpenseReceipts::stripPoFieldLabel('PO/Job Name: Smith Kitchen'));
+
+        // Plain values and prose are left untouched.
+        $this->assertSame('3143', ExpenseReceipts::stripPoFieldLabel('3143'));
+        $this->assertSame('stock', ExpenseReceipts::stripPoFieldLabel('stock'));
+        $this->assertSame('Jobsite crew', ExpenseReceipts::stripPoFieldLabel('Jobsite crew'));
+    }
+
+    public function test_notes_drops_value_wholly_contained_in_a_longer_note(): void
+    {
+        // A bare purchase_order that is a substring of a richer handwritten note
+        // should not appear twice.
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order' => 'Smith',
+                'handwritten_notes' => ['Smith Kitchen Remodel'],
+            ],
+        ]);
+
+        $this->assertSame('Smith Kitchen Remodel', $receipt->notes);
+    }
 }
+

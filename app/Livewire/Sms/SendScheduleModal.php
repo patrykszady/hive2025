@@ -248,6 +248,14 @@ class SendScheduleModal extends Component
                 }
 
                 if ($normalizedDate >= $todayStr && $normalizedDate <= $endDateStr) {
+                    // Today's tasks drop off once their time window has passed
+                    // (e.g. don't list a 7-7:30AM roofer arrival at 2PM).
+                    if ($normalizedDate === $todayStr && $task->timeHasPassedOn($normalizedDate, browser_timezone())) {
+                        $addedDateKeys[$normalizedDate] = true;
+
+                        continue;
+                    }
+
                     if (! $grouped->has($normalizedDate)) {
                         $grouped[$normalizedDate] = collect();
                     }
@@ -289,6 +297,13 @@ class SendScheduleModal extends Component
                     $dateStr = $cursor->format('Y-m-d');
 
                     if ($dateStr >= $todayStr && $dateStr <= $endDateStr) {
+                        // Today's tasks drop off once their time window has passed.
+                        if ($dateStr === $todayStr && $task->timeHasPassedOn($dateStr, browser_timezone())) {
+                            $cursor->addDay();
+
+                            continue;
+                        }
+
                         if (! $grouped->has($dateStr)) {
                             $grouped[$dateStr] = collect();
                         }
@@ -690,7 +705,8 @@ class SendScheduleModal extends Component
         } elseif ($invite !== '') {
             $header = "{$greeting}\n{$invite}";
         } elseif ($intro !== '') {
-            $header = "{$greeting}\n\n{$intro}";
+            // Greeting flows straight into the intro line — no blank line.
+            $header = "{$greeting}\n{$intro}";
         } else {
             $header = $greeting;
         }

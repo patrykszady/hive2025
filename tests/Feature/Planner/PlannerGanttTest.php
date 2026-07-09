@@ -8,16 +8,16 @@ it('maps gantt zoom levels to the expected pixels-per-day', function (string $zo
 
     expect($component->ganttPxPerDay())->toBe($expected);
 })->with([
-    'day'   => ['day', 80],
-    'week'  => ['week', 32],
-    'month' => ['month', 14],
+    'day'   => ['day', 140],
+    'week'  => ['week', 80],
+    'month' => ['month', 32],
 ]);
 
 it('falls back to the day zoom when ganttZoom is unrecognized', function (): void {
     $component = new CardsIndex();
     $component->ganttZoom = 'decade';
 
-    expect($component->ganttPxPerDay())->toBe(80);
+    expect($component->ganttPxPerDay())->toBe(140);
 });
 
 it('exposes the three gantt zoom levels as a constant', function (): void {
@@ -62,9 +62,13 @@ it('exposes the updateTaskDates action used by the gantt drag handlers', functio
     $method = $reflection->getMethod('updateTaskDates');
     $params = $method->getParameters();
 
+    // 3 required + 2 optional (oldStart/oldEnd, passed by the drag handler so
+    // an update can be reverted client-side if the server rejects it).
     expect($method->isPublic())->toBeTrue()
-        ->and($params)->toHaveCount(3)
+        ->and($params)->toHaveCount(5)
         ->and($params[0]->getName())->toBe('taskId')
         ->and($params[1]->getName())->toBe('startDate')
-        ->and($params[2]->getName())->toBe('endDate');
+        ->and($params[2]->getName())->toBe('endDate')
+        ->and($params[3]->isOptional())->toBeTrue()
+        ->and($params[4]->isOptional())->toBeTrue();
 });

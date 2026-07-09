@@ -477,41 +477,7 @@ class NylasService
             $queryAttempt = $query;
             $queryAttempt['limit'] = $limit;
 
-            $result = $this->retryWithBackoff(function () use ($grantId, $queryAttempt, $withHeaders) {
-                try {
-                    $response = $this->httpClient->get($this->baseUrl . "/grants/{$grantId}/messages", [
-                        'headers' => [
-                            'Authorization' => 'Bearer ' . $this->apiKey,
-                            'Accept' => 'application/json',
-                            'Content-Type' => 'application/json',
-                        ],
-                        'query' => $queryAttempt,
-                    ]);
-
-                    $decoded = json_decode($response->getBody(), true) ?? [];
-
-                    return [
-                        'status' => $response->getStatusCode(),
-                        'data' => is_array($decoded) ? ($decoded['data'] ?? []) : [],
-                        'next_cursor' => is_array($decoded) ? ($decoded['next_cursor'] ?? null) : null,
-                        'request_id' => is_array($decoded)
-                            ? ($decoded['request_id'] ?? ($response->hasHeader('x-request-id') ? $response->getHeader('x-request-id')[0] : null))
-                            : ($response->hasHeader('x-request-id') ? $response->getHeader('x-request-id')[0] : null),
-                    ];
-                } catch (RequestException $e) {
-                    $statusCode = $e->hasResponse() ? $e->getResponse()->getStatusCode() : 500;
-                    $response = $e->getResponse();
-
-                    return [
-                        'status' => $statusCode,
-                        'data' => [],
-                        'error' => ApiErrorFormatter::format($e, []),
-                        'request_id' => $response && $response->hasHeader('x-request-id')
-                            ? $response->getHeader('x-request-id')[0]
-                            : null,
-                    ];
-                }
-            });
+            $result = $this->getMessagesAttemptWithConcurrencyBackoff($grantId, $queryAttempt, $withHeaders);
 
             $lastResult = $result;
 
@@ -569,6 +535,80 @@ class NylasService
             'next_cursor' => null,
             'request_id' => null,
         ];
+    }
+
+    /**
+     * Perform a single get-messages HTTP attempt, transparently retrying the
+     * provider-side "CommandConcurrencyLimitReached" 504 with backoff. Exchange
+     * throttles concurrent commands per mailbox; when several receipt-fetch
+     * windows run at once they collide and each 504s. A short serialized retry
+     * clears it far better than the generic limit-shrinking fallback.
+     *
+     * @return array<string, mixed>
+     */
+    protected function getMessagesAttemptWithConcurrencyBackoff(string $grantId, array $queryAttempt, bool $withHeaders): array
+    {
+        $concurrencyAttempts = 4;
+        $delayMs = 1500;
+
+        for ($i = 1; ; $i++) {
+            $result = $this->retryWithBackoff(function () use ($grantId, $queryAttempt) {
+                try {
+                    $response = $this->httpClient->get($this->baseUrl . "/grants/{$grantId}/messages", [
+                        'headers' => [
+                            'Authorization' => 'Bearer ' . $this->apiKey,
+                            'Accept' => 'application/json',
+                            'Content-Type' => 'application/json',
+                        ],
+                        'query' => $queryAttempt,
+                    ]);
+
+                    $decoded = json_decode($response->getBody(), true) ?? [];
+
+                    return [
+                        'status' => $response->getStatusCode(),
+                        'data' => is_array($decoded) ? ($decoded['data'] ?? []) : [],
+                        'next_cursor' => is_array($decoded) ? ($decoded['next_cursor'] ?? null) : null,
+                        'request_id' => is_array($decoded)
+                            ? ($decoded['request_id'] ?? ($response->hasHeader('x-request-id') ? $response->getHeader('x-request-id')[0] : null))
+                            : ($response->hasHeader('x-request-id') ? $response->getHeader('x-request-id')[0] : null),
+                    ];
+                } catch (RequestException $e) {
+                    $statusCode = $e->hasResponse() ? $e->getResponse()->getStatusCode() : 500;
+                    $response = $e->getResponse();
+                    $body = $response ? (string) $response->getBody() : '';
+
+                    return [
+                        'status' => $statusCode,
+                        'data' => [],
+                        'error' => ApiErrorFormatter::format($e, []),
+                        'raw_body' => $body,
+                        'request_id' => $response && $response->hasHeader('x-request-id')
+                            ? $response->getHeader('x-request-id')[0]
+                            : null,
+                    ];
+                }
+            });
+
+            $isConcurrency = is_array($result)
+                && (int) ($result['status'] ?? 0) === 504
+                && str_contains((string) ($result['raw_body'] ?? ''), 'CommandConcurrencyLimitReached');
+
+            if (! $isConcurrency || $i >= $concurrencyAttempts) {
+                unset($result['raw_body']);
+
+                return $result;
+            }
+
+            Log::channel('nylas')->info('Exchange command-concurrency limit hit — backing off', [
+                'grant_id' => $grantId,
+                'attempt' => $i,
+                'delay_ms' => $delayMs,
+            ]);
+
+            usleep($delayMs * 1000);
+            $delayMs *= 2;
+        }
     }
 
     protected function resolveFolderIdentifier(string $grantId, string $identifier, ?\App\Models\CompanyEmail $companyEmail = null): ?string

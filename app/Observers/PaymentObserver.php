@@ -36,13 +36,13 @@ class PaymentObserver
         $this->reindexTransactionId($payment->transaction_id);
     }
 
-    private function reindexTransactionId(?int $transactionId): void
+    private function reindexTransactionId(int|string|null $transactionId): void
     {
         if (! $transactionId) {
             return;
         }
 
-        $transaction = Transaction::withoutGlobalScopes()->find($transactionId);
+        $transaction = Transaction::withoutGlobalScopes()->find((int) $transactionId);
         $transaction?->searchable();
     }
 }

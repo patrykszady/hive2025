@@ -82,6 +82,9 @@ it('uses vendor short name in schedule greeting for vendor-subject threads', fun
 
     expect($preview)->toStartWith('Hello Smartech,')
         ->and($preview)->toContain('Upcoming tasks:')
+        // Greeting flows straight into the intro — no blank line between them.
+        ->and($preview)->toContain(",\nUpcoming tasks:")
+        ->and($preview)->not->toContain("\n\nUpcoming tasks:")
         ->and($preview)->toContain('- Foundation (Vendor Thread Project)')
         ->and($preview)->toContain('Confirm Schedule:');
 });
@@ -1364,4 +1367,76 @@ it('includes carry-over multi-day tasks in next up when they are scheduled on th
     expect($nextDate)->toBe($dayFour->format('Y-m-d'))
         ->and($nextTitles)->toContain('Demo')
         ->and($nextTitles)->toContain('Measure Windows');
+});
+
+it('hides today tasks whose time window has already passed', function (): void {
+    \Illuminate\Support\Carbon::setTestNow(
+        \Illuminate\Support\Carbon::today(config('app.timezone'))->setTime(14, 0)
+    );
+
+    $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $ownerUser = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.passed-times@example.com',
+        'cell_phone' => '2245550099',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+    $this->actingAs($ownerUser);
+
+    $client = Client::factory()->create();
+    $project = Project::query()->create([
+        'project_name' => 'Passed Time Project',
+        'client_id' => $client->id,
+        'address' => '1 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $todayKey = today()->format('Y-m-d');
+
+    Task::query()->create([
+        'title' => 'Roofer',
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+        'options' => [
+            'dates' => [$todayKey],
+            'time_settings' => [$todayKey => ['use_time' => true, 'start_time' => '07:00', 'end_time' => '07:30']],
+        ],
+    ]);
+
+    Task::query()->create([
+        'title' => 'Rough Inspections',
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'start_date' => today(),
+        'end_date' => today(),
+        'options' => [
+            'dates' => [$todayKey],
+            'time_settings' => [$todayKey => ['use_time' => true, 'start_time' => '15:00', 'end_time' => '17:00']],
+        ],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $ownerVendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    // At 2PM: the 7-7:30AM roofer arrival is over, the 3-5PM inspection is not.
+    expect($preview)->toContain('Rough Inspections')
+        ->and($preview)->not->toContain('Roofer');
+
+    \Illuminate\Support\Carbon::setTestNow();
 });

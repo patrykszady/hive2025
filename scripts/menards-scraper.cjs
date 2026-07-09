@@ -314,10 +314,14 @@ async function handleImpervaChallenge(page) {
 
                     // Inject the token into the iframe
                     await frame.evaluate((tkn) => {
+                        const fire = (el) => {
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        };
                         const ta = document.querySelector('[name="h-captcha-response"], textarea[name="h-captcha-response"]');
-                        if (ta) ta.value = tkn;
+                        if (ta) { ta.value = tkn; fire(ta); }
                         const gta = document.querySelector('[name="g-recaptcha-response"]');
-                        if (gta) gta.value = tkn;
+                        if (gta) { gta.value = tkn; fire(gta); }
                         // Try hCaptcha JS callback
                         if (typeof window.hcaptcha !== 'undefined') {
                             try {
@@ -368,6 +372,18 @@ async function handleImpervaChallenge(page) {
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
+/**
+ * An Imperva-blocked page renders as an empty shell: no body text, no inputs.
+ * The real Menards login page has a full nav + form (~17 inputs).
+ */
+async function pageLooksWalled(page) {
+    return page.evaluate(() => {
+        const text = (document.body?.innerText || '').trim();
+        const inputs = document.querySelectorAll('input').length;
+        return text.length < 50 && inputs === 0;
+    }).catch(() => false);
+}
+
 async function login(page) {
     log('Navigating to login page…');
     const response = await page.goto('https://www.menards.com/main/login.html', {
@@ -388,22 +404,39 @@ async function login(page) {
         log(`  Page title: ${await page.title().catch(() => '(unavailable)')}`);
     }
 
-    // Check for Imperva/hCaptcha WAF challenge before anything else
-    const impervaHandled = await handleImpervaChallenge(page);
-    if (impervaHandled) {
-        log('  Imperva challenge handled — reloading login page…');
-        await page.goto('https://www.menards.com/main/login.html', {
-            waitUntil: 'networkidle2',
-            timeout: 60000,
-        });
-        // Check again in case there's a second challenge
-        const secondChallenge = await handleImpervaChallenge(page);
-        if (secondChallenge) {
+    // Check for Imperva/hCaptcha WAF challenge before anything else.
+    // Even a correctly solved captcha sometimes fails to clear the wall —
+    // Imperva scores the whole session (datacenter IPs are penalized) and can
+    // keep serving an empty shell page. Retry the challenge cycle a few times;
+    // if the wall persists, defer to the next scheduled run instead of failing.
+    const WALL_ATTEMPTS = 3;
+    for (let wallAttempt = 1; wallAttempt <= WALL_ATTEMPTS; wallAttempt++) {
+        const impervaHandled = await handleImpervaChallenge(page);
+        if (impervaHandled) {
+            log(`  Imperva challenge handled (attempt ${wallAttempt}) — reloading login page…`);
             await page.goto('https://www.menards.com/main/login.html', {
                 waitUntil: 'networkidle2',
                 timeout: 60000,
-            });
+            }).catch(() => {});
         }
+
+        await sleep(3000);
+
+        if (!(await pageLooksWalled(page))) {
+            break; // real content rendered
+        }
+
+        if (wallAttempt === WALL_ATTEMPTS) {
+            log(`  SKIP: Imperva wall persisted after ${WALL_ATTEMPTS} challenge attempts — deferring to the next scheduled run`);
+            process.exit(75);
+        }
+
+        log(`  Page is still an empty Imperva shell — retrying challenge cycle (${wallAttempt}/${WALL_ATTEMPTS})…`);
+        await sleep(10000 * wallAttempt);
+        await page.goto('https://www.menards.com/main/login.html', {
+            waitUntil: 'networkidle2',
+            timeout: 60000,
+        }).catch(() => {});
     }
 
     // Wait for Vue.js to render the login form

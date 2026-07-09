@@ -226,6 +226,53 @@ class GeoapifyService
         });
     }
 
+    /**
+     * Forward-geocode a free-form address and return its ZIP code. Used to
+     * enrich lead addresses that arrive without one (e.g. from the
+     * gs.construction site: "104 N Plum Grove Rd, Palatine, IL, USA").
+     */
+    public function lookupZipCode(string $address): ?string
+    {
+        $address = trim($address);
+
+        if ($address === '' || $this->apiKey === '') {
+            return null;
+        }
+
+        $cacheKey = 'geoapify_zip_' . md5(strtolower($address));
+
+        return Cache::remember($cacheKey, now()->addDays(30), function () use ($address) {
+            try {
+                $response = $this->httpClient->get('https://api.geoapify.com/v1/geocode/search', [
+                    'query' => [
+                        'text' => $address,
+                        'apiKey' => $this->apiKey,
+                        'format' => 'json',
+                        'limit' => 1,
+                        'filter' => 'countrycode:us',
+                    ],
+                ]);
+
+                $data = json_decode($response->getBody(), true);
+                $first = $data['results'][0] ?? null;
+
+                if (! is_array($first)) {
+                    return null;
+                }
+
+                $zip = trim((string) ($first['postcode'] ?? ''));
+
+                return preg_match('/^\d{5}(?:-\d{4})?$/', $zip) === 1 ? $zip : null;
+            } catch (RequestException $e) {
+                Log::channel('google_places')->error('Geoapify zip lookup error', ApiErrorFormatter::format($e, [
+                    'address' => $address,
+                ]));
+
+                return null;
+            }
+        });
+    }
+
     public static function sortResultsByDistance(array $results, ?string $location): array
     {
         if ($location === null) {

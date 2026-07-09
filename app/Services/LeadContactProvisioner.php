@@ -132,6 +132,15 @@ class LeadContactProvisioner
     protected function findOrCreateClient(User $user, string $address, int $vendorId): Client
     {
         $parsed = $this->parseAddress($address);
+
+        // Leads from the marketing site arrive without a ZIP ("104 N Plum
+        // Grove Rd, Palatine, IL, USA") — geocode the full address to fill it
+        // so the client record is complete from day one. Only when a city or
+        // state anchors the lookup: a bare street would geocode anywhere.
+        if (empty($parsed['zip_code']) && ($parsed['city'] || $parsed['state'])) {
+            $parsed['zip_code'] = app(GeoapifyService::class)->lookupZipCode($address);
+        }
+
         $key = self::normalizeAddressKey($parsed['address']);
 
         // Look across all clients linked to this user (any vendor).

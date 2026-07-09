@@ -141,7 +141,7 @@ class SmsGroupThread extends Model
         return $participantCount === $optedInCount;
     }
 
-    public static function unreadCountForUser(int $userId, ?int $vendorId = null): int
+    public static function unreadCountForUser(int $userId, ?int $vendorId = null, ?\Illuminate\Support\Carbon $newerThan = null): int
     {
         $query = SmsMessage::query()
             ->join('sms_group_threads', 'sms_group_threads.id', '=', 'sms_messages.thread_id')
@@ -154,7 +154,11 @@ class SmsGroupThread extends Model
             ->where(function ($query) {
                 $query->whereNull('thread_reads.last_read_message_id')
                     ->orWhereColumn('sms_messages.id', '>', 'thread_reads.last_read_message_id');
-            });
+            })
+            // Sidebar badge scope: only messages newer than the user's last
+            // visit to /messages (badge resets on visit; per-thread unread
+            // indicators are governed by thread_reads above instead).
+            ->when($newerThan, fn ($q) => $q->where('sms_messages.created_at', '>', $newerThan));
 
         if ($vendorId) {
             $query->where(function ($q) use ($vendorId) {
@@ -184,7 +188,7 @@ class SmsGroupThread extends Model
      *
      * @param  array<int>  $clientIds
      */
-    public static function unreadCountForUserInClients(int $userId, array $clientIds): int
+    public static function unreadCountForUserInClients(int $userId, array $clientIds, ?\Illuminate\Support\Carbon $newerThan = null): int
     {
         if (empty($clientIds)) {
             return 0;
@@ -203,6 +207,7 @@ class SmsGroupThread extends Model
                 $query->whereNull('thread_reads.last_read_message_id')
                     ->orWhereColumn('sms_messages.id', '>', 'thread_reads.last_read_message_id');
             })
+            ->when($newerThan, fn ($q) => $q->where('sms_messages.created_at', '>', $newerThan))
             ->count('sms_messages.id');
     }
 
