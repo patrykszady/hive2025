@@ -77,7 +77,7 @@ class SendCallAnsweredBrowserNotifications implements ShouldQueue
     protected function resolveCallerDisplayName(CallLog $callLog): string
     {
         if ($callLog->caller_name) {
-            return $callLog->caller_name;
+            return $callLog->display_caller_name;
         }
 
         $fromNumber = $callLog->from_number;

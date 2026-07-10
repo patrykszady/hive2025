@@ -389,3 +389,64 @@ it('carries prior opt-in into new group and greets only pending participants in 
         ->and($bonnieParticipant->opted_in_at)->not->toBeNull()
         ->and($bradParticipant->opted_in_at)->toBeNull();
 });
+
+it('sends consent and welcome messages in the recipient preferred language', function (): void {
+    Queue::fake();
+
+    $ownerVendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+    ]);
+
+    $subjectVendor = Vendor::factory()->create([
+        'business_name' => 'Cardona Painting',
+    ]);
+
+    $arturo = User::query()->create([
+        'first_name' => 'Arturo',
+        'last_name' => 'Cardona',
+        'preferred_language' => 'Spanish',
+        'email' => 'arturo.sms-test@example.com',
+        'cell_phone' => '7735550001',
+    ]);
+
+    $subjectVendor->users()->attach($arturo->id, [
+        'is_employed' => true,
+        'role_id' => 1,
+    ]);
+
+    $service = app(GroupSmsService::class);
+
+    $thread = $service->sendNewGroup(
+        ['7735550001'],
+        'Ignored manual text',
+        null,
+        null,
+        null,
+        $ownerVendor->id,
+        $subjectVendor->id,
+    );
+
+    $consentMessage = SmsMessage::query()
+        ->where('thread_id', $thread->id)
+        ->firstOrFail();
+
+    expect($consentMessage->text)
+        ->toStartWith("Hola Arturo,\n")
+        ->and($consentMessage->text)->toContain('Responde START para activar')
+        ->and($consentMessage->text)->toContain('Responde STOP')
+        ->and($consentMessage->text)->not->toContain('Reply START');
+
+    $welcomeSent = $service->markParticipantOptedInAndSendWelcomeIfReady($thread->fresh(), '+17735550001');
+
+    expect($welcomeSent)->toBeTrue();
+
+    $welcomeMessage = SmsMessage::query()
+        ->where('thread_id', $thread->id)
+        ->orderByDesc('id')
+        ->firstOrFail();
+
+    expect($welcomeMessage->text)
+        ->toStartWith("Hola Arturo,\n")
+        ->and($welcomeMessage->text)->toContain('te da la bienvenida')
+        ->and($welcomeMessage->text)->not->toContain('welcomes you');
+});

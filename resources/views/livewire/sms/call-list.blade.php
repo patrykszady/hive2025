@@ -174,7 +174,7 @@
             $displayName = $isKnownContact
                 ? ($resolvedName ?? 'Unknown')
                 : (($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
-                    ? $call->caller_name
+                    ? $call->display_caller_name
                     : ($resolvedName ?? 'Unknown'));
 
             // Show formatted phone as secondary only when display name differs from it

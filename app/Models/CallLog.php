@@ -123,6 +123,33 @@ class CallLog extends Model
     }
 
     /**
+     * CNAM lookups return personal names as "LASTNAME FIRSTNAME". Flip
+     * two-word ALL-CAPS names to "FIRSTNAME LASTNAME" for display; anything
+     * else (cities, businesses, mixed-case user names) passes through as-is.
+     */
+    public static function formatCallerNameForDisplay(?string $name): ?string
+    {
+        $name = trim((string) $name);
+
+        if ($name === '') {
+            return null;
+        }
+
+        if (preg_match('/^[A-Z]+\s+[A-Z]+$/', $name) === 1) {
+            $parts = preg_split('/\s+/', $name);
+
+            return $parts[1] . ' ' . $parts[0];
+        }
+
+        return $name;
+    }
+
+    public function getDisplayCallerNameAttribute(): ?string
+    {
+        return self::formatCallerNameForDisplay($this->caller_name);
+    }
+
+    /**
      * Trailing-digit variants of both call numbers so partial phone searches
      * (e.g. "6349") match.
      *

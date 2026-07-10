@@ -445,7 +445,7 @@ class TranscribeCallRecording implements ShouldQueue
         $other = $callLog->otherPartyUser();
         $otherName = $other
             ? trim(($other->first_name ?? '') . ' ' . ($other->last_name ?? ''))
-            : trim((string) $callLog->caller_name);
+            : trim((string) CallLog::formatCallerNameForDisplay($callLog->caller_name));
 
         // Need at least one known name to map a role onto.
         if ($agentName === '' && $otherName === '') {
@@ -892,7 +892,7 @@ class TranscribeCallRecording implements ShouldQueue
      */
     protected function applyKnownNameSubstitutions(CallLog $callLog, array $segments): array
     {
-        $callerName = trim((string) $callLog->caller_name);
+        $callerName = trim((string) CallLog::formatCallerNameForDisplay($callLog->caller_name));
         if ($callerName === '') {
             $other = $callLog->otherPartyUser();
             if ($other) {

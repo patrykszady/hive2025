@@ -2732,6 +2732,19 @@ class SmsConversation extends Component
             return $cache[$e164] = $vendor->short_name;
         }
 
+        // Fall back to the latest CNAM captured on a call log, matching the
+        // calls tab (HasCallActions::resolvePhoneDisplay).
+        $callLogName = CallLog::query()
+            ->where(fn ($q) => $q->where('from_number', $e164)->orWhere('to_number', $e164))
+            ->whereNotNull('caller_name')
+            ->whereNotIn('caller_name', ['Incoming Call', 'Outgoing Call'])
+            ->latest()
+            ->value('caller_name');
+
+        if (is_string($callLogName) && trim($callLogName) !== '') {
+            return $cache[$e164] = CallLog::formatCallerNameForDisplay($callLogName);
+        }
+
         $display10 = strlen($normalized) === 10 ? $normalized : $last10;
         if (strlen($display10) === 10) {
             return $cache[$e164] = '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);

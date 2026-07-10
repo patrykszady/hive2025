@@ -120,7 +120,7 @@ class CallDetail extends Component
                 }
             }
             if (! $callerName && $call->caller_name) {
-                $callerName = ucfirst(strtolower(explode(' ', trim((string) $call->caller_name))[0]));
+                $callerName = ucfirst(strtolower(explode(' ', trim((string) $call->display_caller_name))[0]));
             }
             $callerName ??= 'Caller';
         }
@@ -249,7 +249,7 @@ class CallDetail extends Component
         }
 
         if ($call->caller_name) {
-            $first = explode(' ', trim((string) $call->caller_name))[0] ?? null;
+            $first = explode(' ', trim((string) $call->display_caller_name))[0] ?? null;
             if ($first) {
                 return ucfirst(strtolower($first));
             }

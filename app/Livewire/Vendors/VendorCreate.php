@@ -161,7 +161,7 @@ class VendorCreate extends Component
     public function addVendorToCompany($vendor_id)
     {
         //add $vendor to currently logged in vendor (company)
-        auth()->user()->vendor->vendors()->attach($vendor_id);
+        auth()->user()->vendor->vendors()->syncWithoutDetaching([$vendor_id]);
 
         $this->redirectRoute('vendors.show', ['vendor' => $vendor_id]);
         // $this->dispatch('refreshComponent')->to('vendors.vendors-index');
@@ -209,13 +209,13 @@ class VendorCreate extends Component
         if (isset($this->vendor->id)) {
             //attach vendor to auth->user->vendor (logged in/working vendor/Company)
             $vendor = $this->vendor;
-            auth()->user()->vendor->vendors()->attach($vendor);
+            auth()->user()->vendor->vendors()->syncWithoutDetaching([$vendor->id]);
         //NEW VENDOR
         } else {
             $vendor = $this->form->store();
 
             //Add existing Vendor to the logged-in-vendor/company || add $vendor to currently logged in vendor
-            auth()->user()->vendor->vendors()->attach($vendor->id);
+            auth()->user()->vendor->vendors()->syncWithoutDetaching([$vendor->id]);
 
             if ($vendor->business_type != 'Retail') {
                 $user = $this->user;

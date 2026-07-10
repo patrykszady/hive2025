@@ -80,7 +80,7 @@ it('uses vendor short name in schedule greeting for vendor-subject threads', fun
         ->call('open', $thread->id)
         ->get('previewMessage');
 
-    expect($preview)->toStartWith('Hello Smartech,')
+    expect($preview)->toStartWith('Hi Smartech,')
         ->and($preview)->toContain('Upcoming tasks:')
         // Greeting flows straight into the intro — no blank line between them.
         ->and($preview)->toContain(",\nUpcoming tasks:")
@@ -303,7 +303,7 @@ it('uses vendor user nickname and preferred language when vendor short name is m
 
     $expectedTodayHeading = 'Today ' . today()->format('D m/d') . ':';
 
-    expect($preview)->toStartWith('Hello Rg Tile,')
+    expect($preview)->toStartWith('Hi Rg Tile,')
         ->and($preview)->toContain('Upcoming tasks:')
         ->and($preview)->toContain('Confirm Schedule:')
         ->and($preview)->toContain($expectedTodayHeading)

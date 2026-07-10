@@ -4,6 +4,7 @@ namespace App\Livewire\Sms;
 
 use App\Livewire\Sms\Concerns\ResolvesClientDisplayName;
 use App\Models\BlockedCaller;
+use App\Models\CallLog;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadRead;
@@ -416,14 +417,55 @@ class SmsThreadList extends Component
                 }
             }
 
-            if (! $name) {
-                $display10 = strlen($parts['n']) === 10 ? $parts['n'] : $parts['l'];
-                $name = strlen($display10) === 10
-                    ? '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6)
-                    : $phone;
+            if ($name) {
+                $this->phoneNameCache[$phone] = $name;
+            }
+        }
+
+        // Fall back to the latest CNAM captured on a call log (same source as
+        // the calls tab) for numbers without a matching user or vendor.
+        $unresolved = array_diff_key($normalized, $this->phoneNameCache);
+
+        if ($unresolved !== []) {
+            $candidatesByPhone = [];
+            foreach ($unresolved as $phone => $parts) {
+                $candidatesByPhone[$phone] = array_unique([
+                    $phone,
+                    '+' . $parts['d'],
+                    '+1' . $parts['n'],
+                ]);
             }
 
-            $this->phoneNameCache[$phone] = $name;
+            $allCandidates = array_unique(array_merge(...array_values($candidatesByPhone)));
+
+            $callLogs = CallLog::query()
+                ->where(fn ($q) => $q->whereIn('from_number', $allCandidates)->orWhereIn('to_number', $allCandidates))
+                ->whereNotNull('caller_name')
+                ->whereNotIn('caller_name', ['Incoming Call', 'Outgoing Call'])
+                ->latest()
+                ->get(['from_number', 'to_number', 'caller_name']);
+
+            foreach ($unresolved as $phone => $parts) {
+                $match = $callLogs->first(
+                    fn (CallLog $log): bool => in_array($log->from_number, $candidatesByPhone[$phone], true)
+                        || in_array($log->to_number, $candidatesByPhone[$phone], true)
+                );
+
+                if ($match) {
+                    $this->phoneNameCache[$phone] = CallLog::formatCallerNameForDisplay($match->caller_name);
+                }
+            }
+        }
+
+        foreach ($unresolved as $phone => $parts) {
+            if (isset($this->phoneNameCache[$phone])) {
+                continue;
+            }
+
+            $display10 = strlen($parts['n']) === 10 ? $parts['n'] : $parts['l'];
+            $this->phoneNameCache[$phone] = strlen($display10) === 10
+                ? '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6)
+                : $phone;
         }
     }
 

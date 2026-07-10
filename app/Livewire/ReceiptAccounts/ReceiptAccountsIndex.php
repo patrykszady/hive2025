@@ -70,7 +70,7 @@ class ReceiptAccountsIndex extends Component
     {
         //Add existing Vendor to the logged-in-vendor
         //add $vendor to currently logged in vendor
-        auth()->user()->vendor->vendors()->attach($vendor_id);
+        auth()->user()->vendor->vendors()->syncWithoutDetaching([$vendor_id]);
 
         // $this->dispatchBrowserEvent('notify', [
         //     'type' => 'success',

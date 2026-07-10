@@ -86,7 +86,7 @@ class SendIncomingCallBrowserNotifications implements ShouldQueue
     {
         // Use the caller name already looked up on the call log
         if ($callLog->caller_name) {
-            return $callLog->caller_name;
+            return $callLog->display_caller_name;
         }
 
         $fromNumber = $callLog->from_number;

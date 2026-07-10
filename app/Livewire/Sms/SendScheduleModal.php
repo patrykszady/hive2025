@@ -810,8 +810,8 @@ class SendScheduleModal extends Component
             $shortName = trim((string) ($thread->subjectVendor?->short_name ?? ''));
 
             return $shortName !== ''
-                ? 'Hello' . " {$shortName},"
-                : ($this->vendorUserGreeting() ?: 'Hello,');
+                ? 'Hi' . " {$shortName},"
+                : ($this->vendorUserGreeting() ?: 'Hi,');
         }
 
         $clientName = trim($this->clientFirstNamesForGreeting($thread?->client_id));
@@ -902,7 +902,7 @@ class SendScheduleModal extends Component
             return null;
         }
 
-        return 'Hello ' . collect($names)->join(', ', ' & ') . ',';
+        return 'Hi ' . collect($names)->join(', ', ' & ') . ',';
     }
 
     protected function scheduleDayLabel(string $key): string

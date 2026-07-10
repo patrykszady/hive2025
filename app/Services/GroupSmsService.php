@@ -12,6 +12,34 @@ class GroupSmsService
 {
     public const START_CONSENT_TEXT = 'Reply START to activate communication with GS Construction. Msg & data rates may apply. Message frequency varies. Reply STOP to opt out, HELP for help.';
 
+    /**
+     * Static translations of the consent prompt. START/STOP/HELP keywords must
+     * stay in English — carriers only recognize the English keywords.
+     *
+     * @var array<string, string>
+     */
+    private const CONSENT_TEXT_TRANSLATIONS = [
+        'Spanish' => 'Responde START para activar la comunicación con GS Construction. Pueden aplicarse tarifas de mensajes y datos. La frecuencia de los mensajes varía. Responde STOP para darte de baja o HELP para recibir ayuda.',
+        'Polish' => 'Odpisz START, aby aktywować komunikację z GS Construction. Mogą obowiązywać opłaty za wiadomości i dane. Częstotliwość wiadomości może się różnić. Odpisz STOP, aby zrezygnować, lub HELP, aby uzyskać pomoc.',
+    ];
+
+    private const WELCOME_BODY = 'GS Construction welcomes you to our project msg thread. '
+        . "Msgs will be tagged with \"-GS\" for Gregory's replies, \"-PS\" for Patryk's, and our automated \"GS Crew\" replies by \"-GSC\". "
+        . 'Please save this number as "GS Construction" in your contacts list. '
+        . 'You can always also text or call us at this number.';
+
+    /** @var array<string, string> */
+    private const WELCOME_BODY_TRANSLATIONS = [
+        'Spanish' => 'GS Construction te da la bienvenida a nuestro hilo de mensajes del proyecto. '
+            . 'Los mensajes llevarán la etiqueta "-GS" para las respuestas de Gregory, "-PS" para las de Patryk y "-GSC" para las respuestas automáticas de "GS Crew". '
+            . 'Por favor, guarda este número como "GS Construction" en tu lista de contactos. '
+            . 'También puedes escribirnos o llamarnos a este número en cualquier momento.',
+        'Polish' => 'GS Construction wita Cię w naszym wątku wiadomości projektowych. '
+            . 'Wiadomości będą oznaczone "-GS" dla odpowiedzi Gregory\'ego, "-PS" dla odpowiedzi Patryka, a automatyczne odpowiedzi "GS Crew" — "-GSC". '
+            . 'Zapisz ten numer jako "GS Construction" na liście kontaktów. '
+            . 'Zawsze możesz też do nas napisać lub zadzwonić pod ten numer.',
+    ];
+
     protected string $from;
 
     public function __construct()
@@ -172,28 +200,55 @@ class GroupSmsService
 
     private function buildWelcomeMessage(SmsGroupThread $thread): string
     {
-        return $this->buildGreeting($thread) . "\n"
-            . "GS Construction welcomes you to our project msg thread. "
-            . "Msgs will be tagged with \"-GS\" for Gregory's replies, \"-PS\" for Patryk's, and our automated \"GS Crew\" replies by \"-GSC\". "
-            . "Please save this number as \"GS Construction\" in your contacts list. "
-            . "You can always also text or call us at this number."
-            . "\n-GSC";
+        $language = $this->threadRecipientLanguage($thread);
+        $body = self::WELCOME_BODY_TRANSLATIONS[$language] ?? self::WELCOME_BODY;
+
+        return $this->buildGreeting($thread, language: $language) . "\n" . $body . "\n-GSC";
     }
 
     private function buildConsentMessage(SmsGroupThread $thread): string
     {
-        return $this->buildGreeting($thread, pendingOnly: true) . "\n" . self::START_CONSENT_TEXT . "\n-GSC";
+        $language = $this->threadRecipientLanguage($thread);
+        $consentText = self::CONSENT_TEXT_TRANSLATIONS[$language] ?? self::START_CONSENT_TEXT;
+
+        return $this->buildGreeting($thread, pendingOnly: true, language: $language) . "\n" . $consentText . "\n-GSC";
     }
 
-    private function buildGreeting(SmsGroupThread $thread, bool $pendingOnly = false): string
+    /**
+     * Preferred language of the thread's recipients (subject vendor's or
+     * client's users), mirroring SmsConversation::threadRecipientLanguage().
+     */
+    private function threadRecipientLanguage(SmsGroupThread $thread): string
     {
+        $thread->loadMissing('client.users', 'subjectVendor.users');
+
+        $users = $thread->subject_vendor_id
+            ? $thread->subjectVendor?->users
+            : $thread->client?->users;
+
+        $language = $users
+            ?->pluck('preferred_language')
+            ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+            ->first();
+
+        return app(SmsTranslationService::class)->normalizeLanguage((string) ($language ?: 'English'));
+    }
+
+    private function buildGreeting(SmsGroupThread $thread, bool $pendingOnly = false, string $language = 'English'): string
+    {
+        $greetingWord = match ($language) {
+            'Spanish' => 'Hola',
+            'Polish' => 'Cześć',
+            default => 'Hi',
+        };
+
         $recipientNames = $this->resolveRecipientNames($thread, $pendingOnly);
 
         if ($recipientNames === '') {
-            return 'Hi there,';
+            return $language === 'English' ? 'Hi there,' : "{$greetingWord},";
         }
 
-        return "Hi {$recipientNames},";
+        return "{$greetingWord} {$recipientNames},";
     }
 
     private function resolveRecipientNames(SmsGroupThread $thread, bool $pendingOnly = false): string

@@ -229,7 +229,7 @@ trait HasCallActions
             ->value('caller_name');
 
         if ($callLogName) {
-            return $cache[$e164] = $callLogName;
+            return $cache[$e164] = CallLog::formatCallerNameForDisplay($callLogName);
         }
 
         return $cache[$e164] = $this->formatPhone($e164);

@@ -32,7 +32,7 @@
             $displayName = $isKnownContact
                 ? ($resolvedName ?? 'Unknown')
                 : (($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
-                    ? $call->caller_name
+                    ? $call->display_caller_name
                     : ($resolvedName ?? 'Unknown'));
             $effectiveStatus = $this->effectiveStatus($call);
             $dur = $call->duration_seconds ? abs($call->duration_seconds) : 0;

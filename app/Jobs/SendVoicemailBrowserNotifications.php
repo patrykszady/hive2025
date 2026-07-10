@@ -44,7 +44,7 @@ class SendVoicemailBrowserNotifications implements ShouldQueue
             return;
         }
 
-        $callerLabel = $callLog->caller_name
+        $callerLabel = $callLog->display_caller_name
             ?: $callLog->from_number
             ?: 'Unknown caller';
 
