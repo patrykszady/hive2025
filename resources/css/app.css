@@ -112,6 +112,21 @@
     box-shadow: inset -9999px 0 0 0 color-mix(in oklab, var(--color-indigo-500) 12%, transparent);
   }
 
+  /* Sub-rows (e.g. a transaction's description line) belong to the row above:
+     never hover-highlight them. */
+  tr[data-flux-row].table-subrow:hover,
+  tr[data-flux-row].table-subrow:hover > td,
+  .dark tr[data-flux-row].table-subrow:hover,
+  .dark tr[data-flux-row].table-subrow:hover > td {
+    background-color: transparent;
+  }
+  tr[data-flux-row].table-subrow:hover > td:first-child,
+  tr[data-flux-row].table-subrow:hover > td:last-child,
+  .dark tr[data-flux-row].table-subrow:hover > td:first-child,
+  .dark tr[data-flux-row].table-subrow:hover > td:last-child {
+    box-shadow: none;
+  }
+
   /* Global link hover: indigo text, no underline. */
   a:hover {
     color: var(--color-indigo-600);
@@ -296,8 +311,11 @@ input[type="number"] {
 
 /* Add vertical breathing room between stacked Flux field blocks.
    This ensures the gap ABOVE a label (from the previous input) is larger
-   than the gap BELOW a label (to its own input), creating clear grouping. */
-[data-flux-field] + [data-flux-field] {
+   than the gap BELOW a label (to its own input), creating clear grouping.
+   Scoped to fields whose label is a DIRECT child (stacked layout) — inline
+   label/input rows (x-forms.one_line nests the label in a dt) keep their
+   container's tight space-y rhythm instead. */
+[data-flux-field] + [data-flux-field]:has(> [data-flux-label]) {
   margin-top: 1.25rem; /* 20px between field blocks */
 }
 

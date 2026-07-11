@@ -14,13 +14,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement('
-            DELETE t1 FROM vendors_vendor t1
-            INNER JOIN vendors_vendor t2
-                ON t1.vendor_id = t2.vendor_id
-                AND t1.belongs_to_vendor_id = t2.belongs_to_vendor_id
-                AND t1.id > t2.id
-        ');
+        // Driver-agnostic dedupe (tests run on sqlite): keep the oldest row per pair.
+        DB::table('vendors_vendor')
+            ->select(DB::raw('MIN(id) as keep_id'), 'vendor_id', 'belongs_to_vendor_id')
+            ->groupBy('vendor_id', 'belongs_to_vendor_id')
+            ->havingRaw('COUNT(*) > 1')
+            ->get()
+            ->each(function ($duplicate) {
+                DB::table('vendors_vendor')
+                    ->where('vendor_id', $duplicate->vendor_id)
+                    ->where('belongs_to_vendor_id', $duplicate->belongs_to_vendor_id)
+                    ->where('id', '!=', $duplicate->keep_id)
+                    ->delete();
+            });
 
         Schema::table('vendors_vendor', function (Blueprint $table) {
             $table->unique(['vendor_id', 'belongs_to_vendor_id']);

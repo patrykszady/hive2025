@@ -45,7 +45,7 @@
         </x-island-card>
     @endif
 
-    <x-island-card heading="Checks" :separator="true">
+    <x-island-card heading="{{ $view === 'expenses.show' && $this->checks->count() === 1 ? 'Check' : 'Checks' }}" :separator="true">
 
         <div class="space-y-4">
             <flux:table>

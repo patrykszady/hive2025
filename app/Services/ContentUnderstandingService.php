@@ -44,6 +44,20 @@ class ContentUnderstandingService
             throw new \RuntimeException("ContentUnderstanding: file is empty or unreadable: {$filePath}");
         }
 
+        return $this->normalise($this->analyzeBinary($fileContent, $analyzerId, $logChannel));
+    }
+
+    /**
+     * Analyze raw file content and return the FULL raw CU response
+     * (status/result/contents) including per-field `source` polygons when the
+     * analyzer has estimateFieldSourceAndConfidence enabled.
+     *
+     * @return array{status: string, result: array}
+     */
+    public function analyzeBinary(string $fileContent, string $analyzerId, string $logChannel = 'vendor_docs'): array
+    {
+        $filePath = '(binary)';
+
         // Submit as raw binary — CU only runs OCR on octet-stream uploads.
         $submitUrl = "https://{$this->endpoint}/contentunderstanding/analyzers/{$analyzerId}:analyzeBinary?api-version={$this->apiVersion}";
 
@@ -86,16 +100,9 @@ class ContentUnderstandingService
             throw new \RuntimeException('ContentUnderstanding: missing Operation-Location header');
         }
 
-        // Poll until complete
-        $result = $this->poll($operationUrl, $logChannel);
-
-        // Normalise the Content Understanding response to the same shape
-        // that ReceiptController::extractReceipt() uses:
-        //   $result['analyzeResult']['documents'][0]['fields']
-        //   $result['analyzeResult']['content']
-        //   $result['analyzeResult']['keyValuePairs']   (optional)
-        //   $result['analyzeResult']['styles']          (optional)
-        return $this->normalise($result);
+        // Poll until complete. Callers that need the normalised analyzeResult
+        // shape (documents/content/keyValuePairs/styles) go through analyze().
+        return $this->poll($operationUrl, $logChannel);
     }
 
     /**
@@ -226,6 +233,38 @@ class ContentUnderstandingService
             'jpg', 'jpeg'   => 'image/jpeg',
             default         => 'application/octet-stream',
         };
+    }
+
+    /**
+     * Flatten a CU `fields` map (scalars, valueObject groups, valueArray
+     * lists) into plain PHP values, dropping spans/sources/confidence.
+     *
+     * @param  array<string, array<string, mixed>>  $fields
+     * @return array<string, mixed>
+     */
+    public static function normalizeFieldValues(array $fields): array
+    {
+        return collect($fields)->map(fn ($field) => self::normalizeFieldValue($field))->all();
+    }
+
+    private static function normalizeFieldValue(array $field): mixed
+    {
+        if (isset($field['valueObject'])) {
+            return collect($field['valueObject'])->map(fn ($sub) => self::normalizeFieldValue($sub))->all();
+        }
+
+        if (($field['type'] ?? '') === 'array' || isset($field['valueArray'])) {
+            return array_values(array_filter(
+                array_map(fn ($item) => self::normalizeFieldValue($item), $field['valueArray'] ?? []),
+                fn ($v) => $v !== null && $v !== ''
+            ));
+        }
+
+        return $field['valueString']
+            ?? $field['valueNumber']
+            ?? $field['valueDate']
+            ?? $field['valueBoolean']
+            ?? null;
     }
 
     // -------------------------------------------------------------------------

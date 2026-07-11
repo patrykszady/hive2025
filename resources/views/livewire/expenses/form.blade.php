@@ -71,6 +71,36 @@
             @endif
         </flux:field>
 
+        {{-- SCANNED CHECK IMAGE attached to the source transaction --}}
+        @php
+            $transactionCheckImage = null;
+            if ($form->transaction) {
+                $sourceTransactionId = $form->transaction->id;
+                $sourceCheckId = $form->transaction->check_id;
+                $transactionCheckImage = \App\Models\CheckImage::query()
+                    ->where(function ($query) use ($sourceTransactionId, $sourceCheckId) {
+                        $query->where('transaction_id', $sourceTransactionId);
+                        if ($sourceCheckId) {
+                            $query->orWhere('check_id', $sourceCheckId);
+                        }
+                    })
+                    ->first();
+            }
+        @endphp
+        @if($transactionCheckImage)
+            <div>
+                <img
+                    src="{{ route('expenses.original_receipt', ['checks', $transactionCheckImage->image_filename]) }}"
+                    alt="Check {{ $transactionCheckImage->check_number }}"
+                    class="w-full rounded-lg border border-zinc-200 bg-white dark:border-zinc-700"
+                    loading="lazy"
+                />
+                @if($transactionCheckImage->resolved_payee_name)
+                    <flux:description class="mt-1"><i>Check payee: {{ $transactionCheckImage->resolved_payee_name }}</i></flux:description>
+                @endif
+            </div>
+        @endif
+
         {{-- PROJECT --}}
         <div
             x-data="{ open: @entangle('form.vendor_id'), split: @entangle('split') }"
@@ -163,38 +193,51 @@
         </div>
 
         {{-- ATTACH TO EXISTING CHECK (Optional) --}}
-        <div
-            x-data="{ open: @entangle('form.paid_by'), existing_check: @entangle('existing_check_id') }"
-            x-show="true"
-            x-transition
-            >
-            <div class="flex flex-wrap items-end gap-3">
-                <div class="grow min-w-[16rem]">
-                    <flux:select 
-                        wire:model.live="existing_check_id" 
-                        label="Attach to Existing Check (Optional)"
-                        placeholder="Create new check or select existing..."
-                        searchable
-                        x-bind:disabled="open"
-                    >
-                        <flux:select.option value="">Create New Check</flux:select.option>
-                        @foreach($this->available_checks as $check)
-                            <flux:select.option value="{{$check['id']}}">{{$check['label']}}</flux:select.option>
-                        @endforeach
-                    </flux:select>
-                    <flux:description>Select an existing check to add this expense to it, or leave blank to create a new check.</flux:description>
-                </div>
-                @if(isset($expense->id) && ($expense->check_id || $expense->checks->isNotEmpty()))
-                    <flux:button
-                        size="sm"
-                        variant="danger"
-                        x-on:click.stop="if (confirm('Remove this expense from all checks?')) { $wire.removeCheckAssociation() }"
-                    >
-                        Remove from Check
-                    </flux:button>
-                @endif
+        @php
+            // Hidden when the expense already belongs to a check, and when
+            // creating from a check-paid transaction (the transaction's check
+            // number dictates the check — no manual attach).
+            $expenseHasCheck = isset($expense->id) && ($expense->check_id || $expense->checks->isNotEmpty());
+            $isCheckPaidTransaction = ! $expense->exists
+                && $form->transaction
+                && ($form->transaction->check_id
+                    || ($form->transaction->check_number && ! in_array($form->transaction->check_number, ['1010101', '2020202', '0', '0000'], true)));
+        @endphp
+        @if($expenseHasCheck)
+            <div class="flex justify-end">
+                <flux:button
+                    size="sm"
+                    variant="danger"
+                    x-on:click.stop="if (confirm('Remove this expense from all checks?')) { $wire.removeCheckAssociation() }"
+                >
+                    Remove from Check
+                </flux:button>
             </div>
-        </div>
+        @elseif(! $isCheckPaidTransaction)
+            <div
+                x-data="{ open: @entangle('form.paid_by'), existing_check: @entangle('existing_check_id') }"
+                x-show="true"
+                x-transition
+                >
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="grow min-w-[16rem]">
+                        <flux:select
+                            wire:model.live="existing_check_id"
+                            label="Attach to Existing Check (Optional)"
+                            placeholder="Create new check or select existing..."
+                            searchable
+                            x-bind:disabled="open"
+                        >
+                            <flux:select.option value="">Create New Check</flux:select.option>
+                            @foreach($this->available_checks as $check)
+                                <flux:select.option value="{{$check['id']}}">{{$check['label']}}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                        <flux:description>Select an existing check to add this expense to it, or leave blank to create a new check.</flux:description>
+                    </div>
+                </div>
+            </div>
+        @endif
 
         {{-- CHECK --}}
         {{-- SHOULD Be a component here --}}

@@ -2,7 +2,7 @@
     <div class="grid max-w-xl grid-cols-5 gap-4 xl:relative lg:max-w-5xl sm:px-6">
         <div class="col-span-5 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
             {{-- CHECK DETAILS --}}
-            <x-details.card title="Check Details" :canEdit="auth()->user()->can('update', $check)">
+            <x-details.card title="Details" :canEdit="auth()->user()->can('update', $check)">
                 <x-slot:header_buttons>                 
                     <flux:button
                         wire:click="$dispatchTo('checks.check-create', 'editCheck', { check: {{$check->id}}})"
@@ -307,6 +307,134 @@
                         </flux:table.rows>
                     </flux:table>
                 </x-island-card>
+            @endif
+
+            {{-- SCANNED CHECK IMAGE --}}
+            @if($check_images->isNotEmpty())
+                <x-details.card :expanded="false" details_text="Details">
+                    <x-slot:header_buttons>
+                        <a
+                            href="{{ route('expenses.original_receipt', ['checks', $check_images->first()->image_filename]) }}"
+                            target="_blank"
+                            title="View Full Size"
+                            aria-label="View Full Size"
+                            class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-700 hover:bg-zinc-950/5 dark:hover:bg-white/10"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
+                                <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
+                                <circle cx="12" cy="12" r="2.5"/>
+                            </svg>
+                        </a>
+                        @if($check_images->first()->statement_filename)
+                            <a
+                                href="{{ route('checks.statement_pdf', $check_images->first()->statement_filename) }}"
+                                target="_blank"
+                                title="View Full Statement ({{ $check_images->first()->statement_filename }})"
+                                aria-label="View Full Statement"
+                                class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-700 hover:bg-zinc-950/5 dark:hover:bg-white/10"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <path d="M14 2v6h6"/>
+                                    <path d="M8 13h8M8 17h8"/>
+                                </svg>
+                            </a>
+                        @endif
+                    </x-slot:header_buttons>
+
+                    {{-- Always-visible image(s) — open full size via the header eye icon --}}
+                    <div class="space-y-3 py-2">
+                        @foreach($check_images as $image)
+                            <img
+                                src="{{ route('expenses.original_receipt', ['checks', $image->image_filename]) }}"
+                                alt="Check {{ $image->check_number }}"
+                                class="w-full rounded-lg border border-zinc-200 bg-white dark:border-zinc-700"
+                                loading="lazy"
+                            />
+                        @endforeach
+                    </div>
+
+                    <x-slot:details>
+                        @foreach($check_images as $image)
+                            @php
+                                $fields = $image->check_fields ?? [];
+                                $numbers = collect([
+                                    'On Check' => $fields['CheckNumber']['OnCheck'] ?? null,
+                                    'MICR' => $fields['CheckNumber']['Micr'] ?? null,
+                                    'Bank' => $fields['CheckNumber']['Bank'] ?? null,
+                                ])->filter();
+                                $writtenDate = $fields['Date']['OnCheck'] ?? null;
+                                $amountOnCheck = $fields['Amount']['OnCheck'] ?? null;
+                            @endphp
+
+                            {{-- Check number: one row when all sources agree, separate rows when they differ --}}
+                            @if($numbers->unique()->count() > 1)
+                                @foreach($numbers as $source => $number)
+                                    <x-details.row title="Check Number ({{ $source }})" :content="(string) $number" />
+                                @endforeach
+                            @elseif($image->check_number)
+                                <x-details.row title="Check Number" :content="(string) $image->check_number" />
+                            @endif
+
+                            @php
+                                $resolvedPayee = $image->payeeUser?->full_name ?? $image->payeeVendor?->business_name;
+                                $payeeHref = $image->payee_user_id
+                                    ? route('users.show', $image->payee_user_id)
+                                    : ($image->payee_vendor_id ? route('vendors.show', $image->payee_vendor_id) : null);
+                            @endphp
+                            @if($resolvedPayee || $image->payee)
+                                <x-details.row
+                                    title="Payee"
+                                    :content="$resolvedPayee ?? $image->payee"
+                                    :href="$payeeHref"
+                                    :navigate="(bool) $payeeHref"
+                                    :secondary_content="$resolvedPayee && $resolvedPayee !== $image->payee ? $image->payee : null"
+                                />
+                            @endif
+                            @if(!empty($fields['Memo']))
+                                <x-details.row title="Memo" :content="implode(', ', $fields['Memo'])" />
+                            @endif
+
+                            @if($image->amount !== null)
+                                <x-details.row title="Amount" :content="money($image->amount)" />
+                            @endif
+                            @if($amountOnCheck && (float) str_replace(',', '', $amountOnCheck) !== (float) $image->amount)
+                                <x-details.row title="Amount On Check" :content="'$' . $amountOnCheck" />
+                            @endif
+                            @if(!empty($fields['AmountWords']))
+                                <x-details.row title="Amount In Words" :content="$fields['AmountWords']" />
+                            @endif
+
+                            @if($writtenDate)
+                                <x-details.row title="Written" :content="\Carbon\Carbon::parse($writtenDate)->format('m/d/Y')" />
+                            @endif
+                            @if($image->check_date)
+                                <x-details.row title="Cleared" :content="$image->check_date->format('m/d/Y')" />
+                            @endif
+
+                            @if(!empty($fields['CheckInfo']['PayerName']))
+                                <x-details.row title="Payer" :content="$fields['CheckInfo']['PayerName']" />
+                            @endif
+                            @if(!empty($fields['CheckInfo']['PayerAddress']))
+                                <x-details.row title="Payer Address" :content="$fields['CheckInfo']['PayerAddress']" />
+                            @endif
+                            @if(!empty($fields['CheckInfo']['PayerPhone']))
+                                <x-details.row title="Payer Phone" :content="$fields['CheckInfo']['PayerPhone']" />
+                            @endif
+
+                            @if(!empty($fields['BankInfo']['BankName']))
+                                <x-details.row title="Bank" :content="$fields['BankInfo']['BankName']" />
+                            @endif
+                            @if(!empty($fields['BankInfo']['RoutingNumber']))
+                                <x-details.row title="Routing Number" :content="$fields['BankInfo']['RoutingNumber']" />
+                            @endif
+                            @if(!empty($fields['BankInfo']['AccountNumber']))
+                                <x-details.row title="Account Number" :content="$fields['BankInfo']['AccountNumber']" />
+                            @endif
+
+                        @endforeach
+                    </x-slot:details>
+                </x-details.card>
             @endif
         </div>
     </div>

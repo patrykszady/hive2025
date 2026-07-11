@@ -21,15 +21,17 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseId    = $this->option('base');
         $model     = $this->option('model');
 
-        if (! in_array($type, ['receipt', 'coi', 'material_order'], true)) {
-            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', or 'material_order'.");
+        if (! in_array($type, ['receipt', 'coi', 'material_order', 'check_statement', 'check'], true)) {
+            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', 'material_order', 'check_statement', or 'check'.");
             return self::FAILURE;
         }
 
         $analyzerId = match ($type) {
-            'coi'            => config('services.azure_cu.analyzer_id_coi'),
-            'material_order' => config('services.azure_cu.analyzer_id_material_order'),
-            default          => config('services.azure_cu.analyzer_id'),
+            'coi'             => config('services.azure_cu.analyzer_id_coi'),
+            'material_order'  => config('services.azure_cu.analyzer_id_material_order'),
+            'check_statement' => config('services.azure_cu.analyzer_id_check_statement'),
+            'check'           => config('services.azure_cu.analyzer_id_check'),
+            default           => config('services.azure_cu.analyzer_id'),
         };
 
         $this->info("Syncing '{$type}' analyzer: {$analyzerId}");
@@ -39,9 +41,11 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseFields = $base['fieldSchema']['fields'] ?? [];
 
         $definition = match ($type) {
-            'coi'            => $this->buildCoiDefinition($model),
-            'material_order' => $this->buildMaterialOrderDefinition($model),
-            default          => $this->buildReceiptDefinition($model, $baseFields),
+            'coi'             => $this->buildCoiDefinition($model),
+            'material_order'  => $this->buildMaterialOrderDefinition($model),
+            'check_statement' => $this->buildCheckStatementDefinition($model),
+            'check'           => $this->buildCheckDefinition($model),
+            default           => $this->buildReceiptDefinition($model, $baseFields),
         };
 
         if ($this->option('dry-run')) {
@@ -406,6 +410,260 @@ class SyncContentUnderstandingAnalyzer extends Command
             'fieldSchema'    => [
                 'name'        => 'HiveCoiSchema',
                 'description' => 'Schema for Certificate of Insurance extraction.',
+                'fields'      => $fields,
+            ],
+        ];
+    }
+
+    private function buildCheckDefinition(string $model): array
+    {
+        $fields = [
+            // ── Grouped: dates ─────────────────────────────────────────────
+            'Date' => [
+                'type'        => 'object',
+                'description' => 'The check dates: (1) the handwritten date on the check face, (2) the typed bank caption date below the check image.',
+                'properties'  => [
+                    'OnCheck' => [
+                        'type'        => 'date',
+                        'description' => 'The HANDWRITTEN date on the check\'s DATE line (e.g. "06/03/26" → 2026-06-03, "6/3/26" → 2026-06-03). Read it from the check face only — ignore the typed caption below the image. Two-digit years are 20xx. Return null if the date line is blank or unreadable.',
+                        'method'      => 'extract',
+                    ],
+                    'Bank' => [
+                        'type'        => 'date',
+                        'description' => 'The typed bank date from the caption "Ck Date: MM/DD/YYYY" printed below the check image (the date the bank processed the check). Return null when no caption is present.',
+                        'method'      => 'extract',
+                    ],
+                ],
+            ],
+
+            // ── Grouped: check numbers ─────────────────────────────────────
+            'CheckNumber' => [
+                'type'        => 'object',
+                'description' => 'The check number from its three sources: (1) printed on the check face, (2) encoded in the MICR line, (3) the typed bank caption. All three should normally agree.',
+                'properties'  => [
+                    'OnCheck' => [
+                        'type'        => 'string',
+                        'description' => 'The check number as PRINTED on the check itself, in the top-right corner (e.g. "2612"). Read it from the check face only — ignore the typed caption below the image. Digits only.',
+                        'method'      => 'extract',
+                    ],
+                    'Micr' => [
+                        'type'        => 'string',
+                        'description' => 'The check number as encoded in the MICR line — the LAST group of digits at the bottom of the check, after the account number (e.g. "2612"). Digits only.',
+                        'method'      => 'extract',
+                    ],
+                    'Bank' => [
+                        'type'        => 'string',
+                        'description' => 'The check number from the typed caption "Ck No: NNNN" printed below the check image. Digits only. Return null when no caption is present.',
+                        'method'      => 'extract',
+                    ],
+                ],
+            ],
+
+            // ── Grouped: amounts ───────────────────────────────────────────
+            'Amount' => [
+                'type'        => 'object',
+                'description' => 'The check amount from its two sources: (1) the handwritten courtesy box on the check face, (2) the typed bank caption below the check image.',
+                'properties'  => [
+                    'OnCheck' => [
+                        'type'        => 'string',
+                        'description' => implode(' ', [
+                            'The HANDWRITTEN courtesy-box amount from the check face — the digits next to the "$" symbol at the end of the payee line (NOT the typed "Ck Date / Ck No / Amt" caption below the check image; that is a different field).',
+                            'The courtesy box is ALWAYS in the same place on every check: the upper-right area of the check face, immediately to the right of a "$" sign, level with the payee line. It ALWAYS contains handwriting on a filled-out check — if the OCR there is garbled or low-confidence, still read it and correct it using the amount-in-words line; NEVER return null merely because the handwriting is messy.',
+                            'Decide the output in this order:',
+                            '(1) If the courtesy-box text is VALID US currency formatting AND agrees with the amount-in-words line, copy it as written — keep the writer\'s commas and decimal point (e.g. "2,397.50" stays "2,397.50"; "6,000.00" stays "6,000.00"; "990.00" stays "990.00").',
+                            '(2) If the formatting is INVALID US currency (e.g. a comma followed by exactly two digits at the end like "23,30", or "6,289,00" with two commas), it is an OCR/handwriting artifact — output the MINIMAL correction: change or remove ONLY the wrong characters, never add separators or cents that are not written. Examples: "23,30" (words "twenty three hundred thirty") → "2330" (drop the stray comma — NOT "2,330.00"); "6,289,00" → "6,289.00" (second comma becomes the decimal point).',
+                            '(3) If any DIGIT contradicts the amount-in-words line, the words win — especially the LEADING digit: cursive "$1,215.00" is often misread as "6215.00" because the "1," loop looks like a "6"; when the words read "one thousand two hundred fifteen", output "1215.00" (only the wrong digit changed).',
+                            'MINIMAL-EDIT PRINCIPLE for corrections: the output must stay as close as possible to the characters visible in the courtesy box — change only what is wrong. Do not reformat.',
+                            'The amount-in-words line is ALWAYS the authoritative cross-check for magnitude and digits.',
+                            'Handwritten cents may appear as "50/100" (= .50) or "00/100" (= .00). No "$" sign.',
+                            'This field must always be sourced from the courtesy box on the check face — never from the typed caption below the check image.',
+                            'Return null if the courtesy box is blank or unreadable.',
+                        ]),
+                        'method'      => 'extract',
+                    ],
+                    'Bank' => [
+                        'type'        => 'number',
+                        'description' => 'The check amount in dollars from the typed caption "Amt: $N.NN" printed below the check image (e.g. 2330.00 from "Amt: $2330.00"). Return null when no caption is present.',
+                        'method'      => 'extract',
+                    ],
+                ],
+            ],
+
+            'AmountWords' => [
+                'type'        => 'string',
+                'description' => implode(' ', [
+                    'The handwritten amount-in-words line of the check — ONLY that single line (it ends near the printed "DOLLARS" label). Never source this from the payee line, the courtesy box, or the typed caption below the check.',
+                    'Transcribe the line AS WRITTEN, but CORRECT OCR-garbled tokens into the real English number words the writer intended — use the check amount to disambiguate garbled words.',
+                    'Example: OCR "two thousand wille hundred 00/200us" on a $2,900.00 check → "two thousand nine hundred" ("wille" is a misread of "nine").',
+                    'Example: OCR "two thousand two hunded eigty 0" on a $2,280.00 check → "two thousand two hundred eighty".',
+                    'Example: OCR "twenty three hundred thirty and 100" on a $2,330.00 check → "twenty three hundred thirty" — KEEP the writer\'s phrasing; do NOT rephrase it as "two thousand three hundred thirty".',
+                    'PRESERVE the phrasing and word order as handwritten — only fix misread tokens, never restructure the number into a different wording.',
+                    'EVERY word in the output MUST be a valid English number word ("one" … "ninety", "hundred", "thousand", "million") or the connector "and" — this line is ALWAYS an amount in words. NEVER output OCR garble like "sir", "hundrd", "trenty", "hundes", "fivet", "wille", "hunokd", "eigty" — replace each garbled token with the valid number word it visually resembles, cross-checked against the check amount (e.g. on a $6,620.00 check, OCR "six thousand sir hundrd trenty" → "six thousand six hundred twenty").',
+                    'Omit the trailing cents fraction when it is zero ("00/100"); append "and NN/100" only when cents are non-zero (e.g. "two thousand three hundred ninety seven and 50/100").',
+                    'Use lowercase words. Return null only when the line is completely blank.',
+                ]),
+                'method'      => 'extract',
+            ],
+
+            'Memo' => [
+                'type'        => 'array',
+                'description' => implode(' ', [
+                    'The individual references handwritten on the MEMO line at the bottom-left of the check, as an array with ONE entry per reference (like PO numbers on an expense).',
+                    'Split on commas — e.g. handwriting "1124, 1125" → ["1124", "1125"]; "#282,285,301(1800)" → ["282", "285", "301(1800)"]; "25-9, 17-1000" → ["25-9", "17-1000"].',
+                    'Strip a leading "#" from reference numbers. A single word or address is one entry (e.g. ["Violet"], ["Capital credit"]).',
+                    'NEVER return the MICR digit line printed along the very bottom edge of the check (long digit groups, often with ⑆/⑈ symbols) — that is not a memo.',
+                    'Return an empty array when the memo line is blank.',
+                ]),
+                'items'       => [
+                    'type'        => 'string',
+                    'description' => 'One memo reference exactly as handwritten (leading "#" stripped).',
+                    'method'      => 'extract',
+                ],
+            ],
+
+            // ── Grouped: payer / payee info ────────────────────────────────
+            'CheckInfo' => [
+                'type'        => 'object',
+                'description' => 'Who wrote the check and who it is written to: the printed payer block at the top-left of the check face, and the handwritten payee.',
+                'properties'  => [
+                    'Payee' => [
+                        'type'        => 'string',
+                        'description' => 'Who the check is written to — the handwritten name on the "PAY TO THE ORDER OF" line. May be a person (e.g. "Grzegorz Szady", "Jesus De La Torre") or a business (e.g. "Shartech Electric", "Vol Nat Heating", "TBD Painting", "RG Tiles", "Accomplished Plumbing"). Read the handwriting carefully; return the name as written with normal capitalization.',
+                        'method'      => 'extract',
+                    ],
+                    'PayerName' => [
+                        'type'        => 'string',
+                        'description' => 'The printed account-holder name block at the top-left of the check (e.g. "GS CONSTRUCTION AND REMODELING"). Name only, without the address lines.',
+                        'method'      => 'extract',
+                    ],
+                    'PayerAddress' => [
+                        'type'        => 'string',
+                        'description' => implode(' ', [
+                            'The printed payer address under the account-holder name at the top-left of the check — street and city/state/zip combined into one string separated by ", " (e.g. "400 N WHEELING ROAD, PROSPECT HEIGHTS, ILLINOIS 60070"). Do NOT include the payer name or phone number.',
+                            'These checks are fax-quality scans and OCR often misreads printed characters — CORRECT obvious misreads so the result is a plausible US address:',
+                            'A ZIP code is EXACTLY 5 DIGITS — fix letter/digit confusions in it (letter O → digit 0, G → 6, B → 8, S → 5, I/l → 1; e.g. OCR "GO070" or "COD70" → "60070", "ILLINORS" → "ILLINOIS").',
+                            'Restore missing spaces the OCR dropped (e.g. "NWHEELING" → "N WHEELING").',
+                            'Fix punctuation misreads (a period between city and state is a comma: "PROSPECT HEIGHTS. ILLINOIS" → "PROSPECT HEIGHTS, ILLINOIS").',
+                        ]),
+                        'method'      => 'extract',
+                    ],
+                    'PayerPhone' => [
+                        'type'        => 'string',
+                        'description' => implode(' ', [
+                            'The printed phone number in the payer block at the top-left of the check, if present, formatted "(XXX) XXX-XXXX".',
+                            'A US phone number has EXACTLY 10 digits with a 3-DIGIT area code — correct OCR misreads so the result is valid:',
+                            'e.g. OCR "(1347) 873-7217" has a 4-digit area code, which is impossible — the printed "8" was misread as "13", so the correct value is "(847) 873-7217".',
+                            'Common confusions on blurry scans: "8" read as "13", "8" read as "6" (a filled-in or faded top loop — inspect the glyph closely before accepting a "6" in a printed phone number, e.g. "673-7217" is usually a misread of "873-7217"), "6" as "G" or "0", "0" as "O" or "D".',
+                            'Return null when no phone is printed.',
+                        ]),
+                        'method'      => 'extract',
+                    ],
+                ],
+            ],
+
+            // ── Grouped: bank info ─────────────────────────────────────────
+            'BankInfo' => [
+                'type'        => 'object',
+                'description' => 'The payer\'s bank details: the printed bank name and the routing/account groups from the MICR line at the bottom of the check.',
+                'properties'  => [
+                    'BankName' => [
+                        'type'        => 'string',
+                        'description' => 'The printed bank name on the check (e.g. "citibank"). Return ONLY the clean bank name: strip OCR artifacts from the trademark/registered symbol next to the logo (an apostrophe, asterisk, quote, or degree sign — "citibank\'" or "cítìbank*" → "citibank") and remove stray accents/diacritics OCR adds to logo letters ("cítìbank" → "citibank").',
+                        'method'      => 'extract',
+                    ],
+                    'RoutingNumber' => [
+                        'type'        => 'string',
+                        'description' => 'The bank routing number — the FIRST group of the MICR line at the bottom of the check, always exactly 9 digits (e.g. "271070801"). Digits only.',
+                        'method'      => 'extract',
+                    ],
+                    'AccountNumber' => [
+                        'type'        => 'string',
+                        'description' => 'The payer bank account number — the SECOND group of the MICR line, between the routing number and the check number (e.g. "0800854903"). Digits only, preserving leading zeros.',
+                        'method'      => 'extract',
+                    ],
+                ],
+            ],
+        ];
+
+        return [
+            'description'    => 'Hive 2025 individual check analyzer — extracts check number, date, amount, payee, memo, and MICR details from a single scanned check image (typically cropped from a bank statement, with the typed "Ck Date / Ck No / Amt" caption line included below the image).',
+            'baseAnalyzerId' => 'prebuilt-document',
+            'config'         => [
+                'returnDetails'                    => true,
+                'estimateFieldSourceAndConfidence' => true,
+            ],
+            'models'         => [
+                'completion' => $model,
+            ],
+            'fieldSchema'    => [
+                'name'        => 'HiveCheckSchema',
+                'description' => 'Schema for a single scanned check image. Handwritten fields (payee, memo, amount words) require careful cursive reading; typed caption values are authoritative for number/date/amount.',
+                'fields'      => $fields,
+            ],
+        ];
+    }
+
+    private function buildCheckStatementDefinition(string $model): array
+    {
+        $fields = [
+            'AccountNumber' => [
+                'type'        => 'string',
+                'description' => 'The bank account number printed in the statement page header (e.g. "Account 800854903" → "800854903"). Digits only, without the "Account" label.',
+                'method'      => 'extract',
+            ],
+            'StatementPeriod' => [
+                'type'        => 'string',
+                'description' => 'The statement period printed in the page header (e.g. "Statement Period: Jun 1 - Jun 30, 2026" → "Jun 1 - Jun 30, 2026"). Return the period text without the label.',
+                'method'      => 'extract',
+            ],
+            'Checks' => [
+                'type'        => 'array',
+                'description' => implode(' ', [
+                    'One row per imaged check across ALL pages of the document.',
+                    'Bank statement check-image pages show scanned check images laid out in a grid (typically 2 columns × up to 5 rows per page).',
+                    'Directly BELOW each check image there is a machine-printed caption line in the form "Ck Date: MM/DD/YYYY Ck No: NNNN Amt: $N.NN" (e.g. "Ck Date: 06/02/2026 Ck No: 2607 Amt: $2397.50").',
+                    'ALWAYS read CheckNumber, CheckDate, and CheckAmount from this printed caption line — it is typed and reliable, unlike the handwritten check contents above it.',
+                    'Every caption line on every page is exactly one check — do NOT skip any, do NOT merge two checks, and do NOT invent checks that have no caption.',
+                    'Process pages in order and within a page read the grid left-to-right, top-to-bottom.',
+                ]),
+                'items'       => [
+                    'type'       => 'object',
+                    'properties' => [
+                        'CheckNumber' => [
+                            'type'        => 'string',
+                            'description' => 'Check number from the caption "Ck No: NNNN" printed below the check image (e.g. "2607"). The same number is also printed in the top-right corner of the check image itself — if the caption is unreadable, fall back to that. Digits only.',
+                            'method'      => 'extract',
+                        ],
+                        'CheckDate' => [
+                            'type'        => 'date',
+                            'description' => 'Check date from the caption "Ck Date: MM/DD/YYYY" printed below the check image (e.g. "06/02/2026"). Use the typed caption date, NOT the handwritten date on the check image.',
+                            'method'      => 'extract',
+                        ],
+                        'CheckAmount' => [
+                            'type'        => 'number',
+                            'description' => 'Check amount in dollars from the caption "Amt: $N.NN" printed below the check image (e.g. 2397.50 from "Amt: $2397.50"). Use the typed caption amount, NOT the handwritten courtesy box on the check image.',
+                            'method'      => 'extract',
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        return [
+            'description'    => 'Hive 2025 bank-statement check-image analyzer — extracts one row per imaged check (check number, date, amount) from the printed caption below each check image, across all pages.',
+            'baseAnalyzerId' => 'prebuilt-document',
+            'config'         => [
+                // Field grounding: return the source polygon of each extracted value so the
+                // app can locate every check's caption and crop the check image above it.
+                'returnDetails'                    => true,
+                'estimateFieldSourceAndConfidence' => true,
+            ],
+            'models'         => [
+                'completion' => $model,
+            ],
+            'fieldSchema'    => [
+                'name'        => 'HiveCheckStatementSchema',
+                'description' => 'Schema for bank statement check-image page extraction. Each printed "Ck Date / Ck No / Amt" caption equals exactly one check.',
                 'fields'      => $fields,
             ],
         ];

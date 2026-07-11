@@ -1,13 +1,11 @@
-<div>
-    <x-island-card
-        :heading="$view ? 'Vendor Documents' : $vendor->name"
-        :href="!$view ? route('vendors.show', $vendor->id) : null"
-        class="mt-4"
-        x-data="{ expanded: true }"
+<div class="mt-4">
+    <x-details.card
+        :title="$view ? 'Vendor Documents' : $vendor->name"
+        :title_href="!$view ? route('vendors.show', $vendor->id) : null"
     >
-        <x-slot:badge>
+        <x-slot:title_extras>
             @if(!$vendor_docs->isEmpty())
-                <div x-show="!expanded" x-cloak class="flex items-center gap-2">
+                <div x-show="!open" x-cloak class="flex items-center gap-2">
                     @php
                         $currentDocs = $vendor_docs->filter(fn($doc) => $doc->expiration_date > today());
                         $expiredDocs = $vendor_docs->filter(fn($doc) => $doc->expiration_date <= today());
@@ -25,14 +23,12 @@
                         </flux:badge>
                     @endif
                 </div>
-
-                <flux:icon.chevron-down class="w-5 h-5 transition-transform cursor-pointer" ::class="expanded ? 'rotate-180' : ''" @click="expanded = !expanded" />
             @endif
-        </x-slot:badge>
+        </x-slot:title_extras>
 
-        <x-slot:actions>
+        <x-slot:header_buttons>
             @can('create', App\Models\VendorDoc::class)
-                <div x-show="expanded" x-cloak>
+                <div @if(!$vendor_docs->isEmpty()) x-show="open" x-cloak @endif>
                     <flux:button.group>
                         <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'addDocument', { vendor: {{$vendor->id}} })">Add</flux:button>
                         @if(isset($vendor->expired_docs))
@@ -41,41 +37,45 @@
                     </flux:button.group>
                 </div>
             @endcan
-        </x-slot:actions>
+        </x-slot:header_buttons>
 
         @if(!$vendor_docs->isEmpty())
-            <div x-show="expanded" x-cloak x-collapse>
-                <flux:separator variant="subtle" />
-
-                <flux:table>
+            <x-slot:details>
+                {{-- table-fixed + min-w-0 so the card never scrolls horizontally;
+                     long values truncate with a title tooltip instead. --}}
+                <flux:table class="table-fixed min-w-0 w-full">
                     <flux:table.columns>
-                        <flux:table.column>Type</flux:table.column>
-                        <flux:table.column>Exp Date</flux:table.column>
-                        <flux:table.column>Policy #</flux:table.column>
+                        <flux:table.column class="w-[38%]">Type</flux:table.column>
+                        <flux:table.column class="w-[30%]">Exp Date</flux:table.column>
+                        <flux:table.column class="w-[32%]">Policy #</flux:table.column>
                     </flux:table.columns>
 
                     <flux:table.rows>
                         @foreach($vendor_docs as $doc)
                             <flux:table.row :key="$doc->id">
-                                <flux:table.cell variant="strong">
+                                <flux:table.cell variant="strong" class="w-[38%]">
                                     <a
                                         href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->doc_filename]) }}"
                                         target="_blank"
+                                        class="block truncate"
+                                        title="{{ $doc->type_label }}"
                                     >
                                         {{$doc->type_label}}
                                     </a>
                                 </flux:table.cell>
-                                <flux:table.cell>
+                                <flux:table.cell class="w-[30%]">
                                     <flux:badge size="sm" :color="$doc->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
                                         {{$doc->expiration_date->format('m/d/Y')}}
                                     </flux:badge>
                                 </flux:table.cell>
-                                <flux:table.cell>{{$doc->number}}</flux:table.cell>
+                                <flux:table.cell class="w-[32%]">
+                                    <div class="truncate" title="{{ $doc->number }}">{{ $doc->number }}</div>
+                                </flux:table.cell>
                             </flux:table.row>
                         @endforeach
                     </flux:table.rows>
                 </flux:table>
-            </div>
+            </x-slot:details>
         @endif
-    </x-island-card>
+    </x-details.card>
 </div>

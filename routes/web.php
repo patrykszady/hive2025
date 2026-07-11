@@ -334,6 +334,7 @@ Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nyla
 Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
 Route::get('receipts/home-depot-messages', [ReceiptController::class, 'getHomeDepotMessages'])->name('receipts.home-depot-messages');
 Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_receipt'])->name('expenses.original_receipt');
+Route::get('files/checks/files/{filename}', fn (string $filename) => app(ReceiptController::class)->original_receipt('checks/files', $filename))->name('checks.statement_pdf');
 
 Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_receipt'])->name('receipts.temp_receipt');
 

@@ -47,10 +47,15 @@ class VendorPaymentCreate extends Component
     public $view_text = [
         'card_title' => 'Create Vendor Payments',
         'button_text' => 'Create Vendor Check',
-        'form_submit' => 'save',
+        'form_submit' => 'confirmPayment',
     ];
 
     protected $listeners = ['updateProjectBids'];
+
+    protected function messages(): array
+    {
+        return $this->handlesChecksMessages();
+    }
 
     protected function rules(): array
     {
@@ -138,18 +143,25 @@ class VendorPaymentCreate extends Component
      */
     public function updated($field, $value)
     {
-        // Call trait method to handle check-related updates
-        $this->handleChecksUpdated($field, $value);
-        
-        // Check if a project amount was updated
-        if (preg_match('/^projects\.(\d+)\.amount$/', $field, $matches)) {
-            $project_id = $matches[1];
-            $this->updateProjectBalance($project_id);
-            // Re-validate check total as amounts change
-            $this->validateOnly('check_total_min');
+        // Keep validation errors visible but don't let the exception skip the
+        // render — the check-image preview must still update (e.g. an
+        // "already been taken" check number that has a scanned image to show).
+        try {
+            // Call trait method to handle check-related updates
+            $this->handleChecksUpdated($field, $value);
+
+            // Check if a project amount was updated
+            if (preg_match('/^projects\.(\d+)\.amount$/', $field, $matches)) {
+                $project_id = $matches[1];
+                $this->updateProjectBalance($project_id);
+                // Re-validate check total as amounts change
+                $this->validateOnly('check_total_min');
+            }
+
+            $this->validateOnly($field);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->setErrorBag($e->validator->errors());
         }
-        
-        $this->validateOnly($field);
     }
 
     public function addProject()
@@ -210,6 +222,30 @@ class VendorPaymentCreate extends Component
             ->sum('amount');
 
         return $total;
+    }
+
+    /**
+     * Whether the payment is submittable — shared rules in
+     * HandlesChecks::canSubmitCheckPayment().
+     */
+    public function getCanSubmitPaymentProperty(): bool
+    {
+        return $this->canSubmitCheckPayment((float) $this->getVendorCheckSumProperty());
+    }
+
+    /**
+     * Validate the payment, then show the shared confirmation modal (round
+     * hundreds skip straight to save — same behavior as timesheet payments).
+     */
+    public function confirmPayment()
+    {
+        $this->validate();
+
+        if (fmod($this->getVendorCheckSumProperty(), 100) == 0) {
+            return $this->save();
+        }
+
+        $this->modal('confirm-payment')->show();
     }
 
     public function save()

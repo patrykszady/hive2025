@@ -6,6 +6,8 @@ use \Illuminate\Validation\Rule;
 use App\Models\BankAccount;
 
 use App\Models\Check;
+use App\Models\CheckImage;
+use Livewire\Attributes\Computed;
 
 trait HandlesChecks
 {
@@ -50,6 +52,52 @@ trait HandlesChecks
                     }
                 }),
             ],
+        ];
+    }
+
+    /**
+     * Whether a check payment is submittable: no validation errors, a positive
+     * total, and the required check/bank fields filled in. Drives the submit
+     * button's disabled state on the vendor and timesheet payment pages.
+     */
+    public function canSubmitCheckPayment(float $total): bool
+    {
+        if ($this->getErrorBag()->isNotEmpty()) {
+            return false;
+        }
+
+        if ($total <= 0) {
+            return false;
+        }
+
+        if (! $this->form->date) {
+            return false;
+        }
+
+        // Bank is required unless paying via an employee (paid_by).
+        if (! $this->bank_account_id && ! $this->form->paid_by) {
+            return false;
+        }
+
+        if ($this->bank_account_id && ! $this->check_type) {
+            return false;
+        }
+
+        if ($this->check_type === 'Check' && ! $this->check_number) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Validation messages for the check fields — merge into the component's
+     * messages().
+     */
+    public function handlesChecksMessages(): array
+    {
+        return [
+            'check_number.unique' => 'Check already recorded.',
         ];
     }
 
@@ -150,6 +198,31 @@ trait HandlesChecks
     public function getBankAccountsProperty()
     {
         return BankAccount::latestCheckingAccounts()->get();
+    }
+
+    /**
+     * Scanned check image matching the entered check number on the selected
+     * bank — matched across sibling accounts of the same bank, since re-linked
+     * Plaid items duplicate accounts (e.g. Citibank ids 10 and 17).
+     * Rendered by livewire.checks._check_image_preview.
+     */
+    #[Computed]
+    public function matchingCheckImage(): ?CheckImage
+    {
+        if (! $this->bank_account_id || ! is_numeric($this->check_number)) {
+            return null;
+        }
+
+        $bankId = BankAccount::withoutGlobalScopes()->withTrashed()
+            ->find($this->bank_account_id)?->bank_id;
+
+        $siblingAccountIds = $bankId
+            ? BankAccount::withoutGlobalScopes()->withTrashed()->where('bank_id', $bankId)->pluck('id')
+            : collect([$this->bank_account_id]);
+
+        return CheckImage::whereIn('bank_account_id', $siblingAccountIds)
+            ->where('check_number', (int) $this->check_number)
+            ->first();
     }
 
     public function autoCheckNumber()

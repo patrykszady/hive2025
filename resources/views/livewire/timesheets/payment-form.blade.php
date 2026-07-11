@@ -22,6 +22,7 @@
 
                         @can('viewAnyPayment', App\Models\Timesheet::class)
                             @include('livewire.checks._payment_form', ['disablePaidBy' => $this->disablePaidBy])
+                            @include('livewire.checks._check_image_preview')
                         @endcan
                     </x-cards.body>
 
@@ -30,7 +31,8 @@
                     <div class="space-y-2 mt-2">
                         <flux:button class="w-full">Check Total | <b>{{money($this->weekly_timesheets_total)}}</b></flux:button>
                         @can('viewAnyPayment', App\Models\Timesheet::class)
-                            <flux:button wire:click="confirmPayment" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
+                            {{-- Disabled on validation errors, missing check/bank info, or a $0 total --}}
+                            <flux:button wire:click="confirmPayment" variant="primary" class="w-full" :disabled="! $this->canSubmitPayment">{{$view_text['button_text']}}</flux:button>
                         @endcan
                     </div>
 
@@ -218,24 +220,8 @@
     </form>
 
     {{-- Payment Confirmation Modal --}}
-    <flux:modal name="confirm-payment" class="md:w-96">
-        <div class="space-y-6">
-            <div>
-                <flux:heading size="lg">Confirm Payment</flux:heading>
-                <flux:text class="mt-2">Please verify the check amount before proceeding.</flux:text>
-            </div>
+    @include('livewire.checks._confirm_payment_modal', ['confirm_total' => (float) $this->weekly_timesheets_total])
 
-            <div class="bg-zinc-100 dark:bg-zinc-800 rounded-lg p-4 text-center">
-                <flux:text class="text-sm text-zinc-500">Check Total</flux:text>
-                <flux:heading size="xl" class="!mt-1">{{money($this->weekly_timesheets_total)}}</flux:heading>
-            </div>
-
-            <div class="flex gap-2">
-                <flux:modal.close>
-                    <flux:button variant="ghost" class="w-full">Cancel</flux:button>
-                </flux:modal.close>
-                <flux:button wire:click="save" variant="primary" class="w-full">Confirm & Pay</flux:button>
-            </div>
-        </div>
-    </flux:modal>
+    {{-- Check image lightbox --}}
+    @include('livewire.checks._check_image_lightbox')
 </div>

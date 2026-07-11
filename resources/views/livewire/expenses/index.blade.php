@@ -113,12 +113,13 @@
             </div>
         @endif
 
+        @php $isEmbedView = in_array($view, ['checks.show', 'vendors.show']); @endphp
         <div class="space-y-4">
             <div class="-mb-2">
                 <flux:table
                     wire:loading.class.delay.shortest="opacity-50 pointer-events-none"
                     wire:target="bulkDelete"
-                    class="transition-opacity duration-150 table-fixed {{ in_array($view, ['projects.show', 'vendors.show']) ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0"
+                    class="transition-opacity duration-150 table-fixed {{ in_array($view, ['projects.show', 'vendors.show', 'checks.show']) ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0"
                 >
                 <flux:table.columns>
                     @if($view === null)
@@ -126,15 +127,15 @@
                             <span class="sr-only">Select</span>
                         </flux:table.column>
                     @endif
-                    <flux:table.column class="w-[14%] min-w-[5.5rem]">Amount</flux:table.column>
+                    <flux:table.column class="{{ $isEmbedView ? 'w-[20%] min-w-[4.5rem]' : 'w-[14%] min-w-[5.5rem]' }}">Amount</flux:table.column>
                     <flux:table.column
                         sortable
                         :sorted="$sortBy === 'date'"
                         :direction="$sortDirection"
                         wire:click="sort('date')"
-                        class="w-[14%] min-w-[6rem] !ps-8 !pe-3"
+                        class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem] !ps-8 !pe-3' }}"
                         >
-                        <div class="ps-4">Date</div>
+                        <div class="{{ $isEmbedView ? '' : 'ps-4' }}">Date</div>
                     </flux:table.column>
 
                     @if(!in_array($view, ['checks.show', 'vendors.show']))
@@ -142,9 +143,9 @@
                     @endif
 
                     @if($view != 'projects.show')
-                        <flux:table.column class="w-[30%] min-w-0">Project</flux:table.column>
+                        <flux:table.column class="{{ $isEmbedView ? 'w-[37%]' : 'w-[30%]' }} min-w-0">Project</flux:table.column>
                     @endif
-                    <flux:table.column align="end" class="w-[17%] min-w-[5rem] shrink-0">Status</flux:table.column>
+                    <flux:table.column align="end" class="{{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -155,7 +156,7 @@
                                     <flux:checkbox size="sm" wire:model="selected" value="{{ $expense->id }}" />
                                 </flux:table.cell>
                             @endif
-                        <flux:table.cell variant="strong" class="w-[14%] min-w-[5.5rem]">
+                        <flux:table.cell variant="strong" class="{{ $isEmbedView ? 'w-[20%] min-w-[4.5rem]' : 'w-[14%] min-w-[5.5rem]' }}">
                                 <div class="pe-4 flex items-center gap-1">
                                     <a href="{{ route('expenses.show', $expense->id) }}" wire:navigate.hover>{{ display_money($expense->amount) }}</a>
                                     @if($expense->reimbursment)
@@ -172,8 +173,8 @@
                                     @endcan
                                 </div>
                             </flux:table.cell>
-                            <flux:table.cell class="w-[14%] min-w-[6rem] !ps-8 !pe-3">
-                                <div class="ps-4">{{ $expense->date->format('m/d/y') }}</div>
+                            <flux:table.cell class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem] !ps-8 !pe-3' }}">
+                                <div class="{{ $isEmbedView ? '' : 'ps-4' }}">{{ $expense->date->format('m/d/y') }}</div>
                             </flux:table.cell>
                             @if(!in_array($view, ['checks.show', 'vendors.show']))
                                 <flux:table.cell class="w-[25%] min-w-0 !ps-3">
@@ -184,7 +185,7 @@
                             @endif
 
                             @if($view != 'projects.show')
-                                <flux:table.cell class="w-[30%] min-w-0">
+                                <flux:table.cell class="{{ $isEmbedView ? 'w-[37%]' : 'w-[30%]' }} min-w-0">
                                     @if($expense->splits->count() > 0)
                                         SPLIT
                                     @else
@@ -204,7 +205,7 @@
                                     @endif
                                 </flux:table.cell>
                             @endif
-                            <flux:table.cell align="end" class="w-[17%] min-w-[5rem] shrink-0">
+                            <flux:table.cell align="end" class="{{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">
                                 {{-- Just use status directly, no fallback needed if coming from search --}}
                                 <div class="flex justify-end">
                                     <flux:badge size="sm" inset="top bottom" color="{{$expense->status_color}}" class="max-w-[8rem] overflow-hidden text-ellipsis whitespace-nowrap">
@@ -230,7 +231,7 @@
                                     @if($view === null)
                                         <flux:table.cell class="w-10 !px-3" x-show="bulkMode" x-cloak></flux:table.cell>
                                     @endif
-                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 tabular-nums w-[14%] min-w-[5.5rem] !pl-10 !pe-8">
+                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 tabular-nums {{ $isEmbedView ? 'w-[20%] min-w-[4.5rem] !pl-6' : 'w-[14%] min-w-[5.5rem] !pl-10 !pe-8' }}">
                                         <div class="pe-4 flex items-center gap-1">
                                             {{ display_money($split->amount) }}
                                             @if($split->reimbursment && $split->reimbursment !== 'None')
@@ -239,15 +240,15 @@
                                         </div>
                                     </flux:table.cell>
                                     {{-- Preserve column alignment: empty date cell --}}
-                                    <flux:table.cell class="w-[14%] min-w-[6rem] !ps-8 !pe-3">
-                                        <div class="ps-4"></div>
+                                    <flux:table.cell class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem] !ps-8 !pe-3' }}">
+                                        <div class="{{ $isEmbedView ? '' : 'ps-4' }}"></div>
                                     </flux:table.cell>
                                     @if(!in_array($view, ['checks.show', 'vendors.show']))
                                         {{-- Empty vendor cell for split rows --}}
                                         <flux:table.cell class="w-[25%] min-w-0 !ps-3"></flux:table.cell>
                                     @endif
                                     @if($view != 'projects.show')
-                                        <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 w-[30%] min-w-0">
+                                        <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 {{ $isEmbedView ? 'w-[37%]' : 'w-[30%]' }} min-w-0">
                                             {{-- Prefer distribution name, then project accessor; link if project exists --}}
                                             @php
                                                 $splitProjectName = '';
@@ -266,7 +267,7 @@
                                             @endif
                                         </flux:table.cell>
                                     @endif
-                                    <flux:table.cell align="end" class="text-sm text-gray-600 dark:text-gray-400 w-[17%] min-w-[5rem] shrink-0">
+                                    <flux:table.cell align="end" class="text-sm text-gray-600 dark:text-gray-400 {{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">
                                         <flux:badge size="sm" variant="outline" color="gray">Split</flux:badge>
                                     </flux:table.cell>
                                 </flux:table.row>

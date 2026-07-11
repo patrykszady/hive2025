@@ -69,8 +69,9 @@
                     
                     {{-- Only show this row if there's vendor info or merchant descriptions to display --}}
                     @if(!empty($displayLines))
-                        <flux:table.row>
-                            <flux:table.cell colspan="4" class="whitespace-normal break-words">
+                        {{-- Sub-row: belongs to the transaction above — no hover highlight, tucked under it --}}
+                        <flux:table.row class="table-subrow">
+                            <flux:table.cell colspan="4" class="whitespace-normal break-words !border-t-0 !pt-0">
                                 @foreach($displayLines as $line)
                                     <span class="block
                                         @if($line['variant'] === 'vendor') font-medium

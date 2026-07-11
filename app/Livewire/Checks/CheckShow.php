@@ -99,7 +99,11 @@ class CheckShow extends Component
                 ->keyBy('id')
             : collect();
 
+        // Scanned check images cropped from bank statements
+        $check_images = $this->check->checkImages()->orderBy('check_date')->get();
+
         return view('livewire.checks.show', [
+            'check_images' => $check_images,
             'vendor_expenses' => $vendor_expenses,
             'user_paid_expenses' => $user_paid_expenses,
             'user_reimbursement_expenses' => $user_reimbursement_expenses,

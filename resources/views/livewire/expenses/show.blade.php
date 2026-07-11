@@ -120,10 +120,14 @@
             @endif
 
             {{-- TRANSACTIONS (uses allTransactions() fallback: own -> check) --}}
-        @if($expense->allTransactions()->isNotEmpty())
-                <x-transactions.list_card 
-            :transactions="$expense->allTransactions()" 
-                    :title="$expense->transactions()->exists() ? 'Transactions' : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check Transactions' : 'Transactions')"
+            @php
+                $all_transactions = $expense->allTransactions();
+                $transaction_word = $all_transactions->count() === 1 ? 'Transaction' : 'Transactions';
+            @endphp
+            @if($all_transactions->isNotEmpty())
+                <x-transactions.list_card
+                    :transactions="$all_transactions"
+                    :title="$expense->transactions()->exists() ? $transaction_word : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check ' . $transaction_word : $transaction_word)"
                 />
             @endif
         </div>
@@ -153,6 +157,45 @@
                                         <flux:table.cell>{{ $associated_expense->date->format('m/d/Y') }}</flux:table.cell>
                                         <flux:table.cell>{{ $associated_expense->allTransactions()->isNotEmpty() ? $associated_expense->allTransactions()->first()->bank_account->bank->name : '' }}</flux:table.cell>
                                         <flux:table.cell>{{ $associated_expense->allTransactions()->isNotEmpty() ? $associated_expense->allTransactions()->first()->bank_account->account_number : '' }}</flux:table.cell>
+                                    </flux:table.row>
+                                @endforeach
+                            </flux:table.rows>
+                        </flux:table>
+                    </div>
+                </x-island-card>
+            @endif
+
+            {{-- CHECK ASSOCIATED EXPENSES (other expenses paid by the same check) --}}
+            @if($check_associated_expenses->isNotEmpty())
+                <x-island-card heading="Associated Expenses" :separator="true" subheading="Other expenses paid by the same check.">
+                    <div class="space-y-6">
+                        <flux:table>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Vendor</flux:table.column>
+                                <flux:table.column>Project</flux:table.column>
+                            </flux:table.columns>
+
+                            <flux:table.rows>
+                                @foreach ($check_associated_expenses as $associated)
+                                    <flux:table.row :key="'check-assoc-' . $associated->id">
+                                        <flux:table.cell variant="strong">
+                                            <a href="{{ route('expenses.show', $associated->id) }}" wire:navigate>
+                                                {{ money($associated->amount) }}
+                                            </a>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $associated->date?->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>{{ $associated->vendor?->name }}</flux:table.cell>
+                                        <flux:table.cell>
+                                            @if($associated->project_id && $associated->project)
+                                                <a href="{{ route('projects.show', $associated->project_id) }}" wire:navigate>
+                                                    {{ Str::limit($associated->project->name, 25) }}
+                                                </a>
+                                            @else
+                                                {{ $associated->project ? Str::limit($associated->project->name, 25) : '' }}
+                                            @endif
+                                        </flux:table.cell>
                                     </flux:table.row>
                                 @endforeach
                             </flux:table.rows>

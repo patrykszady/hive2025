@@ -36,6 +36,13 @@ class CheckObserver
         $check->timesheets()->update(['check_id' => null]);
         $check->transactions()->update(['check_id' => null]);
 
+        // Detach scanned check images (soft delete never fires the FK's
+        // nullOnDelete) and requeue them for matching
+        \App\Models\CheckImage::where('check_id', $check->id)->update([
+            'check_id' => null,
+            'match_status' => \App\Models\CheckImage::STATUS_PENDING,
+        ]);
+
         // Re-index expenses in Meilisearch after soft-delete
         if (! empty($expenseIds)) {
             \App\Models\Expense::withoutGlobalScopes()

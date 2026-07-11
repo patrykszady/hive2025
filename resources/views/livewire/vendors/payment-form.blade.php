@@ -14,7 +14,10 @@
         <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-4 lg:self-start">
                 <x-island-card heading="{{$vendor->name}} Payment" subheading="Choose Projects to add for {{$vendor->name}} in this Payment" :separator="true">
-                    @island(defer: true)
+                    {{-- always: true — re-render on EVERY update (island keystrokes AND
+                         outer project-amount changes) so the total and the submit
+                         button's disabled state stay live in both directions. --}}
+                    @island(defer: true, always: true)
                         @placeholder
                             <div class="space-y-2 my-2">
                                 @foreach(['Date', 'Paid By', 'Bank'] as $label)
@@ -31,18 +34,29 @@
                         <x-cards.body :class="'space-y-2 my-2'">
                             {{-- FORM --}}
                             @include('livewire.checks._payment_form')
+
+                            {{-- Must live INSIDE this island: updates originating in the
+                                 island (wire:model.live fields) re-render only the island. --}}
+                            @include('livewire.checks._check_image_preview')
                         </x-cards.body>
+
+                        <flux:separator variant="subtle" />
+
+                        <div class="space-y-2 mt-2">
+                            <flux:button class="w-full">Check Total | <b>{{money($this->vendor_check_sum)}}</b></flux:button>
+                            {{-- Disabled on validation errors, missing required inputs, or a $0 total --}}
+                            <flux:button type="submit" variant="primary" class="w-full" :disabled="! $this->canSubmitPayment">{{$view_text['button_text']}}</flux:button>
+                        </div>
+
+                        <flux:error name="check_total_min" />
                     @endisland
-
-                    <flux:separator variant="subtle" />
-
-                    <div class="space-y-2 mt-2">
-                        <flux:button class="w-full">Check Total | <b>{{money($this->vendor_check_sum)}}</b></flux:button>
-                        <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
-                    </div>
-
-                    <flux:error name="check_total_min" />
                 </x-island-card>
+
+                {{-- Payment Confirmation Modal --}}
+                @include('livewire.checks._confirm_payment_modal', ['confirm_total' => (float) $this->vendor_check_sum])
+
+                {{-- Check image lightbox (outside the island — see partial docblock) --}}
+                @include('livewire.checks._check_image_lightbox')
 
                 {{-- INSURANCE --}}
                 <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy wire:key="insurance-{{ $vendor->id }}" />

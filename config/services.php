@@ -49,6 +49,8 @@ return [
         'analyzer_id_material_order' => env('AZURE_CU_ANALYZER_ID_MATERIAL_ORDER', 'hive_MaterialOrder_1'),
         'analyzer_id_state_license' => env('AZURE_CU_ANALYZER_ID_STATE_LICENSE', 'hive_StateLicense_1'),
         'analyzer_id_receipt_classifier' => env('AZURE_CU_ANALYZER_ID_RECEIPT_CLASSIFIER', 'hive_ReceiptClassifier_1'),
+        'analyzer_id_check_statement' => env('AZURE_CU_ANALYZER_ID_CHECK_STATEMENT', 'hive_CheckStatement_1'),
+        'analyzer_id_check' => env('AZURE_CU_ANALYZER_ID_CHECK', 'hive_Check_1'),
     ],
 
     'ocr_space' => [

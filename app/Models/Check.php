@@ -64,6 +64,14 @@ class Check extends Model
         return $this->hasMany(Transaction::class);
     }
 
+    /**
+     * Scanned check images cropped from bank statements (no global scope).
+     */
+    public function checkImages(): HasMany
+    {
+        return $this->hasMany(CheckImage::class);
+    }
+
     public function expenses(): HasMany
     {
         return $this->hasMany(Expense::class);

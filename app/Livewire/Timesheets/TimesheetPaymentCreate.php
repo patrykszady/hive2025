@@ -64,9 +64,9 @@ class TimesheetPaymentCreate extends Component
 
     protected function messages(): array
     {
-        return [
+        return array_merge($this->handlesChecksMessages(), [
             'payment_total.gt' => 'Payment needs to be greater than $0.00',
-        ];
+        ]);
     }
 
     public function mount()
@@ -142,8 +142,24 @@ class TimesheetPaymentCreate extends Component
 
     public function updated($field, $value)
     {
-        // Minimal: removed transient checkbox mirroring; selection arrays drive UI & totals directly.
-        $this->handleChecksUpdated($field, $value);
+        // Keep validation errors visible but don't let the exception skip the
+        // render — the check-image preview and the disabled state of the Pay
+        // button must still update.
+        try {
+            // Minimal: removed transient checkbox mirroring; selection arrays drive UI & totals directly.
+            $this->handleChecksUpdated($field, $value);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->setErrorBag($e->validator->errors());
+        }
+    }
+
+    /**
+     * Whether the payment is submittable — shared rules in
+     * HandlesChecks::canSubmitCheckPayment().
+     */
+    public function getCanSubmitPaymentProperty(): bool
+    {
+        return $this->canSubmitCheckPayment((float) $this->getWeeklyTimesheetsTotalProperty());
     }
 
     public function getWeeklyTimesheetsTotalProperty()

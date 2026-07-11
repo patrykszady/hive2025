@@ -4,7 +4,10 @@
     'subheading' => null,
     'canEdit' => null,
     'expanded' => true,
-    'details_text' => "Details",
+    // false = single header row: the chevron toggle sits next to the title
+    // instead of a separate "Details" label row. Pass a string for a labeled
+    // sub-row (e.g. "Receipt Items", "Split Details").
+    'details_text' => false,
     'accordion' => true,
     'nonLivewire' => false,
     'separator' => true,
@@ -25,7 +28,8 @@
 <div x-data="{ open: @js($expanded) }">
 @endif
 
-<flux:card class="!px-5 !py-2" style="--flux-card-px: calc(var(--spacing) * 5);">
+{{-- wire:transition — cards that appear/disappear from server renders fade smoothly --}}
+<flux:card wire:transition.opacity.duration.200ms class="!px-5 !py-2" style="--flux-card-px: calc(var(--spacing) * 5);">
     {{-- HEADER - Uses shared island-card.header component --}}
     <x-island-card.header :heading="html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8')" :href="$title_href" :subheading="$subheading" :clickable="$useInlineToggle">
         <x-slot:badge>
@@ -35,17 +39,20 @@
             @if($canEdit === null || $canEdit)
                 {{ $header_buttons ?? '' }}
             @endif
-        </x-slot:actions>
-        @if($useInlineToggle)
-            <x-slot:subheading_actions>
-                <button @click.stop="open = !open" class="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer">
+            @if($useInlineToggle)
+                {{-- Single-row header: accordion chevron lives next to the title.
+                     type=button: inside a <form> a bare button would submit it. --}}
+                <button type="button" @click.stop="open = !open" class="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer">
                     <svg x-bind:class="open && 'rotate-180'" class="size-4 transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
                     </svg>
                 </button>
-            </x-slot:subheading_actions>
-        @endif
+            @endif
+        </x-slot:actions>
     </x-island-card.header>
+
+    {{-- Always-visible body content (e.g. a check image) shown above the collapsible details --}}
+    {{ $slot }}
     
     @if(isset($details))
         @if($separator)

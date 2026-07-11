@@ -257,6 +257,36 @@ class ExpenseShow extends Component
     {
         $this->authorize('view', $this->expense);
 
-        return view('livewire.expenses.show');
+        return view('livewire.expenses.show', [
+            'check_associated_expenses' => $this->checkAssociatedExpenses(),
+        ]);
+    }
+
+    /**
+     * Other expenses paid by the same check(s) as this expense — via both the
+     * legacy expenses.check_id FK and the check_expense pivot.
+     */
+    protected function checkAssociatedExpenses()
+    {
+        $checkIds = $this->expense->checks()->pluck('checks.id')
+            ->when($this->expense->check_id, fn ($ids) => $ids->push($this->expense->check_id))
+            ->unique()
+            ->values();
+
+        if ($checkIds->isEmpty()) {
+            return collect();
+        }
+
+        return Expense::query()
+            ->where('id', '!=', $this->expense->id)
+            ->where(function ($query) use ($checkIds) {
+                $query->whereIn('check_id', $checkIds)
+                    ->orWhereHas('checks', fn ($q) => $q->whereIn('checks.id', $checkIds));
+            })
+            ->with('project')
+            ->orderBy('date')
+            ->get()
+            ->unique('id')
+            ->values();
     }
 }

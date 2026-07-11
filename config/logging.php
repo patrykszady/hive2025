@@ -157,6 +157,13 @@ return [
             'days' => 30
         ],
 
+        'check_images' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/check_images.log'),
+            'level' => 'info',
+            'days' => 30,
+        ],
+
         'receipt_errors' => [
             'driver' => 'single',
             'path' => storage_path('logs/receipt_errors.log'),

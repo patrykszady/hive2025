@@ -29,7 +29,9 @@
 {{-- BANK AND CHECK DETAILS --}}
 {{-- When paid_by is empty (default), this section is visible. x-cloak removed to prevent layout jump. --}}
 <div x-show="!$wire.form.paid_by || {{ $showWhenPaidBy ? 'true' : 'false' }}" x-transition>
-    <div class="space-y-4">
+    {{-- one_line rows keep the tight card rhythm (space-y-2); the labeled
+         direct-flux variant (expense modal) needs the roomier space-y-4 --}}
+    <div class="{{ $hideBasicFields ? 'space-y-4' : 'space-y-2' }}">
         @if($hideBasicFields)
             {{-- Bank select with direct flux components --}}
             <flux:select 
@@ -94,7 +96,7 @@
                 <flux:error name="bank_account_id" />
             </x-forms.one_line>
 
-            <div x-show="$wire.bank_account_id" x-transition x-cloak class="mt-2 space-y-2">
+            <div x-show="$wire.bank_account_id" x-transition x-cloak class="space-y-2">
                 <x-forms.one_line label="Payment Type">
                     <flux:select wire:model.live="check_type" placeholder="Choose payment type..." :disabled="$disableChecks">
                         <flux:select.option value="Check">Check</flux:select.option>

@@ -13,6 +13,23 @@ if (! function_exists('display_money')) {
     }
 }
 
+if (! function_exists('amount_in_words')) {
+    /**
+     * Spell a dollar amount out check-style: "two thousand three hundred
+     * ninety-seven and 50/100" ($2,397.50), "seven and 04/100" ($7.04).
+     */
+    function amount_in_words(float|int|string $value): string
+    {
+        $value   = round((float) $value, 2);
+        $dollars = (int) floor(abs($value));
+        $cents   = (int) round((abs($value) - $dollars) * 100);
+
+        $words = (new \NumberFormatter('en_US', \NumberFormatter::SPELLOUT))->format($dollars);
+
+        return ($value < 0 ? 'minus ' : '') . $words . ' and ' . str_pad((string) $cents, 2, '0', STR_PAD_LEFT) . '/100';
+    }
+}
+
 if (! function_exists('browser_timezone')) {
     function browser_timezone(): string
     {
