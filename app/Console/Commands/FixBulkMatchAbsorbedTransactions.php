@@ -45,9 +45,14 @@ class FixBulkMatchAbsorbedTransactions extends Command
         $unlinkedCount = 0;
 
         foreach ($expenses as $expense) {
+            // Keep preference: a transaction whose vendor matches the expense
+            // beats one that doesn't (e.g. a $12 Microsoft MSBILL charge wins
+            // over a $12 bank fee mislinked to a Microsoft expense), then
+            // closest to the expense date, then lowest id.
             $sameAmount = $expense->transactions
                 ->where('amount', $expense->amount)
                 ->sortBy(fn (Transaction $t) => [
+                    $t->vendor_id === $expense->vendor_id ? 0 : 1,
                     abs($expense->date->floatDiffInDays($t->transaction_date)),
                     $t->id,
                 ])

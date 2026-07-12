@@ -2346,7 +2346,7 @@ class CompanyEmailController extends Controller
                                 }
                                 $expense->save();
                                 // Link a single matched transaction to this expense if found earlier
-                                if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                if (isset($transaction) && $transaction && is_null($transaction->expense_id) && (is_null($transaction->vendor_id) || (int) $transaction->vendor_id === (int) $expense->vendor_id)) {
                                     $transaction->expense_id = $expense->id;
                                     $transaction->save();
                                 }
@@ -2366,7 +2366,7 @@ class CompanyEmailController extends Controller
                                     }
                                 }
                                 $expense->save();
-                                if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                if (isset($transaction) && $transaction && is_null($transaction->expense_id) && (is_null($transaction->vendor_id) || (int) $transaction->vendor_id === (int) $expense->vendor_id)) {
                                     $transaction->expense_id = $expense->id;
                                     $transaction->save();
                                 }
@@ -2463,7 +2463,7 @@ class CompanyEmailController extends Controller
                                 ]);
 
                                 // If exactly one bank transaction matched earlier, link it now
-                                if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                if (isset($transaction) && $transaction && is_null($transaction->expense_id) && (is_null($transaction->vendor_id) || (int) $transaction->vendor_id === (int) $expense->vendor_id)) {
                                     $transaction->expense_id = $expense->id;
                                     $transaction->save();
                                 }
