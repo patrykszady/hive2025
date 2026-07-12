@@ -3149,12 +3149,16 @@ class TransactionController extends Controller
                             $duplicate_end_date = $transaction->transaction_date->copy()->addDays(4)->format('Y-m-d');
 
                             //find duplicate expenses
+                            //An expense that already has a transaction linked is NOT a duplicate —
+                            //two same-amount charges in the window (e.g. two identical Groot invoices)
+                            //must each get their own expense instead of piling onto one.
                             $duplicates =
                                 Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
                                     where('vendor_id', $transaction->vendor_id)->
                                     whereNull('deleted_at')->
                                     where('amount', $transaction->amount)->
                                     whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
+                                    whereDoesntHave('transactions', fn ($q) => $q->withoutGlobalScope(\App\Scopes\TransactionScope::class))->
                                     get();
 
                             if ($duplicates->count() >= 1) {

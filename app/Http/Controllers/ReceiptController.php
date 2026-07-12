@@ -853,6 +853,15 @@ class ReceiptController extends Controller
             $purchaseOrderNumber = '';
         }
 
+        // ── 6b. Service / job-site address ────────────────────────────
+        // Used downstream to auto-match the expense to a project by address.
+        $serviceAddress = $this->extractFieldStringValue($prefix['ServiceAddress'] ?? null);
+        if ($serviceAddress === '' && $rawContent !== '') {
+            if (preg_match('/\b(?:service|job(?:\s*site)?|site|delivery|project)\s+(?:address|location)\s*[:\-]?\s*(\d[^\n\r]{4,100})/i', $rawContent, $m)) {
+                $serviceAddress = trim($m[1]);
+            }
+        }
+
         // ── 7. Total Tax ──────────────────────────────────────────────
         $totalTax = null;
         if (isset($prefix['TotalTaxAmount'])) {
@@ -1347,6 +1356,7 @@ class ReceiptController extends Controller
                 'merchant_name'     => $merchantName,
                 'invoice_number'    => $invoiceNumber,
                 'purchase_order'    => $purchaseOrderNumber,
+                'service_address'   => $serviceAddress !== '' ? $serviceAddress : null,
                 'handwritten_notes' => $handwrittenNotes,
                 'payment_methods'   => $this->extractPaymentMethods($prefix),
                 'raw_content'       => $rawContent,

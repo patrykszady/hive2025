@@ -6,7 +6,7 @@
 
     - Scheduled onto a client submitted preferred slot → green "Service Scheduled"
     - Homeowner submitted times covering this task, still unscheduled → red "Schedule"
-    - Homeowner has not chosen times for this task yet → orange "Awaiting client availability"
+    - Homeowner has not chosen times for this task yet → orange "Awaiting Client"
 --}}
 @php($indicator = $task->preferredTimeIndicator())
 
@@ -23,6 +23,6 @@
 @elseif($indicator === 'pending')
     <span {{ $attributes->class('inline-flex items-center gap-1 shrink-0 whitespace-nowrap text-xs text-orange-600 dark:text-orange-400') }} title="Waiting for client to share preferred times">
         <flux:icon.calendar-days variant="micro" class="size-4" />
-        <span>Awaiting client availability</span>
+        <span>Awaiting Client</span>
     </span>
 @endif

@@ -219,6 +219,12 @@ class Task extends Model
     public function preferredTimeIndicator(): ?string
     {
         if (! $this->projectHasHomeownerPreferredTimes()) {
+            // Service Call project where the homeowner hasn't submitted any
+            // times yet — an unscheduled task is awaiting client availability.
+            if (empty($this->start_date) && (int) ($this->project?->latestStatus?->status_code ?? 0) === 8) {
+                return 'pending';
+            }
+
             return null;
         }
 

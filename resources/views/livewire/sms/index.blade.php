@@ -10,6 +10,21 @@
         callsMounted: @js($activeTab === 'calls'),
         callsLoading: false,
         threadFilter: $wire.entangle('subjectFilter').live,
+        // Threads stay unread while open; leaving the page marks the open
+        // thread read via a beacon (in-app thread switches are server-side).
+        // once:true — the page (and this component) is torn down right after,
+        // and a fresh visit re-registers.
+        init() {
+            document.addEventListener('livewire:navigating', () => this.markOpenThreadReadOnExit(), { once: true });
+            window.addEventListener('pagehide', () => this.markOpenThreadReadOnExit(), { once: true });
+        },
+        markOpenThreadReadOnExit() {
+            const threadId = this.$store.sms.threadId;
+            if (!threadId) return;
+            const data = new FormData();
+            data.append('_token', '{{ csrf_token() }}');
+            navigator.sendBeacon(`/messages/threads/${threadId}/read`, data);
+        },
         audioCtx: null,
         ensureAudioContext() {
             if (!this.audioCtx) {
@@ -258,6 +273,14 @@
                                 x-on:click="threadFilter = 'vendor'"
                             >
                                 Vendors
+                            </button>
+                            <button
+                                type="button"
+                                class="flex-1 px-2.5 py-1 text-sm font-medium rounded-md"
+                                x-bind:class="threadFilter === 'unread' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
+                                x-on:click="threadFilter = 'unread'"
+                            >
+                                Unread
                             </button>
                         </div>
                     </div>

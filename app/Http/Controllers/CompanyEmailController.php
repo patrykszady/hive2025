@@ -1254,6 +1254,27 @@ class CompanyEmailController extends Controller
                     ]);
                 }
 
+                // Fallback: match the receipt's service/job-site address (e.g.
+                // "Service Address: 3154 VIOLET LN, NORTHBROOK, IL 60062" on a
+                // Groot invoice) to a project address. Kept as the expense note
+                // when no project matches so a human can match it manually.
+                $serviceAddress = $ocr_receipt_data['fields']['service_address'] ?? null;
+                if (! $detectedProjectId && $serviceAddress) {
+                    $detectedProjectId = $this->resolveProjectIdFromServiceAddress(
+                        $serviceAddress,
+                        $effectiveBelongsToVendorId
+                    );
+                    Log::channel('nylas')->info('Service address project match', [
+                        'message_id' => $messageId,
+                        'service_address' => $serviceAddress,
+                        'project_id' => $detectedProjectId,
+                        'receipt_id' => $receipt->id,
+                    ]);
+                }
+                $serviceAddressNote = (! $detectedProjectId && $serviceAddress)
+                    ? 'Service Address: ' . $serviceAddress
+                    : null;
+
                 $detectedVendorId = $detectedBillToVendorId ?? $emailDetectedVendorId;
                 if ($detectedVendorId && $detectedVendorId !== ($receipt_account->belongs_to_vendor_id ?? null)) {
                     Log::channel('nylas')->info('Detected belongs-to vendor override', [
@@ -1865,7 +1886,7 @@ class CompanyEmailController extends Controller
                             $expense->date = $date;
                             $expense->invoice = $invoice;
                             $expense->vendor_id = $receipt->vendor_id;
-                            $expense->note = null;
+                            $expense->note = $serviceAddressNote;
                             $expense->belongs_to_vendor_id = $effectiveBelongsToVendorId;
                             $expense->belongs_to_client_id = $detectedBillToClientId;
                             $expense->save();
@@ -1903,7 +1924,7 @@ class CompanyEmailController extends Controller
                             $expense->date = $date;
                             $expense->invoice = $invoice;
                             $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
-                            $expense->note = null;
+                            $expense->note = $serviceAddressNote;
                             $expense->belongs_to_vendor_id = $effectiveBelongsToVendorId;
                             $expense->belongs_to_client_id = $detectedBillToClientId;
                             $expense->save();
@@ -4839,6 +4860,62 @@ class CompanyEmailController extends Controller
      * that belongs to the same Hive vendor as the company email; falls back to
      * the client's most recent non-deleted project.
      */
+    /**
+     * Match a receipt's service/job-site address (e.g. "3154 VIOLET LN,
+     * NORTHBROOK, IL 60062") to a project by street number + street name.
+     * Returns a project id only when exactly one project matches.
+     */
+    protected function resolveProjectIdFromServiceAddress(?string $serviceAddress, ?int $belongsToVendorId): ?int
+    {
+        $serviceAddress = trim((string) $serviceAddress);
+
+        if ($serviceAddress === '' || ! preg_match('/^(\d+)\s+([A-Za-z][A-Za-z0-9 .\'-]*?)(?:,|$)/', $serviceAddress, $m)) {
+            return null;
+        }
+
+        $streetNumber = $m[1];
+        $streetName = $this->normalizeStreetName($m[2]);
+
+        if ($streetName === '') {
+            return null;
+        }
+
+        $candidates = Project::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->when($belongsToVendorId, fn ($q) => $q->where('belongs_to_vendor_id', $belongsToVendorId))
+            ->where('address', 'LIKE', $streetNumber . ' %')
+            ->get(['id', 'address'])
+            ->filter(fn (Project $project) => $this->normalizeStreetName(
+                preg_replace('/^\d+\s+/', '', (string) $project->address)
+            ) === $streetName)
+            ->values();
+
+        return $candidates->count() === 1 ? (int) $candidates->first()->id : null;
+    }
+
+    /**
+     * Normalize a street name for comparison: uppercase, strip punctuation,
+     * drop directionals (N/S/E/W…) and suffixes (LN/ST/RD/AVE…).
+     */
+    protected function normalizeStreetName(string $street): string
+    {
+        $tokens = preg_split('/\s+/', strtoupper(preg_replace('/[^A-Za-z0-9 ]/', ' ', $street))) ?: [];
+
+        $drop = [
+            'N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW',
+            'NORTH', 'SOUTH', 'EAST', 'WEST',
+            'LN', 'LANE', 'ST', 'STREET', 'RD', 'ROAD', 'AVE', 'AVENUE',
+            'CT', 'COURT', 'DR', 'DRIVE', 'PL', 'PLACE', 'BLVD', 'BOULEVARD',
+            'WAY', 'CIR', 'CIRCLE', 'TER', 'TERRACE', 'TRL', 'TRAIL',
+            'PKWY', 'PARKWAY', 'HWY', 'HIGHWAY',
+        ];
+
+        return implode(' ', array_values(array_filter(
+            $tokens,
+            fn (string $t) => $t !== '' && ! in_array($t, $drop, true)
+        )));
+    }
+
     protected function resolveProjectIdForClient(int $clientId, ?int $preferredVendorId): ?int
     {
         $base = Project::withoutGlobalScopes()

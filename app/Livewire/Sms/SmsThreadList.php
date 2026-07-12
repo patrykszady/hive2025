@@ -25,7 +25,7 @@ class SmsThreadList extends Component
     #[Reactive]
     public string $search = '';
 
-    /** 'all', 'client', or 'vendor' */
+    /** 'all', 'client', 'vendor', or 'unread' */
     #[Reactive]
     public string $subjectFilter = 'all';
 
@@ -79,6 +79,7 @@ class SmsThreadList extends Component
                     $meili->where('vendor_visibility_ids', (int) $user->vendor->id);
                 }
                 // Scout's builder has no whereNotNull() — filter on indexed 0/1 flags.
+                // ('unread' is per-user state, not indexed — applied on the DB query below.)
                 if ($this->subjectFilter === 'client') {
                     $meili->where('has_client', 1);
                 } elseif ($this->subjectFilter === 'vendor') {
@@ -140,6 +141,7 @@ class SmsThreadList extends Component
                             $query->visibleToVendor($vendorId);
                         }
                     })
+                    ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) $user->id))
                     ->limit($this->limit)
                     ->get();
 
@@ -197,6 +199,7 @@ class SmsThreadList extends Component
             })
             ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
             ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'))
+            ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) $user->id))
             ->orderByDesc('last_activity_at')
             ->limit($this->limit)
             ->get();

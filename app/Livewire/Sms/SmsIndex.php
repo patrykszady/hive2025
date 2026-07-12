@@ -43,10 +43,6 @@ class SmsIndex extends Component
             abort(403);
         }
 
-        // Visiting /messages resets the sidebar badge: it only counts unread
-        // messages newer than this stamp (per-thread unread stays intact).
-        $user->forceFill(['sms_last_seen_at' => now()])->saveQuietly();
-
         // Restore activeTab from session when not explicitly set in URL
         if (! request()->has('activeTab')) {
             $this->activeTab = session('sms_active_tab', 'messages');
@@ -94,6 +90,12 @@ class SmsIndex extends Component
 
     public function autoSelectLatestForFilter(): void
     {
+        // Never auto-open a thread when filtering to Unread — opening marks it
+        // read, which would immediately drop it out of the filtered list.
+        if ($this->subjectFilter === 'unread') {
+            return;
+        }
+
         $latestThreadId = $this->latestAccessibleThreadId();
 
         if ($latestThreadId !== null && $latestThreadId !== $this->threadId) {
@@ -170,7 +172,7 @@ class SmsIndex extends Component
 
     public function autoSelectLatestDesktopThread(): void
     {
-        if ($this->threadId !== null) {
+        if ($this->threadId !== null || $this->subjectFilter === 'unread') {
             return;
         }
 
@@ -183,7 +185,7 @@ class SmsIndex extends Component
 
     public function autoSelectSingleThreadIfOnlyOne(): void
     {
-        if ($this->threadId !== null) {
+        if ($this->threadId !== null || $this->subjectFilter === 'unread') {
             return;
         }
 
@@ -223,7 +225,8 @@ class SmsIndex extends Component
                 }
             })
             ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
-            ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'));
+            ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'))
+            ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) auth()->id()));
     }
 
     /**

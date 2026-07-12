@@ -488,6 +488,32 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     Route::get('/messages', SmsIndex::class)
         ->name('sms.index');
 
+    // Exit-beacon: threads stay unread while open and are marked read on exit.
+    // In-app exits (thread switch / close) go through SmsConversation; this
+    // handles leaving the page entirely (wire:navigate away, tab close) via
+    // navigator.sendBeacon from the messages index.
+    Route::post('/messages/threads/{thread}/read', function (\App\Models\SmsGroupThread $thread) {
+        $user = auth()->user();
+
+        if ($user->is_browsing_as_client) {
+            abort_unless($thread->client_id && $user->clients()->pluck('clients.id')->contains($thread->client_id), 403);
+        } else {
+            $vendorId = $user->vendor?->id;
+            abort_unless($vendorId && \App\Models\SmsGroupThread::where('id', $thread->id)->visibleToVendor($vendorId)->exists(), 403);
+        }
+
+        $latestMessageId = $thread->messages()->max('id');
+
+        if ($latestMessageId) {
+            \App\Models\SmsThreadRead::updateOrCreate(
+                ['thread_id' => $thread->id, 'user_id' => $user->id],
+                ['last_read_message_id' => $latestMessageId],
+            );
+        }
+
+        return response()->noContent();
+    })->name('sms.threads.read');
+
     // Call recording stream — uses BinaryFileResponse which natively supports
     // HTTP Range requests so <audio> can show real duration and seek (the
     // built-in `php artisan serve` dev server does not support Range on

@@ -141,74 +141,47 @@ class SmsGroupThread extends Model
         return $participantCount === $optedInCount;
     }
 
-    public static function unreadCountForUser(int $userId, ?int $vendorId = null, ?\Illuminate\Support\Carbon $newerThan = null): int
+    /**
+     * Threads whose latest message is inbound and newer than the user's
+     * last-read marker — the same definition as the unread dot in the list.
+     */
+    public function scopeUnreadForUser($query, int $userId)
     {
-        $query = SmsMessage::query()
-            ->join('sms_group_threads', 'sms_group_threads.id', '=', 'sms_messages.thread_id')
-            ->leftJoin('sms_thread_reads as thread_reads', function ($join) use ($userId) {
-                $join->on('thread_reads.thread_id', '=', 'sms_messages.thread_id')
-                    ->where('thread_reads.user_id', '=', $userId);
-            })
-            ->whereNotNull('sms_messages.thread_id')
-            ->where('sms_messages.direction', SmsMessage::DIRECTION_INBOUND)
-            ->where(function ($query) {
-                $query->whereNull('thread_reads.last_read_message_id')
-                    ->orWhereColumn('sms_messages.id', '>', 'thread_reads.last_read_message_id');
-            })
-            // Sidebar badge scope: only messages newer than the user's last
-            // visit to /messages (badge resets on visit; per-thread unread
-            // indicators are governed by thread_reads above instead).
-            ->when($newerThan, fn ($q) => $q->where('sms_messages.created_at', '>', $newerThan));
-
-        if ($vendorId) {
-            $query->where(function ($q) use ($vendorId) {
-                $q->where('sms_group_threads.vendor_id', $vendorId)
-                    ->orWhere(function ($legacyScope) use ($vendorId) {
-                        $legacyScope->whereNull('sms_group_threads.vendor_id')
-                            ->where(function ($rel) use ($vendorId) {
-                                $rel->whereIn('sms_group_threads.project_id', function ($sub) use ($vendorId) {
-                                    $sub->select('id')->from('projects')->where('belongs_to_vendor_id', $vendorId);
-                                })->orWhereIn('sms_group_threads.client_id', function ($sub) use ($vendorId) {
-                                    $sub->select('clients.id')->from('clients')
-                                        ->where('clients.vendor_id', $vendorId)
-                                        ->orWhereIn('clients.id', function ($pivot) use ($vendorId) {
-                                            $pivot->select('client_id')->from('client_vendor')->where('vendor_id', $vendorId);
-                                        });
-                                });
-                            });
-                    });
-            });
-        }
-
-        return $query->count('sms_messages.id');
+        return $query->whereHas('latestMessage', fn ($messageQuery) => $messageQuery
+            ->where('direction', SmsMessage::DIRECTION_INBOUND)
+            ->whereRaw(
+                'sms_messages.id > COALESCE((select last_read_message_id from sms_thread_reads where sms_thread_reads.thread_id = sms_messages.thread_id and sms_thread_reads.user_id = ?), 0)',
+                [$userId]
+            ));
     }
 
     /**
-     * Count unread messages for a user, scoped to specific client IDs.
+     * Count unread THREADS for a user — same definition as the unread dot and
+     * the Unread filter, so the sidebar badge always agrees with the list.
+     */
+    public static function unreadCountForUser(int $userId, ?int $vendorId = null): int
+    {
+        return static::query()
+            ->when($vendorId, fn ($q) => $q->visibleToVendor($vendorId))
+            ->unreadForUser($userId)
+            ->count();
+    }
+
+    /**
+     * Count unread threads for a user, scoped to specific client IDs.
      *
      * @param  array<int>  $clientIds
      */
-    public static function unreadCountForUserInClients(int $userId, array $clientIds, ?\Illuminate\Support\Carbon $newerThan = null): int
+    public static function unreadCountForUserInClients(int $userId, array $clientIds): int
     {
         if (empty($clientIds)) {
             return 0;
         }
 
-        return SmsMessage::query()
-            ->join('sms_group_threads', 'sms_group_threads.id', '=', 'sms_messages.thread_id')
-            ->leftJoin('sms_thread_reads as thread_reads', function ($join) use ($userId) {
-                $join->on('thread_reads.thread_id', '=', 'sms_messages.thread_id')
-                    ->where('thread_reads.user_id', '=', $userId);
-            })
-            ->whereNotNull('sms_messages.thread_id')
-            ->whereIn('sms_group_threads.client_id', $clientIds)
-            ->where('sms_messages.direction', SmsMessage::DIRECTION_INBOUND)
-            ->where(function ($query) {
-                $query->whereNull('thread_reads.last_read_message_id')
-                    ->orWhereColumn('sms_messages.id', '>', 'thread_reads.last_read_message_id');
-            })
-            ->when($newerThan, fn ($q) => $q->where('sms_messages.created_at', '>', $newerThan))
-            ->count('sms_messages.id');
+        return static::query()
+            ->whereIn('client_id', $clientIds)
+            ->unreadForUser($userId)
+            ->count();
     }
 
     /**

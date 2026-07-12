@@ -337,7 +337,10 @@
                             ? '(' . substr($d10, 0, 3) . ') ' . substr($d10, 3, 3) . '-' . substr($d10, 6)
                             : $phone;
                         $callableContacts->push([
-                            'name' => $name !== $displayPhone ? $name : null,
+                            // Only label with a name when the phone is linked to a
+                            // user/vendor — a CNAM-only name (no linked contact)
+                            // shows the number so it's clear who this actually is.
+                            'name' => ($name !== $displayPhone && $this->isKnownContact($phone)) ? $name : null,
                             'e164' => $phone,
                             'display' => $displayPhone,
                         ]);

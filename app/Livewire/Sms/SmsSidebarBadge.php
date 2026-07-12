@@ -27,17 +27,12 @@ class SmsSidebarBadge extends Component
         $count = 0;
 
         if ($user) {
-            // Badge counts unread messages newer than the user's last visit to
-            // /messages — visiting the page resets the badge without touching
-            // per-thread unread indicators.
-            $seenAt = $user->sms_last_seen_at ? \Illuminate\Support\Carbon::parse($user->sms_last_seen_at) : null;
-
             if ($user->is_browsing_as_client) {
                 $clientIds = $user->clients()->pluck('clients.id')->toArray();
-                $count = SmsGroupThread::unreadCountForUserInClients($user->id, $clientIds, $seenAt);
+                $count = SmsGroupThread::unreadCountForUserInClients($user->id, $clientIds);
             } else {
                 $vendorId = $user->vendor?->id;
-                $count = SmsGroupThread::unreadCountForUser($user->id, $vendorId, $seenAt);
+                $count = SmsGroupThread::unreadCountForUser($user->id, $vendorId);
             }
         }
 

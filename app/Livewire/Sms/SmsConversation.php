@@ -98,7 +98,8 @@ class SmsConversation extends Component
     {
         $this->isClientUser = (bool) auth()->user()->is_browsing_as_client;
         $this->authorizeThread();
-        $this->markThreadAsRead();
+        // Opening a thread does NOT mark it read — threads stay unread until
+        // the user exits them (switches thread, closes it, or leaves the page).
     }
 
     /**
@@ -111,10 +112,12 @@ class SmsConversation extends Component
         if ($threadId === $this->threadId) {
             // Same thread — refresh messages (e.g., after notification click)
             unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
-            $this->markThreadAsRead();
             $this->dispatch('thread-ready');
             return;
         }
+
+        // Exiting the current thread — mark IT read before swapping.
+        $this->markThreadAsRead();
 
         $this->threadId = $threadId;
         $this->authorizeThread();
@@ -133,7 +136,6 @@ class SmsConversation extends Component
         $this->forwardTargetThreadId = null;
         $this->forwardThreadSearch = '';
 
-        $this->markThreadAsRead();
         $this->dispatch('thread-ready');
     }
 
@@ -220,7 +222,6 @@ class SmsConversation extends Component
         }
 
         unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages);
-        $this->markThreadAsRead();
         $this->dispatch('sms-new-message-received');
     }
 
@@ -229,7 +230,6 @@ class SmsConversation extends Component
     public function refreshMessages(): void
     {
         unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages, $this->threadHasMixedNumbers);
-        $this->markThreadAsRead();
     }
 
     /**
@@ -1129,8 +1129,9 @@ class SmsConversation extends Component
         $this->dispatch('threadDeleted')->to(SmsIndex::class);
     }
 
-    public function updatedThreadId(): void
+    public function updatingThreadId(): void
     {
+        // Property still holds the departing thread here — mark it read on exit.
         $this->markThreadAsRead();
     }
 
@@ -1480,6 +1481,9 @@ class SmsConversation extends Component
 
         $this->newMessage = '';
         $this->attachment = null;
+
+        // Replying counts as reading — clear the unread state immediately.
+        $this->markThreadAsRead();
 
         // Clear memoized computed properties so the re-render fetches fresh data
         $this->refreshMessages();
@@ -2691,6 +2695,43 @@ class SmsConversation extends Component
     public function placeholder()
     {
         return view('livewire.sms.conversation_placeholder');
+    }
+
+    /**
+     * Whether the phone belongs to a linked contact (user or vendor). CNAM
+     * names from call logs do NOT count — those threads show the number.
+     */
+    public function isKnownContact(string $e164): bool
+    {
+        static $cache = [];
+
+        if (isset($cache[$e164])) {
+            return $cache[$e164];
+        }
+
+        $digits = preg_replace('/[^0-9]/', '', $e164);
+
+        $normalized = $digits;
+        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
+            $normalized = substr($normalized, 1);
+        }
+
+        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+
+        $userExists = User::where('cell_phone', $normalized)
+            ->orWhere('cell_phone', '1' . $normalized)
+            ->orWhere('cell_phone', $digits)
+            ->orWhere('cell_phone', $last10)
+            ->exists();
+
+        if ($userExists) {
+            return $cache[$e164] = true;
+        }
+
+        return $cache[$e164] = Vendor::where('business_phone', $normalized)
+            ->orWhere('business_phone', $last10)
+            ->orWhere('business_phone', $digits)
+            ->exists();
     }
 
     /**

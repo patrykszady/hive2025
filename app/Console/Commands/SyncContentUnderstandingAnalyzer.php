@@ -167,6 +167,12 @@ class SyncContentUnderstandingAnalyzer extends Command
                 'method'      => 'extract',
             ],
 
+            'ServiceAddress' => [
+                'type'        => 'string',
+                'description' => 'The SERVICE / JOB-SITE / DELIVERY address on the document — the location where the work was performed or materials were delivered, NOT the merchant\'s own address and NOT the billing/mailing address. Look for labels such as "Service Address", "Service Location", "Job Address", "Job Site", "Jobsite", "Site Address", "Delivery Address", "Deliver To", "Ship To", "Project Address", "Work Performed At", "Location of Service". Example: "Service Address: 3154 VIOLET LN, NORTHBROOK, IL 60062" → return "3154 VIOLET LN, NORTHBROOK, IL 60062". Return the full address value as printed (street, city, state, zip when present) WITHOUT the label. When "Ship To" repeats the billing party\'s name, still return the address portion. Do NOT return the merchant/store address, the remittance ("Remit To") address, or the customer billing ("Bill To") address when a separate service/delivery address exists. Return null when no service/job-site/delivery address is present.',
+                'method'      => 'extract',
+            ],
+
             'Tip' => [
                 'type'        => 'number',
                 'description' => 'Tip or gratuity amount paid.',

@@ -127,6 +127,24 @@ it('returns a null preferred indicator when the project has no preferred times',
     expect($task->preferredTimeIndicator())->toBeNull();
 });
 
+it('returns an awaiting indicator for an unscheduled task on a Service Call project before the homeowner submits times', function (): void {
+    $project = makeHomeownerPreferredProject([]);
+    \App\Models\ProjectStatus::withoutEvents(fn () => \App\Models\ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
+        'status_code' => 8,
+        'start_date' => now(),
+    ]));
+    $task = makePreferredTask($project, ['dates' => []]);
+
+    expect($task->preferredTimeIndicator())->toBe('pending');
+
+    // Once the task is scheduled the cue goes away.
+    $task->forceFill(['start_date' => now()->addDay()])->saveQuietly();
+
+    expect($task->fresh()->preferredTimeIndicator())->toBeNull();
+});
+
 it('returns a schedule preferred indicator for an unscheduled task with current preferred times', function (): void {
     $project = makeHomeownerPreferredProject([
         ['date' => '2026-07-16', 'time' => '1-3 PM'],

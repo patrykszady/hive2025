@@ -7,7 +7,8 @@
 #     gsc   → /home/forge/gs.construction
 #   --delete  Remove local files that no longer exist on the server.
 #   --full    Sync the entire storage/ tree (logs, framework caches, etc.).
-#             Default syncs only storage/app (user uploads & public files).
+#             Default syncs storage/app (public uploads) AND storage/files
+#             (the custom 'files' disk: sms-media, receipts, checks, docs).
 
 set -euo pipefail
 
@@ -15,16 +16,16 @@ REMOTE_HOST="${HIVE_PROD_HOST:-hive-prod}"
 
 TARGET="hive"
 EXTRA_FLAGS=()
-SUBPATH="storage/app/"
+SUBPATHS=("storage/app/" "storage/files/")
 
 for arg in "$@"; do
     case "$arg" in
         hive) TARGET="hive" ;;
         gsc|gs) TARGET="gsc" ;;
         --delete) EXTRA_FLAGS+=(--delete) ;;
-        --full)   SUBPATH="storage/" ;;
+        --full)   SUBPATHS=("storage/") ;;
         -h|--help)
-            sed -n '2,11p' "$0"
+            sed -n '2,12p' "$0"
             exit 0
             ;;
         *)
@@ -52,21 +53,26 @@ case "$TARGET" in
 esac
 
 cd "$LOCAL_ROOT"
-mkdir -p "$SUBPATH"
 
-echo "→ Pulling ${REMOTE_HOST}:${REMOTE_PATH}/${SUBPATH}"
-echo "  into ${LOCAL_ROOT}/${SUBPATH}"
+for SUBPATH in "${SUBPATHS[@]}"; do
+    mkdir -p "$SUBPATH"
 
-rsync -avz --human-readable --progress \
-    --exclude='framework/cache/data/*' \
-    --exclude='framework/sessions/*' \
-    --exclude='framework/views/*' \
-    --exclude='framework/testing/*' \
-    --exclude='logs/*.log' \
-    --exclude='debugbar/*' \
-    --exclude='clockwork/*' \
-    "${EXTRA_FLAGS[@]}" \
-    "${REMOTE_HOST}:${REMOTE_PATH}/${SUBPATH}" \
-    "./${SUBPATH}"
+    echo "→ Pulling ${REMOTE_HOST}:${REMOTE_PATH}/${SUBPATH}"
+    echo "  into ${LOCAL_ROOT}/${SUBPATH}"
+
+    rsync -avz --human-readable --progress \
+        --exclude='framework/cache/data/*' \
+        --exclude='framework/sessions/*' \
+        --exclude='framework/views/*' \
+        --exclude='framework/testing/*' \
+        --exclude='logs/*.log' \
+        --exclude='debugbar/*' \
+        --exclude='clockwork/*' \
+        --exclude='_temp_ocr/*' \
+        "${EXTRA_FLAGS[@]}" \
+        "${REMOTE_HOST}:${REMOTE_PATH}/${SUBPATH}" \
+        "./${SUBPATH}" \
+        || echo "  (skipped ${SUBPATH}: not present on remote or partial transfer)"
+done
 
 echo "✓ Done."
