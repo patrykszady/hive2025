@@ -186,6 +186,20 @@ document.addEventListener('DOMContentLoaded', () => {
 	}, 200);
 });
 
+// Preserve the sidebar's scroll position across wire:navigate page loads —
+// the nav re-renders on each navigation and would otherwise jump to the top.
+let sidebarScrollTop = 0;
+document.addEventListener('livewire:navigating', () => {
+	sidebarScrollTop = document.querySelector('[data-sidebar-scroll]')?.scrollTop ?? 0;
+});
+document.addEventListener('livewire:navigated', () => {
+	if (!sidebarScrollTop) return;
+	const sidebar = document.querySelector('[data-sidebar-scroll]');
+	if (sidebar) {
+		requestAnimationFrame(() => { sidebar.scrollTop = sidebarScrollTop; });
+	}
+});
+
 // Livewire navigate: hide during navigation, show after
 // Skip fade entirely for login <-> registration transitions
 const guestAuthPaths = ['/login', '/registration'];

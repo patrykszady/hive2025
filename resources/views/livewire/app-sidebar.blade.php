@@ -1,4 +1,4 @@
-<div class="flex-1 min-h-0 overflow-y-auto flux-no-scrollbar">
+<div class="flex-1 min-h-0 overflow-y-auto flux-no-scrollbar" data-sidebar-scroll>
     <flux:sidebar.nav>
             {{-- Notifications (both client and non-client users) --}}
             <flux:sidebar.item wire:navigate.hover icon="bell" href="{{ route('notifications.index') }}" tooltip="Notifications" class="[&_[data-content]]:!overflow-visible">
