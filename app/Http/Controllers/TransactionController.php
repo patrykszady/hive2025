@@ -1976,6 +1976,10 @@ class TransactionController extends Controller
                 ->whereNull('check_id')
                 ->whereNull('expense_id')
                 ->whereNull('deposit')
+                // Same rail as the check: sentinel number for Transfer/Cash,
+                // the real number for Check — without this, any same-amount
+                // card purchase could be absorbed as a check "completion".
+                ->where('check_number', $check_number)
                 // Exclude returned checks - they are reversals, not the original check
                 ->where(function ($query) {
                     $query->whereNull('plaid_merchant_description')
@@ -1992,6 +1996,29 @@ class TransactionController extends Controller
                 ])
                 ->where('amount', $check->amount_difference)
                 ->get();
+
+            // Transfer checks: apply the same payee-identity gate as subset-sum
+            // matching, so a completion can't grab a same-amount transfer to a
+            // different person (or a Venmo business payment).
+            if ($check->check_type === 'Transfer' && $transactions->isNotEmpty()) {
+                $payeeIdentity = $check->vendor?->business_name;
+                $allowUnresolvedPayee = false;
+
+                if (! $payeeIdentity && $check->user_id) {
+                    $userName = trim(($check->user?->first_name ?? '').' '.($check->user?->last_name ?? ''));
+                    $payeeIdentity = $userName !== '' ? $userName : null;
+                    $allowUnresolvedPayee = true;
+                }
+
+                if ($payeeIdentity) {
+                    $transactions = $transactions->filter(function ($transaction) use ($payeeIdentity, $allowUnresolvedPayee) {
+                        $payeeName = $this->extractPayeeNameFromTransaction($transaction);
+
+                        return ($allowUnresolvedPayee && ! $this->payeeNameIsResolvable($payeeName))
+                            || $this->payeeNameMatchesVendor($payeeName, $payeeIdentity);
+                    });
+                }
+            }
 
             if($transactions->isEmpty()){
                 // Add the check ID to the processed IDs only if it's not already there
@@ -2356,6 +2383,15 @@ class TransactionController extends Controller
      */
     protected function extractPayeeNameFromTransaction(Transaction $transaction): string
     {
+        // Plaid's merchant enrichment beats the bank memo. A Venmo BUSINESS
+        // payment (e.g. "Ssemblyai" paid via Venmo) still shows the account
+        // holder's own name in the bank description ("VENMO *PATRYK SZADY"),
+        // so the memo would wrongly group it with person-to-person transfers.
+        $merchant = trim((string) ($transaction->plaid_merchant_name ?? ''));
+        if ($merchant !== '' && ! in_array(strtoupper($merchant), ['VENMO', 'ZELLE'], true)) {
+            return strtoupper($merchant);
+        }
+
         $description = (string) $transaction->plaid_merchant_description;
         $originalDescription = (string) ($transaction->details['original_description'] ?? '');
 

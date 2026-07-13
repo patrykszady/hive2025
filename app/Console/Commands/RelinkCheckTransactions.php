@@ -11,6 +11,7 @@ class RelinkCheckTransactions extends Command
     protected $signature = 'app:relink-check-transactions
         {check : Check id to relink}
         {--txn=* : Transaction ids that SHOULD be linked to the check}
+        {--allow-partial : Allow the set to sum to LESS than the check amount (e.g. a transfer not yet posted)}
         {--apply : Actually relink (default is a dry-run report)}';
 
     protected $description = 'Replace a check\'s linked transactions with the given set (e.g. a Transfer check that subset-sum matched to the wrong person\'s transfers before the payee gate existed). Validates the new set sums to the check amount and sits on the same bank. Idempotent — safe to re-run.';
@@ -46,8 +47,12 @@ class RelinkCheckTransactions extends Command
             return self::FAILURE;
         }
 
-        // The new set must exactly cover the check amount and live on the check's bank.
-        if (number_format((float) $wanted->sum('amount'), 2, '.', '') !== number_format((float) $check->amount, 2, '.', '')) {
+        // The new set must exactly cover the check amount (or under-cover it
+        // with --allow-partial) and live on the check's bank.
+        $sumsMatch = number_format((float) $wanted->sum('amount'), 2, '.', '') === number_format((float) $check->amount, 2, '.', '');
+        $underCovers = (float) $wanted->sum('amount') < (float) $check->amount;
+
+        if (! $sumsMatch && ! ($this->option('allow-partial') && $underCovers)) {
             $this->error(sprintf('Refusing: transactions sum $%s but check %d is $%s.', $wanted->sum('amount'), $check->id, $check->amount));
 
             return self::FAILURE;

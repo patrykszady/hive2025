@@ -236,3 +236,66 @@ it('never matches a personal transfer check to same-sum transfers sent to a diff
         ->and($zelle->every(fn ($t) => $t->refresh()->check_id === null))->toBeTrue();
 });
 
+
+it('never matches a Venmo business payment (Plaid-enriched merchant) to a personal transfer check', function () {
+    $bankAccount = makeTransferCheckBankAccount();
+
+    $patryk = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Szady',
+        'email' => 'patryk-'.uniqid().'@example.com',
+        'cell_phone' => '5551234567',
+        'password' => bcrypt('password'),
+        'primary_vendor_id' => $bankAccount->vendor_id,
+    ]);
+
+    // $300 personal Venmo transfer check to Patryk, dated 06/28.
+    $check = Check::create([
+        'check_type' => 'Transfer',
+        'check_number' => '3849',
+        'date' => '2026-06-28',
+        'amount' => 300.00,
+        'bank_account_id' => $bankAccount->id,
+        'belongs_to_vendor_id' => $bankAccount->vendor_id,
+        'user_id' => $patryk->id,
+        'created_by_user_id' => $patryk->id,
+    ]);
+
+    $makeVenmo = fn (string $date, ?string $merchant) => Transaction::create([
+        'transaction_date' => $date,
+        'amount' => 100.00,
+        'bank_account_id' => $bankAccount->id,
+        'check_number' => '1010101',
+        'plaid_merchant_description' => 'Venmo',
+        'plaid_merchant_name' => $merchant,
+        // The bank memo carries the ACCOUNT HOLDER name even for business payments.
+        'details' => [
+            'original_description' => 'DEBIT PURCHASE '.$date.' 4849 VENMO *PATRYK SZADY 8558124430 NY 26178',
+        ],
+    ]);
+
+    // Two genuine person transfers + one Venmo BUSINESS payment (AssemblyAI).
+    $personA = $makeVenmo('2026-06-26', null);
+    $business = $makeVenmo('2026-06-26', 'Ssemblyai');
+    $personB = $makeVenmo('2026-06-28', null);
+
+    app(TransactionController::class)->add_check_id_to_transactions();
+
+    // The business payment is never linked — even though including it would
+    // complete the $300 sum and its bank memo names the check payee. With it
+    // excluded no subset sums to $300, so the check waits, unmatched.
+    expect($business->refresh()->check_id)->toBeNull()
+        ->and($personA->refresh()->check_id)->toBeNull()
+        ->and($personB->refresh()->check_id)->toBeNull();
+
+    // Once the real third person transfer posts, the check completes — still
+    // without the business payment.
+    $personC = $makeVenmo('2026-06-29', null);
+
+    app(TransactionController::class)->add_check_id_to_transactions();
+
+    expect($business->refresh()->check_id)->toBeNull()
+        ->and($personA->refresh()->check_id)->toBe($check->id)
+        ->and($personB->refresh()->check_id)->toBe($check->id)
+        ->and($personC->refresh()->check_id)->toBe($check->id);
+});
