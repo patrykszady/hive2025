@@ -23,6 +23,7 @@ use App\Services\NylasService;
 use App\Services\ReceiptItemEnricher;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -2063,6 +2064,19 @@ class CompanyEmailController extends Controller
 
             // NylasService::syncMessages already persists cursors into CompanyEmail->api_json when changed.
             // No need to mutate api_json here.
+
+            // Epson "Checks Scan" emails carry scanned bank-statement check-image
+            // PDFs — run those through the check analyzers instead of the receipt
+            // pipeline. Must happen in THIS sync pass: the cursor above already
+            // consumed these messages, so a separate fetch would never see them.
+            $checkScanMessages = collect($syncResult['messages'] ?? [])
+                ->filter(fn($m) => isset($m['from'][0]['email'], $m['subject']) &&
+                    strcasecmp($m['from'][0]['email'], 'noreply@print.epsonconnect.com') === 0 &&
+                    stripos($m['subject'], 'Checks Scan') !== false)
+                ->values()
+                ->all();
+
+            $this->processCheckScanMessages($checkScanMessages, $company_email);
          
             foreach ($messages as $message) {
                 $messageId = $message['id'];
@@ -4860,6 +4874,73 @@ class CompanyEmailController extends Controller
      * that belongs to the same Hive vendor as the company email; falls back to
      * the client's most recent non-deleted project.
      */
+    /**
+     * Process Epson "Checks Scan" emails: save each attached PDF of scanned
+     * bank-statement check images to the checks source folder, split it into
+     * per-check images (cu:extract-checks), then analyze + link them
+     * (cu:process-check-images). Idempotent: an already-downloaded PDF is
+     * skipped, and the extract command upserts check_images by filename.
+     *
+     * @param  array<int, array<string, mixed>>  $messages
+     */
+    protected function processCheckScanMessages(array $messages, CompanyEmail $companyEmail): void
+    {
+        $extracted = false;
+
+        foreach ($messages as $message) {
+            $messageId = $message['id'];
+
+            foreach ($message['attachments'] ?? [] as $attachment) {
+                $filename = basename((string) ($attachment['filename'] ?? ''));
+
+                if (! str_ends_with(strtolower($filename), '.pdf')) {
+                    continue;
+                }
+
+                $target = 'checks/files/' . $filename;
+
+                // Same scan re-synced (or re-sent) — already ingested.
+                if (Storage::disk('files')->exists($target)) {
+                    continue;
+                }
+
+                try {
+                    $content = $this->nylasService->downloadAttachment(
+                        $attachment['id'],
+                        $companyEmail->grant_id,
+                        $messageId
+                    );
+
+                    Storage::disk('files')->put($target, $content);
+
+                    Artisan::call('cu:extract-checks', [
+                        'file' => Storage::disk('files')->path($target),
+                    ]);
+
+                    $extracted = true;
+
+                    Log::channel('nylas')->info('Checks Scan: extracted check images from emailed statement PDF', [
+                        'company_email_id' => $companyEmail->id,
+                        'message_id' => $messageId,
+                        'filename' => $filename,
+                    ]);
+                } catch (\Throwable $exception) {
+                    Log::channel('nylas')->error('Checks Scan: failed to process attachment', [
+                        'company_email_id' => $companyEmail->id,
+                        'message_id' => $messageId,
+                        'filename' => $filename,
+                        'error' => $exception->getMessage(),
+                    ]);
+                }
+            }
+        }
+
+        // One analyze+match pass for everything ingested above.
+        if ($extracted) {
+            Artisan::call('cu:process-check-images');
+        }
+    }
+
     /**
      * Match a receipt's service/job-site address (e.g. "3154 VIOLET LN,
      * NORTHBROOK, IL 60062") to a project by street number + street name.
