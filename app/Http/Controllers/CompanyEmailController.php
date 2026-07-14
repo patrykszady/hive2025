@@ -4889,6 +4889,7 @@ class CompanyEmailController extends Controller
 
         foreach ($messages as $message) {
             $messageId = $message['id'];
+            $messageFailed = false;
 
             foreach ($message['attachments'] ?? [] as $attachment) {
                 $filename = basename((string) ($attachment['filename'] ?? ''));
@@ -4925,6 +4926,8 @@ class CompanyEmailController extends Controller
                         'filename' => $filename,
                     ]);
                 } catch (\Throwable $exception) {
+                    $messageFailed = true;
+
                     Log::channel('nylas')->error('Checks Scan: failed to process attachment', [
                         'company_email_id' => $companyEmail->id,
                         'message_id' => $messageId,
@@ -4932,6 +4935,17 @@ class CompanyEmailController extends Controller
                         'error' => $exception->getMessage(),
                     ]);
                 }
+            }
+
+            // Processed cleanly — file the email in the same folder receipt
+            // scans go to (api_json HIVE_RECEIPTS_FOLDER, e.g. "RECEIPT SCAN").
+            // Failed messages stay in the inbox so they're visible for a rescan.
+            if (! $messageFailed) {
+                $this->nylasService->moveOriginalMessageToHiveFolder(
+                    $companyEmail->grant_id,
+                    $messageId,
+                    $companyEmail->id
+                );
             }
         }
 

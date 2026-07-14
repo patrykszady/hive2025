@@ -42,6 +42,9 @@ it('downloads Checks Scan PDFs and runs the check pipeline', function () {
         ->once()
         ->with('att-1', 'grant-test', 'msg-checks-1')
         ->andReturn('%PDF-1.4 fake');
+    $nylas->shouldReceive('moveOriginalMessageToHiveFolder')
+        ->once()
+        ->with('grant-test', 'msg-checks-1', $companyEmail->id);
 
     $kernel = Mockery::mock();
     $kernel->shouldReceive('call')
@@ -74,6 +77,10 @@ it('skips a statement PDF that was already downloaded', function () {
 
     $nylas = Mockery::mock(NylasService::class);
     $nylas->shouldNotReceive('downloadAttachment');
+    // Already-ingested scans still get filed out of the inbox.
+    $nylas->shouldReceive('moveOriginalMessageToHiveFolder')
+        ->once()
+        ->with('grant-test', 'msg-checks-1', $companyEmail->id);
 
     $kernel = Mockery::mock();
     $kernel->shouldNotReceive('call');
@@ -97,6 +104,8 @@ it('does not run the analyze pass when a download fails', function () {
 
     $nylas = Mockery::mock(NylasService::class);
     $nylas->shouldReceive('downloadAttachment')->once()->andThrow(new RuntimeException('nylas down'));
+    // Failed messages stay in the inbox for visibility.
+    $nylas->shouldNotReceive('moveOriginalMessageToHiveFolder');
 
     $kernel = Mockery::mock();
     $kernel->shouldNotReceive('call');
