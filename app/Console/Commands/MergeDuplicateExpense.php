@@ -40,7 +40,13 @@ class MergeDuplicateExpense extends Command
             return self::SUCCESS;
         }
 
-        if ((int) $remove->vendor_id !== (int) $keep->vendor_id
+        // Vendors must agree — except when the duplicate has NO real vendor
+        // (0/null), which happens when a garbled OCR merchant name defeated
+        // vendor matching on a re-scan of the same receipt.
+        $vendorsCompatible = (int) $remove->vendor_id === (int) $keep->vendor_id
+            || (int) $remove->vendor_id === 0;
+
+        if (! $vendorsCompatible
             || $remove->amount !== $keep->amount
             || ! $remove->date->isSameDay($keep->date)) {
             $this->error(sprintf(
@@ -52,21 +58,20 @@ class MergeDuplicateExpense extends Command
             return self::FAILURE;
         }
 
-        if ($remove->receipts()->exists()) {
-            $this->error("Refusing: expense {$remove->id} has receipts attached — merge those manually first.");
-
-            return self::FAILURE;
-        }
-
         $transactions = Transaction::withoutGlobalScopes()
             ->whereNull('deleted_at')
             ->where('expense_id', $remove->id)
             ->get();
 
+        $receipts = $remove->receipts()->get();
+        $copyInvoice = empty($keep->invoice) && ! empty($remove->invoice);
+
         $this->line(sprintf(
-            'Merging expense %d into %d ($%s, vendor %s): moving transactions [%s], then soft-deleting %d.',
+            'Merging expense %d into %d ($%s, vendor %s): moving transactions [%s] and receipts [%s]%s, then soft-deleting %d.',
             $remove->id, $keep->id, $keep->amount, $keep->vendor_id,
             $transactions->pluck('id')->implode(', ') ?: 'none',
+            $receipts->pluck('id')->implode(', ') ?: 'none',
+            $copyInvoice ? ", copying invoice [{$remove->invoice}]" : '',
             $remove->id,
         ));
 
@@ -81,11 +86,27 @@ class MergeDuplicateExpense extends Command
             $transaction->save();
         }
 
+        // Move receipts BEFORE deleting — the ExpenseObserver deletes any
+        // receipts still attached to a deleted expense.
+        foreach ($receipts as $receipt) {
+            $receipt->expense_id = $keep->id;
+            $receipt->save();
+        }
+
+        if ($copyInvoice) {
+            $keep->invoice = $remove->invoice;
+            $keep->save();
+        }
+
         $remove->delete();
         $keep->searchable();
 
-        $this->info("Merged. Expense {$keep->id} now has transactions [" .
-            Transaction::withoutGlobalScopes()->whereNull('deleted_at')->where('expense_id', $keep->id)->pluck('id')->implode(', ') . '].');
+        $this->info(sprintf(
+            'Merged. Expense %d now has transactions [%s] and %d receipt(s).',
+            $keep->id,
+            Transaction::withoutGlobalScopes()->whereNull('deleted_at')->where('expense_id', $keep->id)->pluck('id')->implode(', '),
+            $keep->receipts()->count(),
+        ));
 
         return self::SUCCESS;
     }
