@@ -2303,6 +2303,15 @@ class CompanyEmailController extends Controller
 
                         $incomingMerchantName = trim((string) ($ocr_receipt_data['fields']['merchant_name'] ?? ''));
 
+                        // A garbled OCR merchant that fuzzy-matches NO known vendor
+                        // (e.g. "THEHOMELAKIO" for a Home Depot logo) carries no
+                        // signal — treat it like a missing merchant so it can't veto
+                        // duplicate detection. Amount + date window still gate.
+                        if ($incomingMerchantName !== ''
+                            && ! $this->fuzzyMatchVendor($incomingMerchantName, Vendor::withoutGlobalScopes()->get(), 70.0)) {
+                            $incomingMerchantName = '';
+                        }
+
                         $duplicates = Expense::where('belongs_to_vendor_id', $email_vendor->id)
                             ->with('receipts')
                             ->whereNull('deleted_at')
