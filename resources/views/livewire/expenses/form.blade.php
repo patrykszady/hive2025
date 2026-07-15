@@ -301,8 +301,7 @@
             <flux:field>
                 <flux:label>Reimbursment</flux:label>
 
-                <flux:select wire:model.live="form.reimbursment" placeholder="Choose reimbursment...">
-                    {{--  x-bind:selected="split == true ? true : false" --}}
+                <flux:select wire:model.live="form.reimbursment" variant="listbox" searchable placeholder="Choose reimbursment...">
                     <flux:select.option value="">None</flux:select.option>
                     <flux:select.option x-bind:disabled="project_completed || !open" value="Client">Client</flux:select.option>
                     @foreach ($this->via_vendor_employees as $employee)
