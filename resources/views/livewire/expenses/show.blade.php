@@ -81,7 +81,19 @@
                     />
 
                     @if($expense->reimbursment)
-                        <x-details.row title="Reimbursment" content="{{ $expense->reimbursment }}" />
+                        @php
+                            // 'V:{vendor_id}' — vendor reimbursement links to the vendor
+                            $reimbursmentRaw = $expense->getRawOriginal('reimbursment');
+                            $reimbursmentVendorId = is_string($reimbursmentRaw) && str_starts_with($reimbursmentRaw, 'V:')
+                                ? (int) substr($reimbursmentRaw, 2)
+                                : null;
+                        @endphp
+                        <x-details.row
+                            title="Reimbursment"
+                            content="{{ $expense->reimbursment }}"
+                            href="{{ $reimbursmentVendorId ? route('vendors.show', $reimbursmentVendorId) : null }}"
+                            navigate
+                        />
                     @endif
 
                     @if($expense->paid_by)
