@@ -350,3 +350,25 @@ it('clears Paid By when a reimbursement is selected after it, and store() refuse
 
     expect($component->instance()->form->paid_by)->toBeNull();
 });
+
+it('disables reimbursement selection until a project is in the payment, and unchecks when the last project is removed', function () {
+    [$company, $admin, $sub, $merchant, $bankAccount] = vendorReimbursementSetup();
+    $this->actingAs($admin);
+    $expense = makeVendorReimbursementExpense($company, $sub, $merchant);
+    $project = makeProjectWithBid($company, $sub, 1000.00);
+
+    $component = Livewire::actingAs($admin)
+        ->test(VendorPaymentCreate::class, ['vendor' => $sub]);
+
+    // Project has an outstanding balance so it is in the payment from mount
+    expect($component->instance()->getHasPaymentProjectsProperty())->toBeTrue();
+
+    // Select the reimbursement, then remove the only project → unchecked + disabled
+    $component->set("selectedVendorReimbursementExpenses.{$expense->id}", true)
+        ->call('removeProject', $project->id);
+
+    $instance = $component->instance();
+    expect($instance->getHasPaymentProjectsProperty())->toBeFalse()
+        ->and($instance->selectedVendorReimbursementExpenses[$expense->id])->toBeFalse()
+        ->and($instance->getVendorCheckSumProperty())->toEqual(0.0);
+});

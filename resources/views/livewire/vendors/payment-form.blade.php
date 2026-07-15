@@ -158,7 +158,8 @@
                                 @foreach($vendor_reimbursement_expenses as $expense)
                                     <flux:table.row :key="$expense->id">
                                         <flux:table.cell>
-                                            <flux:checkbox wire:model.live="selectedVendorReimbursementExpenses.{{$expense->id}}" />
+                                            {{-- Deductions need a payment to deduct from --}}
+                                            <flux:checkbox wire:model.live="selectedVendorReimbursementExpenses.{{$expense->id}}" :disabled="! $this->hasPaymentProjects" />
                                         </flux:table.cell>
                                         <flux:table.cell variant="strong">
                                             <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">-{{ money($expense->amount) }}</a>

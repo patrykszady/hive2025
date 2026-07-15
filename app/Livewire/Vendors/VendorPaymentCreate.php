@@ -252,6 +252,25 @@ class VendorPaymentCreate extends Component
     $this->projects[$id]['disabled'] = false;
 
         $this->project_id = '';
+
+        // A deduction needs a payment to deduct from — when the last project
+        // is removed, clear any selected reimbursements (their checkboxes
+        // also disable in the blade until a project is added back).
+        if (! $this->hasPaymentProjects) {
+            $this->selectedVendorReimbursementExpenses = array_map(
+                fn () => false,
+                $this->selectedVendorReimbursementExpenses
+            );
+        }
+    }
+
+    /**
+     * Whether at least one project is part of the payment — reimbursement
+     * deductions are only selectable alongside a project payment.
+     */
+    public function getHasPaymentProjectsProperty(): bool
+    {
+        return collect($this->projects)->where('show', true)->isNotEmpty();
     }
 
     public function getVendorCheckSumProperty()
