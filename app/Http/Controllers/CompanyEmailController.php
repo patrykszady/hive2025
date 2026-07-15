@@ -4589,7 +4589,11 @@ class CompanyEmailController extends Controller
             '/Invoice\s*Number\s*:\s*\R+\s*([^\r\n,]+)/i',
             '/Invoice\s*Number\s*:\s*([^\r\n,]+)/i',
             '/Invoice\s*#\s*([A-Za-z0-9\-]+)/i',
-            '/\bINV(?:OICE)?\s*#?\s*([A-Za-z0-9\-]+)/i',
+            // Stripe-style receipts label the number "Receipt #1134-0898"
+            '/\bReceipt\s*#\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-]*)/i',
+            // (?![a-z]) keeps the bare "INV" branch from matching inside words
+            // like "invoicing" (which once produced the invoice "oicing")
+            '/\bINV(?:OICE)?(?![a-z])\s*#?\s*([A-Za-z0-9\-]+)/i',
         ];
 
         foreach ($patterns as $pattern) {

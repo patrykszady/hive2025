@@ -755,6 +755,25 @@ class ReceiptController extends Controller
         $rawContent = preg_replace('/<\/tr>\s*/i', "\n", $rawContent);
         $rawContent = strip_tags($rawContent);
         $rawContent = preg_replace('/\n{3,}/', "\n\n", $rawContent);
+
+        // Per-config truncation of OCR content: hosted receipt pages (e.g.
+        // Stripe-rendered Village of Northbrook receipts) end with an email-style
+        // footer ("If you have any questions, contact us…", "…partners with Stripe
+        // to provide invoicing…") that pollutes invoice extraction and duplicate
+        // matching. options['ocr_content_end'] lists marker strings — content is
+        // cut at the first marker found (marker excluded), like receipt_end.
+        if ($receipt && ! empty($receipt->options['ocr_content_end'])) {
+            $ends = is_array($receipt->options['ocr_content_end'])
+                ? $receipt->options['ocr_content_end']
+                : [$receipt->options['ocr_content_end']];
+            foreach ($ends as $endText) {
+                if ($endText !== '' && ($pos = strpos($rawContent, (string) $endText)) !== false) {
+                    $rawContent = rtrim(substr($rawContent, 0, $pos));
+                    break;
+                }
+            }
+        }
+
         $content = htmlspecialchars(trim($rawContent), ENT_QUOTES, 'UTF-8');
 
         $keyValuePairs = null;

@@ -378,9 +378,19 @@ class ReOcrReceipts extends Command
             return self::SUCCESS;
         }
 
+        // Resolve the receipt config from the expense's vendor so config-driven
+        // OCR options (e.g. ocr_content_end footer trimming) apply on re-OCR too.
+        $expense = Expense::withoutGlobalScopes()->find((int) $this->option('expense'));
+        $receiptConfig = null;
+        if ($expense && $expense->vendor_id) {
+            $configs = Receipt::where('vendor_id', $expense->vendor_id)->get();
+            $receiptConfig = $configs->first(fn ($c) => ! empty($c->options['ocr_content_end']))
+                ?? $configs->first();
+        }
+
         $lastFields = null;
         foreach ($records as $record) {
-            $result = $this->reOcrSingleReceipt($receiptController, $record);
+            $result = $this->reOcrSingleReceipt($receiptController, $record, $receiptConfig);
             if ($result['status'] === 'failed') {
                 return self::FAILURE;
             }
@@ -402,7 +412,7 @@ class ReOcrReceipts extends Command
     /**
      * @return array{status: 'ok'|'skipped'|'failed', fields?: array<string, mixed>}
      */
-    private function reOcrSingleReceipt(ReceiptController $receiptController, ExpenseReceipts $record): array
+    private function reOcrSingleReceipt(ReceiptController $receiptController, ExpenseReceipts $record, ?Receipt $receiptConfig = null): array
     {
         $filePath = 'receipts/' . $record->receipt_filename;
         if (! Storage::disk('files')->exists($filePath)) {
@@ -424,7 +434,7 @@ class ReOcrReceipts extends Command
 
         $docType = $record->is_material_order ? 'material_order' : 'receipt';
 
-        $result = $receiptController->extractReceipt($filePath, $docType, null, null, null, $analyzerId);
+        $result = $receiptController->extractReceipt($filePath, $docType, null, null, $receiptConfig, $analyzerId);
 
         if (isset($result['error'])) {
             $this->error("OCR returned error.");
