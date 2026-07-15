@@ -5,11 +5,13 @@
     @endcan
     </x-slot:actions>
 
-    <div class="space-y-2 overflow-x-hidden">
+    {{-- No overflow-x-hidden here: it would clip the negative-margin bleed
+         that lets row hovers reach the card edges (see app.css ui-table-scroll-area). --}}
+    <div class="space-y-2">
         <flux:table
             :paginate="$this->projects->hasPages() ? $this->projects : null"
             wire:loading.class="opacity-50 text-opacity-50"
-            class="table-fixed w-full"
+            class="table-fixed w-full compact-table"
         >
             <flux:table.columns>
                 @if($view == 'clients.index')

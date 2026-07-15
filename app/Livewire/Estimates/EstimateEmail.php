@@ -122,7 +122,9 @@ class EstimateEmail extends Component
         $clientUsers = $this->estimate->client->users
             ->map(fn ($user) => [
                 'email' => $user->email,
-                'name' => trim($user->first_name . ' ' . ($user->last_name ?? '')),
+                // Nickname-first display ("Dick" for Richard) — matches the
+                // client name shown across the app.
+                'name' => trim(($user->nickname ?: $user->first_name) . ' ' . ($user->last_name ?? '')),
                 'group' => 'Client',
             ])
             ->filter(fn ($contact) => ! empty($contact['email']))

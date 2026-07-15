@@ -83,6 +83,12 @@
     margin-inline: calc(var(--flux-card-px) * -1);
   }
 
+  /* Compact tables (e.g. Projects index): tighter row rhythm than Flux's
+     default py-3 cells — rows with sm selects drop from 56px to ~46px. */
+  .compact-table td[data-flux-cell] {
+    padding-block: calc(var(--spacing) * 1.5) !important;
+  }
+
   /* Flux table row hover: light indigo. Scoped to Flux rows only so plain
      <table> elements (e.g. footer totals) are not affected.
      Flux tables use `border-separate` with `border-spacing`, so cells paint

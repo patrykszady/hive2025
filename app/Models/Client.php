@@ -165,27 +165,31 @@ class Client extends Model
                     if ($users->count() == 0) {
                         return 'No Name';
                     }
-                    
+
+                    // Display names prefer nicknames (e.g. "Dick" for Richard);
+                    // legal documents build names from first_name/last_name directly.
+                    $preferredName = fn ($user) => trim((string) ($user->nickname ?: $user->first_name));
+
                     if ($users->count() == 1) {
-                        return $users->first()->first_name.' '.$users->first()->last_name;
+                        return trim($preferredName($users->first()).' '.$users->first()->last_name);
                     } else {
                         // Group users by last name
                         $usersByLastName = $users->groupBy('last_name');
-                        
+
                         $nameGroups = [];
-                        
+
                         // Process each last name group
                         foreach ($usersByLastName as $lastName => $lastNameGroup) {
                             if ($lastNameGroup->count() == 1) {
                                 // Single person with this last name - use full name
-                                $nameGroups[] = $lastNameGroup->first()->first_name . ' ' . $lastName;
+                                $nameGroups[] = $preferredName($lastNameGroup->first()) . ' ' . $lastName;
                             } else {
                                 // Multiple people with same last name - combine first names
-                                $firstNames = $lastNameGroup->pluck('first_name')->toArray();
+                                $firstNames = $lastNameGroup->map($preferredName)->filter()->values()->toArray();
                                 $nameGroups[] = $this->oxfordJoin($firstNames) . ' ' . $lastName;
                             }
                         }
-                        
+
                         // Join all name groups
                         return $this->oxfordJoin($nameGroups);
                     }
@@ -199,7 +203,9 @@ class Client extends Model
     }
 
     /**
-     * Get just the first names for greeting purposes
+     * Get just the first names for greeting purposes.
+     * Prefers nicknames (e.g. "Dick" for Richard) — legal documents build
+     * full names from first_name/last_name directly and are unaffected.
      */
     protected function firstNames(): Attribute
     {
@@ -218,12 +224,14 @@ class Client extends Model
                     return 'there';
                 }
 
+                $preferredName = fn ($user) => trim((string) ($user->nickname ?: $user->first_name));
+
                 if ($users->count() == 1) {
-                    return $users->first()->first_name;
+                    return $preferredName($users->first());
                 }
 
                 // Multiple users - combine first names with Oxford comma
-                $firstNames = $users->pluck('first_name')->toArray();
+                $firstNames = $users->map($preferredName)->filter()->values()->toArray();
                 return $this->oxfordJoin($firstNames);
             }
         );

@@ -516,8 +516,14 @@ class SmsThreadList extends Component
                     $cellPhone = substr($cellPhone, 1);
                 }
 
-                if ($cellPhone === $normalizedFrom && is_string($user->first_name) && trim($user->first_name) !== '') {
-                    return trim($user->first_name);
+                if ($cellPhone === $normalizedFrom) {
+                    // Prefer the nickname (e.g. "Dick" for Richard), matching
+                    // the thread title and conversation pane.
+                    $display = trim((string) ($user->nickname ?: $user->first_name));
+
+                    if ($display !== '') {
+                        return $display;
+                    }
                 }
             }
         }
