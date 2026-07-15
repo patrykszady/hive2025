@@ -69,6 +69,7 @@ function vendorReimbursementSetup(): array
         'name' => 'Test Bank',
         'vendor_id' => $company->id,
         'plaid_ins_id' => 'ins_test',
+        'plaid_access_token' => 'access-test-token',
     ]);
     $bankAccount = BankAccount::query()->create([
         'bank_id' => $bank->id,
@@ -384,4 +385,35 @@ it('disables reimbursement selection until a project is in the payment, and unch
     expect($instance->getHasPaymentProjectsProperty())->toBeFalse()
         ->and($instance->selectedVendorReimbursementExpenses[$expense->id])->toBeFalse()
         ->and($instance->getVendorCheckSumProperty())->toEqual(0.0);
+});
+
+it('shows bank and check number / transfer in the confirm payment modal', function () {
+    [$company, $admin, $sub, $merchant, $bankAccount] = vendorReimbursementSetup();
+    $this->actingAs($admin);
+    $project = makeProjectWithBid($company, $sub, 1000.00);
+
+    // Seed one paper check so autoCheckNumber() (fired by check_type=Check) works
+    Check::forceCreate([
+        'check_type' => 'Check',
+        'check_number' => 99000,
+        'date' => '2026-07-01',
+        'bank_account_id' => $bankAccount->id,
+        'vendor_id' => $merchant->id,
+        'belongs_to_vendor_id' => $company->id,
+        'created_by_user_id' => $admin->id,
+    ]);
+
+    $component = Livewire::actingAs($admin)
+        ->test(VendorPaymentCreate::class, ['vendor' => $sub])
+        ->set('form.date', '2026-07-14')
+        ->set('bank_account_id', $bankAccount->id)
+        ->set('check_type', 'Check')
+        ->set('check_number', 99123)
+        ->set("projects.{$project->id}.amount", 930);
+
+    $component->assertSee('Test Bank')->assertSee('Check #99123');
+
+    $component->set('check_type', 'Transfer')
+        ->assertSee('Test Bank')
+        ->assertDontSee('Check #99123');
 });
