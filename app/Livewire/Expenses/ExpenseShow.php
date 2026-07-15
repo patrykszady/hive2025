@@ -55,13 +55,8 @@ class ExpenseShow extends Component
             $this->expense->searchable();
         }
 
-        $check->load(['expenses', 'expensesMany', 'timesheets']);
-        $expenseSum = $check->expenses
-            ->concat($check->expensesMany)
-            ->unique('id')
-            ->sum('amount');
-        $check->amount = $expenseSum + $check->timesheets->sum('amount');
-        $check->save();
+        // Reimbursement deductions must stay negative — use the shared recalc
+        $check->recalculateAmount();
 
         $this->expense->refresh();
         $this->expense->load(['checks.bank_account.bank']);

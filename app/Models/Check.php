@@ -88,6 +88,65 @@ class Check extends Model
     }
 
     /**
+     * Is this expense a DEDUCTION on this check (a reimbursement being settled
+     * by it), as opposed to something the check is paying for?
+     *
+     * A reimbursement only deducts on its SETTLEMENT check — the check whose
+     * payee is the party that owes the company (or, for user checks, the payee
+     * who personally paid off someone else's owed expense). The same expense
+     * attached to its own merchant-payment check counts positive.
+     */
+    public function isSettlementDeduction(Expense $expense): bool
+    {
+        $raw = $expense->getRawOriginal('reimbursment');
+        if ($raw === null || trim((string) $raw) === '' || $raw === 'Client') {
+            return false;
+        }
+
+        // User owes the company; settled through that user's payment check
+        if ($this->user_id && (string) $raw === (string) $this->user_id) {
+            return true;
+        }
+
+        // Vendor owes the company; settled through that vendor's payment check
+        if ($this->vendor_id && $raw === 'V:'.$this->vendor_id) {
+            return true;
+        }
+
+        // The check's payee personally paid off ANOTHER party's owed expense
+        // (CheckShow's "Paid Off Other User Reimbursements" bucket)
+        if ($this->user_id && $expense->paid_by && (int) $expense->paid_by === (int) $this->user_id) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Recalculate this check's amount from its attached records.
+     *
+     * amount = timesheets + expenses, where reimbursement expenses being
+     * SETTLED by this check (see isSettlementDeduction) count as deductions.
+     * Their DB amounts stay positive; the negation only affects the stored
+     * check total. Centralized here so timesheet payments, vendor payments
+     * and every check/expense attach/detach flow agree on the math.
+     */
+    public function recalculateAmount(): void
+    {
+        $expenseSum = $this->expenses()->get()
+            ->concat($this->expensesMany()->get())
+            ->unique('id')
+            ->sum(function ($expense) {
+                $amount = (float) $expense->amount;
+
+                return $this->isSettlementDeduction($expense) ? -abs($amount) : $amount;
+            });
+
+        $this->amount = $this->timesheets()->sum('amount') + $expenseSum;
+        $this->save();
+    }
+
+    /**
      * Unified, human-friendly payment label for UI.
      */
     protected function paymentLabel(): Attribute

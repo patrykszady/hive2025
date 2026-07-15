@@ -292,9 +292,10 @@
         </div>
 
         {{-- REIMBURSEMNT --}}
+        {{-- Always visible: user/vendor reimbursements don't need a project
+             (e.g. a permit fee paid on a sub's behalf); Client requires one. --}}
         <div
             x-data="{ open: @entangle('form.project_id'), project_completed: @entangle('form.project_completed') }"
-            x-show="open"
             x-transition
             >
             <flux:field>
@@ -303,9 +304,12 @@
                 <flux:select wire:model.live="form.reimbursment" placeholder="Choose reimbursment...">
                     {{--  x-bind:selected="split == true ? true : false" --}}
                     <flux:select.option value="">None</flux:select.option>
-                    <flux:select.option x-bind:disabled="project_completed" value="Client">Client</flux:select.option>
+                    <flux:select.option x-bind:disabled="project_completed || !open" value="Client">Client</flux:select.option>
                     @foreach ($this->via_vendor_employees as $employee)
                         <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
+                    @endforeach
+                    @foreach ($this->reimbursment_vendors as $reimbursmentVendor)
+                        <flux:select.option value="V:{{$reimbursmentVendor->id}}">{{$reimbursmentVendor->business_name}}</flux:select.option>
                     @endforeach
                 </flux:select>
 

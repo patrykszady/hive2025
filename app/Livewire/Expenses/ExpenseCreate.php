@@ -96,6 +96,17 @@ class ExpenseCreate extends Component
     }
 
     #[Computed]
+    public function reimbursment_vendors()
+    {
+        // Sub / 1099 vendors that can owe the company back for expenses paid
+        // on their behalf — stored as reimbursment = 'V:{vendor_id}' and
+        // deducted from that vendor's next payment on /vendors/{id}/payment.
+        return Vendor::whereIn('business_type', ['Sub', '1099'])
+            ->orderBy('business_name')
+            ->get(['id', 'business_name']);
+    }
+
+    #[Computed]
     public function vendors()
     {
         return Vendor::orderBy('business_name')->get(['id', 'business_name']);
@@ -492,13 +503,8 @@ class ExpenseCreate extends Component
                 continue;
             }
 
-            $check->load(['expenses', 'expensesMany', 'timesheets']);
-            $expenseSum = $check->expenses
-                ->concat($check->expensesMany)
-                ->unique('id')
-                ->sum('amount');
-            $check->amount = $expenseSum + $check->timesheets->sum('amount');
-            $check->save();
+            // Reimbursement deductions must stay negative — use the shared recalc
+            $check->recalculateAmount();
         }
 
         $this->expense->refresh();
@@ -552,10 +558,9 @@ class ExpenseCreate extends Component
         $expense = $this->form->store($this->existing_check_id);
         
         // If user selected an existing check, recalculate check amount
+        // (reimbursement deductions handled centrally)
         if ($this->existing_check_id) {
-            $check = Check::find($this->existing_check_id);
-            $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
-            $check->save();
+            Check::find($this->existing_check_id)?->recalculateAmount();
         }
         
         if (! $this->embedded) {

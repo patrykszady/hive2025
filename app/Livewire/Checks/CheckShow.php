@@ -99,12 +99,23 @@ class CheckShow extends Component
                 ->keyBy('id')
             : collect();
 
+        // Vendor reimbursements settled by this check — expenses the company
+        // paid on the payee vendor's behalf (reimbursment = 'V:{vendor_id}'),
+        // deducted from the check total by Check::recalculateAmount().
+        $vendor_reimbursement_expenses = $this->check->vendor_id
+            ? Expense::whereIn('id', $allExpenseIds)
+                ->where('reimbursment', 'V:'.$this->check->vendor_id)
+                ->orderBy('date', 'DESC')
+                ->get()
+            : collect();
+
         // Scanned check images cropped from bank statements
         $check_images = $this->check->checkImages()->orderBy('check_date')->get();
 
         return view('livewire.checks.show', [
             'check_images' => $check_images,
             'vendor_expenses' => $vendor_expenses,
+            'vendor_reimbursement_expenses' => $vendor_reimbursement_expenses,
             'user_paid_expenses' => $user_paid_expenses,
             'user_reimbursement_expenses' => $user_reimbursement_expenses,
             'user_paid_by_reimbursements' => $user_paid_by_reimbursements,

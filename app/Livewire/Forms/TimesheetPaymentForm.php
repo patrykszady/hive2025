@@ -106,16 +106,9 @@ class TimesheetPaymentForm extends Form
         }
 
         if (isset($check)) {
-            $expenses = $check->expenses; // reload attached expenses (after loops)
-            foreach ($expenses as $expense) {
-                if ($expense->reimbursment != null && $expense->reimbursment != 'Client') {
-                    // Ensure reimbursements reflect as negative for total if not already
-                    $expense->amount = str_starts_with((string) $expense->amount, '-') ? $expense->amount : '-'.$expense->amount;
-                }
-            }
-            // Recalculate check amount from attached relations
-            $check->amount = $check->timesheets->sum('amount') + $expenses->sum('amount');
-            $check->save();
+            // Recalculate check amount from attached relations — reimbursement
+            // expenses count as deductions (centralized in Check::recalculateAmount)
+            $check->recalculateAmount();
             return $check;
         }
 

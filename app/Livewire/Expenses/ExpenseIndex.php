@@ -199,12 +199,9 @@ class ExpenseIndex extends Component
 
         $check = Check::find($this->check);
         if ($check) {
-            $expenseSum = $check->expenses
-                ->concat($check->expensesMany)
-                ->unique('id')
-                ->sum('amount');
-            $check->amount = $expenseSum + $check->timesheets->sum('amount');
-            $check->save();
+            // Reimbursement-type expenses count as deductions, so the shared
+            // recalculation must be used here too (not a plain sum).
+            $check->recalculateAmount();
         }
 
         $this->dispatch('refreshComponent')->to('checks.check-show');
@@ -517,6 +514,13 @@ class ExpenseIndex extends Component
         // Apply check filter if present (covers both direct check_id and many-to-many pivot)
         if (is_numeric($this->check)) {
             $filterConditions[] = "check_ids = {$this->check}";
+
+            // Vendor reimbursements deducted by this check render in their own
+            // card on checks.show — keep them out of the main expense list.
+            $checkVendorId = Check::withoutGlobalScopes()->find($this->check)?->vendor_id;
+            if ($checkVendorId) {
+                $filterConditions[] = "NOT reimbursment = 'V:{$checkVendorId}'";
+            }
         }
 
         // Apply date range filter

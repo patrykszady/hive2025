@@ -163,6 +163,47 @@
                 </div>
             @endif
 
+            {{-- VENDOR REIMBURSEMENTS DEDUCTED FROM THIS CHECK --}}
+            @if($vendor_reimbursement_expenses->isNotEmpty())
+                <x-island-card heading="{{ $check->vendor?->name }} Paid back these Expenses">
+                    <x-slot:actions>
+                        <flux:button disabled>
+                            -{{ money($vendor_reimbursement_expenses->sum('amount')) }}
+                        </flux:button>
+                    </x-slot:actions>
+
+                    <flux:table>
+                        <flux:table.columns>
+                            <flux:table.column>Amount</flux:table.column>
+                            <flux:table.column>Date</flux:table.column>
+                            <flux:table.column>Vendor</flux:table.column>
+                            <flux:table.column>Project</flux:table.column>
+                        </flux:table.columns>
+
+                        <flux:table.rows>
+                            @foreach($vendor_reimbursement_expenses as $expense)
+                                <flux:table.row :key="$expense->id">
+                                    <flux:table.cell variant="strong">
+                                        <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
+                                    </flux:table.cell>
+                                    <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
+                                    <flux:table.cell>
+                                        <a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{ Str::limit($expense->vendor->name, 25) }}</a>
+                                    </flux:table.cell>
+                                    <flux:table.cell>
+                                        @if($expense->project_id)
+                                            <a wire:navigate.hover href="{{route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a>
+                                        @else
+                                            —
+                                        @endif
+                                    </flux:table.cell>
+                                </flux:table.row>
+                            @endforeach
+                        </flux:table.rows>
+                    </flux:table>
+                </x-island-card>
+            @endif
+
             {{-- THIS CHECK USER PAID EXPENSES --}}
             @if($user_paid_expenses->isNotEmpty())
                 <x-island-card heading="Paid Expenses">

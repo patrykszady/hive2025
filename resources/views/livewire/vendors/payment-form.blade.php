@@ -33,7 +33,7 @@
 
                         <x-cards.body :class="'space-y-2 my-2'">
                             {{-- FORM --}}
-                            @include('livewire.checks._payment_form')
+                            @include('livewire.checks._payment_form', ['disablePaidBy' => $this->disablePaidBy])
 
                             {{-- Must live INSIDE this island: updates originating in the
                                  island (wire:model.live fields) re-render only the island. --}}
@@ -131,6 +131,43 @@
                         </x-forms.one_line>
                     </x-island-card>
                 @endforeach
+
+                {{-- VENDOR REIMBURSEMENTS (vendor owes the company) — selected rows are deducted from the check --}}
+                @if(!$vendor_reimbursement_expenses->isEmpty())
+                    <x-island-card heading="{{ $vendor->name }} owes for Expenses">
+                        <x-slot:actions>
+                            <flux:button disabled>
+                                -{{ money($vendor_reimbursement_expenses->filter(fn($e) => ($selectedVendorReimbursementExpenses[$e->id] ?? false))->sum('amount')) }}
+                            </flux:button>
+                        </x-slot:actions>
+
+                        <flux:table>
+                            <flux:table.columns>
+                                <flux:table.column></flux:table.column>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Vendor</flux:table.column>
+                            </flux:table.columns>
+
+                            <flux:table.rows>
+                                @foreach($vendor_reimbursement_expenses as $expense)
+                                    <flux:table.row :key="$expense->id">
+                                        <flux:table.cell>
+                                            <flux:checkbox wire:model.live="selectedVendorReimbursementExpenses.{{$expense->id}}" />
+                                        </flux:table.cell>
+                                        <flux:table.cell variant="strong">
+                                            <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>
+                                            <a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{ Str::limit($expense->vendor->name, 25) }}</a>
+                                        </flux:table.cell>
+                                    </flux:table.row>
+                                @endforeach
+                            </flux:table.rows>
+                        </flux:table>
+                    </x-island-card>
+                @endif
 
                 <livewire:bids.bid-create />
                 <livewire:vendor-docs.vendor-doc-create />

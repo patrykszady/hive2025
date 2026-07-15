@@ -424,6 +424,11 @@ class Expense extends Model
                     $u = User::query()->select('id','first_name')->find($value);
                     return $u?->first_name ?? ('User #' . $value);
                 }
+                // 'V:{vendor_id}' — a vendor owes the company for this expense
+                if (is_string($value) && str_starts_with($value, 'V:')) {
+                    $v = Vendor::withoutGlobalScopes()->select('id', 'business_name')->find(substr($value, 2));
+                    return $v?->business_name ?? $value;
+                }
                 return $value;
             },
             set: function ($value) {

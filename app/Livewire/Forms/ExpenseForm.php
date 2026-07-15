@@ -122,7 +122,9 @@ class ExpenseForm extends Form
             $this->project_id = $projectId > 0 ? $projectId : null;
         }
 
-        $this->reimbursment = $expense->reimbursment;
+        // Raw value ('Client', a user id, or 'V:{vendor_id}') so the form
+        // select round-trips — the accessor rewrites ids to display names.
+        $this->reimbursment = $expense->getRawOriginal('reimbursment');
         $this->invoice = $expense->invoice;
         $this->note = $expense->note;
         $this->paid_by = $expense->paid_by;
@@ -360,15 +362,11 @@ class ExpenseForm extends Form
             if (isset($existing_check)) {
                 // If this expense already had a different check, recalculate that check's amount
                 if ($check && $check->id !== $existing_check->id) {
-                    $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
-                    $check->save();
+                    $check->recalculateAmount();
                 }
-                
+
                 $check = $existing_check;
-                // Recalculate check amount from all linked expenses and timesheets
-                $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
-                $check->save();
-            } 
+            }
             // Otherwise create a new check only if we have all required values
             elseif (isset($this->component->bank_account_id) && 
                     isset($this->component->check_type) && 
@@ -395,6 +393,9 @@ class ExpenseForm extends Form
                 $this->expense->update([
                     'check_id' => $check->id,
                 ]);
+                // Recalculate AFTER the expense points at the check so the sum
+                // includes it; reimbursement deductions handled centrally.
+                $check->recalculateAmount();
             }
         } else if ($check) {
             // If there's no bank account or check details but there was a check previously,
@@ -402,10 +403,8 @@ class ExpenseForm extends Form
             $this->expense->update([
                 'check_id' => null
             ]);
-            
-            // Recalculate check amount from remaining linked expenses and timesheets
-            $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
-            $check->save();
+
+            $check->recalculateAmount();
         }
 
         $this->save_splits($this->expense);
@@ -483,10 +482,7 @@ class ExpenseForm extends Form
 
             if ($existing_check) {
                 $check = $existing_check;
-                // Recalculate check amount from all linked expenses and timesheets
-                $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
-                $check->save();
-                
+                // Amount recalculated below, after the new expense is attached
             } else {
                 $check = Check::create([
                     'check_type' => $checkType,
@@ -526,7 +522,11 @@ class ExpenseForm extends Form
             'created_by_user_id' => auth()->user()->id,
         ]);
 
-        
+        // Recalculate after the expense is attached so the sum includes it;
+        // reimbursement deductions are handled centrally (payee-aware).
+        if (isset($check)) {
+            $check->recalculateAmount();
+        }
 
         if ($this->transaction) {
             // Determine final check association for the transaction.

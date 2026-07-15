@@ -31,7 +31,20 @@ class CheckObserver
         $expenseIds = $check->expenses()->pluck('id')->toArray();
         $transactionIds = $check->transactions()->pluck('id')->toArray();
 
-        // Soft-delete expenses tied to this check so they stop counting toward totals
+        // Expenses that pre-existed the payment and were merely SETTLED by it
+        // (employee-paid expenses and reimbursements deducted on this check)
+        // must survive the check: unlink them so they become payable /
+        // deductible again — same treatment as timesheets. Expenses CREATED
+        // by the payment (vendor project expenses, an expense paid by its own
+        // merchant check) die with the check.
+        $settledIds = $check->expenses()->get()
+            ->filter(fn ($e) => $e->paid_by !== null || $check->isSettlementDeduction($e))
+            ->pluck('id');
+        if ($settledIds->isNotEmpty()) {
+            $check->expenses()->whereIn('id', $settledIds)->update(['check_id' => null]);
+        }
+
+        // Soft-delete remaining expenses tied to this check so they stop counting toward totals
         $check->expenses()->delete();
         $check->timesheets()->update(['check_id' => null]);
         $check->transactions()->update(['check_id' => null]);
@@ -71,6 +84,11 @@ class CheckObserver
         if ($restoredCount > 0) {
             $check->expenses()->searchable();
         }
+
+        // Settled expenses were UNLINKED on delete (not trashed) and stay
+        // unlinked — recalculate so the restored check's amount reflects only
+        // what is actually still attached.
+        $check->recalculateAmount();
     }
 
     /**
