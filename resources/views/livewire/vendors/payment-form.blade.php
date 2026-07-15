@@ -134,10 +134,15 @@
 
                 {{-- VENDOR REIMBURSEMENTS (vendor owes the company) — selected rows are deducted from the check --}}
                 @if(!$vendor_reimbursement_expenses->isEmpty())
+                    @php
+                        $selectedReimbursementSum = $vendor_reimbursement_expenses
+                            ->filter(fn($e) => ($selectedVendorReimbursementExpenses[$e->id] ?? false))
+                            ->sum('amount');
+                    @endphp
                     <x-island-card heading="{{ $vendor->name }} owes for Expenses">
                         <x-slot:actions>
                             <flux:button disabled>
-                                -{{ money($vendor_reimbursement_expenses->filter(fn($e) => ($selectedVendorReimbursementExpenses[$e->id] ?? false))->sum('amount')) }}
+                                {{ $selectedReimbursementSum > 0 ? '-'.money($selectedReimbursementSum) : money(0) }}
                             </flux:button>
                         </x-slot:actions>
 
@@ -156,7 +161,7 @@
                                             <flux:checkbox wire:model.live="selectedVendorReimbursementExpenses.{{$expense->id}}" />
                                         </flux:table.cell>
                                         <flux:table.cell variant="strong">
-                                            <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
+                                            <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">-{{ money($expense->amount) }}</a>
                                         </flux:table.cell>
                                         <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
                                         <flux:table.cell>
