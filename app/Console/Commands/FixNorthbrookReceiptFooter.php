@@ -8,15 +8,19 @@ use App\Models\Receipt;
 use Illuminate\Console\Command;
 
 /**
- * One-time repair for the Village of Northbrook (BS&A → Stripe) receipt that
- * OCR'd with the Stripe email footer attached:
+ * Repair Village of Northbrook (BS&A → Stripe) receipts that OCR'd with the
+ * Stripe email footer attached:
  *
  *  - the footer text "…provide invoicing and payment processing" made the
- *    invoice fallback regex capture "oicing" instead of "Receipt #1134-0898";
- *  - receipt_html / raw_content stored the footer junk after "Amount paid $70.00".
+ *    invoice fallback regex capture "oicing" instead of the "Receipt #…";
+ *  - receipt_html / raw_content stored the footer junk after "Amount paid".
  *
- * Also adds the new `ocr_content_end` markers to the BS&A receipt config so
- * future receipts are trimmed at OCR time (see ReceiptController::extractReceipt).
+ * Sweeps ALL Northbrook (vendor 425) expenses: trims stored receipt content at
+ * the footer markers and fixes the expense invoice from the receipt's
+ * "Receipt #" line when the invoice is missing or the bogus "oicing".
+ *
+ * Also adds the `ocr_content_end` markers to the BS&A receipt config so future
+ * receipts are trimmed at OCR time (see ReceiptController::extractReceipt).
  *
  * Idempotent; dry-run by default, pass --apply to execute.
  */
@@ -24,11 +28,9 @@ class FixNorthbrookReceiptFooter extends Command
 {
     protected $signature = 'app:fix-northbrook-receipt-footer {--apply : Actually write the changes}';
 
-    protected $description = 'Fix expense 27226 invoice (oicing → 1134-0898), trim the Stripe footer from its stored receipt, and add ocr_content_end to the BS&A receipt config.';
+    protected $description = 'Fix Northbrook expenses hit by the Stripe footer: invoice from Receipt #, trim stored receipts, add ocr_content_end to the BS&A config.';
 
-    private const EXPENSE_ID = 27226;
     private const VENDOR_ID = 425; // Village of Northbrook
-    private const CORRECT_INVOICE = '1134-0898';
     private const BAD_INVOICE = 'oicing';
 
     /** Markers where the receipt body ends and the Stripe footer begins. */
@@ -44,8 +46,7 @@ class FixNorthbrookReceiptFooter extends Command
         $this->info($apply ? 'APPLY mode — writing changes.' : 'DRY-RUN — pass --apply to write changes.');
 
         $this->fixReceiptConfig($apply);
-        $this->fixExpenseInvoice($apply);
-        $this->trimStoredReceipt($apply);
+        $this->sweepExpenses($apply);
 
         return self::SUCCESS;
     }
@@ -78,84 +79,73 @@ class FixNorthbrookReceiptFooter extends Command
         }
     }
 
-    private function fixExpenseInvoice(bool $apply): void
+    private function sweepExpenses(bool $apply): void
     {
-        $expense = Expense::withoutGlobalScopes()->find(self::EXPENSE_ID);
+        $expenses = Expense::withoutGlobalScopes()
+            ->where('vendor_id', self::VENDOR_ID)
+            ->whereNull('deleted_at')
+            ->orderBy('id')
+            ->get();
 
-        if (! $expense || (int) $expense->vendor_id !== self::VENDOR_ID || (float) $expense->amount !== 70.00) {
-            $this->warn('Expense '.self::EXPENSE_ID.' not found or does not look like the Northbrook $70.00 expense — skipping invoice fix.');
+        foreach ($expenses as $expense) {
+            $records = ExpenseReceipts::where('expense_id', $expense->id)->get();
+            $receiptNumber = null;
 
-            return;
-        }
+            foreach ($records as $record) {
+                $htmlTrimmed = $this->trimAtMarkers((string) $record->receipt_html);
+                $items = $record->receipt_items ?? [];
+                $rawTrimmed = $this->trimAtMarkers((string) ($items['raw_content'] ?? ''));
 
-        $current = trim((string) $expense->invoice);
-        if ($current === self::CORRECT_INVOICE) {
-            $this->line('Expense '.self::EXPENSE_ID.': invoice already correct — OK.');
+                // Receipt # from the (trimmed or stored) content — used for the
+                // expense invoice and the receipt's own invoice_number.
+                if (preg_match('/Receipt\s*#([A-Za-z0-9\-]+)/', $htmlTrimmed ?? (string) $record->receipt_html, $m)) {
+                    $receiptNumber = $m[1];
+                }
 
-            return;
-        }
-
-        if ($current !== self::BAD_INVOICE && $current !== '') {
-            $this->warn('Expense '.self::EXPENSE_ID.": invoice is [{$current}] (expected [".self::BAD_INVOICE.']) — not touching it.');
-
-            return;
-        }
-
-        $this->line('Expense '.self::EXPENSE_ID.": invoice [{$current}] → [".self::CORRECT_INVOICE.'].');
-        if ($apply) {
-            $expense->invoice = self::CORRECT_INVOICE;
-            $expense->save();
-            $expense->searchable();
-            $this->info('  → saved.');
-        }
-    }
-
-    private function trimStoredReceipt(bool $apply): void
-    {
-        $records = ExpenseReceipts::where('expense_id', self::EXPENSE_ID)->get();
-
-        if ($records->isEmpty()) {
-            $this->warn('No receipt records for expense '.self::EXPENSE_ID.' — skipping trim.');
-
-            return;
-        }
-
-        foreach ($records as $record) {
-            $htmlTrimmed = $this->trimAtMarkers((string) $record->receipt_html);
-            $items = $record->receipt_items ?? [];
-            $rawTrimmed = $this->trimAtMarkers((string) ($items['raw_content'] ?? ''));
-
-            $changes = [];
-            if ($htmlTrimmed !== null) {
-                $changes[] = 'receipt_html '.strlen((string) $record->receipt_html).' → '.strlen($htmlTrimmed).' chars';
-            }
-            if ($rawTrimmed !== null) {
-                $changes[] = 'raw_content '.strlen((string) ($items['raw_content'] ?? '')).' → '.strlen($rawTrimmed).' chars';
-            }
-            if (empty($items['invoice_number'])) {
-                $changes[] = 'invoice_number → '.self::CORRECT_INVOICE;
-            }
-
-            if (empty($changes)) {
-                $this->line("Receipt {$record->id}: already trimmed — OK.");
-
-                continue;
-            }
-
-            $this->line("Receipt {$record->id}: ".implode(', ', $changes).'.');
-            if ($apply) {
+                $changes = [];
                 if ($htmlTrimmed !== null) {
-                    $record->receipt_html = $htmlTrimmed;
+                    $changes[] = 'receipt_html '.strlen((string) $record->receipt_html).' → '.strlen($htmlTrimmed).' chars';
                 }
                 if ($rawTrimmed !== null) {
-                    $items['raw_content'] = $rawTrimmed;
+                    $changes[] = 'raw_content '.strlen((string) ($items['raw_content'] ?? '')).' → '.strlen($rawTrimmed).' chars';
                 }
-                if (empty($items['invoice_number'])) {
-                    $items['invoice_number'] = self::CORRECT_INVOICE;
+                if ($receiptNumber && empty($items['invoice_number'])) {
+                    $changes[] = 'invoice_number → '.$receiptNumber;
                 }
-                $record->receipt_items = $items;
-                $record->save();
-                $this->info('  → saved.');
+
+                if (empty($changes)) {
+                    continue;
+                }
+
+                $this->line("Expense {$expense->id} / receipt {$record->id}: ".implode(', ', $changes).'.');
+                if ($apply) {
+                    if ($htmlTrimmed !== null) {
+                        $record->receipt_html = $htmlTrimmed;
+                    }
+                    if ($rawTrimmed !== null) {
+                        $items['raw_content'] = $rawTrimmed;
+                    }
+                    if ($receiptNumber && empty($items['invoice_number'])) {
+                        $items['invoice_number'] = $receiptNumber;
+                    }
+                    $record->receipt_items = $items;
+                    $record->save();
+                    $this->info('  → saved.');
+                }
+            }
+
+            // Fix the expense invoice from the receipt number when missing/bogus
+            $current = trim((string) $expense->invoice);
+            if ($receiptNumber && ($current === self::BAD_INVOICE || $current === '')) {
+                $this->line("Expense {$expense->id}: invoice [{$current}] → [{$receiptNumber}].");
+                if ($apply) {
+                    $expense->invoice = $receiptNumber;
+                    $expense->save();
+                    $expense->searchable();
+                    $this->info('  → saved.');
+                }
+            } elseif ($receiptNumber && $current !== $receiptNumber) {
+                $this->warn("Expense {$expense->id}: invoice [{$current}] differs from receipt # [{$receiptNumber}] — not touching it.");
             }
         }
     }
