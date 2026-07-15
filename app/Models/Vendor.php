@@ -330,7 +330,14 @@ class Vendor extends Model
                 
                 // Extract first part before ',' if available
                 $nameParts = explode(',', $attributes['business_name']);
-                return trim($nameParts[0]);
+                $name = trim($nameParts[0]);
+
+                // Strip a trailing legal suffix for display ("PMG Carpentry Inc"
+                // → "PMG Carpentry"). Legal contexts (check payees, contracts)
+                // read business_name directly and keep the full legal name.
+                $name = preg_replace('/\s+(?:inc|incorporated|llc|l\.l\.c|ltd|limited|corp|corporation)\.?$/i', '', $name);
+
+                return trim($name);
             }
         );
     }

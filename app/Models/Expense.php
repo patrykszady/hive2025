@@ -426,8 +426,8 @@ class Expense extends Model
                 }
                 // 'V:{vendor_id}' — a vendor owes the company for this expense
                 if (is_string($value) && str_starts_with($value, 'V:')) {
-                    $v = Vendor::withoutGlobalScopes()->select('id', 'business_name')->find(substr($value, 2));
-                    return $v?->business_name ?? $value;
+                    $v = Vendor::withoutGlobalScopes()->select('id', 'business_name', 'options')->find(substr($value, 2));
+                    return $v?->short_name ?? $value;
                 }
                 return $value;
             },

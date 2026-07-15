@@ -94,7 +94,8 @@ it('shows participant names for client users in the list', function (): void {
     $this->actingAs($clientUser);
 
     Livewire::test(SmsThreadList::class, ['isClientUser' => true])
-        ->assertSee('Acme Vendor Llc, Mark & Gail Brodson');
+        // Vendor display names strip trailing legal suffixes ("Acme Vendor Llc" → "Acme Vendor")
+        ->assertSee('Acme Vendor, Mark & Gail Brodson');
 });
 
 it('shows only threads where the client user is a participant', function (): void {
