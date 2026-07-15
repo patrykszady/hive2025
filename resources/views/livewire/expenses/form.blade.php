@@ -293,20 +293,22 @@
 
         {{-- REIMBURSEMNT --}}
         {{-- Always visible: user/vendor reimbursements don't need a project
-             (e.g. a permit fee paid on a sub's behalf); Client requires one. --}}
-        <div
-            x-data="{ open: @entangle('form.project_id'), project_completed: @entangle('form.project_completed') }"
-            x-transition
-            >
+             (e.g. a permit fee paid on a sub's behalf). Clear (x) = none. --}}
+        <div>
             <flux:field>
                 <flux:label>Reimbursment</flux:label>
 
-                <flux:select wire:model.live="form.reimbursment" variant="listbox" searchable placeholder="Choose reimbursment...">
-                    <flux:select.option value="">None</flux:select.option>
-                    <flux:select.option x-bind:disabled="project_completed || !open" value="Client">Client</flux:select.option>
-                    @foreach ($this->via_vendor_employees as $employee)
+                <flux:select wire:model.live="form.reimbursment" variant="listbox" searchable clearable placeholder="Choose reimbursment...">
+                    <flux:select.option value="Client">Client</flux:select.option>
+
+                    <flux:separator class="my-1" />
+
+                    @foreach ($this->employees as $employee)
                         <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                     @endforeach
+
+                    <flux:separator class="my-1" />
+
                     @foreach ($this->reimbursment_vendors as $reimbursmentVendor)
                         <flux:select.option value="V:{{$reimbursmentVendor->id}}">{{$reimbursmentVendor->business_name}}</flux:select.option>
                     @endforeach
