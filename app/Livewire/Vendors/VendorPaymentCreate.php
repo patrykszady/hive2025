@@ -183,6 +183,8 @@ class VendorPaymentCreate extends Component
             if (preg_match('/^projects\.(\d+)\.amount$/', $field, $matches)) {
                 $project_id = $matches[1];
                 $this->updateProjectBalance($project_id);
+                // Zeroing the last funded project unchecks any reimbursements
+                $this->clearReimbursementSelectionsWhenUnpayable();
                 // Re-validate check total as amounts change
                 $this->validateOnly('check_total_min');
             }
@@ -253,24 +255,33 @@ class VendorPaymentCreate extends Component
 
         $this->project_id = '';
 
-        // A deduction needs a payment to deduct from — when the last project
-        // is removed, clear any selected reimbursements (their checkboxes
-        // also disable in the blade until a project is added back).
+        // A deduction needs a payment to deduct from — when the last funded
+        // project is removed, clear any selected reimbursements (their
+        // checkboxes also disable in the blade until one is added back).
+        $this->clearReimbursementSelectionsWhenUnpayable();
+    }
+
+    /**
+     * Whether the payment actually pays something — at least one project with
+     * an amount > 0. Reimbursement deductions are only selectable alongside a
+     * real project payment (a $0 payment leaves nothing to deduct from).
+     */
+    public function getHasPaymentProjectsProperty(): bool
+    {
+        return collect($this->projects)
+            ->where('show', true)
+            ->contains(fn ($p) => is_numeric($p['amount'] ?? null) && $p['amount'] > 0);
+    }
+
+    /** Uncheck all reimbursements when the payment no longer supports them. */
+    protected function clearReimbursementSelectionsWhenUnpayable(): void
+    {
         if (! $this->hasPaymentProjects) {
             $this->selectedVendorReimbursementExpenses = array_map(
                 fn () => false,
                 $this->selectedVendorReimbursementExpenses
             );
         }
-    }
-
-    /**
-     * Whether at least one project is part of the payment — reimbursement
-     * deductions are only selectable alongside a project payment.
-     */
-    public function getHasPaymentProjectsProperty(): bool
-    {
-        return collect($this->projects)->where('show', true)->isNotEmpty();
     }
 
     public function getVendorCheckSumProperty()

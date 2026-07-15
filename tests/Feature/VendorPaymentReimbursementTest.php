@@ -360,11 +360,24 @@ it('disables reimbursement selection until a project is in the payment, and unch
     $component = Livewire::actingAs($admin)
         ->test(VendorPaymentCreate::class, ['vendor' => $sub]);
 
-    // Project has an outstanding balance so it is in the payment from mount
+    // Project is in the payment from mount but has NO amount yet → still gated
+    expect($component->instance()->getHasPaymentProjectsProperty())->toBeFalse();
+
+    // Funding the project opens the gate
+    $component->set("projects.{$project->id}.amount", 500);
     expect($component->instance()->getHasPaymentProjectsProperty())->toBeTrue();
 
-    // Select the reimbursement, then remove the only project → unchecked + disabled
+    // Select the reimbursement, then zero the project amount → unchecked
     $component->set("selectedVendorReimbursementExpenses.{$expense->id}", true)
+        ->set("projects.{$project->id}.amount", null);
+
+    $instance = $component->instance();
+    expect($instance->getHasPaymentProjectsProperty())->toBeFalse()
+        ->and($instance->selectedVendorReimbursementExpenses[$expense->id])->toBeFalse();
+
+    // Same when the only project is removed after re-funding + re-selecting
+    $component->set("projects.{$project->id}.amount", 500)
+        ->set("selectedVendorReimbursementExpenses.{$expense->id}", true)
         ->call('removeProject', $project->id);
 
     $instance = $component->instance();
