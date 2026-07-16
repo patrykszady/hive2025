@@ -65,6 +65,19 @@
 
                 {{-- SECTIONS --}}
                 <div class="col-span-4 space-y-4">
+                    @php
+                        // "section.item" numbers for credit badges — active items
+                        // ordered by order ASC, matching the numbering below.
+                        $creditsByOriginal = [];
+                        foreach ($sections->values() as $creditSectionIndex => $creditSection) {
+                            $creditSectionItems = $creditSection->estimate_line_items->sortBy('order')->values();
+                            foreach ($creditSectionItems as $creditItemIndex => $creditItem) {
+                                if ($creditItem->credit_for_id) {
+                                    $creditsByOriginal[$creditItem->credit_for_id][] = ($creditSectionIndex + 1).'.'.($creditItemIndex + 1);
+                                }
+                            }
+                        }
+                    @endphp
                     @foreach($sections as $index => $section)
                         <flux:card style="{{ $index > 0 ? 'break-inside: avoid;' : '' }}">
                             <div class="flex justify-between">
@@ -180,6 +193,9 @@
                                                         @elseif($liChanged)
                                                             <span style="display: inline-block; font-size: 9px; color: #fff; background-color: #f59e0b; padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; vertical-align: middle;">{{ ucfirst($liChanged['event']) }}</span>
                                                         @endif
+                                                        @foreach($creditsByOriginal[$estimate_line_item->id] ?? [] as $creditNumber)
+                                                            <span style="display: inline-block; font-size: 9px; color: #9a3412; background-color: #ffedd5; padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; vertical-align: middle; white-space: nowrap;">Credit on line item {{ $creditNumber }}</span>
+                                                        @endforeach
                                                     </div>
                                                     <div class="text-xs font-bold text-indigo-900">{{$estimate_line_item->category}}/{{$estimate_line_item->sub_category}}</div>
                                                     @if($showAllowances ?? true)

@@ -92,10 +92,10 @@
                                         <flux:table.cell class="align-top !pl-6">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
                                         <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
                                             <div class="flex flex-col min-w-0">
-                                                <div class="leading-5">
+                                                <div class="leading-5 flex flex-wrap items-center gap-x-1">
                                                     <b>{{$line_item->name}}</b>
                                                     @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
-                                                        <flux:badge size="sm" color="orange" class="ml-1">Credit on line item {{ $creditNumber }}</flux:badge>
+                                                        <flux:badge size="sm" color="orange" class="shrink-0 whitespace-nowrap">Credit on line item {{ $creditNumber }}</flux:badge>
                                                     @endforeach
                                                 </div>
                                                 <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
@@ -260,7 +260,7 @@
                                                     <flux:table.cell wire:sort:handle class="cursor-grab active:cursor-grabbing align-top !pl-16">{{$index + 1}}.{{$activeNumber}}</flux:table.cell>
                                                         <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
                                                             <div class="flex flex-col min-w-0">
-                                                                <div class="leading-5">
+                                                                <div class="leading-5 flex flex-wrap items-center gap-x-1">
                                                                     <a
                                                                         class="cursor-pointer"
                                                                         wire:click="$dispatchTo('line-items.estimate-line-item-create', 'editOnEstimate', { estimate_line_item_id: {{$line_item->id}} })"
@@ -268,7 +268,7 @@
                                                                         <b>{{$line_item->name}}</b>
                                                                     </a>
                                                                     @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
-                                                                        <flux:badge size="sm" color="orange" class="ml-1">Credit on line item {{ $creditNumber }}</flux:badge>
+                                                                        <flux:badge size="sm" color="orange" class="shrink-0 whitespace-nowrap">Credit on line item {{ $creditNumber }}</flux:badge>
                                                                     @endforeach
                                                                     @if($liChanged)
                                                                         <flux:badge size="sm" color="amber" class="ml-1">{{ ucfirst($liChanged['event']) }}</flux:badge>
