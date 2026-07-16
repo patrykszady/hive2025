@@ -353,8 +353,10 @@ class EstimateLineItemCreate extends Component
             'quantity' => $quantity,
             'cost' => -$cost,
             'total' => -$total,
-            'desc' => $this->form->desc ?: $original->desc,
-            'notes' => $this->form->notes ?: $original->notes,
+            // The credit doesn't repeat the original scope text — it just
+            // points back at the credited line item.
+            'desc' => 'Credit for Line Item: '.$original->name,
+            'notes' => null,
             'order' => $section->estimate_line_items()->count() + 1,
         ]);
 
