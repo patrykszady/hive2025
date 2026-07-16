@@ -6,6 +6,7 @@ use App\Models\Bank;
 use App\Models\BankAccount;
 
 use GuzzleHttp\Exception\GuzzleException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 use GuzzleHttp\Client as GuzzleClient;
@@ -268,6 +269,49 @@ class PlaidService
         }
 
         return $this->makeRequest($url, $data, $logContext, 'Plaid statement list failed.');
+    }
+
+    /**
+     * Products supported by an institution, cached for a week (capabilities
+     * rarely change). Returns null when the lookup fails or the institution
+     * id is blank — callers should treat null as "unknown", not "unsupported".
+     */
+    public function getInstitutionProducts(?string $institutionId, array $logContext = []): ?array
+    {
+        if (blank($institutionId)) {
+            return null;
+        }
+
+        return Cache::remember(
+            'plaid:institution-products:'.$institutionId,
+            now()->addWeek(),
+            function () use ($institutionId, $logContext): ?array {
+                $response = $this->makeRequest($this->baseUrl.'/institutions/get_by_id', [
+                    'client_id' => $this->clientId,
+                    'secret' => $this->secret,
+                    'institution_id' => $institutionId,
+                    'country_codes' => ['US'],
+                ], $logContext, 'Plaid institution lookup failed.');
+
+                if (($response['error'] ?? false) === true) {
+                    return null; // null is not cached — retried next call
+                }
+
+                return $response['institution']['products'] ?? null;
+            }
+        );
+    }
+
+    /**
+     * Whether the institution supports the Plaid statements product (e.g.
+     * Citibank does, Capital One does not). Unknown capability defaults to
+     * true so the UI stays functional and runtime error handling takes over.
+     */
+    public function institutionSupportsStatements(?string $institutionId, array $logContext = []): bool
+    {
+        $products = $this->getInstitutionProducts($institutionId, $logContext);
+
+        return $products === null || in_array('statements', $products, true);
     }
 
     public function downloadStatement($accessToken, $statementId, array $logContext = [])

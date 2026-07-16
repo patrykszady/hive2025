@@ -57,6 +57,23 @@ class BankShow extends Component
             });
     }
 
+    /**
+     * Whether this bank's institution supports Plaid statements — hides the
+     * "Latest Statement" button for institutions that don't (e.g. Capital
+     * One), instead of surfacing a guaranteed PRODUCTS_NOT_SUPPORTED error.
+     */
+    public function getSupportsStatementsProperty(): bool
+    {
+        if (blank($this->bank->plaid_access_token)) {
+            return false;
+        }
+
+        return app(PlaidService::class)->institutionSupportsStatements(
+            $this->bank->plaid_ins_id,
+            ['bank_id' => $this->bank->id, 'source' => 'BankShow::supportsStatements'],
+        );
+    }
+
     public function plaid_link_token_update(PlaidService $plaidService)
     {
         $data = [

@@ -5,7 +5,9 @@
         </x-slot:badge>
         <x-slot:actions>
             @if(!Route::is('banks.index'))
-                <flux:button wire:click="downloadLatestStatement" size="sm" variant="filled" icon="arrow-down-tray" wire:loading.attr="disabled" wire:target="downloadLatestStatement">Latest Statement</flux:button>
+                @if($this->supportsStatements)
+                    <flux:button wire:click="downloadLatestStatement" size="sm" variant="filled" icon="arrow-down-tray" wire:loading.attr="disabled" wire:target="downloadLatestStatement">Latest Statement</flux:button>
+                @endif
                 <flux:button wire:navigate.hover wire:click="plaid_link_token_update" size="sm">Update Bank Account</flux:button>
             @endif
             <div class="text-xs"><i>{{$bank->updated_at->diffForHumans()}}</i></div>
