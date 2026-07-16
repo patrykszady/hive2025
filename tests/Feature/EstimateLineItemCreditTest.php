@@ -157,7 +157,7 @@ it('creates a negative credit line item in a new change-order section', function
         ->and((float) $credit->cost)->toBe(-2850.0)
         ->and((float) $credit->total)->toBe(-2850.0)
         ->and($credit->category)->toBe('Framing')
-        ->and($credit->desc)->toBe('Credit for Line Item: Structural Header')
+        ->and($credit->desc)->toBe('Credit for Line Item #1.1: Structural Header')
         ->and($credit->notes)->toBeNull()
         // observer cascade: section total and change-order bid amount go negative
         ->and((float) $creditSection->fresh()->total)->toBe(-2850.0)
@@ -188,20 +188,38 @@ it('reuses an existing unlocked change-order section for subsequent credits', fu
         ->and(Bid::where('project_id', $s['project']->id)->where('type', '>=', 2)->count())->toBe(1);
 });
 
-it('credits the edited amount for partial credits on unlocked estimates', function () {
+it('does nothing on unsigned estimates — credits only exist for locked contract items', function () {
     $s = makeCreditScenario(signed: false);
 
     Livewire::test(EstimateLineItemCreate::class, ['estimate' => $s['estimate']->fresh()])
         ->call('editOnEstimate', $s['estimateLineItem']->id)
-        ->set('form.cost', '1000.00')
-        ->call('creditToChangeOrder');
+        ->call('creditToChangeOrder')
+        ->assertDontSee('Credit</flux:button>');
 
-    $credit = EstimateLineItem::query()
+    expect(EstimateLineItem::query()
         ->where('estimate_id', $s['estimate']->id)
         ->where('id', '!=', $s['estimateLineItem']->id)
-        ->first();
+        ->count())->toBe(0);
+});
 
-    expect($credit)->not->toBeNull()
-        ->and((float) $credit->cost)->toBe(-1000.0)
-        ->and((float) $credit->total)->toBe(-1000.0);
+it('does not offer credit for items already in a change-order section', function () {
+    $s = makeCreditScenario();
+    $this->travel(1)->hour();
+
+    // First credit creates the change-order section + credit item.
+    Livewire::test(EstimateLineItemCreate::class, ['estimate' => $s['estimate']->fresh()])
+        ->call('editOnEstimate', $s['estimateLineItem']->id)
+        ->call('creditToChangeOrder');
+
+    $creditItem = EstimateLineItem::query()
+        ->where('estimate_id', $s['estimate']->id)
+        ->where('id', '!=', $s['estimateLineItem']->id)
+        ->firstOrFail();
+
+    // Crediting the credit (an unlocked change-order item) is refused.
+    Livewire::test(EstimateLineItemCreate::class, ['estimate' => $s['estimate']->fresh()])
+        ->call('editOnEstimate', $creditItem->id)
+        ->call('creditToChangeOrder');
+
+    expect(EstimateLineItem::query()->where('estimate_id', $s['estimate']->id)->count())->toBe(2);
 });

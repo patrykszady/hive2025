@@ -336,6 +336,13 @@ class EstimateLineItemCreate extends Component
         }
 
         $original = $this->estimate_line_item;
+
+        // Credits only exist for line items locked into the signed contract —
+        // items in post-signing sections (change orders) are simply editable.
+        if (! $original->section?->isLocked()) {
+            return;
+        }
+
         $section = $this->resolveChangeOrderSection();
 
         $quantity = (float) ($this->form->quantity ?: $original->quantity ?: 1);
@@ -354,8 +361,8 @@ class EstimateLineItemCreate extends Component
             'cost' => -$cost,
             'total' => -$total,
             // The credit doesn't repeat the original scope text — it just
-            // points back at the credited line item.
-            'desc' => 'Credit for Line Item: '.$original->name,
+            // points back at the credited line item by its estimate number.
+            'desc' => 'Credit for Line Item #'.$this->lineItemNumber($original).': '.$original->name,
             'notes' => null,
             'order' => $section->estimate_line_items()->count() + 1,
         ]);
@@ -371,6 +378,25 @@ class EstimateLineItemCreate extends Component
             heading: 'Credit Added',
             text: money(-$total).' credit for '.$original->name.' added to '.($section->name ?: $section->bid?->name ?: 'Change Order').'.',
         );
+    }
+
+    /**
+     * The "{section}.{item}" number a line item displays as on the estimate
+     * (both ordered by their order column, matching the page's default sort).
+     */
+    protected function lineItemNumber(EstimateLineItem $lineItem): string
+    {
+        $sectionIndex = $this->estimate->estimate_sections()
+            ->orderBy('order')
+            ->pluck('id')
+            ->search($lineItem->section_id);
+
+        $itemIndex = $lineItem->section->estimate_line_items()
+            ->orderBy('order')
+            ->pluck('id')
+            ->search($lineItem->id);
+
+        return ($sectionIndex === false ? '?' : $sectionIndex + 1).'.'.($itemIndex === false ? '?' : $itemIndex + 1);
     }
 
     /**
