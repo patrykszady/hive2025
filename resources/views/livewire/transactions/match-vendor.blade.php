@@ -18,6 +18,7 @@
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
                                 <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Location</flux:table.column>
                                 <flux:table.column>Bank | Type</flux:table.column>
                                 <flux:table.column>Company</flux:table.column>
                             </flux:table.columns>
@@ -26,6 +27,9 @@
                                     <flux:table.row wire:key="txn-row-{{ $transaction->id }}">
                                         <flux:table.cell variant="strong">{{ money($transaction->amount) }}</flux:table.cell>
                                         <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>
+                                            {{ collect([$transaction->plaid_city, $transaction->plaid_region])->filter(fn ($part) => filled($part) && $part !== 'null')->implode(', ') }}
+                                        </flux:table.cell>
                                         <flux:table.cell>
                                             {{ $transaction->bank_account->bank ? $transaction->bank_account->bank->name : '' }} | {{ $transaction->bank_account->type }}
                                         </flux:table.cell>
@@ -57,7 +61,7 @@
                             <flux:select.option value="CASH">Cash Withdrawal</flux:select.option>
                             <flux:separator />
                             @foreach ($vendors as $vendor)
-                                <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}</flux:select.option>
+                                <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}{{ $vendor->city ? ' — '.$vendor->city.($vendor->state ? ', '.$vendor->state : '') : '' }}</flux:select.option>
                             @endforeach
                         </flux:select>
 
@@ -139,7 +143,7 @@
                             >
                                 <flux:select.option value="NEW">NEW Retail Vendor</flux:select.option>
                                 @foreach ($vendors as $vendor)
-                                    <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}</flux:select.option>
+                                    <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}{{ $vendor->city ? ' — '.$vendor->city.($vendor->state ? ', '.$vendor->state : '') : '' }}</flux:select.option>
                                 @endforeach
                             </flux:select>
                         </div>

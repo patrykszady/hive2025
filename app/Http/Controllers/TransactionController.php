@@ -1043,7 +1043,13 @@ class TransactionController extends Controller
                 $descNamesDifferentVendor = $matchedViaName
                     && $this->descriptionNamesDifferentVendor($pDesc, (int) $vendor_match->id, $vendorTokenOwners);
 
-                if ($namesOverlap && !$descNamesDifferentVendor) {
+                // Location gate: a vendor with a pinned location (street + zip)
+                // is one specific physical place — don't fuzzy-match it to a
+                // charge whose Plaid location says it happened somewhere else.
+                $locationConflicts = $vendor_match->hasPinnedLocation()
+                    && $transaction->locationAgreementWithVendor($vendor_match) === false;
+
+                if ($namesOverlap && !$descNamesDifferentVendor && !$locationConflicts) {
                     $transaction->vendor_id = $vendor_match->id;
                     $transaction->save();
                 }
@@ -1072,6 +1078,13 @@ class TransactionController extends Controller
         $isAssignedByAliasRule = function (Transaction $transaction) use ($vendorTransactionAliases): bool {
             $desc = $transaction->plaid_merchant_description ?? '';
             if ($desc === '') {
+                return false;
+            }
+            // A pinned-location vendor's alias doesn't protect the assignment
+            // when the charge's Plaid location contradicts the vendor's address
+            // — let PART 2 clear it so it resurfaces on Match Vendor.
+            if ($transaction->vendor && $transaction->vendor->hasPinnedLocation()
+                && $transaction->locationAgreementWithVendor($transaction->vendor) === false) {
                 return false;
             }
             foreach ($vendorTransactionAliases as $alias) {
@@ -1136,6 +1149,14 @@ class TransactionController extends Controller
                 // Try to find correct vendor using fuzzy match
                 $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
 
+                // Location gate: never "correct" onto a pinned-location vendor
+                // whose address contradicts where the charge happened — fall
+                // through to the clear branch so it resurfaces on Match Vendor.
+                if ($correctVendor && $correctVendor->hasPinnedLocation()
+                    && $transaction->locationAgreementWithVendor($correctVendor) === false) {
+                    $correctVendor = null;
+                }
+
                 if ($correctVendor && $correctVendor->id !== $transaction->vendor_id) {
                     // Found a better vendor match - update
                     Log::channel('plaid_adds')->info('Corrected vendor mismatch', [
@@ -1164,45 +1185,83 @@ class TransactionController extends Controller
 
         $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get()->groupBy('plaid_merchant_description');
         $vendor_transactions = VendorTransaction::whereNull('deposit_check')->orderByRaw('LENGTH(`desc`) ASC')->get();
+        $aliasVendors = Vendor::withoutGlobalScopes()
+            ->whereIn('id', $vendor_transactions->pluck('vendor_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
 
-        foreach ($vendor_transactions as $vendor_transaction) {
-            //get all BankAccount where bank_account_id
-            //get plaid_inst_id of bank_account_ids on transactions table
-
-            //Alter $transactions variable/results based on the if statement below
-            foreach ($transactions as $merchant_desc => $plaid_name_transactions) {
+        foreach ($transactions as $merchant_desc => $plaid_name_transactions) {
+            // Aliases whose regex matches this descriptor, kept shortest-desc
+            // first: the last (longest) candidate wins, matching the old
+            // behavior where later, longer aliases overwrote earlier ones.
+            $matchingAliases = $vendor_transactions->filter(function ($vendor_transaction) use ($merchant_desc) {
                 //decode json on VendorTrasaction Model
                 $preg = json_decode($vendor_transaction->options);
-                preg_match('/'.$vendor_transaction->desc.$preg, $merchant_desc, $matches, PREG_UNMATCHED_AS_NULL);
+                $matched = @preg_match('/'.$vendor_transaction->desc.$preg, $merchant_desc, $matches, PREG_UNMATCHED_AS_NULL);
 
-                if (! empty($matches)) {
-                    foreach ($plaid_name_transactions as $transaction) {
-                        // Check amount_sign filter
-                        if ($vendor_transaction->amount_sign !== null) {
-                            if ($vendor_transaction->amount_sign === 1 && $transaction->amount <= 0) {
-                                continue;
-                            }
-                            if ($vendor_transaction->amount_sign === 2 && $transaction->amount >= 0) {
-                                continue;
-                            }
-                        }
+                return $matched === 1 && ! empty($matches);
+            });
 
-                        $transaction->vendor_id = $vendor_transaction->vendor_id;
-                        $transaction->save();
+            if ($matchingAliases->isEmpty()) {
+                continue;
+            }
 
-                        if ($transaction->expense) {
-                            $expense = $transaction->expense;
-                            $expense->vendor_id = $transaction->vendor_id;
-                            $expense->save();
-                        }
-
-                        //USED IN MULTIPLE OF PLACES MatchVendor@store, above in original Vendor find code in this function as well
-                        //add vendor if vendor is not part of the currently logged in vendor
-                        // if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
-                        //     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
-                        // }
+            foreach ($plaid_name_transactions as $transaction) {
+                $candidates = $matchingAliases->filter(function ($vendor_transaction) use ($transaction, $aliasVendors) {
+                    // Check amount_sign filter
+                    if ($vendor_transaction->amount_sign === 1 && $transaction->amount <= 0) {
+                        return false;
                     }
+                    if ($vendor_transaction->amount_sign === 2 && $transaction->amount >= 0) {
+                        return false;
+                    }
+
+                    // Location gate: a vendor pinned to one physical place
+                    // (street + zip) only claims charges whose Plaid location
+                    // doesn't contradict it. Soft city/state never vetoes.
+                    $vendor = $aliasVendors->get($vendor_transaction->vendor_id);
+
+                    return ! ($vendor && $vendor->hasPinnedLocation()
+                        && $transaction->locationAgreementWithVendor($vendor) === false);
+                });
+
+                if ($candidates->pluck('vendor_id')->unique()->count() > 1) {
+                    // Generic descriptor ("SMOKE N VAPE") claimed by multiple
+                    // vendors — only a positive location match may pick one;
+                    // otherwise leave the transaction for Match Vendor.
+                    $positive = $candidates->filter(function ($vendor_transaction) use ($transaction, $aliasVendors) {
+                        $vendor = $aliasVendors->get($vendor_transaction->vendor_id);
+
+                        return $vendor && $transaction->locationAgreementWithVendor($vendor) === true;
+                    });
+
+                    if ($positive->pluck('vendor_id')->unique()->count() !== 1) {
+                        continue;
+                    }
+
+                    $candidates = $positive;
                 }
+
+                $chosen = $candidates->last();
+
+                if (! $chosen) {
+                    continue;
+                }
+
+                $transaction->vendor_id = $chosen->vendor_id;
+                $transaction->save();
+
+                if ($transaction->expense) {
+                    $expense = $transaction->expense;
+                    $expense->vendor_id = $transaction->vendor_id;
+                    $expense->save();
+                }
+
+                //USED IN MULTIPLE OF PLACES MatchVendor@store, above in original Vendor find code in this function as well
+                //add vendor if vendor is not part of the currently logged in vendor
+                // if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
+                //     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
+                // }
             }
         }
     }

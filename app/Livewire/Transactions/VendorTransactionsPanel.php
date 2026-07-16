@@ -27,7 +27,7 @@ class VendorTransactionsPanel extends Component
     {
         $this->resetNewVendorTransaction();
         $this->vendors = Vendor::withoutGlobalScopes()
-            ->select(['id', 'business_name'])
+            ->select(['id', 'business_name', 'city', 'state'])
             ->orderBy('business_name', 'ASC')
             ->get();
         $this->banks = Bank::withoutGlobalScopes()

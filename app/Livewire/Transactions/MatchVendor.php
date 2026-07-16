@@ -46,7 +46,7 @@ class MatchVendor extends Component
     public function mount()
     {
         $this->vendors = Vendor::withoutGlobalScopes()
-            ->select(['id', 'business_name'])
+            ->select(['id', 'business_name', 'city', 'state'])
             ->orderBy('business_name', 'ASC')
             ->get();
         $this->loadExpenseReceiptMerchants();
@@ -92,6 +92,12 @@ class MatchVendor extends Component
                 'plaid_merchant_description',
                 'plaid_merchant_name',
                 'bank_account_id',
+                // Lean location columns — selecting the whole details JSON
+                // would serialize every Plaid payload into the Livewire
+                // snapshot. On MySQL a JSON null arrives as the string
+                // "null"; the blade filters it out.
+                'details->location->city as plaid_city',
+                'details->location->region as plaid_region',
             ])
             ->with([
                 'bank_account' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bank_id', 'type'])->with([

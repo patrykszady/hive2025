@@ -89,6 +89,19 @@ class Vendor extends Model
         return $now->between($start, $end);
     }
 
+    /**
+     * A vendor with a street address and zip is one specific physical place
+     * (e.g. one "Smoke N Vape" among many with the same name) — transaction
+     * matching hard-gates on location agreement for these. City/state alone
+     * (often backfilled from Plaid data) only aids display and positive
+     * disambiguation, so chains never get vetoed by a soft location.
+     */
+    public function hasPinnedLocation(): bool
+    {
+        return trim((string) $this->address) !== ''
+            && strlen(preg_replace('/\D/', '', (string) $this->zip_code)) >= 5;
+    }
+
     //Searchable
     public function toSearchableArray(): array
     {

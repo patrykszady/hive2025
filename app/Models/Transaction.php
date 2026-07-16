@@ -249,6 +249,96 @@ class Transaction extends Model
     //     return $this->hasOneThrough(BankAccount::class, Bank::class);
     // }
 
+    /**
+     * Plaid's merchant location for this transaction, when the bank provided
+     * one. Null when every field is empty — some banks (e.g. Capital One)
+     * strip location on many transactions.
+     *
+     * @return array{city: string, region: string, postal_code: string}|null
+     */
+    public function plaidLocation(): ?array
+    {
+        $location = data_get($this->details, 'location');
+
+        if (! is_array($location)) {
+            return null;
+        }
+
+        $normalized = [
+            'city' => trim((string) ($location['city'] ?? '')),
+            'region' => trim((string) ($location['region'] ?? '')),
+            'postal_code' => substr(preg_replace('/\D/', '', (string) ($location['postal_code'] ?? '')), 0, 5),
+        ];
+
+        return array_filter($normalized) === [] ? null : $normalized;
+    }
+
+    /**
+     * Compare this transaction's Plaid location against a vendor's stored
+     * address. Generic same-named merchants ("SMOKE N VAPE", "Chinese Food")
+     * can only be told apart by where the charge happened, so vendors with an
+     * address act as location-specific and matching gates on agreement.
+     *
+     * true  => comparable and they agree (zip, or city and state)
+     * false => comparable and they disagree — different physical location
+     * null  => not comparable (transaction or vendor lacks location data)
+     */
+    public function locationAgreementWithVendor(Vendor $vendor): ?bool
+    {
+        $location = $this->plaidLocation();
+
+        if (! $location) {
+            return null;
+        }
+
+        $vendorZip = substr(preg_replace('/\D/', '', (string) $vendor->zip_code), 0, 5);
+        if (strlen($location['postal_code']) === 5 && strlen($vendorZip) === 5) {
+            return $location['postal_code'] === $vendorZip;
+        }
+
+        $txnCity = mb_strtolower($location['city']);
+        $vendorCity = mb_strtolower(trim((string) $vendor->city));
+        $txnRegion = mb_strtolower($location['region']);
+        $vendorState = mb_strtolower(trim((string) $vendor->state));
+        // Regions only compare when both are 2-letter state codes — vendors
+        // sometimes store the full state name, which must not read as conflict.
+        $regionsComparable = strlen($txnRegion) === 2 && strlen($vendorState) === 2;
+
+        if ($txnCity === '' || $vendorCity === '') {
+            if ($regionsComparable && $txnRegion !== $vendorState) {
+                return false;
+            }
+
+            return null;
+        }
+
+        if (! self::citiesAgree($txnCity, $vendorCity)) {
+            return false;
+        }
+
+        if ($regionsComparable && $txnRegion !== $vendorState) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Some banks truncate city names in Plaid data ("Mount" for Mount
+     * Prospect, "Buffalo" for Buffalo Grove), so cities agree when equal or
+     * when one is a leading whole word of the other. Expects lowercase input.
+     */
+    protected static function citiesAgree(string $a, string $b): bool
+    {
+        if ($a === $b) {
+            return true;
+        }
+
+        [$short, $long] = strlen($a) <= strlen($b) ? [$a, $b] : [$b, $a];
+
+        return str_starts_with($long, $short.' ');
+    }
+
     //used in TransactionController::add_vendor_to_transactions
     //used in Livewire/Transactions/MatchVendor::mount
     public function scopeTransactionsSinVendor($query)

@@ -11,7 +11,7 @@
                 >
                     <flux:select.option value="">None</flux:select.option>
                     @foreach($vendors as $vendor)
-                        <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}</flux:select.option>
+                        <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}{{ $vendor->city ? ' — '.$vendor->city.($vendor->state ? ', '.$vendor->state : '') : '' }}</flux:select.option>
                     @endforeach
                 </flux:select>
 
