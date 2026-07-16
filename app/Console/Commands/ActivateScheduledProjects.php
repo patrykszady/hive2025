@@ -35,6 +35,27 @@ class ActivateScheduledProjects extends Command
                 continue;
             }
 
+            // Idempotency: the project may already carry an Active row that a
+            // stale later-dated Scheduled row is outranking (latestOfMany by
+            // start_date) — never insert a duplicate for the same activation.
+            $alreadyActivated = ProjectStatus::withoutGlobalScopes()
+                ->where('project_id', $project->id)
+                ->where('status_code', 6)
+                ->whereDate('start_date', $estimateStartDate->toDateString())
+                ->exists();
+
+            // Heal stale reschedules: a Scheduled row dated AFTER the estimate
+            // start would forever outrank the Active row. Pull it back to the
+            // estimate start so the newer Active row (higher id, same date)
+            // becomes the latest status.
+            if ($project->latestStatus->start_date?->toDateString() > $estimateStartDate->toDateString()) {
+                $project->latestStatus->update(['start_date' => $estimateStartDate->toDateString()]);
+            }
+
+            if ($alreadyActivated) {
+                continue;
+            }
+
             ProjectStatus::create([
                 'project_id'           => $project->id,
                 'belongs_to_vendor_id' => $project->latestStatus->belongs_to_vendor_id,

@@ -410,6 +410,13 @@ class EstimateAccept extends Component
                         'status_code'          => 5,
                         'start_date'           => $this->start_date,
                     ]);
+                } elseif ($latestStatus && $latestStatus->status_code === 5
+                    && $latestStatus->start_date?->toDateString() !== $this->start_date) {
+                    // RESCHEDULE: the project is already Scheduled — move that
+                    // status row to the new date. Leaving the old date behind
+                    // makes it outrank the eventual Active row (latestOfMany
+                    // by start_date), freezing the project as "Scheduled".
+                    $latestStatus->update(['start_date' => $this->start_date]);
                 }
             }
 
