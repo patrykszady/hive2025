@@ -70,8 +70,10 @@ class BankShow extends Component
             'access_token' => $this->bank->plaid_access_token,
             'products' => ['transactions', 'statements'],
             'statements' => [
-                'start_date' => Carbon::today()->subMonth()->startOfMonth()->format('Y-m-d'),
-                'end_date' => Carbon::today()->subMonth()->endOfMonth()->format('Y-m-d'),
+                // Cover the trailing 6 months so newly-consented items ingest
+                // enough history to resolve masked/aged transactions.
+                'start_date' => Carbon::today()->subMonths(6)->startOfMonth()->format('Y-m-d'),
+                'end_date' => Carbon::today()->format('Y-m-d'),
             ],
         ];
 
