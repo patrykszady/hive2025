@@ -92,7 +92,12 @@
                                         <flux:table.cell class="align-top !pl-6">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
                                         <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
                                             <div class="flex flex-col min-w-0">
-                                                <div class="leading-5"><b>{{$line_item->name}}</b></div>
+                                                <div class="leading-5">
+                                                    <b>{{$line_item->name}}</b>
+                                                    @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
+                                                        <flux:badge size="sm" color="orange" class="ml-1">Credit on line item {{ $creditNumber }}</flux:badge>
+                                                    @endforeach
+                                                </div>
                                                 <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
                                             </div>
                                         </flux:table.cell>
@@ -262,6 +267,9 @@
                                                                         >
                                                                         <b>{{$line_item->name}}</b>
                                                                     </a>
+                                                                    @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
+                                                                        <flux:badge size="sm" color="orange" class="ml-1">Credit on line item {{ $creditNumber }}</flux:badge>
+                                                                    @endforeach
                                                                     @if($liChanged)
                                                                         <flux:badge size="sm" color="amber" class="ml-1">{{ ucfirst($liChanged['event']) }}</flux:badge>
                                                                     @endif

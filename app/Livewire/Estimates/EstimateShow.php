@@ -764,6 +764,53 @@ class EstimateShow extends Component
 
 
     #[Title('Estimate')]
+    /**
+     * "{section}.{item}" display numbers keyed by line item id, mirroring the
+     * page's numbering (sections in $sections order, items by current sort).
+     */
+    public function getLineItemNumbersProperty(): array
+    {
+        $numbers = [];
+
+        foreach (array_values($this->sections ?? []) as $sectionIndex => $sectionData) {
+            $section = $this->estimate->estimate_sections->find($sectionData['id'] ?? null);
+
+            if (! $section) {
+                continue;
+            }
+
+            $items = $section->estimate_line_items
+                ->sortBy($this->sortBy, SORT_REGULAR, $this->sortDirection === 'desc')
+                ->values();
+
+            foreach ($items as $itemIndex => $item) {
+                $numbers[$item->id] = ($sectionIndex + 1).'.'.($itemIndex + 1);
+            }
+        }
+
+        return $numbers;
+    }
+
+    /**
+     * Credit pointers for badges: original line item id => list of the
+     * display numbers of its credit line items ("3.1").
+     */
+    public function getCreditBadgesProperty(): array
+    {
+        $numbers = $this->lineItemNumbers;
+        $badges = [];
+
+        foreach ($this->estimate->estimate_sections as $section) {
+            foreach ($section->estimate_line_items as $item) {
+                if ($item->credit_for_id && isset($numbers[$item->id])) {
+                    $badges[$item->credit_for_id][] = $numbers[$item->id];
+                }
+            }
+        }
+
+        return $badges;
+    }
+
     public function render()
     {
         $this->authorize('view', $this->estimate);

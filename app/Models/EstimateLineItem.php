@@ -51,6 +51,22 @@ class EstimateLineItem extends Pivot
     }
 
     /**
+     * Credit line items created against this (signed) line item.
+     */
+    public function credits(): HasMany
+    {
+        return $this->hasMany(self::class, 'credit_for_id', 'id');
+    }
+
+    /**
+     * The signed line item this credit offsets.
+     */
+    public function creditFor(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'credit_for_id', 'id');
+    }
+
+    /**
      * Override displace to record the original order before it's wiped to 999999.
      */
     public function displace(): void

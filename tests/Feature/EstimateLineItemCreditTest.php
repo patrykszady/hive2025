@@ -159,6 +159,7 @@ it('creates a negative credit line item in a new change-order section', function
         ->and($credit->category)->toBe('Framing')
         ->and($credit->desc)->toBe('Credit for Line Item #1.1: Structural Header')
         ->and($credit->notes)->toBeNull()
+        ->and($credit->credit_for_id)->toBe($s['estimateLineItem']->id)
         // observer cascade: section total and change-order bid amount go negative
         ->and((float) $creditSection->fresh()->total)->toBe(-2850.0)
         ->and((float) $creditSection->bid->fresh()->amount)->toBe(-2850.0)

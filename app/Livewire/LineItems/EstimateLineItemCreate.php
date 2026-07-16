@@ -352,6 +352,7 @@ class EstimateLineItemCreate extends Component
         EstimateLineItem::create([
             'estimate_id' => $this->estimate->id,
             'line_item_id' => $original->line_item_id,
+            'credit_for_id' => $original->id,
             'section_id' => $section->id,
             'name' => 'Credit: '.$original->name,
             'category' => $original->category,
