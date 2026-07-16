@@ -4,8 +4,11 @@ namespace App\Livewire\LineItems;
 
 use App\Livewire\Forms\EstimateLineItemForm;
 use App\Livewire\Projects\ProjectFinances;
+use App\Models\Bid;
 use App\Models\Estimate;
+use App\Models\EstimateLineItem;
 use App\Models\EstimateLineItemAllowance;
+use App\Models\EstimateSection;
 use App\Models\LineItem;
 use App\Models\LineItemAllowance;
 use App\Services\AllowanceAggregator;
@@ -316,6 +319,105 @@ class EstimateLineItemCreate extends Component
         $total = number_format((float) $total, 2, '.', '');
 
         return $total;
+    }
+
+    /**
+     * Create an offsetting "Credit" copy of the line item being edited in a
+     * change-order section — the way to back a signed (locked) line item out
+     * of the contract without touching the original. Uses the form's current
+     * amount/quantity, so partial credits work on unlocked items.
+     */
+    public function creditToChangeOrder()
+    {
+        $this->authorize('create', LineItem::class);
+
+        if (! $this->edit_line_item || ! $this->estimate_line_item) {
+            return;
+        }
+
+        $original = $this->estimate_line_item;
+        $section = $this->resolveChangeOrderSection();
+
+        $quantity = (float) ($this->form->quantity ?: $original->quantity ?: 1);
+        $cost = (float) ($this->form->cost ?: $original->cost);
+        $total = number_format($quantity * $cost, 2, '.', '');
+
+        EstimateLineItem::create([
+            'estimate_id' => $this->estimate->id,
+            'line_item_id' => $original->line_item_id,
+            'section_id' => $section->id,
+            'name' => 'Credit: '.$original->name,
+            'category' => $original->category,
+            'sub_category' => $original->sub_category,
+            'unit_type' => $original->unit_type,
+            'quantity' => $quantity,
+            'cost' => -$cost,
+            'total' => -$total,
+            'desc' => $this->form->desc ?: $original->desc,
+            'notes' => $this->form->notes ?: $original->notes,
+            'order' => $section->estimate_line_items()->count() + 1,
+        ]);
+
+        $this->modal('estimate_line_item_form_modal')->close();
+        $this->dispatch('refreshComponent')->to('estimates.estimate-show');
+        $this->dispatch('refresh')->to(ProjectFinances::class);
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Credit Added',
+            text: money(-$total).' credit for '.$original->name.' added to '.($section->name ?: $section->bid?->name ?: 'Change Order').'.',
+        );
+    }
+
+    /**
+     * The section a credit lands in: the newest unlocked section already
+     * attached to a change-order bid, or a fresh "Change Order" section with
+     * its own change-order bid (mirrors EstimateShow::maybeCreateChangeOrderBid,
+     * but unconditional — crediting is an explicit change-order action).
+     */
+    protected function resolveChangeOrderSection(): EstimateSection
+    {
+        $existing = $this->estimate->estimate_sections()
+            ->with('bid')
+            ->orderByDesc('order')
+            ->get()
+            ->first(fn ($section) => $section->bid && (int) $section->bid->type >= 2 && ! $section->isLocked());
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $maxOrder = $this->estimate->estimate_sections()->where('order', '<', 999999)->max('order');
+
+        $section = EstimateSection::create([
+            'estimate_id' => $this->estimate->id,
+            'order' => is_null($maxOrder) ? 0 : $maxOrder + 1,
+            'name' => 'Change Order',
+            'total' => 0.00,
+        ]);
+
+        $projectId = $this->estimate->project_id;
+        $vendorId = $this->estimate->belongs_to_vendor_id;
+
+        if ($projectId && $vendorId) {
+            $nextType = (int) (Bid::where('project_id', $projectId)
+                ->where('vendor_id', $vendorId)
+                ->max('type') ?? 1) + 1;
+
+            $bid = Bid::create([
+                'amount' => 0.00,
+                'type' => $nextType,
+                'project_id' => $projectId,
+                'vendor_id' => $vendorId,
+            ]);
+
+            $section->bid_id = $bid->id;
+            $section->save();
+        }
+
+        return $section;
     }
 
     public function removeFromEstimate()

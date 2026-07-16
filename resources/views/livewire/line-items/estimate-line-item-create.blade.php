@@ -238,6 +238,16 @@
         <flux:spacer />
 
         <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
+            <flux:button
+                wire:click="creditToChangeOrder"
+                variant="filled"
+                tooltip="Add an offsetting credit to a change order section"
+            >
+                Credit
+            </flux:button>
+        </div>
+
+        <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
             <flux:button wire:click="removeFromEstimate" variant="danger">{{ $isLocked ? 'Hide' : 'Remove' }}</flux:button>
         </div>
 
