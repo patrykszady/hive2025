@@ -27,13 +27,14 @@
                                     <flux:table.row wire:key="txn-row-{{ $transaction->id }}">
                                         <flux:table.cell variant="strong">{{ money($transaction->amount) }}</flux:table.cell>
                                         <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>{{ $txn_locations[$transaction->id] ?? '' }}</flux:table.cell>
+                                        {{-- Null-safe: after a Livewire action, rehydrated models
+                                             lazy-load bank_account WITH global scopes, which hides
+                                             sibling companies' accounts — must not crash the row. --}}
                                         <flux:table.cell>
-                                            {{ collect([$transaction->plaid_city, $transaction->plaid_region])->filter(fn ($part) => filled($part) && $part !== 'null')->implode(', ') }}
+                                            {{ $transaction->bank_account?->bank?->name ?? '' }} | {{ $transaction->bank_account?->type ?? '' }}
                                         </flux:table.cell>
-                                        <flux:table.cell>
-                                            {{ $transaction->bank_account->bank ? $transaction->bank_account->bank->name : '' }} | {{ $transaction->bank_account->type }}
-                                        </flux:table.cell>
-                                        <flux:table.cell>{{ $transaction->bank_account->bank->vendor->business_name }}</flux:table.cell>
+                                        <flux:table.cell>{{ $transaction->bank_account?->bank?->vendor?->business_name ?? '' }}</flux:table.cell>
                                     </flux:table.row>
                                 @endforeach
                             </flux:table.rows>
@@ -86,6 +87,62 @@
                                 Bank Specific
                             </flux:button>
                         </flux:input.group>
+
+                        <div class="flex items-center gap-3">
+                            <flux:button
+                                type="button"
+                                size="sm"
+                                icon="sparkles"
+                                wire:click="suggestVendor({{ $loop->index }})"
+                                wire:loading.attr="disabled"
+                                wire:target="suggestVendor({{ $loop->index }})"
+                            >
+                                AI Identify
+                            </flux:button>
+                            <div wire:loading wire:target="suggestVendor({{ $loop->index }})" class="text-xs italic text-zinc-500">
+                                Searching the web for this merchant…
+                            </div>
+                        </div>
+
+                        @if(isset($ai_suggestions[$loop->index]))
+                            @php($suggestion = $ai_suggestions[$loop->index])
+                            <flux:card class="p-3! space-y-2">
+                                @if(isset($suggestion['error']))
+                                    <flux:subheading>{{ $suggestion['error'] }}</flux:subheading>
+                                @else
+                                    <div class="flex items-center gap-2">
+                                        <flux:heading>{{ $suggestion['vendor_name'] }}</flux:heading>
+                                        <flux:badge size="sm" inset="top bottom" color="{{ ['high' => 'green', 'medium' => 'yellow', 'low' => 'zinc'][$suggestion['confidence']] ?? 'zinc' }}">
+                                            {{ $suggestion['confidence'] }} confidence
+                                        </flux:badge>
+                                        @if(!empty($suggestion['existing_vendor_id']))
+                                            <flux:badge size="sm" inset="top bottom" color="blue">existing vendor</flux:badge>
+                                        @endif
+                                    </div>
+                                    <flux:subheading>
+                                        {{ $suggestion['reasoning'] }}
+                                        @if(!empty($suggestion['website']))
+                                            <a href="{{ $suggestion['website'] }}" target="_blank" rel="noopener" class="underline">{{ $suggestion['website'] }}</a>
+                                        @endif
+                                        @if(!empty($suggestion['city']))
+                                            &middot; {{ collect([$suggestion['city'], $suggestion['state'] ?? null])->filter()->implode(', ') }}
+                                        @endif
+                                    </flux:subheading>
+                                    <div>
+                                        <flux:button
+                                            type="button"
+                                            size="sm"
+                                            variant="primary"
+                                            wire:click="applySuggestion({{ $loop->index }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="applySuggestion({{ $loop->index }})"
+                                        >
+                                            {{ empty($suggestion['existing_vendor_id']) ? 'Create "'.$suggestion['vendor_name'].'" + match' : 'Use this vendor' }}
+                                        </flux:button>
+                                    </div>
+                                @endif
+                            </flux:card>
+                        @endif
                     </div>
                 </x-island-card>
             @endforeach

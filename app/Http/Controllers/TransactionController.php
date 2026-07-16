@@ -1080,13 +1080,10 @@ class TransactionController extends Controller
             if ($desc === '') {
                 return false;
             }
-            // A pinned-location vendor's alias doesn't protect the assignment
-            // when the charge's Plaid location contradicts the vendor's address
-            // — let PART 2 clear it so it resurfaces on Match Vendor.
-            if ($transaction->vendor && $transaction->vendor->hasPinnedLocation()
-                && $transaction->locationAgreementWithVendor($transaction->vendor) === false) {
-                return false;
-            }
+            // Deliberately NO location check here: an alias-backed assignment
+            // may be a human's explicit decision (Match Vendor, edit modal),
+            // and PART 2 clearing it would revert that decision every 10
+            // minutes. The location gate only blocks NEW automatic matches.
             foreach ($vendorTransactionAliases as $alias) {
                 if ((int) $alias->vendor_id !== (int) $transaction->vendor_id) {
                     continue;
@@ -1149,10 +1146,12 @@ class TransactionController extends Controller
                 // Try to find correct vendor using fuzzy match
                 $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
 
-                // Location gate: never "correct" onto a pinned-location vendor
-                // whose address contradicts where the charge happened — fall
-                // through to the clear branch so it resurfaces on Match Vendor.
-                if ($correctVendor && $correctVendor->hasPinnedLocation()
+                // Location gate: never "correct" onto a DIFFERENT pinned-location
+                // vendor whose address contradicts where the charge happened —
+                // fall through to the clear branch so it resurfaces on Match
+                // Vendor. Same-vendor results stay untouched (no clearing).
+                if ($correctVendor && $correctVendor->id !== $transaction->vendor_id
+                    && $correctVendor->hasPinnedLocation()
                     && $transaction->locationAgreementWithVendor($correctVendor) === false) {
                     $correctVendor = null;
                 }
@@ -1226,20 +1225,35 @@ class TransactionController extends Controller
                 });
 
                 if ($candidates->pluck('vendor_id')->unique()->count() > 1) {
-                    // Generic descriptor ("SMOKE N VAPE") claimed by multiple
-                    // vendors — only a positive location match may pick one;
-                    // otherwise leave the transaction for Match Vendor.
+                    // Descriptor claimed by multiple vendors. A unique positive
+                    // location match wins outright.
                     $positive = $candidates->filter(function ($vendor_transaction) use ($transaction, $aliasVendors) {
                         $vendor = $aliasVendors->get($vendor_transaction->vendor_id);
 
-                        return $vendor && $transaction->locationAgreementWithVendor($vendor) === true;
+                        // strict: only zip or an exact city may PICK a winner —
+                        // truncated fragments merely avoid the veto above.
+                        return $vendor && $transaction->locationAgreementWithVendor($vendor, strict: true) === true;
                     });
 
-                    if ($positive->pluck('vendor_id')->unique()->count() !== 1) {
-                        continue;
-                    }
+                    if ($positive->pluck('vendor_id')->unique()->count() === 1) {
+                        $candidates = $positive;
+                    } else {
+                        // Only skip when multiple PINNED vendors genuinely
+                        // collide ("SMOKE N VAPE" in two towns) — that needs a
+                        // human. Otherwise keep the legacy behavior for nested
+                        // aliases (e.g. "Other Decrease" vs "Other Decrease Il
+                        // Dep…"): the longest matching desc wins below.
+                        $pinnedVendors = $candidates->pluck('vendor_id')->unique()
+                            ->filter(function ($vendorId) use ($aliasVendors) {
+                                $vendor = $aliasVendors->get($vendorId);
 
-                    $candidates = $positive;
+                                return $vendor && $vendor->hasPinnedLocation();
+                            });
+
+                        if ($pinnedVendors->count() > 1) {
+                            continue;
+                        }
+                    }
                 }
 
                 $chosen = $candidates->last();

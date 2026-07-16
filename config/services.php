@@ -16,6 +16,8 @@ return [
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'task_extraction_model' => env('OPENAI_TASK_EXTRACTION_MODEL', 'gpt-4.1'),
+        'vendor_suggestion_model' => env('OPENAI_VENDOR_SUGGESTION_MODEL', 'gpt-4o'),
+        'vendor_suggestion_fallback_model' => env('OPENAI_VENDOR_SUGGESTION_FALLBACK_MODEL', 'gpt-4o'),
     ],
 
     'assemblyai' => [

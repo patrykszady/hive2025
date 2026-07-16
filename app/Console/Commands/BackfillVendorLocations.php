@@ -53,6 +53,8 @@ class BackfillVendorLocations extends Command
             $locations = Transaction::withoutGlobalScopes()
                 ->where('vendor_id', $vendor->id)
                 ->whereNull('deleted_at')
+                ->withOnly([])
+                ->select(['id', 'details'])
                 ->get()
                 ->map(fn (Transaction $t) => $t->plaidLocation())
                 ->filter(fn (?array $loc) => $loc && $loc['city'] !== '');
@@ -61,15 +63,23 @@ class BackfillVendorLocations extends Command
                 continue;
             }
 
-            // Canonicalize bank-truncated city names ("Mount" → "Mount
-            // Prospect", "Buffalo" → "Buffalo Grove"): a city that is a
-            // leading word of exactly one longer city in the set maps to it.
+            // Canonicalize bank-truncated city names: banks emit leading AND
+            // trailing fragments ("Mount" and "Prospect" both mean Mount
+            // Prospect). A fragment maps to a longer city only when exactly
+            // ONE longer city in the set extends it either way — "Prospect"
+            // alongside both "Mount Prospect" and "Prospect Heights" stays
+            // its own group, which then trips the multi-city chain skip.
             $names = $locations->pluck('city')->unique(fn ($c) => mb_strtolower($c))->values();
             $canonical = [];
             foreach ($names as $name) {
                 $lower = mb_strtolower($name);
                 $longer = $names
-                    ->filter(fn ($n) => str_starts_with(mb_strtolower($n), $lower.' '))
+                    ->filter(function ($n) use ($lower) {
+                        $candidate = mb_strtolower($n);
+
+                        return str_starts_with($candidate, $lower.' ')
+                            || str_ends_with($candidate, ' '.$lower);
+                    })
                     ->unique(fn ($n) => mb_strtolower($n));
                 $canonical[$lower] = $longer->count() === 1 ? $longer->first() : $name;
             }
@@ -124,11 +134,13 @@ class BackfillVendorLocations extends Command
 
             if ($this->option('apply')) {
                 // Model save so Scout re-indexes (vendor city is searchable).
-                $vendor->update([
+                // Filter nulls: never overwrite an existing state/zip with
+                // nothing just because the bank data lacked it.
+                $vendor->update(array_filter([
                     'city' => $city,
                     'state' => strlen($region) === 2 ? $region : null,
                     'zip_code' => $zip,
-                ]);
+                ], fn ($value) => $value !== null));
                 $applied++;
             }
         }

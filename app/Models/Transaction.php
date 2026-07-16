@@ -282,8 +282,14 @@ class Transaction extends Model
      * true  => comparable and they agree (zip, or city and state)
      * false => comparable and they disagree — different physical location
      * null  => not comparable (transaction or vendor lacks location data)
+     *
+     * $strict requires exact city equality (after abbreviation
+     * normalization) — use it when a positive answer PICKS a vendor rather
+     * than merely avoiding a veto: a truncated fragment like "Park" must
+     * never be decisive ("Park" would suffix-match "Highland Park" and
+     * misassign a Park Ridge charge).
      */
-    public function locationAgreementWithVendor(Vendor $vendor): ?bool
+    public function locationAgreementWithVendor(Vendor $vendor, bool $strict = false): ?bool
     {
         $location = $this->plaidLocation();
 
@@ -291,7 +297,7 @@ class Transaction extends Model
             return null;
         }
 
-        $vendorZip = substr(preg_replace('/\D/', '', (string) $vendor->zip_code), 0, 5);
+        $vendorZip = $vendor->normalizedZip();
         if (strlen($location['postal_code']) === 5 && strlen($vendorZip) === 5) {
             return $location['postal_code'] === $vendorZip;
         }
@@ -312,7 +318,7 @@ class Transaction extends Model
             return null;
         }
 
-        if (! self::citiesAgree($txnCity, $vendorCity)) {
+        if (! self::citiesAgree($txnCity, $vendorCity, $strict)) {
             return false;
         }
 
@@ -324,19 +330,41 @@ class Transaction extends Model
     }
 
     /**
-     * Some banks truncate city names in Plaid data ("Mount" for Mount
-     * Prospect, "Buffalo" for Buffalo Grove), so cities agree when equal or
-     * when one is a leading whole word of the other. Expects lowercase input.
+     * Some banks truncate city names in Plaid data — leading OR trailing
+     * fragments ("Mount" and "Prospect" both appear for Mount Prospect) and
+     * abbreviations ("Mt Prospect") — so cities agree when equal after
+     * normalization or when one is a whole-word prefix/suffix of the other.
+     * Lenient by design: a false agree only defers to other signals, while a
+     * false conflict would hard-veto a correct match. Expects lowercase input.
      */
-    protected static function citiesAgree(string $a, string $b): bool
+    protected static function citiesAgree(string $a, string $b, bool $exactOnly = false): bool
     {
+        $a = self::normalizeCityName($a);
+        $b = self::normalizeCityName($b);
+
         if ($a === $b) {
             return true;
         }
 
+        if ($exactOnly) {
+            return false;
+        }
+
         [$short, $long] = strlen($a) <= strlen($b) ? [$a, $b] : [$b, $a];
 
-        return str_starts_with($long, $short.' ');
+        return str_starts_with($long, $short.' ') || str_ends_with($long, ' '.$short);
+    }
+
+    protected static function normalizeCityName(string $city): string
+    {
+        $expansions = ['mt' => 'mount', 'ft' => 'fort', 'st' => 'saint'];
+
+        $words = array_map(
+            fn (string $word) => $expansions[rtrim($word, '.')] ?? $word,
+            preg_split('/\s+/', trim($city)) ?: [],
+        );
+
+        return implode(' ', $words);
     }
 
     //used in TransactionController::add_vendor_to_transactions

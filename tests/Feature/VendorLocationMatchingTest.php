@@ -194,17 +194,69 @@ it('still respects amount_sign rules in the alias loop', function () {
     expect($transaction->refresh()->vendor_id)->toBeNull();
 });
 
-it('clears an alias-protected assignment when the location contradicts a pinned vendor', function () {
+it('keeps an alias-backed assignment even when the location conflicts — human decisions win', function () {
     $account = locationFixture();
     $vendor = vapeVendor(['address' => '1522 N Elmhurst Rd', 'city' => 'Mount Prospect', 'state' => 'IL', 'zip_code' => '60056']);
     vapeAlias($vendor);
 
-    // Assigned to the pinned vendor, but the charge happened in Elgin — PART 2
-    // must not treat the alias as protection, and PART 3 must not re-apply it.
+    // A human explicitly assigned this Elgin charge to the pinned vendor.
+    // PART 2 must NOT clear it every 10 minutes — the location gate only
+    // blocks new automatic matches, never reverts standing assignments.
     $transaction = vapeTransaction($account, ['city' => 'Elgin', 'region' => 'IL']);
     $transaction->update(['vendor_id' => $vendor->id]);
 
     app(TransactionController::class)->add_vendor_to_transactions();
 
+    expect($transaction->refresh()->vendor_id)->toBe($vendor->id);
+});
+
+it('treats bank-truncated trailing fragments and abbreviations as the same city', function () {
+    $account = locationFixture();
+    $vendor = vapeVendor(['address' => '1522 N Elmhurst Rd', 'city' => 'Mount Prospect', 'state' => 'IL']);
+
+    // Capital One really sends both "Prospect" (trailing word) and
+    // "Mt Prospect" for Mount Prospect charges.
+    expect(vapeTransaction($account, ['city' => 'Prospect', 'region' => 'IL'])->locationAgreementWithVendor($vendor))->toBeTrue()
+        ->and(vapeTransaction($account, ['city' => 'Mt Prospect', 'region' => 'IL'])->locationAgreementWithVendor($vendor))->toBeTrue()
+        ->and(vapeTransaction($account, ['city' => 'Mount', 'region' => 'IL'])->locationAgreementWithVendor($vendor))->toBeTrue();
+});
+
+it('keeps the legacy longest-desc winner for nested aliases of unpinned vendors', function () {
+    $account = locationFixture();
+    $short = vapeVendor(['business_name' => 'Short Alias Vendor']);
+    $long = vapeVendor(['business_name' => 'Long Alias Vendor']);
+
+    VendorTransaction::create(['vendor_id' => $short->id, 'desc' => 'SMOKE N', 'options' => json_encode('/i')]);
+    vapeAlias($long); // 'SMOKE N VAPE' — longer, must win as before the rewrite
+
+    $transaction = vapeTransaction($account, null);
+
+    app(TransactionController::class)->add_vendor_to_transactions();
+
+    expect($transaction->refresh()->vendor_id)->toBe($long->id);
+});
+
+it('never lets a truncated city fragment PICK a winner between colliding vendors', function () {
+    $account = locationFixture();
+    // Charge really happened in Park Ridge, but Capital One sent just "Park".
+    // "Park" suffix-matches "Highland Park" — that leniency must avoid vetoes
+    // only, never decide the assignment.
+    $highlandPark = vapeVendor(['business_name' => 'Smoke N Vape HP', 'address' => '1 Central Ave', 'city' => 'Highland Park', 'state' => 'IL', 'zip_code' => '60035']);
+    $parkRidge = vapeVendor(['business_name' => 'Smoke N Vape PR', 'address' => '2 Main St', 'city' => 'Park Ridge', 'state' => 'IL', 'zip_code' => '60068']);
+    vapeAlias($highlandPark);
+    vapeAlias($parkRidge);
+
+    $transaction = vapeTransaction($account, ['city' => 'Park', 'region' => 'IL']);
+
+    app(TransactionController::class)->add_vendor_to_transactions();
+
     expect($transaction->refresh()->vendor_id)->toBeNull();
+});
+
+it('pins leading-zero zips despite the int zip_code column', function () {
+    $vendor = vapeVendor(['business_name' => 'Hoboken Vendor', 'address' => '1 Washington St', 'zip_code' => '07030']);
+
+    // The int column stores 7030; normalizedZip() restores the leading zero.
+    expect($vendor->refresh()->normalizedZip())->toBe('07030')
+        ->and($vendor->hasPinnedLocation())->toBeTrue();
 });

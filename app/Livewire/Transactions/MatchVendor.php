@@ -2,11 +2,13 @@
 
 namespace App\Livewire\Transactions;
 
+use App\Http\Controllers\TransactionController;
 use App\Models\Expense;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
 use App\Models\TransactionBulkMatch;
+use App\Services\VendorSuggestionService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -26,6 +28,13 @@ class MatchVendor extends Component
     public $match_expense_merchant_names = [];
 
     public $match_vendor_names = [];
+
+    // transaction id => "City, ST" — plain array so it survives Livewire
+    // hydration (virtual select columns don't).
+    public $txn_locations = [];
+
+    // card index => AI suggestion payload
+    public $ai_suggestions = [];
 
     public $view_text = [
         'card_title' => 'Save Transactions/Vendor',
@@ -108,8 +117,107 @@ class MatchVendor extends Component
             ])
             ->orderBy('plaid_merchant_description')
             ->get()
+            ->each(function ($transaction): void {
+                // MySQL JSON null arrives as the string "null" — filter both.
+                $parts = collect([$transaction->plaid_city, $transaction->plaid_region])
+                    ->filter(fn ($part) => filled($part) && $part !== 'null');
+
+                if ($parts->isNotEmpty()) {
+                    $this->txn_locations[$transaction->id] = $parts->implode(', ');
+                }
+            })
             ->groupBy('plaid_merchant_description')
             ->toBase();
+    }
+
+    /**
+     * Ask the AI (web-search grounded) who the merchant behind this card's
+     * descriptor is. Result renders as a suggestion the user can accept.
+     */
+    public function suggestVendor(int $index, VendorSuggestionService $service)
+    {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
+        $descriptor = (string) collect($this->merchant_names)->keys()->get($index, '');
+
+        if ($descriptor === '') {
+            return;
+        }
+
+        $transactions = Transaction::transactionsSinVendor()
+            ->where('plaid_merchant_description', $descriptor)
+            // withoutGlobalScopes at EVERY nesting level — a scoped nested
+            // 'bank' load would drop sibling companies' bank names.
+            ->with(['bank_account' => fn ($q) => $q->withoutGlobalScopes()
+                ->with(['bank' => fn ($q) => $q->withoutGlobalScopes()])])
+            ->get();
+
+        $vendors = Vendor::withoutGlobalScopes()
+            ->select(['id', 'business_name', 'city', 'state'])
+            ->get();
+
+        $suggestion = $service->suggest($descriptor, $transactions, $vendors);
+
+        $this->ai_suggestions[$index] = $suggestion
+            ?? ['error' => 'Could not identify this merchant — try again or match manually.'];
+    }
+
+    /**
+     * Accept an AI suggestion: an existing vendor fills the form for review;
+     * a new vendor is created with the AI's details (name, website, city)
+     * plus a matching alias, then transactions are linked.
+     */
+    public function applySuggestion(int $index)
+    {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
+        $suggestion = $this->ai_suggestions[$index] ?? null;
+
+        if (! is_array($suggestion) || isset($suggestion['error'])) {
+            return;
+        }
+
+        if (! empty($suggestion['existing_vendor_id'])) {
+            $this->match_merchant_names[$index]['vendor_id'] = (string) $suggestion['existing_vendor_id'];
+            if (filled($suggestion['match_desc'] ?? null)) {
+                $this->match_merchant_names[$index]['match_desc'] = $suggestion['match_desc'];
+            }
+
+            return;
+        }
+
+        // Duplicate guard: the suggestion may predate a vendor created since
+        // (stale cache, another tab, a colleague) — reuse it instead.
+        $vendor = Vendor::withoutGlobalScopes()
+            ->whereRaw('LOWER(business_name) = ?', [mb_strtolower(trim($suggestion['vendor_name']))])
+            ->first();
+
+        $vendor ??= Vendor::create([
+            'business_name' => $suggestion['vendor_name'],
+            'business_type' => 'Retail',
+            'business_website' => $suggestion['website'] ?? null,
+            'city' => $suggestion['city'] ?? null,
+            'state' => $suggestion['state'] ?? null,
+        ]);
+
+        if (filled($suggestion['match_desc'] ?? null)) {
+            VendorTransaction::create([
+                'vendor_id' => $vendor->id,
+                'deposit_check' => null,
+                'desc' => str_replace('*', "\*", $suggestion['match_desc']),
+                'plaid_inst_id' => null,
+                'options' => json_encode('/i'),
+            ]);
+        }
+
+        //USED IN MULTIPLE OF PLACES MatchVendor@store, TransactionController@add_vendor_to_transactions
+        if (! collect($this->vendors)->pluck('id')->contains($vendor->id)) {
+            auth()->user()->vendor->vendors()->attach($vendor->id);
+        }
+
+        app(TransactionController::class)->add_vendor_to_transactions();
+
+        return redirect(route('transactions.match_vendor'));
     }
 
     public function store_expense_vendors()

@@ -99,7 +99,25 @@ class Vendor extends Model
     public function hasPinnedLocation(): bool
     {
         return trim((string) $this->address) !== ''
-            && strlen(preg_replace('/\D/', '', (string) $this->zip_code)) >= 5;
+            && strlen($this->normalizedZip()) === 5;
+    }
+
+    /**
+     * 5-digit zip regardless of storage quirks: the zip_code column is an
+     * int, so leading-zero zips (07030) lose a digit and zip+4 values lose
+     * their separator — restore both before comparing.
+     */
+    public function normalizedZip(): string
+    {
+        $digits = preg_replace('/\D/', '', (string) $this->zip_code);
+
+        $digits = match (strlen($digits)) {
+            3, 4 => str_pad($digits, 5, '0', STR_PAD_LEFT),
+            6, 7, 8 => str_pad($digits, 9, '0', STR_PAD_LEFT),
+            default => $digits,
+        };
+
+        return substr($digits, 0, 5);
     }
 
     //Searchable
