@@ -1,20 +1,21 @@
 @props([
     'current' => null,
-    'heading' => 'Explore your homeowner portal',
+    'heading' => null,
     'subheading' => null,
 ])
 
 @php
+    $heading = $heading ?? __('Explore your homeowner portal');
     $portalItems = [
-        ['key' => 'status', 'icon' => 'eye', 'title' => 'Live project status', 'body' => 'See what is done, in progress, and coming up at any time.'],
-        ['key' => 'schedule', 'icon' => 'calendar-date-range', 'title' => 'Schedule & reminders', 'body' => 'Know when the crew is coming and get a heads-up before each visit.'],
-        ['key' => 'messaging', 'icon' => 'chat-bubble-left-right', 'title' => 'Direct messaging', 'body' => 'One clean thread with your contractor—photos included.'],
-        ['key' => 'photos', 'icon' => 'photo', 'title' => 'Photos & progress', 'body' => 'Watch your project come together with job-site photos.'],
-        ['key' => 'documents', 'icon' => 'pencil-square', 'title' => 'Estimates & e-sign', 'body' => 'Review and approve estimates and change orders on your phone.'],
-        ['key' => 'payments', 'icon' => 'banknotes', 'title' => 'Invoices & payments', 'body' => 'See invoices and a running total of what has been paid.'],
-        ['key' => 'selections', 'icon' => 'swatch', 'title' => 'Selections & allowances', 'body' => 'Track your choices and where each allowance stands.'],
-        ['key' => 'notifications', 'icon' => 'bell-alert', 'title' => 'Notifications', 'body' => 'Get a text or alert when something needs you or a date moves.'],
-        ['key' => 'access', 'icon' => 'finger-print', 'title' => 'Secure, easy access', 'body' => 'Sign in with a private link—no app, no password to remember.'],
+        ['key' => 'status', 'icon' => 'eye', 'title' => __('Live project status'), 'body' => __('See what is done, in progress, and coming up at any time.')],
+        ['key' => 'schedule', 'icon' => 'calendar-date-range', 'title' => __('Schedule & reminders'), 'body' => __('Know when the crew is coming and get a heads-up before each visit.')],
+        ['key' => 'messaging', 'icon' => 'chat-bubble-left-right', 'title' => __('Direct messaging'), 'body' => __('One clean thread with your contractor—photos included.')],
+        ['key' => 'photos', 'icon' => 'photo', 'title' => __('Photos & progress'), 'body' => __('Watch your project come together with job-site photos.')],
+        ['key' => 'documents', 'icon' => 'pencil-square', 'title' => __('Estimates & e-sign'), 'body' => __('Review and approve estimates and change orders on your phone.')],
+        ['key' => 'payments', 'icon' => 'banknotes', 'title' => __('Invoices & payments'), 'body' => __('See invoices and a running total of what has been paid.')],
+        ['key' => 'selections', 'icon' => 'swatch', 'title' => __('Selections & allowances'), 'body' => __('Track your choices and where each allowance stands.')],
+        ['key' => 'notifications', 'icon' => 'bell-alert', 'title' => __('Notifications'), 'body' => __('Get a text or alert when something needs you or a date moves.')],
+        ['key' => 'access', 'icon' => 'finger-print', 'title' => __('Secure, easy access'), 'body' => __('Sign in with a private link—no app, no password to remember.')],
     ];
 
     $items = $current
@@ -40,7 +41,7 @@
                     <h3 class="mt-4 text-base font-semibold text-gray-900 dark:text-white">{{ $item['title'] }}</h3>
                     <p class="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-400">{{ $item['body'] }}</p>
                     <span class="inline-flex items-center gap-1 mt-4 text-sm font-semibold text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-500">
-                        Learn more <span aria-hidden="true" class="transition group-hover:translate-x-0.5">→</span>
+                        {{ __('Learn more') }} <span aria-hidden="true" class="transition group-hover:translate-x-0.5">→</span>
                     </span>
                 </a>
             @endforeach

@@ -1,46 +1,46 @@
 @php
     $cols = [
         [
-            'heading' => 'For contractors',
+            'heading' => __('For contractors'),
             'links' => [
-                ['label' => 'Finances & Receipts',  'route' => 'welcome.finances'],
-                ['label' => 'Estimates & Documents', 'route' => 'welcome.estimates'],
-                ['label' => 'Leads & Clients',       'route' => 'welcome.clients'],
-                ['label' => 'Vendors & Compliance',  'route' => 'welcome.vendors'],
-                ['label' => 'Planning & Scheduling', 'route' => 'welcome.planning'],
-                ['label' => 'Team & Time',           'route' => 'welcome.team'],
-                ['label' => 'Communication',         'route' => 'welcome.communication'],
-                ['label' => 'Automation & AI',       'route' => 'welcome.automation'],
+                ['label' => __('Finances & Receipts'),  'route' => 'welcome.finances'],
+                ['label' => __('Estimates & Documents'), 'route' => 'welcome.estimates'],
+                ['label' => __('Leads & Clients'),       'route' => 'welcome.clients'],
+                ['label' => __('Vendors & Compliance'),  'route' => 'welcome.vendors'],
+                ['label' => __('Planning & Scheduling'), 'route' => 'welcome.planning'],
+                ['label' => __('Team & Time'),           'route' => 'welcome.team'],
+                ['label' => __('Communication'),         'route' => 'welcome.communication'],
+                ['label' => __('Automation & AI'),       'route' => 'welcome.automation'],
             ],
         ],
         [
-            'heading' => 'For homeowners',
+            'heading' => __('For homeowners'),
             'links' => [
-                ['label' => 'Project status',       'route' => 'welcome.homeowners.status'],
-                ['label' => 'Schedule & reminders', 'route' => 'welcome.homeowners.schedule'],
-                ['label' => 'Messaging',            'route' => 'welcome.homeowners.messaging'],
-                ['label' => 'Photos',               'route' => 'welcome.homeowners.photos'],
-                ['label' => 'Documents',            'route' => 'welcome.homeowners.documents'],
-                ['label' => 'Payments',             'route' => 'welcome.homeowners.payments'],
-                ['label' => 'Selections',           'route' => 'welcome.homeowners.selections'],
-                ['label' => 'Notifications',        'route' => 'welcome.homeowners.notifications'],
-                ['label' => 'Access & login',       'route' => 'welcome.homeowners.access'],
+                ['label' => __('Project status'),       'route' => 'welcome.homeowners.status'],
+                ['label' => __('Schedule & reminders'), 'route' => 'welcome.homeowners.schedule'],
+                ['label' => __('Messaging'),            'route' => 'welcome.homeowners.messaging'],
+                ['label' => __('Photos'),               'route' => 'welcome.homeowners.photos'],
+                ['label' => __('Documents'),            'route' => 'welcome.homeowners.documents'],
+                ['label' => __('Payments'),             'route' => 'welcome.homeowners.payments'],
+                ['label' => __('Selections'),           'route' => 'welcome.homeowners.selections'],
+                ['label' => __('Notifications'),        'route' => 'welcome.homeowners.notifications'],
+                ['label' => __('Access & login'),       'route' => 'welcome.homeowners.access'],
             ],
         ],
         [
-            'heading' => 'Get started',
+            'heading' => __('Get started'),
             'links' => [
-                ['label' => 'Create your Hive', 'route' => 'registration'],
-                ['label' => 'Sign in',           'route' => 'login'],
-                ['label' => 'FAQ',               'route' => 'welcome.faq'],
-                ['label' => 'Homeowner portal',  'route' => 'welcome.homeowners'],
+                ['label' => __('Create your Hive'), 'route' => 'registration'],
+                ['label' => __('Sign in'),           'route' => 'login'],
+                ['label' => __('FAQ'),               'route' => 'welcome.faq'],
+                ['label' => __('Homeowner portal'),  'route' => 'welcome.homeowners'],
             ],
         ],
         [
-            'heading' => 'Legal',
+            'heading' => __('Legal'),
             'links' => [
-                ['label' => 'Terms of service', 'route' => 'legal.terms'],
-                ['label' => 'Privacy policy',   'route' => 'legal.privacy'],
+                ['label' => __('Terms of service'), 'route' => 'legal.terms'],
+                ['label' => __('Privacy policy'),   'route' => 'legal.privacy'],
             ],
         ],
     ];
@@ -56,7 +56,7 @@
                     <a href="{{ route('welcome') }}" class="text-base font-semibold text-gray-900 hover:text-gray-700 dark:text-white dark:hover:text-gray-300" wire:navigate.hover>Hive Contractors</a>
                 </div>
                 <p class="text-sm/6 text-balance text-gray-600 dark:text-gray-400 font-normal">
-                    Purpose-built CRM for contractors—streamline projects, vendors, finances, and client updates in one place. Made by contractors, for contractors.
+                    {{ __('Purpose-built CRM for contractors—streamline projects, vendors, finances, and client updates in one place. Made by contractors, for contractors.') }}
                 </p>
                 <div class="text-sm/6 text-gray-600 dark:text-gray-400 font-normal space-y-1">
                     <div>305 S Ridge St, PO Box 1504</div>
@@ -88,7 +88,7 @@
         </div>
 
         <div class="mt-12 border-t border-gray-900/10 pt-8 dark:border-white/10">
-            <p class="text-xs/6 font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-500">Contractors running on Hive</p>
+            <p class="text-xs/6 font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-500">{{ __('Contractors running on Hive') }}</p>
             <ul role="list" class="mt-4 flex flex-wrap items-center gap-x-8 gap-y-3">
                 @foreach ([['name' => 'GS Construction', 'url' => 'https://gs.construction', 'favicon' => 'https://gs.construction/favicon.svg']] as $company)
                     <li>
@@ -103,8 +103,8 @@
 
         <div class="mt-8 border-t border-gray-900/10 pt-6 text-sm/6 text-gray-600 dark:border-white/10 dark:text-gray-400 font-normal">
             <div class="flex flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-6">
-                <span>&copy; {{ date('Y') }} {{ config('app.name') }}. All rights reserved.</span>
-                <span>Made by Contractors. For Contractors.</span>
+                <span>&copy; {{ date('Y') }} {{ config('app.name') }}. {{ __('All rights reserved.') }}</span>
+                <span>{{ __('Made by Contractors. For Contractors.') }}</span>
             </div>
         </div>
     </div>

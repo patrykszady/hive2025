@@ -6,9 +6,9 @@
 ])
 
 @php
-    $areaConfig = config("marketing.areas.$area", []);
+    $areaConfig = marketing("areas.$area", []);
     $cards = $areaConfig['cards'] ?? [];
-    $heading = $heading ?? ($areaConfig['grid_heading'] ?? 'Explore the toolkit');
+    $heading = $heading ?? ($areaConfig['grid_heading'] ?? __('Explore the toolkit'));
 
     $items = $current
         ? array_filter($cards, fn ($key) => $key !== $current, ARRAY_FILTER_USE_KEY)
@@ -33,7 +33,7 @@
                     <h3 class="mt-4 text-base font-semibold text-gray-900 dark:text-white">{{ $card['title'] }}</h3>
                     <p class="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-400">{!! $card['body'] !!}</p>
                     <span class="inline-flex items-center gap-1 mt-4 text-sm font-semibold text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-500">
-                        Learn more <span aria-hidden="true" class="transition group-hover:translate-x-0.5">→</span>
+                        {{ __('Learn more') }} <span aria-hidden="true" class="transition group-hover:translate-x-0.5">→</span>
                     </span>
                 </a>
             @endforeach

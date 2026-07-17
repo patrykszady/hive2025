@@ -12,8 +12,8 @@
         <h1 class="mt-2 text-4xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-5xl text-balance">{{ $title }}</h1>
         <p class="mt-6 text-lg leading-8 text-gray-600 dark:text-gray-300">{{ $body }}</p>
         <div class="flex flex-wrap items-center justify-center mt-10 gap-x-6 gap-y-4">
-            <a href="{{ route('registration') }}" class="rounded-md bg-indigo-600 px-3.5 py-2.5 text-base font-semibold leading-7 text-white shadow-xs hover:bg-indigo-500" wire:navigate.hover>Create your Hive</a>
-            <a href="{{ route('welcome') }}#features" class="text-base font-semibold leading-7 text-gray-900 dark:text-white" wire:navigate.hover>See all features <span aria-hidden="true">→</span></a>
+            <a href="{{ route('registration') }}" class="rounded-md bg-indigo-600 px-3.5 py-2.5 text-base font-semibold leading-7 text-white shadow-xs hover:bg-indigo-500" wire:navigate.hover>{{ __('Create your Hive') }}</a>
+            <a href="{{ route('welcome') }}#features" class="text-base font-semibold leading-7 text-gray-900 dark:text-white" wire:navigate.hover>{{ __('See all features') }} <span aria-hidden="true">→</span></a>
         </div>
     </div>
 </div>
