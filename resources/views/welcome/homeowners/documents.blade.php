@@ -1,12 +1,12 @@
-@section('title', 'Estimates & E-Sign — Hive Contractors')
+@section('title', __('Estimates & E-Sign — Hive Contractors'))
 <x-guest-layout>
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero
         icon="pencil-square"
-        eyebrow="Your homeowner portal"
-        title="Review and sign—right from your phone"
-        body="Estimates and change orders come to you as clean, easy-to-read documents. Read every line, ask questions, and approve with a tap. No printing, scanning, or driving anywhere."
+        eyebrow="{{ __('Your homeowner portal') }}"
+        title="{{ __('Review and sign—right from your phone') }}"
+        body="{{ __('Estimates and change orders come to you as clean, easy-to-read documents. Read every line, ask questions, and approve with a tap. No printing, scanning, or driving anywhere.') }}"
     />
 
     {{-- DEEP ROWS --}}
@@ -15,10 +15,9 @@
 
             <div class="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center">
                 <div>
-                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">Documents you can actually read</h2>
+                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ __('Documents you can actually read') }}</h2>
                     <p class="mt-4 text-lg leading-8 text-gray-600 dark:text-gray-300">
-                        No more cryptic, handwritten quotes. Your estimate is itemized in plain language so you know
-                        exactly what you are paying for before you agree to anything.
+                        {{ __('No more cryptic, handwritten quotes. Your estimate is itemized in plain language so you know exactly what you are paying for before you agree to anything.') }}
                     </p>
                     <ul class="mt-8 space-y-4">
                         @foreach ([

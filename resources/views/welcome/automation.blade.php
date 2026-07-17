@@ -1,12 +1,12 @@
-@section('title', 'Automation & AI — Hive Contractors')
+@section('title', __('Automation & AI — Hive Contractors'))
 <x-guest-layout>
     <x-marketing.nav active="automation" />
 
     <x-marketing.feature-hero
         icon="sparkles"
-        eyebrow="Automation & AI"
-        title="Let the busywork run itself"
-        body="Hive reads your receipts, matches your transactions, summarizes your calls, and turns texts into tasks—quietly, in the background. The office work that used to eat your evenings just happens."
+        eyebrow="{{ __('Automation & AI') }}"
+        title="{{ __('Let the busywork run itself') }}"
+        body="{{ __('Hive reads your receipts, matches your transactions, summarizes your calls, and turns texts into tasks—quietly, in the background. The office work that used to eat your evenings just happens.') }}"
     />
 
     {{-- DEEP FEATURE ROWS --}}
@@ -16,10 +16,9 @@
             {{-- Receipt AI --}}
             <div class="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center">
                 <div>
-                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">AI that reads your receipts</h2>
+                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ __('AI that reads your receipts') }}</h2>
                     <p class="mt-4 text-lg leading-8 text-gray-600 dark:text-gray-300">
-                        Forward an email or snap a photo and Hive pulls the vendor, totals, and every line item—even
-                        handwritten notes. It can even pull itemized receipts straight from supplier accounts.
+                        {{ __('Forward an email or snap a photo and Hive pulls the vendor, totals, and every line item—even handwritten notes. It can even pull itemized receipts straight from supplier accounts.') }}
                     </p>
                     <ul class="mt-8 space-y-4">
                         @foreach ([

@@ -1,4 +1,4 @@
-@section('title', 'Vendors & Compliance — Hive Contractors')
+@section('title', __('Vendors & Compliance — Hive Contractors'))
 <x-guest-layout>
     <x-marketing.nav active="vendors" />
 

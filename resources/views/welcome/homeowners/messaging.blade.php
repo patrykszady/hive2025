@@ -1,12 +1,12 @@
-@section('title', 'Direct Messaging — Hive Contractors')
+@section('title', __('Direct Messaging — Hive Contractors'))
 <x-guest-layout>
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero
         icon="chat-bubble-left-right"
-        eyebrow="Your homeowner portal"
-        title="One conversation with your contractor"
-        body="No more scattered texts, emails, and voicemails. Every message, question, and photo lives in one clean thread you can find any time—so nothing about your project gets lost."
+        eyebrow="{{ __('Your homeowner portal') }}"
+        title="{{ __('One conversation with your contractor') }}"
+        body="{{ __('No more scattered texts, emails, and voicemails. Every message, question, and photo lives in one clean thread you can find any time—so nothing about your project gets lost.') }}"
     />
 
     {{-- DEEP ROWS --}}
@@ -15,17 +15,16 @@
 
             <div class="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center">
                 <div>
-                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">Everything in one thread</h2>
+                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ __('Everything in one thread') }}</h2>
                     <p class="mt-4 text-lg leading-8 text-gray-600 dark:text-gray-300">
-                        Ask a question, share a concern, or get an answer—all in one place tied to your project. You will
-                        always know where to look, and so will your contractor.
+                        {{ __('Ask a question, share a concern, or get an answer—all in one place tied to your project. You will always know where to look, and so will your contractor.') }}
                     </p>
                     <ul class="mt-8 space-y-4">
                         @foreach ([
-                            'A single thread for your whole project',
-                            'No more digging through texts and email',
-                            'Your contractor sees it alongside your job',
-                            'Searchable any time you need it',
+                            __('A single thread for your whole project'),
+                            __('No more digging through texts and email'),
+                            __('Your contractor sees it alongside your job'),
+                            __('Searchable any time you need it'),
                         ] as $item)
                             <li class="flex gap-3 text-base text-gray-700 dark:text-gray-300">
                                 <flux:icon name="check-circle" class="w-6 h-6 shrink-0 text-indigo-600 dark:text-indigo-400" />
@@ -37,17 +36,17 @@
                 <div class="p-6 rounded-2xl bg-gray-50 dark:bg-zinc-900 ring-1 ring-gray-200 dark:ring-zinc-800">
                     <div class="space-y-3">
                         <div class="max-w-[80%] p-3 rounded-2xl rounded-bl-sm bg-white dark:bg-zinc-950 ring-1 ring-gray-200 dark:ring-zinc-800">
-                            <p class="text-sm text-gray-900 dark:text-white">Quick question—can we move the island 6 inches toward the window?</p>
-                            <p class="mt-1 text-xs text-gray-400">You · 9:14 AM</p>
+                            <p class="text-sm text-gray-900 dark:text-white">{{ __('Quick question—can we move the island 6 inches toward the window?') }}</p>
+                            <p class="mt-1 text-xs text-gray-400">{{ __('You · 9:14 AM') }}</p>
                         </div>
                         <div class="max-w-[80%] ml-auto p-3 rounded-2xl rounded-br-sm bg-indigo-600 text-white">
-                            <p class="text-sm">Absolutely. I&rsquo;ll update the plan and send a quick change order to confirm.</p>
-                            <p class="mt-1 text-xs text-indigo-200">Mike · 9:21 AM</p>
+                            <p class="text-sm">{!! __('Absolutely. I&rsquo;ll update the plan and send a quick change order to confirm.') !!}</p>
+                            <p class="mt-1 text-xs text-indigo-200">{{ __('Mike · 9:21 AM') }}</p>
                         </div>
                         <div class="max-w-[80%] ml-auto p-3 rounded-2xl rounded-br-sm bg-indigo-600 text-white">
                             <flux:icon name="photo" class="w-5 h-5 mb-1 text-indigo-200" />
-                            <p class="text-sm">Here is the layout with the new spacing.</p>
-                            <p class="mt-1 text-xs text-indigo-200">Mike · 9:22 AM</p>
+                            <p class="text-sm">{{ __('Here is the layout with the new spacing.') }}</p>
+                            <p class="mt-1 text-xs text-indigo-200">{{ __('Mike · 9:22 AM') }}</p>
                         </div>
                     </div>
                 </div>
@@ -55,17 +54,16 @@
 
             <div class="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center">
                 <div class="lg:order-last">
-                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">Share photos and get answers</h2>
+                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ __('Share photos and get answers') }}</h2>
                     <p class="mt-4 text-lg leading-8 text-gray-600 dark:text-gray-300">
-                        Send a photo of the spot you are asking about, point to a detail, and keep the conversation moving.
-                        It is the easiest way to stay on the same page without a single phone tag round.
+                        {{ __('Send a photo of the spot you are asking about, point to a detail, and keep the conversation moving. It is the easiest way to stay on the same page without a single phone tag round.') }}
                     </p>
                     <ul class="mt-8 space-y-4">
                         @foreach ([
-                            'Attach photos right in the conversation',
-                            'Reference exactly what you mean',
-                            'Get notified when your contractor replies',
-                            'Keep a record of every decision',
+                            __('Attach photos right in the conversation'),
+                            __('Reference exactly what you mean'),
+                            __('Get notified when your contractor replies'),
+                            __('Keep a record of every decision'),
                         ] as $item)
                             <li class="flex gap-3 text-base text-gray-700 dark:text-gray-300">
                                 <flux:icon name="check-circle" class="w-6 h-6 shrink-0 text-indigo-600 dark:text-indigo-400" />

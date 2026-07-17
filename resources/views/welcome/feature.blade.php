@@ -35,7 +35,7 @@
                     @php $panel = $row['panel']; @endphp
                     @if (($panel['style'] ?? 'gray') === 'indigo')
                         <div class="p-8 rounded-2xl bg-indigo-600 shadow-xl">
-                            <p class="text-xs font-semibold tracking-wide text-indigo-100 uppercase">{!! $panel['label'] ?? 'Why it matters' !!}</p>
+                            <p class="text-xs font-semibold tracking-wide text-indigo-100 uppercase">{!! $panel['label'] ?? __('Why it matters') !!}</p>
                             <p class="mt-4 text-lg font-medium leading-8 text-white">{!! $panel['note'] !!}</p>
                         </div>
                     @else
@@ -76,7 +76,7 @@
     <div class="py-20 bg-gray-100 dark:bg-zinc-900 sm:py-28">
         <div class="px-6 mx-auto max-w-7xl lg:px-8">
             <div class="max-w-2xl mx-auto text-center">
-                <h2 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl">What you get</h2>
+                <h2 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl">{{ __('What you get') }}</h2>
             </div>
             <dl class="grid max-w-xl grid-cols-1 mx-auto mt-16 gap-x-8 gap-y-12 lg:max-w-none lg:grid-cols-3">
                 @foreach ($features as $feature)
@@ -94,11 +94,11 @@
         </div>
     </div>
 
-    <x-marketing.feature-links :area="$areaKey" :current="$cardKey" :heading="'Explore the rest of ' . $area['label']" />
+    <x-marketing.feature-links :area="$areaKey" :current="$cardKey" :heading="__('Explore the rest of ') . $area['label']" />
 
     <x-marketing.cta
-        :heading="$cta['heading'] ?? 'Run your whole business in one place.'"
-        :subheading="$cta['sub'] ?? 'Join the contractors who trust Hive to keep every job on track.'"
+        :heading="$cta['heading'] ?? __('Run your whole business in one place.')"
+        :subheading="$cta['sub'] ?? __('Join the contractors who trust Hive to keep every job on track.')"
     />
 
     <x-marketing.footer />

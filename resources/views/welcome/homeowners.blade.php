@@ -1,12 +1,12 @@
-@section('title', 'For Homeowners — Hive Contractors')
+@section('title', __('For Homeowners — Hive Contractors'))
 <x-guest-layout>
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero
         icon="home-modern"
-        eyebrow="For Homeowners"
-        title="Always know exactly where your project stands"
-        body="When your contractor works in Hive, you get a private window into your whole project—what is done, what is happening today, and what is coming next. No more wondering, no more &ldquo;any update?&rdquo; texts that go unanswered."
+        :eyebrow="__('For Homeowners')"
+        :title="__('Always know exactly where your project stands')"
+        :body="__('When your contractor works in Hive, you get a private window into your whole project—what is done, what is happening today, and what is coming next. No more wondering, no more &ldquo;any update?&rdquo; texts that go unanswered.')"
     />
 
     {{-- WHAT YOU GET --}}
@@ -16,17 +16,16 @@
             {{-- Live status --}}
             <div class="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center">
                 <div>
-                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">See your whole project at a glance</h2>
+                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ __('See your whole project at a glance') }}</h2>
                     <p class="mt-4 text-lg leading-8 text-gray-600 dark:text-gray-300">
-                        Log in and instantly see the big picture: completed work, what the crew is doing right now, and
-                        what is up next. Everything updates in real time as your contractor moves the job forward.
+                        {{ __('Log in and instantly see the big picture: completed work, what the crew is doing right now, and what is up next. Everything updates in real time as your contractor moves the job forward.') }}
                     </p>
                     <ul class="mt-8 space-y-4">
                         @foreach ([
-                            'Real-time status for every stage of the work',
-                            'A clear &ldquo;what is next&rdquo; so there are no surprises',
-                            'Progress you can check anytime, day or night',
-                            'One place for the whole project—not scattered texts',
+                            __('Real-time status for every stage of the work'),
+                            __('A clear &ldquo;what is next&rdquo; so there are no surprises'),
+                            __('Progress you can check anytime, day or night'),
+                            __('One place for the whole project—not scattered texts'),
                         ] as $item)
                             <li class="flex gap-3 text-base text-gray-700 dark:text-gray-300">
                                 <flux:icon name="check-circle" class="w-6 h-6 shrink-0 text-indigo-600 dark:text-indigo-400" />
