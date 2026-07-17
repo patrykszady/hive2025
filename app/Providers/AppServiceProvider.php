@@ -151,6 +151,12 @@ class AppServiceProvider extends ServiceProvider
         $this->bootEvent();
         $this->bootRoute();
 
+        // Marketing routes carry a required {locale} prefix, so route('welcome')
+        // needs a 'locale' default everywhere — including pages outside the
+        // marketing group (login, emails, dashboard). SetLocale overrides this
+        // with the active locale on the marketing pages themselves.
+        URL::defaults(['locale' => config('locales.default', 'en')]);
+
         // Set Carbon timezone to match app timezone
         Carbon::setLocale(config('app.locale'));
 

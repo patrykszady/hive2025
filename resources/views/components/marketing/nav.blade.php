@@ -2,14 +2,14 @@
 
 @php
     $contractorPages = [
-        ['route' => 'welcome.finances', 'label' => 'Finances', 'icon' => 'credit-card', 'key' => 'finances'],
-        ['route' => 'welcome.estimates', 'label' => 'Estimates & Documents', 'icon' => 'document-text', 'key' => 'estimates'],
-        ['route' => 'welcome.clients', 'label' => 'Leads & Clients', 'icon' => 'users', 'key' => 'clients'],
-        ['route' => 'welcome.vendors', 'label' => 'Vendors & Compliance', 'icon' => 'user-group', 'key' => 'vendors'],
-        ['route' => 'welcome.planning', 'label' => 'Planning', 'icon' => 'calendar', 'key' => 'planning'],
-        ['route' => 'welcome.team', 'label' => 'Team & Time', 'icon' => 'clock', 'key' => 'team'],
-        ['route' => 'welcome.communication', 'label' => 'Communication', 'icon' => 'chat-bubble-left-right', 'key' => 'communication'],
-        ['route' => 'welcome.automation', 'label' => 'Automation & AI', 'icon' => 'sparkles', 'key' => 'automation'],
+        ['route' => 'welcome.finances', 'label' => __('marketing.nav.pages.finances'), 'icon' => 'credit-card', 'key' => 'finances'],
+        ['route' => 'welcome.estimates', 'label' => __('marketing.nav.pages.estimates'), 'icon' => 'document-text', 'key' => 'estimates'],
+        ['route' => 'welcome.clients', 'label' => __('marketing.nav.pages.clients'), 'icon' => 'users', 'key' => 'clients'],
+        ['route' => 'welcome.vendors', 'label' => __('marketing.nav.pages.vendors'), 'icon' => 'user-group', 'key' => 'vendors'],
+        ['route' => 'welcome.planning', 'label' => __('marketing.nav.pages.planning'), 'icon' => 'calendar', 'key' => 'planning'],
+        ['route' => 'welcome.team', 'label' => __('marketing.nav.pages.team'), 'icon' => 'clock', 'key' => 'team'],
+        ['route' => 'welcome.communication', 'label' => __('marketing.nav.pages.communication'), 'icon' => 'chat-bubble-left-right', 'key' => 'communication'],
+        ['route' => 'welcome.automation', 'label' => __('marketing.nav.pages.automation'), 'icon' => 'sparkles', 'key' => 'automation'],
     ];
     $contractorActive = collect($contractorPages)->contains('key', $active);
 @endphp
@@ -31,7 +31,7 @@
         <flux:navbar class="-mb-px">
             <flux:dropdown position="bottom" align="center">
                 <flux:navbar.item icon:trailing="chevron-down" :current="$contractorActive">
-                    Contractors
+                    {{ __('marketing.nav.contractors') }}
                 </flux:navbar.item>
                 <flux:navmenu>
                     @foreach ($contractorPages as $page)
@@ -48,30 +48,32 @@
                 href="{{ route('welcome.homeowners') }}"
                 :current="$active === 'homeowners'"
                 wire:navigate.hover
-            >Homeowners</flux:navbar.item>
+            >{{ __('marketing.nav.homeowners') }}</flux:navbar.item>
             <flux:navbar.item
                 href="{{ route('welcome.faq') }}"
                 :current="$active === 'faq'"
                 wire:navigate.hover
-            >FAQ</flux:navbar.item>
+            >{{ __('marketing.nav.faq') }}</flux:navbar.item>
         </flux:navbar>
     </div>
 
     <div class="flex items-center gap-2 flex-1 justify-end">
+        <x-marketing.language-switcher />
+
         <flux:button
             href="{{ route('login') }}"
             class="max-lg:hidden !px-3 !py-2 text-sm font-semibold border border-transparent hover:border-zinc-300 dark:hover:border-zinc-600"
             wire:navigate.hover
         >
-            Sign in
+            {{ __('marketing.nav.sign_in') }}
         </flux:button>
-        <flux:button href="{{ route('registration') }}" class="!bg-indigo-600 hover:!bg-indigo-500 !text-white font-semibold !px-3 !py-2 text-sm" wire:navigate.hover>Get started</flux:button>
+        <flux:button href="{{ route('registration') }}" class="!bg-indigo-600 hover:!bg-indigo-500 !text-white font-semibold !px-3 !py-2 text-sm" wire:navigate.hover>{{ __('marketing.nav.get_started') }}</flux:button>
 
         <flux:dropdown class="lg:hidden" position="bottom" align="end">
             <flux:button variant="ghost" icon="bars-2" aria-label="Menu" class="!px-2 !py-2" />
             <flux:navmenu>
                 <flux:navmenu.item href="{{ route('welcome.homeowners') }}" icon="home-modern" :current="$active === 'homeowners'" wire:navigate.hover>
-                    Homeowners
+                    {{ __('marketing.nav.homeowners') }}
                 </flux:navmenu.item>
                 <flux:navmenu.separator />
                 @foreach ($contractorPages as $page)
@@ -79,10 +81,10 @@
                         {{ $page['label'] }}
                     </flux:navmenu.item>
                 @endforeach
-                <flux:navmenu.item href="{{ route('welcome.faq') }}" icon="question-mark-circle" wire:navigate.hover>FAQ</flux:navmenu.item>
+                <flux:navmenu.item href="{{ route('welcome.faq') }}" icon="question-mark-circle" wire:navigate.hover>{{ __('marketing.nav.faq') }}</flux:navmenu.item>
                 <flux:navmenu.separator />
-                <flux:navmenu.item href="{{ route('login') }}" icon="arrow-right-end-on-rectangle" wire:navigate.hover>Sign in</flux:navmenu.item>
-                <flux:navmenu.item href="{{ route('registration') }}" icon="sparkles" wire:navigate.hover>Get started</flux:navmenu.item>
+                <flux:navmenu.item href="{{ route('login') }}" icon="arrow-right-end-on-rectangle" wire:navigate.hover>{{ __('marketing.nav.sign_in') }}</flux:navmenu.item>
+                <flux:navmenu.item href="{{ route('registration') }}" icon="sparkles" wire:navigate.hover>{{ __('marketing.nav.get_started') }}</flux:navmenu.item>
             </flux:navmenu>
         </flux:dropdown>
     </div>

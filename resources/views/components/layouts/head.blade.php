@@ -74,6 +74,16 @@
     <meta name="apple-mobile-web-app-title" content="{{ config('app.name') }}">
 
     <title>{{ isset($title) ? $title . ' | ' . env('APP_NAME') : env('APP_NAME')}}</title>
+
+    {{-- hreflang alternates for the public marketing site: tells search engines
+         this page exists in each language and how to reach it. Only emitted on
+         localizable public routes (those under the SetLocale middleware). --}}
+    @if (Route::current() && collect(Route::current()->gatherMiddleware())->contains(\App\Http\Middleware\SetLocale::class))
+        @foreach (config('locales.supported', []) as $code => $meta)
+            <link rel="alternate" hreflang="{{ $meta['hreflang'] ?? $code }}" href="{{ locale_alternate_url($code) }}">
+        @endforeach
+        <link rel="alternate" hreflang="x-default" href="{{ locale_alternate_url(config('locales.default', 'en')) }}">
+    @endif
     {{-- Favicon: ICO for legacy browsers, SVG for modern, PNG fallback --}}
     <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="48x48">
     <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">

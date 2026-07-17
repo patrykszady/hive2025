@@ -223,3 +223,65 @@ if (! function_exists('task_datetime_in_browser_tz')) {
         return \Illuminate\Support\Carbon::createFromFormat('Y-m-d', $dateKey, $browserTz)->startOfDay();
     }
 }
+
+if (! function_exists('marketing')) {
+    /**
+     * Locale-aware public marketing content. Reads from lang/{locale}/marketing.php
+     * (translated), falling back to the English lang file, then to
+     * config/marketing.php. Keys/slugs/icons are identical across locales —
+     * only human-readable strings differ — so callers use the same key
+     * regardless of the active locale.
+     *
+     *   marketing()                 // full array
+     *   marketing('areas.finances') // one area, dot-notation
+     */
+    function marketing(?string $key = null, $default = null)
+    {
+        $locale = app()->getLocale();
+
+        // trans() returns the key string itself when a translation file/key is
+        // missing; detect that and fall back to the English config source.
+        $line = "marketing.".($key ?? '');
+        $line = rtrim($line, '.');
+
+        $value = trans($line, [], $locale);
+
+        if (! is_array($value)) {
+            // Fall back to the English lang file, then the legacy config.
+            $value = trans($line, [], config('locales.default', 'en'));
+        }
+
+        if (! is_array($value)) {
+            $value = $key ? config("marketing.$key", $default) : config('marketing', $default);
+        }
+
+        return $value;
+    }
+}
+
+if (! function_exists('locale_alternate_url')) {
+    /**
+     * The current request's path rendered under a different locale prefix —
+     * used by the language switcher and hreflang tags. The default locale is
+     * un-prefixed (/welcome); others carry their code (/pl/welcome). Query
+     * string is preserved.
+     */
+    function locale_alternate_url(string $targetLocale): string
+    {
+        $request = request();
+        $supported = array_keys(config('locales.supported', ['en' => []]));
+
+        $segments = $request->segments();
+
+        // Drop an existing locale prefix so we're left with the bare path.
+        if (isset($segments[0]) && in_array($segments[0], $supported, true)) {
+            array_shift($segments);
+        }
+
+        $path = implode('/', array_merge([$targetLocale], $segments));
+
+        $query = $request->getQueryString();
+
+        return url($path).($query ? '?'.$query : '');
+    }
+}

@@ -156,10 +156,8 @@ $hubRoutes = function () {
 //if guests go to '/', if logged in go to dashboard (or to /account/selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
     Route::get('/', function () {
-        return redirect()->route('welcome');
+        return redirect()->route('welcome', ['locale' => config('locales.default', 'en')]);
     })->name('home');
-
-    Route::view('welcome', 'welcome')->name('welcome');
 
     Route::get('login', Login::class)->name('login');
     Route::get('cant-login', CantLogin::class)->name('cant.login');
@@ -169,51 +167,78 @@ Route::middleware('guest')->group(function () {
     Route::get('registration', Registration::class)->name('registration');
 });
 
-// Public marketing feature pages (no auth required)
-Route::prefix('welcome')->name('welcome.')->group(function () {
-    Route::view('finances', 'welcome.finances')->name('finances');
-    Route::view('estimates', 'welcome.estimates')->name('estimates');
-    Route::view('clients', 'welcome.clients')->name('clients');
-    Route::view('vendors', 'welcome.vendors')->name('vendors');
-    Route::view('planning', 'welcome.planning')->name('planning');
-    Route::view('team', 'welcome.team')->name('team');
-    Route::view('communication', 'welcome.communication')->name('communication');
-    Route::view('automation', 'welcome.automation')->name('automation');
-    Route::view('homeowners', 'welcome.homeowners')->name('homeowners');
+// Public marketing site — one canonical URL per language under its locale
+// code: /en/welcome, /pl/welcome, /es/welcome. A single required {locale}
+// prefix keeps route names unique and works in every environment (tests,
+// route:cache, Octane); SetLocale sets the app locale and pins
+// URL::defaults('locale') so every route('welcome') link stays
+// language-correct with no call-site changes. Bare /welcome paths 301 to the
+// default locale below, preserving old links and SEO.
+$localePattern = implode('|', array_keys(config('locales.supported', ['en' => []])));
 
-    Route::prefix('homeowners')->name('homeowners.')->group(function () {
-        Route::view('status', 'welcome.homeowners.status')->name('status');
-        Route::view('schedule', 'welcome.homeowners.schedule')->name('schedule');
-        Route::view('messaging', 'welcome.homeowners.messaging')->name('messaging');
-        Route::view('photos', 'welcome.homeowners.photos')->name('photos');
-        Route::view('documents', 'welcome.homeowners.documents')->name('documents');
-        Route::view('payments', 'welcome.homeowners.payments')->name('payments');
-        Route::view('selections', 'welcome.homeowners.selections')->name('selections');
-        Route::view('notifications', 'welcome.homeowners.notifications')->name('notifications');
-        Route::view('access', 'welcome.homeowners.access')->name('access');
+Route::prefix('{locale}')
+    ->where(['locale' => $localePattern])
+    ->middleware(\App\Http\Middleware\SetLocale::class)
+    ->group(function () {
+        Route::view('welcome', 'welcome')->name('welcome');
+
+        Route::prefix('welcome')->name('welcome.')->group(function () {
+            Route::view('finances', 'welcome.finances')->name('finances');
+            Route::view('estimates', 'welcome.estimates')->name('estimates');
+            Route::view('clients', 'welcome.clients')->name('clients');
+            Route::view('vendors', 'welcome.vendors')->name('vendors');
+            Route::view('planning', 'welcome.planning')->name('planning');
+            Route::view('team', 'welcome.team')->name('team');
+            Route::view('communication', 'welcome.communication')->name('communication');
+            Route::view('automation', 'welcome.automation')->name('automation');
+            Route::view('homeowners', 'welcome.homeowners')->name('homeowners');
+
+            Route::prefix('homeowners')->name('homeowners.')->group(function () {
+                Route::view('status', 'welcome.homeowners.status')->name('status');
+                Route::view('schedule', 'welcome.homeowners.schedule')->name('schedule');
+                Route::view('messaging', 'welcome.homeowners.messaging')->name('messaging');
+                Route::view('photos', 'welcome.homeowners.photos')->name('photos');
+                Route::view('documents', 'welcome.homeowners.documents')->name('documents');
+                Route::view('payments', 'welcome.homeowners.payments')->name('payments');
+                Route::view('selections', 'welcome.homeowners.selections')->name('selections');
+                Route::view('notifications', 'welcome.homeowners.notifications')->name('notifications');
+                Route::view('access', 'welcome.homeowners.access')->name('access');
+            });
+
+            // Include $locale in the signature: with the {locale} prefix the
+            // route now has three params, and closure args bind positionally —
+            // omitting $locale would shift the locale value into $area.
+            Route::get('{area}/{card}', function (string $locale, string $area, string $card) {
+                $areaConfig = marketing("areas.$area");
+                abort_unless($areaConfig && isset($areaConfig['cards'][$card]), 404);
+
+                return view('welcome.feature', [
+                    'areaKey' => $area,
+                    'cardKey' => $card,
+                    'area' => $areaConfig,
+                    'card' => $areaConfig['cards'][$card],
+                ]);
+            })->whereIn('area', array_keys(config('marketing.areas')))->name('feature');
+        });
+
+        // Standalone FAQ page
+        Route::view('welcome/faq', 'welcome.faq')->name('welcome.faq');
     });
 
-    Route::get('{area}/{card}', function (string $area, string $card) {
-        $areaConfig = config("marketing.areas.$area");
-        abort_unless($areaConfig && isset($areaConfig['cards'][$card]), 404);
-
-        return view('welcome.feature', [
-            'areaKey' => $area,
-            'cardKey' => $card,
-            'area' => $areaConfig,
-            'card' => $areaConfig['cards'][$card],
-        ]);
-    })->whereIn('area', array_keys(config('marketing.areas')))->name('feature');
-});
-
-// Standalone FAQ page
-Route::view('welcome/faq', 'welcome.faq')->name('welcome.faq');
-
-// Legal pages (public, no auth required)
+// Legal pages (public, no auth required) — un-prefixed, registered before the
+// bare-welcome catch-all below so /welcome/legal/* keeps matching here.
 Route::prefix('welcome/legal')->name('legal.')->group(function () {
     Route::view('privacy', 'legal.privacy-policy')->name('privacy');
     Route::view('terms', 'legal.terms-of-service')->name('terms');
 });
+
+// Bare (un-prefixed) marketing paths 301 to the default locale so old links,
+// bookmarks, and existing SEO for /welcome keep resolving.
+$defaultLocale = config('locales.default', 'en');
+Route::permanentRedirect('welcome', "/{$defaultLocale}/welcome");
+Route::get('welcome/{path}', function (string $path) use ($defaultLocale) {
+    return redirect("/{$defaultLocale}/welcome/{$path}", 301);
+})->where('path', '.*')->name('welcome.legacy');
 
 Route::permanentRedirect('legal', '/welcome/legal');
 Route::permanentRedirect('legal/privacy', '/welcome/legal/privacy');
