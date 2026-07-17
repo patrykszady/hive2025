@@ -49,6 +49,8 @@ class Index extends Component
 
     public string $newNotes = '';
 
+    public ?int $newPaymentId = null;
+
     #[Placeholder]
     public function skeleton()
     {
@@ -172,7 +174,48 @@ class Index extends Component
         $this->newThroughDate = now()->toDateString();
         $this->prefillPayerFromProject();
         $this->newNotes = '';
+        $this->newPaymentId = null;
+        unset($this->projectPayments);
         $this->showCreate = true;
+    }
+
+    /**
+     * Payments already recorded on this project — shown in the create modal
+     * so the waiver can be issued against a specific payment (amount and
+     * through-date follow the selection, and the waiver links to it).
+     */
+    #[Computed]
+    public function projectPayments()
+    {
+        if (! $this->project) {
+            return collect();
+        }
+
+        return \App\Models\Payment::withoutGlobalScopes()
+            ->where('project_id', $this->project->id)
+            ->with('lienWaiver:id,payment_id,status,type')
+            ->orderByDesc('date')
+            ->get();
+    }
+
+    public function selectPayment(?int $paymentId): void
+    {
+        // Clicking the selected payment again deselects it.
+        if ($paymentId === null || $this->newPaymentId === $paymentId) {
+            $this->newPaymentId = null;
+
+            return;
+        }
+
+        $payment = $this->projectPayments->firstWhere('id', $paymentId);
+
+        if (! $payment) {
+            return;
+        }
+
+        $this->newPaymentId = $payment->id;
+        $this->newAmount = number_format((float) $payment->amount, 2, '.', '');
+        $this->newThroughDate = optional($payment->date)->toDateString() ?? $this->newThroughDate;
     }
 
     public function createWaiver(): void
@@ -222,12 +265,17 @@ class Index extends Component
             ? 'US-' . $jurisdiction
             : 'US-GENERIC';
 
+        // A linked payment must belong to this project; ignore anything else.
+        $linkedPayment = $this->newPaymentId
+            ? $this->projectPayments->firstWhere('id', $this->newPaymentId)
+            : null;
+
         LienWaiver::create([
             'belongs_to_vendor_id' => $contractor->id,
             'vendor_id' => $contractor->id,
             'project_id' => $this->project->id,
             'check_id' => null,
-            'payment_id' => null,
+            'payment_id' => $linkedPayment?->id,
             'type' => $type,
             'status' => LienWaiverStatus::Draft,
             'amount' => $isPaidInFull ? 0 : $this->newAmount,

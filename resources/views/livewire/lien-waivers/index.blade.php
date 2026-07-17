@@ -164,6 +164,39 @@
                     @endforeach
                 </flux:select>
 
+                @if($this->projectPayments->isNotEmpty())
+                    <flux:field>
+                        <flux:label>Payments received on this project</flux:label>
+                        <flux:description>Select a payment to issue this waiver against — the amount and through date follow it.</flux:description>
+                        <div class="mt-1 divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-700">
+                            @foreach($this->projectPayments as $payment)
+                                @php($hasWaiver = $payment->lienWaiver !== null)
+                                <button
+                                    type="button"
+                                    wire:click="selectPayment({{ $payment->id }})"
+                                    class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition
+                                        {{ $newPaymentId === $payment->id ? 'bg-indigo-50 dark:bg-indigo-950/40' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/60' }}"
+                                >
+                                    <span class="flex items-center gap-3 min-w-0">
+                                        <flux:icon
+                                            name="{{ $newPaymentId === $payment->id ? 'check-circle' : 'circle-stack' }}"
+                                            class="w-5 h-5 shrink-0 {{ $newPaymentId === $payment->id ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400' }}"
+                                        />
+                                        <span class="font-semibold text-zinc-900 dark:text-zinc-100">{{ money($payment->amount) }}</span>
+                                        <span class="text-zinc-500">{{ optional($payment->date)->format('m/d/Y') }}</span>
+                                        @if($payment->reference)
+                                            <span class="truncate text-zinc-400">{{ $payment->reference }}</span>
+                                        @endif
+                                    </span>
+                                    @if($hasWaiver)
+                                        <flux:badge size="sm" color="amber" class="shrink-0">Waiver exists</flux:badge>
+                                    @endif
+                                </button>
+                            @endforeach
+                        </div>
+                    </flux:field>
+                @endif
+
                 <div class="flex flex-nowrap items-start gap-4">
                     <div class="min-w-0 flex-1">
                         @if($newType === \App\Enums\LienWaiverType::UnconditionalFinal->value)

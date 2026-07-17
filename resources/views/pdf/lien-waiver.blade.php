@@ -41,6 +41,20 @@
         .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 9pt;
             background: #eef; color: #225; font-weight: 600; }
         .totals { margin-top: 8px; font-size: 12pt; }
+        /* Traditional IL form styles */
+        .il-form { font-size: 10.5pt; line-height: 1.7; }
+        .il-form .fill { display: inline-block; border-bottom: 1px solid #333; padding: 0 6px; min-width: 120px; font-weight: 600; }
+        .il-form .fill.wide { min-width: 320px; }
+        .il-form .fill.full { display: block; width: 100%; }
+        .il-title { font-size: 13pt; font-weight: 700; text-align: center; text-decoration: underline; margin: 14px 0 16px; letter-spacing: 0.04em; }
+        .il-small { font-size: 8.5pt; }
+        .il-affidavit-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 9.5pt; }
+        .il-affidavit-table th, .il-affidavit-table td { border: 1px solid #333; padding: 5px 6px; text-align: left; }
+        .il-affidavit-table th { background: #f0f0f0; font-size: 8.5pt; text-transform: uppercase; text-align: center; }
+        .il-affidavit-table td.num { text-align: right; }
+        .il-affidavit-table td.blank { height: 20px; }
+        .il-sig-line { border-bottom: 1px solid #333; display: inline-block; min-width: 300px; vertical-align: bottom; }
+        .il-page-break { page-break-before: always; break-before: page; }
         .totals strong { font-size: 13pt; }
         .typed-signature {
             font-family: 'Dancing Script', 'Brush Script MT', 'Segoe Script', 'Lucida Handwriting', cursive;
@@ -120,21 +134,238 @@
             : '—';
     @endphp
 
+    @php
+        // Direct view() renders (tests, previews) may omit the generator-computed
+        // context — default them so the template stands alone.
+        $amountWords = $amountWords ?? null;
+        $affidavit = $affidavit ?? ['contract_total' => 0.0, 'prior_paid' => 0.0, 'this_payment' => (float) ($waiver->amount ?? 0), 'balance_due' => 0.0];
+        $payerNameIl = $payerVendor?->business_name ?? ($payerOverride['name'] ?? 'the Owner / General Contractor');
+        $ownerNameIl = $project->client?->name ?? ($payerOverride['name'] ?? 'the Owner');
+        $projectAddressIl = trim(($project->address ?? '') . ', ' . ($project->city ?? '') . ', ' . ($project->state ?? '') . ' ' . ($project->zip_code ?? ''), ', ');
+        $vendorAddressIl = trim(($vendor->address ?? '') . ', ' . ($vendor->city ?? '') . ', ' . ($vendor->state ?? '') . ' ' . ($vendor->zip_code ?? ''), ', ');
+        $workFurnishedIl = 'labor, services, material, fixtures, apparatus and machinery';
+        $firstSignature = $signatures->first();
+        $isPaidInFullIl = $waiver->type === \App\Enums\LienWaiverType::UnconditionalFinal;
+    @endphp
+
     @if($isIllinois)
-        <h1>
-            @if($waiver->type?->isFinal())
-                FINAL WAIVER OF LIEN
-            @else
-                WAIVER OF LIEN TO DATE
+        {{-- ============ TRADITIONAL ILLINOIS FORM (matches office layout) ============ --}}
+        <div class="il-form">
+            <p style="margin: 0;">
+                STATE OF ILLINOIS<br>
+                COUNTY OF <span class="fill">{{ !empty($projectCounty ?? null) ? strtoupper($projectCounty) : '' }}</span>
+            </p>
+
+            <div class="il-title">
+                @if($waiver->type?->isFinal())
+                    FINAL WAIVER OF LIEN
+                @else
+                    WAIVER OF LIEN TO DATE
+                @endif
+            </div>
+
+            <p>
+                WHEREAS the undersigned has been employed by
+                <span class="fill wide">{{ $payerNameIl }}</span><br>
+                to furnish <span class="fill wide">{{ $workFurnishedIl }}</span><br>
+                for the premises known as <span class="fill wide">{{ $projectAddressIl ?: '' }}</span><br>
+                of which <span class="fill wide">{{ $ownerNameIl }}</span> is the owner.
+            </p>
+
+            <p>
+                THE undersigned, for and in consideration of
+                <span class="fill wide">{{ $isPaidInFullIl ? 'payment in full of the contract price' : ($amountWords ?? '') }}</span>
+                <span class="il-small">(write out amount)</span><br>
+                (<span class="fill">{{ $isPaidInFullIl ? 'PAID IN FULL' : $displayAmount }}</span>) Dollars,
+                and other good and valuable considerations, the receipt whereof is hereby acknowledged,
+                do(es) hereby waive and release any and all lien or claim of, or right to, lien, under the
+                statutes of the State of ILLINOIS, relating to mechanics&rsquo; liens, with respect to and on said
+                above-described premises, and the improvements thereon, and on the material, fixtures,
+                apparatus or machinery furnished, and on the moneys, funds or other considerations due or to
+                become due from the owner, on account of all labor, services, material, fixtures, apparatus
+                or machinery,
+                @if($waiver->type?->isFinal())
+                    heretofore furnished or which may be furnished at any time hereafter,
+                @else
+                    heretofore furnished to this date
+                @endif
+                by the undersigned for the above-described premises, INCLUDING EXTRAS.*
+            </p>
+
+            @if($waiver->type?->isConditional())
+                <p>
+                    <strong>CONDITION:</strong> This waiver is conditional and becomes effective only upon
+                    the undersigned&rsquo;s actual receipt of the payment stated above.
+                </p>
             @endif
-        </h1>
-        <p class="subtitle">
-            STATE OF ILLINOIS
-            &nbsp;·&nbsp;
-            770 ILCS 60/
-            &nbsp;·&nbsp;
-            <span class="badge">{{ $waiver->type?->shortLabel() }}</span>
-        </p>
+
+            <table style="width: 100%; border-collapse: collapse; margin-top: 18px;">
+                <tr>
+                    <td style="width: 50%; vertical-align: bottom; padding-right: 16px;">
+                        <strong>DATE</strong> <span class="fill">{{ optional($waiver->through_date)->format('m/d/Y') ?? now()->format('m/d/Y') }}</span>
+                    </td>
+                    <td style="width: 50%; vertical-align: bottom;">
+                        <strong>COMPANY NAME</strong> <span class="fill wide">{{ $vendor->business_name }}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td style="padding-top: 8px;">
+                        <strong>ADDRESS</strong> <span class="fill wide">{{ $vendorAddressIl }}</span>
+                    </td>
+                </tr>
+            </table>
+
+            <div style="margin-top: 22px;" class="{{ $isDraft ? 'draft-signature-zone' : '' }}">
+                <strong>SIGNATURE AND TITLE</strong>
+                @if($firstSignature)
+                    <span class="il-sig-line" style="text-align: center;">
+                        @if($firstSignature->signature_type === 'type')
+                            <span class="typed-signature" style="font-size: 26px;">{{ $firstSignature->signer_name }}</span>
+                        @else
+                            <img src="{{ $firstSignature->signature_data }}" style="max-height: 44px; vertical-align: bottom;" alt="signature" />
+                        @endif
+                        <span style="font-size: 9pt; color: #444;">
+                            &nbsp;{{ $firstSignature->signer_name }}@if($firstSignature->signer_title), {{ $firstSignature->signer_title }}@endif
+                        </span>
+                    </span>
+                @else
+                    <span class="il-sig-line">&nbsp;</span>
+                @endif
+            </div>
+
+            <p class="il-small" style="margin-top: 14px;">
+                *EXTRAS INCLUDE BUT ARE NOT LIMITED TO CHANGE ORDERS, BOTH ORAL AND WRITTEN, TO THE CONTRACT
+            </p>
+        </div>
+
+        {{-- ============ CONTRACTOR'S AFFIDAVIT (page 2) ============ --}}
+        <div class="il-form il-page-break" style="line-height: 1.55;">
+            <p style="margin: 0;">
+                STATE OF ILLINOIS<br>
+                COUNTY OF <span class="fill">{{ !empty($projectCounty ?? null) ? strtoupper($projectCounty) : '' }}</span>
+            </p>
+
+            <div class="il-title">CONTRACTOR&rsquo;S AFFIDAVIT</div>
+
+            <p><strong>TO WHOM IT MAY CONCERN:</strong></p>
+
+            <p>
+                THE UNDERSIGNED, (NAME) <span class="fill">{{ $firstSignature?->signer_name ?? '' }}</span>
+                BEING DULY SWORN, DEPOSES AND SAYS THAT HE OR SHE IS
+                (POSITION) <span class="fill">{{ $firstSignature?->signer_title ?? '' }}</span>
+                OF (COMPANY NAME) <span class="fill wide">{{ $vendor->business_name }}</span>
+                WHO IS THE CONTRACTOR FURNISHING <span class="fill">general construction</span> WORK ON THE
+                BUILDING LOCATED AT <span class="fill wide">{{ $projectAddressIl ?: '' }}</span>
+                OWNED BY <span class="fill wide">{{ $ownerNameIl }}</span>
+            </p>
+
+            <p>
+                That the total amount of the contract including extras* is
+                <span class="fill">${{ number_format($affidavit['contract_total'], 2) }}</span>
+                on which he or she has received payment of
+                <span class="fill">${{ number_format($affidavit['prior_paid'], 2) }}</span>
+                prior to this payment. That all waivers are true, correct and genuine and delivered
+                unconditionally and that there is no claim either legal or equitable to defeat the validity
+                of said waivers. That the following are the names and addresses of all parties who have
+                furnished material or labor, or both, for said work and all parties having contracts or
+                subcontracts for specific portions of said work or for material entering in the construction
+                thereof and the amount due or to become due to each, and that the items mentioned include all
+                labor and material required to complete said work according to plans and specifications:
+            </p>
+
+            <table class="il-affidavit-table">
+                <thead>
+                    <tr>
+                        <th style="width: 26%;">Names</th>
+                        <th style="width: 22%;">What For</th>
+                        <th style="width: 13%;">Contract Price</th>
+                        <th style="width: 13%;">Amount Paid</th>
+                        <th style="width: 13%;">This Payment</th>
+                        <th style="width: 13%;">Balance Due</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>{{ $vendor->business_name }}</td>
+                        <td>General construction — labor &amp; material</td>
+                        <td class="num">${{ number_format($affidavit['contract_total'], 2) }}</td>
+                        <td class="num">${{ number_format($affidavit['prior_paid'], 2) }}</td>
+                        <td class="num">${{ number_format($affidavit['this_payment'], 2) }}</td>
+                        <td class="num">${{ number_format($affidavit['balance_due'], 2) }}</td>
+                    </tr>
+                    @for($i = 0; $i < 2; $i++)
+                        <tr><td class="blank"></td><td></td><td></td><td></td><td></td><td></td></tr>
+                    @endfor
+                    <tr>
+                        <td colspan="2"><strong>TOTAL LABOR AND MATERIAL INCLUDING EXTRAS* TO COMPLETE</strong></td>
+                        <td class="num"><strong>${{ number_format($affidavit['contract_total'], 2) }}</strong></td>
+                        <td class="num"><strong>${{ number_format($affidavit['prior_paid'], 2) }}</strong></td>
+                        <td class="num"><strong>${{ number_format($affidavit['this_payment'], 2) }}</strong></td>
+                        <td class="num"><strong>${{ number_format($affidavit['balance_due'], 2) }}</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>
+                That there are no other contracts for said work outstanding, and that there is nothing due or
+                to become due to any person for material, labor or other work of any kind done or to be done
+                upon or in connection with said work other than above stated.
+            </p>
+
+            <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                <tr>
+                    <td style="width: 40%; vertical-align: bottom;">
+                        <strong>DATE</strong> <span class="fill">{{ optional($waiver->through_date)->format('m/d/Y') ?? now()->format('m/d/Y') }}</span>
+                    </td>
+                    <td style="width: 60%; vertical-align: bottom;" class="{{ $isDraft ? 'draft-signature-zone' : '' }}">
+                        <strong>SIGNATURE</strong>
+                        @if($firstSignature)
+                            <span class="il-sig-line" style="text-align: center;">
+                                @if($firstSignature->signature_type === 'type')
+                                    <span class="typed-signature" style="font-size: 26px;">{{ $firstSignature->signer_name }}</span>
+                                @else
+                                    <img src="{{ $firstSignature->signature_data }}" style="max-height: 44px; vertical-align: bottom;" alt="signature" />
+                                @endif
+                            </span>
+                        @else
+                            <span class="il-sig-line">&nbsp;</span>
+                        @endif
+                    </td>
+                </tr>
+            </table>
+
+            <p style="margin-top: 12px;">
+                SUBSCRIBED AND SWORN TO BEFORE ME THIS <span class="fill" style="min-width: 60px;"></span> DAY OF
+                <span class="fill" style="min-width: 140px;"></span>, 20<span class="fill" style="min-width: 40px;"></span>
+            </p>
+
+            <table style="width: 100%; border-collapse: collapse; margin-top: 6px; page-break-inside: avoid;">
+                <tr>
+                    <td style="width: 50%; vertical-align: top;" class="il-small">
+                        *EXTRAS INCLUDE BUT ARE NOT LIMITED TO CHANGE<br>
+                        ORDERS BOTH ORAL AND WRITTEN, TO THE CONTRACT
+                    </td>
+                    <td style="width: 50%; vertical-align: top; text-align: center;">
+                        _____________________________________________<br>
+                        NOTARY PUBLIC
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        @if($signatures->isNotEmpty())
+            <div class="audit">
+                <strong>Audit Trail:</strong><br>
+                Document hash: {{ $waiver->document_hash }}<br>
+                @foreach($signatures as $sig)
+                    Signed by {{ $sig->signer_name }}
+                    ({{ $sig->signer_email ?? 'no email' }})
+                    from IP {{ $sig->ip_address }}
+                    at {{ optional($sig->signed_at)->format('Y-m-d H:i:s T') }}<br>
+                @endforeach
+            </div>
+        @endif
     @else
         <h1>{{ $waiver->typeLabel() }}</h1>
         <p class="subtitle">
@@ -142,7 +373,6 @@
             &nbsp;·&nbsp;
             <span class="badge">{{ $waiver->type?->shortLabel() }}</span>
         </p>
-    @endif
 
     <table class="meta">
         <tr>
@@ -216,74 +446,7 @@
 
     <h2>Notice &amp; Waiver</h2>
     <div class="legal">
-        @if($isIllinois)
-            @php
-                $payerName = $payerVendor?->business_name ?? ($payerOverride['name'] ?? 'the Owner / General Contractor');
-                $ownerName = $project->client?->name ?? 'the Owner';
-                $projectAddress = trim(($project->address ?? '') . ', ' . ($project->city ?? '') . ', ' . ($project->state ?? '') . ' ' . ($project->zip_code ?? ''), ', ');
-                $amountFormatted = $waiver->type === \App\Enums\LienWaiverType::UnconditionalFinal
-                    ? 'PAID IN FULL'
-                    : $displayAmount;
-                $workDescription = $waiver->type?->isFinal()
-                    ? 'all labor, services, material, fixtures, apparatus, machinery, and extras'
-                    : 'labor, services, material, fixtures, apparatus, and machinery';
-            @endphp
 
-            <p>
-                <strong>STATE OF ILLINOIS</strong> &nbsp;)&nbsp;<br>
-                <strong>COUNTY OF {{ !empty($projectCounty ?? null) ? strtoupper($projectCounty) : '__________________' }}</strong> &nbsp;)&nbsp;SS
-            </p>
-
-            <p>
-                <strong>TO WHOM IT MAY CONCERN:</strong> Whereas the undersigned has been employed by
-                <strong>{{ $payerName }}</strong> to furnish <strong>{{ $workDescription }}</strong> for the
-                premises known as <strong>{{ $projectAddress ?: '—' }}</strong>, of which
-                <strong>{{ $ownerName }}</strong> is the owner.
-            </p>
-
-            <p>
-                Now, therefore, for and in consideration of the sum of <strong>{{ $amountFormatted }}</strong>
-                @if($waiver->type?->isConditional())
-                    (upon actual receipt thereof)
-                @else
-                    and other good and valuable consideration, the receipt whereof is hereby acknowledged,
-                @endif
-                the undersigned does hereby waive and release any and all lien or claim of, or right to,
-                lien under the statutes of the State of Illinois relating to mechanics' liens, on the
-                above-described premises and improvements thereon, and on the monies or other consideration
-                due or to become due from the owner,
-                @if($waiver->type?->isFinal())
-                    on account of the contract, including approved extras, through final completion and
-                    final payment.
-                @else
-                    on account of labor, services, material, fixtures, apparatus, or machinery furnished
-                    to and including <strong>{{ optional($waiver->through_date)->format('F j, Y') }}</strong>,
-                    <em>excluding</em> retainage, disputed amounts, and approved extras not yet invoiced.
-                @endif
-            </p>
-
-            @if($waiver->type?->isConditional())
-                <p>
-                    <strong>CONDITION:</strong> This is a conditional waiver and release. It becomes
-                    effective only upon actual receipt of funds in the amount stated above.
-                </p>
-            @endif
-
-            <p>
-                The undersigned further certifies that all lower-tier lien waivers required for this
-                payment have been obtained to the extent of this payment request and that there is no
-                known claim, legal or equitable, that would defeat this waiver to the stated extent.
-            </p>
-
-            @php
-                $notesPayload = json_decode((string) $waiver->notes, true);
-                $humanNote = is_array($notesPayload) ? ($notesPayload['note'] ?? null) : (string) $waiver->notes;
-                $humanNote = is_string($humanNote) ? trim($humanNote) : null;
-            @endphp
-            @if(!empty($humanNote))
-                <p><strong>Additional Notes:</strong> {{ $humanNote }}</p>
-            @endif
-        @else
             @if($waiver->type?->isConditional())
                 <p>
                     <strong>NOTICE:</strong> THIS DOCUMENT WAIVES THE CLAIMANT'S LIEN, STOP PAYMENT NOTICE,
@@ -328,7 +491,7 @@
             @if(!empty($humanNote))
                 <p><strong>Additional Notes:</strong> {{ $humanNote }}</p>
             @endif
-        @endif
+        
     </div>
 
     <div class="continued-note">CONTINUTED ON NEXT PAGE</div>
@@ -385,17 +548,6 @@
             @endforeach
         </div>
     @endif
-
-    @if($isIllinois)
-        <div style="margin-top: 28px; border: 1px solid #888; padding: 10px 12px; font-size: 10pt;" class="{{ $isDraft ? 'draft-signature-zone' : '' }}">
-            <strong>JURAT (Notary Acknowledgment)</strong><br><br>
-            Subscribed and sworn to before me this ______ day of ______________________, 20____.<br><br>
-            <div style="margin-top: 36px;">
-                _____________________________________________<br>
-                Notary Public &nbsp;·&nbsp; My commission expires: __________________<br>
-                <em>(Seal)</em>
-            </div>
-        </div>
-    @endif
+    @endif {{-- end non-Illinois branch --}}
 </body>
 </html>

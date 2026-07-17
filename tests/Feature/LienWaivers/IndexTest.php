@@ -80,3 +80,111 @@ it('soft deletes a lien waiver from the index', function () {
     expect(LienWaiver::find($waiver->id))->toBeNull()
         ->and(LienWaiver::withTrashed()->find($waiver->id)?->trashed())->toBeTrue();
 });
+it('lists project payments in the create modal and links the selected one to the waiver', function () {
+    $vendor = Vendor::query()->create([
+        'business_name' => 'GS Construction',
+        'business_type' => 'Sub',
+        'business_email' => 'accounts@example.test',
+        'address' => '123 Main St',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => '60601',
+    ]);
+
+    $user = makeLienWaiverIndexUser($vendor);
+    $user->vendors()->attach($vendor->id, ['role_id' => 1, 'is_employed' => true]);
+    $this->actingAs($user);
+
+    $project = Project::query()->create([
+        'project_name' => 'Kitchen',
+        'client_id' => Client::query()->create([
+            'business_name' => 'Owner Client',
+            'address' => '456 Oak Ave',
+            'city' => 'Chicago',
+            'state' => 'IL',
+            'zip_code' => '60601',
+        ])->id,
+        'address' => '456 Oak Ave',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => '60601',
+    ]);
+
+    $payment = \App\Models\Payment::query()->create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'amount' => 60000,
+        'date' => '2026-07-09',
+        'reference' => '070926',
+        'created_by_user_id' => $user->id,
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(Index::class, ['project' => $project])
+        ->call('openCreate')
+        ->assertSee('Payments received on this project')
+        ->assertSee('070926')
+        ->call('selectPayment', $payment->id)
+        ->assertSet('newPaymentId', $payment->id)
+        ->assertSet('newAmount', '60000.00')
+        ->assertSet('newThroughDate', '2026-07-09');
+
+    $component->set('newPayerName', 'Owner Client')->call('createWaiver')->assertHasNoErrors();
+
+    $waiver = LienWaiver::withoutGlobalScopes()
+        ->where('project_id', $project->id)
+        ->latest('id')
+        ->first();
+
+    expect($waiver)->not->toBeNull()
+        ->and($waiver->payment_id)->toBe($payment->id)
+        ->and((float) $waiver->amount)->toBe(60000.0);
+});
+
+it('deselects a payment when clicked again', function () {
+    $vendor = Vendor::query()->create([
+        'business_name' => 'GS Construction',
+        'business_type' => 'Sub',
+        'business_email' => 'accounts@example.test',
+        'address' => '123 Main St',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => '60601',
+    ]);
+
+    $user = makeLienWaiverIndexUser($vendor);
+    $user->vendors()->attach($vendor->id, ['role_id' => 1, 'is_employed' => true]);
+    $this->actingAs($user);
+
+    $project = Project::query()->create([
+        'project_name' => 'Deck',
+        'client_id' => Client::query()->create([
+            'business_name' => 'Owner Client 2',
+            'address' => '789 Elm St',
+            'city' => 'Chicago',
+            'state' => 'IL',
+            'zip_code' => '60601',
+        ])->id,
+        'address' => '789 Elm St',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => '60601',
+    ]);
+
+    $payment = \App\Models\Payment::query()->create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'amount' => 1500,
+        'date' => '2026-07-01',
+        'reference' => 'ref-1',
+        'created_by_user_id' => $user->id,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(Index::class, ['project' => $project])
+        ->call('openCreate')
+        ->call('selectPayment', $payment->id)
+        ->assertSet('newPaymentId', $payment->id)
+        ->call('selectPayment', $payment->id)
+        ->assertSet('newPaymentId', null);
+});

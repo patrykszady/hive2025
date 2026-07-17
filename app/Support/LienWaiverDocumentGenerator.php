@@ -64,6 +64,8 @@ class LienWaiverDocumentGenerator
             'signatures' => $waiver->signatures,
             'isSigned' => $isSigned,
             'isDraft' => ! $isSigned,
+            'amountWords' => self::amountInWords($waiver),
+            'affidavit' => self::buildAffidavitContext($waiver),
         ])->render();
 
         $headerHtml = self::buildHeaderHtml($waiver);
@@ -182,6 +184,73 @@ HTML;
     </div>
 </div>
 HTML;
+    }
+
+    /**
+     * The waiver amount written out in words, matching the traditional form's
+     * "for and in consideration of ___ (write out amount)" blank — e.g.
+     * "Sixty Thousand and 00/100". Null when the waiver has no fixed amount
+     * (unconditional final = paid in full).
+     */
+    protected static function amountInWords(LienWaiver $waiver): ?string
+    {
+        $amount = $waiver->amount;
+
+        if ($amount === null || $waiver->type === \App\Enums\LienWaiverType::UnconditionalFinal) {
+            return null;
+        }
+
+        $dollars = (int) floor((float) $amount);
+        $cents = (int) round(((float) $amount - $dollars) * 100);
+
+        if (class_exists(\NumberFormatter::class)) {
+            $formatter = new \NumberFormatter('en_US', \NumberFormatter::SPELLOUT);
+            $words = ucwords((string) $formatter->format($dollars));
+        } else {
+            $words = number_format($dollars);
+        }
+
+        return sprintf('%s and %02d/100', $words, $cents);
+    }
+
+    /**
+     * Contract math for the Contractor's Affidavit section: total contract
+     * (claimant's bids on the project, i.e. original bid + change orders),
+     * payments received prior to this waiver's payment, and the resulting
+     * balance after this payment.
+     */
+    protected static function buildAffidavitContext(LienWaiver $waiver): array
+    {
+        $project = $waiver->project;
+
+        $contractTotal = (float) \App\Models\Bid::withoutGlobalScopes()
+            ->where('project_id', $project->id)
+            ->where('vendor_id', $waiver->vendor_id)
+            ->sum('amount');
+
+        $paymentsQuery = \App\Models\Payment::withoutGlobalScopes()
+            ->where('project_id', $project->id);
+
+        if ($waiver->payment_id) {
+            $paymentDate = $waiver->payment?->date;
+            $paymentsQuery->where('id', '!=', $waiver->payment_id)
+                ->when($paymentDate, fn ($q) => $q->whereDate('date', '<=', $paymentDate->toDateString()));
+        } elseif ($waiver->through_date) {
+            $paymentsQuery->whereDate('date', '<', $waiver->through_date->toDateString());
+        }
+
+        $priorPaid = (float) $paymentsQuery->sum('amount');
+
+        $thisPayment = $waiver->type === \App\Enums\LienWaiverType::UnconditionalFinal
+            ? max(0, $contractTotal - $priorPaid)
+            : (float) ($waiver->amount ?? 0);
+
+        return [
+            'contract_total' => $contractTotal,
+            'prior_paid' => $priorPaid,
+            'this_payment' => $thisPayment,
+            'balance_due' => max(0, $contractTotal - $priorPaid - $thisPayment),
+        ];
     }
 
     protected static function escapeHtml(string $value): string

@@ -168,8 +168,13 @@ it('detects Illinois jurisdiction and renders IL-specific wording', function () 
         'isDraft' => true,
     ])->render();
 
+    // Traditional Illinois two-part form: waiver page + contractor's affidavit.
     expect($html)
-        ->toContain('State of Illinois')
-        ->toContain('770 ILCS 60/')
-        ->toContain('JURAT');
+        ->toContain('STATE OF ILLINOIS')
+        ->toContain('WAIVER OF LIEN TO DATE')
+        ->toContain('WHEREAS the undersigned has been employed by')
+        ->toContain('CONTRACTOR&rsquo;S AFFIDAVIT')
+        ->toContain('SUBSCRIBED AND SWORN TO BEFORE ME THIS')
+        ->toContain('NOTARY PUBLIC')
+        ->toContain('INCLUDING EXTRAS.*');
 });
