@@ -459,9 +459,29 @@ class ExpenseIndex extends Component
         // Filter out transactions that were just converted (MeiliSearch may not have indexed yet)
         if (!empty($this->removedTransactionIds)) {
             $removed = $this->removedTransactionIds;
+            $beforeCount = $transactions->getCollection()->count();
             $transactions->setCollection(
                 $transactions->getCollection()->reject(fn ($t) => in_array($t->id, $removed))
             );
+
+            // setCollection() doesn't touch total(), so the "N unmatched"
+            // badge would hold the stale MeiliSearch count until re-index.
+            // Subtract only what was rejected THIS render: once MeiliSearch
+            // catches up the id stops appearing and the native total is
+            // already correct — no double-counting.
+            $rejectedNow = $beforeCount - $transactions->getCollection()->count();
+            if ($rejectedNow > 0) {
+                $transactions = new LengthAwarePaginator(
+                    $transactions->getCollection(),
+                    max(0, $transactions->total() - $rejectedNow),
+                    $transactions->perPage(),
+                    $transactions->currentPage(),
+                    [
+                        'path' => LengthAwarePaginator::resolveCurrentPath(),
+                        'pageName' => 'transactions-page',
+                    ],
+                );
+            }
         }
         
         // Then load the relationships on the collection
