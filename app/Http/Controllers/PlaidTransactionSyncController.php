@@ -565,15 +565,22 @@ class PlaidTransactionSyncController extends Controller
         $matchedTransaction->owner = $payload['account_owner'] ?? $matchedTransaction->owner;
         $matchedTransaction->check_number = $payload['check_number'] ?? $matchedTransaction->check_number;
         
-        // Handle merchant_name carefully - if incoming description indicates a transfer (ZELLE, ACH, WIRE),
-        // don't keep previous merchant name as it could be from an incorrectly matched pending transaction
+        // Handle merchant_name carefully. When a pending transaction upgrades to
+        // posted and Plaid re-sends a merchant name, trust it. When it doesn't,
+        // we normally keep the pending row's name — EXCEPT when this posted row
+        // is a transfer or a bank-generated fee, which never have a real
+        // merchant. Those are exactly the descriptors a mis-matched pending
+        // transaction leaves a stale name on (e.g. a $12 "Laravel Forge" pending
+        // inherited onto a $12 "FEE-DEP CK RTN" returned-check fee).
         $incomingDescription = $payload['name'] ?? $payload['original_description'] ?? '';
         $isTransfer = preg_match('/\b(ZELLE|WIRE|ACH|TRANSFER|PAYROLL)\b/i', $incomingDescription);
-        
+        $isBankFee = (($payload['personal_finance_category']['primary'] ?? null) === 'BANK_FEES')
+            || preg_match('/\bFEE\b|RETURNED|SERVICE CHARGE|ACCT ANALYSIS|OVERDRAFT|\bNSF\b/i', $incomingDescription);
+
         if (isset($payload['merchant_name']) && $payload['merchant_name'] !== null) {
             $matchedTransaction->plaid_merchant_name = $payload['merchant_name'];
-        } elseif ($isTransfer) {
-            // Clear merchant name for transfers - don't inherit from previous pending transaction
+        } elseif ($isTransfer || $isBankFee) {
+            // Don't inherit a stale merchant name from a mis-matched pending transaction.
             $matchedTransaction->plaid_merchant_name = null;
         }
         // Otherwise keep existing merchant name (for non-transfer upgrades where Plaid doesn't send merchant_name)
