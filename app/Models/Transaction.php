@@ -175,6 +175,10 @@ class Transaction extends Model
                 "expenses_count = 0",
                 "check_id IS NULL",
                 'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]',
+                // Transfer-marked transactions (both sides of a credit card
+                // payment / bank transfer) never become expenses — hide them.
+                // Real check numbers stay visible until matched to a Check.
+                '(check_number IS NULL OR check_number != "1010101")',
             ];
             
             $baseFilter = implode(' AND ', $baseFilters);

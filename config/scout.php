@@ -177,8 +177,9 @@ return [
 
             Transaction::class => [
                 'filterableAttributes'=> [
-                    'vendor_id', 'deposit', 'transaction_date', 'posted_date', 
-                    'expense_id', 'check_id', 'bank_account_id', '__soft_deleted', 'amount', 'expenses_count'
+                    'vendor_id', 'deposit', 'transaction_date', 'posted_date',
+                    'expense_id', 'check_id', 'bank_account_id', '__soft_deleted', 'amount', 'expenses_count',
+                    'check_number',
                 ],
                 'sortableAttributes' => ['transaction_date', 'amount'],
                 'searchableAttributes' => ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name', 'amount'],
