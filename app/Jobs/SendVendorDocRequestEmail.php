@@ -61,8 +61,12 @@ class SendVendorDocRequestEmail implements ShouldQueue
             ->values()
             ->all();
 
+        // COI/document requests are always English — the real audience is the
+        // insurance agent (cc'd or forwarded to even when the vendor is the
+        // direct recipient), and certificates are English-language documents.
         Mail::to($primaryRecipient)
             ->cc($ccRecipients)
+            ->locale('en')
             ->send(new RequestInsurance($this->agent_expired_docs, $this->vendor, $this->requesting_vendor));
     }
 

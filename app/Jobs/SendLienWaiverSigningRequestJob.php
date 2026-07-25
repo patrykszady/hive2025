@@ -26,23 +26,60 @@ class SendLienWaiverSigningRequestJob implements ShouldQueue
             ->with(['vendor.users', 'project', 'payerVendor'])
             ->find($this->lienWaiverId);
 
-        if (! $waiver) {
+        // The queue can outrun the UI: never email a waiver that was deleted,
+        // cancelled or signed between dispatch and execution — and never
+        // regress a Signed/Cancelled status back to Sent.
+        if (! $waiver || $waiver->trashed()) {
+            return;
+        }
+
+        if (! in_array($waiver->status, [LienWaiverStatus::Draft, LienWaiverStatus::Sent], true)) {
             return;
         }
 
         $recipientEmail = $waiver->vendor?->business_email;
         $recipientName = $waiver->vendor?->short_name ?? $waiver->vendor?->business_name ?? '';
+        $recipientLocale = $waiver->vendor?->preferredLocale() ?? 'en';
 
         if (empty($recipientEmail)) {
             $recipient = $waiver->vendor?->users
                 ?->filter(fn ($user) => (bool) data_get($user, 'pivot.is_employed') && ! empty($user->email))
+                ->sortBy('id')
                 ->first();
 
             $recipientEmail = $recipient?->email;
             $recipientName = trim((string) ($recipient?->first_name ?? '') . ' ' . (string) ($recipient?->last_name ?? '')) ?: $recipientName;
+
+            // Only override the vendor-level locale when the user actually has
+            // a language preference recorded.
+            if ($recipient?->preferred_language) {
+                $recipientLocale = $recipient->preferredLocale();
+            }
+        }
+
+        // Vendor has no email anywhere (typical for material suppliers): send
+        // to the GC user who created the waiver with a "please forward to the
+        // right contact at {vendor}" banner, so it still goes out by email.
+        $forwardVendorName = null;
+        if (empty($recipientEmail)) {
+            $creator = $waiver->created_by_user_id
+                ? \App\Models\User::find($waiver->created_by_user_id)
+                : null;
+
+            if ($creator && ! empty($creator->email)) {
+                $recipientEmail = $creator->email;
+                $recipientName = trim((string) ($creator->first_name ?? '') . ' ' . (string) ($creator->last_name ?? ''));
+                $recipientLocale = $creator->preferredLocale();
+                $forwardVendorName = $waiver->vendor?->short_name ?? $waiver->vendor?->business_name ?? '';
+            }
         }
 
         if (empty($recipientEmail)) {
+            \Illuminate\Support\Facades\Log::warning('Lien waiver signing request skipped — no recipient email on file.', [
+                'lien_waiver_id' => $waiver->id,
+                'vendor_id' => $waiver->vendor_id,
+            ]);
+
             return;
         }
 
@@ -52,8 +89,11 @@ class SendLienWaiverSigningRequestJob implements ShouldQueue
             ? Mail::mailer($mailer)
             : Mail::mailer();
 
-        $pending->to($recipientEmail)->send(
-            new LienWaiverSigningRequest($waiver, $recipientName)
+        // Subject and body render in the recipient's preferred language.
+        // (In local/dev/test, Mail::alwaysTo redirects delivery to the dev
+        // inbox — see AppServiceProvider — while production mails the vendor.)
+        $pending->to($recipientEmail)->locale($recipientLocale)->send(
+            new LienWaiverSigningRequest($waiver, $recipientName, $forwardVendorName)
         );
 
         $waiver->forceFill([

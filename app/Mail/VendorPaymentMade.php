@@ -67,6 +67,12 @@ class VendorPaymentMade extends Mailable
         $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
             $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('vendor_payment'));
 
+            // Hive mark for the shared CTA card (<x-mail.cta />).
+            $markPath = public_path('favicon.png');
+            if (is_file($markPath)) {
+                $message->embedFromPath($markPath, 'hive-mark', 'image/png');
+            }
+
             if (is_string($this->trackingId) && $this->trackingId !== '') {
                 $message->getHeaders()->add(new \Mailtrap\EmailHeader\CustomVariableHeader('tracking_id', $this->trackingId));
             }
@@ -78,6 +84,10 @@ class VendorPaymentMade extends Mailable
             if (is_string($this->emailTemplateName) && $this->emailTemplateName !== '') {
                 $message->getHeaders()->add(new \Mailtrap\EmailHeader\CustomVariableHeader('email_template_name', $this->emailTemplateName));
             }
+
+            // The payee vendor — shared owner emails make recipient-based
+            // attribution ambiguous, so webhook events carry the id too.
+            $message->getHeaders()->add(new \Mailtrap\EmailHeader\CustomVariableHeader('vendor_id', (string) $this->vendor->id));
         });
     }
 
@@ -90,7 +100,9 @@ class VendorPaymentMade extends Mailable
     {
         return new Envelope(
             from: new Address(config('mail.from.address'), config('mail.from.name')),
-            subject: $this->paying_vendor->name.' Payment',
+            subject: __('vendor_payment.subject', [
+                'contractor' => $this->paying_vendor->short_name ?? $this->paying_vendor->name,
+            ]),
         );
     }
 
@@ -105,7 +117,6 @@ class VendorPaymentMade extends Mailable
             markdown: 'emails.vendor_payment_made',
             with: [
                 'hideFooter' => true,
-                'showHeaderBrand' => true,
             ],
         );
     }
@@ -115,6 +126,11 @@ class VendorPaymentMade extends Mailable
         $metadata = [
             'email_type' => 'vendor_payment',
             'email_template_name' => $this->emailTemplateName ?: 'Vendor Payment',
+            // Attribution: the payee vendor and the check this email is about.
+            // Never infer the vendor from the recipient address — owners often
+            // share one email across several vendor entities.
+            'vendor_id' => $this->vendor->id,
+            'check_id' => $this->check->id,
         ];
 
         if (is_string($this->senderEmail) && $this->senderEmail !== '') {

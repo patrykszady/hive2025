@@ -38,6 +38,8 @@ class PaymentsIndex extends Component
 
     public $view = null;
 
+    public $vendor_filter = null;
+
     public $sortBy = 'date';
     public $sortDirection = 'desc';
 
@@ -113,6 +115,20 @@ class PaymentsIndex extends Component
             $query->whereHas('project', function ($projectQuery) use ($clientId) {
                 $projectQuery->where('client_id', $clientId);
             });
+        }
+
+        if ($this->vendor_filter) {
+            // Payments for a specific (sub) vendor on this project: either recorded
+            // under that vendor, or paid to them by check. PaymentScope pins queries
+            // to the auth user's vendor, so it must be lifted for this filter.
+            $vendorId = (int) $this->vendor_filter;
+            $query->withoutGlobalScope(\App\Scopes\PaymentScope::class)
+                ->where(function ($q) use ($vendorId) {
+                    $q->where('belongs_to_vendor_id', $vendorId)
+                        ->orWhereIn('check_id', function ($sub) use ($vendorId) {
+                            $sub->select('id')->from('checks')->where('vendor_id', $vendorId);
+                        });
+                });
         }
 
         if ($this->status_filter === 'complete') {

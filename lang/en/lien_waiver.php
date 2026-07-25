@@ -1,0 +1,26 @@
+<?php
+
+return [
+    'subject' => ':contractor | Lien Waiver Request | :address',
+    'subject_forward' => 'FORWARD to :vendor | Lien Waiver Request | :address',
+    'email_title' => 'Lien Waiver',
+    'greeting' => 'Hi :name,',
+    'greeting_fallback' => 'Hi there,',
+    'intro_request' => 'the homeowner has requested this lien waiver for',
+    'intro_filled' => '<strong>We already filled it out for you</strong> — it\'s attached.',
+    'project_fallback' => 'your project',
+    'step_print_title' => 'Print',
+    'step_print_body' => 'Print the attached PDF.',
+    'step_sign_title' => 'Sign',
+    'step_sign_body' => 'Sign next to each yellow <span style="background-color: rgba(253, 224, 71, 0.5); padding: 0 3px; font-weight: 600;">*</span>.',
+    'step_sign_body2' => 'For "Title or Position": write <strong>Owner</strong> — or <strong>President</strong> if you\'re an Inc.',
+    'step_notarize_title' => 'Notarize',
+    'step_notarize_body' => 'Any currency exchange works.',
+    'step_notarize_body2' => 'Sign the "SIGNATURE" line in front of the notary.',
+    'step_return_title' => 'Send it back',
+    'step_return_body' => 'Reply to this email with a scan, or hand us the notarized copy in person.',
+    'help' => 'Need help? <strong>Call us ASAP</strong>:phone.',
+    'urgency' => '<strong>The homeowner can\'t pay us until your notarized waiver is in.</strong>',
+    'thanks' => 'Thanks,',
+    'forward_notice' => 'Please forward this email to the correct contact at :vendor.',
+];

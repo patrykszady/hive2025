@@ -1,0 +1,26 @@
+<?php
+
+return [
+    'subject' => ':contractor | Solicitud de Lien Waiver | :address',
+    'subject_forward' => 'REENVIAR a :vendor | Solicitud de Lien Waiver | :address',
+    'email_title' => 'Lien Waiver',
+    'greeting' => 'Hola :name,',
+    'greeting_fallback' => 'Hola,',
+    'intro_request' => 'el propietario ha solicitado este documento (lien waiver — renuncia de gravamen) para',
+    'intro_filled' => '<strong>Ya lo llenamos por usted</strong> — va adjunto.',
+    'project_fallback' => 'su proyecto',
+    'step_print_title' => 'Imprima',
+    'step_print_body' => 'Imprima el PDF adjunto.',
+    'step_sign_title' => 'Firme',
+    'step_sign_body' => 'Firme junto a cada asterisco <span style="background-color: rgba(253, 224, 71, 0.5); padding: 0 3px; font-weight: 600;">amarillo (*)</span>.',
+    'step_sign_body2' => 'En "Title or Position" escriba <strong>Owner</strong> — o <strong>President</strong> si es una compañía Inc.',
+    'step_notarize_title' => 'Notarice',
+    'step_notarize_body' => 'Cualquier currency exchange sirve.',
+    'step_notarize_body2' => 'Firme la línea "SIGNATURE" frente al notario.',
+    'step_return_title' => 'Envíenoslo de vuelta',
+    'step_return_body' => 'Responda a este correo con un escaneo, o entréguenos la copia notarizada en persona.',
+    'help' => '¿Necesita ayuda? <strong>Llámenos cuanto antes</strong>:phone.',
+    'urgency' => '<strong>El propietario no puede pagarnos hasta recibir su waiver notarizado.</strong>',
+    'thanks' => 'Gracias,',
+    'forward_notice' => 'Por favor, reenvíe este correo al contacto correcto en :vendor.',
+];

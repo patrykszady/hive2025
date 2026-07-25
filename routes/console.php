@@ -61,9 +61,17 @@ Schedule::job(new RunScheduledTask(\App\Http\Controllers\CompanyEmailController:
     ->onOneServer();
 
 Schedule::job(new RunScheduledTask(\App\Http\Controllers\VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox'))
-    ->hourly()
-    // ->between('7:00', '20:00')
+    ->everyTenMinutes()
     ->name('fetch-insurance-mailbox')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Returned wet-signed lien waiver / GCSS scans → match by footer barcode,
+// store the scan, flip the record to Signed.
+Schedule::job(new RunScheduledTask(\App\Services\WaiverScanIngest::class, 'processInbox'))
+    ->everyTenMinutes()
+    ->name('fetch-waiver-scans')
     ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();

@@ -1,0 +1,26 @@
+<?php
+
+return [
+    'subject' => ':contractor | Prośba o Lien Waiver | :address',
+    'subject_forward' => 'PRZEKAŻ do :vendor | Prośba o Lien Waiver | :address',
+    'email_title' => 'Lien Waiver',
+    'greeting' => 'Dzień dobry :name,',
+    'greeting_fallback' => 'Dzień dobry,',
+    'intro_request' => 'właściciel domu poprosił o ten dokument (lien waiver — zrzeczenie się prawa zastawu) dla inwestycji',
+    'intro_filled' => '<strong>Dokument jest już wypełniony</strong> — znajduje się w załączniku.',
+    'project_fallback' => 'Państwa inwestycja',
+    'step_print_title' => 'Wydrukuj',
+    'step_print_body' => 'Wydrukuj załączony PDF.',
+    'step_sign_title' => 'Podpisz się',
+    'step_sign_body' => 'Podpisz się przy każdej żółtej <span style="background-color: rgba(253, 224, 71, 0.5); padding: 0 3px; font-weight: 600;">gwiazdce (*)</span>.',
+    'step_sign_body2' => 'W polu „Title or Position” wpisz <strong>Owner</strong> — albo <strong>President</strong>, jeśli prowadzisz spółkę Inc.',
+    'step_notarize_title' => 'Poświadcz',
+    'step_notarize_body' => 'Wystarczy currency exchange.',
+    'step_notarize_body2' => 'Linię „SIGNATURE” podpisz dopiero przy notariuszu.',
+    'step_return_title' => 'Odeślij do nas',
+    'step_return_body' => 'Odpowiedz na tego maila ze skanem albo dostarcz poświadczony notarialnie dokument osobiście.',
+    'help' => 'Potrzebujesz pomocy? <strong>Zadzwoń do nas jak najszybciej</strong>:phone.',
+    'urgency' => '<strong>Właściciel domu nie może nam zapłacić, dopóki nie otrzymamy poświadczonego notarialnie dokumentu.</strong>',
+    'thanks' => 'Dziękujemy,',
+    'forward_notice' => 'Prosimy o przekazanie tej wiadomości właściwej osobie w firmie :vendor.',
+];

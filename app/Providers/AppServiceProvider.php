@@ -143,8 +143,15 @@ class AppServiceProvider extends ServiceProvider
         // if APP_ENV is misconfigured on a server.
         if (app()->environment('local', 'development', 'testing')) {
             $devEmail = (string) config('mail.dev_email');
+
             if ($devEmail !== '') {
                 Mail::alwaysTo($devEmail);
+            } elseif (! app()->environment('testing')) {
+                // Fail CLOSED: without a dev inbox configured, route to an
+                // unroutable address rather than letting dev mail reach real
+                // vendors/clients. (Tests use the array mailer — no risk.)
+                Mail::alwaysTo('dev-mail-blackhole@invalid.localhost');
+                \Illuminate\Support\Facades\Log::warning('MAIL_DEV_EMAIL is not set — dev mail is being blackholed. Set it to receive dev email.');
             }
         }
 

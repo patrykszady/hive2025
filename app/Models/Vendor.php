@@ -24,7 +24,7 @@ class Vendor extends Model
 {
     use HasFactory, Notifiable, Searchable, HasAddress;
 
-    protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'business_website', 'timezone', 'short_name', 'availability_token', 'availability_short_url', 'created_at', 'updated_at'];
+    protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'work_type_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'business_website', 'timezone', 'short_name', 'availability_token', 'availability_short_url', 'created_at', 'updated_at'];
     // protected $appends = ['name'];
 
     protected function casts(): array
@@ -187,6 +187,26 @@ class Vendor extends Model
         return $this->belongsTo(Category::class);
     }
 
+    /** Default kind of work — prefills sworn statements, planner, tasks. */
+    public function workType(): BelongsTo
+    {
+        return $this->belongsTo(WorkType::class);
+    }
+
+    /**
+     * The vendor's mail locale: its first employed user's preferred language
+     * (emails to a business address still land with a person).
+     */
+    public function preferredLocale(): string
+    {
+        $language = $this->users()
+            ->wherePivot('is_employed', true)
+            ->whereNotNull('preferred_language')
+            ->value('preferred_language');
+
+        return User::localeFromLanguage($language);
+    }
+
     public function receipt_account(): HasOne
     {
         return $this->hasOne(ReceiptAccount::class);
@@ -307,7 +327,7 @@ class Vendor extends Model
     {
         return $this->belongsToMany(User::class)
             ->using(UserVendor::class)
-            ->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate']);
+            ->withPivot(['is_employed', 'role_id', 'position', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate']);
     }
 
     public function clients(): BelongsToMany

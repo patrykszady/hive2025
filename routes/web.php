@@ -263,7 +263,6 @@ Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availabili
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
 
 // Public lien waiver signing (token-based, no auth)
-Route::get('lw/{token}', \App\Livewire\LienWaivers\Show::class)->name('lien-waivers.public-sign');
 
 
 // Public vendor availability response routes (no auth required)
@@ -497,6 +496,8 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     Route::get('/lien-waivers', \App\Livewire\LienWaivers\Index::class)->name('lien-waivers.index');
     Route::get('/lien-waivers/{lienWaiver}', \App\Livewire\LienWaivers\Show::class)->name('lien-waivers.show');
     Route::get('/lien-waivers/{lienWaiver}/download', [\App\Http\Controllers\LienWaiverController::class, 'download'])->name('lien-waivers.download');
+    Route::get('/sworn-statements/{swornStatement}/download', [\App\Http\Controllers\LienWaiverController::class, 'downloadSwornStatement'])->name('sworn-statements.download');
+    Route::get('/sworn-statements/{swornStatement}/download-package', [\App\Http\Controllers\LienWaiverController::class, 'downloadDrawPackage'])->name('sworn-statements.download-package');
 
     //COMPANY EMAILS
     Route::get('/company_emails', CompanyEmailsIndex::class)->name('company_emails.index');

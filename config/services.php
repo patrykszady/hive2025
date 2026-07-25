@@ -53,6 +53,7 @@ return [
         'analyzer_id_receipt_classifier' => env('AZURE_CU_ANALYZER_ID_RECEIPT_CLASSIFIER', 'hive_ReceiptClassifier_1'),
         'analyzer_id_check_statement' => env('AZURE_CU_ANALYZER_ID_CHECK_STATEMENT', 'hive_CheckStatement_1'),
         'analyzer_id_check' => env('AZURE_CU_ANALYZER_ID_CHECK', 'hive_Check_1'),
+        'analyzer_id_waiver' => env('AZURE_CU_ANALYZER_ID_WAIVER', 'HiveWaivers20261'),
     ],
 
     'ocr_space' => [

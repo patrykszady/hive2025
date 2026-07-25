@@ -31,6 +31,12 @@
                     <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" />
                 @endif
 
+                {{-- EMAILS SENT TO THIS VENDOR (lien waiver signing requests) --}}
+                <livewire:vendors.vendor-payment-email-tracking-table
+                    :vendor-id="$vendor->id"
+                    :templates="['Lien Waiver Signing Request']"
+                    :key="'vendor-emails-'.$vendor->id" />
+
                 {{-- VENDOR FINANCES --}}
                 {{-- INSURANCE --}}
                 @can('update', $vendor)

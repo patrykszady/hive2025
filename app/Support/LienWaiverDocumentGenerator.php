@@ -22,13 +22,15 @@ class LienWaiverDocumentGenerator
     {
         $waiver = LienWaiver::withoutGlobalScopes()
             ->with([
-                'vendor',
-                'payerVendor',
+                // Scope-independent: documents render identically whether built
+                // from the queue (guest) or an authenticated session, where
+                // VendorScope could hide the claimant/payer.
+                'vendor' => fn ($q) => $q->withoutGlobalScopes(),
+                'payerVendor' => fn ($q) => $q->withoutGlobalScopes(),
                 'project',
                 'project.estimates',
                 'check',
                 'payment',
-                'signatures',
             ])
             ->find($waiver->getKey());
 
@@ -61,24 +63,26 @@ class LienWaiverDocumentGenerator
             'projectCounty' => $projectCounty,
             'check' => $waiver->check,
             'payment' => $waiver->payment,
-            'signatures' => $waiver->signatures,
             'isSigned' => $isSigned,
             'isDraft' => ! $isSigned,
+            'isSubWaiver' => $waiver->isSubWaiver(),
             'amountWords' => self::amountInWords($waiver),
             'affidavit' => self::buildAffidavitContext($waiver),
         ])->render();
 
-        $headerHtml = self::buildHeaderHtml($waiver);
-        $footerHtml = self::buildFooterHtml($waiver);
+        // The traditional Illinois form is a self-contained legal document that
+        // must fit on a single page with no Hive header/footer chrome.
+        $isIllinois = in_array(strtoupper((string) $waiver->jurisdiction), ['IL', 'US-IL'], true);
 
-        $pdf = self::renderPdf($html, $headerHtml, $footerHtml);
+        // Illinois forms still get a minimal footer: the filename plus a
+        // Code 128 barcode of the waiver id, so returned wet-signed scans can
+        // be matched to the right waiver even when OCR struggles.
+        $headerHtml = $isIllinois ? null : self::buildHeaderHtml($waiver);
+        $footerHtml = $isIllinois ? self::buildIllinoisFooterHtml($waiver) : self::buildFooterHtml($waiver);
 
-        $filename = sprintf(
-            'lien-waiver-%d-%s-%s.pdf',
-            $waiver->id,
-            $variant,
-            $waiver->updated_at?->format('YmdHis') ?? now()->format('YmdHis'),
-        );
+        $pdf = self::renderPdf($html, $headerHtml, $footerHtml, $isIllinois);
+
+        $filename = self::filenameFor($waiver);
 
         $title = sprintf(
             '%s - Lien Waiver - %s',
@@ -86,16 +90,29 @@ class LienWaiverDocumentGenerator
             $waiver->vendor->business_name ?? 'Vendor',
         );
 
-        $relativePath = sprintf('lien-waivers/%d/%s', $waiver->project_id, $filename);
+        // Store under a per-waiver folder so the clean, non-unique filename can't
+        // collide between different waivers for the same vendor/date.
+        $relativePath = sprintf('lien-waivers/%d/%d/%s', $waiver->project_id, $waiver->id, $filename);
         $absolutePath = null;
 
-        if ($store) {
+        // Never clobber an ingested wet-signed scan: once the waivers@ ingest
+        // stored a returned scan in signed_path, a re-render must not replace
+        // the legal original with a freshly generated PDF.
+        $hasIngestedScan = $isSigned
+            && $waiver->signed_path
+            && str_contains($waiver->signed_path, '/scan-')
+            && Storage::disk('files')->exists($waiver->signed_path);
+
+        if ($store && ! $hasIngestedScan) {
             Storage::disk('files')->put($relativePath, $pdf);
             $absolutePath = Storage::disk('files')->path($relativePath);
 
             $waiver->forceFill([
                 $isSigned ? 'signed_path' : 'draft_path' => $relativePath,
             ])->saveQuietly();
+        } elseif ($store && $hasIngestedScan) {
+            $relativePath = $waiver->signed_path;
+            $absolutePath = Storage::disk('files')->path($relativePath);
         }
 
         return array_filter([
@@ -108,25 +125,62 @@ class LienWaiverDocumentGenerator
     }
 
     /**
+     * The canonical filename for a waiver's PDF: id, claimant, estimate
+     * number, homeowner, jobsite address and through date. Public so the
+     * download route can name stored files consistently even when the file
+     * on disk was saved under an older naming scheme.
+     */
+    public static function filenameFor(LienWaiver $waiver): string
+    {
+        $vendor = $waiver->vendor ?? \App\Models\Vendor::withoutGlobalScopes()->find($waiver->vendor_id);
+        $vendorSlug = \Illuminate\Support\Str::slug((string) ($vendor?->business_name ?? 'vendor')) ?: 'vendor';
+        $dateSlug = ($waiver->through_date ?? $waiver->updated_at ?? now())->format('Y-m-d');
+        $estimateNumber = (string) ($waiver->project?->estimates?->first()?->number ?? '');
+        $owner = $waiver->project?->client()->withoutGlobalScopes()->first();
+        $drawNumber = $waiver->sworn_statement_id
+            ? \App\Models\SwornStatement::find($waiver->sworn_statement_id)?->drawNumber()
+            : null;
+
+        return collect([
+            'lien-waiver',
+            $waiver->id,
+            $vendorSlug,
+            $estimateNumber !== '' ? \Illuminate\Support\Str::slug($estimateNumber) : null,
+            \Illuminate\Support\Str::slug((string) ($owner?->name ?? '')),
+            \Illuminate\Support\Str::slug((string) ($waiver->project?->address ?? '')),
+            $drawNumber ? 'draw-' . $drawNumber : null,
+            $dateSlug,
+        ])->filter(fn ($part) => $part !== null && $part !== '')->implode('-') . '.pdf';
+    }
+
+    /**
      * Render HTML → PDF using Browsershot (Chromium). Falls back to returning
      * the raw HTML wrapped as a binary string when headless Chrome isn't
      * available, so calling code can still persist *something* and surface a
      * preview link rather than throwing in environments without Chrome
      * (CI, lightweight workers, the test suite, etc.).
      */
-    protected static function renderPdf(string $html, ?string $headerHtml = null, ?string $footerHtml = null): string
+    protected static function renderPdf(string $html, ?string $headerHtml = null, ?string $footerHtml = null, bool $compact = false): string
     {
         try {
             $shot = Browsershot::html($html)
                 ->format('Letter')
-                ->margins(24, 15, 22, 15)
                 ->showBackground();
+
+            // Compact (no-chrome) forms get tight uniform margins — deeper at
+            // the bottom when a footer (filename + barcode) rides along; the
+            // standard layout leaves room for the running header/footer.
+            $compact
+                ? $shot->margins(9, 12, empty($footerHtml) ? 9 : 21, 12)
+                : $shot->margins(24, 15, 22, 15);
 
             if (! empty($headerHtml) || ! empty($footerHtml)) {
                 $shot
                     ->showBrowserHeaderAndFooter()
-                    ->headerHtml((string) $headerHtml)
-                    ->footerHtml((string) $footerHtml);
+                    // A truly empty template makes Chromium print its default
+                    // date/title header — a blank span suppresses it.
+                    ->headerHtml((string) ($headerHtml ?: '<span></span>'))
+                    ->footerHtml((string) ($footerHtml ?: '<span></span>'));
             }
 
             return $shot->pdf();
@@ -159,6 +213,23 @@ class LienWaiverDocumentGenerator
     </div>
 </div>
 HTML;
+    }
+
+    /**
+     * Footer for the compact Illinois forms: the document's filename in small
+     * print with a Code 128 barcode ("HLW-{id}") underneath. Vendors print,
+     * wet-sign, notarize and scan these back — the barcode survives bad scans
+     * far better than tiny text, so Azure Content Understanding can still
+     * match the scan to the right waiver and flip it to Signed.
+     */
+    public static function barcodeValueFor(LienWaiver $waiver): string
+    {
+        return 'HLW-' . $waiver->id;
+    }
+
+    protected static function buildIllinoisFooterHtml(LienWaiver $waiver): string
+    {
+        return PdfDocumentFooter::build(self::barcodeValueFor($waiver), self::filenameFor($waiver));
     }
 
     protected static function buildFooterHtml(LienWaiver $waiver): string
@@ -214,42 +285,107 @@ HTML;
     }
 
     /**
-     * Contract math for the Contractor's Affidavit section: total contract
-     * (claimant's bids on the project, i.e. original bid + change orders),
-     * payments received prior to this waiver's payment, and the resulting
-     * balance after this payment.
+     * Contract math for the Contractor's Affidavit section. The claimant's
+     * original bid (type 1) is the base contract; every change order (type >= 2,
+     * i.e. sections added after the signed contract) is an "extra". Amount paid
+     * is every payment already recorded on the project prior to this waiver.
      */
     protected static function buildAffidavitContext(LienWaiver $waiver): array
     {
         $project = $waiver->project;
 
-        $contractTotal = (float) \App\Models\Bid::withoutGlobalScopes()
+        $bidQuery = fn () => \App\Models\Bid::withoutGlobalScopes()
             ->where('project_id', $project->id)
-            ->where('vendor_id', $waiver->vendor_id)
-            ->sum('amount');
+            ->where('vendor_id', $waiver->vendor_id);
 
-        $paymentsQuery = \App\Models\Payment::withoutGlobalScopes()
-            ->where('project_id', $project->id);
+        $originalContract = (float) $bidQuery()->where('type', 1)->sum('amount');
+        $extras = (float) $bidQuery()->where('type', '>', 1)->sum('amount');
+        $contractTotal = $originalContract + $extras;
 
-        if ($waiver->payment_id) {
-            $paymentDate = $waiver->payment?->date;
-            $paymentsQuery->where('id', '!=', $waiver->payment_id)
-                ->when($paymentDate, fn ($q) => $q->whereDate('date', '<=', $paymentDate->toDateString()));
-        } elseif ($waiver->through_date) {
-            $paymentsQuery->whereDate('date', '<', $waiver->through_date->toDateString());
+        // "Amount paid" = everything previously paid to THIS claimant. Each
+        // party's affidavit swears its own contract math: the GC's counts the
+        // owner's draws; a sub's counts what the GC has paid them (expenses and
+        // check-paid payment rows). The full every-sub listing lives on the
+        // standalone GCSS sworn statement, not here.
+        if ($waiver->isSubWaiver()) {
+            $cutoff = $waiver->payment_id
+                ? $waiver->payment?->date
+                : $waiver->through_date;
+
+            $expensesPaid = (float) \App\Models\Expense::withoutGlobalScopes()
+                ->where('project_id', $project->id)
+                ->where('vendor_id', $waiver->vendor_id)
+                ->whereNull('deleted_at')
+                ->when($cutoff, fn ($q) => $q->whereDate('date', '<=', $cutoff->toDateString()))
+                ->sum('amount');
+
+            $checkPaid = (float) \App\Models\Payment::withoutGlobalScopes()
+                ->where('project_id', $project->id)
+                ->when($waiver->payment_id, fn ($q) => $q->where('id', '!=', $waiver->payment_id))
+                ->whereIn('check_id', function ($q) use ($waiver) {
+                    $q->select('id')->from('checks')
+                        ->where('vendor_id', $waiver->vendor_id)
+                        ->whereNull('deleted_at');
+                })
+                ->when($cutoff, fn ($q) => $q->whereDate('date', '<=', $cutoff->toDateString()))
+                ->sum('amount');
+
+            $totalPaid = $expensesPaid + $checkPaid;
+
+            if ($waiver->payment_id) {
+                // Auto-generated from a specific payment: that payment is "this
+                // payment"; everything paid before it is prior. (The excluded
+                // payment isn't in $totalPaid, so no double-count.)
+                $thisPayment = (float) ($waiver->payment?->amount ?? 0);
+                $amountPaid = (float) $totalPaid;
+            } else {
+                // Manual "to date" waiver documents money already in hand — all
+                // of it is prior/paid-to-date, with no new payment made now.
+                $amountPaid = (float) $totalPaid;
+                $thisPayment = 0.0;
+            }
+        } else {
+            $paymentsQuery = fn () => \App\Models\Payment::withoutGlobalScopes()
+                ->where('project_id', $project->id);
+
+            if ($waiver->payment_id) {
+                $paymentDate = $waiver->payment?->date;
+                $amountPaid = (float) $paymentsQuery()
+                    ->where('id', '!=', $waiver->payment_id)
+                    ->when($paymentDate, fn ($q) => $q->whereDate('date', '<=', $paymentDate->toDateString()))
+                    ->sum('amount');
+                $thisPayment = (float) ($waiver->payment?->amount ?? $waiver->amount ?? 0);
+            } else {
+                $amountPaid = (float) $paymentsQuery()
+                    ->when($waiver->through_date, fn ($q) => $q->whereDate('date', '<=', $waiver->through_date->toDateString()))
+                    ->sum('amount');
+                $thisPayment = (float) ($waiver->amount ?? 0);
+            }
         }
 
-        $priorPaid = (float) $paymentsQuery->sum('amount');
+        // No contract on file (a sub with no recorded bid): the money that has
+        // flowed to the claimant stands in as the contract amount, so the
+        // affidavit reads sensibly ("the contract is $30,000 on which he has
+        // received $30,000") instead of a blank. Record the sub's actual bid to
+        // override this — if the real contract exceeds what's been paid, the
+        // balance-due column will then reflect the amount still owing.
+        if ($contractTotal <= 0.0) {
+            $contractTotal = $amountPaid + $thisPayment;
+            $originalContract = $contractTotal;
+            $extras = 0.0;
+        }
 
-        $thisPayment = $waiver->type === \App\Enums\LienWaiverType::UnconditionalFinal
-            ? max(0, $contractTotal - $priorPaid)
-            : (float) ($waiver->amount ?? 0);
+        if ($waiver->type === \App\Enums\LienWaiverType::UnconditionalFinal) {
+            $thisPayment = max(0, $contractTotal - $amountPaid);
+        }
 
         return [
+            'original_contract' => $originalContract,
+            'extras' => $extras,
             'contract_total' => $contractTotal,
-            'prior_paid' => $priorPaid,
+            'amount_paid' => $amountPaid,
             'this_payment' => $thisPayment,
-            'balance_due' => max(0, $contractTotal - $priorPaid - $thisPayment),
+            'balance_due' => (float) max(0, $contractTotal - $amountPaid - $thisPayment),
         ];
     }
 
@@ -289,8 +425,9 @@ HTML;
      * Resolve the U.S. county for a project's jobsite address using Geoapify.
      * Returns null when the address is incomplete or the lookup fails — the
      * PDF will then leave the COUNTY OF ____ line blank for manual fill-in.
+     * (Public so sibling document generators can share the lookup.)
      */
-    protected static function lookupProjectCounty($project): ?string
+    public static function lookupProjectCounty($project): ?string
     {
         if (! $project) {
             return null;

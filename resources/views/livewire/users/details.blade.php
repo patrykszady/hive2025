@@ -69,6 +69,8 @@
 
             <x-details.row title="Vendor Role" :content="$user->getRoleForVendor(auth()->user()->vendor->id)" />
 
+            <x-details.row title="Business Title" :content="$user->vendor_pivot?->position ?: '—'" />
+
             @if($user->via_vendor)
                 <x-details.row title="Via Vendor" :content="$user->via_vendor->business_name . ' (' . $user->via_vendor->business_type . ')'" href="{{ route('vendors.show', $user->via_vendor->id) }}" />
             @endif

@@ -15,13 +15,24 @@ class VendorPaymentEmailTrackingTable extends Component
 
     protected string $pageName = 'vendor_payment_email_page';
 
+    /**
+     * When set, only threads addressed to this vendor are shown — matched via
+     * the sent email's metadata (vendor_id), never the recipient address, so
+     * attribution survives the dev mail fallback where every message goes to
+     * one catch-all inbox.
+     */
+    public ?int $vendorId = null;
+
+    /** Which email templates this card tracks. */
+    public array $templates = ['Vendor Payment'];
+
     #[Computed]
     public function events(): LengthAwarePaginator
     {
         $allEvents = EmailTracking::query()
             ->where('event_type', '!=', 'mailtrap_webhook_received')
             ->where('belongs_to_vendor_id', auth()->user()->vendor->id)
-            ->where('email_template_name', 'Vendor Payment')
+            ->whereIn('email_template_name', $this->templates)
             ->orderByDesc('event_at')
             ->get();
 
@@ -215,10 +226,43 @@ class VendorPaymentEmailTrackingTable extends Component
                 $mainEvent->all_recipient_emails = ! empty($eventRecipientEmails) ? $eventRecipientEmails : [];
                 $mainEvent->event_count = $eventCount;
 
+                // Which vendor this thread was addressed to, from the sent
+                // email's metadata (falls back to the thread's own metadata).
+                $threadMetadata = ! empty($sentMetadata)
+                    ? $sentMetadata
+                    : (is_array($mainEvent->metadata) ? $mainEvent->metadata : []);
+                $mainEvent->thread_vendor_id = is_numeric($threadMetadata['vendor_id'] ?? null)
+                    ? (int) $threadMetadata['vendor_id']
+                    : null;
+
                 return $mainEvent;
             })
             ->sortByDesc('event_at')
             ->values();
+
+        // Metadata attribution beats email inference: when the sent email
+        // recorded which vendor it was about, display THAT vendor — a shared
+        // owner email must not relabel GKW's payment as Moniek's.
+        $threadVendorIds = $events->pluck('thread_vendor_id')->filter()->unique()->values();
+        if ($threadVendorIds->isNotEmpty()) {
+            $vendorNamesById = Vendor::withoutGlobalScopes()
+                ->whereIn('id', $threadVendorIds)
+                ->get(['id', 'business_name'])
+                ->keyBy('id');
+
+            $events->each(function ($event) use ($vendorNamesById) {
+                $attributed = $event->thread_vendor_id ? $vendorNamesById->get($event->thread_vendor_id) : null;
+                if ($attributed) {
+                    $event->recipient_vendor_names = collect([$attributed->name]);
+                }
+            });
+        }
+
+        if ($this->vendorId) {
+            $events = $events
+                ->filter(fn ($event) => (int) ($event->thread_vendor_id ?? 0) === (int) $this->vendorId)
+                ->values();
+        }
 
         // Collapse consecutive opened events.
         $collapsed = collect();

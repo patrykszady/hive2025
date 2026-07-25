@@ -21,8 +21,8 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseId    = $this->option('base');
         $model     = $this->option('model');
 
-        if (! in_array($type, ['receipt', 'coi', 'material_order', 'check_statement', 'check'], true)) {
-            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', 'material_order', 'check_statement', or 'check'.");
+        if (! in_array($type, ['receipt', 'coi', 'material_order', 'check_statement', 'check', 'waiver'], true)) {
+            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', 'material_order', 'check_statement', 'check', or 'waiver'.");
             return self::FAILURE;
         }
 
@@ -31,6 +31,7 @@ class SyncContentUnderstandingAnalyzer extends Command
             'material_order'  => config('services.azure_cu.analyzer_id_material_order'),
             'check_statement' => config('services.azure_cu.analyzer_id_check_statement'),
             'check'           => config('services.azure_cu.analyzer_id_check'),
+            'waiver'          => config('services.azure_cu.analyzer_id_waiver'),
             default           => config('services.azure_cu.analyzer_id'),
         };
 
@@ -45,6 +46,7 @@ class SyncContentUnderstandingAnalyzer extends Command
             'material_order'  => $this->buildMaterialOrderDefinition($model),
             'check_statement' => $this->buildCheckStatementDefinition($model),
             'check'           => $this->buildCheckDefinition($model),
+            'waiver'          => $this->buildWaiverDefinition($model),
             default           => $this->buildReceiptDefinition($model, $baseFields),
         };
 
@@ -311,6 +313,142 @@ class SyncContentUnderstandingAnalyzer extends Command
                 'name'        => 'HiveReceiptSchema',
                 'description' => 'Schema for construction company receipt and invoice OCR.',
                 'fields'      => $customFields,
+            ],
+        ];
+    }
+
+    /**
+     * Reader for returned wet-signed lien waiver / GCSS scans arriving at
+     * waivers@hive.contractors. enableBarcode makes CU decode the Code 128
+     * footer barcode ("HLW-{waiver id}" / "HSS-{statement id}") into the
+     * markdown as ![Code128](... "HLW-123"); the BarcodeValue field surfaces
+     * it, and WaiverScanIngest also regexes the markdown directly.
+     */
+    private function buildWaiverDefinition(string $model): array
+    {
+        return [
+            'description' => 'Hive lien waiver / GCSS signed-scan reader: barcode, footer filename, signature presence',
+            'baseAnalyzerId' => 'prebuilt-document',
+            'config' => [
+                'returnDetails' => true,
+                'enableBarcode' => true,
+            ],
+            'models' => ['completion' => $model],
+            'fieldSchema' => [
+                'name' => 'HiveWaiverScan',
+                'description' => 'Identifies a returned wet-signed Hive lien waiver or sworn statement scan',
+                // NOTE: no BarcodeValue LLM field — the decoded Code 128 value
+                // arrives deterministically as a markdown annotation
+                // (![Code128](... "HLW-2")) from the barcode engine, and an
+                // LLM echo of it grounds on random spans and can hallucinate.
+                'fields' => [
+                    'FooterFilename' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The small gray filename text printed inside the bordered card at the bottom-left of the page, next to the barcode. It starts with "lien-waiver-" or "sworn-statement-" and ends with ".pdf". Return the full filename exactly as printed, joining it if it wraps across two lines. If not present, leave empty.',
+                    ],
+                    'DocumentType' => [
+                        'type' => 'string',
+                        'method' => 'classify',
+                        'description' => 'The type of document.',
+                        'enum' => ['lien_waiver', 'sworn_statement', 'other'],
+                    ],
+                    'ClaimantCompanyName' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'On a lien waiver: the company name printed next to "COMPANY NAME". On a sworn statement: the contractor company the affiant swears for. This is the party whose document this is — NOT the general contractor who employed them (not the name after "has been employed by").',
+                    ],
+                    'PropertyAddress' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The jobsite/premises street address the document concerns (after "premises known as" or "BUILDING LOCATED AT").',
+                    ],
+                    'IsWetSigned' => [
+                        'type' => 'boolean',
+                        'method' => 'generate',
+                        'description' => 'True if the document carries at least one handwritten ink signature (in the SIGNATURE AND TITLE, SIGNATURE, or SIGNED blanks). Printed/typed names alone do not count.',
+                    ],
+                    'SignedDate' => [
+                        'type' => 'date',
+                        'method' => 'extract',
+                        'description' => 'The handwritten date filled into the DATE blank in the TOP waiver section (next to COMPANY NAME), if any.',
+                    ],
+                    'AffiantName' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The handwritten name filled into the (NAME) blank of the CONTRACTOR\'S AFFIDAVIT ("THE UNDERSIGNED, (NAME) ___ BEING DULY SWORN..."). Transcribe the handwriting as best you can. Empty if the blank is unfilled or there is no affidavit.',
+                    ],
+                    'AffiantPosition' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The handwritten position/title filled into the "IS (POSITION) ___" blank of the CONTRACTOR\'S AFFIDAVIT (e.g. "President", "Secretary"). Empty if unfilled.',
+                    ],
+                    'AffidavitDate' => [
+                        'type' => 'date',
+                        'method' => 'extract',
+                        'description' => 'The handwritten date in the DATE blank directly BELOW the affidavit table, next to the SIGNATURE line. Handwritten separators are often misread — "7125126" means 7/25/26. Empty if unfilled.',
+                    ],
+                    'WaiverSignatureText' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'Best-effort transcription of the handwriting on the SIGNATURE AND TITLE line in the top waiver section — usually a signature plus a title (e.g. "Rayde Jmy - Secretory"). The handwriting may land on its own line before/after the printed label in reading order. Empty only if that line is truly blank.',
+                    ],
+                    'CompanyAddressText' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The claimant company\'s address on the ADDRESS line directly under COMPANY NAME in the waiver signature block. It may be pre-printed or handwritten. Empty only if that line is truly blank.',
+                    ],
+                    'AffidavitSignatureText' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'Best-effort transcription of the handwriting on the SIGNATURE line below the affidavit table. Signatures often transcribe as short scribble text (e.g. "por m") — return whatever is there. Empty only if that line is truly blank.',
+                    ],
+                    'StatementSignatureText' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'For a SWORN STATEMENT OF CONTRACTOR document: best-effort transcription of the handwriting on the SIGNED line (above the ADDRESS line, right side of the page). Signatures may transcribe as short scribble-like text — return whatever is there. Empty if blank or if this is not a sworn statement.',
+                    ],
+                    'NotaryDay' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The handwritten day number in the jurat "SUBSCRIBED AND SWORN TO BEFORE ME THIS ___ DAY OF" (e.g. "25"). On a sworn statement the phrase prints in lowercase: "Subscribed and sworn to before me this ___ day of". Empty if that blank is unfilled.',
+                    ],
+                    'NotaryMonth' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The handwritten month name in the jurat "DAY OF ___ , 20" (or lowercase "day of ___ , 20" on a sworn statement) — e.g. "July"; handwriting may transcribe imperfectly, e.g. "Juhy". Empty if that blank is unfilled.',
+                    ],
+                    'NotaryYear' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The handwritten two-digit year after ", 20" in the jurat (e.g. "26"). Empty if that blank is unfilled.',
+                    ],
+                    'NotaryName' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The notary\'s printed name as it appears on the official seal/stamp impression (e.g. "ADRIANA Y ALVAREZ"). The stamp may be recognized as a figure whose text reads like "OFFICIAL SEAL / <name> / Notary Public, State of Illinois / Commission No. ... / My Commission Expires ...". Empty if no stamp.',
+                    ],
+                    'NotaryCommissionNumber' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'The commission number printed on the notary seal/stamp (e.g. "840218"). Empty if no stamp or not readable.',
+                    ],
+                    'NotaryCommissionExpires' => [
+                        'type' => 'date',
+                        'method' => 'extract',
+                        'description' => 'The commission expiration date printed on the notary seal/stamp (e.g. "September 23, 2028"). Empty if no stamp or not readable.',
+                    ],
+                    'HasNotaryStamp' => [
+                        'type' => 'boolean',
+                        'method' => 'generate',
+                        'description' => 'True if an official notary seal/stamp impression is visible anywhere on the document — an inked or embossed stamp typically reading "OFFICIAL SEAL", the notary\'s name, "Notary Public, State of ...", a commission number and/or commission expiry. A handwritten signature on the NOTARY PUBLIC line alone is NOT a stamp.',
+                    ],
+                    'NotarySignatureText' => [
+                        'type' => 'string',
+                        'method' => 'extract',
+                        'description' => 'Best-effort transcription of the notary\'s handwritten signature — the handwriting immediately ABOVE the printed "NOTARY PUBLIC" label (printed as "Notary Public" on a sworn statement, bottom-left). Signatures often transcribe as short scribble-like text; return whatever is legible. Empty only if that line is truly blank.',
+                    ],
+                ],
             ],
         ];
     }

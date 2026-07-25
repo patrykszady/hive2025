@@ -47,18 +47,19 @@
 
     <x-island-card heading="{{ $view === 'expenses.show' && $this->checks->count() === 1 ? 'Check' : 'Checks' }}" :separator="true">
 
-        <div class="space-y-4">
+        @php($cell = $view !== NULL ? "!px-2 whitespace-nowrap" : "")
+        <div class="space-y-2">
             <flux:table>
                 <flux:table.columns>
                     {{-- sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')"> --}}
-                    <flux:table.column>Amount</flux:table.column>
-                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
-                    <flux:table.column>Check #</flux:table.column>
-                    <flux:table.column>Bank</flux:table.column>
+                    <flux:table.column :class="$cell">Amount</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" :class="$cell">Date</flux:table.column>
+                    <flux:table.column :class="$cell">Check #</flux:table.column>
+                    <flux:table.column :class="$cell">Bank</flux:table.column>
                     @if($view === NULL)
                         <flux:table.column>Payee</flux:table.column>
                     @endif
-                    <flux:table.column>Status</flux:table.column>
+                    <flux:table.column :class="$cell">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -66,19 +67,28 @@
                         <flux:table.row :key="$check->id">
                             <flux:table.cell
                                 variant="strong"
-                                class="cursor-pointer"
+                                class="cursor-pointer {{ $cell }}"
                                 >
                                 <a wire:navigate.hover href="{{route('checks.show', $check->id)}}">
                                     {{ money($check->amount) }}
                                 </a>
                             </flux:table.cell>
-                            <flux:table.cell>{{ $check->date->format('m/d/Y') }}</flux:table.cell>
-                            <flux:table.cell>{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:table.cell>
-                            <flux:table.cell>{{$check->bank_account?->bank?->name}}</flux:table.cell>
+                            <flux:table.cell :class="$cell">{{ $check->date->format($view !== NULL ? 'm/d/y' : 'm/d/Y') }}</flux:table.cell>
+                            <flux:table.cell :class="$cell">{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:table.cell>
+                            <flux:table.cell class="whitespace-nowrap {{ $view !== NULL ? '!px-2' : '' }}">
+                                @php($bankName = $check->bank_account?->bank?->name ?? '')
+                                @if($view !== NULL && mb_strlen($bankName) > 12)
+                                    <flux:tooltip :content="$bankName" position="top">
+                                        <span>{{ \Illuminate\Support\Str::limit($bankName, 12) }}</span>
+                                    </flux:tooltip>
+                                @else
+                                    {{ $bankName }}
+                                @endif
+                            </flux:table.cell>
                             @if($view === NULL)
                                 <flux:table.cell>{{$check->owner}}</flux:table.cell>
                             @endif
-                            <flux:table.cell>
+                            <flux:table.cell :class="$cell">
                                 <flux:badge size="sm" :color="$check->statusColor" inset="top bottom">{{ $check->status }}</flux:badge>
                             </flux:table.cell>
                         </flux:table.row>
@@ -87,9 +97,7 @@
             </flux:table>
 
             @if($this->checks->hasPages())
-                <div class="px-6 pb-6 pt-4">
-                    <flux:pagination :paginator="$this->checks" />
-                </div>
+                <flux:pagination :paginator="$this->checks" />
             @endif
         </div>
     </x-island-card>

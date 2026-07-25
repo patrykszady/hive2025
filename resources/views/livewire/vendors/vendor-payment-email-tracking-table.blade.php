@@ -1,4 +1,6 @@
-<div class="mt-4">
+<div @class(['mt-4' => is_null($vendorId)])>
+    {{-- Per-vendor usage (vendor show page) hides the card when empty. --}}
+    @if(is_null($vendorId) || $this->events->total() > 0)
     <x-island-card heading="Email Tracking" :separator="true" wire:loading.class="opacity-50 text-opacity-50" wire:transition>
         <div class="space-y-2">
             <flux:table :paginate="$this->events->hasPages() ? $this->events : null">
@@ -76,11 +78,12 @@
                         </flux:table.row>
                     @empty
                         <flux:table.row>
-                            <flux:table.cell colspan="4" class="text-center text-gray-500">No vendor payment email tracking events found.</flux:table.cell>
+                            <flux:table.cell colspan="4" class="text-center text-gray-500">No email tracking events found.</flux:table.cell>
                         </flux:table.row>
                     @endforelse
                 </flux:table.rows>
             </flux:table>
         </div>
     </x-island-card>
+    @endif
 </div>

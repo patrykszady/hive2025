@@ -13,7 +13,7 @@
     <form wire:submit="{{$view_text['form_submit']}}">
         <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-4 lg:self-start">
-                <x-island-card heading="{{$vendor->name}} Payment" subheading="Choose Projects to add for {{$vendor->name}} in this Payment" :separator="true">
+                <x-island-card heading="{{$vendor->name}} Payment" :href="route('vendors.show', $vendor->id)" subheading="Choose Projects to add for {{$vendor->name}} in this Payment" :separator="true">
                     {{-- always: true — re-render on EVERY update (island keystrokes AND
                          outer project-amount changes) so the total and the submit
                          button's disabled state stay live in both directions. --}}

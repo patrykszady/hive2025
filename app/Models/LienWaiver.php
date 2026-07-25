@@ -11,7 +11,6 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -24,6 +23,7 @@ class LienWaiver extends Model
         'belongs_to_vendor_id',
         'vendor_id',
         'project_id',
+        'sworn_statement_id',
         'check_id',
         'payment_id',
         'type',
@@ -93,18 +93,6 @@ class LienWaiver extends Model
         return $this->belongsTo(Payment::class);
     }
 
-    public function signatures(): HasMany
-    {
-        return $this->hasMany(LienWaiverSignature::class)->orderBy('signed_at');
-    }
-
-    public function signature(): Attribute
-    {
-        return Attribute::make(
-            get: fn () => $this->signatures->first(),
-        );
-    }
-
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
@@ -120,6 +108,18 @@ class LienWaiver extends Model
     public function isDraft(): bool
     {
         return $this->status === LienWaiverStatus::Draft;
+    }
+
+    /**
+     * A waiver from a subcontractor/supplier (claimant is not the paying
+     * contractor). Sub waivers print the waiver section only — the contractor's
+     * affidavit is a GC→owner document.
+     */
+    public function isSubWaiver(): bool
+    {
+        return $this->vendor_id !== null
+            && $this->belongs_to_vendor_id !== null
+            && (int) $this->vendor_id !== (int) $this->belongs_to_vendor_id;
     }
 
     public function typeLabel(): string

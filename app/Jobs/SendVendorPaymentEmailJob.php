@@ -68,9 +68,24 @@ class SendVendorPaymentEmailJob implements ShouldQueue
             ? (string) config('email_tracking.mailtrap_mailer', 'mailtrap-sdk')
             : 'mailtrap-sdk';
 
+        // Subject and body render in the recipient's preferred language —
+        // same resolution as the lien waiver emails: the vendor's locale,
+        // but when we email a specific user (no business email on file),
+        // that user's own language preference wins.
+        $recipientLocale = $this->vendor->preferredLocale();
+
+        if (! $this->vendor->business_email) {
+            $recipientUser = $this->vendor->users()->where('is_employed', 1)->first();
+
+            if ($recipientUser?->preferred_language) {
+                $recipientLocale = $recipientUser->preferredLocale();
+            }
+        }
+
         Mail::mailer($mailer)
             ->to($to)
             ->cc($cc)
+            ->locale($recipientLocale ?: 'en')
             ->send($mailable);
     }
 }

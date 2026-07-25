@@ -44,8 +44,10 @@ class EmailTrackingTable extends Component
     {
         $allEvents = EmailTracking::with('project')
             ->where(function ($query) {
+                // Internal/vendor-facing sends stay out of the client-facing
+                // tracking card.
                 $query->whereNull('email_template_name')
-                    ->orWhere('email_template_name', '!=', 'Vendor Payment');
+                    ->orWhereNotIn('email_template_name', ['Vendor Payment', 'Lien Waiver Signing Request', 'Draw Package']);
             })
             ->when($this->projectId, function ($query) {
                 $query->where('project_id', $this->projectId);

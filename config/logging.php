@@ -157,6 +157,13 @@ return [
             'days' => 30
         ],
 
+        'waiver_scans' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/waiver_scans.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'check_images' => [
             'driver' => 'daily',
             'path' => storage_path('logs/check_images.log'),

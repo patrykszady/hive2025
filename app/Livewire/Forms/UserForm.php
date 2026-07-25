@@ -43,6 +43,13 @@ class UserForm extends Form
     #[Validate('nullable')]
     public $via_vendor = null;
 
+    /** Company position at the auth vendor ("President", "Secretary", …). */
+    #[Validate('nullable|string|max:100')]
+    public $position = null;
+
+    /** True when the edited user is attached to the auth vendor (pivot exists). */
+    public bool $showPosition = false;
+
     public function rules()
     {
         return [
@@ -91,6 +98,14 @@ class UserForm extends Form
         $this->preferred_language = $user->preferred_language ?: 'English';
         $this->email = $user->email;
         $this->cell_phone = $user->cell_phone;
+
+        // Business title lives on the user↔vendor pivot for the auth vendor.
+        $authVendorId = auth()->user()?->vendor?->id;
+        $pivot = $authVendorId
+            ? $user->vendors()->where('vendor_id', $authVendorId)->first()?->pivot
+            : null;
+        $this->showPosition = (bool) $pivot;
+        $this->position = $pivot?->position;
     }
 
     public function store()
@@ -144,6 +159,14 @@ class UserForm extends Form
             'email' => $this->email,
             // 'cell_phone' => $this->component->user_cell,
         ]);
+
+        // Persist the business title onto the user↔vendor pivot.
+        $authVendorId = auth()->user()?->vendor?->id;
+        if ($this->showPosition && $authVendorId && $this->user->vendors()->where('vendor_id', $authVendorId)->exists()) {
+            $this->user->vendors()->updateExistingPivot($authVendorId, [
+                'position' => trim((string) $this->position) ?: null,
+            ]);
+        }
 
         return $user;
     }

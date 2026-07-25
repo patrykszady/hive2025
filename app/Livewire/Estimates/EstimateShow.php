@@ -423,6 +423,20 @@ class EstimateShow extends Component
             return;
         }
 
+        // A section is only a change order once the contract exists — the base
+        // (type 1) bid is created when the estimate is accepted/signed. Before
+        // that, new sections are simply part of the still-unsigned estimate
+        // (otherwise the finances double-count: the section sums into the
+        // estimate fallback AND its CO bid).
+        $hasBaseBid = Bid::where('project_id', $projectId)
+            ->where('vendor_id', $vendorId)
+            ->where('type', 1)
+            ->exists();
+
+        if (! $hasBaseBid) {
+            return;
+        }
+
         $nextType = (int) (Bid::where('project_id', $projectId)
             ->where('vendor_id', $vendorId)
             ->max('type') ?? 1) + 1;

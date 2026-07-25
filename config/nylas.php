@@ -31,6 +31,16 @@ return [
     'certificates_error_folder_id' => 'AAMkADFjNDA4YWRkLWQwY2EtNGRjNy05MGY2LWIzZmRkZGY4MWQ2ZAAuAAAAAAAbAx4d9GtURbnmT1hEV1zPAQBKa1xL_ysmRpM8pXdp3NQPAAAIbJ_JAAA=',
     'certificates_deleted_folder_id' => 'AQMkADFjNDA4YWRkAC1kMGNhLTRkYzctOTBmNi1iM2ZkZAFmODFkNmQALgAAAxsDHh30a1RFueZPWERXXM8BAEprXEv7KyZGkzyld2nc1A8AAAIBCgAAAA==',
 
+    // Waivers mailbox on Hive Email — returned wet-signed lien waiver / GCSS
+    // scans land here; the barcode ingest matches them by HLW-/HSS- codes.
+    'waivers_grant_id' => '6bfc3060-7409-4b44-9b98-9e88a5ae4481',
+    'waivers_email' => 'waivers@hive.contractors',
+    'waivers_inbox_folder_id' => 'AQMkAGQ4MjRmM2M3LTQ1MmEtNGZiYS1hMjUxLWNiMjFiZGZjOTNjZQAuAAADZg-HbmNa8kyefF2rxPPyRwEAi7dz6mqPSUOPEb-C83eK8wAAAgEMAAAA',
+    'waivers_processed_folder_id' => 'AQMkAGQ4MjRmM2M3LTQ1MmEtNGZiYS1hMjUxLWNiMjFiZGZjOTNjZQAuAAADZg-HbmNa8kyefF2rxPPyRwEAi7dz6mqPSUOPEb-C83eK8wAAAgFcAAAA',
+    'waivers_saved_folder_id' => 'AQMkAGQ4MjRmM2M3LTQ1MmEtNGZiYS1hMjUxLWNiMjFiZGZjOTNjZQAuAAADZg-HbmNa8kyefF2rxPPyRwEAi7dz6mqPSUOPEb-C83eK8wAAAgFdAAAA',
+    'waivers_error_folder_id' => 'AQMkAGQ4MjRmM2M3LTQ1MmEtNGZiYS1hMjUxLWNiMjFiZGZjOTNjZQAuAAADZg-HbmNa8kyefF2rxPPyRwEAi7dz6mqPSUOPEb-C83eK8wAAAgFeAAAA',
+    'waivers_deleted_folder_id' => 'AQMkAGQ4MjRmM2M3LTQ1MmEtNGZiYS1hMjUxLWNiMjFiZGZjOTNjZQAuAAADZg-HbmNa8kyefF2rxPPyRwEAi7dz6mqPSUOPEb-C83eK8wAAAgEKAAAA',
+
     // OAuth scopes required (space separated). Ensure the Nylas Connect flow requests email.send for forwarding.
     // Add NYLAS_SCOPES to .env to override if needed.
     'scopes' => env('NYLAS_SCOPES') ?: 'email.read_only email.send',

@@ -2,7 +2,6 @@
 
 namespace App\Mail;
 
-use App\Models\Agent;
 use App\Models\Vendor;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -10,6 +9,7 @@ use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use Throwable;
 
 class RequestInsurance extends Mailable
 {
@@ -19,50 +19,56 @@ class RequestInsurance extends Mailable
 
     public $vendor;
 
-    // public $agent;
     public $agent_expired_docs;
 
-    public string $requestLabel;
+    /** 'coi' | 'license' | 'documents' — localized via insurance_request.label_* */
+    public string $requestType;
 
-    /**
-     * Create a new message instance.
-     *
-     * @return void
-     */
-    //Agent $agent,
+    public string $trackingId = '';
+
     public function __construct($agent_expired_docs, Vendor $vendor, Vendor $requesting_vendor)
     {
         $this->theme = 'transparent';
+        $this->trackingId = (string) \Illuminate\Support\Str::uuid();
 
         $this->agent_expired_docs = $agent_expired_docs;
-        // $this->agent = $agent;
         $this->vendor = $vendor;
         $this->requesting_vendor = $requesting_vendor;
-        $this->requestLabel = $this->resolveRequestLabel($agent_expired_docs);
+        $this->requestType = $this->resolveRequestType($agent_expired_docs);
 
         $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
-            $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('insurance_request'));
+            try {
+                $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('insurance_request'));
+                $message->getHeaders()->add(new \Mailtrap\EmailHeader\CustomVariableHeader('tracking_id', $this->trackingId));
+            } catch (Throwable) {
+                // Mailtrap header classes may not be available in test/CI envs.
+            }
+
+            // Hive mark for the shared CTA card (<x-mail.cta />).
+            $markPath = public_path('favicon.png');
+            if (is_file($markPath)) {
+                $message->embedFromPath($markPath, 'hive-mark', 'image/png');
+            }
+
+            $message->getHeaders()->addTextHeader('X-Email-Metadata', json_encode([
+                'email_template_name' => 'Insurance Request',
+                'tracking_id' => $this->trackingId,
+                'vendor_id' => $this->vendor->id,
+                'belongs_to_vendor_id' => $this->requesting_vendor->id,
+            ]));
         });
     }
 
-    /**
-     * Get the message envelope.
-     *
-     * @return \Illuminate\Mail\Mailables\Envelope
-     */
     public function envelope()
     {
         return new Envelope(
+            // From certificates@ so a plain reply (with the new COI attached)
+            // lands straight in the ingest mailbox.
             from: new Address(config('nylas.certificates_email'), 'Hive Contractors'),
-            subject: $this->requestLabel.' for '.$this->vendor->name,
+            subject: __('insurance_request.label_' . $this->requestType) . ' | ' . $this->vendor->name,
         );
     }
 
-    /**
-     * Get the message content definition.
-     *
-     * @return \Illuminate\Mail\Mailables\Content
-     */
     public function content()
     {
         return new Content(
@@ -70,17 +76,12 @@ class RequestInsurance extends Mailable
         );
     }
 
-    /**
-     * Get the attachments for the message.
-     *
-     * @return array
-     */
     public function attachments()
     {
         return [];
     }
 
-    private function resolveRequestLabel($docs): string
+    private function resolveRequestType($docs): string
     {
         $insuranceTypes = ['general', 'professional', 'workers'];
 
@@ -96,14 +97,10 @@ class RequestInsurance extends Mailable
             }
         }
 
-        if ($hasInsurance && $hasLicense) {
-            return 'Document Request';
-        }
-
-        if ($hasLicense) {
-            return 'License Request';
-        }
-
-        return 'COI Request';
+        return match (true) {
+            $hasInsurance && $hasLicense => 'documents',
+            $hasLicense => 'license',
+            default => 'coi',
+        };
     }
 }

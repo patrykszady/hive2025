@@ -694,7 +694,18 @@ class NylasService
                 default => null,
             };
         }
-        
+
+        // Waivers grant (returned wet-signed lien waiver / GCSS scans)
+        if ($grantId === config('nylas.waivers_grant_id')) {
+            return match($folderName) {
+                'inbox' => null, // Use default inbox
+                'saved', 'processed' => config('nylas.waivers_saved_folder_id'),
+                'error', 'errors' => config('nylas.waivers_error_folder_id'),
+                'deleted', 'deleteditems' => config('nylas.waivers_deleted_folder_id'),
+                default => null,
+            };
+        }
+
         return null;
     }
 

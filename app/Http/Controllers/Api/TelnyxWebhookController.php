@@ -3630,7 +3630,8 @@ class TelnyxWebhookController extends Controller
             : $callerNumber;
 
         $vendor = Vendor::find(1);
-        $businessName = $vendor?->business_name ?: 'us';
+        // short_name falls back to the full business name when not set.
+        $businessName = $vendor?->short_name ?: ($vendor?->business_name ?: 'us');
         $website = trim((string) ($vendor?->business_website ?? ''));
         $smsText = "Hi, {$businessName} received your call. We'll get back to you as soon as possible.";
         if ($website !== '') {

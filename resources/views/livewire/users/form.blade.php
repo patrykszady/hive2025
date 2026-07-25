@@ -167,6 +167,18 @@
                         placeholder="10"
                     />
                 </div>
+
+                {{-- BUSINESS TITLE (user↔vendor pivot; prefills signature blocks) --}}
+                @if($form->showPosition)
+                    <div class="my-4 space-y-4">
+                        <flux:input
+                            wire:model="form.position"
+                            label="Business Title"
+                            size="lg"
+                            placeholder="President / Secretary"
+                        />
+                    </div>
+                @endif
             </div>
         </div>
     </form>

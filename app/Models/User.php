@@ -15,9 +15,28 @@ use Laragear\WebAuthn\WebAuthnAuthentication;
 use Laragear\WebAuthn\WebAuthnData;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable implements WebAuthnAuthenticatable
+class User extends Authenticatable implements WebAuthnAuthenticatable, \Illuminate\Contracts\Translation\HasLocalePreference
 {
     use HasApiTokens, HasFactory, Notifiable, WebAuthnAuthentication;
+
+    /** Map a stored preferred_language label to an app locale code. */
+    public static function localeFromLanguage(?string $language): string
+    {
+        return match ($language) {
+            'Polish' => 'pl',
+            'Spanish' => 'es',
+            default => 'en',
+        };
+    }
+
+    /**
+     * Laravel uses this automatically for Mail::to($user) and notifications,
+     * so every mailable renders in the recipient's language.
+     */
+    public function preferredLocale(): string
+    {
+        return static::localeFromLanguage($this->preferred_language);
+    }
 
     /**
      * Languages a user can choose as their preferred communication language.
@@ -111,7 +130,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
         return $this->belongsToMany(Vendor::class)
             ->using(UserVendor::class)
             ->withTimestamps()
-            ->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate', 'options']);
+            ->withPivot(['is_employed', 'role_id', 'position', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate', 'options']);
     }
 
     //User's default/logged in vendor
