@@ -172,6 +172,7 @@
                         </flux:button>
                     </x-slot:actions>
 
+                    <div class="card-flush-bottom">
                     <flux:table>
                         <flux:table.columns>
                             <flux:table.column>Amount</flux:table.column>
@@ -201,6 +202,7 @@
                             @endforeach
                         </flux:table.rows>
                     </flux:table>
+                    </div>
                 </x-island-card>
             @endif
 
@@ -213,7 +215,7 @@
                         </flux:button>
                     </x-slot:actions>
 
-                    <div class="space-y-2">
+                    <div class="card-flush-bottom space-y-2">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
@@ -248,7 +250,7 @@
                         </flux:button>
                     </x-slot:actions>
 
-                    <div class="space-y-2">
+                    <div class="card-flush-bottom space-y-2">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
@@ -285,7 +287,7 @@
                         </flux:button>
                     </x-slot:actions>
 
-                    <div class="space-y-2">
+                    <div class="card-flush-bottom space-y-2">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
@@ -320,6 +322,7 @@
                         </flux:button>
                     </x-slot:actions>
 
+                    <div class="card-flush-bottom">
                     <flux:table>
                         <flux:table.columns>
                             <flux:table.column>Amount</flux:table.column>
@@ -347,6 +350,7 @@
                             @endforeach
                         </flux:table.rows>
                     </flux:table>
+                    </div>
                 </x-island-card>
             @endif
 

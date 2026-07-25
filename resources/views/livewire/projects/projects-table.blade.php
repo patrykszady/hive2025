@@ -1,17 +1,19 @@
-<x-island-card heading="Projects" wire:transition>
+<x-index-table heading="Projects" :paginator="$this->projects" wire:transition>
     <x-slot:actions>
-    @can('create', App\Models\Project::class)
-        <flux:button size="sm" wire:click="$dispatchTo('projects.project-create', 'newProject', { client_id: '{{ $clientId }}' })">Create Project</flux:button>
-    @endcan
+        @include('livewire.projects.partials.projects-table-actions')
     </x-slot:actions>
 
-    {{-- No overflow-x-hidden here: it would clip the negative-margin bleed
-         that lets row hovers reach the card edges (see app.css ui-table-scroll-area). --}}
-    <div class="space-y-2">
+    {{-- Modal host BEFORE the flush wrapper: anything after it re-introduces
+         bottom whitespace via the card's space-y gap. --}}
+    <x-slot:before>
+        <livewire:projects.project-create />
+    </x-slot:before>
+
+    {{-- No projects: show the card heading alone, without empty table headers. --}}
+    @if($this->projects->isNotEmpty())
         <flux:table
-            :paginate="$this->projects->hasPages() ? $this->projects : null"
             wire:loading.class="opacity-50 text-opacity-50"
-            class="table-fixed w-full compact-table"
+            class="compact-table {{ $view == 'clients.index' ? 'table-fixed min-w-0 w-full' : 'index-table' }} [:where(&)]:p-0 [:where(&)]:space-y-0"
         >
             <flux:table.columns>
                 @if($view == 'clients.index')
@@ -30,7 +32,7 @@
                         <flux:table.column class="w-[25%] min-w-0">Contractor</flux:table.column>
                     @endif
                 @endif
-                <flux:table.column align="end" class="w-[30%] min-w-[5rem] shrink-0">Status</flux:table.column>
+                <flux:table.column class="w-[30%] min-w-[5rem] shrink-0">Status</flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
@@ -43,19 +45,17 @@
                                 href="{{route('projects.show', $project->id)}}"
                                 variant="strong" 
                                 class="cursor-pointer w-[35%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400">
-                                <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->project_name }}">{{ $project->project_name }}</div>
+                                <x-truncate-tooltip :content="$project->project_name"><div class="truncate">{{ $project->project_name }}</div></x-truncate-tooltip>
                             </flux:table.cell>
                             <flux:table.cell
                                 wire:navigate.hover
                                 href="{{route('projects.show', $project->id)}}"
                                 class="cursor-pointer w-[35%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400">
-                                <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
+                                <x-truncate-tooltip :content="$project->address"><div class="truncate">{{ $project->short_address }}</div></x-truncate-tooltip>
                             </flux:table.cell>
                             @if(auth()->user()->is_browsing_as_client)
                                 <flux:table.cell class="w-[25%] min-w-0">
-                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name }}">
-                                        {{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}
-                                    </div>
+                                    <x-truncate-tooltip :content="$project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? ''"><div class="truncate">{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}</div></x-truncate-tooltip>
                                 </flux:table.cell>
                             @endif
                         @else
@@ -65,7 +65,7 @@
                                 variant="strong"
                                 class="cursor-pointer w-[30%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400"
                                 >
-                                <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
+                                <x-truncate-tooltip :content="$project->address"><div class="truncate">{{ $project->short_address }}</div></x-truncate-tooltip>
                             </flux:table.cell>
                             @if($view != 'clients.index' && !auth()->user()->is_browsing_as_client)
                                 @if($project->client)
@@ -74,7 +74,7 @@
                                         href="{{route('clients.show', $project->client->id)}}"
                                         class="cursor-pointer w-[25%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400"
                                     >
-                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->client->last_names }}">{{ $project->client->last_names }}</div>
+                                        <x-truncate-tooltip :content="$project->client->last_names"><div class="truncate">{{ $project->client->last_names }}</div></x-truncate-tooltip>
                                     </flux:table.cell>
                                 @else
                                     <flux:table.cell class="w-[25%] min-w-0">
@@ -86,44 +86,30 @@
                                 wire:navigate.hover
                                 href="{{route('projects.show', $project->id)}}"
                                 class="cursor-pointer w-[25%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400">
-                                <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->project_name }}">{{ $project->project_name }}</div>
+                                <x-truncate-tooltip :content="$project->project_name"><div class="truncate">{{ $project->project_name }}</div></x-truncate-tooltip>
                             </flux:table.cell>
                             @if(auth()->user()->is_browsing_as_client)
                                 <flux:table.cell class="w-[25%] min-w-0">
-                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name }}">
-                                        {{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}
-                                    </div>
+                                    <x-truncate-tooltip :content="$project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? ''"><div class="truncate">{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}</div></x-truncate-tooltip>
                                 </flux:table.cell>
                             @endif
                         @endif
-                        <flux:table.cell align="end" class="w-[30%] min-w-[5rem] shrink-0">
+                        <flux:table.cell class="w-[30%] min-w-[5rem] shrink-0">
                             @php($vendorStatus = $project->latestVendorStatus())
                             @if(auth()->user()->is_browsing_as_client)
                                 <flux:badge size="sm" :color="$vendorStatus->badge_color" inset="top bottom">{{ $vendorStatus->title }}</flux:badge>
                             @else
-                                <div x-data="{ status: {{ $vendorStatus->status_code }} }" x-init="$watch('status', value => $wire.updateProjectStatus({{ $project->id }}, value))">
-                                    <flux:select
-                                        x-model="status"
-                                        variant="listbox"
-                                        size="sm"
-                                        class="!min-w-0"
-                                    >
-                                        @foreach($projectStatuses as $status)
-                                            <flux:select.option :value="$status['code']">
-                                                <flux:badge size="sm" inset="top bottom" :color="$status['color']">
-                                                    {{ $status['label'] }}
-                                                </flux:badge>
-                                            </flux:select.option>
-                                        @endforeach
-                                    </flux:select>
-                                </div>
+                                <x-status-select
+                                    :value="$vendorStatus->status_code"
+                                    :options="$projectStatuses"
+                                    method="updateProjectStatus"
+                                    :model-id="$project->id"
+                                />
                             @endif
                         </flux:table.cell>
                     </flux:table.row>
                 @endforeach
             </flux:table.rows>
         </flux:table>
-    </div>
-
-    <livewire:projects.project-create />
-</x-island-card>
+    @endif
+</x-index-table>

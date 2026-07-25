@@ -161,7 +161,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
 
     public function leads(): HasMany
     {
-        return $this->hasMany(Leads::class);
+        return $this->hasMany(Lead::class);
     }
 
     public function clients(): BelongsToMany
@@ -327,8 +327,8 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     protected function firstName(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => ucwords(strtolower($value)),
-            set: fn ($value) => ucwords(strtolower($value))
+            get: fn ($value) => static::titleCaseName($value),
+            set: fn ($value) => static::titleCaseName($value)
         );
     }
 
@@ -338,8 +338,25 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     protected function lastName(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => ucwords(strtolower($value)),
-            set: fn ($value) => ucwords(strtolower($value))
+            get: fn ($value) => static::titleCaseName($value),
+            set: fn ($value) => static::titleCaseName($value)
+        );
+    }
+
+    /**
+     * Title-case a person's name, capitalizing after spaces, hyphens and
+     * apostrophes (O'Brien, Jean-Luc) without mangling accented letters.
+     */
+    protected static function titleCaseName(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return $value;
+        }
+
+        return preg_replace_callback(
+            "/(?:^|[\s\-\x{2019}'])\p{L}/u",
+            fn ($m) => mb_strtoupper($m[0], 'UTF-8'),
+            mb_strtolower($value, 'UTF-8')
         );
     }
 
@@ -388,6 +405,42 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
 
         // Default: add + to whatever we have
         return '+' . $phone;
+    }
+
+    /**
+     * Every storage variant of this user's cell phone that could appear as an
+     * SMS thread participant (+1XXXXXXXXXX, 1XXXXXXXXXX, bare 10-digit, raw).
+     *
+     * Single source of truth for client-user thread visibility — used by
+     * SmsGroupThread::scopeAccessibleTo and anywhere phone-participant
+     * matching is needed.
+     *
+     * @return array<int, string>
+     */
+    public function smsParticipantPhoneVariants(): array
+    {
+        $rawPhone = $this->routeNotificationForTelnyx();
+
+        if (! is_string($rawPhone) || $rawPhone === '') {
+            return [];
+        }
+
+        $digits = preg_replace('/\D/', '', $rawPhone);
+        if (! is_string($digits) || $digits === '') {
+            return [];
+        }
+
+        if (strlen($digits) === 10) {
+            return array_values(array_unique([$rawPhone, '+1' . $digits, '1' . $digits, $digits]));
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $tenDigit = substr($digits, 1);
+
+            return array_values(array_unique([$rawPhone, '+' . $digits, $digits, '+1' . $tenDigit, $tenDigit]));
+        }
+
+        return array_values(array_unique([$rawPhone, '+' . $digits, $digits]));
     }
 
     /**

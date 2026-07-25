@@ -227,7 +227,7 @@ class VendorTasks extends Component
             'title' => 'Your Tasks',
             'showProjectInfo' => true,
             'count' => 2,
-            'showHeaderSkeleton' => false,
+            'showAddTask' => true,
         ]);
     }
 }

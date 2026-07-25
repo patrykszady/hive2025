@@ -70,9 +70,23 @@ class ExpenseCreate extends Component
         );
     }
 
+    /**
+     * The form's select lists (all vendors + projects + distributions) are
+     * ~2.2MB of rendered options. Until one of the open events fires, the
+     * modal body renders empty — the page that merely HOSTS this modal
+     * doesn't pay for it. Flipped by every path that shows a modal; the
+     * open event's own round trip brings the options.
+     */
+    public bool $hydrated = false;
+
     public function mount(?int $expenseId = null, bool $embedded = false): void
     {
         $this->embedded = $embedded;
+
+        if ($embedded) {
+            $this->hydrated = true;
+        }
+
         $this->expense = Expense::make();
 
         if ($expenseId) {
@@ -226,6 +240,7 @@ class ExpenseCreate extends Component
 
     public function newExpense($amount)
     {
+        $this->hydrated = true;
         $this->clearCheckFields();
         $this->expense = Expense::make();
        
@@ -241,6 +256,7 @@ class ExpenseCreate extends Component
 
     public function openUploadReceipt(): void
     {
+        $this->hydrated = true;
         $this->upload_file = null;
         $this->upload_is_material_order = false;
         $this->upload_belongs_to_vendor_id = null;
@@ -250,6 +266,7 @@ class ExpenseCreate extends Component
 
     public function editExpense(Expense $expense)
     {
+        $this->hydrated = true;
         $this->resetModal();
 
         $this->expense = $expense;
@@ -376,6 +393,7 @@ class ExpenseCreate extends Component
 
     public function createExpenseFromTransaction(Transaction $transaction)
     {
+        $this->hydrated = true;
         $this->resetModal();
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         // {

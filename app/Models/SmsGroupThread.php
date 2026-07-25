@@ -98,6 +98,34 @@ class SmsGroupThread extends Model
         });
     }
 
+    /**
+     * Scope threads the given user may see — the single source of truth for
+     * SMS thread visibility (list, conversation, read-beacon, offline cache).
+     *
+     * Client users: threads on one of their clients where their own phone is a
+     * participant. Vendor users: the existing visibleToVendor rules.
+     */
+    public function scopeAccessibleTo(Builder $query, User $user): Builder
+    {
+        if ($user->is_browsing_as_client) {
+            $clientIds = $user->clients()->pluck('clients.id');
+            $participantPhones = $user->smsParticipantPhoneVariants();
+
+            return $query
+                ->whereIn('client_id', $clientIds)
+                ->whereHas('threadParticipants', fn (Builder $participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones));
+        }
+
+        $vendorId = $user->vendor?->id;
+
+        if (! $vendorId) {
+            // Vendor user without a vendor context can see nothing.
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->visibleToVendor($vendorId);
+    }
+
     public function messages(): HasMany
     {
         return $this->hasMany(SmsMessage::class, 'thread_id');

@@ -31,7 +31,7 @@ class Index extends Component
     public bool $scoped = false;
 
     #[Url(as: 'status')]
-    public string $statusFilter = '';
+    public ?string $statusFilter = '';
 
     #[Url(as: 'q')]
     public string $search = '';
@@ -80,6 +80,42 @@ class Index extends Component
 
     /** The draw amount the owner is paying now ("Net amount of this payment"). */
     public ?string $ssThisPayment = null;
+
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(): int
+    {
+        return 20;
+    }
+
+    /**
+     * Column defs for the standalone /lien-waivers table — the loading skeleton
+     * renders from this array so it can never drift from the real header row.
+     * (The project-scoped card uses the per-draw accordion in _table.blade.php,
+     * not this flat table.)
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        // The real table declares no per-column widths — .index-table is
+        // table-fixed, so the six columns split evenly. Mirror that exactly.
+        return [
+            // Project cell stacks the project name over its address, so its rows
+            // are two lines (60px) rather than the shared 44px rhythm — the
+            // skeleton has to stack too or the card jumps when rows swap in.
+            ['label' => 'Project', 'width' => '', 'skeleton' => 'two-line', 'skeletonWidth' => 'w-28', 'skeletonSubWidth' => 'w-20'],
+            ['label' => 'Vendor', 'width' => '', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Amount', 'width' => '', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Through', 'width' => '', 'skeletonWidth' => 'w-12'],
+            ['label' => 'Type', 'width' => '', 'skeleton' => 'badge'],
+            ['label' => 'Status', 'width' => '', 'skeleton' => 'badge'],
+        ];
+    }
 
     #[Placeholder]
     public function skeleton()
@@ -235,7 +271,7 @@ class Index extends Component
         return LienWaiver::query()
             ->with(['vendor', 'payerVendor', 'project', 'check', 'payment'])
             ->when($this->project?->id, fn ($q) => $q->where('project_id', $this->project->id))
-            ->when($this->statusFilter !== '', fn ($q) => $q->where('status', $this->statusFilter))
+            ->when(filled($this->statusFilter), fn ($q) => $q->where('status', $this->statusFilter))
             ->when($this->search !== '', function ($q) {
                 $needle = '%' . $this->search . '%';
                 $q->where(function ($q) use ($needle) {

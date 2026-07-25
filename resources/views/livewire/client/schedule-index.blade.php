@@ -15,9 +15,13 @@
     <div class="max-w-lg mx-auto px-4 py-6">
         {{-- Skeleton shown during Livewire refresh (e.g. browser timezone sync) --}}
         <div wire:loading.delay.shortest class="animate-pulse">
+            {{-- Client portal: the real card shows no buttons (public view),
+                 so the skeleton header shows none either. --}}
             <x-upcoming-tasks-list-skeleton
                 title="Tasks"
                 :show-project-info="false"
+                :clickable="false"
+                :show-notifications="false"
             />
         </div>
 

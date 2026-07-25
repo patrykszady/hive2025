@@ -32,7 +32,7 @@
                 @endif
             </x-slot:actions>
 
-            <div class="space-y-2" x-data="{ hoveredPaymentGroup: null }">
+            <div class="card-flush-bottom space-y-2" x-data="{ hoveredPaymentGroup: null }">
                 <flux:table class="w-full">
                     <flux:table.columns>
                         <flux:table.column>Amount</flux:table.column>

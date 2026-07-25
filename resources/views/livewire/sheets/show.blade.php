@@ -34,7 +34,7 @@
                         </div>
                         <div class="text-sm text-zinc-600 dark:text-zinc-300 truncate">
                             @if($expense->vendor)
-                                <a href="{{ route('vendors.show', $expense->vendor_id) }}" class="hover:underline">{{ $expense->vendor->business_name }}</a>
+                                <a wire:navigate.hover href="{{ route('vendors.show', $expense->vendor_id) }}" class="hover:underline">{{ $expense->vendor->business_name }}</a>
                             @else
                                 <span class="text-zinc-400">No Vendor</span>
                             @endif
@@ -85,7 +85,7 @@
                                         @if($laborSum == 0.0) @continue @endif
                                         <flux:table.row :key="'labor-' . $loop->index">
                                             <flux:table.cell>
-                                                <a href="{{ route('vendors.show', $cost_of_labor_vendor->first()->vendor_id) }}" target="_blank" class="hover:text-indigo-600 dark:hover:text-indigo-400">
+                                                <a wire:navigate.hover href="{{ route('vendors.show', $cost_of_labor_vendor->first()->vendor_id) }}" target="_blank" class="hover:text-indigo-600 dark:hover:text-indigo-400">
                                                     {!! $vendor_name !!}
                                                 </a>
                                             </flux:table.cell>
@@ -112,7 +112,7 @@
                                         @if($materialsSum == 0.0) @continue @endif
                                         <flux:table.row :key="'materials-' . $loop->index">
                                             <flux:table.cell>
-                                                <a href="{{ route('vendors.show', $cost_of_materials_vendors->first()->vendor_id) }}" target="_blank" class="hover:text-indigo-600 dark:hover:text-indigo-400">
+                                                <a wire:navigate.hover href="{{ route('vendors.show', $cost_of_materials_vendors->first()->vendor_id) }}" target="_blank" class="hover:text-indigo-600 dark:hover:text-indigo-400">
                                                     {!! $vendor_name !!}
                                                 </a>
                                             </flux:table.cell>

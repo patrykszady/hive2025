@@ -1,5 +1,8 @@
 <div>
     <flux:modal wire:model="showModal" name="send-schedule-modal" class="w-full max-w-lg">
+        {{-- Radio-grid pickers (~340KB rendered): only while open — this child
+             re-renders with every conversation thread switch otherwise. --}}
+        @if($showModal)
         <div class="space-y-4">
             <flux:heading size="lg">Confirm Tasks</flux:heading>
 
@@ -219,5 +222,6 @@
                 </flux:button>
             </div>
         </div>
+    @endif
     </flux:modal>
 </div>

@@ -1,3 +1,4 @@
+<div>
 <x-form-modal name="client_form_modal" :title="$view_text['card_title']">
     <form id="client_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         <flux:input
@@ -74,8 +75,7 @@
     <x-slot name="footer">
         @if ($view_text['form_submit'] === 'edit' && isset($client) && $client->exists && auth()->user()->can('delete', $client))
             <flux:button
-                wire:click="deleteClient"
-                wire:confirm="Are you sure you want to delete this client? This action cannot be undone."
+                wire:click="confirmDeleteClient"
                 variant="danger"
             >
                 Delete
@@ -85,3 +85,28 @@
         <flux:button type="submit" form="client_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
     </x-slot>
 </x-form-modal>
+
+{{-- DELETE CLIENT CONFIRMATION --}}
+<flux:modal wire:model.self="showClientDelete" name="client-delete-confirm" class="max-w-md">
+    @if(isset($client) && $client->exists)
+        <div class="space-y-4">
+            <flux:heading size="lg">Delete {{ $client->name }}?</flux:heading>
+
+            <flux:text>This permanently removes the client:</flux:text>
+
+            <ul class="list-disc pl-5 space-y-1 text-sm text-zinc-600 dark:text-zinc-300">
+                <li>The client and their portal access are removed.</li>
+                <li>Contact people keep their account if they're connected to another client or company; otherwise it's removed too.</li>
+                <li>Links to your team and vendors are removed.</li>
+                <li>Clients with projects can't be deleted — this one has none.</li>
+            </ul>
+
+            <div class="flex justify-end gap-2 pt-2">
+                <flux:button variant="ghost" wire:click="$set('showClientDelete', false)">Cancel</flux:button>
+                <flux:button variant="danger" icon="trash" wire:click="deleteClient">Delete Client</flux:button>
+            </div>
+        </div>
+    @endif
+</flux:modal>
+
+</div>

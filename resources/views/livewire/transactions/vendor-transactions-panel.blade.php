@@ -70,7 +70,7 @@
     </x-island-card>
 
     <x-island-card heading="Vendor Transactions">
-        <div class="overflow-x-hidden">
+        <div class="card-flush-bottom overflow-x-hidden">
             <flux:table class="table-fixed w-full">
                 <flux:table.columns>
                     <flux:table.column class="w-[16%]">Vendor</flux:table.column>

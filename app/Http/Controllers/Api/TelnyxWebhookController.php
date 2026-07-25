@@ -4513,7 +4513,62 @@ class TelnyxWebhookController extends Controller
             'completed_at' => $data['completed_at'] ?? null,
         ]);
 
+        $this->updateOutboundMessageStatus($data, 'delivered');
+
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Persist a carrier status onto the outbound message and tell the open
+     * conversation, so bubbles show delivered/failed instead of staying
+     * silently on "sent" forever.
+     */
+    protected function updateOutboundMessageStatus(array $data, string $status): void
+    {
+        $providerId = $data['id'] ?? null;
+
+        if (! $providerId) {
+            return;
+        }
+
+        $message = \App\Models\SmsMessage::where('provider_message_id', $providerId)
+            ->where('direction', 'outbound')
+            ->first();
+
+        if (! $message) {
+            return;
+        }
+
+        // failed must never be overwritten by a late delivered event for
+        // another recipient of the same group message.
+        if ($message->status === 'failed' && $status === 'delivered') {
+            return;
+        }
+
+        if ($message->status === $status) {
+            return;
+        }
+
+        $message->status = $status;
+
+        if ($status === 'failed' && isset($data['errors'])) {
+            $raw = is_array($message->raw_payload) ? $message->raw_payload : [];
+            $raw['delivery_errors'] = $data['errors'];
+            $message->raw_payload = $raw;
+        }
+
+        $message->save();
+
+        try {
+            event(new \App\Events\SmsMessageStatusUpdated(
+                messageId: $message->id,
+                threadId: (int) $message->thread_id,
+                status: $status,
+            ));
+        } catch (\Throwable $e) {
+            // Broadcasting is best-effort; the status is already persisted.
+            Log::channel('telnyx')->warning('Status broadcast failed', ['error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -4529,6 +4584,8 @@ class TelnyxWebhookController extends Controller
             'to' => $data['to'][0]['phone_number'] ?? null,
             'errors' => $errors,
         ]);
+
+        $this->updateOutboundMessageStatus($data, 'failed');
 
         return response()->json(['status' => 'ok']);
     }
@@ -5038,6 +5095,15 @@ class TelnyxWebhookController extends Controller
             'to' => $data['to'][0]['phone_number'] ?? null,
             'status' => $data['to'][0]['status'] ?? null,
         ]);
+
+        // Authoritative final state: any recipient failing marks the message
+        // failed; all-delivered marks it delivered.
+        $recipientStatuses = collect($data['to'] ?? [])->pluck('status');
+        if ($recipientStatuses->contains(fn ($s) => in_array($s, ['delivery_failed', 'sending_failed', 'failed'], true))) {
+            $this->updateOutboundMessageStatus($data, 'failed');
+        } elseif ($recipientStatuses->isNotEmpty() && $recipientStatuses->every(fn ($s) => $s === 'delivered')) {
+            $this->updateOutboundMessageStatus($data, 'delivered');
+        }
 
         return response()->json(['status' => 'ok']);
     }

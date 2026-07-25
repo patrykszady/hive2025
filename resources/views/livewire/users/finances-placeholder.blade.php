@@ -19,6 +19,7 @@
             '[Difference]'
         ])
 
+        <div class="card-flush-bottom">
         <div class="overflow-x-auto">
             <flux:table>
                 <flux:table.columns>
@@ -44,6 +45,7 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
+        </div>
         </div>
     </x-island-card>
 </div>

@@ -23,10 +23,49 @@ class EstimatesIndex extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh', 'disableEstimate'];
 
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(): int
+    {
+        return 10;
+    }
+
+    /**
+     * Column defs for the estimates table — the loading skeleton renders from
+     * the same array as the real header row, so widths can never drift apart.
+     * Columns vary by view (the embedded card drops Client and is far narrower
+     * than the index), so the caller passes the same $view the table uses.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(?string $view = 'estimates.index'): array
+    {
+        // Embedded on projects.show: two auto-width cells (amount + status
+        // badge, then date) and no Client column.
+        if ($view !== null && $view !== 'estimates.index') {
+            return [
+                ['label' => 'Estimate', 'width' => 'w-1/2 min-w-0', 'skeletonWidth' => 'w-20'],
+                ['label' => 'Date', 'width' => 'w-1/2 min-w-0', 'skeletonWidth' => 'w-16'],
+            ];
+        }
+
+        return [
+            ['label' => 'Estimate', 'width' => 'w-[40%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Date', 'width' => 'w-[25%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Client', 'width' => 'w-[35%] min-w-0', 'skeletonWidth' => 'w-28'],
+        ];
+    }
+
     #[Computed]
     public function estimates()
     {
-        $project_id = $this->project?->id;
+        // Standalone /estimates mounts without a project, leaving the typed
+        // property uninitialized — `?->` still fatals on that, so guard it.
+        $project_id = isset($this->project) ? $this->project->id : null;
 
         return Estimate::withTrashed()
             ->when($project_id, function ($query) use ($project_id) {
@@ -100,8 +139,19 @@ class EstimatesIndex extends Component
         return view('livewire.estimates.index');
     }
 
-    public function placeholder()
+    /**
+     * @param  array<string, mixed>  $params  The lazy component's mount params —
+     *   Livewire passes the whole array positionally, never named arguments.
+     */
+    public function placeholder(array $params = [])
     {
-        return view('livewire.estimates.estimates-index-placeholder');
+        // placeholder() runs before mount(), so $this->view is still the
+        // default here — the embedded projects.show card only announces itself
+        // through the mount params. The view data key can't be 'view': Livewire
+        // merges the component's public properties into the placeholder view
+        // afterwards and would clobber it.
+        return view('livewire.estimates.estimates-index-placeholder', [
+            'tableView' => $params['view'] ?? $this->view,
+        ]);
     }
 }

@@ -1,5 +1,8 @@
 <div x-init="document.addEventListener('livewire:navigating', () => { if ($wire.showModal) $wire.showModal = false })">
     <flux:modal wire:model="showModal" name="new-sms-thread" class="max-w-lg">
+        {{-- Recipient picker lists every contact (~590KB rendered): only while
+             open, so the messages page doesn't carry it on every load. --}}
+        @if($showModal)
         <div class="space-y-4">
             <flux:heading size="lg">New Group Message</flux:heading>
 
@@ -140,5 +143,6 @@
                 @endif
             </form>
         </div>
+    @endif
     </flux:modal>
 </div>

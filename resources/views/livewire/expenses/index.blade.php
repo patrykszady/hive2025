@@ -1,31 +1,15 @@
 <div class="max-w-3xl space-y-2" wire:transition>
     @if($view === NULL)
-        {{-- Mobile: accordion collapsed by default --}}
-        <flux:card class="!px-5 !py-2 sm:hidden">
-            <flux:accordion transition>
-                <flux:accordion.item>
-                    <div class="flex items-center">
-                        <div class="flex-1 min-w-0">
-                            <flux:accordion.heading>
-                                <flux:heading size="lg">Filters</flux:heading>
-                            </flux:accordion.heading>
-                        </div>
-                        <flux:button size="sm" variant="ghost" icon="scan-barcode" x-on:click.stop="$flux.modal('barcode-scanner').show()" title="Scan barcode" class="shrink-0 text-zinc-400" />
-                        <flux:button size="sm" variant="ghost" icon="arrow-up-tray" wire:click="$dispatchTo('expenses.expense-create', 'openUploadReceipt')" title="Upload receipt" class="shrink-0 text-zinc-400" />
-                    </div>
-                    <flux:accordion.content>
-                        @include('livewire.expenses.partials.filter-fields', ['layout' => 'stacked'])
-                    </flux:accordion.content>
-                </flux:accordion.item>
-            </flux:accordion>
-        </flux:card>
-
-        {{-- Desktop: always expanded --}}
-        <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
+        {{-- Single-copy responsive filters: the inline layout already stacks
+             below sm (flex-col sm:flex-row), so one render serves both
+             breakpoints — this HALVES the page payload (the vendor/project
+             selects are ~2.7MB of options each time they render). --}}
+        <x-filter-card>
             <x-slot:actions>
                 @can('create', App\Models\Expense::class)
                     @if($view == NULL)
-                        <flux:button size="sm" variant="ghost" icon="document-text" href="{{ route('expenses.auto-receipts') }}" wire:navigate>Recent Auto Receipts</flux:button>
+                        <flux:button size="sm" variant="ghost" icon="document-text" href="{{ route('expenses.auto-receipts') }}" wire:navigate class="hidden sm:inline-flex">Recent Auto Receipts</flux:button>
+                        <flux:button size="sm" variant="ghost" icon="scan-barcode" x-on:click.stop="$flux.modal('barcode-scanner').show()" tooltip="Scan barcode" class="sm:hidden shrink-0 text-zinc-400" />
                         <flux:button size="sm" icon="arrow-up-tray" wire:click="$dispatchTo('expenses.expense-create', 'openUploadReceipt')">Upload Receipt</flux:button>
                     @endif
                     @if($amount && $view == NULL)
@@ -33,14 +17,29 @@
                     @endif
                 @endcan
             </x-slot:actions>
-
             @include('livewire.expenses.partials.filter-fields', ['layout' => 'inline'])
-        </x-island-card>
+        </x-filter-card>
     @endif
 
     {{-- Hide expenses card on project page when there are no expenses --}}
     @if($view !== 'projects.show' || $this->expenses->isNotEmpty())
-    <x-island-card :heading="!in_array($view, ['projects.show', 'vendors.show']) ? 'Expenses' : null" class="overflow-hidden" x-data="{
+    {{-- Standalone page: lazy island paints the shared skeleton first, like the
+         Projects card. Embedded variants render immediately. --}}
+    @island(name: 'expenses-table', lazy: island_lazy($view === NULL), always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Expenses"
+                :columns="\App\Livewire\Expenses\ExpenseIndex::columnDefs($view)"
+                :rows="\App\Livewire\Expenses\ExpenseIndex::placeholderRows($view)"
+                :compact="false"
+            />
+        @endplaceholder
+    {{-- Loaded-content marker: lets the Transactions block below hold its own
+         lazy load until the Expenses rows have actually arrived, so the two
+         island requests don't compete for the connection. x-init runs once on
+         insertion; island re-renders morph the same keyed node. --}}
+    <div wire:key="expenses-table-loaded-ping" x-init="$dispatch('expenses-table-loaded')"></div>
+    <x-index-table :heading="!in_array($view, ['projects.show', 'vendors.show']) ? 'Expenses' : null" :paginator="$this->expenses" x-data="{
         filtersOpen: false,
         bulkMode: false,
         refreshAfterDeleteTimer: null,
@@ -114,12 +113,10 @@
         @endif
 
         @php $isEmbedView = in_array($view, ['checks.show', 'vendors.show']); @endphp
-        <div class="space-y-4">
-            <div class="-mb-2">
                 <flux:table
                     wire:loading.class.delay.shortest="opacity-50 pointer-events-none"
                     wire:target="bulkDelete"
-                    class="transition-opacity duration-150 table-fixed {{ in_array($view, ['projects.show', 'vendors.show', 'checks.show']) ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0"
+                    class="transition-opacity duration-150 {{ in_array($view, ['projects.show', 'vendors.show', 'checks.show']) ? 'table-fixed min-w-0 w-full' : 'index-table' }} [:where(&)]:p-0 [:where(&)]:space-y-0"
                 >
                 <flux:table.columns>
                     @if($view === null)
@@ -133,19 +130,19 @@
                         :sorted="$sortBy === 'date'"
                         :direction="$sortDirection"
                         wire:click="sort('date')"
-                        class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem] !ps-8 !pe-3' }}"
+                        class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem]' }}"
                         >
-                        <div class="{{ $isEmbedView ? '' : 'ps-4' }}">Date</div>
+                        Date
                     </flux:table.column>
 
                     @if(!in_array($view, ['checks.show', 'vendors.show']))
-                        <flux:table.column class="w-[25%] min-w-0 !ps-3">Vendor</flux:table.column>
+                        <flux:table.column class="w-[25%] min-w-0">Vendor</flux:table.column>
                     @endif
 
                     @if($view != 'projects.show')
                         <flux:table.column class="{{ $isEmbedView ? 'w-[37%]' : 'w-[30%]' }} min-w-0">Project</flux:table.column>
                     @endif
-                    <flux:table.column align="end" class="{{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">Status</flux:table.column>
+                    <flux:table.column class="{{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -158,29 +155,32 @@
                             @endif
                         <flux:table.cell variant="strong" class="{{ $isEmbedView ? 'w-[20%] min-w-[4.5rem]' : 'w-[14%] min-w-[5.5rem]' }}">
                                 <div class="pe-4 flex items-center gap-1">
-                                    <a href="{{ route('expenses.show', $expense->id) }}" wire:navigate.hover>{{ display_money($expense->amount) }}</a>
+                                    <a wire:navigate.hover href="{{ route('expenses.show', $expense->id) }}" wire:navigate.hover>{{ display_money($expense->amount) }}</a>
                                     @if($expense->reimbursment)
-                                        <flux:badge size="sm" variant="outline" inset="top bottom" color="zinc" title="{{ $expense->reimbursment }}">R</flux:badge>
+                                        <flux:tooltip :content="$expense->reimbursment" position="top"><flux:badge size="sm" variant="outline" inset="top bottom" color="zinc">R</flux:badge></flux:tooltip>
                                     @endif
                                     @if($expense->trashed())
-                                        <button type="button" wire:click="restoreExpense({{ $expense->id }})" wire:confirm="Restore this expense?" class="text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300" title="Restore expense">
+                                        {{-- inline-flex: a baseline-aligned inline button adds a descender
+                                             pixel to the row (45px instead of the shared 44px rhythm). --}}
+                                        <flux:tooltip content="Restore expense" position="top"><button type="button" wire:click="restoreExpense({{ $expense->id }})" wire:confirm="Restore this expense?" class="align-middle text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300">
                                             <flux:icon.arrow-uturn-left variant="micro" />
-                                        </button>
+                                        </button></flux:tooltip>
                                     @elsecan('create', App\Models\Expense::class)
-                                        <button type="button" wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{ $expense->id }} })" class="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Edit expense">
+                                        <flux:tooltip content="Edit expense" position="top"><button type="button" wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{ $expense->id }} })" class="align-middle text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
                                             <flux:icon.pencil-square variant="micro" />
-                                        </button>
+                                        </button></flux:tooltip>
                                     @endcan
                                 </div>
                             </flux:table.cell>
-                            <flux:table.cell class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem] !ps-8 !pe-3' }}">
-                                <div class="{{ $isEmbedView ? '' : 'ps-4' }}">{{ $expense->date->format('m/d/y') }}</div>
+                            <flux:table.cell class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem]' }}">
+                                {{ $expense->date->format('m/d/y') }}
                             </flux:table.cell>
                             @if(!in_array($view, ['checks.show', 'vendors.show']))
-                                <flux:table.cell class="w-[25%] min-w-0 !ps-3">
-                                    <a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}" wire:navigate.hover>
-                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{$expense->vendor->name}}">{{$expense->vendor->name}}</div>
-                                    </a>
+                                <flux:table.cell class="w-[25%] min-w-0">
+                                    <x-table-link
+                                        :href="isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : null"
+                                        :label="$expense->vendor->name"
+                                    />
                                 </flux:table.cell>
                             @endif
 
@@ -190,27 +190,30 @@
                                         SPLIT
                                     @else
                                         @if($expense->project?->id)
-                                            <a href="{{ route('projects.show', $expense->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold block" title="{{ $expense->project->name }}" wire:navigate.hover>{{ $expense->project->name }}</a>
+                                            <x-truncate-tooltip :content="$expense->project->name"><a wire:navigate.hover href="{{ route('projects.show', $expense->project->id) }}" class="truncate font-semibold block" wire:navigate.hover>{{ $expense->project->name }}</a></x-truncate-tooltip>
                                         @elseif($expense->distribution_id && $expense->distribution?->name)
-                                            <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="{{ $expense->distribution->name }}">{{ $expense->distribution->name }}</div>
+                                            <x-truncate-tooltip :content="$expense->distribution->name"><div class="truncate font-semibold">{{ $expense->distribution->name }}</div></x-truncate-tooltip>
                                         @else
-                                            <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="No Project">No Project</div>
+                                            <div class="truncate font-semibold">No Project</div>
                                         @endif
                                         @php
                                             $po = $expense->receipts->first()?->notes;
                                         @endphp
                                         @if($po)
-                                            <div class="text-xs italic text-zinc-500 dark:text-zinc-400 truncate" title="{{ $po }}">{{ $po }}</div>
+                                            <x-truncate-tooltip :content="$po"><div class="text-xs italic text-zinc-500 dark:text-zinc-400 truncate">{{ $po }}</div></x-truncate-tooltip>
                                         @endif
                                     @endif
                                 </flux:table.cell>
                             @endif
-                            <flux:table.cell align="end" class="{{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">
-                                {{-- Just use status directly, no fallback needed if coming from search --}}
-                                <div class="flex justify-end">
-                                    <flux:badge size="sm" inset="top bottom" color="{{$expense->status_color}}" class="max-w-[8rem] overflow-hidden text-ellipsis whitespace-nowrap">
-                                        {{$expense->status}}
-                                    </flux:badge>
+                            <flux:table.cell class="{{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">
+                                {{-- Left-aligned like the header (align="end" was removed with the
+                                     other index tables) --}}
+                                <div class="flex min-w-0">
+                                    <x-truncate-tooltip :content="$expense->status">
+                                        <flux:badge size="sm" inset="top bottom" color="{{$expense->status_color}}" class="max-w-full min-w-0">
+                                            <span class="truncate">{{ $expense->status }}</span>
+                                        </flux:badge>
+                                    </x-truncate-tooltip>
                                 </div>
                             </flux:table.cell>
                         </flux:table.row>
@@ -235,17 +238,17 @@
                                         <div class="pe-4 flex items-center gap-1">
                                             {{ display_money($split->amount) }}
                                             @if($split->reimbursment && $split->reimbursment !== 'None')
-                                                <flux:badge size="sm" variant="outline" inset="top bottom" color="zinc" title="{{ $split->reimbursment }}">R</flux:badge>
+                                                <flux:tooltip :content="$split->reimbursment" position="top"><flux:badge size="sm" variant="outline" inset="top bottom" color="zinc">R</flux:badge></flux:tooltip>
                                             @endif
                                         </div>
                                     </flux:table.cell>
                                     {{-- Preserve column alignment: empty date cell --}}
-                                    <flux:table.cell class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem] !ps-8 !pe-3' }}">
+                                    <flux:table.cell class="{{ $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem]' }}">
                                         <div class="{{ $isEmbedView ? '' : 'ps-4' }}"></div>
                                     </flux:table.cell>
                                     @if(!in_array($view, ['checks.show', 'vendors.show']))
                                         {{-- Empty vendor cell for split rows --}}
-                                        <flux:table.cell class="w-[25%] min-w-0 !ps-3"></flux:table.cell>
+                                        <flux:table.cell class="w-[25%] min-w-0"></flux:table.cell>
                                     @endif
                                     @if($view != 'projects.show')
                                         <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 {{ $isEmbedView ? 'w-[37%]' : 'w-[30%]' }} min-w-0">
@@ -261,13 +264,13 @@
                                                 }
                                             @endphp
                                             @if(isset($split->project->id))
-                                                <a href="{{ route('projects.show', $split->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis block" title="{{ $splitProjectName }}" wire:navigate.hover>{{ $splitProjectName }}</a>
+                                                <x-truncate-tooltip :content="$splitProjectName"><a wire:navigate.hover href="{{ route('projects.show', $split->project->id) }}" class="truncate block" wire:navigate.hover>{{ $splitProjectName }}</a></x-truncate-tooltip>
                                             @else
-                                                <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $splitProjectName }}">{{ $splitProjectName }}</div>
+                                                <x-truncate-tooltip :content="$splitProjectName"><div class="truncate">{{ $splitProjectName }}</div></x-truncate-tooltip>
                                             @endif
                                         </flux:table.cell>
                                     @endif
-                                    <flux:table.cell align="end" class="text-sm text-gray-600 dark:text-gray-400 {{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">
+                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 {{ $isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]' }} shrink-0">
                                         <flux:badge size="sm" variant="outline" color="gray">Split</flux:badge>
                                     </flux:table.cell>
                                 </flux:table.row>
@@ -297,9 +300,9 @@
                                                     + ($view === null ? 1 : 0);
                                             @endphp
                                             <flux:table.cell :colspan="$totalCols" class="!pl-10 !pr-5 !pb-0">
-                                                <div class="truncate text-xs text-gray-600 dark:text-gray-400" title="{{ strip_tags($desc) }}">{!! strip_tags($desc, '<mark>') !!}</div>
+                                                <x-truncate-tooltip :content="strip_tags($desc)"><div class="truncate text-xs text-gray-600 dark:text-gray-400">{!! strip_tags($desc, '<mark>') !!}</div></x-truncate-tooltip>
                                                 @if($code)
-                                                    <div class="text-xs text-gray-400 dark:text-gray-500 italic" title="{{ strip_tags($code) }}">
+                                                    <div class="text-xs text-gray-400 dark:text-gray-500 italic">
                                                         @if(isset($expense->vendor) && $expense->vendor->sku_search_url)
                                                             <flux:link href="{{ $expense->vendor->sku_search_url . strip_tags($code) }}" external variant="subtle">{!! strip_tags($code, '<mark>') !!}</flux:link>
                                                         @else
@@ -316,36 +319,67 @@
                     @endforeach
                 </flux:table.rows>
                 </flux:table>
-
-                @if($this->expenses->hasPages())
-                <div class="px-6 pb-6 pt-4">
-                    <flux:pagination :paginator="$this->expenses" />
-                </div>
-                @endif
-            </div>
-        </div>
-    </x-island-card>
+    </x-index-table>
+    @endisland
     @endif
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
-        <x-island-card heading="Transactions" x-init="if (!$wire.transactionsReady) { $wire.loadTransactions() }">
+        {{-- The card is VISIBLE from first paint (static skeleton below), but
+             its DATA only starts downloading after the Expenses table has
+             loaded: the lazy island stays display:none (which blocks its
+             wire:intersect trigger) until the expenses-table-loaded ping flips
+             the gate — Expenses always gets the connection first. The static
+             skeleton and the island's own placeholder are the same shared
+             component, so the handoff is invisible. Timeout = safety net so a
+             failed expenses load can never strand this card. --}}
+        @php($sequencedLoad = island_lazy())
+        <div x-data="{ transactionsGo: @js(! $sequencedLoad) }"
+            x-on:expenses-table-loaded.window="transactionsGo = true"
+            x-init="setTimeout(() => transactionsGo = true, 6000)">
+        @if($sequencedLoad)
+        {{-- Phase 1: pure placeholder, visible immediately, fetches nothing --}}
+        <div x-show="! transactionsGo">
+            <x-index-table.placeholder
+                heading="Transactions"
+                :columns="\App\Livewire\Expenses\ExpenseIndex::transactionColumnDefs()"
+                :rows="8"
+                :compact="false"
+            />
+        </div>
+        @endif
+        {{-- Phase 2: the real island. On first visits it stays display:none
+             (blocking its lazy intersect) until Expenses loads; on eager
+             revisits the content is server-rendered and shown immediately. --}}
+        <div x-show="transactionsGo" @if($sequencedLoad) x-cloak @endif>
+        @island(name: 'transactions-table', lazy: island_lazy(), always: true)
+            @placeholder
+                <x-index-table.placeholder
+                    heading="Transactions"
+                    :columns="\App\Livewire\Expenses\ExpenseIndex::transactionColumnDefs()"
+                    {{-- The card lists every unmatched transaction (up to 100);
+                         skeleton a screenful rather than the whole page. --}}
+                    :rows="8"
+                    :compact="false"
+                >
+                    <x-slot:toolbar>
+                        @include('livewire.expenses.partials.transaction-search')
+                    </x-slot:toolbar>
+                </x-index-table.placeholder>
+            @endplaceholder
+        <x-index-table heading="Transactions" :paginator="$this->transactions">
             <x-slot:actions>
-                @if($this->transactionsReady && $this->transactions->total() > 0)
+                @if($this->transactions->total() > 0)
                     <flux:badge size="sm" color="yellow">{{ $this->transactions->total() }} unmatched</flux:badge>
                 @endif
             </x-slot:actions>
-            <div class="px-6 pt-4 pb-2">
-                <flux:input wire:model.live.debounce.300ms="transaction_search" placeholder="Search vendor (e.g. ZELLE)..." icon="magnifying-glass" clearable />
-            </div>
-            <div>
-                @if($this->transactionsReady)
-                    <flux:table :paginate="$this->transactions->hasPages() ? $this->transactions : null" wire:loading.class="opacity-50 text-opacity-50">
+            <x-slot:toolbar>
+                @include('livewire.expenses.partials.transaction-search')
+            </x-slot:toolbar>
+                    <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0" wire:loading.class="opacity-50 text-opacity-50">
                         <flux:table.columns>
-                            <flux:table.column>Amount</flux:table.column>
-                            <flux:table.column>Date</flux:table.column>
-                            <flux:table.column>Vendor</flux:table.column>
-                            <flux:table.column>Bank</flux:table.column>
-                            <flux:table.column>Account</flux:table.column>
+                            @foreach(\App\Livewire\Expenses\ExpenseIndex::transactionColumnDefs() as $txColumn)
+                                <flux:table.column class="{{ $txColumn['width'] }}">{{ $txColumn['label'] }}</flux:table.column>
+                            @endforeach
                         </flux:table.columns>
 
                         <flux:table.rows>
@@ -360,11 +394,11 @@
                                     </flux:table.cell>
                                     <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
                                     @if($transaction->vendor->name != 'No Vendor')
-                                        <flux:table.cell class="max-w-[150px] truncate" title="{{ $transaction->vendor->name }}">
-                                            {{ $transaction->vendor->name }}
+                                        <flux:table.cell class="max-w-[150px] min-w-0">
+                                            <x-truncate-tooltip :content="$transaction->vendor->name"><div class="truncate">{{ $transaction->vendor->name }}</div></x-truncate-tooltip>
                                         </flux:table.cell>
                                     @else
-                                        <flux:table.cell class="whitespace-normal break-words" title="{{ $transaction->plaid_merchant_description }}">
+                                        <flux:table.cell class="whitespace-normal break-words">
                                             {{ $transaction->plaid_merchant_description }}
                                         </flux:table.cell>
                                     @endif
@@ -391,11 +425,10 @@
                             @endforeach
                         </flux:table.rows>
                     </flux:table>
-                @else
-                    <div class="p-4 text-sm text-zinc-500">Loading transactions…</div>
-                @endif
-            </div>
-        </x-island-card>
+        </x-index-table>
+        @endisland
+        </div>
+        </div>
     @endif
 
     <livewire:expenses.expense-create />

@@ -112,23 +112,11 @@ class SmsIndex extends Component
             return;
         }
 
-        // Client users may only view threads belonging to their client
-        if ($this->isClientUser && $threadId !== null) {
-            $user = auth()->user();
-            $clientIds = $user->clients()->pluck('clients.id');
-            $participantPhones = $this->clientUserParticipantPhones($user);
-            $allowed = SmsGroupThread::where('id', $threadId)
-                ->whereIn('client_id', $clientIds)
-                ->whereHas('threadParticipants', fn ($participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones))
-                ->exists();
-
-            if (! $allowed) {
-                return;
-            }
-        } elseif (! $this->isClientUser && $threadId !== null) {
-            $vendorId = auth()->user()->vendor?->id;
-            $allowed = $vendorId && SmsGroupThread::where('id', $threadId)
-                ->visibleToVendor($vendorId)
+        // Users may only view threads they can access (client or vendor rules).
+        if ($threadId !== null) {
+            $allowed = SmsGroupThread::query()
+                ->accessibleTo(auth()->user())
+                ->whereKey($threadId)
                 ->exists();
 
             if (! $allowed) {
@@ -208,54 +196,15 @@ class SmsIndex extends Component
 
     protected function accessibleThreadsQuery()
     {
+        // One caveat vs the old inline logic: a vendor user WITHOUT a vendor
+        // used to see every thread here (no scope applied); accessibleTo
+        // correctly returns none — that state cannot reach this page anyway
+        // (mount() aborts non-admin, and admins always have a vendor).
         return SmsGroupThread::query()
-            ->when($this->isClientUser, function ($query) {
-                $user = auth()->user();
-                $clientIds = $user->clients()->pluck('clients.id');
-                $participantPhones = $this->clientUserParticipantPhones($user);
-
-                $query->whereIn('client_id', $clientIds)
-                    ->whereHas('threadParticipants', fn ($participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones));
-            })
-            ->when(! $this->isClientUser, function ($query) {
-                $vendorId = auth()->user()->vendor?->id;
-
-                if ($vendorId) {
-                    $query->visibleToVendor($vendorId);
-                }
-            })
+            ->accessibleTo(auth()->user())
             ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
             ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'))
             ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) auth()->id()));
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    protected function clientUserParticipantPhones($user): array
-    {
-        $rawPhone = $user->routeNotificationForTelnyx();
-
-        if (! is_string($rawPhone) || $rawPhone === '') {
-            return [];
-        }
-
-        $digits = preg_replace('/\D/', '', $rawPhone);
-        if (! is_string($digits) || $digits === '') {
-            return [];
-        }
-
-        if (strlen($digits) === 10) {
-            return array_values(array_unique([$rawPhone, '+1' . $digits, '1' . $digits, $digits]));
-        }
-
-        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            $tenDigit = substr($digits, 1);
-
-            return array_values(array_unique([$rawPhone, '+' . $digits, $digits, '+1' . $tenDigit, $tenDigit]));
-        }
-
-        return array_values(array_unique([$rawPhone, '+' . $digits, $digits]));
     }
 
     #[Title('Messages')]

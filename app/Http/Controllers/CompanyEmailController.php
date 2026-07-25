@@ -2307,9 +2307,19 @@ class CompanyEmailController extends Controller
                         // (e.g. "THEHOMELAKIO" for a Home Depot logo) carries no
                         // signal — treat it like a missing merchant so it can't veto
                         // duplicate detection. Amount + date window still gate.
-                        if ($incomingMerchantName !== ''
-                            && ! $this->fuzzyMatchVendor($incomingMerchantName, Vendor::withoutGlobalScopes()->get(), 70.0)) {
-                            $incomingMerchantName = '';
+                        // merchantsLikelySame is the second opinion: a name like
+                        // "GregRedLightViolations" misses the strict fuzzy bar but
+                        // clearly IS the vendor "Redlightviolations.com" — real
+                        // names must keep their veto power.
+                        if ($incomingMerchantName !== '') {
+                            $knownVendors = Vendor::withoutGlobalScopes()->get();
+
+                            $resemblesKnownVendor = $this->fuzzyMatchVendor($incomingMerchantName, $knownVendors, 70.0)
+                                || $knownVendors->contains(fn ($v) => $this->merchantsLikelySame($incomingMerchantName, (string) $v->business_name));
+
+                            if (! $resemblesKnownVendor) {
+                                $incomingMerchantName = '';
+                            }
                         }
 
                         $duplicates = Expense::where('belongs_to_vendor_id', $email_vendor->id)
@@ -4612,8 +4622,16 @@ class CompanyEmailController extends Controller
 
     protected function merchantsLikelySame(string $incomingMerchant, string $candidateMerchant): bool
     {
-        $incoming = $this->normalizeMerchantName($incomingMerchant);
-        $candidate = $this->normalizeMerchantName($candidateMerchant);
+        // Corporate/TLD noise ("Redlightviolations.com", "Acme LLC") would
+        // poison the compact-substring comparison below, so drop it first.
+        $stripNoise = fn (string $s): string => trim(preg_replace(
+            '/\b(?:www|com|net|org|inc|llc|ltd|corp|company)\b/',
+            ' ',
+            $s
+        ) ?? $s);
+
+        $incoming = $stripNoise($this->normalizeMerchantName($incomingMerchant));
+        $candidate = $stripNoise($this->normalizeMerchantName($candidateMerchant));
 
         if ($incoming === '' || $candidate === '') {
             return false;

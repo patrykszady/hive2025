@@ -9,7 +9,7 @@
         <div class="flex items-center gap-1">
             @if($waiver->vendor)
                 <flux:tooltip :content="$waiver->vendor->business_name" position="top">
-                    <a href="{{ route('vendors.show', $waiver->vendor->id) }}" target="_blank">{{ Str::limit($waiver->vendor->short_name ?? $waiver->vendor->business_name, $nameLimit) }}</a>
+                    <a wire:navigate.hover href="{{ route('vendors.show', $waiver->vendor->id) }}" target="_blank">{{ Str::limit($waiver->vendor->short_name ?? $waiver->vendor->business_name, $nameLimit) }}</a>
                 </flux:tooltip>
             @else
                 —
@@ -21,7 +21,7 @@
                 </button>
 
                 <flux:menu>
-                    <flux:menu.item icon="eye" href="{{ route('lien-waivers.show', $waiver) }}" wire:navigate>
+                    <flux:menu.item icon="eye" href="{{ route('lien-waivers.show', $waiver) }}" wire:navigate.hover>
                         View
                     </flux:menu.item>
                     <flux:menu.item icon="arrow-down-tray" href="{{ route('lien-waivers.download', $waiver) }}">

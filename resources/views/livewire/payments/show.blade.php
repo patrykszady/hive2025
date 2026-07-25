@@ -24,7 +24,7 @@
             @if($payment->transaction)
             <x-island-card heading="Payment Transaction" :separator="true">
 
-                    <div class="space-y-6">
+                    <div class="card-flush-bottom space-y-6">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
@@ -67,7 +67,7 @@
                     <flux:card>
                         <div class="flex justify-between">
                             <flux:heading size="lg">
-                                <a 
+                                <a wire:navigate.hover 
                                     href="{{ route('clients.show', $group['client']->id) }}" 
                                     wire:navigate.hover
                                     >
@@ -94,7 +94,7 @@
                                         <flux:table.cell>{{ $paymentItem->reference }}</flux:table.cell>
                                         <flux:table.cell>
                                             @if($paymentItem->project)
-                                                <a 
+                                                <a wire:navigate.hover 
                                                     href="{{ route('projects.show', $paymentItem->project->id) }}" 
                                                     wire:navigate.hover
                                                     >

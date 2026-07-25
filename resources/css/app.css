@@ -72,6 +72,22 @@
     padding-inline-end: calc(var(--spacing) * 6) !important;
   }
 
+  /* ...and when the first column is HIDDEN (the bulk-select checkbox column on
+     leads/expenses is x-show'd), it still counts as :first-child and keeps that
+     start padding, leaving the visually-first column's text flush against the
+     card edge. Hand the padding to whichever cell is actually first — before
+     Alpine boots ([x-cloak]) and after (inline display:none). */
+  [data-flux-table] th:first-child[x-cloak] + th,
+  [data-flux-table] th:first-child[style*="display: none"] + th,
+  [data-flux-columns] th:first-child[x-cloak] + th,
+  [data-flux-columns] th:first-child[style*="display: none"] + th,
+  [data-flux-table] td:first-child[x-cloak] + td,
+  [data-flux-table] td:first-child[style*="display: none"] + td,
+  [data-flux-row] > [data-flux-cell]:first-child[x-cloak] + [data-flux-cell],
+  [data-flux-row] > [data-flux-cell]:first-child[style*="display: none"] + [data-flux-cell] {
+    padding-inline-start: calc(var(--spacing) * 6) !important;
+  }
+
   /* Flux tables inside Flux cards: bleed the table out past the card's
      horizontal padding so row hover backgrounds reach the card edges.
      Cards expose their inline padding via --flux-card-px (defaults to 1.5rem
@@ -81,6 +97,56 @@
   }
   [data-flux-card] ui-table-scroll-area {
     margin-inline: calc(var(--flux-card-px) * -1);
+  }
+
+  /* Flush card bottom: wrap a card's trailing table/list so its last row sits
+     at the very bottom edge with no whitespace — spans the full card width
+     (so full-bleed row hovers still reach the edges) and clips backgrounds to
+     the card's rounded bottom corners. Cancels island/details cards' !py-2. */
+  .card-flush-bottom {
+    margin-inline: calc(var(--flux-card-px, 0.5rem) * -1);
+    padding-inline: var(--flux-card-px, 0.5rem);
+    margin-bottom: calc(var(--spacing) * -2);
+    overflow: hidden;
+    border-bottom-left-radius: var(--radius-xl, 0.75rem);
+    border-bottom-right-radius: var(--radius-xl, 0.75rem);
+  }
+
+  /* Index-page main tables (single source of truth, used inside
+     <x-index-table>): fixed layout so % column widths hold, full width, and a
+     floor width — below it, Flux's ui-table-scroll-area scrolls horizontally
+     (the mobile behavior of the Expenses index). */
+  .index-table {
+    table-layout: fixed;
+    width: 100%;
+    /* !important: Flux's table stub carries `[:where(&)]:min-w-full`, a utility
+       that outranks this layer — without it the floor silently becomes 100% of
+       the viewport and narrow screens crush the columns into each other instead
+       of scrolling. Per-table override: style="--index-table-min: 720px". */
+    min-width: var(--index-table-min, 640px) !important;
+  }
+
+  /* Controls above an index table (search inputs, etc.). Same bleed-and-repad
+     as .index-table-footer so the control's edges line up with the table's
+     first/last column text instead of the card's inner padding. */
+  .index-table-toolbar {
+    margin-inline: calc(var(--flux-card-px, 0.5rem) * -1);
+    padding-inline: calc(var(--spacing) * 6);
+    padding-block: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  }
+
+  /* Pagination footer under an index table. The table is bled out to the card
+     edges (ui-table-scroll-area negative margin), so the footer bleeds the same
+     way and re-pads with the cells' 6-unit edge padding — that lands "Showing
+     x of y" exactly under the first column's text and the pager's right edge
+     under the last column's. Block padding stays tight (the card's own !py-2 is
+     already cancelled by .card-flush-bottom). */
+  .index-table-footer {
+    margin-inline: calc(var(--flux-card-px, 0.5rem) * -1);
+    padding-inline: calc(var(--spacing) * 6);
+    /* No top padding: flux:pagination brings its own `pt-3 border-t`, which is
+       the separator line under the last row. Only the bottom gap is ours. */
+    padding-block: 0 calc(var(--spacing) * 3);
   }
 
   /* Compact tables (e.g. Projects index): tighter row rhythm than Flux's

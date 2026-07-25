@@ -285,3 +285,65 @@ if (! function_exists('locale_alternate_url')) {
         return url($path).($query ? '?'.$query : '');
     }
 }
+
+if (! function_exists('island_always')) {
+    /**
+     * Companion to island_lazy(): under the test runner islands must also be
+     * `always` — a component update ($refresh, filter changes) skips
+     * non-always islands entirely, so test assertions after ->call() would
+     * run against a response with no island content.
+     */
+    function island_always(bool $when = false): bool
+    {
+        return $when || app()->runningUnitTests();
+    }
+}
+
+if (! function_exists('island_lazy')) {
+    /**
+     * Lazy-island flag, aware of where it's running:
+     *
+     * - Test runner: always eager (the harness can't trigger island loads).
+     * - FIRST visit to a page this session: lazy — skeleton paints instantly,
+     *   data streams in behind it.
+     * - REVISITS: eager — the user has seen this page; clicking back to it
+     *   should show the full content immediately (native-app feel), not a
+     *   skeleton that reloads data they already looked at. Combined with
+     *   hover prefetching, the complete page is usually downloaded before
+     *   the click even lands.
+     *
+     * The "seen" flag is set by the island-load request itself (a Livewire
+     * update whose Referer is the page), so a visit only counts once the
+     * data actually loaded.
+     */
+    function island_lazy(bool $when = true): bool
+    {
+        if (app()->runningUnitTests()) {
+            return false;
+        }
+
+        if (! $when) {
+            return false;
+        }
+
+        $page = app(\Livewire\LivewireManager::class)->isLivewireRequest()
+            ? parse_url((string) request()->header('Referer'), PHP_URL_PATH)
+            : request()->path();
+
+        if (! $page) {
+            return true;
+        }
+
+        $key = 'islands_seen:'.$page;
+
+        if (session()->has($key)) {
+            return false;
+        }
+
+        if (app(\Livewire\LivewireManager::class)->isLivewireRequest()) {
+            session()->put($key, true);
+        }
+
+        return true;
+    }
+}

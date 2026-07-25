@@ -1,6 +1,8 @@
 <div>
 	<div class="grid max-w-xl grid-cols-4 gap-4 lg:max-w-5xl sm:px-6">
-		<div class="contents lg:col-span-2 lg:flex lg:flex-col lg:gap-4">
+		{{-- Wrappers whose component rendered no card (e.g. Lien Waivers before
+		     a signed contract) collapse entirely, so they never double the gap. --}}
+		<div class="contents lg:col-span-2 lg:flex lg:flex-col lg:gap-4 [&>div:not(:has([data-flux-card]))]:hidden">
             {{-- PROJECT DETAILS --}}
             <div class="col-span-4 order-1">
             <x-details.card
@@ -73,13 +75,12 @@
                             />
                         @endcan
                     @endif
-                </x-slot:details>
-
-                <x-slot:footer>    
+                    {{-- Modal host only (teleports) — inside the details slot
+                         so the card has no footer and the last row sits flush. --}}
                     @can('update', $project)
                         <livewire:projects.project-create />
                     @endcan
-                </x-slot:footer>
+                </x-slot:details>
             </x-details.card>
             </div>
 
@@ -118,7 +119,7 @@
 		</div>
 
         @can('viewFinancials', $project)
-            <div class="contents lg:col-span-2 lg:flex lg:flex-col lg:gap-4 lg:col-start-3">
+            <div class="contents lg:col-span-2 lg:flex lg:flex-col lg:gap-4 lg:col-start-3 [&>div:not(:has([data-flux-card]))]:hidden">
                 {{-- PROJECT ESTIMATES --}}
                 @can('viewAny', App\Models\Estimate::class)
                     <div class="col-span-4 order-4">

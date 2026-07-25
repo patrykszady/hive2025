@@ -278,6 +278,7 @@ it('shows an awaiting client availability card for service-call tasks when no ac
     ]);
 
     Livewire::test(TaskCreate::class)
+        ->dispatch('addTask') // hydrates the gated modal body, as the real open does
         ->set('form.project_id', $project->id)
         ->assertSee('Awaiting client availability')
         ->assertSee('Client has not submitted preferred times yet.');

@@ -14,6 +14,7 @@
             @endif
         </div>
     </x-slot>
+@if($hydrated)
 
     <!-- Tab Navigation -->
     <div 
@@ -690,6 +691,7 @@
 
     </div>
 
+    @endif
     <x-slot name="footer">
         <flux:spacer />
 

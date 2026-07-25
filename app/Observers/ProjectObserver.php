@@ -2,6 +2,7 @@
 
 namespace App\Observers;
 
+use App\Jobs\MarkClientLeadWon;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 
@@ -27,6 +28,11 @@ class ProjectObserver
             'status_code' => 2, // Estimate
             'start_date' => today()->format('Y-m-d'),
         ]);
+
+        // The client now has work — any New lead behind them has converted.
+        if ($project->client_id) {
+            MarkClientLeadWon::dispatch($project->client_id, $project->belongs_to_vendor_id);
+        }
     }
 
     /**

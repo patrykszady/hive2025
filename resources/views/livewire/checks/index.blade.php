@@ -1,65 +1,35 @@
 <div class="max-w-3xl">
     @if($view === NULL)
-        {{-- Mobile: accordion collapsed by default --}}
-        <flux:card class="!px-5 !py-2 mb-4 sm:hidden">
-            <flux:accordion transition>
-                <flux:accordion.item>
-                    <flux:accordion.heading>
-                        <flux:heading size="lg">Filters</flux:heading>
-                    </flux:accordion.heading>
-                    <flux:accordion.content>
-                        <div class="flex flex-col gap-4">
-                            <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
-                            <flux:input wire:model.debounce.500ms.live="check_number" label="Check Number" icon="magnifying-glass" placeholder="1234" />
-                            <flux:select wire:model.live="bank" label="Bank" placeholder="Select Bank..." variant="listbox" placeholder="Choose Bank...">
-                                <flux:select.option value="">All Banks</flux:select.option>
-                                @foreach ($banks->groupBy('plaid_ins_id') as $bank)
-                                    <flux:select.option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:select.option>
-                                @endforeach
-                            </flux:select>
-                        </div>
-                    </flux:accordion.content>
-                </flux:accordion.item>
-            </flux:accordion>
-        </flux:card>
-
-        {{-- Desktop: always expanded --}}
-        <x-island-card heading="Filters" :separator="true" class="mb-4 hidden sm:block">
-            <div class="flex flex-row items-end gap-4">
-                <div class="flex-1 min-w-0">
-                    <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
-                </div>
-                <div class="flex-1 min-w-0">
-                    <flux:input wire:model.debounce.500ms.live="check_number" label="Check Number" icon="magnifying-glass" placeholder="1234" />
-                </div>
-                <div class="flex-1 min-w-0">
-                    {{-- 09-28-2024 NEED TYPE AND VENDOR FILTERS --}}
-                    <flux:select wire:model.live="bank" label="Bank" placeholder="Select Bank..." variant="listbox" placeholder="Choose Bank...">
-                        <flux:select.option value="">All Banks</flux:select.option>
-                        @foreach ($banks->groupBy('plaid_ins_id') as $bank)
-                            <flux:select.option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:select.option>
-                        @endforeach
-                    </flux:select>
-                </div>
-            </div>
-        </x-island-card>
+        <x-filter-card class="mb-4">
+            {{-- single copy: the inline layout stacks below sm on its own --}}
+            @include('livewire.checks.partials.filter-fields', ['layout' => 'inline'])
+        </x-filter-card>
     @endif
 
-    <x-island-card heading="{{ $view === 'expenses.show' && $this->checks->count() === 1 ? 'Check' : 'Checks' }}" :separator="true">
-
-        @php($cell = $view !== NULL ? "!px-2 whitespace-nowrap" : "")
-        <div class="space-y-2">
-            <flux:table>
+    {{-- Standalone page: lazy island so the card paints the shared skeleton
+         first, like the Projects card. Embedded variants render immediately. --}}
+    @island(name: 'checks-table', lazy: island_lazy($view === NULL), always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Checks"
+                :columns="\App\Livewire\Checks\ChecksIndex::columnDefs()"
+                :rows="\App\Livewire\Checks\ChecksIndex::placeholderRows($view)"
+                :compact="false"
+            />
+        @endplaceholder
+    <x-index-table heading="{{ $view === 'expenses.show' && $this->checks->count() === 1 ? 'Check' : 'Checks' }}" :paginator="$this->checks">
+        @php($cell = $view !== NULL ? "!px-1.5 whitespace-nowrap" : "")
+            <flux:table class="{{ $view !== NULL ? 'table-fixed min-w-0 w-full' : 'index-table' }} [:where(&)]:p-0 [:where(&)]:space-y-0">
                 <flux:table.columns>
                     {{-- sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')"> --}}
-                    <flux:table.column :class="$cell">Amount</flux:table.column>
-                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" :class="$cell">Date</flux:table.column>
-                    <flux:table.column :class="$cell">Check #</flux:table.column>
-                    <flux:table.column :class="$cell">Bank</flux:table.column>
+                    <flux:table.column class="{{ $view === NULL ? 'w-[14%]' : '' }} {{ $cell }}">Amount</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" class="{{ $view === NULL ? 'w-[13%]' : '' }} {{ $cell }}">Date</flux:table.column>
+                    <flux:table.column class="{{ $view === NULL ? 'w-[13%]' : '' }} {{ $cell }}">Check #</flux:table.column>
+                    <flux:table.column class="{{ $view === NULL ? 'w-[18%] min-w-0' : '' }} {{ $cell }}">Bank</flux:table.column>
                     @if($view === NULL)
-                        <flux:table.column>Payee</flux:table.column>
+                        <flux:table.column class="w-[24%] min-w-0">Payee</flux:table.column>
                     @endif
-                    <flux:table.column :class="$cell">Status</flux:table.column>
+                    <flux:table.column class="{{ $view === NULL ? 'w-[18%] min-w-0' : '' }} {{ $cell }}">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -74,31 +44,50 @@
                                 </a>
                             </flux:table.cell>
                             <flux:table.cell :class="$cell">{{ $check->date->format($view !== NULL ? 'm/d/y' : 'm/d/Y') }}</flux:table.cell>
-                            <flux:table.cell :class="$cell">{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:table.cell>
-                            <flux:table.cell class="whitespace-nowrap {{ $view !== NULL ? '!px-2' : '' }}">
+                            <flux:table.cell class="cursor-pointer min-w-0 {{ $cell }}">
+                                <x-table-link
+                                    :href="route('checks.show', $check->id)"
+                                    :label="(string) ($check->check_type != 'Check' ? $check->check_type : $check->check_number)"
+                                />
+                            </flux:table.cell>
+                            <flux:table.cell class="whitespace-nowrap min-w-0 {{ $view !== NULL ? '!px-1.5' : '' }}">
                                 @php($bankName = $check->bank_account?->bank?->name ?? '')
-                                @if($view !== NULL && mb_strlen($bankName) > 12)
+                                @if($view === NULL)
+                                    <x-truncate-tooltip :content="$bankName">
+                                        <div class="truncate">{{ $bankName }}</div>
+                                    </x-truncate-tooltip>
+                                @elseif($view !== NULL && mb_strlen($bankName) > 10)
                                     <flux:tooltip :content="$bankName" position="top">
-                                        <span>{{ \Illuminate\Support\Str::limit($bankName, 12) }}</span>
+                                        <span>{{ \Illuminate\Support\Str::limit($bankName, 10) }}</span>
                                     </flux:tooltip>
                                 @else
                                     {{ $bankName }}
                                 @endif
                             </flux:table.cell>
                             @if($view === NULL)
-                                <flux:table.cell>{{$check->owner}}</flux:table.cell>
+                                {{-- Payee links to whoever it names: the vendor, the
+                                     via-vendor, or the team member. --}}
+                                <flux:table.cell class="min-w-0 {{ $check->payeeUrl() ? 'cursor-pointer' : '' }}">
+                                    <x-table-link
+                                        :href="$check->payeeUrl()"
+                                        :label="(string) $check->owner"
+                                    />
+                                </flux:table.cell>
                             @endif
                             <flux:table.cell :class="$cell">
-                                <flux:badge size="sm" :color="$check->statusColor" inset="top bottom">{{ $check->status }}</flux:badge>
+                                @if($view !== NULL && mb_strlen($check->status) > 8)
+                                    {{-- Compact card: truncate long statuses; full text on hover. --}}
+                                    <flux:tooltip :content="$check->status" position="top">
+                                        <flux:badge size="sm" :color="$check->statusColor" inset="top bottom">{{ \Illuminate\Support\Str::limit($check->status, 8) }}</flux:badge>
+                                    </flux:tooltip>
+                                @else
+                                    <flux:badge size="sm" :color="$check->statusColor" inset="top bottom">{{ $check->status }}</flux:badge>
+                                @endif
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-
-            @if($this->checks->hasPages())
-                <flux:pagination :paginator="$this->checks" />
-            @endif
-        </div>
-    </x-island-card>
+    </x-index-table>
+    @endisland
 </div>

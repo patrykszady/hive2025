@@ -3,6 +3,6 @@
         title="Your Tasks"
         :show-project-info="true"
         :count="2"
-        :show-header-skeleton="false"
+        :show-add-task="true"
     />
 </div>

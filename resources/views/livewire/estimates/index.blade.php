@@ -4,7 +4,20 @@
         </x-island-card>
     @endif
 
-    <x-island-card heading="Estimates">
+    {{-- Standalone page: lazy island so the card paints the shared skeleton
+         first, like the Payments/Checks cards. The card embedded on
+         projects.show is already lazy-mounted (placeholder() handles it), so it
+         renders immediately here. --}}
+    @island(name: 'estimates-table', lazy: island_lazy($view === 'estimates.index'), always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Estimates"
+                :columns="\App\Livewire\Estimates\EstimatesIndex::columnDefs($view)"
+                :rows="\App\Livewire\Estimates\EstimatesIndex::placeholderRows()"
+                :compact="false"
+            />
+        @endplaceholder
+    <x-index-table heading="Estimates" :paginator="$this->estimates">
         <x-slot:actions>
         @if($view !== 'estimates.index')
             @can('create', [App\Models\Estimate::class, $project])
@@ -18,13 +31,12 @@
         @endif
         </x-slot:actions>
 
-        <div class="space-y-2">
-            <flux:table :paginate="$this->estimates->hasPages() ? $this->estimates : null">
+            <flux:table class="{{ $view === 'estimates.index' ? 'index-table' : 'table-fixed min-w-0 w-full' }} [:where(&)]:p-0 [:where(&)]:space-y-0">
                 @if($view === 'estimates.index')
                     <flux:table.columns>
-                        <flux:table.column>Estimate</flux:table.column>
-                        <flux:table.column>Date</flux:table.column>
-                        <flux:table.column>Client</flux:table.column>
+                        <flux:table.column class="w-[40%] min-w-0">Estimate</flux:table.column>
+                        <flux:table.column class="w-[25%]">Date</flux:table.column>
+                        <flux:table.column class="w-[35%] min-w-0">Client</flux:table.column>
                     </flux:table.columns>
                 @endif
 
@@ -99,6 +111,6 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-        </div>
-    </x-island-card>
+    </x-index-table>
+    @endisland
 </div>

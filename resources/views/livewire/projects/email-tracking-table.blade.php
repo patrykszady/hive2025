@@ -5,10 +5,14 @@
     $latestEvent = $scopedId ? $projectEvents->first() : null;
     $olderEvents = $scopedId ? $projectEvents->slice(1)->values() : collect();
 @endphp
-@if(!$scopedId || $this->emailTrackingEvents->isNotEmpty())
+{{-- Scoped to a project, lead or client: no events means no card at all. The
+     unscoped index keeps its empty state. --}}
+@if($this->emailTrackingEvents->isNotEmpty() || (! $scopedId && ! $clientId))
 
-<x-island-card :separator="false" wire:loading.class="opacity-50 text-opacity-50" wire:transition x-data="{ expanded: false }">
-    <div class="flex w-full items-center justify-between">
+<x-index-table wire:loading.class="opacity-50 text-opacity-50" wire:transition x-data="{ expanded: false }"
+    :paginator="$scopedId ? null : $this->emailTrackingEvents">
+    <x-slot:before>
+    <div class="flex w-full items-center justify-between pb-2">
         <button type="button" @click="expanded = !expanded" class="flex items-center gap-2">
             <flux:heading size="lg" class="mb-0">Email Tracking</flux:heading>
         </button>
@@ -19,16 +23,16 @@
             </button>
         @endif
     </div>
+    </x-slot:before>
 
-    <div class="space-y-2">
         @if($scopedId)
             @if($latestEvent)
-                <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
+                {{-- Scoped card sits in ~500px columns/modals: no 640px floor --}}
+                <flux:table class="table-fixed min-w-0 w-full [:where(&)]:p-0 [:where(&)]:space-y-0">
                     <flux:table.columns>
-                        <flux:table.column>Event</flux:table.column>
-                        <flux:table.column>Template</flux:table.column>
-                        <flux:table.column class="w-48">Recipients</flux:table.column>
-                        <flux:table.column>Date</flux:table.column>
+                        @foreach(\App\Livewire\Projects\EmailTrackingTable::columnDefs(scoped: true) as $trackingColumn)
+                            <flux:table.column class="{{ $trackingColumn['width'] }}">{{ $trackingColumn['label'] }}</flux:table.column>
+                        @endforeach
                     </flux:table.columns>
 
                     <flux:table.rows>
@@ -52,13 +56,11 @@
                 <flux:text class="text-gray-500">No tracking events found.</flux:text>
             @endif
         @else
-            <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
+            <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
                 <flux:table.columns>
-                    <flux:table.column>Event</flux:table.column>
-                    <flux:table.column>Template</flux:table.column>
-                    <flux:table.column>Project</flux:table.column>
-                    <flux:table.column class="w-48">Recipients</flux:table.column>
-                    <flux:table.column>Date</flux:table.column>
+                    @foreach(\App\Livewire\Projects\EmailTrackingTable::columnDefs(scoped: false) as $trackingColumn)
+                        <flux:table.column class="{{ $trackingColumn['width'] }}">{{ $trackingColumn['label'] }}</flux:table.column>
+                    @endforeach
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -66,6 +68,7 @@
                         @include('livewire.projects.partials.email-tracking-row', [
                             'event' => $event,
                             'projectId' => $projectId,
+                            'shortProjectName' => (bool) $clientId,
                         ])
                     @empty
                         <flux:table.row>
@@ -75,7 +78,6 @@
                 </flux:table.rows>
             </flux:table>
         @endif
-    </div>
-</x-island-card>
+</x-index-table>
 @endif
 </div>

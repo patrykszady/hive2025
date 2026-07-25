@@ -88,7 +88,7 @@
                     <flux:field wire:key="project-{{ $project->id }}">
                         <div class="grid grid-cols-2 items-center gap-2">
                             <div>
-                                <flux:label><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->short_address }}</a></flux:label>
+                                <flux:label><a wire:navigate.hover href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->short_address }}</a></flux:label>
                                 <flux:description><i>{{$project->project_name}}</i></flux:description>
                             </div>
                             <div>

@@ -44,6 +44,10 @@
     x-on:thread-switching.window="
         clearTimeout(switchingTimer);
         switching = true;
+        /* Safety net: if thread-ready never arrives (request failed / offline),
+           dissolve the skeleton instead of stranding it forever — whatever is
+           beneath (previous thread or cached copy) is more useful. */
+        switchingTimer = setTimeout(() => { switching = false }, 8000);
     "
     x-on:thread-ready.window="
         clearTimeout(switchingTimer);
@@ -70,68 +74,19 @@
             </div>
         </div>
 
-        {{-- Header --}}
+        {{-- Header — title logic lives in ConversationPresenter (shared with
+             the offline fragment so both render the same header). --}}
         @php
-            $participantPhones = $this->thread->threadParticipants->pluck('phone_number')->filter()->values();
-            $vendorLabel = trim((string) (
-                $this->thread->ownerVendor?->short_name
-                ?: $this->thread->ownerVendor?->business_name
-                ?: $this->thread->subjectVendor?->short_name
-                ?: $this->thread->subjectVendor?->business_name
-                ?: ''
-            ));
-            $headerTitle = 'Group Message';
-            // When set, the header renders these parts individually so only the
-            // client-user portions are wrapped in the client link.
-            $headerParts = null;
-            if ($this->thread->client) {
-                $clientUserByPhone = $this->thread->client->users
-                    ->mapWithKeys(fn ($u) => [$u->routeNotificationForTelnyx() => $u])
-                    ->filter(fn ($u, $phone) => is_string($phone) && $phone !== '');
-                $participantsMatchClientUsers = $participantPhones->count() === $clientUserByPhone->count()
-                    && $participantPhones->diff($clientUserByPhone->keys())->isEmpty();
-
-                if ($participantsMatchClientUsers) {
-                    $headerTitle = $this->clientDisplayNameForThread($this->thread);
-                } else {
-                    $headerParts = $participantPhones->map(function ($phone) use ($clientUserByPhone) {
-                        $user = $clientUserByPhone->get($phone);
-                        return [
-                            'label' => $user
-                                ? trim(($user->nickname ?: $user->first_name) . ' ' . $user->last_name)
-                                : $this->resolvePhoneDisplay($phone),
-                            'linkToClient' => (bool) $user,
-                        ];
-                    })->values()->all();
-
-                    if ($vendorLabel !== '' && collect($headerParts)->where('label', $vendorLabel)->isEmpty()) {
-                        $headerParts[] = [
-                            'label' => $vendorLabel,
-                            'linkToClient' => false,
-                        ];
-                    }
-                }
-
-                if ($vendorLabel !== '' && is_string($headerTitle) && ! str_contains($headerTitle, $vendorLabel)) {
-                    $headerTitle .= ', ' . $vendorLabel;
-                }
-            } elseif ($this->thread->name) {
-                $headerTitle = $this->thread->name;
-            } elseif ($this->thread->subjectVendor) {
-                $headerTitle = $this->thread->subjectVendor->short_name ?: $this->thread->subjectVendor->name;
-            } elseif ($this->thread->project) {
-                $headerTitle = $this->thread->project->address;
-            } else {
-                if ($participantPhones->isNotEmpty()) {
-                    $headerTitle = $participantPhones
-                        ->map(fn ($p) => $this->resolvePhoneDisplay($p))
-                        ->implode(', ');
-                }
-            }
+            $participantPhones = $this->presenter->participantPhones();
+            $headerTitle = $this->presenter->headerTitle();
+            $headerParts = $this->presenter->headerParts();
         @endphp
         <div
             x-show="switching"
             x-cloak
+            x-transition:leave="transition-opacity duration-150 ease-out"
+            x-transition:leave-start="opacity-100"
+            x-transition:leave-end="opacity-0"
             class="sms-mobile-header-offset border-b border-zinc-200 dark:border-zinc-700 py-2"
         >
             <div class="flex items-center gap-1.5">
@@ -184,13 +139,13 @@
                             @foreach ($headerParts as $i => $part)
                                 @if ($i > 0)<span class="text-zinc-400">,</span> @endif
                                 @if ($part['linkToClient'])
-                                    <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $part['label'] }}</a>
+                                    <a wire:navigate.hover href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $part['label'] }}</a>
                                 @else
                                     <span>{{ $part['label'] }}</span>
                                 @endif
                             @endforeach
                         @else
-                            <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
+                            <a wire:navigate.hover href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
                         @endif
                     </flux:heading>
                 @elseif (! empty($this->thread->name_data))
@@ -206,7 +161,7 @@
                     </flux:heading>
                 @elseif ($this->thread->subjectVendor)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
-                        <a href="{{ route('vendors.show', $this->thread->subject_vendor_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
+                        <a wire:navigate.hover href="{{ route('vendors.show', $this->thread->subject_vendor_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
                     </flux:heading>
                 @else
                     <flux:heading size="lg" class="mb-0 truncate flex-1">{{ $headerTitle }}</flux:heading>
@@ -382,18 +337,6 @@
         </div>
 
         {{-- Messages --}}
-        @php
-            $phoneNameMap = $this->phoneNameMap;
-            $processed = $this->processedMessages;
-            $visibleMessages = $processed['visible'];
-            $scheduledMessages = $processed['scheduled'];
-            $reactionsMap = $processed['reactions'];
-
-            $tz = browser_timezone();
-            $now = now($tz);
-            $todayDate = $now->toDateString();
-            $yesterdayDate = $now->copy()->subDay()->toDateString();
-        @endphp
 
         <div
             class="contents"
@@ -415,6 +358,9 @@
             <div
                 x-show="switching"
                 x-cloak
+                x-transition:leave="transition-opacity duration-150 ease-out"
+                x-transition:leave-start="opacity-100"
+                x-transition:leave-end="opacity-0"
                 class="absolute inset-0 z-10 pointer-events-none"
             >
                 @include('livewire.sms.conversation_placeholder')
@@ -438,295 +384,79 @@
                 }
             "
         >
-            {{-- Scheduled messages always at bottom (first in DOM due to flex-col-reverse) --}}
-            @foreach ($scheduledMessages as $msg)
-                <div wire:key="msg-{{ $msg->id }}" class="flex justify-end">
-                    <div class="max-w-[85%] lg:max-w-[75%] order-last">
-                        <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
-                            {{ $msg->sentByUser?->nickname ?: ($msg->sentByUser?->first_name ?? 'GS Crew') }}
-                        </p>
+            {{-- Nested island: an incoming message re-renders ONLY this bubble
+                 list (skipRender + renderIsland('sms-bubbles')) — ~10KB instead
+                 of the full conversation. Params live INSIDE the island because
+                 island fragments render standalone and don't inherit the outer
+                 template's locals. --}}
+            @island(name: 'sms-bubbles', always: true)
+        @php
+            $phoneNameMap = $this->phoneNameMap;
+            $processed = $this->processedMessages;
+            $visibleMessages = $processed['visible'];
+            $scheduledMessages = $processed['scheduled'];
+            $reactionsMap = $processed['reactions'];
 
-                        <div class="relative">
-                            <div class="mb-1.5 flex items-center justify-end gap-1">
-                                <flux:badge color="amber" size="sm" icon="clock">
-                                    {{ $msg->scheduled_at ? 'Scheduled · ' . $msg->scheduled_at->timezone('America/Chicago')->format('M j, g:i A') : 'Draft' }}
-                                </flux:badge>
-                                <flux:button size="xs" variant="ghost" square icon="pencil-square" wire:click="openEditScheduledMessage({{ $msg->id }})" tooltip="Edit" aria-label="Edit scheduled message"></flux:button>
-                                <flux:button size="xs" variant="primary" square icon="paper-airplane" wire:click="sendScheduledNow({{ $msg->id }})" tooltip="Send now" aria-label="Send now"></flux:button>
-                                <flux:button size="xs" variant="danger" square icon="x-mark" wire:click="$set('cancelScheduledId', {{ $msg->id }}); $set('showCancelModal', true)" tooltip="Cancel" aria-label="Cancel scheduled message"></flux:button>
-                            </div>
+            $tz = browser_timezone();
+            $now = now($tz);
+            $todayDate = $now->toDateString();
+            $yesterdayDate = $now->copy()->subDay()->toDateString();
 
-                            <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm break-words bg-indigo-600/50 text-white/80 rounded-br-md">
-                                @if ($msg->hasMedia())
-                                    <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
-                                        @foreach ($msg->media_urls as $url)
-                                            @php $mediaUrl = $this->mediaUrl($url); @endphp
-                                            @if (\App\Models\SmsMessage::isVideoUrl($url))
-                                                <button type="button" class="block relative" wire:click="openVideoLightbox('{{ $url }}')">
-                                                    <video preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black pointer-events-none" playsinline>
-                                                        <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
-                                                        Your browser does not support the video tag.
-                                                    </video>
-                                                    <span class="absolute inset-0 flex items-center justify-center">
-                                                        <span class="inline-flex items-center justify-center size-12 rounded-full bg-black/50 text-white">
-                                                            <svg class="size-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                                                <path d="M8 5v14l11-7-11-7z" />
-                                                            </svg>
-                                                        </span>
-                                                    </span>
-                                                </button>
-                                            @elseif (\App\Models\SmsMessage::isAudioUrl($url))
-                                                <audio controls preload="metadata" class="max-w-full">
-                                                    <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
-                                                </audio>
-                                            @else
-                                                <button type="button" class="block" wire:click="openImageLightbox('{{ $url }}')">
-                                                    <img src="{{ $mediaUrl }}" alt="MMS attachment" class="max-w-full rounded-lg max-h-64 object-cover" loading="lazy" />
-                                                </button>
-                                            @endif
-                                        @endforeach
-                                    </div>
-                                @endif
-                                @if (($msg->translated_display_text ?? $msg->display_text))
-                                    {!! preg_replace(
-                                        '/(https?:\/\/[^\s<]+)/',
-                                        '<a href="$1" target="_blank" class="underline text-indigo-100 hover:text-white">$1</a>',
-                                        nl2br(e($msg->translated_display_text ?? $msg->display_text))
-                                    ) !!}
-                                @endif
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            @endforeach
-
-            @forelse ($visibleMessages->reverse() as $msg)
-                @if ($loop->last && $this->smsMessages->count() >= $messageLimit)
-                    <div data-load-more class="text-center py-2">
-                        <span wire:loading wire:target="loadMoreMessages" class="text-xs text-zinc-400">Loading...</span>
-                    </div>
-                @endif
-                @php
-                    $msgLocal = $msg->created_at->copy()->setTimezone($tz);
-                    $msgDate = $msgLocal->toDateString();
-                    if ($msgDate === $todayDate) {
-                        $timeLabel = $msgLocal->format('g:i A');
-                    } elseif ($msgDate === $yesterdayDate) {
-                        $timeLabel = 'Yesterday ' . $msgLocal->format('g:i A');
-                    } elseif ($msgLocal->year !== $now->year) {
-                        $timeLabel = $msgLocal->format('M j, Y, g:i A');
-                    } else {
-                        $timeLabel = $msgLocal->format('M j, g:i A');
-                    }
-                    $msgReactions = $reactionsMap[$msg->id] ?? [];
-                    $translatedTextForUi = (string) ($msg->translated_display_text ?? $msg->display_text ?? '');
-                    $originalTextForUi = (string) ($msg->original_display_text ?? $msg->display_text ?? '');
-                    $languageBadge = $msg->language_badge ?? null;
-                    $canToggleOriginal = (bool) ($msg->show_original_toggle ?? false);
-                @endphp
-                <div wire:key="msg-{{ $msg->id }}" class="flex items-center group"
-                    x-data="{ showOriginal: false, showActions: false, isTouch: window.matchMedia('(hover: none)').matches }"
-                    x-on:mouseenter="if (!isTouch) { $dispatch('sms-message-actions-focus', { id: {{ $msg->id }} }); showActions = true }"
-                    x-on:mouseleave="if (!isTouch) { showActions = false }"
-                    x-on:sms-message-actions-focus.window="if ($event.detail?.id !== {{ $msg->id }}) { showActions = false }"
-                    x-bind:class="selectionMode ? '' : '{{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}'">
-                    <div class="flex-shrink-0 pr-2" x-show="selectionMode" x-cloak>
-                        <flux:checkbox
-                            x-bind:checked="has({{ $msg->id }})"
-                            x-on:click.stop="toggle({{ $msg->id }})"
-                        />
-                    </div>
-                    <div
-                        class="max-w-[85%] lg:max-w-[75%]"
-                        x-bind:class="{
-                            'ml-auto': selectionMode && {{ $msg->isOutbound() ? 'true' : 'false' }},
-                            'order-last': !selectionMode && {{ $msg->isOutbound() ? 'true' : 'false' }},
-                            'cursor-pointer': selectionMode,
-                        }"
-                        x-on:click="if (selectionMode) { toggle({{ $msg->id }}) } else if (isTouch) { $dispatch('sms-message-actions-focus', { id: {{ $msg->id }} }); showActions = !showActions }"
-                    >
-                        @if ($msg->isInbound())
-                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 flex items-center gap-1">
-                                <span>{{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}</span>
-                                @if ($msg->was_edited ?? false)
-                                    <span class="italic">(Edited)</span>
-                                @endif
-                                @if ($languageBadge && $canToggleOriginal)
-                                    <button
-                                        type="button"
-                                        class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
-                                        x-bind:class="showOriginal
-                                            ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
-                                            : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
-                                        x-on:click.stop="showOriginal = !showOriginal"
-                                        x-text="@js($languageBadge)"
-                                        :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
-                                    ></button>
-                                @endif
-                            </p>
-                        @elseif ($msg->isOutbound())
-                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right flex items-center justify-end gap-1">
-                                @if ($languageBadge && $canToggleOriginal)
-                                    <button
-                                        type="button"
-                                        class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
-                                        x-bind:class="showOriginal
-                                            ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
-                                            : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
-                                        x-on:click.stop="showOriginal = !showOriginal"
-                                        x-text="@js($languageBadge)"
-                                        :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
-                                    ></button>
-                                @endif
-                                @if ($msg->was_edited ?? false)
-                                    <span class="italic">(Edited)</span>
-                                @endif
-                                <span>{{ $msg->sentByUser?->nickname ?: ($msg->sentByUser?->first_name ?? 'GS Crew') }}</span>
-                            </p>
-                        @endif
-
-                        <div class="relative">
-                            <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm break-words {{ $msg->isOutbound()
-                                ? 'bg-indigo-600 text-white rounded-br-md'
-                                : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-bl-md' }}">
-                                @if ($msg->hasMedia())
-                                    <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
-                                        @foreach ($msg->media_urls as $url)
-                                            @php $mediaUrl = $this->mediaUrl($url); @endphp
-                                            @if (\App\Models\SmsMessage::isVideoUrl($url))
-                                                <button type="button" class="block relative" wire:click="openVideoLightbox('{{ $url }}')">
-                                                    <video preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black pointer-events-none" playsinline>
-                                                        <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
-                                                        Your browser does not support the video tag.
-                                                    </video>
-                                                    <span class="absolute inset-0 flex items-center justify-center">
-                                                        <span class="inline-flex items-center justify-center size-12 rounded-full bg-black/50 text-white">
-                                                            <svg class="size-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                                                <path d="M8 5v14l11-7-11-7z" />
-                                                            </svg>
-                                                        </span>
-                                                    </span>
-                                                </button>
-                                            @elseif (\App\Models\SmsMessage::isAudioUrl($url))
-                                                <audio controls preload="metadata" class="max-w-full">
-                                                    <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
-                                                </audio>
-                                            @else
-                                                <button
-                                                    type="button"
-                                                    class="block"
-                                                    wire:click="openImageLightbox('{{ $url }}')"
-                                                >
-                                                    <img
-                                                        src="{{ $mediaUrl }}"
-                                                        alt="MMS attachment"
-                                                        class="max-w-full rounded-lg max-h-64 object-cover"
-                                                        loading="lazy"
-                                                        onerror="this.parentElement.innerHTML='<div class=\'flex items-center gap-1.5 py-2 text-sm opacity-75\'><svg xmlns=\'http://www.w3.org/2000/svg\' class=\'size-4\' viewBox=\'0 0 20 20\' fill=\'currentColor\'><path fill-rule=\'evenodd\' d=\'M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 0 0-1.06 0L2.5 11.06Zm12.5-2.56a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z\' clip-rule=\'evenodd\'/></svg> Image unavailable</div>'"
-                                                    />
-                                                </button>
-                                            @endif
-                                        @endforeach
-                                    </div>
-                                @endif
-                                @if ($translatedTextForUi !== '')
-                                    @if ($canToggleOriginal)
-                                        <div x-show="!showOriginal">
-                                            {!! preg_replace(
-                                                '/(https?:\/\/[^\s<]+)/',
-                                                '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
-                                                nl2br(e($translatedTextForUi))
-                                            ) !!}
-                                        </div>
-                                        <div x-show="showOriginal">
-                                            {!! preg_replace(
-                                                '/(https?:\/\/[^\s<]+)/',
-                                                '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
-                                                nl2br(e($originalTextForUi))
-                                            ) !!}
-                                        </div>
-                                    @else
-                                        {!! preg_replace(
-                                            '/(https?:\/\/[^\s<]+)/',
-                                            '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
-                                            nl2br(e($translatedTextForUi))
-                                        ) !!}
-                                    @endif
-                                @endif
-                            </div>
-
-                            {{-- Tapback reactions --}}
-                            @if (! empty($msgReactions))
-                                <div class="flex gap-0.5 {{ $msg->isOutbound() ? 'justify-end -mr-1' : '-ml-1' }} -mt-2 relative z-10">
-                                    @foreach ($msgReactions as $emoji => $senders)
-                                        <span
-                                            class="inline-flex items-center gap-0.5 rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-600 px-1 py-0.5 text-xs shadow-sm"
-                                            title="{{ implode(', ', $senders) }}"
-                                        >
-                                            {{ $emoji }}@if (count($senders) > 1)<span class="text-[10px] text-zinc-500">{{ count($senders) }}</span>@endif
-                                        </span>
-                                    @endforeach
-                                </div>
-                            @endif
-                        </div>
-
-                        <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5 {{ $msg->isOutbound() ? 'text-right' : '' }} px-1">
-                            {{ $timeLabel }}
-                            @if ($this->threadHasMixedNumbers)
-                                @php
-                                    $numbers = config('services.telnyx.numbers', []);
-                                    $primaryNumber = config('services.telnyx.from');
-                                    $msgNumber = $msg->isOutbound()
-                                        ? $msg->from_number
-                                        : collect($msg->to_numbers)->first(fn ($n) => in_array($n, $numbers));
-                                @endphp
-                                @if ($msgNumber && $msgNumber !== $primaryNumber)
-                                    <span class="text-zinc-400/70 dark:text-zinc-500/70">&middot; {{ substr($msgNumber, -4) }}</span>
-                                @endif
-                            @endif
-                        </p>
-                    </div>
-                    @if (! $isClientUser && (($msg->translated_display_text ?? $msg->display_text) || $msg->hasMedia()))
-                        <div
-                            class="flex items-center self-center transition-opacity {{ $msg->isOutbound() ? 'order-first pr-1' : 'pl-1' }}"
-                            x-bind:class="showActions
-                                ? 'opacity-100'
-                                : 'opacity-0 group-hover:opacity-100'"
-                            x-show="!selectionMode"
-                            x-on:click.stop
-                            x-on:click.outside="showActions = false"
-                        >
-                            <flux:dropdown position="bottom" align="{{ $msg->isOutbound() ? 'start' : 'end' }}">
-                                <flux:button type="button" variant="ghost" size="xs" square icon="ellipsis-vertical" aria-label="Message actions" x-on:click.stop="showActions = true" />
-                                <flux:menu>
-                                    @if ($this->messageAllowsTaskCreation($msg))
-                                        <flux:menu.item icon="calendar-date-range" wire:click="createTaskFromMessage({{ $msg->id }})">
-                                            Create Task
-                                        </flux:menu.item>
-                                    @endif
-                                    <flux:menu.item icon="arrow-right-circle" wire:click="forwardSingleMessage({{ $msg->id }})">
-                                        Forward
-                                    </flux:menu.item>
-                                    @if (($msg->translated_display_text ?? $msg->display_text))
-                                        <flux:menu.item
-                                            icon="clipboard"
-                                            x-on:click="navigator.clipboard.writeText(showOriginal ? @js($originalTextForUi) : @js($translatedTextForUi)); $flux.toast({ text: 'Message copied', variant: 'success' })"
-                                        >
-                                            Copy Text
-                                        </flux:menu.item>
-                                    @endif
-                                </flux:menu>
-                            </flux:dropdown>
-                        </div>
-                    @endif
-                </div>
-            @empty
-                <div class="text-center py-12">
-                    <p class="text-sm text-zinc-400 dark:text-zinc-500">No messages yet. Send the first one!</p>
-                </div>
-            @endforelse
+            // Params for the shared message-bubbles partial (single source of
+            // bubble markup — the offline fragment renders the same partial
+            // with $interactive = false). Closures live in this top-level
+            // @php block on purpose: never define them in @php(...) directly
+            // after an @if (Blaze compile bug).
+            $interactive = true;
+            $threadHasMixedNumbers = $this->threadHasMixedNumbers;
+            $hasMoreMessages = $this->smsMessages->count() >= $this->messageLimit;
+            $resolveMediaUrl = fn (string $url): string => $this->mediaUrl($url);
+            $allowsTaskCreation = fn ($m): bool => $this->messageAllowsTaskCreation($m);
+        @endphp
+            {{-- Bubble markup lives in ONE place — the shared partial (also rendered, non-interactive, by the offline fragment). --}}
+            @include('livewire.sms.partials.message-bubbles')
+            @endisland
         </div>
             <div class="sms-fade-overlay bottom"></div>
+
+            @if (! $isClientUser)
+                {{-- ONE shared message-actions menu for every bubble (the ⋮
+                     trigger in the bubbles partial dispatches sms-message-menu
+                     with the message context + anchor element). Lives OUTSIDE
+                     the sms-bubbles island so island morphs never touch it. --}}
+                <div
+                    x-data="{ mmOpen: false, mm: { id: null, canTask: false, hasText: false, text: '' }, mmAnchor: null }"
+                    x-on:sms-message-menu.window="mm = $event.detail; mmAnchor = $event.detail.anchor; mmOpen = true"
+                    x-on:sms-new-message-received.window="mmOpen = false"
+                    x-on:thread-ready.window="mmOpen = false"
+                    x-on:keydown.escape.window="mmOpen = false"
+                >
+                    <template x-if="mmOpen">
+                        <div
+                            x-anchor.bottom-end.offset.4="mmAnchor"
+                            x-on:click.outside="mmOpen = false"
+                            x-transition.opacity.duration.100ms
+                            class="absolute z-30 min-w-40 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-600 dark:bg-zinc-700"
+                        >
+                            <button type="button" x-show="mm.canTask"
+                                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-600"
+                                x-on:click="mmOpen = false; $wire.createTaskFromMessage(mm.id)">
+                                <flux:icon.calendar-date-range variant="mini" class="size-4 text-zinc-400 dark:text-zinc-300" /> Create Task
+                            </button>
+                            <button type="button"
+                                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-600"
+                                x-on:click="mmOpen = false; $wire.forwardSingleMessage(mm.id)">
+                                <flux:icon.arrow-right-circle variant="mini" class="size-4 text-zinc-400 dark:text-zinc-300" /> Forward
+                            </button>
+                            <button type="button" x-show="mm.hasText"
+                                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-600"
+                                x-on:click="mmOpen = false; navigator.clipboard.writeText(mm.text); $flux.toast({ text: 'Message copied', variant: 'success' })">
+                                <flux:icon.clipboard variant="mini" class="size-4 text-zinc-400 dark:text-zinc-300" /> Copy Text
+                            </button>
+                        </div>
+                    </template>
+                </div>
+            @endif
         </div>
 
         <div class="sticky bottom-0 z-20 border-t border-zinc-200 bg-transparent dark:border-zinc-700 px-4 py-3 flex items-center justify-between gap-3"
@@ -757,6 +487,9 @@
             @close="$wire.set('showForwardModal', false, false)"
             class="max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden !p-0"
         >
+            {{-- Every thread as a pickable option (~270KB): render only while
+                 open, so thread switches don't re-download it each time. --}}
+            @if($showForwardModal)
             <form wire:submit="forwardMessages" class="flex flex-col min-h-0 min-w-0 flex-1 w-full" x-data="{ q: '' }">
                 <div class="px-6 pt-6 pb-4 space-y-4 border-b border-zinc-200 dark:border-zinc-700">
                     <div>
@@ -812,6 +545,7 @@
                     </flux:button>
                 </div>
             </form>
+            @endif
         </flux:modal>
 
         {{-- Manual Opt-In Modal --}}
@@ -1271,6 +1005,9 @@
 
         {{-- Assign Client --}}
         <flux:modal wire:model="showAssignClientModal" class="min-w-[22rem]">
+            {{-- Every client/vendor as options (~270KB): render only while open
+                 so thread switches don't re-download the lists each time. --}}
+            @if($showAssignClientModal)
             <div class="space-y-6">
                 <div>
                     <flux:heading size="lg">Assign client / vendor</flux:heading>
@@ -1307,6 +1044,7 @@
                     <flux:button variant="primary" wire:click="assignClient">Save</flux:button>
                 </div>
             </div>
+        @endif
         </flux:modal>
 
         {{-- Delete Thread Confirmation --}}
@@ -1403,8 +1141,32 @@
             $pendingOptIn = $this->thread ? $this->thread->hasPendingOptIn() : false;
             $composerDisabled = ! $this->thread || $pendingOptIn;
         @endphp
-        <div class="shrink-0 px-1 pb-1" wire:key="sms-composer-{{ $threadId ?? 'none' }}">
-            <form wire:submit="sendMessage">
+        <div class="shrink-0 px-1 pb-1" wire:key="sms-composer-{{ $threadId ?? 'none' }}"
+            x-data="{
+                async submitComposer(form) {
+                    // Optimistic clear — the box empties the instant you hit
+                    // send, like iMessage. Only the VISIBLE box is cleared
+                    // (via ui-composer, which owns the inner textarea); the
+                    // draft stays in the Livewire store, so:
+                    //  - success → server empties newMessage → box stays clear
+                    //  - failure → Livewire re-syncs the box from the store,
+                    //    restoring the draft automatically.
+                    // The text also rides along as an argument so the send is
+                    // immune to any store race.
+                    const text = $wire.newMessage ?? '';
+                    const uc = form.querySelector('ui-composer');
+                    if (uc) uc.value = '';
+
+                    try {
+                        await $wire.sendMessage(text);
+                    } catch (e) {
+                        // Belt-and-braces: if the round trip died and the sync
+                        // didn't happen, put the draft back by hand.
+                        if (uc && ! uc.value && $wire.newMessage) uc.value = $wire.newMessage;
+                    }
+                }
+            }">
+            <form x-on:submit.prevent="submitComposer($el)">
                 @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
                     <div class="mb-2 px-1">
                         @php
@@ -1438,7 +1200,7 @@
                         <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach media" x-bind:disabled="!! $wire.editScheduledId || @js($composerDisabled)"></flux:button>
                         <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*,video/*,.mp4,.mov,.webm,.m4v,.3gp,.avi" class="hidden" />
                         <div x-show="! $wire.editScheduledId" x-cloak>
-                            <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" aria-label="Send schedule" :disabled="$composerDisabled"></flux:button>
+                            <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId ?? 'null' }} })" tooltip="Send schedule" aria-label="Send schedule" :disabled="$composerDisabled"></flux:button>
                         </div>
                     </x-slot>
 

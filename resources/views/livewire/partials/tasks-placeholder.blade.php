@@ -2,8 +2,11 @@
     <x-upcoming-tasks-list-skeleton
         :title="$title ?? 'Tasks'"
         :show-project-info="$showProjectInfo ?? false"
-        :actions-width="$actionsWidth ?? 'w-32'"
         :count="$count ?? null"
-        :show-header-skeleton="$showHeaderSkeleton ?? true"
+        :project-id="$projectId ?? null"
+        :client-id="$clientId ?? null"
+        :show-add-task="$showAddTask ?? false"
+        :clickable="$clickable ?? true"
+        :show-notifications="$showNotifications ?? true"
     />
 </div>

@@ -287,6 +287,8 @@
 
     {{-- New Call Modal --}}
     <flux:modal wire:model="showNewCallModal" class="max-w-sm">
+        {{-- Contact picker (~270KB rendered): only while open. --}}
+        @if($showNewCallModal)
         <div class="space-y-4">
             <flux:heading size="lg">New Call</flux:heading>
             <flux:text class="text-sm text-zinc-500">Select a contact or enter a number. Your phone will ring first, then we'll connect you.</flux:text>
@@ -349,5 +351,6 @@
                 </div>
             </form>
         </div>
+    @endif
     </flux:modal>
 </div>

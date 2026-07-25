@@ -1,5 +1,13 @@
-<x-island-card :heading="$view_text['card_title']" :separator="true">
-    <x-slot:actions>
+{{-- Shared collapsible-card pattern: chevron in the header, whole heading
+     row toggles — same as every other accordion card on the site. --}}
+<x-details.card
+    :title="$view_text['card_title']"
+    :accordion="($accordion ?? false) && ! ($nonLivewire ?? false)"
+    :expanded="$accordionExpanded ?? true"
+    :details_text="false"
+    :separator="true"
+    :nonLivewire="$nonLivewire ?? false">
+    <x-slot:header_buttons>
         @unless($nonLivewire ?? false)
             @if($view === 'vendors.show' || $view === 'vendor_registration')
                 @can('create_team_member', [App\Models\User::class, $vendor->id])
@@ -11,22 +19,17 @@
                 @endcan
             @endif
         @endunless
-    </x-slot:actions>
-
-        @if($accordion ?? false)
-            <div x-data="{ open: @js($accordionExpanded ?? true) }">
-                <button type="button" @click="open = !open" class="flex w-full items-center justify-between py-2">
-                    <div class="font-medium text-gray-700 dark:text-gray-300">Details</div>
-                    <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="open && 'rotate-180'" />
-                </button>
-                <div x-show="open" x-collapse x-cloak>
-        @endif
-
+    </x-slot:header_buttons>
+    <x-slot:details>
         <flux:table class="{{ ($nonLivewire ?? false) ? 'whitespace-normal' : '' }}">
         <flux:table.columns>
             <flux:table.column>Name</flux:table.column>
-            <flux:table.column>Phone</flux:table.column>
-            <flux:table.column>Email</flux:table.column>
+            @if($nonLivewire ?? false)
+                <flux:table.column>Phone</flux:table.column>
+                <flux:table.column>Email</flux:table.column>
+            @else
+                <flux:table.column>Contact</flux:table.column>
+            @endif
             @if($view === 'vendors.show' || $view === 'vendor_registration')
                 <flux:table.column>Role</flux:table.column>
             @endif
@@ -71,47 +74,56 @@
                             {{ $user->full_name }}
                         </flux:table.cell>
                     @endif
-                    <flux:table.cell>
-                        @if($user->cell_phone)
-                            @php $formattedPhone = preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $user->cell_phone); @endphp
-                            <div class="flex items-center gap-1 min-w-0" x-data="{
-                                copied: false,
-                                copyText() {
-                                    navigator.clipboard.writeText('{{ $user->cell_phone }}')
-                                        .then(() => { this.copied = true; setTimeout(() => { this.copied = false }, 1500); })
-                                        .catch(() => { $flux.toast({ text: 'Failed to copy phone to clipboard.', variant: 'danger', timeout: 2000, position: 'top right' }); });
-                                }
-                            }">
-                                <span class="truncate text-sm" title="{{ $formattedPhone }}">{{ $formattedPhone }}</span>
-                                <div x-show="!copied" class="shrink-0">
-                                    <flux:button size="xs" icon="clipboard-document" icon:variant="outline" tooltip="Copy Phone" x-on:click.stop="copyText()" />
-                                </div>
-                                <div x-show="copied" x-cloak class="shrink-0">
-                                    <flux:button size="xs" icon="check" variant="primary" color="green" disabled />
-                                </div>
+                    {{-- Contact: phone + email as icon buttons in one column so
+                         narrow cards never scroll — value on hover, click copies. --}}
+                    @php $formattedPhone = $user->cell_phone ? preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $user->cell_phone) : null; @endphp
+                    @if($nonLivewire ?? false)
+                        <flux:table.cell>
+                            @if($formattedPhone)<span class="text-sm">{{ $formattedPhone }}</span>@endif
+                        </flux:table.cell>
+                        <flux:table.cell>
+                            @if($user->email)<span class="text-sm">{{ $user->email }}</span>@endif
+                        </flux:table.cell>
+                    @else
+                        <flux:table.cell>
+                            <div class="flex items-center gap-1">
+                                @if($user->cell_phone)
+                                    <div x-data="{
+                                        copied: false,
+                                        copyText() {
+                                            navigator.clipboard.writeText('{{ $user->cell_phone }}')
+                                                .then(() => { this.copied = true; setTimeout(() => { this.copied = false }, 1500); })
+                                                .catch(() => { $flux.toast({ text: 'Failed to copy phone to clipboard.', variant: 'danger', timeout: 2000, position: 'top right' }); });
+                                        }
+                                    }">
+                                        <div x-show="!copied">
+                                            <flux:button size="xs" icon="phone" icon:variant="outline" tooltip="{{ $formattedPhone }} — click to copy" x-on:click.stop="copyText()" />
+                                        </div>
+                                        <div x-show="copied" x-cloak>
+                                            <flux:button size="xs" icon="clipboard-document" variant="primary" color="green" disabled />
+                                        </div>
+                                    </div>
+                                @endif
+                                @if($user->email)
+                                    <div x-data="{
+                                        copied: false,
+                                        copyText() {
+                                            navigator.clipboard.writeText('{{ addslashes($user->email) }}')
+                                                .then(() => { this.copied = true; setTimeout(() => { this.copied = false }, 1500); })
+                                                .catch(() => { $flux.toast({ text: 'Failed to copy email to clipboard.', variant: 'danger', timeout: 2000, position: 'top right' }); });
+                                        }
+                                    }">
+                                        <div x-show="!copied">
+                                            <flux:button size="xs" icon="envelope" icon:variant="outline" tooltip="{{ $user->email }} — click to copy" x-on:click.stop="copyText()" />
+                                        </div>
+                                        <div x-show="copied" x-cloak>
+                                            <flux:button size="xs" icon="clipboard-document" variant="primary" color="green" disabled />
+                                        </div>
+                                    </div>
+                                @endif
                             </div>
-                        @endif
-                    </flux:table.cell>
-                    <flux:table.cell>
-                        @if($user->email)
-                            <div class="flex items-center gap-1 min-w-0" x-data="{
-                                copied: false,
-                                copyText() {
-                                    navigator.clipboard.writeText('{{ addslashes($user->email) }}')
-                                        .then(() => { this.copied = true; setTimeout(() => { this.copied = false }, 1500); })
-                                        .catch(() => { $flux.toast({ text: 'Failed to copy email to clipboard.', variant: 'danger', timeout: 2000, position: 'top right' }); });
-                                }
-                            }">
-                                <span class="truncate text-sm" title="{{ $user->email }}">{{ $user->email }}</span>
-                                <div x-show="!copied" class="shrink-0">
-                                    <flux:button size="xs" icon="clipboard-document" icon:variant="outline" tooltip="Copy Email" x-on:click.stop="copyText()" />
-                                </div>
-                                <div x-show="copied" x-cloak class="shrink-0">
-                                    <flux:button size="xs" icon="check" variant="primary" color="green" disabled />
-                                </div>
-                            </div>
-                        @endif
-                    </flux:table.cell>
+                        </flux:table.cell>
+                    @endif
                     @if($view === 'vendors.show' || $view === 'vendor_registration')
                         {{-- Show role only for vendor users --}}
                         <flux:table.cell>                            
@@ -123,21 +135,14 @@
                 </flux:table.row>
             @endforeach
         </flux:table.rows>
-    </flux:table>
-    
-    <div class="flex justify-end">
-        @unless($nonLivewire ?? false)
-            <div>
-                <livewire:users.user-create />
-                {{-- @can('update', $vendor)
-                    <livewire:users.user-create />
-                @endcan --}}
-            </div>
-        @endunless
-    </div>
+        </flux:table>
 
-    @if($accordion ?? false)
+        <div class="flex justify-end">
+            @unless($nonLivewire ?? false)
+                <div>
+                    <livewire:users.user-create />
                 </div>
-            </div>
-    @endif
-</x-island-card>
+            @endunless
+        </div>
+    </x-slot:details>
+</x-details.card>

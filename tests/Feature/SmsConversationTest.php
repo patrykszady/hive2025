@@ -29,7 +29,9 @@ it('filters client users down to actual thread participants', function (): void 
         'cell_phone' => '2245550002',
     ]);
 
-    $filteredUsers = (new SmsConversation())->filterClientUsersToThreadParticipants(
+    // Moved (verbatim) to ConversationPresenter so the offline fragment
+    // endpoint shares the same participant filtering.
+    $filteredUsers = \App\Support\Sms\ConversationPresenter::filterClientUsersToThreadParticipants(
         [$participant, $nonParticipant],
         ['+12245550001'],
     );
@@ -495,8 +497,11 @@ describe('forwarding messages', function (): void {
 
         $this->actingAs($user);
 
+        // The bubble renders the shared-menu trigger (dispatches
+        // sms-message-menu with this message's id) even with no text.
         Livewire::test(SmsConversation::class, ['threadId' => $source->id])
-            ->assertSeeHtml('forwardSingleMessage(' . $imageOnly->id . ')');
+            ->assertSeeHtml('sms-message-menu')
+            ->assertSeeHtml('id: ' . $imageOnly->id . ',');
     });
 
     it('refreshes and marks read when an incoming message targets the open thread', function (): void {

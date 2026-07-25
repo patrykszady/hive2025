@@ -19,6 +19,35 @@ class ChecksIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(?string $view = null): int
+    {
+        return $view === null ? 10 : 5;
+    }
+
+    /**
+     * Column defs for the checks table — the loading skeleton renders from the
+     * same array as the real header row, so widths can never drift apart.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[14%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Date', 'width' => 'w-[13%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Check #', 'width' => 'w-[13%]', 'skeletonWidth' => 'w-12'],
+            ['label' => 'Bank', 'width' => 'w-[18%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Payee', 'width' => 'w-[24%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ['label' => 'Status', 'width' => 'w-[18%] min-w-0', 'skeleton' => 'badge'],
+        ];
+    }
+
     public $banks = [];
 
     public $vendors = [];

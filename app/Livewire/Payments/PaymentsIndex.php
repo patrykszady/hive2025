@@ -18,6 +18,48 @@ class PaymentsIndex extends Component
 {
     use AuthorizesRequests, WithPagination, HasToJsonMethod;
 
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(?string $view = null): int
+    {
+        return $view === 'projects.show' ? 25 : 15;
+    }
+
+    /**
+     * Column defs for the payments table — the loading skeleton renders from
+     * the same array as the real header row, so widths can never drift apart.
+     * Columns vary by view, so the caller passes the same $view the table uses.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(?string $view = null): array
+    {
+        // Embedded on projects.show / estimate.pdf: no Project or Client
+        // column, and the real table carries no % widths — table-fixed splits
+        // the four remaining cells evenly.
+        if (in_array($view, ['projects.show', 'estimate.pdf'], true)) {
+            return [
+                ['label' => 'Amount', 'width' => 'w-1/4', 'skeletonWidth' => 'w-16'],
+                ['label' => 'Date', 'width' => 'w-1/4', 'skeletonWidth' => 'w-20'],
+                ['label' => 'Reference', 'width' => 'w-1/4 min-w-0', 'skeletonWidth' => 'w-20'],
+                ['label' => 'Status', 'width' => 'w-1/4', 'skeleton' => 'badge'],
+            ];
+        }
+
+        return [
+            ['label' => 'Amount', 'width' => 'w-[13%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Date', 'width' => 'w-[12%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Project', 'width' => 'w-[25%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ['label' => 'Client', 'width' => 'w-[16%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Reference', 'width' => 'w-[18%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Status', 'width' => 'w-[16%]', 'skeleton' => 'badge'],
+        ];
+    }
+
     public Project $project;
 
     public $clients = [];
@@ -171,8 +213,15 @@ class PaymentsIndex extends Component
         return view('livewire.payments.index');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
-        return view('livewire.payments.payments-index-placeholder');
+        // Livewire hands the lazy component's mount params to placeholder()
+        // before mount() runs, so $view still holds its default here. Pass the
+        // incoming view under its own key — Livewire re-merges the component's
+        // public properties into the placeholder view data afterwards, which
+        // would clobber a 'view' key.
+        return view('livewire.payments.payments-index-placeholder', [
+            'tableView' => $params['view'] ?? $this->view,
+        ]);
     }
 }

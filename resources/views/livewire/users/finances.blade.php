@@ -3,6 +3,7 @@
 
         {{-- DETAILS: multi-year (2020..current year) --}}
         @php($colspan = count($years) + 1)
+        <div class="card-flush-bottom">
         <div class="overflow-x-auto">
         <flux:table>
             <flux:table.columns>
@@ -207,6 +208,7 @@
                 @endif
             </flux:table.rows>
         </flux:table>
+        </div>
         </div>
     </x-island-card>
 </div>

@@ -3,88 +3,58 @@
 
     {{-- STANDALONE PAGE (NON-PROJECT SCOPED) --}}
     @if(!$isProjectScoped)
-        {{-- Mobile: accordion collapsed by default --}}
-        <flux:card class="!px-5 !py-2 sm:hidden">
-            <div class="flex items-center justify-between mb-3">
-                <flux:heading size="lg" class="mb-0">Filters</flux:heading>
-                <flux:button size="sm" variant="primary" icon="plus" wire:click="openProjectSelector">
-                    Create
-                </flux:button>
-            </div>
-            <flux:accordion transition>
-                <flux:accordion.item>
-                    <flux:accordion.heading>
-                        <flux:heading size="sm">Filter & Search</flux:heading>
-                    </flux:accordion.heading>
-                    <flux:accordion.content>
-                        <div class="space-y-3">
-                            <flux:input 
-                                wire:model.live.debounce.500ms="search" 
-                                placeholder="Search vendor or project..." 
-                                icon="magnifying-glass"
-                                size="md" 
-                                class="w-full"
-                            />
-                            <flux:select 
-                                wire:model.live="statusFilter" 
-                                label="Status"
-                                size="md" 
-                                class="w-full"
-                            >
-                                <flux:select.option value="">All statuses</flux:select.option>
-                                @foreach($this->statusOptions as $opt)
-                                    <flux:select.option value="{{ $opt['value'] }}">
-                                        <flux:badge size="sm" inset="top bottom" :color="\App\Enums\LienWaiverStatus::from($opt['value'])->color()">
-                                            {{ $opt['label'] }}
-                                        </flux:badge>
-                                    </flux:select.option>
-                                @endforeach
-                            </flux:select>
-                        </div>
-                    </flux:accordion.content>
-                </flux:accordion.item>
-            </flux:accordion>
-        </flux:card>
-
-        {{-- Desktop: always expanded --}}
-        <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
+        <x-filter-card>
             <x-slot:actions>
                 <flux:button size="sm" variant="primary" icon="plus" wire:click="openProjectSelector">
                     Create Waiver
                 </flux:button>
             </x-slot:actions>
+            {{-- single copy: the inline layout stacks below sm on its own --}}
+            @include('livewire.lien-waivers.partials.filter-fields', ['layout' => 'inline'])
+        </x-filter-card>
 
-            <div class="grid grid-cols-2 gap-4 items-end">
-                <flux:input 
-                    wire:model.live.debounce.500ms="search" 
-                    label="Search"
-                    placeholder="Search vendor or project..." 
-                    icon="magnifying-glass"
-                    size="md" 
-                    class="w-full"
+        {{-- MAIN TABLE CARD — standalone flat table (the project-scoped
+             accordion variant stays in _table.blade.php). Lazy island: the card
+             paints from the shared skeleton first, then the real table swaps
+             in — same loading treatment as the Leads/Checks cards. --}}
+        @island(name: 'lien-waivers-table', lazy: island_lazy(), always: true)
+            @placeholder
+                <x-index-table.placeholder
+                    heading="Lien Waivers"
+                    :columns="\App\Livewire\LienWaivers\Index::columnDefs()"
+                    :rows="\App\Livewire\LienWaivers\Index::placeholderRows()"
+                    :compact="false"
                 />
-                <flux:select 
-                    wire:model.live="statusFilter" 
-                    label="Status"
-                    size="md" 
-                    class="w-full"
-                >
-                    <flux:select.option value="">All statuses</flux:select.option>
-                    @foreach($this->statusOptions as $opt)
-                        <flux:select.option value="{{ $opt['value'] }}">
-                            <flux:badge size="sm" inset="top bottom" :color="\App\Enums\LienWaiverStatus::from($opt['value'])->color()">
-                                {{ $opt['label'] }}
-                            </flux:badge>
-                        </flux:select.option>
-                    @endforeach
-                </flux:select>
-            </div>
-        </x-island-card>
-
-        {{-- MAIN TABLE CARD --}}
-        <x-island-card heading="Lien Waivers" class="overflow-hidden">
-            @include('livewire.lien-waivers._table')
-        </x-island-card>
+            @endplaceholder
+        <x-index-table heading="Lien Waivers" :paginator="$this->waivers">
+            {{-- Islands render in their own scope (public properties only), so the
+                 row partials get their own copy of the outer flag — always false
+                 here, since this branch IS the standalone page. --}}
+            @php($isProjectScoped = $this->scoped)
+            @php($cell = '')
+            @php($nameLimit = 20)
+            @if($this->waivers->isNotEmpty() || $this->swornStatements->isNotEmpty())
+                <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
+                    <flux:table.columns>
+                        <flux:table.column>Project</flux:table.column>
+                        <flux:table.column>Vendor</flux:table.column>
+                        <flux:table.column>Amount</flux:table.column>
+                        <flux:table.column>Through</flux:table.column>
+                        <flux:table.column>Type</flux:table.column>
+                        <flux:table.column>Status</flux:table.column>
+                    </flux:table.columns>
+                    <flux:table.rows>
+                        @foreach($this->swornStatements as $statement)
+                            @include('livewire.lien-waivers._statement-row', ['statement' => $statement])
+                        @endforeach
+                        @foreach($this->waivers as $waiver)
+                            @include('livewire.lien-waivers._waiver-row', ['waiver' => $waiver])
+                        @endforeach
+                    </flux:table.rows>
+                </flux:table>
+            @endif
+        </x-index-table>
+        @endisland
     @elseif($this->hasSignedContract)
         {{-- PROJECT-SCOPED VARIANT — hidden until the contract is signed
              (the base bid created at estimate acceptance). --}}
@@ -139,6 +109,9 @@
     {{-- PROJECT SELECTOR MODAL (STANDALONE PAGE ONLY) --}}
     @if(!$this->project && !$isProjectScoped)
         <flux:modal wire:model.self="showProjectSelector" name="lien-waiver-project-select" class="max-w-lg">
+            {{-- Heavy option list (every selectable project) renders only once
+                 the modal is opened — the open click's round trip brings it. --}}
+            @if($showProjectSelector)
             <div class="space-y-4">
                 <div>
                     <flux:heading size="lg">Create Lien Waiver</flux:heading>
@@ -179,6 +152,7 @@
                     @endif
                 </div>
             </div>
+        @endif
         </flux:modal>
     @endif
 

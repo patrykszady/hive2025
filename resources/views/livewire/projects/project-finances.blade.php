@@ -1,22 +1,7 @@
 {{-- PROJECT FINANCIALS --}}
 <x-island-card heading="Project Finances" wire:transition>
     <x-slot:actions>
-        @can('create', App\Models\Bid::class)
-            @php
-                $userBids = $project->bids()->vendorBids(auth()->user()->vendor->id)->with('estimate_sections')->get();
-                $hasEditableBids = $userBids->isEmpty() || $userBids->contains(function($bid) {
-                    return $bid->estimate_sections->isEmpty();
-                });
-            @endphp
-            @if($hasEditableBids)
-                <flux:button
-                    wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{auth()->user()->vendor->id}}, project: {{$project->id}} })"
-                    size="sm"
-                    >
-                    Edit Bid
-                </flux:button>
-            @endif
-        @endcan
+        @include('livewire.projects.partials.finances-actions')
     </x-slot:actions>
 
     <livewire:bids.bid-create />
@@ -24,6 +9,7 @@
     <flux:separator variant="subtle" />
 
     {{-- DETAILS --}}
+    <div class="card-flush-bottom">
     <flux:table>
         <flux:table.rows>
             <flux:table.row>
@@ -84,6 +70,7 @@
             </flux:table.row>
         </flux:table.rows>
     </flux:table>
+    </div>
 </x-island-card>
 
 

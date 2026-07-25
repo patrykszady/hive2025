@@ -20,7 +20,7 @@
                         wire:key="receipt-desc-{{ $index }}"
                         class="transition-colors duration-150 {{ $loop->first ? '!border-none' : 'border-t border-zinc-800/15 dark:border-white/20 !border-b-0' }} {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}"
                     >
-                        <flux:table.cell colspan="4" class="!py-1" title="{{$line_item['Description'] ?? ''}}">
+                        <flux:table.cell colspan="4" class="!py-1">
                             <div class="flex items-center gap-2 transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
                                 @if(!empty($line_item['image_url']))
                                     <button
@@ -127,7 +127,7 @@
                                     @endif
                                     @if($showNotes && !empty($itemNotes))
                                         @if($compactNotes)
-                                            <span class="min-w-0 truncate text-zinc-400 dark:text-zinc-500" title="{{ $itemNotes }}">{{ \Illuminate\Support\Str::limit(trim((string) $itemNotes), 140) }}</span>
+                                            <x-truncate-tooltip :content="trim((string) $itemNotes)" class="min-w-0"><span class="block min-w-0 truncate text-zinc-400 dark:text-zinc-500">{{ \Illuminate\Support\Str::limit(trim((string) $itemNotes), 140) }}</span></x-truncate-tooltip>
                                         @else
                                             <span class="min-w-0 whitespace-pre-line text-zinc-400 dark:text-zinc-500">{{ trim((string) $itemNotes) }}</span>
                                         @endif

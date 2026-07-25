@@ -115,7 +115,7 @@
                             <flux:table.cell>{{ optional($doc->expiration_date)->format('m/d/Y') ?: '-' }}</flux:table.cell>
                             <flux:table.cell>
                                 @if($doc->doc_filename)
-                                    <a href="{{ route('vendor_docs.show', ['filename' => $doc->doc_filename]) }}" class="text-blue-600 hover:underline" target="_blank">Open</a>
+                                    <a wire:navigate.hover href="{{ route('vendor_docs.show', ['filename' => $doc->doc_filename]) }}" class="text-blue-600 hover:underline" target="_blank">Open</a>
                                 @else
                                     -
                                 @endif

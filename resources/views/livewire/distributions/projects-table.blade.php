@@ -1,4 +1,4 @@
-<x-island-card heading="Projects {{ $type }} Distributions">
+<x-index-table heading="Projects {{ $type }} Distributions" :paginator="$projects">
     <x-slot:actions>
         @if ($type === 'Without' && $projects->count() > 0)
             <flux:button
@@ -11,12 +11,11 @@
         @endif
     </x-slot:actions>
 
-    <div class="space-y-2">
-        <flux:table :paginate="$projects->hasPages() ? $projects : null" wire:loading.class="opacity-50 text-opacity-50">
+        <flux:table wire:loading.class="opacity-50 text-opacity-50" class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
             <flux:table.columns>
-                <flux:table.column>Projects {{ $type }}</flux:table.column>
-                <flux:table.column>Profit</flux:table.column>
-                <flux:table.column>Completed</flux:table.column>
+                <flux:table.column class="w-[50%] min-w-0">Projects {{ $type }}</flux:table.column>
+                <flux:table.column class="w-[25%]">Profit</flux:table.column>
+                <flux:table.column class="w-[25%]">Completed</flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
@@ -43,5 +42,4 @@
                 @endforeach
             </flux:table.rows>
         </flux:table>
-    </div>
-</x-island-card>
+</x-index-table>

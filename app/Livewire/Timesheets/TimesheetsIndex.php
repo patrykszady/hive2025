@@ -15,10 +15,40 @@ use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-#[Lazy]
+// #[Lazy]
 class TimesheetsIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
+
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(): int
+    {
+        return 20;
+    }
+
+    /**
+     * Column defs for the confirmed-timesheets table — the loading skeleton
+     * renders from the same array as the real header row, so widths can never
+     * drift apart.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Date', 'width' => 'w-[13%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Name', 'width' => 'w-[22%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Project', 'width' => 'w-[27%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ['label' => 'Hours', 'width' => 'w-[11%]', 'skeletonWidth' => 'w-10'],
+            ['label' => 'Amount', 'width' => 'w-[13%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Status', 'width' => 'w-[14%]', 'skeleton' => 'badge'],
+        ];
+    }
 
     #[Url(except: '')]
     public string $search = '';
@@ -156,9 +186,11 @@ class TimesheetsIndex extends Component
     {
         $this->authorize('viewAny', Timesheet::class);
 
+        // $timesheets is intentionally NOT passed here: the table lives in a
+        // lazy island and reads $this->timesheets, so the search query only
+        // runs when the island renders.
         return view('livewire.timesheets.index', [
             'weekly_hours_to_confirm' => $this->weeklyHoursToConfirm(),
-            'timesheets' => $this->timesheets,
         ]);
     }
 }

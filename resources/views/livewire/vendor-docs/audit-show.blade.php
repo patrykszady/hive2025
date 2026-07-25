@@ -78,7 +78,7 @@
                             <flux:table.row :key="'desc-' . $transaction->id" class="border-t-0">
                                 <flux:table.cell class="pt-0"></flux:table.cell>
                                 <flux:table.cell class="pt-0 border-t border-gray-200" colspan="2">
-                                    <div class="italic whitespace-normal break-words leading-tight" title="{{ $transaction->plaid_merchant_description }}">
+                                    <div class="italic whitespace-normal break-words leading-tight">
                                         {{ $transaction->plaid_merchant_description }}
                                     </div>
                                 </flux:table.cell>

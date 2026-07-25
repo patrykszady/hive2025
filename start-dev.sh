@@ -36,7 +36,7 @@ done
 show_status() {
   echo ""
   echo "Services status:"
-  for PORT_LABEL in "8000:Hive2025" "8002:Breck" "8003:GSC" "8005:Test" "5173:Vite"; do
+  for PORT_LABEL in "8000:Hive2025" "8002:Breck" "8003:GSC" "8005:Test"; do
     PORT="${PORT_LABEL%%:*}"
     LABEL="${PORT_LABEL##*:}"
     if lsof -Pi :"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -45,6 +45,18 @@ show_status() {
       echo "  ⬚  $LABEL (port $PORT) — not running"
     fi
   done
+  # Report *our* Vite, not whichever project happens to hold 5173.
+  VITE_STATUS="  ⬚  Vite — not running for this project"
+  for PORT in 5173 5174 5175 5176; do
+    OWNER=$(lsof -Pi :"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1)
+    [ -z "$OWNER" ] && continue
+    if [ "$(readlink "/proc/$OWNER/cwd" 2>/dev/null)" = "$PWD" ]; then
+      VITE_STATUS="  ✅ Vite (port $PORT) — running"
+      break
+    fi
+    VITE_STATUS="  ⬚  Vite — not running (port $PORT held by $(basename "$(readlink "/proc/$OWNER/cwd" 2>/dev/null)"))"
+  done
+  echo "$VITE_STATUS"
   pgrep -x meilisearch >/dev/null 2>&1 && echo "  ✅ Meilisearch — running" || echo "  ⬚  Meilisearch — not running"
   pgrep -f "artisan horizon" >/dev/null 2>&1 && echo "  ✅ Horizon — running" || echo "  ⬚  Horizon — not running"
   pgrep -f "artisan reverb:start" >/dev/null 2>&1 && echo "  ✅ Reverb — running" || echo "  ⬚  Reverb — not running"
@@ -61,8 +73,10 @@ fi
 # The lock file stores the PID of the main Laravel server.
 # If that process is still alive, we consider the dev env running.
 if [ "$FORCE" = false ] && [ -f "$LOCK_FILE" ]; then
-  # Check if the main Hive server (port 8000) is actually running
-  if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  # An open socket isn't proof the app works — a wedged server would short-circuit
+  # startup and force a manual `--force`. Require a real response from /up.
+  if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1 \
+     && curl -fsS -m 5 -o /dev/null http://127.0.0.1:8000/up 2>/dev/null; then
     # If the app server is already up, still ensure Horizon is running.
     if ! pgrep -f "artisan horizon" >/dev/null 2>&1; then
       echo "🔄 Horizon not running, starting it now..."
@@ -83,7 +97,13 @@ if [ "$FORCE" = false ] && [ -f "$LOCK_FILE" ]; then
     echo "To force restart: ./start-dev.sh --force"
     exit 0
   else
-    # Stale lock file (services not actually running), remove it
+    # Stale lock, or a listener that no longer serves requests: clear it and do
+    # a full startup instead of exiting as if everything were fine.
+    if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "⚠️  Port 8000 is listening but not responding — restarting the server"
+      kill "$(lsof -Pi :8000 -sTCP:LISTEN -t)" 2>/dev/null || true
+      sleep 0.5
+    fi
     rm -f "$LOCK_FILE"
   fi
 fi
@@ -122,15 +142,32 @@ echo "🧹 Clearing Laravel caches..."
 php artisan config:clear --no-interaction >"$LOG_DIR/config_clear.log" 2>&1
 status $? "Config cache cleared" "Config cache clear failed (see $LOG_DIR/config_clear.log)"
 
-# MySQL
-echo "🔄 Starting MySQL..."
-sudo service mysql start >/dev/null 2>&1
-status $? "MySQL started (or already running)" "Failed to start MySQL"
+# MySQL / Redis
+#
+# Never run a plain `sudo` here. The VS Code folderOpen task runs this script in
+# a hidden terminal (presentation.reveal = silent), so a sudo password prompt
+# has nobody to answer it and blocks the script *before* any app server starts —
+# which is why a manual `./start-dev.sh --force` was needed to get port 8000 up.
+# Skip the sudo entirely when the daemon is already running, and never wait for
+# input when it isn't.
+ensure_service() {
+  local label="$1" proc="$2" service="$3"
 
-# Redis
-echo "🔄 Starting Redis..."
-sudo service redis-server start >/dev/null 2>&1
-status $? "Redis started (or already running)" "Failed to start Redis"
+  if pgrep -x "$proc" >/dev/null 2>&1; then
+    echo "✅ $label already running"
+    return
+  fi
+
+  echo "🔄 Starting $label..."
+  if sudo -n service "$service" start >/dev/null 2>&1; then
+    echo "✅ $label started"
+  else
+    echo "⚠️  $label not running and sudo needs a password → run: sudo service $service start"
+  fi
+}
+
+ensure_service "MySQL" mysqld mysql
+ensure_service "Redis" redis-server redis-server
 
 # Meilisearch
 MEILI_HOST=$(grep -E '^MEILISEARCH_HOST=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | xargs)
@@ -258,15 +295,21 @@ echo "════════════════════════�
 echo "📦 Starting HIVE2025 (Port 8000)"
 echo "════════════════════════════════════════════════════════════════"
 
-# Horizon
-echo "🔄 Starting Laravel Horizon..."
-nohup php artisan horizon --no-interaction >"$LOG_DIR/horizon.log" 2>&1 &
-HORIZON_PID=$!
-sleep 0.7
-if ps -p "$HORIZON_PID" >/dev/null 2>&1; then
-  echo "✅ Horizon started (pid: $HORIZON_PID)"
+# Horizon — one master process only. Without this guard every run stacked
+# another Horizon on top of the last, so jobs got picked up by several workers.
+if pgrep -f "artisan horizon --no-interaction" >/dev/null 2>&1; then
+  HORIZON_PID=$(pgrep -f "artisan horizon --no-interaction" | head -n 1)
+  echo "✅ Horizon already running (pid: $HORIZON_PID)"
 else
-  echo "❌ Horizon failed → check logs: $LOG_DIR/horizon.log"
+  echo "🔄 Starting Laravel Horizon..."
+  nohup php artisan horizon --no-interaction >"$LOG_DIR/horizon.log" 2>&1 &
+  HORIZON_PID=$!
+  sleep 0.7
+  if ps -p "$HORIZON_PID" >/dev/null 2>&1; then
+    echo "✅ Horizon started (pid: $HORIZON_PID)"
+  else
+    echo "❌ Horizon failed → check logs: $LOG_DIR/horizon.log"
+  fi
 fi
 
 # Reverb (WebSocket server for real-time broadcasting)
@@ -314,18 +357,47 @@ if [ -f public/hot ]; then
   fi
 fi
 
-if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then
-  VITE_PID=$(lsof -Pi :5173 -sTCP:LISTEN -t)
-  echo "✅ Vite already running (pid: $VITE_PID)"
-else
-  echo "🔄 Starting Vite (npm run dev)..."
-  nohup npm run dev -- --host 0.0.0.0 --port 5173 --strictPort >"$LOG_DIR/vite.log" 2>&1 &
-  VITE_PID=$!
-  sleep 0.7
-  if ps -p "$VITE_PID" >/dev/null 2>&1; then
-    echo "✅ Vite dev server started (pid: $VITE_PID)"
+# A listener on 5173 is not proof that *our* Vite is up — breck also runs one
+# and whichever app boots first takes the port. Match on the owning process's
+# working directory, and fall back to the next free port so this project always
+# gets a dev server (Vite writes the real port into public/hot for us).
+VITE_PID=""
+for VITE_PORT_CANDIDATE in 5173 5174 5175 5176; do
+  OWNER_PID=$(lsof -Pi :"$VITE_PORT_CANDIDATE" -sTCP:LISTEN -t 2>/dev/null | head -n 1)
+  [ -z "$OWNER_PID" ] && continue
+  OWNER_CWD=$(readlink "/proc/$OWNER_PID/cwd" 2>/dev/null)
+  if [ "$OWNER_CWD" = "$PWD" ]; then
+    VITE_PID="$OWNER_PID"
+    echo "✅ Vite already running for this project (pid: $VITE_PID, port $VITE_PORT_CANDIDATE)"
+    break
+  fi
+done
+
+if [ -z "$VITE_PID" ]; then
+  VITE_PORT=""
+  for VITE_PORT_CANDIDATE in 5173 5174 5175 5176; do
+    if ! lsof -Pi :"$VITE_PORT_CANDIDATE" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      VITE_PORT="$VITE_PORT_CANDIDATE"
+      break
+    fi
+  done
+
+  if [ -z "$VITE_PORT" ]; then
+    echo "❌ No free Vite port in 5173-5176 → free one and re-run"
   else
-    echo "❌ Vite failed → check logs: $LOG_DIR/vite.log"
+    OTHER=""
+    [ "$VITE_PORT" != "5173" ] && OTHER=" (5173 is taken by another project)"
+    # VITE_PORT is what vite.config.js derives the HMR host/client ports from —
+    # passing only --port would leave HMR dialling 5173 (another project's Vite).
+    echo "🔄 Starting Vite (npm run dev) on port $VITE_PORT$OTHER..."
+    VITE_PORT="$VITE_PORT" nohup npm run dev -- --host 0.0.0.0 --port "$VITE_PORT" --strictPort >"$LOG_DIR/vite.log" 2>&1 &
+    VITE_PID=$!
+    sleep 0.7
+    if ps -p "$VITE_PID" >/dev/null 2>&1; then
+      echo "✅ Vite dev server started (pid: $VITE_PID) → http://127.0.0.1:$VITE_PORT"
+    else
+      echo "❌ Vite failed → check logs: $LOG_DIR/vite.log"
+    fi
   fi
 fi
 

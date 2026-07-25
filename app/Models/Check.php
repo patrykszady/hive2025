@@ -176,6 +176,35 @@ class Check extends Model
         return $this->amount - $transactions_sum;
     }
 
+    /**
+     * Where the payee name links to — mirrors the branching in owner():
+     * a via-vendor (the label shows that company), then the user, then the
+     * vendor. Null when the check has neither.
+     */
+    public function payeeUrl(): ?string
+    {
+        if ($this->user_id && $this->user) {
+            $userVendorPivot = $this->user->vendors()
+                ->where('vendors.id', auth()->user()?->vendor?->id)
+                ->first();
+
+            $viaVendorId = $userVendorPivot?->pivot?->via_vendor_id;
+
+            // owner() shows the via-vendor's business name here, so link there.
+            if ($viaVendorId) {
+                return route('vendors.show', $viaVendorId);
+            }
+
+            return route('users.show', $this->user_id);
+        }
+
+        if ($this->vendor) {
+            return route('vendors.show', $this->vendor->id);
+        }
+
+        return null;
+    }
+
     protected function owner(): Attribute
     {
         return Attribute::make(

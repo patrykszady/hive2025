@@ -1,25 +1,19 @@
-<div class="max-w-3xl">
-    <x-island-card heading="Estimates" wire:transition>
-        <x-slot:actions>
-            <flux:skeleton class="h-8 w-28 rounded-md" animate="shimmer" />
-        </x-slot:actions>
+{{-- Loading skeleton for the Estimates card — the shared index-table skeleton,
+     so it renders through the same card shell as the loaded table.
 
-        <flux:table>
-            <flux:table.rows>
-                <flux:skeleton.group animate="shimmer">
-                    <flux:table.row>
-                        <flux:table.cell>
-                            <div class="flex items-center gap-2">
-                                <flux:skeleton.line class="w-20" />
-                                <flux:skeleton class="h-5 w-16 rounded-full" />
-                            </div>
-                        </flux:table.cell>
-                        <flux:table.cell>
-                            <flux:skeleton.line class="w-20" />
-                        </flux:table.cell>
-                    </flux:table.row>
-                </flux:skeleton.group>
-            </flux:table.rows>
-        </flux:table>
-    </x-island-card>
-</div>
+     In practice this only paints for the lazy card embedded on projects.show
+     (the standalone /estimates route is a normal full-page component), and that
+     card is narrower than .index-table's 640px floor and drops the Client
+     column — hence the view-aware column defs and the min-width reset. --}}
+@php
+    $tableView = $tableView ?? 'estimates.index';
+    $isIndexView = $tableView === 'estimates.index';
+@endphp
+<x-index-table.placeholder
+    heading="Estimates"
+    :columns="\App\Livewire\Estimates\EstimatesIndex::columnDefs($tableView)"
+    :rows="$isIndexView ? 5 : 1"
+    :compact="false"
+    :floor="$isIndexView"
+    wire:transition
+/>

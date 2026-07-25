@@ -21,7 +21,7 @@
 @endphp
 <div
     {{-- Hover bleeds to the card edges via the card's own padding var (--flux-card-px), like table-row hovers --}}
-    class="details-row relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 mx-[calc(var(--flux-card-px,0.5rem)*-1)] px-[var(--flux-card-px,0.5rem)] transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-500/10 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20"
+    class="details-row relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 mx-[calc(var(--flux-card-px,0.5rem)*-1)] px-[var(--flux-card-px,0.5rem)] transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-500/10 [&:has(~.details-row)]:border-b [&:has(~.details-row)]:border-zinc-800/15 dark:[&:has(~.details-row)]:border-white/20"
     @if($useCloak) x-data="{}" x-cloak @endif
 >
     @if($isRight)

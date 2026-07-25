@@ -7,7 +7,7 @@
             <p class="text-sm text-zinc-500">
                 Project:
                 @if($waiver->project)
-                    <a href="{{ route('projects.show', $waiver->project) }}" class="font-semibold text-zinc-700 no-underline hover:no-underline hover:text-indigo-600 dark:text-zinc-300 dark:hover:text-indigo-400">
+                    <a wire:navigate.hover href="{{ route('projects.show', $waiver->project) }}" class="font-semibold text-zinc-700 no-underline hover:no-underline hover:text-indigo-600 dark:text-zinc-300 dark:hover:text-indigo-400">
                         {{ $waiver->project->project_name ?? '—' }}
                         @if($waiver->project->address)
                             &middot; {{ $waiver->project->address }}

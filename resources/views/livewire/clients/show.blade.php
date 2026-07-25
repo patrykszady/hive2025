@@ -1,6 +1,8 @@
 <div>
-    <div class="grid grid-cols-4 gap-4 max-w-5xl lg:grid-cols-6">
-        <div class="col-span-4 lg:col-span-2">
+    {{-- Two independent columns (items-start): cards stack per column, so a
+         tall card on one side never opens gaps on the other. --}}
+    <div class="grid grid-cols-1 gap-4 max-w-5xl lg:grid-cols-2 lg:items-start">
+        <div class="space-y-4">
             {{-- CLIENT DETAILS --}}
             <x-details.card 
                 :title="$client->name"
@@ -46,20 +48,16 @@
                     @endif
                 </x-slot:details>
             </x-details.card>
-        </div>
 
-        {{-- CLIENT USERS --}}
-        <div class="col-span-4 lg:col-span-4">
-            <livewire:users.users-index :client="$client" :view="'clients.show'"/>
-        </div>
-
-        {{-- CLIENT PROJECT --}}
-        <div class="col-span-4 lg:col-span-3">
+            {{-- CLIENT PROJECTS (includes Email Tracking) --}}
             <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
         </div>
 
-        {{-- CLIENT PROJECT TASKS --}}
-        <div class="col-span-4 lg:col-span-3">
+        <div class="space-y-4">
+            {{-- CLIENT USERS --}}
+            <livewire:users.users-index :client="$client" :view="'clients.show'"/>
+
+            {{-- CLIENT PROJECT TASKS --}}
             <livewire:clients.upcoming-client-tasks :client="$client" lazy />
         </div>
     </div>

@@ -61,7 +61,7 @@
                                 <div class="flex justify-between items-center w-full">
                                     <div class="flex-1 min-w-0 mr-2"> <!-- Added min-w-0 to allow truncation -->
                                         <flux:heading class="truncate text-zinc-700 hover:text-zinc-900">
-                                            <a href="{{route('vendors.show', $vendor_found->id)}}" target="_blank">
+                                            <a wire:navigate.hover href="{{route('vendors.show', $vendor_found->id)}}" target="_blank">
                                                 {{$vendor_found->name}}
                                             </a>
                                         </flux:heading>

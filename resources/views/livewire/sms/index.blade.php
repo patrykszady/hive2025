@@ -89,8 +89,12 @@
             const url = new URL(window.location.href);
             if (name === 'calls') {
                 url.searchParams.delete('threadId');
+                // Loading overlay only when the list isn't premounted yet —
+                // the idle premount makes the common case instant.
+                if (! this.callsMounted) {
+                    this.callsLoading = true;
+                }
                 this.callsMounted = true;
-                this.callsLoading = true;
             } else {
                 url.searchParams.delete('callId');
             }
@@ -101,7 +105,10 @@
             }
             window.history.replaceState({}, '', url);
             Alpine.store('sms').setTab(name);
-            $wire.$set('activeTab', name);
+            /* Deferred assignment (no roundtrip): the panels are Alpine-toggled
+               and the URL is already updated — the server state rides along
+               with the next real request instead of costing one now. */
+            $wire.activeTab = name;
         },
     }"
     x-on:click.window.once="ensureAudioContext()"
@@ -143,8 +150,15 @@
             // Don't set callsLoading on initial render — the CallList is
             // rendered synchronously, so there is no async load to wait for.
 
-            window.addEventListener('sms-incoming', () => notifyIncoming());
-            window.addEventListener('focus', () => stopFlashing());
+            /* Listener hygiene: window/document/SW/Echo outlive wire:navigate,
+               so everything registered here is scoped to THIS page visit —
+               otherwise each return to /messages stacks another set of
+               listeners holding a dead $wire. Aborted on livewire:navigating. */
+            const pageScope = new AbortController();
+            const pageSignal = pageScope.signal;
+
+            window.addEventListener('sms-incoming', () => notifyIncoming(), { signal: pageSignal });
+            window.addEventListener('focus', () => stopFlashing(), { signal: pageSignal });
 
             // Catch-up refresh: broadcasts can be missed while the tab is
             // hidden or the websocket is down, so re-sync the thread list and
@@ -164,17 +178,21 @@
                     stopFlashing();
                     catchUpRefresh();
                 }
-            });
+            }, { signal: pageSignal });
 
             // Refresh after the websocket reconnects (skip the initial connect —
-            // the page just rendered fresh data).
+            // the page just rendered fresh data). Pusher's binder isn't an
+            // EventTarget, so this one is unbound by hand on navigate.
+            let echoConnection = null;
+            let onEchoReconnect = null;
             try {
-                const connection = window.Echo?.connector?.pusher?.connection;
-                let hadConnection = connection?.state === 'connected';
-                connection?.bind('connected', () => {
+                echoConnection = window.Echo?.connector?.pusher?.connection;
+                let hadConnection = echoConnection?.state === 'connected';
+                onEchoReconnect = () => {
                     if (hadConnection) catchUpRefresh();
                     hadConnection = true;
-                });
+                };
+                echoConnection?.bind('connected', onEchoReconnect);
             } catch (e) {}
 
             // Handle notification clicks from the service worker
@@ -186,15 +204,34 @@
                     } else if (event.data?.type === 'navigate-url' && event.data?.url) {
                         window.location.href = event.data.url;
                     }
-                });
+                }, { signal: pageSignal });
             }
 
-            if (! $wire.threadId) {
+            document.addEventListener('livewire:navigating', () => {
+                pageScope.abort();
+                stopFlashing(); // don't leave the title flashing on another page
+                try { echoConnection?.unbind('connected', onEchoReconnect); } catch (e) {}
+            }, { once: true });
+
+            /* navigator.onLine gate: when the cached shell boots offline these
+               auto-select calls would fire doomed POSTs and strand the
+               conversation skeleton. Offline thread opens go through
+               HiveSmsOffline.openThread from the thread-list tap instead. */
+            if (navigator.onLine && ! $wire.threadId) {
                 if (window.matchMedia('(min-width: 1024px)').matches) {
                     $wire.autoSelectLatestDesktopThread();
                 } else {
                     $wire.autoSelectSingleThreadIfOnlyOne();
                 }
+            }
+
+            // Pre-mount the Calls list once the page is idle so the first tap
+            // on the Calls tab is instant (it stays hidden until then).
+            if (!callsMounted) {
+                const premount = () => { callsMounted = true };
+                'requestIdleCallback' in window
+                    ? requestIdleCallback(premount, { timeout: 4000 })
+                    : setTimeout(premount, 2500);
             }
 
         }
@@ -294,7 +331,7 @@
                     <div
                         wire:loading.delay
                         wire:target="subjectFilter,search"
-                        class="absolute inset-0 z-20 pointer-events-none"
+                        class="absolute inset-0 z-20 pointer-events-none transition-opacity duration-150"
                     >
                         @include('livewire.sms.sidebar-card-skeleton')
                     </div>
@@ -323,6 +360,9 @@
                         <div
                             x-show="callsLoading"
                             x-cloak
+                            x-transition:leave="transition-opacity duration-150 ease-out"
+                            x-transition:leave-start="opacity-100"
+                            x-transition:leave-end="opacity-0"
                             class="absolute inset-0 z-20 pointer-events-none"
                         >
                             @include('livewire.sms.call-list-skeleton')
@@ -351,6 +391,26 @@
         class="relative flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none">
         <div class="flex-1 min-h-0 flex flex-col">
             <livewire:sms.sms-conversation :thread-id="$threadId" :is-client-user="$isClientUser" />
+        </div>
+
+        {{-- INVARIANT — offline conversation overlay (sms-offline.js injects
+             cached fragments here). It must stay wire:ignore AND remain a
+             SIBLING of the SmsConversation wrapper, never inside any component
+             root: SmsConversation is #[Isolate] with always-render islands, so
+             anything inside its root gets clobbered on every island re-render. --}}
+        <div id="sms-offline-pane" wire:ignore class="absolute inset-0 z-30 hidden flex-col min-h-0 bg-white dark:bg-zinc-900"></div>
+
+        {{-- Offline / cached-copy banner ('' hides it; text set by sms-offline.js) --}}
+        <div
+            wire:ignore
+            x-show="$store.sms.offlineBanner"
+            x-cloak
+            class="absolute top-1 inset-x-0 z-40 flex justify-center pointer-events-none"
+        >
+            <div
+                class="rounded-full bg-amber-100 dark:bg-amber-900/70 border border-amber-300 dark:border-amber-700 px-3 py-1 text-xs text-amber-800 dark:text-amber-200 shadow-sm"
+                x-text="$store.sms.offlineBanner"
+            ></div>
         </div>
     </div>
 

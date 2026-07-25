@@ -212,12 +212,12 @@ class TimesheetPaymentCreate extends Component
         $redirect_route = $this->form->store();
 
         if ($redirect_route == 'timesheets') {
-            return redirect()->route('timesheets.payments');
+            return $this->redirect(route('timesheets.payments'), navigate: true);
         } else {
             $check = $redirect_route;
             $check->amount = $check->amount; // already recalculated in form->store
             $check->save();
-            return redirect()->route('checks.show', $check->id);
+            return $this->redirect(route('checks.show', $check->id), navigate: true);
         }
     }
 

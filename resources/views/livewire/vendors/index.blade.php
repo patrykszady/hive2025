@@ -1,66 +1,50 @@
 <div class="max-w-2xl">
-    {{-- Mobile: accordion collapsed by default --}}
-    <flux:card class="!px-5 !py-2 sm:hidden">
-        <flux:accordion transition>
-            <flux:accordion.item>
-                <flux:accordion.heading>
-                    <flux:heading size="lg">Filters</flux:heading>
-                </flux:accordion.heading>
-                <flux:accordion.content>
-                    <div class="flex flex-col gap-4">
-                        <div class="min-w-0">
-                            <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
-                        </div>
-                        <div class="min-w-0">
-                            <flux:select wire:model.live="vendor_type" label="Business Type" wire:model="vendor_type" placeholder="Choose type...">
-                                <flux:select.option value="All">All Vendor Types</flux:select.option>
-                                <flux:select.option value="Sub">Subcontractor</flux:select.option>
-                                <flux:select.option value="Retail">Retail</flux:select.option>
-                                <flux:select.option value="1099">1099/Independent</flux:select.option>
-                                <flux:select.option value="DBA">DBA</flux:select.option>
-                            </flux:select>
-                        </div>
-                    </div>
-                </flux:accordion.content>
-            </flux:accordion.item>
-        </flux:accordion>
-    </flux:card>
+    <x-filter-card>
+        {{-- single copy: the inline layout stacks below sm on its own --}}
+        @include('livewire.vendors.partials.filter-fields', ['layout' => 'inline'])
+    </x-filter-card>
 
-    {{-- Desktop: always expanded --}}
-    <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
-        <div class="flex flex-col sm:flex-row items-end gap-4">
-            <div class="flex-1 min-w-0">
-                <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
-            </div>
-
-            <div class="flex-1 min-w-0">
-                <flux:select wire:model.live="vendor_type" label="Business Type" wire:model="vendor_type" placeholder="Choose type...">
-                    <flux:select.option value="All">All Vendor Types</flux:select.option>
-                    <flux:select.option value="Sub">Subcontractor</flux:select.option>
-                    <flux:select.option value="Retail">Retail</flux:select.option>
-                    <flux:select.option value="1099">1099/Independent</flux:select.option>
-                    <flux:select.option value="DBA">DBA</flux:select.option>
-                </flux:select>
-            </div>
-        </div>
-    </x-island-card>
-
-    <x-island-card heading="Vendors" class="mt-4">
+    {{-- lazy island: the card paints from the shared skeleton first, then the
+         real table swaps in — same loading treatment as the Leads card.
+         always: true because this page's drivers live OUTSIDE the island — the
+         filter card (business_name / vendor_type) and the VendorCreated event
+         that prepends a new row. Without it those updates come back as a
+         mode=skip fragment and the table keeps showing stale rows. --}}
+    @island(name: 'vendors-table', lazy: true, always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Vendors"
+                floor-min="600px"
+                :columns="\App\Livewire\Vendors\VendorsIndex::columnDefs()"
+                :rows="\App\Livewire\Vendors\VendorsIndex::placeholderRows()"
+                :compact="false"
+                class="mt-4"
+            >
+                <x-slot:actions>
+                    @include('livewire.vendors.partials.index-actions')
+                </x-slot:actions>
+            </x-index-table.placeholder>
+        @endplaceholder
+    <x-index-table heading="Vendors" :paginator="$this->vendors" class="mt-4">
         <x-slot:actions>
-            @can('create', App\Models\Vendor::class)
-                <flux:button size="sm" wire:click="$dispatchTo('vendors.vendor-create', 'newVendor')">Add New Vendor</flux:button>
-            @endcan
+            @include('livewire.vendors.partials.index-actions')
         </x-slot:actions>
 
-        <div class="space-y-2">
-            <flux:table :paginate="$this->vendors->hasPages() ? $this->vendors : null">
+        <x-slot:before>
+            @can('create', App\Models\Vendor::class)
+                <livewire:vendors.vendor-create />
+            @endcan
+        </x-slot:before>
+
+            {{-- /vendors is max-w-2xl (~630px interior): lower the 640px floor --}}
+            <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0" style="--index-table-min: 600px">
                 <flux:table.columns>
-                    <flux:table.column sortable :sorted="$sortBy === 'business_name'" :direction="$sortDirection" wire:click="sort('business_name')">Vendor</flux:table.column>
-                    <flux:table.column>Type</flux:table.column>
+                    <flux:table.column class="w-[40%] min-w-0" sortable :sorted="$sortBy === 'business_name'" :direction="$sortDirection" wire:click="sort('business_name')">Vendor</flux:table.column>
+                    <flux:table.column class="w-[18%]">Type</flux:table.column>
                     @can('create', App\Models\Vendor::class)
-                        <flux:table.column sortable :sorted="$sortBy === 'ytd_expense_sum'" :direction="$sortDirection" wire:click="sort('ytd_expense_sum')">YTD Paid</flux:table.column>
+                        <flux:table.column class="w-[20%]" sortable :sorted="$sortBy === 'ytd_expense_sum'" :direction="$sortDirection" wire:click="sort('ytd_expense_sum')">YTD Paid</flux:table.column>
                     @endcan
-                    <flux:table.column sortable :sorted="$sortBy === 'attached_at'" :direction="$sortDirection" wire:click="sort('attached_at')">Since</flux:table.column>
+                    <flux:table.column class="w-[22%]" sortable :sorted="$sortBy === 'attached_at'" :direction="$sortDirection" wire:click="sort('attached_at')">Since</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -76,8 +60,8 @@
                             x-transition:enter-end="opacity-100 translate-y-0"
                             class="bg-green-50 dark:bg-green-900/10"
                         >
-                            <flux:table.cell variant="strong">
-                                <a wire:navigate.hover href="{{ route('vendors.show', ['vendor' => $new['id']]) }}">{{ $new['name'] }}</a>
+                            <flux:table.cell variant="strong" class="min-w-0">
+                                <x-table-link :href="route('vendors.show', ['vendor' => $new['id']])" :label="$new['name']" />
                             </flux:table.cell>
                             <flux:table.cell>
                                 <flux:badge color="green" inset="top bottom">{{ $new['business_type'] }}</flux:badge>
@@ -94,25 +78,20 @@
                     @foreach ($this->vendors as $vendor)
                         @continue(in_array($vendor->id, $this->newVendorIds))
                         <flux:table.row :key="$vendor->id">
-                            <flux:table.cell variant="strong"><a wire:navigate.hover href="{{route('vendors.show', $vendor->id)}}">{{$vendor->name}}</a></flux:table.cell>
+                            <flux:table.cell variant="strong" class="min-w-0"><x-table-link :href="route('vendors.show', $vendor->id)" :label="$vendor->name" /></flux:table.cell>
                             <flux:table.cell><flux:badge color="blue" inset="top bottom">{{$vendor->business_type}}</flux:badge></flux:table.cell>
                             @can('create', App\Models\Vendor::class)
                                 <flux:table.cell>{{ money($vendor->ytd_expense_sum) }}</flux:table.cell>
                             @endcan
-                            <flux:table.cell>
+                            <flux:table.cell class="whitespace-nowrap">
                                 {{ ($this->attachedMap[$vendor->id] ?? null) ? \Carbon\Carbon::parse($this->attachedMap[$vendor->id])->diffForHumans() : '—' }}
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-
-            {{-- VENDOR FORM MODAL --}}
-            @can('create', App\Models\Vendor::class)
-                <livewire:vendors.vendor-create />
-            @endcan
-        </div>
-    </x-island-card>
+    </x-index-table>
+    @endisland
 
     <livewire:vendors.vendor-payment-email-tracking-table lazy />
 </div>

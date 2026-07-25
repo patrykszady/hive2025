@@ -1,16 +1,19 @@
 {
   "resources/css/app.css": {
-    "file": "assets/app-BI18AG3B.css",
+    "file": "assets/app-BIFGmMBD.css",
     "src": "resources/css/app.css",
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-Y3M5kOg5.js",
+    "file": "assets/app-BN7bthcl.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
     "imports": [
       "resources/js/plaid-link.js"
+    ],
+    "dynamicImports": [
+      "resources/js/sms-offline.js"
     ]
   },
   "resources/js/plaid-link.js": {
@@ -18,5 +21,11 @@
     "name": "plaid-link",
     "src": "resources/js/plaid-link.js",
     "isEntry": true
+  },
+  "resources/js/sms-offline.js": {
+    "file": "assets/sms-offline-CzfXA-Tl.js",
+    "name": "sms-offline",
+    "src": "resources/js/sms-offline.js",
+    "isDynamicEntry": true
   }
 }

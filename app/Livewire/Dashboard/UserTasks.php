@@ -149,6 +149,7 @@ class UserTasks extends Component
     public function placeholder(): \Illuminate\Contracts\View\View
     {
         return view('livewire.partials.tasks-placeholder', [
+            'showAddTask' => true,
             'showProjectInfo' => true,
         ]);
     }

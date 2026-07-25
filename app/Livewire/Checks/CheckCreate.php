@@ -90,7 +90,7 @@ class CheckCreate extends Component
     public function remove()
     {
         $this->form->delete();
-        $this->redirect(ChecksIndex::class);
+        $this->redirect(ChecksIndex::class, navigate: true);
     }
 
     public function store()

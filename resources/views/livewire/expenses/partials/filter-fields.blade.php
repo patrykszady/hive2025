@@ -40,7 +40,7 @@
         </div>
 
         <div class="flex-1 min-w-0 w-full">
-            <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
+            <flux:select variant="listbox" label="Status" multiple clearable placeholder="Choose status..." wire:model.live="expense_statuses">
                 <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
                 <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
                 <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
@@ -77,7 +77,7 @@
         <div class="flex-1 min-w-0 w-full sm:max-w-xs">
             <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
                 <x-slot name="iconTrailing">
-                    <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
+                    <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" tooltip="Scan barcode" />
                 </x-slot>
             </flux:input>
             @if($upcProductName)
@@ -130,7 +130,7 @@
             </div>
         @endif
         <div class="min-w-0 w-full">
-            <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
+            <flux:select variant="listbox" label="Status" multiple clearable placeholder="Choose status..." wire:model.live="expense_statuses">
                 <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
                 <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
                 <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
@@ -162,7 +162,7 @@
         <div class="min-w-0 w-full">
             <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
                 <x-slot name="iconTrailing">
-                    <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
+                    <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" tooltip="Scan barcode" />
                 </x-slot>
             </flux:input>
             @if($upcProductName)

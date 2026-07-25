@@ -1,17 +1,16 @@
 <div class="max-w-3xl space-y-4">
     @if($weekly_hours_to_confirm->isNotEmpty())
-    <x-island-card heading="Confirm Weekly Timesheets">
+    <x-index-table heading="Confirm Weekly Timesheets" x-data="{ hoveredWeeklyGroup: null }">
         <x-slot:actions>
             <flux:button href="{{route('hours.create')}}">Add Hours</flux:button>
         </x-slot:actions>
 
-        <div class="space-y-2" x-data="{ hoveredWeeklyGroup: null }">
-            <flux:table>
+            <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
                 <flux:table.columns>
-                    <flux:table.column>Date</flux:table.column>
-                    <flux:table.column>Name</flux:table.column>
-                    <flux:table.column>Hours</flux:table.column>
-                    <flux:table.column>Status</flux:table.column>
+                    <flux:table.column class="w-[22%]">Date</flux:table.column>
+                    <flux:table.column class="w-[22%] min-w-0">Name</flux:table.column>
+                    <flux:table.column class="w-[18%]">Hours</flux:table.column>
+                    <flux:table.column class="w-[14%]">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -34,15 +33,14 @@
                                 </flux:table.cell>
                                 <flux:table.cell>{{ $timesheet->sum_hours }}</flux:table.cell>
                                 <flux:table.cell>
-                                    <flux:badge size="sm" :color="'red'" inset="top bottom"><a href="{{route('timesheets.create', $timesheet->timesheet_id)}}">Confirm</a></flux:badge>
+                                    <flux:badge size="sm" :color="'red'" inset="top bottom"><a wire:navigate.hover href="{{route('timesheets.create', $timesheet->timesheet_id)}}">Confirm</a></flux:badge>
                                 </flux:table.cell>
                             </flux:table.row>
                         @endforeach
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-        </div>
-    </x-island-card>
+    </x-index-table>
     @endif
 
     <x-island-card heading="Confirmed Timesheets Filters" :separator="true">
@@ -63,7 +61,7 @@
             </div>
 
             <div class="flex-1 min-w-0 w-full">
-                <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="paid_statuses">
+                <flux:select variant="listbox" label="Status" multiple clearable placeholder="Choose status..." wire:model.live="paid_statuses">
                     <flux:select.option value="Confirmed"><flux:badge size="md" inset="top bottom" color="green">Paid</flux:badge></flux:select.option>
                     <flux:select.option value="Unpaid"><flux:badge size="md" inset="top bottom" color="amber">Unpaid</flux:badge></flux:select.option>
                 </flux:select>
@@ -83,23 +81,32 @@
         </div>
     </x-island-card>
 
-    <x-island-card heading="Confirmed Timesheets">
+    {{-- lazy island: the card paints from the shared skeleton first, then the
+         real table swaps in — same loading treatment as the Leads card. --}}
+    @island(name: 'timesheets-table', lazy: island_lazy(), always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Confirmed Timesheets"
+                :columns="\App\Livewire\Timesheets\TimesheetsIndex::columnDefs()"
+                :rows="\App\Livewire\Timesheets\TimesheetsIndex::placeholderRows()"
+                :compact="false"
+            />
+        @endplaceholder
+    <x-index-table heading="Confirmed Timesheets" :paginator="$this->timesheets" x-data="{ hoveredConfirmedGroup: null }">
 
-        <div class="space-y-2" x-data="{ hoveredConfirmedGroup: null }">
-
-            <flux:table :paginate="$timesheets->hasPages() ? $timesheets : null">
+            <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
                 <flux:table.columns>
-                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
-                    <flux:table.column>Name</flux:table.column>
-                    <flux:table.column>Project</flux:table.column>
-                    <flux:table.column sortable :sorted="$sortBy === 'hours'" :direction="$sortDirection" wire:click="sort('hours')">Hours</flux:table.column>
-                    <flux:table.column sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')">Amount</flux:table.column>
-                    <flux:table.column>Status</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" class="w-[13%]">Date</flux:table.column>
+                    <flux:table.column class="w-[22%] min-w-0">Name</flux:table.column>
+                    <flux:table.column class="w-[27%] min-w-0">Project</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'hours'" :direction="$sortDirection" wire:click="sort('hours')" class="w-[11%]">Hours</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')" class="w-[13%]">Amount</flux:table.column>
+                    <flux:table.column class="w-[14%]">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
                     @php
-                        $timesheetsByDate = $timesheets->getCollection()->groupBy(fn ($item) => $item->date->format('m/d/Y'));
+                        $timesheetsByDate = $this->timesheets->getCollection()->groupBy(fn ($item) => $item->date->format('m/d/Y'));
                     @endphp
 
                     @if($timesheetsByDate->isNotEmpty())
@@ -140,14 +147,15 @@
 
                                         <flux:table.cell>
                                             @if($timesheet->project)
+                                                <x-truncate-tooltip :content="$timesheet->project->project_name ?? $timesheet->project->short_address ?? ''">
                                                 <a
                                                     wire:navigate.hover
                                                     href="{{ route('projects.show', $timesheet->project->id) }}"
                                                     class="block truncate transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
-                                                    title="{{ $timesheet->project->project_name ?? $timesheet->project->short_address ?? '' }}"
                                                 >
                                                     {{ $timesheet->project->short_address ?? '—' }}
                                                 </a>
+                                                </x-truncate-tooltip>
                                             @else
                                                 <span>—</span>
                                             @endif
@@ -191,6 +199,6 @@
                     @endif
                 </flux:table.rows>
             </flux:table>
-        </div>
-    </x-island-card>
+    </x-index-table>
+    @endisland
 </div>

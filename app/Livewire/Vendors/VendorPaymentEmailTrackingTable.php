@@ -13,6 +13,41 @@ class VendorPaymentEmailTrackingTable extends Component
 {
     use WithPagination;
 
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(): int
+    {
+        return 10;
+    }
+
+    /**
+     * Column defs — the real header row and the loading skeleton render from
+     * this one array, so widths can't drift.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Event', 'width' => 'w-[20%]', 'skeleton' => 'badge'],
+            ['label' => 'Template', 'width' => 'w-[24%] min-w-0', 'skeleton' => 'badge'],
+            ['label' => 'Vendor', 'width' => 'w-[34%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ['label' => 'Date', 'width' => 'w-[22%] min-w-0', 'skeletonWidth' => 'w-16'],
+        ];
+    }
+
+    /** Shared index-table skeleton while this lazy card loads. */
+    public function placeholder(array $params = [])
+    {
+        return view('livewire.vendors.vendor-payment-email-tracking-table-placeholder', [
+            'scopedToVendor' => filled($params['vendorId'] ?? $params['vendor-id'] ?? null),
+        ]);
+    }
+
     protected string $pageName = 'vendor_payment_email_page';
 
     /**
@@ -50,6 +85,36 @@ class VendorPaymentEmailTrackingTable extends Component
 
                 return [$email => $vendor->name];
             });
+
+        // Fallback for vendors without a business email (we emailed their
+        // user directly): resolve the user's email to their vendor — but only
+        // when it maps to exactly ONE vendor. Owners with several companies
+        // on one inbox stay unresolved here; their sends are attributed via
+        // the sent metadata (thread_vendor_id) instead.
+        $unmatchedEmails = collect($allEmails)
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+            ->map(fn (string $email): string => strtolower(trim($email)))
+            ->unique()
+            ->diff($vendorsByEmail->keys())
+            ->values();
+
+        if ($unmatchedEmails->isNotEmpty()) {
+            $userVendorNames = \App\Models\User::query()
+                ->whereIn('email', $unmatchedEmails)
+                ->with('vendors:vendors.id,business_name')
+                ->get()
+                ->mapWithKeys(function ($user): array {
+                    $vendors = $user->vendors->unique('id');
+
+                    if ($vendors->count() !== 1) {
+                        return [];
+                    }
+
+                    return [strtolower(trim((string) $user->email)) => $vendors->first()->name];
+                });
+
+            $vendorsByEmail = $vendorsByEmail->union($userVendorNames);
+        }
 
         $internalDomains = collect((array) config('email_tracking.internal_domains', []))
             ->filter(fn ($d) => is_string($d) && trim($d) !== '')
@@ -170,9 +235,13 @@ class VendorPaymentEmailTrackingTable extends Component
 
                 return $event->thread_id ?: $event->message_id ?: ('email_tracking:' . $event->id);
             })
-            ->map(function ($threadEvents) use ($vendorsByEmail, $shouldIgnoreRecipient) {
+            ->map(function ($threadEvents, $threadKey) use ($vendorsByEmail, $shouldIgnoreRecipient) {
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
                 $mainEvent = $repliedEvent ?? $threadEvents->first();
+
+                // Which email this row belongs to — collapse must never merge
+                // opens from DIFFERENT payments into one row.
+                $mainEvent->thread_key = (string) $threadKey;
 
                 $sentEvent = $threadEvents->firstWhere('event_type', 'sent');
                 $sentMetadata = is_array($sentEvent?->metadata) ? $sentEvent->metadata : [];
@@ -277,7 +346,8 @@ class VendorPaymentEmailTrackingTable extends Component
 
             $canCollapse = ($current->event_type === 'opened')
                 && ($event->event_type === 'opened')
-                && ((string) $current->email_template_name === (string) $event->email_template_name);
+                && ((string) $current->email_template_name === (string) $event->email_template_name)
+                && ((string) ($current->thread_key ?? '') === (string) ($event->thread_key ?? ''));
 
             if (! $canCollapse) {
                 $collapsed->push($current);

@@ -1,113 +1,137 @@
-<div class="max-w-5xl">
+<div class="max-w-3xl space-y-2" wire:transition>
     @if($view === NULL)
-        <x-island-card heading="Lead Filters" :separator="true" class="mb-4">
-
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {{-- <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
-                <flux:input wire:model.debounce.500ms.live="check_number" label="Check Number" icon="magnifying-glass" placeholder="1234" /> --}}
-
-                {{-- 09-28-2024 NEED TYPE AND VENDOR FILTERS --}}
-                {{-- <flux:select wire:model.live="bank" label="Bank" placeholder="Select Bank..." variant="listbox" placeholder="Choose Bank...">
-                    <flux:option value="">All Banks</flux:option>
-                    @foreach ($banks->groupBy('plaid_ins_id') as $bank)
-                        <flux:option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:option>
-                    @endforeach
-                </flux:select> --}}
-            </div>
-        </x-island-card>
+        <x-filter-card heading="Lead Filters">
+            {{-- single copy: the inline layout stacks below sm on its own --}}
+            @include('livewire.leads.partials.filter-fields', ['layout' => 'inline'])
+        </x-filter-card>
     @endif
 
-    <x-island-card heading="Leads" :separator="true">
+    {{-- lazy island: the card paints from the shared skeleton first, then the
+         real table swaps in — same loading treatment as the Projects card. --}}
+    @island(name: 'leads-table', lazy: island_lazy(), always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Leads"
+                :columns="\App\Livewire\Leads\LeadsIndex::columnDefs()"
+                :rows="\App\Livewire\Leads\LeadsIndex::placeholderRows()"
+            >
+                <x-slot:actions>
+                    @include('livewire.leads.partials.index-actions')
+                </x-slot:actions>
+            </x-index-table.placeholder>
+        @endplaceholder
+    <x-index-table heading="Leads" :paginator="$this->leads" x-data="{
+        bulkMode: false,
+        exitBulkMode() {
+            this.bulkMode = false;
+            $wire.clearSelection();
+        }
+    }">
+        <x-slot:badge>
+            <flux:badge as="button" size="sm" color="zinc" icon="cursor-arrow-rays" x-show="!bulkMode" x-on:click="bulkMode = true">Select Items</flux:badge>
+            <div class="flex items-center gap-2" x-show="bulkMode" x-cloak>
+                <flux:badge color="indigo" size="sm">
+                    <span x-text="$wire.selected.length"></span>&nbsp;Selected
+                </flux:badge>
+                <flux:button size="xs" variant="ghost" x-on:click="exitBulkMode()">Clear</flux:button>
+                <flux:dropdown align="end">
+                    <flux:button size="xs" icon-trailing="chevron-down">Bulk actions</flux:button>
+                    <flux:menu>
+                        <flux:menu.submenu heading="Change status">
+                            @foreach(\App\Models\Lead::selectableStatuses() as $status)
+                                <flux:menu.item
+                                    wire:click="bulkSetStatus('{{ $status['code'] }}')"
+                                    x-bind:disabled="$wire.selected.length === 0"
+                                >
+                                    <flux:badge size="sm" inset="top bottom" :color="$status['color']">{{ $status['label'] }}</flux:badge>
+                                </flux:menu.item>
+                            @endforeach
+                        </flux:menu.submenu>
+                    </flux:menu>
+                </flux:dropdown>
+            </div>
+        </x-slot:badge>
         <x-slot:actions>
-            @can('create', App\Models\Project::class)
-                <flux:button wire:click="$dispatchTo('leads.lead-create', 'addLead')">Add Lead</flux:button>
-            @endcan
+            @include('livewire.leads.partials.index-actions')
         </x-slot:actions>
 
-        <div class="space-y-2">
-            @island(name: 'leads-table', always: true)
-            <flux:table :paginate="$this->leads->hasPages() ? $this->leads : null">
+            <flux:table
+                wire:loading.class.delay.shortest="opacity-50 pointer-events-none"
+                wire:target="bulkSetStatus"
+                class="transition-opacity duration-150 index-table compact-table [:where(&)]:p-0 [:where(&)]:space-y-0"
+            >
                 <flux:table.columns>
-                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
-                    <flux:table.column>Client</flux:table.column>
-                    <flux:table.column>Status</flux:table.column>
-                    <flux:table.column>Last Contact</flux:table.column>
-                    <flux:table.column>Origin</flux:table.column>
-                    <flux:table.column>Address</flux:table.column>
-                    {{--
-                    @if($view === NULL)
-                        <flux:column>Payee</flux:column>
-                    @endif
-                    --}}
+                    <flux:table.column class="w-10 !px-3" x-show="bulkMode" x-cloak>
+                        <span class="sr-only">Select</span>
+                    </flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" class="w-[14%]">Date</flux:table.column>
+                    <flux:table.column class="w-[17%] min-w-0">Client</flux:table.column>
+                    <flux:table.column class="w-[20%]">Status</flux:table.column>
+                    <flux:table.column class="w-[14%]">Last</flux:table.column>
+                    <flux:table.column class="w-[12%] min-w-0">Origin</flux:table.column>
+                    <flux:table.column class="w-[23%] min-w-0">Address</flux:table.column>
                 </flux:table.columns>
                 <flux:table.rows>
                     @foreach ($this->leads as $lead)
                         <flux:table.row :key="$lead->id">
-                            {{-- <flux:cell
-                                variant="strong"
-                                class="cursor-pointer"
-                                >
-                                <a wire:navigate.hover href="{{route('checks.show', $check->id)}}">
-                                    {{ money($check->amount) }}
-                                </a>
-                            </flux:cell> --}}
+                            <flux:table.cell class="w-10 !px-3" x-show="bulkMode" x-cloak>
+                                <flux:checkbox size="sm" wire:model="selected" value="{{ $lead->id }}" />
+                            </flux:table.cell>
                             <flux:table.cell
                                 wire:click="$dispatchTo('leads.lead-create', 'editLead', { lead: {{$lead->id}}})"
                                 variant="strong"
-                                class="cursor-pointer"
+                                class="cursor-pointer w-[14%] whitespace-nowrap hover:text-indigo-600 dark:hover:text-indigo-400"
                                 >
-                                {{ $lead->date->format('m/d/Y') }}
+                                {{ $lead->date->format('m/d/y') }}
                             </flux:table.cell>
 
-                            <flux:table.cell>
-                                @if ($leadClient = $this->clientForLead($lead))
-                                    <a href="{{ route('clients.show', $leadClient) }}" wire:navigate class="text-zinc-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 hover:font-bold no-underline">
-                                        {{ $lead->lead_data['name'] }}
-                                    </a>
-                                @else
-                                    {{ $lead->lead_data['name'] }}
+                            <flux:table.cell class="w-[17%] min-w-0">
+                                <x-table-link
+                                    :href="($leadClient = $this->clientForLead($lead)) ? route('clients.show', $leadClient) : null"
+                                    :label="$lead->lead_data['name'] ?? ''"
+                                />
+                            </flux:table.cell>
+
+                            <flux:table.cell class="w-[20%]">
+                                <x-status-select
+                                    :value="$lead->last_status?->title ?? ''"
+                                    :options="\App\Models\Lead::selectableStatuses()"
+                                    method="updateLeadStatus"
+                                    :model-id="$lead->id"
+                                />
+                            </flux:table.cell>
+
+                            <flux:table.cell class="w-[14%] whitespace-nowrap">
+                                @if($lead->last_status && !in_array($lead->last_status->title, ['New', 'Won', 'Lost', 'Not a Fit']))
+                                    {{ $lead->last_status->created_at->format('m/d/y') }}
                                 @endif
                             </flux:table.cell>
 
-                            <flux:table.cell>
-                                @if($lead->last_status)
-                                    @php
-                                        $color = $lead->last_status->title === 'New' ? 'yellow' : ($lead->last_status->title === 'Won' ? 'green' : (in_array($lead->last_status->title, ['Lost', "Not a Fit"]) ? 'red' : 'red'));
-                                    @endphp
-                                    <flux:badge color="{{$color}}">{{ $lead->last_status->title }}</flux:badge>
-                                @endif
+                            <flux:table.cell class="w-[12%] min-w-0">
+                                <x-truncate-tooltip :content="$lead->origin">
+                                    <div class="truncate">{{ $lead->origin }}</div>
+                                </x-truncate-tooltip>
                             </flux:table.cell>
 
-                            <flux:table.cell>
-                                @if($lead->last_status)
-                                    @if(!in_array($lead->last_status->title, ['New', 'Won', 'Lost', 'Not a Fit']))
-                                        {{ $lead->last_status->created_at->diffForHumans() }}
-                                    @endif
-                                @endif
+                            <flux:table.cell class="w-[23%] min-w-0">
+                                @php($addressParts = $lead->shortAddressParts())
+                                <x-truncate-tooltip :content="trim($addressParts['city'].' | '.$addressParts['street'], ' |')">
+                                    <div class="truncate">
+                                        @if($addressParts['city'] !== '')
+                                            <span class="font-semibold">{{ $addressParts['city'] }}</span>
+                                            @if($addressParts['street'] !== '')
+                                                <span class="text-zinc-400 dark:text-zinc-500">|</span>
+                                            @endif
+                                        @endif
+                                        {{ $addressParts['street'] }}
+                                    </div>
+                                </x-truncate-tooltip>
                             </flux:table.cell>
-
-                            <flux:table.cell>
-                                {{ $lead->origin }}
-                            </flux:table.cell>
-
-                            <flux:table.cell>
-                                {{ $lead->lead_data['address'] }}
-                            </flux:table.cell>
-
-                            {{-- <flux:cell>{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:cell>
-
-                            @if($view === NULL)
-                                <flux:cell>{{$check->owner}}</flux:cell>
-                            @endif
-                            <flux:cell>
-                                <flux:badge size="sm" :color="$check->status == 'Complete' ? 'green' : ($check->status == 'Missing Transactions' ? 'yellow' : 'red')" inset="top bottom">{{ $check->status }}</flux:badge>
-                            </flux:cell> --}}
                         </flux:table.row>
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-            @endisland
-        </div>
-    </x-island-card>
+    </x-index-table>
+    @endisland
     <livewire:leads.lead-create />
 </div>

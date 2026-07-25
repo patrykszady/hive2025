@@ -20,7 +20,7 @@
 
         <div class="space-y-2">
             @foreach($vendor_users as $user)
-                <a href="{{route('timesheets.payment', $user->id)}}" class="block">
+                <a wire:navigate.hover href="{{route('timesheets.payment', $user->id)}}" class="block">
                     <flux:card class="hover:bg-indigo-100 hover:border-indigo-300">
                         <div class="flex justify-between">
                             <flux:heading>Pay {{$user->first_name}}</flux:heading>

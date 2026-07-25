@@ -28,6 +28,55 @@ class ProjectsTable extends Component
 
     public array $statusChangedProjectIds = [];
 
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(): int
+    {
+        return 20;
+    }
+
+    /**
+     * Column defs for the projects table — the loading skeleton renders from the
+     * same array the real header row mirrors, so widths can never drift apart.
+     * Columns vary by view and by client-portal browsing, so callers pass the
+     * same $view the table renders with.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(?string $view = null, ?bool $browsingAsClient = null): array
+    {
+        $browsingAsClient ??= (bool) (auth()->user()?->is_browsing_as_client);
+
+        if ($view === 'clients.index') {
+            $columns = [
+                ['label' => 'Name', 'width' => 'w-[30%] min-w-0', 'skeletonWidth' => 'w-28'],
+                ['label' => 'Address', 'width' => 'w-[30%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ];
+        } else {
+            $columns = [
+                ['label' => 'Address', 'width' => 'w-[30%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ];
+
+            if (! $browsingAsClient) {
+                $columns[] = ['label' => 'Client', 'width' => 'w-[25%] min-w-0', 'skeletonWidth' => 'w-24'];
+            }
+
+            $columns[] = ['label' => 'Name', 'width' => 'w-[25%] min-w-0', 'skeletonWidth' => 'w-28'];
+        }
+
+        if ($browsingAsClient) {
+            $columns[] = ['label' => 'Contractor', 'width' => 'w-[25%] min-w-0', 'skeletonWidth' => 'w-24'];
+        }
+
+        $columns[] = ['label' => 'Status', 'width' => 'w-[30%] min-w-[5rem] shrink-0', 'skeleton' => 'badge'];
+
+        return $columns;
+    }
+
     public function updating($field): void
     {
         $this->resetPage();
@@ -178,8 +227,23 @@ class ProjectsTable extends Component
         return view('livewire.projects.projects-table');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
-        return view('livewire.projects.projects-table-placeholder');
+        // When the card is scoped to one client we can cheaply COUNT its
+        // projects (far cheaper than the paginated+search query the skeleton
+        // stands in for) and skeleton the real number of rows — a client with
+        // no projects gets the card chrome alone instead of 5 fake rows that
+        // vanish a moment later.
+        $clientId = $params['clientId'] ?? $params['client-id'] ?? null;
+        $rows = 5;
+
+        if (filled($clientId)) {
+            $rows = min(Project::where('client_id', (int) $clientId)->count(), 5);
+        }
+
+        return view('livewire.projects.projects-table-placeholder', [
+            'tableView' => $params['view'] ?? null,
+            'placeholderRows' => $rows,
+        ]);
     }
 }

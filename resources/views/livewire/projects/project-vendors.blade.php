@@ -20,7 +20,7 @@
                 @endphp
                 <div wire:key="project-vendor-{{ $vendor->id }}" class="flex items-center gap-3 py-2 sm:py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20">
                     <flux:subheading class="flex-1 min-w-0 truncate">
-                        <flux:link href="{{ route('vendors.show', $vendor) }}" variant="ghost" :accent="false" class="font-normal no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400" wire:navigate>
+                        <flux:link href="{{ route('vendors.show', $vendor) }}" variant="ghost" :accent="false" class="font-normal no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400" wire:navigate.hover>
                             {{ $vendor->short_name ?? $vendor->name }}
                         </flux:link>
                     </flux:subheading>

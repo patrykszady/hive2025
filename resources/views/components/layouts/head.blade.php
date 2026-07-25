@@ -69,6 +69,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    @auth
+        {{-- Who owns locally cached SMS data (sms-offline.js wipes its caches
+             on mismatch, e.g. after switching accounts). c/v = client/vendor mode. --}}
+        <meta name="hive-user-key" content="{{ auth()->id() }}:{{ auth()->user()?->is_browsing_as_client ? 'c' : 'v' }}">
+    @endauth
     <meta name="theme-color" content="#ffffff">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="{{ config('app.name') }}">

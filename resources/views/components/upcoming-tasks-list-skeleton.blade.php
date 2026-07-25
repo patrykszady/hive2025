@@ -1,21 +1,34 @@
 @props([
     'title' => 'Tasks',
     'showProjectInfo' => false,
-    'actionsWidth' => 'w-32',
+    'actionsWidth' => 'w-32', {{-- kept for BC; no longer renders anything --}}
     'count' => null,
-    'showHeaderSkeleton' => true,
+    'showHeaderSkeleton' => true, {{-- kept for BC; header is always real now --}}
+    {{-- Real header buttons (same partial as the loaded card). Header content
+         is NEVER skeletonized: buttons don't depend on the rows, so they render
+         usable from the first paint. The count badge IS row-derived, so the
+         skeleton simply omits it rather than faking a pill. --}}
+    'projectId' => null,
+    'clientId' => null,
+    'showAddTask' => false,
+    'clickable' => true,
+    'showNotifications' => true,
 ])
 
 <x-island-card :heading="$title" {{ $attributes }}>
-    @if($showHeaderSkeleton)
-        <x-slot:badge>
-            <flux:skeleton class="h-5 w-6 rounded-full" animate="shimmer" />
-        </x-slot:badge>
-        <x-slot:actions>
-            <flux:skeleton class="h-8 {{ $actionsWidth }} rounded-md" animate="shimmer" />
-        </x-slot:actions>
-    @endif
+    <x-slot:actions>
+        <x-upcoming-tasks-actions
+            :project-id="$projectId"
+            :client-id="$clientId"
+            :show-add-task="$showAddTask"
+            :clickable="$clickable"
+            :show-notifications="$showNotifications"
+        />
+    </x-slot:actions>
 
+    {{-- count=0 means the caller already knows there is nothing to load: render
+         the card chrome alone instead of rows that shimmer and then vanish. --}}
+    @if(($count ?? 3) > 0)
     <flux:skeleton.group animate="shimmer" class="space-y-4">
         @for ($i = 0; $i < ($count ?? 3); $i++)
             <div class="space-y-2">
@@ -64,4 +77,5 @@
             </div>
         @endfor
     </flux:skeleton.group>
+    @endif
 </x-island-card>

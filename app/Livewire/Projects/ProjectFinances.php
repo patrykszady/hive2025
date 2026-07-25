@@ -48,8 +48,10 @@ class ProjectFinances extends Component
         return view('livewire.projects.project-finances');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
-        return view('livewire.projects.project-finances-placeholder');
+        return view('livewire.projects.project-finances-placeholder', [
+            'project' => $params['project'] ?? null,
+        ]);
     }
 }

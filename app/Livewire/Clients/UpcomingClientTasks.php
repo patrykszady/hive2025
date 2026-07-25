@@ -241,11 +241,24 @@ class UpcomingClientTasks extends Component
             ->count();
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
+        // A client with no projects can't have tasks — skip the skeleton
+        // entirely rather than shimmering rows that resolve to an empty card.
+        $client = $params['client'] ?? null;
+        $hasProjects = $client instanceof Client
+            ? $client->projects()->exists()
+            : true;
+
+        $isClientUser = (bool) auth()->user()?->is_browsing_as_client;
+
         return view('livewire.partials.tasks-placeholder', [
             'showProjectInfo' => true,
-            'actionsWidth' => 'w-44',
+            'count' => $hasProjects ? null : 0,
+            // Mirror the real card's header exactly (see the blade).
+            'clientId' => $client instanceof Client ? $client->id : null,
+            'showAddTask' => ! $isClientUser,
+            'clickable' => ! $isClientUser,
         ]);
     }
 }

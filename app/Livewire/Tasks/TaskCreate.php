@@ -46,6 +46,13 @@ class TaskCreate extends Component
         'form_submit' => 'save',
     ];
 
+    /**
+     * The form body (project/vendor/user selects — ~1.5MB rendered) only
+     * renders once one of the open events fires; pages that merely HOST this
+     * modal don't pay for it. The open event's round trip brings the form.
+     */
+    public bool $hydrated = false;
+
     protected $listeners = ['editTask', 'addTask', 'prefillTaskFromSms'];
 
     /**
@@ -1211,6 +1218,7 @@ class TaskCreate extends Component
 
     public function addTask($project_id = null, $date = null, $vendor_id = null, $user_ids = [], $client_id = null)
     {
+        $this->hydrated = true;
         $this->resetFormFields();
         $this->setupViewText('create');
         
@@ -1269,6 +1277,7 @@ class TaskCreate extends Component
      */
     public function prefillTaskFromSms(array $payload): void
     {
+        $this->hydrated = true;
         $this->resetFormFields();
 
         $clientId = isset($payload['client_id']) ? (int) $payload['client_id'] : null;
@@ -1533,6 +1542,7 @@ class TaskCreate extends Component
 
     public function editTask(int $task)
     {
+        $this->hydrated = true;
         $task = Task::withTrashed()->findOrFail($task);
 
         $this->handleTaskOperation('start', $task);

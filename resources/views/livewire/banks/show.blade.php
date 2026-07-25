@@ -45,11 +45,11 @@
                         @foreach($bank_account_data['checks'] as $check)
                             <flux:card class="p-2!">
                                 <div class="flex justify-between">
-                                    <a href="{{route('checks.show', $check->id)}}">
+                                    <a wire:navigate.hover href="{{route('checks.show', $check->id)}}">
                                         <flux:heading>{{$check->owner}}</flux:heading>
                                         <flux:subheading>{{$check->check_type . ' ' . $check->check_number . ' ' . $check->date->format('m/d/Y')}}</flux:subheading>
                                     </a>
-                                    <a href="{{route('checks.show', $check->id)}}" class="text-red-800"><b>{{money($check->amount)}}</b></a>
+                                    <a wire:navigate.hover href="{{route('checks.show', $check->id)}}" class="text-red-800"><b>{{money($check->amount)}}</b></a>
                                 </div>
                             </flux:card>
                         @endforeach

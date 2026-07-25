@@ -72,7 +72,7 @@
 
 @if(($showProjectInfo ?? false) && $task->project)
     <div class="mt-1 space-y-0.5">
-        <a 
+        <a wire:navigate.hover 
             href="{{ route('projects.show', $task->project) }}"
             wire:click.stop
             class="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:underline truncate"
@@ -92,14 +92,15 @@
         @if($taskUsers->count() > 0)
             <flux:avatar.group>
                 @foreach($taskUsers->take(3) as $user)
-                    <flux:avatar
-                        circle
-                        size="xs"
-                        name="{{ $user->full_name }}"
-                        color="auto"
-                        color:seed="{{ $user->id }}"
-                        title="{{ $user->full_name }}"
-                    />
+                    <flux:tooltip :content="$user->full_name" position="top">
+                        <flux:avatar
+                            circle
+                            size="xs"
+                            name="{{ $user->full_name }}"
+                            color="auto"
+                            color:seed="{{ $user->id }}"
+                        />
+                    </flux:tooltip>
                 @endforeach
                 @if($taskUsers->count() > 3)
                     <flux:avatar circle size="xs">{{ $taskUsers->count() - 3 }}+</flux:avatar>

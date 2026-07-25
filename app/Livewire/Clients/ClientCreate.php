@@ -93,8 +93,29 @@ class ClientCreate extends Component
         $this->modal('client_form_modal')->show();
     }
 
+    /** Drives the Flux delete-confirmation modal. */
+    public bool $showClientDelete = false;
+
+    public function confirmDeleteClient(): void
+    {
+        $this->authorize('delete', $this->client);
+
+        // Undeletable clients never reach the confirmation dialog.
+        if ($this->client->projects()->exists()) {
+            Flux::toast(
+                text: 'This client has projects and cannot be deleted.',
+                variant: 'danger',
+            );
+
+            return;
+        }
+
+        $this->showClientDelete = true;
+    }
+
     public function deleteClient(): void
     {
+        $this->showClientDelete = false;
         $this->authorize('delete', $this->client);
 
         // Double-check the client has no associated data
@@ -106,8 +127,19 @@ class ClientCreate extends Component
             return;
         }
 
+        // Contact people keep their account when they're connected to anything
+        // else (another client or a vendor); only fully orphaned users go.
+        $users = $this->client->users()->get();
+
         $this->client->users()->detach();
         $this->client->vendors()->detach();
+
+        foreach ($users as $user) {
+            if (! $user->clients()->exists() && ! $user->vendors()->exists()) {
+                $user->delete();
+            }
+        }
+
         $this->client->unsearchable();
         $this->client->delete();
 

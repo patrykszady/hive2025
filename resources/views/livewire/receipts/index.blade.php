@@ -1,21 +1,39 @@
 <div class="w-full px-4 sm:px-6 lg:max-w-4xl lg:px-8 pb-5 mb-1 space-y-6">
 
-    <x-island-card heading="Email Receipts" subheading="Manage email receipt patterns for automatic expense creation from forwarded emails." :separator="true">
+    {{-- lazy island: the card paints from the shared skeleton first, then the
+         real table swaps in — same loading treatment as the Leads card. --}}
+    @island(name: 'receipts-table', lazy: island_lazy(), always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Email Receipts"
+                subheading="Manage email receipt patterns for automatic expense creation from forwarded emails."
+                :columns="\App\Livewire\Receipts\ReceiptsIndex::columnDefs()"
+                :compact="false"
+            >
+                <x-slot:actions>
+                    @include('livewire.receipts.partials.index-actions')
+                </x-slot:actions>
+                <x-slot:toolbar>
+                    @include('livewire.receipts.partials.search')
+                </x-slot:toolbar>
+            </x-index-table.placeholder>
+        @endplaceholder
+    <x-index-table heading="Email Receipts" subheading="Manage email receipt patterns for automatic expense creation from forwarded emails.">
         <x-slot:actions>
-            <flux:button wire:click="create" size="sm" icon="plus">Add Receipt</flux:button>
+            @include('livewire.receipts.partials.index-actions')
         </x-slot:actions>
 
-        <div class="mb-4">
-            <flux:input wire:model.live.debounce.300ms="search" placeholder="Search vendor, email, or subject..." icon="magnifying-glass" clearable />
-        </div>
+        <x-slot:toolbar>
+            @include('livewire.receipts.partials.search')
+        </x-slot:toolbar>
 
-        <flux:table>
+        <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
             <flux:table.columns>
-                <flux:table.column>Vendor</flux:table.column>
-                <flux:table.column>From Address</flux:table.column>
-                <flux:table.column>Subject Match</flux:table.column>
-                <flux:table.column>Type</flux:table.column>
-                <flux:table.column></flux:table.column>
+                <flux:table.column class="w-[24%] min-w-0">Vendor</flux:table.column>
+                <flux:table.column class="w-[30%] min-w-0">From Address</flux:table.column>
+                <flux:table.column class="w-[24%] min-w-0">Subject Match</flux:table.column>
+                <flux:table.column class="w-[14%]">Type</flux:table.column>
+                <flux:table.column class="w-[8%]"></flux:table.column>
             </flux:table.columns>
             <flux:table.rows>
                 @foreach ($this->receipts as $receipt)
@@ -49,7 +67,9 @@
                             @endif
                         </flux:table.cell>
                         <flux:table.cell>
-                            <flux:button wire:click="delete({{ $receipt->id }})" wire:confirm="Delete this receipt pattern?" size="xs" variant="ghost" icon="trash" />
+                            {{-- inset: the xs button is 24px, which would push these rows to
+                                 49px — 4px taller than every other index table's rows. --}}
+                            <flux:button wire:click="delete({{ $receipt->id }})" wire:confirm="Delete this receipt pattern?" size="xs" variant="ghost" icon="trash" inset="top bottom" class="align-middle" />
                         </flux:table.cell>
                     </flux:table.row>
                 @endforeach
@@ -59,9 +79,12 @@
         @if($this->receipts->isEmpty())
             <div class="py-8 text-center text-sm text-zinc-500">No receipt patterns found.</div>
         @endif
-    </x-island-card>
+    </x-index-table>
+    @endisland
 
-    {{-- CREATE / EDIT MODAL --}}
+    {{-- CREATE / EDIT MODAL — same island name as the table so row/Add clicks
+         (which are island-scoped) still re-render the modal. --}}
+    @island(name: 'receipts-table')
     <x-form-modal name="receipt_form_modal">
         <x-slot:header>
             <flux:heading size="lg">{{ $editing_id ? 'Edit Receipt' : 'New Receipt' }}</flux:heading>
@@ -142,4 +165,5 @@
             </flux:button>
         </x-slot:footer>
     </x-form-modal>
+    @endisland
 </div>

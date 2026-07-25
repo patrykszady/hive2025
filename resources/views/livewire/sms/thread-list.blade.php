@@ -114,7 +114,18 @@
         @endphp
         <button
             wire:key="thread-{{ $thread->id }}"
+            {{-- NOTE: this handler must START with the `if` statement — Alpine
+                 only wraps expressions beginning with `if` as statement blocks
+                 (a leading comment would make it an rvalue → syntax error). --}}
             x-on:click="
+                if ($store.sms.offline) {
+                    /* Offline gate: both Livewire dispatches below are POSTs that
+                       are doomed without a network (stuck skeleton). Paint the
+                       cached copy from sms-offline.js and skip the server. */
+                    $store.sms.threadId = {{ $thread->id }};
+                    if (window.HiveSmsOffline) window.HiveSmsOffline.openThread({{ $thread->id }});
+                    return;
+                }
                 /* Optimistic UI: flip the mobile panels immediately so the conversation
                    becomes visible with a skeleton while the server processes selectThread. */
                 $store.sms.threadId = {{ $thread->id }};

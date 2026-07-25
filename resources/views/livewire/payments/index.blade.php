@@ -1,28 +1,24 @@
 <div class="max-w-3xl space-y-2" wire:transition>
     @if($view === null)
-        <flux:card class="!px-5 !py-2 sm:hidden">
-            <flux:accordion transition>
-                <flux:accordion.item>
-                    <div class="flex items-center">
-                        <div class="flex-1 min-w-0">
-                            <flux:accordion.heading>
-                                <flux:heading size="lg">Filters</flux:heading>
-                            </flux:accordion.heading>
-                        </div>
-                    </div>
-                    <flux:accordion.content>
-                        @include('livewire.payments.partials.filter-fields', ['layout' => 'stacked'])
-                    </flux:accordion.content>
-                </flux:accordion.item>
-            </flux:accordion>
-        </flux:card>
-
-        <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
+        <x-filter-card>
+            {{-- single copy: the inline layout stacks below sm on its own --}}
             @include('livewire.payments.partials.filter-fields', ['layout' => 'inline'])
-        </x-island-card>
+        </x-filter-card>
     @endif
 
-    <x-island-card heading="Payments">
+    {{-- Standalone page: lazy island paints the shared skeleton first, like
+         every other index card. Embedded variants render immediately (they are
+         already lazy-mounted and use placeholder() instead). --}}
+    @island(name: 'payments-table', lazy: island_lazy($view === null), always: true)
+        @placeholder
+            <x-index-table.placeholder
+                heading="Payments"
+                :columns="\App\Livewire\Payments\PaymentsIndex::columnDefs($view)"
+                :rows="\App\Livewire\Payments\PaymentsIndex::placeholderRows($view)"
+                :compact="false"
+            />
+        @endplaceholder
+    <x-index-table heading="Payments" :paginator="$view !== 'estimate.pdf' ? $this->payments : null">
         <x-slot:actions>
         @if($view !== 'estimate.pdf')
             @can('create', App\Models\Payment::class)
@@ -37,10 +33,9 @@
         </x-slot:actions>
 
         @if($this->payments->isNotEmpty())
-        <div class="space-y-2">
-            <flux:table :paginate="$view !== 'estimate.pdf' && $this->payments->hasPages() ? $this->payments : null">
+            <flux:table class="{{ in_array($view, ['projects.show', 'estimate.pdf']) ? 'table-fixed min-w-0 w-full' : 'index-table' }} [:where(&)]:p-0 [:where(&)]:space-y-0">
                 <flux:table.columns>
-                    <flux:table.column>Amount</flux:table.column>
+                    <flux:table.column class="{{ !in_array($view, ['projects.show', 'estimate.pdf']) ? 'w-[13%]' : '' }}">Amount</flux:table.column>
                     @if($view !== 'estimate.pdf')
                         <flux:table.column 
                             sortable 
@@ -49,20 +44,21 @@
                             wire:click="sort('date')"
                             wire:loading.class="opacity-50"
                             wire:loading.attr="disabled"
+                            class="{{ !in_array($view, ['projects.show', 'estimate.pdf']) ? 'w-[12%]' : '' }}"
                             >
                             Date
                         </flux:table.column>
                     @else
-                        <flux:table.column>Date</flux:table.column>
+                        <flux:table.column class="{{ !in_array($view, ['projects.show', 'estimate.pdf']) ? 'w-[12%]' : '' }}">Date</flux:table.column>
                     @endif
 
                     @if(!in_array($view, ['projects.show', 'estimate.pdf']))
-                        <flux:table.column>Project</flux:table.column>
-                        <flux:table.column>Client</flux:table.column>
+                        <flux:table.column class="w-[25%] min-w-0">Project</flux:table.column>
+                        <flux:table.column class="w-[16%] min-w-0">Client</flux:table.column>
                     @endif
 
-                    <flux:table.column>Reference</flux:table.column>
-                    <flux:table.column>Status</flux:table.column>
+                    <flux:table.column class="{{ !in_array($view, ['projects.show', 'estimate.pdf']) ? 'w-[18%] min-w-0' : '' }}">Reference</flux:table.column>
+                    <flux:table.column class="{{ !in_array($view, ['projects.show', 'estimate.pdf']) ? 'w-[16%]' : '' }}">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -86,15 +82,17 @@
                                     {{ money($payment->amount) }}
                                 </flux:table.cell>
                             @endif
-                            <flux:table.cell>{{ $payment->date->format('m/d/Y') }}</flux:table.cell>
+                            <flux:table.cell class="whitespace-nowrap">{{ $payment->date->format('m/d/Y') }}</flux:table.cell>
                             @if(!in_array($view, ['projects.show', 'estimate.pdf']))
                                 @if($payment->project)
                                     <flux:table.cell
                                         wire:navigate.hover
                                         href="{{route('projects.show', $payment->project->id)}}"
-                                        class="cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
+                                        class="cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400 min-w-0"
                                         >
-                                        {{ $payment->project->name }}
+                                        <x-truncate-tooltip :content="$payment->project->name">
+                                            <div class="truncate">{{ $payment->project->name }}</div>
+                                        </x-truncate-tooltip>
                                     </flux:table.cell>
                                 @else
                                     <flux:table.cell>—</flux:table.cell>
@@ -104,15 +102,21 @@
                                     <flux:table.cell
                                         wire:navigate.hover
                                         href="{{route('clients.show', $payment->project->client->id)}}"
-                                        class="cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
+                                        class="cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400 min-w-0"
                                         >
-                                        {{ $payment->project->client->last_names }}
+                                        <x-truncate-tooltip :content="$payment->project->client->last_names">
+                                            <div class="truncate">{{ $payment->project->client->last_names }}</div>
+                                        </x-truncate-tooltip>
                                     </flux:table.cell>
                                 @else
                                     <flux:table.cell>—</flux:table.cell>
                                 @endif
                             @endif
-                            <flux:table.cell>{{ $payment->reference }}</flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                <x-truncate-tooltip :content="(string) $payment->reference">
+                                    <div class="truncate">{{ $payment->reference }}</div>
+                                </x-truncate-tooltip>
+                            </flux:table.cell>
                             <flux:table.cell>
                                 <flux:badge size="sm" :color="$payment->transaction_id != NULL ? 'green' : 'red'" inset="top bottom">{{ $payment->transaction_id != NULL ? 'Complete' : 'Missing' }}</flux:badge>
                             </flux:table.cell>
@@ -120,7 +124,7 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-        </div>
         @endif
-    </x-island-card>
+    </x-index-table>
+    @endisland
 </div>

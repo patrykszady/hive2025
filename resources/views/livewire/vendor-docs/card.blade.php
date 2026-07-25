@@ -54,14 +54,15 @@
                         @foreach($vendor_docs as $doc)
                             <flux:table.row :key="$doc->id">
                                 <flux:table.cell variant="strong" class="w-[38%]">
+                                    <x-truncate-tooltip :content="$doc->type_label">
                                     <a
                                         href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->doc_filename]) }}"
                                         target="_blank"
                                         class="block truncate"
-                                        title="{{ $doc->type_label }}"
                                     >
                                         {{$doc->type_label}}
                                     </a>
+                                    </x-truncate-tooltip>
                                 </flux:table.cell>
                                 <flux:table.cell class="w-[30%]">
                                     <flux:badge size="sm" :color="$doc->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
@@ -69,7 +70,7 @@
                                     </flux:badge>
                                 </flux:table.cell>
                                 <flux:table.cell class="w-[32%]">
-                                    <div class="truncate" title="{{ $doc->number }}">{{ $doc->number }}</div>
+                                    <x-truncate-tooltip :content="(string) $doc->number"><div class="truncate">{{ $doc->number }}</div></x-truncate-tooltip>
                                 </flux:table.cell>
                             </flux:table.row>
                         @endforeach

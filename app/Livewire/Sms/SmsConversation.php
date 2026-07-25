@@ -19,6 +19,7 @@ use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use App\Services\SmsTranslationService;
 use App\Services\SmsTaskExtractionService;
+use App\Support\Sms\ConversationPresenter;
 use Carbon\Carbon;
 use Flux;
 use Illuminate\Support\Facades\Http;
@@ -111,7 +112,7 @@ class SmsConversation extends Component
     {
         if ($threadId === $this->threadId) {
             // Same thread — refresh messages (e.g., after notification click)
-            unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+            unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap);
             $this->dispatch('thread-ready');
             return;
         }
@@ -121,6 +122,8 @@ class SmsConversation extends Component
 
         $this->threadId = $threadId;
         $this->authorizeThread();
+        // Drop any computed state captured for the previous thread.
+        unset($this->thread, $this->presenter);
         $this->messageLimit = self::INITIAL_MESSAGE_LIMIT;
         $this->newMessage = '';
         $this->attachment = null;
@@ -144,6 +147,7 @@ class SmsConversation extends Component
     {
         return [
             'echo-private:sms.notifications,SmsMessageReceived' => 'handleIncomingMessage',
+            'echo-private:sms.notifications,SmsMessageStatusUpdated' => 'handleMessageStatusUpdated',
         ];
     }
 
@@ -158,54 +162,14 @@ class SmsConversation extends Component
             return;
         }
 
-        $user = auth()->user();
-
-        if ($this->isClientUser) {
-            $clientIds = $user->clients()->pluck('clients.id');
-            $participantPhones = $this->clientUserParticipantPhones($user);
-            $allowed = SmsGroupThread::where('id', $this->threadId)
-                ->whereIn('client_id', $clientIds)
-                ->whereHas('threadParticipants', fn ($participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones))
-                ->exists();
-        } else {
-            $vendorId = $user->vendor?->id;
-            $allowed = $vendorId && SmsGroupThread::where('id', $this->threadId)
-                ->visibleToVendor($vendorId)
-                ->exists();
-        }
+        $allowed = SmsGroupThread::query()
+            ->accessibleTo(auth()->user())
+            ->whereKey($this->threadId)
+            ->exists();
 
         if (! $allowed) {
             $this->threadId = null;
         }
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    protected function clientUserParticipantPhones(User $user): array
-    {
-        $rawPhone = $user->routeNotificationForTelnyx();
-
-        if (! is_string($rawPhone) || $rawPhone === '') {
-            return [];
-        }
-
-        $digits = preg_replace('/\D/', '', $rawPhone);
-        if (! is_string($digits) || $digits === '') {
-            return [];
-        }
-
-        if (strlen($digits) === 10) {
-            return array_values(array_unique([$rawPhone, '+1' . $digits, '1' . $digits, $digits]));
-        }
-
-        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            $tenDigit = substr($digits, 1);
-
-            return array_values(array_unique([$rawPhone, '+' . $digits, $digits, '+1' . $tenDigit, $tenDigit]));
-        }
-
-        return array_values(array_unique([$rawPhone, '+' . $digits, $digits]));
     }
 
     public function handleIncomingMessage($payload = null): void
@@ -221,15 +185,74 @@ class SmsConversation extends Component
             return;
         }
 
-        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages);
+        unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages);
+        $this->repaintBubbles();
         $this->dispatch('sms-new-message-received');
+    }
+
+    /**
+     * Carrier delivery status changed for an outbound message — repaint just
+     * the bubble list so the status badge updates live.
+     */
+    public function handleMessageStatusUpdated($payload = null): void
+    {
+        $threadId = is_array($payload) ? ($payload['threadId'] ?? null) : null;
+
+        if ($threadId === null || (int) $threadId !== (int) $this->threadId) {
+            $this->skipRender();
+
+            return;
+        }
+
+        unset($this->presenter, $this->smsMessages, $this->processedMessages);
+        $this->repaintBubbles();
+    }
+
+    /**
+     * Repaint only the bubble list: an incoming message or status change
+     * re-renders the 'sms-bubbles' island (~10KB) instead of the whole
+     * conversation (~115KB). Falls back to a full render when the island
+     * isn't registered yet (it first renders only once a thread is open, so
+     * a component mounted thread-less hasn't stored it until the first
+     * open-thread render — see renderIslandDirective below).
+     */
+    private function repaintBubbles(): void
+    {
+        foreach ($this->getIslands() as $island) {
+            if ($island['name'] === 'sms-bubbles') {
+                $this->skipRender();
+                $this->renderIsland('sms-bubbles');
+
+                return;
+            }
+        }
+        // Not registered: let the default full render carry the update.
+    }
+
+    /**
+     * Livewire only registers islands during the initial mount, but the
+     * bubbles island lives inside the open-thread branch — a thread-less
+     * mount never stores it, and renderIsland() would silently no-op
+     * forever. Register late-appearing islands on update renders too.
+     */
+    public function renderIslandDirective($name = null, $token = null, $lazy = false, $defer = false, $always = false, $skip = false, $with = [])
+    {
+        if (! $this->islandIsMounting()) {
+            $known = array_column($this->getIslands(), 'name');
+
+            if (! in_array($name ?? $token, $known, true)) {
+                $this->storeIsland($name ?? $token, $token);
+            }
+        }
+
+        return parent::renderIslandDirective($name, $token, $lazy, $defer, $always, $skip, $with);
     }
 
     #[On('refreshMessages')]
     #[On('sms-schedule-changed')]
     public function refreshMessages(): void
     {
-        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages, $this->threadHasMixedNumbers);
+        unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages, $this->threadHasMixedNumbers);
     }
 
     /**
@@ -264,12 +287,8 @@ class SmsConversation extends Component
 
     protected function messagesFingerprint(): string
     {
-        $stats = SmsMessage::query()
-            ->where('thread_id', $this->threadId)
-            ->selectRaw('COUNT(*) as total, COALESCE(MAX(id), 0) as max_id, COALESCE(MAX(updated_at), "") as last_update')
-            ->first();
-
-        return $stats->total . ':' . $stats->max_id . ':' . $stats->last_update;
+        // Same formula the offline manifest uses — one implementation.
+        return ConversationPresenter::fingerprintsForThreads([$this->threadId])[$this->threadId] ?? '0:0:';
     }
 
     public function updatedAttachment(): void
@@ -334,33 +353,11 @@ class SmsConversation extends Component
 
     /**
      * Convert a media URL to the proper public streaming URL.
-     * Handles both old /storage/... paths and new relative paths.
+     * Logic lives in ConversationPresenter (shared with the offline fragment).
      */
     public function mediaUrl(string $url): string
     {
-        // If it's already an absolute HTTP URL, return as-is
-        if (str_starts_with($url, 'http')) {
-            return $url;
-        }
-
-        // If it's an old /storage/sms-media/... path, extract just the path after the prefix
-        if (str_starts_with($url, '/storage/sms-media/')) {
-            $path = substr($url, strlen('/storage/sms-media/'));
-            return route('sms.media', ['filename' => $path]);
-        }
-
-        if (str_starts_with($url, '/storage/sms-attachments/')) {
-            $path = substr($url, strlen('/storage/sms-attachments/'));
-            return route('sms.media', ['filename' => 'sms-attachments/' . $path]);
-        }
-
-        // If it's a relative path starting with sms-media/ or sms-attachments/, use as-is
-        if (str_starts_with($url, 'sms-media/') || str_starts_with($url, 'sms-attachments/')) {
-            return route('sms.media', ['filename' => $url]);
-        }
-
-        // Otherwise assume it's a bare filename that goes in sms-media/
-        return route('sms.media', ['filename' => 'sms-media/' . $url]);
+        return ConversationPresenter::mediaUrl($url);
     }
 
     public function loadMoreMessages(): void
@@ -988,7 +985,7 @@ class SmsConversation extends Component
 
         $this->showAssignClientModal = false;
 
-        unset($this->thread);
+        unset($this->thread, $this->presenter);
 
         Flux::toast('Thread updated.');
     }
@@ -1417,10 +1414,18 @@ class SmsConversation extends Component
         );
     }
 
-    public function sendMessage(GroupSmsService $smsService, SmsTranslationService $translator): void
+    public function sendMessage(GroupSmsService $smsService, SmsTranslationService $translator, ?string $text = null): void
     {
         if ($this->isClientUser) {
             abort(403, 'Client users cannot send messages.');
+        }
+
+        // Optimistic composer: the client clears the box instantly and passes
+        // the typed text as an argument (see submitComposer in the blade). On
+        // validation failure newMessage keeps the text, so the response puts
+        // the draft back in the box.
+        if ($text !== null && trim($this->newMessage ?? '') === '') {
+            $this->newMessage = $text;
         }
 
         if ($this->editScheduledId) {
@@ -1561,7 +1566,7 @@ class SmsConversation extends Component
         $this->newMessage = '';
         $this->attachment = null;
 
-        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+        unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
         if ($scheduleOnly) {
             Flux::toast(
@@ -1602,7 +1607,7 @@ class SmsConversation extends Component
         $this->cancelScheduledId = null;
         $this->showCancelModal = false;
 
-        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+        unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
         Flux::toast(
             text: 'Scheduled message cancelled.',
@@ -1671,7 +1676,7 @@ class SmsConversation extends Component
             \App\Jobs\SendOutboundSmsBrowserNotifications::dispatch($message->id, $message->sent_by_user_id);
         }
 
-        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+        unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
         Flux::toast(
             text: 'Message sent',
@@ -1867,70 +1872,26 @@ class SmsConversation extends Component
             ->get();
     }
 
+    /**
+     * The presenter owns the display pipeline (messages, names, translation,
+     * header). Rebuilt whenever message-affecting state changes — every
+     * unset() list that clears smsMessages must clear this too.
+     */
+    #[Computed]
+    public function presenter(): ConversationPresenter
+    {
+        return new ConversationPresenter($this->thread, auth()->user(), $this->messageLimit);
+    }
+
     #[Computed]
     public function thread(): ?SmsGroupThread
     {
-        if (! $this->threadId) {
-            return null;
-        }
-
-        $thread = SmsGroupThread::with([
-            'project:id,address',
-            'client',
-            'client.users:id,first_name,last_name,nickname,preferred_language,cell_phone',
-            'ownerVendor:id,business_name,options',
-            'subjectVendor:id,business_name,options',
-            'subjectVendor.users:id,first_name,last_name,nickname,preferred_language,cell_phone',
-            'threadParticipants:id,thread_id,phone_number',
-        ])->find($this->threadId);
-
-        if (! $thread) {
-            return null;
-        }
-
-        if (! $thread->client && $thread->client_id) {
-            $client = Client::withoutGlobalScopes()
-                ->with('users:id,first_name,last_name,nickname,preferred_language,cell_phone')
-                ->find($thread->client_id);
-
-            if ($client) {
-                $thread->setRelation('client', $client);
-            }
-        }
-
-        return $thread;
+        return ConversationPresenter::loadThreadForDisplay($this->threadId);
     }
 
     public function threadClientUsersFor(?Client $client): \Illuminate\Support\Collection
     {
-        if (! $client || ! $this->thread) {
-            return collect();
-        }
-
-        $participantPhones = $this->thread->threadParticipants
-            ->pluck('phone_number')
-            ->filter();
-
-        $users = $client->relationLoaded('users')
-            ? $client->users
-            : $client->users()->get(['users.id', 'first_name', 'last_name', 'cell_phone']);
-
-        return $this->filterClientUsersToThreadParticipants($users, $participantPhones);
-    }
-
-    public function filterClientUsersToThreadParticipants(iterable $users, iterable $participantPhones): \Illuminate\Support\Collection
-    {
-        $participantPhoneMap = collect($participantPhones)
-            ->filter()
-            ->flip();
-
-        return collect($users)
-            ->filter(function (User $user) use ($participantPhoneMap): bool {
-                $e164 = $user->routeNotificationForTelnyx();
-
-                return is_string($e164) && $participantPhoneMap->has($e164);
-            })
-            ->values();
+        return $this->presenter->threadClientUsersFor($client);
     }
 
     /**
@@ -2099,55 +2060,18 @@ class SmsConversation extends Component
     #[Computed]
     public function smsMessages()
     {
-        if (! $this->threadId) {
-            return collect();
-        }
-
-        return SmsMessage::where('thread_id', $this->threadId)
-            ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'raw_payload', 'status', 'scheduled_at', 'created_at', 'sent_by_user_id'])
-            ->with('sentByUser:id,first_name,last_name,nickname')
-            ->orderByDesc('created_at')
-            ->limit($this->messageLimit)
-            ->get()
-            ->reverse()
-            ->values();
+        return $this->presenter->messages();
     }
 
     /**
      * Build phone number → display name lookup for all inbound senders.
-     * Merges client user first names with resolvePhoneDisplay fallback.
      *
      * @return array<string, string>
      */
     #[Computed]
     public function phoneNameMap(): array
     {
-        $map = $this->smsMessages
-            ->where('direction', 'inbound')
-            ->pluck('from_number')
-            ->unique()
-            ->filter()
-            ->mapWithKeys(fn (string $number) => [$number => $this->resolvePhoneDisplay($number)])
-            ->all();
-
-        // Client user first names take precedence
-        if ($this->thread?->client) {
-            foreach ($this->threadClientUsersFor($this->thread->client) as $user) {
-                $telnyx = $user->routeNotificationForTelnyx();
-                if ($telnyx) {
-                    $map[$telnyx] = $this->preferredUserDisplayName($user, false);
-                }
-            }
-            $rawHome = $this->thread->client->getRawOriginal('home_phone');
-            if ($rawHome) {
-                $formatted = \App\Services\GroupSmsService::formatE164($rawHome);
-                if (! isset($map[$formatted])) {
-                    $map[$formatted] = $this->thread->client->name;
-                }
-            }
-        }
-
-        return $map;
+        return $this->presenter->phoneNameMap();
     }
 
     /**
@@ -2157,22 +2081,7 @@ class SmsConversation extends Component
     #[Computed]
     public function threadHasMixedNumbers(): bool
     {
-        $numbers = config('services.telnyx.numbers', []);
-
-        if (count($numbers) < 2) {
-            return false;
-        }
-
-        $found = $this->smsMessages
-            ->map(fn (SmsMessage $msg) => $msg->isOutbound()
-                ? $msg->from_number
-                : collect($msg->to_numbers)->first(fn ($n) => in_array($n, $numbers))
-            )
-            ->filter()
-            ->unique()
-            ->values();
-
-        return $found->count() > 1;
+        return $this->presenter->threadHasMixedNumbers();
     }
 
     /**
@@ -2185,363 +2094,7 @@ class SmsConversation extends Component
     #[Computed]
     public function processedMessages(): array
     {
-        $allMessages = $this->smsMessages;
-        $phoneNameMap = $this->phoneNameMap;
-        $tapbackIds = collect();
-        $reactionsMap = [];
-
-        // Remote edits (iMessage "Edited to …" SMS fallback): apply the new text
-        // to the original message and hide the notification, so the thread reads
-        // like iMessage — one bubble with an "Edited" marker. Runs before the
-        // tapback pass so reactions match against the edited text.
-        $editIds = collect();
-
-        foreach ($allMessages as $msg) {
-            $editedText = $msg->parseRemoteEdit();
-            if ($editedText === null) {
-                continue;
-            }
-
-            $editedNormalized = $this->normalizeTapbackMatchText($editedText);
-            if ($editedNormalized === '') {
-                continue;
-            }
-
-            // Original candidates: same sender & direction, sent before the edit,
-            // not itself an edit notification. Pick the most similar text.
-            $matched = $allMessages
-                ->filter(fn ($candidate) => $candidate->id !== $msg->id
-                    && ! $editIds->contains($candidate->id)
-                    && $candidate->direction === $msg->direction
-                    && $candidate->from_number === $msg->from_number
-                    && ($candidate->created_at === null || $msg->created_at === null || $candidate->created_at->lte($msg->created_at))
-                    && trim((string) $candidate->display_text) !== ''
-                    && $candidate->parseRemoteEdit() === null)
-                ->map(function ($candidate) use ($editedNormalized) {
-                    similar_text($this->normalizeTapbackMatchText((string) $candidate->display_text), $editedNormalized, $percent);
-
-                    return ['message' => $candidate, 'percent' => $percent];
-                })
-                ->sortByDesc('percent')
-                ->first();
-
-            // Only merge when we're confident which message was edited —
-            // otherwise leave the notification visible rather than lose it.
-            if (! $matched || $matched['percent'] < 40) {
-                continue;
-            }
-
-            $editIds->push($msg->id);
-
-            $original = $matched['message'];
-            // In-memory only: display_text derives from text, so downstream
-            // rendering/translation picks up the edited body. Never persisted.
-            $original->text = $editedText;
-            $original->was_edited = true;
-        }
-
-        $allMessages = $allMessages->reject(fn ($m) => $editIds->contains($m->id))->values();
-
-        foreach ($allMessages as $msg) {
-            $tapback = $msg->parseTapback();
-            if (! $tapback || ! $tapback['emoji']) {
-                continue;
-            }
-
-            $quotedNormalized = $this->normalizeTapbackMatchText((string) ($tapback['quoted'] ?? ''));
-            $quotedLen = mb_strlen($quotedNormalized);
-            $matched = $allMessages
-                ->filter(function ($candidate) use ($quotedNormalized, $msg) {
-                    if ($candidate->id === $msg->id) {
-                        return false;
-                    }
-                    $candidateText = $candidate->display_text;
-                    if (! $candidateText) {
-                        return false;
-                    }
-                    $candidateNormalized = $this->normalizeTapbackMatchText((string) $candidateText);
-
-                    if ($candidateNormalized === '' || $quotedNormalized === '') {
-                        return false;
-                    }
-
-                    return str_contains($candidateNormalized, $quotedNormalized)
-                        || str_contains($quotedNormalized, $candidateNormalized);
-                })
-                ->sortBy(fn ($c) => abs(mb_strlen($this->normalizeTapbackMatchText((string) $c->display_text)) - $quotedLen))
-                ->first();
-
-            // Generic (strict) tapbacks are only processed when the quoted text
-            // actually matches a message in the thread — avoids hiding normal messages.
-            if (($tapback['strict'] ?? false) && ! $matched) {
-                continue;
-            }
-
-            $tapbackIds->push($msg->id);
-
-            if ($matched) {
-                $senderName = $phoneNameMap[$msg->from_number] ?? substr($msg->from_number, -4);
-                $reactionsMap[$matched->id][$tapback['emoji']][] = $senderName;
-            }
-        }
-
-        $withoutTapbacks = $allMessages->reject(fn ($m) => $tapbackIds->contains($m->id));
-
-        $viewerLanguage = $this->preferredLanguageForUser(auth()->user());
-        $translator = app(SmsTranslationService::class);
-        $withoutTapbacks->each(function (SmsMessage $message) use ($viewerLanguage, $translator): void {
-            $message->translated_display_text = $this->messageDisplayTextForViewer($message, $viewerLanguage, $translator);
-            $message->original_display_text = $this->messageOriginalTextForViewer($message);
-
-            $languageMeta = $this->messageLanguageMetaForViewer(
-                $message,
-                $viewerLanguage,
-                (string) ($message->translated_display_text ?? ''),
-                (string) ($message->original_display_text ?? '')
-            );
-
-            $message->language_badge = $languageMeta['badge'];
-            $message->show_original_toggle = $languageMeta['show_original_toggle'];
-        });
-
-        return [
-            'visible' => $withoutTapbacks->where('status', '!=', 'scheduled')->values(),
-            // Scheduled messages render in a flex-col-reverse container, so the
-            // first item in DOM is visually at the bottom. Sort descending by
-            // send time (and creation time as a tie-breaker) so the earliest
-            // scheduled message stays on top and later ones stack below it.
-            'scheduled' => $withoutTapbacks
-                ->where('status', 'scheduled')
-                ->sortByDesc(fn ($m) => [
-                    optional($m->scheduled_at)->getTimestamp() ?? 0,
-                    $m->created_at?->getTimestamp() ?? 0,
-                ])
-                ->values(),
-            'reactions' => $reactionsMap,
-        ];
-    }
-
-    protected function messageDisplayTextForViewer(SmsMessage $message, string $viewerLanguage, SmsTranslationService $translator): ?string
-    {
-        $displayText = trim((string) $message->display_text);
-        if ($displayText === '') {
-            return null;
-        }
-
-        if ($this->shouldBypassViewerTranslation($message)) {
-            return $displayText;
-        }
-
-        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
-        $senderLanguage = $this->normalizeLanguage((string) ($rawPayload['sender_language'] ?? ''));
-        $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
-
-        if ($originalText !== '' && $this->looksLikeTranslationPromptArtifact($displayText)) {
-            if ($senderLanguage !== '' && strcasecmp($senderLanguage, $viewerLanguage) === 0) {
-                return $originalText;
-            }
-
-            return $translator->translate($originalText, $viewerLanguage, $senderLanguage !== '' ? $senderLanguage : null);
-        }
-
-        if (
-            $message->isOutbound()
-            && (int) ($message->sent_by_user_id ?? 0) === (int) auth()->id()
-            && $originalText !== ''
-            && $senderLanguage !== ''
-            && strcasecmp($senderLanguage, $viewerLanguage) === 0
-        ) {
-            return $originalText;
-        }
-
-        if ($viewerLanguage === 'English') {
-            if ($this->viewerAlreadySpeaksMessageLanguage($message, 'English', $displayText)) {
-                return $displayText;
-            }
-
-            return $translator->translate($displayText, 'English');
-        }
-
-        if ($senderLanguage !== '' && strcasecmp($senderLanguage, $viewerLanguage) === 0 && $originalText !== '') {
-            return $originalText;
-        }
-
-        if ($this->viewerAlreadySpeaksMessageLanguage($message, $viewerLanguage, $displayText)) {
-            return $displayText;
-        }
-
-        return $translator->translate($displayText, $viewerLanguage);
-    }
-
-    /**
-     * Whether a message is already in the viewer's language, so it can be
-     * shown verbatim without a (slow) translation round-trip.
-     *
-     * When the source language can't be determined we assume it already
-     * matches the viewer to avoid translating same-language text on every
-     * render — the dominant case for English office users.
-     */
-    protected function viewerAlreadySpeaksMessageLanguage(SmsMessage $message, string $viewerLanguage, string $candidateText): bool
-    {
-        $sourceLanguage = $this->messageSourceLanguage($message, $candidateText);
-
-        if ($sourceLanguage === null) {
-            return true;
-        }
-
-        return strcasecmp($sourceLanguage, $viewerLanguage) === 0;
-    }
-
-    protected function messageOriginalTextForViewer(SmsMessage $message): ?string
-    {
-        if ($this->shouldBypassViewerTranslation($message)) {
-            $displayText = trim((string) $message->display_text);
-
-            return $displayText !== '' ? $displayText : null;
-        }
-
-        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
-        $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
-
-        if ($originalText !== '') {
-            return $originalText;
-        }
-
-        $displayText = trim((string) $message->display_text);
-
-        return $displayText !== '' ? $displayText : null;
-    }
-
-    /**
-     * @return array{badge: ?string, show_original_toggle: bool}
-     */
-    protected function messageLanguageMetaForViewer(
-        SmsMessage $message,
-        string $viewerLanguage,
-        string $translatedText,
-        string $originalText,
-    ): array {
-        if ($this->shouldBypassViewerTranslation($message)) {
-            return ['badge' => null, 'show_original_toggle' => false];
-        }
-
-        $sourceLanguage = $this->messageSourceLanguage($message, $originalText);
-        $badge = $this->languageBadgeForLanguage($sourceLanguage);
-
-        if ($badge === null || $sourceLanguage === null) {
-            return ['badge' => null, 'show_original_toggle' => false];
-        }
-
-        if (strcasecmp($sourceLanguage, $viewerLanguage) === 0) {
-            return ['badge' => null, 'show_original_toggle' => false];
-        }
-
-        $showToggle = trim($translatedText) !== ''
-            && trim($originalText) !== ''
-            && strcmp(trim($translatedText), trim($originalText)) !== 0;
-
-        return [
-            'badge' => $badge,
-            'show_original_toggle' => $showToggle,
-        ];
-    }
-
-    protected function shouldBypassViewerTranslation(SmsMessage $message): bool
-    {
-        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
-
-        return (string) ($rawPayload['source'] ?? '') === 'send_schedule_modal';
-    }
-
-    protected function messageSourceLanguage(SmsMessage $message, string $originalText): ?string
-    {
-        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
-        $senderLanguage = trim((string) ($rawPayload['sender_language'] ?? ''));
-
-        $inferredLanguage = $this->inferSupportedLanguageFromText($originalText);
-        if ($inferredLanguage !== null) {
-            return $inferredLanguage;
-        }
-
-        if ($senderLanguage !== '') {
-            return $this->normalizeLanguage($senderLanguage);
-        }
-
-        return null;
-    }
-
-    protected function languageBadgeForLanguage(?string $language): ?string
-    {
-        if ($language === null || $language === '') {
-            return null;
-        }
-
-        return match ($this->normalizeLanguage($language)) {
-            'English' => 'EN',
-            'Spanish' => 'ES',
-            'Polish' => 'PL',
-            default => null,
-        };
-    }
-
-    protected function inferSupportedLanguageFromText(string $text): ?string
-    {
-        $normalized = mb_strtolower(trim($text));
-        if ($normalized === '') {
-            return null;
-        }
-
-        if (preg_match('/[ąćęłńóśźż]/u', $normalized) === 1) {
-            return 'Polish';
-        }
-
-        if (preg_match('/[áéíóúñ¿¡]/u', $normalized) === 1) {
-            return 'Spanish';
-        }
-
-        $polishHints = ['dziekuje', 'prosze', 'czesc', 'jutro', 'witam', 'tak', 'nie'];
-        foreach ($polishHints as $hint) {
-            if ($this->containsHintWord($normalized, $hint)) {
-                return 'Polish';
-            }
-        }
-
-        $spanishHints = ['hola', 'gracias', 'manana', 'por favor', 'buenos', 'buenas', 'que tal'];
-        foreach ($spanishHints as $hint) {
-            if ($this->containsHintWord($normalized, $hint)) {
-                return 'Spanish';
-            }
-        }
-
-        $englishHints = ['hello', 'hi', 'please', 'can', 'you', 'your', 'send', 'project', 'schedule', 'tasks', 'message', 'thanks'];
-        $englishHits = 0;
-
-        foreach ($englishHints as $hint) {
-            if ($this->containsHintWord($normalized, $hint)) {
-                $englishHits++;
-            }
-        }
-
-        if ($englishHits >= 2) {
-            return 'English';
-        }
-
-        return null;
-    }
-
-    private function containsHintWord(string $normalizedText, string $hint): bool
-    {
-        $pattern = '/\b' . preg_quote($hint, '/') . '\b/u';
-
-        return preg_match($pattern, $normalizedText) === 1;
-    }
-
-    private function looksLikeTranslationPromptArtifact(string $text): bool
-    {
-        $normalized = strtolower(trim($text));
-
-        return str_contains($normalized, 'please provide')
-            && str_contains($normalized, 'translated');
+        return $this->presenter->processedMessages();
     }
 
     protected function preferredLanguageForUser(?User $user): string
@@ -2574,74 +2127,6 @@ class SmsConversation extends Component
     }
 
     /**
-     * Normalize text used when matching tapback quoted text to actual thread messages.
-     */
-    private function normalizeTapbackMatchText(string $text): string
-    {
-        $text = trim($text);
-        if ($text === '') {
-            return '';
-        }
-
-        $text = $this->repairMojibakeForTapbackMatch($text);
-        $text = Str::of($text)
-            ->lower()
-            ->ascii()
-            ->replaceMatches('/[^a-z0-9\s]/u', ' ')
-            ->replaceMatches('/\s+/u', ' ')
-            ->trim()
-            ->value();
-
-        return $text;
-    }
-
-    /**
-     * Lightweight mojibake repair for quote/body mismatches during tapback matching.
-     */
-    private function repairMojibakeForTapbackMatch(string $text): string
-    {
-        if (! preg_match('/[ÃÂâðÄÅ]/u', $text)) {
-            return $text;
-        }
-
-        $candidates = [
-            $text,
-            @mb_convert_encoding($text, 'Windows-1252', 'UTF-8'),
-            @mb_convert_encoding($text, 'ISO-8859-1', 'UTF-8'),
-        ];
-
-        $score = static function (string $value): int {
-            $penalty = preg_match_all('/[ÃÂâðÄÅ]/u', $value, $m);
-            $signal = preg_match_all('/["“”„óęąśłżźćń]/u', $value, $m2);
-
-            return (int) $signal - ((int) $penalty * 2);
-        };
-
-        $best = $text;
-        $bestScore = $score($text);
-
-        foreach ($candidates as $candidate) {
-            if (! is_string($candidate) || $candidate === '') {
-                continue;
-            }
-
-            if (! mb_check_encoding($candidate, 'UTF-8')) {
-                continue;
-            }
-
-            $candidateScore = $score($candidate);
-            if ($candidateScore > $bestScore) {
-                $best = $candidate;
-                $bestScore = $candidateScore;
-            }
-        }
-
-        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $best);
-
-        return is_string($clean) && $clean !== '' ? $clean : $best;
-    }
-
-    /**
      * Build a publicly reachable webhook URL for Telnyx voice callbacks.
      */
     protected function telnyxWebhookUrl(): string
@@ -2663,31 +2148,9 @@ class SmsConversation extends Component
     {
         // Keep the poll fingerprint in sync with what this render shows so
         // pollForUpdates() only repaints on real changes.
+        // (The old localStorage snapshot written here had no readers and is
+        // superseded by the offline fragment cache — see resources/js/sms-offline.js.)
         $this->pollFingerprint = $this->threadId ? $this->messagesFingerprint() : null;
-
-        // Snapshot the visible conversation to localStorage so the next time the
-        // user navigates back to this thread we can paint it instantly while
-        // Livewire re-hydrates in the background.
-        if ($this->threadId) {
-            $snapshot = collect($this->processedMessages)
-                ->take(-30)
-                ->map(fn ($m) => [
-                    'id' => $m['id'] ?? null,
-                    'direction' => $m['direction'] ?? null,
-                    'from_number' => $m['from_number'] ?? null,
-                    'text' => mb_substr((string) ($m['text'] ?? $m['display_text'] ?? ''), 0, 500),
-                    'created_at' => isset($m['created_at']) ? (string) $m['created_at'] : null,
-                    'media_urls' => $m['media_urls'] ?? [],
-                ])
-                ->values()
-                ->all();
-
-            $this->js(sprintf(
-                "(function(){ try { localStorage.setItem('hive-sms-thread-%d', JSON.stringify(%s)); } catch(e) {} })()",
-                $this->threadId,
-                json_encode($snapshot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-            ));
-        }
 
         return view('livewire.sms.conversation');
     }
@@ -2700,156 +2163,25 @@ class SmsConversation extends Component
     /**
      * Whether the phone belongs to a linked contact (user or vendor). CNAM
      * names from call logs do NOT count — those threads show the number.
+     * Logic lives in ConversationPresenter (shared with the offline fragment).
      */
     public function isKnownContact(string $e164): bool
     {
-        static $cache = [];
-
-        if (isset($cache[$e164])) {
-            return $cache[$e164];
-        }
-
-        $digits = preg_replace('/[^0-9]/', '', $e164);
-
-        $normalized = $digits;
-        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
-            $normalized = substr($normalized, 1);
-        }
-
-        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
-
-        $userExists = User::where('cell_phone', $normalized)
-            ->orWhere('cell_phone', '1' . $normalized)
-            ->orWhere('cell_phone', $digits)
-            ->orWhere('cell_phone', $last10)
-            ->exists();
-
-        if ($userExists) {
-            return $cache[$e164] = true;
-        }
-
-        return $cache[$e164] = Vendor::where('business_phone', $normalized)
-            ->orWhere('business_phone', $last10)
-            ->orWhere('business_phone', $digits)
-            ->exists();
+        return ConversationPresenter::isKnownContact($e164);
     }
 
     /**
      * Resolve a display name for an E.164 phone number.
+     * Logic lives in ConversationPresenter (shared with the offline fragment).
      */
     public function resolvePhoneDisplay(string $e164): string
     {
-        static $cache = [];
-
-        if (isset($cache[$e164])) {
-            return $cache[$e164];
-        }
-
-        $digits = preg_replace('/[^0-9]/', '', $e164);
-
-        $normalized = $digits;
-        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
-            $normalized = substr($normalized, 1);
-        }
-
-        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
-
-        $user = User::where('cell_phone', $normalized)
-            ->orWhere('cell_phone', '1' . $normalized)
-            ->orWhere('cell_phone', $digits)
-            ->orWhere('cell_phone', $last10)
-            ->first();
-
-        if ($user && trim($this->preferredUserDisplayName($user, true)) !== '') {
-            return $cache[$e164] = $this->preferredUserDisplayName($user, true);
-        }
-
-        $vendor = Vendor::where('business_phone', $normalized)
-            ->orWhere('business_phone', $last10)
-            ->orWhere('business_phone', $digits)
-            ->first();
-
-        if ($vendor && $vendor->short_name) {
-            return $cache[$e164] = $vendor->short_name;
-        }
-
-        // Fall back to the latest CNAM captured on a call log, matching the
-        // calls tab (HasCallActions::resolvePhoneDisplay).
-        $callLogName = CallLog::query()
-            ->where(fn ($q) => $q->where('from_number', $e164)->orWhere('to_number', $e164))
-            ->whereNotNull('caller_name')
-            ->whereNotIn('caller_name', ['Incoming Call', 'Outgoing Call'])
-            ->latest()
-            ->value('caller_name');
-
-        if (is_string($callLogName) && trim($callLogName) !== '') {
-            return $cache[$e164] = CallLog::formatCallerNameForDisplay($callLogName);
-        }
-
-        $display10 = strlen($normalized) === 10 ? $normalized : $last10;
-        if (strlen($display10) === 10) {
-            return $cache[$e164] = '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
-        }
-
-        return $cache[$e164] = $e164;
-    }
-
-    protected function preferredUserDisplayName(User $user, bool $includeLastName = true): string
-    {
-        $first = trim((string) ($user->nickname ?: $user->first_name));
-
-        if (! $includeLastName) {
-            return $first;
-        }
-
-        return trim($first . ' ' . trim((string) $user->last_name));
+        return ConversationPresenter::resolvePhoneDisplay($e164);
     }
 
     public function clientDisplayNameForThread(?SmsGroupThread $thread): string
     {
-        if (! $thread?->client) {
-            return '';
-        }
-
-        if (trim((string) $thread->client->business_name) !== '') {
-            return (string) $thread->client->name;
-        }
-
-        $users = $this->threadClientUsersFor($thread->client);
-
-        if ($users->isEmpty()) {
-            return (string) $thread->client->name;
-        }
-
-        if ($users->count() === 1) {
-            return $this->preferredUserDisplayName($users->first(), true);
-        }
-
-        $nameGroups = $users
-            ->groupBy(fn (User $user) => trim((string) ($user->last_name ?? '')))
-            ->map(function ($lastNameGroup, $lastName) {
-                if ($lastNameGroup->count() === 1) {
-                    return $this->preferredUserDisplayName($lastNameGroup->first(), true);
-                }
-
-                $firstNames = $lastNameGroup
-                    ->map(fn (User $user) => $this->preferredUserDisplayName($user, false))
-                    ->filter()
-                    ->values()
-                    ->all();
-
-                return trim($this->oxfordJoin($firstNames) . ' ' . $lastName);
-            })
-            ->filter()
-            ->values()
-            ->all();
-
-        return $this->oxfordJoin($nameGroups);
-    }
-
-    protected function oxfordJoin(array $items): string
-    {
-        return collect($items)->filter()->values()->join(', ', ' & ');
+        return $this->presenter->clientDisplayNameForThread($thread);
     }
 
     protected function markThreadAsRead(): void

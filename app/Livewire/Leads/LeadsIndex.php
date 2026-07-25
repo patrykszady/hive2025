@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\Lead;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -18,13 +19,118 @@ class LeadsIndex extends Component
     #[Url(except: '')]
     public $origin = '';
 
+    /** @var array<string> Multi-select like the expenses Status filter. */
+    #[Url(except: [])]
+    public array $statuses = [];
+
+    #[Url(except: '')]
+    public $search = '';
+
     public $view = null;
 
     public $sortBy = 'date';
 
     public $sortDirection = 'desc';
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    /** @var array<int> Selected lead IDs for bulk actions. */
+    public array $selected = [];
+
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(): int
+    {
+        return 15;
+    }
+
+    /**
+     * Column defs for the leads table — the real header row AND the loading
+     * skeleton render from this one array, so widths can never drift apart.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Date', 'width' => 'w-[14%]', 'skeletonWidth' => 'w-12'],
+            ['label' => 'Client', 'width' => 'w-[17%] min-w-0', 'skeletonWidth' => 'w-20'],
+            ['label' => 'Status', 'width' => 'w-[20%]', 'skeleton' => 'badge'],
+            ['label' => 'Last', 'width' => 'w-[14%]', 'skeletonWidth' => 'w-12'],
+            ['label' => 'Origin', 'width' => 'w-[12%] min-w-0', 'skeletonWidth' => 'w-14'],
+            ['label' => 'Address', 'width' => 'w-[23%] min-w-0', 'skeletonWidth' => 'w-28'],
+        ];
+    }
+
+    #[On('refreshComponent')]
+    public function refreshList(): void
+    {
+        unset($this->leads);
+    }
+
+    public function clearSelection(): void
+    {
+        $this->selected = [];
+    }
+
+    public function updateLeadStatus(int $leadId, string $title): void
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        if (! in_array($title, array_column(Lead::selectableStatuses(), 'code'), true)) {
+            return;
+        }
+
+        // LeadScope keeps this to the current vendor's leads.
+        $lead = Lead::findOrFail($leadId);
+
+        $this->applyStatus($lead, $title);
+
+        unset($this->leads);
+        $this->dispatch('lead-status-updated');
+    }
+
+    public function bulkSetStatus(string $title): void
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        if (empty($this->selected)
+            || ! in_array($title, array_column(Lead::selectableStatuses(), 'code'), true)) {
+            return;
+        }
+
+        $leads = Lead::whereIn('id', $this->selected)->get();
+
+        foreach ($leads as $lead) {
+            $this->applyStatus($lead, $title);
+        }
+
+        $this->selected = [];
+        unset($this->leads);
+        $this->dispatch('lead-status-updated');
+
+        \Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: $leads->count().' '.str('lead')->plural($leads->count()).' set to '.$title.'.',
+            text: '',
+        );
+    }
+
+    protected function applyStatus(Lead $lead, string $title): void
+    {
+        $lead->setStatus($title);
+    }
+
+    public function updating($name, $value): void
+    {
+        if (in_array(strtok($name, '.'), ['origin', 'statuses', 'search'], true)) {
+            $this->resetPage();
+        }
+    }
 
     #[Computed]
     public function leads()
@@ -33,10 +139,37 @@ class LeadsIndex extends Component
             Lead::with(['user.clients', 'last_status'])->when($this->origin, function ($query) {
                 return $query->where('origin', $this->origin);
             })
+                ->when(! empty($this->statuses), function ($query) {
+                    return $query->whereLatestStatus($this->statuses);
+                })
+                ->when(trim((string) $this->search), function ($query, $term) {
+                    // lead_data is JSON, so a raw LIKE covers name, address,
+                    // email and phone in one shot. JSON columns use a binary
+                    // collation (case-sensitive LIKE) — LOWER() both sides so
+                    // "steve" finds "Steve".
+                    $term = mb_strtolower($term);
+                    $query->where(function ($q) use ($term) {
+                        $q->whereRaw('LOWER(lead_data) like ?', ["%{$term}%"])
+                            ->orWhereRaw('LOWER(notes) like ?', ["%{$term}%"]);
+                    });
+                })
                 ->orderBy($this->sortBy, $this->sortDirection)
                 ->paginate(15);
 
         return $leads;
+    }
+
+    /** @return array<int, string> */
+    #[Computed]
+    public function origins(): array
+    {
+        return Lead::query()
+            ->whereNotNull('origin')
+            ->where('origin', '!=', '')
+            ->distinct()
+            ->orderBy('origin')
+            ->pluck('origin')
+            ->all();
     }
 
     public function sort($column)
@@ -49,29 +182,10 @@ class LeadsIndex extends Component
         }
     }
 
+    /** Delegates to the model so the table, backfill command and job agree. */
     public function clientForLead(Lead $lead): ?Client
     {
-        $client = $lead->user?->clients->first();
-        if ($client) {
-            return $client;
-        }
-
-        $address = $lead->lead_data['address'] ?? null;
-        $vendorId = $lead->belongs_to_vendor_id;
-
-        if (! $address || ! $vendorId) {
-            return null;
-        }
-
-        $street = trim(explode(',', $address)[0] ?? '');
-        if ($street === '') {
-            return null;
-        }
-
-        return Client::query()
-            ->whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendorId))
-            ->where('address', 'like', $street.'%')
-            ->first();
+        return $lead->resolveClient();
     }
 
     #[Title('Leads')]

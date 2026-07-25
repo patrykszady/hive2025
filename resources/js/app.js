@@ -9,6 +9,11 @@ document.addEventListener('alpine:init', () => {
         tab: 'messages',
         threadId: null,
         callId: null,
+        // Offline messaging state (owned by sms-offline.js): `offline` gates
+        // the thread-list tap handler; `offlineBanner` feeds the banner on
+        // /messages ('' = hidden).
+        offline: false,
+        offlineBanner: '',
         setTab(value) {
             this.tab = value;
         },
@@ -121,6 +126,11 @@ window.Echo = new Echo({
     forceTLS: (import.meta.env.VITE_REVERB_SCHEME ?? 'https') === 'https',
     enabledTransports: ['ws', 'wss'],
 });
+
+// Offline SMS cache — must come after Echo so its background re-warm can
+// subscribe to the sms.notifications channel. Site-wide on purpose: app.js
+// persists across wire:navigate, so caching runs on every page.
+import('./sms-offline');
 
 const FADE_CLASS = 'opacity-0';
 
@@ -270,6 +280,191 @@ document.addEventListener('click', (event) => {
 	const top = target.getBoundingClientRect().top + window.pageYOffset - 80;
 	smoothScrollTo(top, 800);
 }, true); // Use capture phase to get event before Flux components
+
+// Hover prefetch prioritisation.
+//
+// `wire:navigate.hover` fires a prefetch 60ms into a hover and never cancels it,
+// so sweeping the mouse down a table queues one request per row and the row you
+// actually stopped on ends up behind all of them.
+//
+// Fix: hand every navigate fetch an AbortController we own — Livewire's
+// `navigate.request` hook runs synchronously inside sendNavigateRequest()
+// (dist 11232) immediately before `fetch()` — so a fresh prefetch can cancel the
+// stale one and take the connection now.
+//
+// What must never be cancelled is a URI the user committed to. A click on an
+// in-flight prefetch is served by that very request (getPretchedHtmlOr, dist
+// 12775), so aborting it leaves the navigation with nothing to swap in: no error,
+// no progress bar, the page just sits there. Two independent guards prevent it —
+// the committed URI is never tracked as abortable, and nothing is aborted at all
+// while a navigation is waiting on its html. Aborting a *hover* prefetch is safe
+// because prefetchHtml's error path deletes its own cache entry (dist 12764), so
+// a cancelled link simply re-fetches if it is later clicked.
+//
+// After `composer update livewire/livewire`, re-check those three dist spots and
+// sanity-test in a browser: hover row A, hover row B, click row A → A must load.
+(() => {
+	// Older browsers (no AbortController, or abort() without a reason — we need
+	// the reason to recognise our own cancellations) keep Livewire's stock
+	// behaviour: every prefetch runs to completion.
+	if (typeof AbortController === 'undefined' || !('reason' in AbortSignal.prototype)) {
+		return;
+	}
+
+	// The only two wire:navigate forms this app uses (same pair as the anchor
+	// handler above). A bare '[href]' would also match SVG <use> and plain links.
+	const NAVIGATE_LINK = '[wire\\:navigate], [wire\\:navigate\\.hover]';
+
+	// One shared reason object, so the rejection our abort causes can be silenced
+	// by identity — never by sniffing for 'AbortError', which would also swallow
+	// genuine navigation failures.
+	const SUPERSEDED = new DOMException('Prefetch superseded by a newer hover', 'AbortError');
+
+	// A navigation that never lands (network error, a listener cancelling
+	// alpine:navigate) must not protect a URI from cancellation forever.
+	const TTL = 20000;
+
+	let pending = null;         // { uri, controller } — the one abortable prefetch
+	let committedUri = null;    // where the user actually decided to go
+	let committedAt = 0;
+	let navigatingSince = 0;    // a real navigation is waiting on its html right now
+
+	// Must match the key Livewire caches under (getUriStringFromUrlObject, 12736).
+	const uriOf = (url) => url.pathname + url.search + url.hash;
+
+	// Mirrors linkShouldBeHandledNatively (dist 12722): the browser handles these
+	// itself, so committing one would only park a URI no navigation ever clears.
+	const uriOfLink = (el) => {
+		const href = el.getAttribute('href');
+		if (href === null || el.hasAttribute('download')) return null;
+
+		const target = el.getAttribute('target')?.trim().toLowerCase();
+		if (target && target !== '_self') return null;
+
+		try {
+			const url = new URL(href, document.baseURI);
+			const sameSite = url.origin === window.location.origin
+				&& ['http:', 'https:'].includes(url.protocol);
+
+			return sameSite ? uriOf(url) : null;
+		} catch {
+			return null;
+		}
+	};
+
+	const fresh = (stamp) => stamp !== 0 && Date.now() - stamp < TTL;
+	const isCommitted = (uri) => uri === committedUri && fresh(committedAt);
+	const isNavigating = () => fresh(navigatingSince);
+
+	const abortPending = () => {
+		// Second guard: even if the committed URI were misread, never cancel
+		// anything while a navigation is waiting for its html.
+		if (!pending || isNavigating()) return;
+
+		pending.controller.abort(SUPERSEDED);
+		pending = null;
+	};
+
+	const commit = (uri, { abortStale }) => {
+		if (!uri) return;
+
+		committedUri = uri;
+		committedAt = Date.now();
+
+		if (!pending) return;
+
+		// This exact request will serve the click — it stops being disposable.
+		if (pending.uri === uri) {
+			pending = null;
+			return;
+		}
+
+		if (abortStale) abortPending();
+	};
+
+	// Keep Livewire's own PageRequest signal live alongside ours instead of
+	// replacing it, in case Livewire ever starts cancelling navigate requests.
+	const combineSignals = (a, b) => {
+		if (typeof AbortSignal.any === 'function') return AbortSignal.any([a, b]);
+
+		const merged = new AbortController();
+
+		for (const signal of [a, b]) {
+			if (signal.aborted) {
+				merged.abort(signal.reason);
+				return merged.signal;
+			}
+
+			signal.addEventListener('abort', () => merged.abort(signal.reason), { once: true });
+		}
+
+		return merged.signal;
+	};
+
+	// Same predicates Livewire uses to decide a press is a navigation (dist 12662),
+	// so ctrl+click, middle-click and modified Enter never commit.
+	const isPlainLeftClick = (e) => !(e.which > 1 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey);
+	const isPlainEnter = (e) => e.which === 13 && !(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey);
+
+	const linkFrom = (e) => e.target?.closest?.(NAVIGATE_LINK);
+
+	// Capture on `document` beats Livewire's listeners, which sit on the link
+	// itself — intent is recorded before the press becomes a fetch (Livewire
+	// prefetches at mousedown, dist 13224). Aborting here is free: the navigation
+	// and its progress bar only start on mouseup, a later task.
+	document.addEventListener('mousedown', (e) => {
+		const link = linkFrom(e);
+		if (link && isPlainLeftClick(e)) commit(uriOfLink(link), { abortStale: true });
+	}, true);
+
+	// Enter and programmatic clicks start their navigation inside this same task,
+	// so an abort here would land its rejection after showAndStartProgressBar()
+	// armed the bar but before it painted, silently hiding it. Protect the URI,
+	// let the stale prefetch finish.
+	document.addEventListener('keydown', (e) => {
+		const link = linkFrom(e);
+		if (link && isPlainEnter(e)) commit(uriOfLink(link), { abortStale: false });
+	}, true);
+
+	document.addEventListener('click', (e) => {
+		if (e.isTrusted) return; // real clicks already committed on mousedown
+		const link = linkFrom(e);
+		if (link) commit(uriOfLink(link), { abortStale: false });
+	}, true);
+
+	// Covers Alpine.navigate() and back/forward, which never touch a link. On the
+	// click path this fires at mouseup, long after the request — hence mousedown.
+	document.addEventListener('livewire:navigate', (e) => {
+		if (!e.detail?.url) return;
+
+		commit(uriOf(e.detail.url), { abortStale: false });
+		navigatingSince = Date.now();
+	});
+
+	document.addEventListener('livewire:navigated', () => {
+		pending = null;
+		committedUri = null;
+		navigatingSince = 0;
+	});
+
+	// Our aborts are deliberate, but Livewire re-throws them out of a promise
+	// nobody awaits. Silence ours, and only ours.
+	window.addEventListener('unhandledrejection', (e) => {
+		if (e.reason === SUPERSEDED) e.preventDefault();
+	});
+
+	document.addEventListener('livewire:init', () => {
+		window.Livewire.hook('navigate.request', ({ uri, options }) => {
+			if (isCommitted(uri)) return; // the real navigation — never abortable
+
+			if (pending && pending.uri !== uri) abortPending();
+
+			const controller = new AbortController();
+			options.signal = combineSignals(options.signal, controller.signal);
+			pending = { uri, controller };
+		});
+	});
+})();
 
 function isNotificationSupported() {
 	return typeof window !== 'undefined' && 'Notification' in window;

@@ -268,7 +268,7 @@ class EstimateDuplicate extends Component
         $this->modal('estimate_duplicate_modal')->close();
 
         // $this->redirect(ProjectShow::class, navigate: true);
-        return redirect()->route('projects.show', ['project' => $this->project_id]);
+        return $this->redirect(route('projects.show', ['project' => $this->project_id]), navigate: true);
 
         Flux::toast(
             duration: 10000,

@@ -1,23 +1,19 @@
-<x-island-card heading="Payments" wire:transition>
+{{-- Loading skeleton for the Payments card — the shared index-table skeleton,
+     so it paints through the same card shell as the loaded table.
 
-    <flux:table>
-        <flux:table.columns>
-            <flux:table.column>Amount</flux:table.column>
-            <flux:table.column>Date</flux:table.column>
-            <flux:table.column>Reference</flux:table.column>
-            <flux:table.column align="end">Status</flux:table.column>
-        </flux:table.columns>
-        <flux:table.rows>
-            <flux:skeleton.group animate="shimmer">
-                @for ($i = 0; $i < 3; $i++)
-                    <flux:table.row>
-                        <flux:table.cell><flux:skeleton.line class="w-20" /></flux:table.cell>
-                        <flux:table.cell><flux:skeleton.line class="w-24" /></flux:table.cell>
-                        <flux:table.cell><flux:skeleton.line class="w-28" /></flux:table.cell>
-                        <flux:table.cell align="end"><flux:skeleton class="h-5 w-16 rounded-full" /></flux:table.cell>
-                    </flux:table.row>
-                @endfor
-            </flux:skeleton.group>
-        </flux:table.rows>
-    </flux:table>
-</x-island-card>
+     In practice this only renders for the lazy cards embedded on projects.show
+     (the standalone /payments route is a normal full-page component), and those
+     cards are narrower than .index-table's 640px floor and drop the Project and
+     Client columns — hence the view-aware column defs and the min-width reset. --}}
+@php
+    $tableView = $tableView ?? null;
+    $isIndexView = ! in_array($tableView, ['projects.show', 'estimate.pdf'], true);
+@endphp
+<x-index-table.placeholder
+    heading="Payments"
+    :columns="\App\Livewire\Payments\PaymentsIndex::columnDefs($tableView)"
+    :rows="$isIndexView ? 5 : 3"
+    :compact="false"
+    :floor="$isIndexView"
+    wire:transition
+/>

@@ -55,21 +55,33 @@
     {{ $slot }}
     
     @if(isset($details))
-        @if($separator)
-            <flux:separator class="my-2"/>
-        @endif
-        
+        {{-- Without a footer, .card-flush-bottom (app.css) pulls the last
+             row of a list/table flush to the card's bottom edge, full-bleed
+             hovers intact, clipped to the rounded corners. Collapsed cards
+             keep their padding (the region's height is 0). --}}
         @if($accordion === false)
             {{-- When accordion is false, skip the accordion and show content directly --}}
-            <div class="py-2">
+            @if($separator)
+                <flux:separator variant="subtle" class="my-2"/>
+            @endif
+            <div class="pt-2 {{ isset($footer) ? 'pb-2' : 'card-flush-bottom' }}">
                 {{ $details }}
             </div>
         @elseif($details_text === false)
-            {{-- Inline toggle: chevron is in header actions --}}
+            {{-- Inline toggle: chevron is in header actions. The separator
+                 rides inside the collapse — a closed card shows no stray line. --}}
             <div x-show="open" x-collapse @unless($expanded) x-cloak @endunless>
-                {{ $details }}
+                @if($separator)
+                    <flux:separator variant="subtle" class="my-2"/>
+                @endif
+                <div class="{{ isset($footer) ? '' : 'card-flush-bottom' }}">
+                    {{ $details }}
+                </div>
             </div>
         @else
+            @if($separator)
+                <flux:separator variant="subtle" class="my-2"/>
+            @endif
             {{-- Use Alpine toggle matching Project Timeline pattern --}}
             <div x-data="{ open: @js($expanded) }">
                 <button type="button" @click="open = !open" class="flex w-full items-center justify-between py-2">
@@ -84,9 +96,12 @@
         @endif
     @endif
 
-    {{-- Footer with right-aligned content - only if footer slot exists --}}
+    {{-- Footer with right-aligned content - only if footer slot exists.
+         No own margins: footers often just host teleported modals (visually
+         empty), and a spacer would bloat the collapsed card. Empty content
+         collapses to zero height; visible footer content spaces itself. --}}
     @if(isset($footer))
-        <div class="flex justify-end mt-2 mb-0">
+        <div class="flex justify-end">
             {{ $footer }}
         </div>
     @endif

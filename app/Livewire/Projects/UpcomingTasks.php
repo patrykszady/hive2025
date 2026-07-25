@@ -243,10 +243,15 @@ class UpcomingTasks extends Component
         return view('livewire.projects.upcoming-tasks');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
+        $isClientUser = (bool) auth()->user()?->is_browsing_as_client;
+        $project = $params['project'] ?? null;
+
         return view('livewire.partials.tasks-placeholder', [
-            'actionsWidth' => 'w-44',
+            // Mirror the real card's header exactly (see the blade).
+            'projectId' => $project?->id,
+            'clickable' => ! $isClientUser,
         ]);
     }
 }

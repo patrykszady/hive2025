@@ -10,7 +10,7 @@
             <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2 min-h-[2.25rem]">
                     <flux:heading size="lg" class="mb-0 truncate">
-                        <a href="{{ route('vendors.show', $vendor->id) }}" target="_blank" class="hover:underline">{{ $vendor->business_name }}</a>
+                        <a wire:navigate.hover href="{{ route('vendors.show', $vendor->id) }}" target="_blank" class="hover:underline">{{ $vendor->business_name }}</a>
                     </flux:heading>
                 </div>
             </div>

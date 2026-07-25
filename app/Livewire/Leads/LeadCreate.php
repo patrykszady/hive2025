@@ -15,6 +15,8 @@ use Flux;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 class LeadCreate extends Component
@@ -57,7 +59,7 @@ class LeadCreate extends Component
     public array $nylasReferences = [];
     public array $selectedAvailability = [];
 
-    protected $listeners = ['editLead', 'addLead'];
+    public bool $showLeadDelete = false;
 
     public $view_text = [
         'card_title' => 'Create Expense',
@@ -109,11 +111,13 @@ class LeadCreate extends Component
         }
     }
 
+    #[On('addLead')]
     public function addLead()
     {
         $this->modal('lead_form_modal')->show();
     }
 
+    #[On('editLead')]
     public function editLead(Lead $lead)
     {
         $this->lead = $lead->fresh(['user.clients.users', 'last_status']);
@@ -176,6 +180,7 @@ class LeadCreate extends Component
         $this->lead_status = null;
         $this->modal('lead_form_modal')->close();
         $this->dispatch('refreshComponent')->to('leads.leads-index');
+        $this->dispatch('lead-status-updated');
 
         Flux::toast(
             duration: 5000,
@@ -187,13 +192,76 @@ class LeadCreate extends Component
         );
     }
 
+    public function confirmRemove(): void
+    {
+        if (! $this->lead?->exists) {
+            return;
+        }
+
+        $this->showLeadDelete = true;
+    }
+
+    /**
+     * What removing this lead takes with it: the contact person and any client
+     * record that exist only because of this lead.
+     */
+    #[Computed]
+    public function deleteImpact(): array
+    {
+        $impact = ['clients' => [], 'user' => null];
+
+        $user = $this->lead?->user;
+
+        if (! $user) {
+            return $impact;
+        }
+
+        $clients = $user->clients()->get();
+        $orphanedClients = $clients->filter(fn ($client) => $this->clientIsOrphaned($client, $user));
+
+        $impact['clients'] = $orphanedClients->map(fn ($client) => $client->name)->values()->all();
+
+        // The contact keeps their account if anything survives: another lead,
+        // a company, or a client record we're not removing.
+        if ($this->userIsOrphaned($user, $orphanedClients->pluck('id')->all())) {
+            $impact['user'] = $user->full_name;
+        }
+
+        return $impact;
+    }
+
     public function remove()
     {
+        $this->showLeadDelete = false;
+
+        $user = $this->lead->user;
+        $impact = $this->deleteImpact();
+
         $this->lead->delete();
+
+        if ($user) {
+            $orphanedClientNames = $impact['clients'];
+
+            foreach ($user->clients()->get() as $client) {
+                if (! in_array($client->name, $orphanedClientNames, true) || ! $this->clientIsOrphaned($client, $user)) {
+                    continue;
+                }
+
+                $client->users()->detach();
+                $client->vendors()->detach();
+                $client->unsearchable();
+                $client->delete();
+            }
+
+            if ($impact['user'] && $this->userIsOrphaned($user->fresh(), [])) {
+                $user->delete();
+            }
+        }
 
         $this->lead_status = null;
         $this->modal('lead_form_modal')->close();
         $this->dispatch('refreshComponent')->to('leads.leads-index');
+        $this->dispatch('lead-status-updated');
 
         Flux::toast(
             duration: 5000,
@@ -203,6 +271,41 @@ class LeadCreate extends Component
             // route / href / wire:click
             text: '',
         );
+    }
+
+    /**
+     * A client record exists only for this lead when it has no projects and no
+     * contact other than the lead's own.
+     */
+    protected function clientIsOrphaned(\App\Models\Client $client, \App\Models\User $user): bool
+    {
+        return ! $client->projects()->exists()
+            && ! $client->users()->where('users.id', '!=', $user->id)->exists();
+    }
+
+    /**
+     * The lead's contact is orphaned once this lead is gone and nothing else
+     * (another lead, a company, a surviving client, or their own work records)
+     * still refers to them.
+     *
+     * @param  array<int, int>  $ignoreClientIds  clients being removed alongside the lead
+     */
+    protected function userIsOrphaned(\App\Models\User $user, array $ignoreClientIds): bool
+    {
+        // Tasks are queried directly: User::task() maps to a `user_id` column
+        // the tasks table doesn't have (assignees live in `user_ids`).
+        $hasTasks = \App\Models\Task::withoutGlobalScopes()
+            ->where(fn ($q) => $q->where('created_by_user_id', $user->id)
+                ->orWhereJsonContains('user_ids', $user->id)
+                ->orWhereJsonContains('user_ids', (string) $user->id))
+            ->exists();
+
+        return ! $user->leads()->where('leads.id', '!=', $this->lead->id)->exists()
+            && ! $user->vendors()->exists()
+            && ! $user->clients()->whereNotIn('clients.id', $ignoreClientIds ?: [0])->exists()
+            && ! $user->timesheets()->exists()
+            && ! $hasTasks
+            && ! $user->distributions()->exists();
     }
 
     public function message_reply()

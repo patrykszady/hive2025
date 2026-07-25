@@ -1,20 +1,24 @@
 <div @class(['mt-4' => is_null($vendorId)])>
     {{-- Per-vendor usage (vendor show page) hides the card when empty. --}}
     @if(is_null($vendorId) || $this->events->total() > 0)
-    <x-island-card heading="Email Tracking" :separator="true" wire:loading.class="opacity-50 text-opacity-50" wire:transition>
-        <div class="space-y-2">
-            <flux:table :paginate="$this->events->hasPages() ? $this->events : null">
+    <x-index-table heading="Email Tracking" :paginator="$this->events" wire:loading.class="opacity-50 text-opacity-50" wire:transition>
+            {{-- Per-vendor card sits in a ~500px column: no table floor there.
+                 The /vendors page is max-w-2xl (~630px interior), so the shared
+                 640px floor is lowered to 600px via the CSS variable. --}}
+            <flux:table
+                class="{{ $vendorId ? 'table-fixed min-w-0 w-full' : 'index-table' }} [:where(&)]:p-0 [:where(&)]:space-y-0"
+                :style="$vendorId ? null : '--index-table-min: 600px'"
+            >
                 <flux:table.columns>
-                    <flux:table.column>Event</flux:table.column>
-                    <flux:table.column>Template</flux:table.column>
-                    <flux:table.column class="w-56">Vendor</flux:table.column>
-                    <flux:table.column>Date</flux:table.column>
+                    @foreach(\App\Livewire\Vendors\VendorPaymentEmailTrackingTable::columnDefs() as $trackingColumn)
+                        <flux:table.column class="{{ $trackingColumn['width'] }}">{{ $trackingColumn['label'] }}</flux:table.column>
+                    @endforeach
                 </flux:table.columns>
 
                 <flux:table.rows>
                     @forelse ($this->events as $event)
                         <flux:table.row :key="$event->id">
-                            <flux:table.cell>
+                            <flux:table.cell class="w-[20%]">
                                 <flux:badge
                                     size="sm"
                                     :color="match($event->event_type) {
@@ -32,12 +36,14 @@
                                     @endif
                                 </flux:badge>
                             </flux:table.cell>
-                            <flux:table.cell>
-                                <flux:badge size="sm" color="zinc" variant="outline">
-                                    {{ $event->email_template_name ?: 'Vendor Payment' }}
+                            <flux:table.cell class="w-[24%] min-w-0">
+                                {{-- inset: without it this badge is 24px and the row grows to
+                                     49px, 4px taller than every other index row (and the skeleton). --}}
+                                <flux:badge size="sm" color="zinc" variant="outline" inset="top bottom" class="max-w-full min-w-0">
+                                    <span class="truncate">{{ $event->email_template_name ?: 'Vendor Payment' }}</span>
                                 </flux:badge>
                             </flux:table.cell>
-                            <flux:table.cell class="w-56">
+                            <flux:table.cell class="w-[34%] min-w-0">
                                 @php
                                     $names = $event->recipient_vendor_names ?? collect();
                                     $names = $names instanceof \Illuminate\Support\Collection ? $names : collect($names);
@@ -55,14 +61,17 @@
                                 @endphp
 
                                 @if($displayName)
-                                    <div class="text-sm text-zinc-700 dark:text-zinc-300">
-                                        {{ $displayName }}@if($extraCount > 0) <span class="text-xs text-zinc-500 dark:text-zinc-400">+{{ $extraCount }}</span>@endif
-                                    </div>
+                                    {{-- Hover reveals every recipient address behind the "+N". --}}
+                                    <flux:tooltip :content="implode(', ', $emails) ?: (string) $displayName" position="top">
+                                        <div class="truncate text-sm text-zinc-700 dark:text-zinc-300 cursor-default">
+                                            {{ $displayName }}@if($extraCount > 0) <span class="text-xs text-zinc-500 dark:text-zinc-400">+{{ $extraCount }}</span>@endif
+                                        </div>
+                                    </flux:tooltip>
                                 @else
                                     <span class="text-gray-400">-</span>
                                 @endif
                             </flux:table.cell>
-                            <flux:table.cell>
+                            <flux:table.cell class="w-[22%] min-w-0 whitespace-nowrap">
                                 @if($event->event_at)
                                     @php
                                         $daysAgo = $event->event_at->diffInDays(now());
@@ -83,7 +92,6 @@
                     @endforelse
                 </flux:table.rows>
             </flux:table>
-        </div>
-    </x-island-card>
+    </x-index-table>
     @endif
 </div>

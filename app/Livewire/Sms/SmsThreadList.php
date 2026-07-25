@@ -46,10 +46,14 @@ class SmsThreadList extends Component
         ];
     }
 
-    public function handleNewMessage(): void
+    public function handleNewMessage($payload = null): void
     {
+        // Broadcast payload carries the thread id (SmsMessageReceived); pass it
+        // through so sms-offline.js can re-warm that thread's cached fragment.
+        $threadId = is_array($payload) ? ($payload['threadId'] ?? null) : $payload;
+
         // Inject JS directly into the Livewire response to trigger tab flash / sound
-        $this->js("window.dispatchEvent(new CustomEvent('sms-incoming'))");
+        $this->js('window.dispatchEvent(new CustomEvent(\'sms-incoming\', { detail: { threadId: ' . json_encode($threadId) . ' } }))');
     }
 
     public function updating($field): void

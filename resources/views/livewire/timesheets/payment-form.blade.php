@@ -139,6 +139,7 @@
                             </flux:button>
                         </x-slot:actions>
 
+                        <div class="card-flush-bottom">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column></flux:table.column>
@@ -170,6 +171,7 @@
                                 @endforeach
                             </flux:table.rows>
                         </flux:table>
+                        </div>
                     </x-island-card>
                 @endif
 
@@ -182,6 +184,7 @@
                             </flux:button>
                         </x-slot:actions>
 
+                        <div class="card-flush-bottom">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column></flux:table.column>
@@ -213,6 +216,7 @@
                                 @endforeach
                             </flux:table.rows>
                         </flux:table>
+                        </div>
                     </x-island-card>
                 @endif
             </div>

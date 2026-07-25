@@ -4,104 +4,14 @@
 
 <div class="max-w-3xl space-y-2">
     @if($view === NULL && !auth()->user()->is_browsing_as_client)
-        {{-- Mobile: flux:accordion collapsed by default --}}
-        <flux:card class="!px-5 !py-2 mb-4 sm:hidden">
-            <flux:accordion transition>
-                <flux:accordion.item>
-                    <flux:accordion.heading>
-                        <flux:heading size="lg">Filters</flux:heading>
-                    </flux:accordion.heading>
-                    <flux:accordion.content>
-                        <div class="flex flex-col gap-4">
-                            <div class="flex-1 min-w-0">
-                                <flux:field>
-                                    <flux:label>Project</flux:label>
-                                    <flux:input
-                                        wire:model.live.debounce.400ms="project_name_search"
-                                        icon="magnifying-glass"
-                                        placeholder="Search projects..."
-                                    />
-                                </flux:field>
-                            </div>
-
-                            <div class="flex-1 min-w-0">
-                                <flux:field>
-                                    <flux:label>Client</flux:label>
-                                    <flux:select wire:model.live="client_id" variant="listbox" searchable clearable placeholder="All Clients...">
-                                        <x-slot name="search">
-                                            <flux:select.search placeholder="Search..." />
-                                        </x-slot>
-                                        @foreach ($clients as $client)
-                                            <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
-                                        @endforeach
-                                    </flux:select>
-                                </flux:field>
-                            </div>
-
-                            <div class="flex-1 min-w-0">
-                                <flux:field>
-                                    <flux:label>Status</flux:label>
-                                    <flux:select variant="listbox" clearable placeholder="All statuses..." wire:model.live="project_status_title">
-                                        @foreach($projectStatuses as $status)
-                                            <flux:select.option :value="$status['code']">
-                                                <flux:badge size="md" inset="top bottom" :color="$status['color']">
-                                                    {{ $status['label'] }}
-                                                </flux:badge>
-                                            </flux:select.option>
-                                        @endforeach
-                                    </flux:select>
-                                </flux:field>
-                            </div>
-                        </div>
-                    </flux:accordion.content>
-                </flux:accordion.item>
-            </flux:accordion>
-        </flux:card>
-
-        {{-- Desktop: always expanded, no accordion --}}
-        <x-island-card heading="Filters" :separator="true" class="mb-4 hidden sm:block">
-            <div class="flex flex-row items-end gap-4">
-                <div class="flex-1 min-w-0">
-                    <flux:field>
-                        <flux:label>Project</flux:label>
-                        <flux:input
-                            wire:model.live.debounce.400ms="project_name_search"
-                            icon="magnifying-glass"
-                            placeholder="Search projects..."
-                        />
-                    </flux:field>
-                </div>
-
-                <div class="flex-1 min-w-0">
-                    <flux:field>
-                        <flux:label>Client</flux:label>
-                        <flux:select wire:model.live="client_id" variant="listbox" searchable clearable placeholder="All Clients...">
-                            <x-slot name="search">
-                                <flux:select.search placeholder="Search..." />
-                            </x-slot>
-                            @foreach ($clients as $client)
-                                <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </flux:field>
-                </div>
-
-                <div class="flex-1 min-w-0">
-                    <flux:field>
-                        <flux:label>Status</flux:label>
-                        <flux:select variant="listbox" clearable placeholder="All statuses..." wire:model.live="project_status_title">
-                            @foreach($projectStatuses as $status)
-                                <flux:select.option :value="$status['code']">
-                                    <flux:badge size="md" inset="top bottom" :color="$status['color']">
-                                        {{ $status['label'] }}
-                                    </flux:badge>
-                                </flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </flux:field>
-                </div>
-            </div>
-        </x-island-card>
+        <x-filter-card class="mb-4">
+            <x-slot:mobile>
+                @include('livewire.projects.partials.filter-fields', ['layout' => 'stacked'])
+            </x-slot:mobile>
+            <x-slot:desktop>
+                @include('livewire.projects.partials.filter-fields', ['layout' => 'inline'])
+            </x-slot:desktop>
+        </x-filter-card>
     @endif
 
     <livewire:projects.projects-table
@@ -113,7 +23,14 @@
         lazy.bundle
     />
 
-    @if(!auth()->user()->is_browsing_as_client)
+    @php
+        // Skip the component (and its lazy skeleton) entirely for clients with
+        // no tracking rows, so no empty card ever flashes on the client page.
+        $showEmailTracking = ! auth()->user()->is_browsing_as_client
+            && (! $client_id || \App\Models\EmailTracking::whereHas('project', fn ($q) => $q->where('client_id', $client_id))->exists());
+    @endphp
+
+    @if($showEmailTracking)
         <livewire:projects.email-tracking-table
             :client-id="$client_id"
             lazy.bundle

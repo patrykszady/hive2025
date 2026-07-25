@@ -7,7 +7,7 @@
 ])
 
 <div>
-    <div class="flex justify-between items-start gap-4">
+    <div class="flex justify-between items-center gap-4">
         {{-- Collapsible cards: the whole heading row toggles, not just the chevron. --}}
         <div @if($clickable) @click="open = !open" role="button" @endif @class(['min-w-0 flex-1', 'cursor-pointer select-none' => $clickable])>
             <div class="flex items-center gap-2 min-h-[2.25rem]">

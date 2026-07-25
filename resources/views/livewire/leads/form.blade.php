@@ -1,3 +1,5 @@
+{{-- Single root: the delete confirmation is a sibling of the lead modal. --}}
+<div>
 <x-form-modal name="lead_form_modal" title="Lead">
     <flux:tab.group>
         <flux:tabs>
@@ -32,7 +34,7 @@
                 @if ($client)
                     <flux:field>
                         <flux:label>Client</flux:label>
-                        <a href="{{ route('clients.show', $client) }}" wire:navigate class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
+                        <a href="{{ route('clients.show', $client) }}" wire:navigate.hover class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
                             <flux:heading size="sm">{{ $client->name }}</flux:heading>
                             @if ($client->address)
                                 <flux:text class="text-zinc-500">
@@ -54,7 +56,7 @@
                     <flux:field>
                         <flux:label>User</flux:label>
                         @if ($linkedClient)
-                            <a href="{{ route('clients.show', $linkedClient) }}" wire:navigate class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
+                            <a href="{{ route('clients.show', $linkedClient) }}" wire:navigate.hover class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
                                 <flux:heading size="sm">{{ $user->full_name }}</flux:heading>
                                 @if ($user->email)
                                     <flux:text class="text-zinc-500">{{ $user->email }}</flux:text>
@@ -117,10 +119,9 @@
                     variant="listbox"
                     placeholder="Choose Status..."
                 >
-                    <flux:select.option value="New"><flux:badge color="yellow">New</flux:badge></flux:select.option>
-                    <flux:select.option value="Won"><flux:badge color="green">Won</flux:badge></flux:select.option>
-                    <flux:select.option value="Lost"><flux:badge color="red">Lost</flux:badge></flux:select.option>
-                    <flux:select.option value="Not a Fit"><flux:badge color="red">Not a Fit</flux:badge></flux:select.option>
+                    @foreach(\App\Models\Lead::selectableStatuses() as $status)
+                        <flux:select.option value="{{ $status['code'] }}"><flux:badge :color="$status['color']">{{ $status['label'] }}</flux:badge></flux:select.option>
+                    @endforeach
                 </flux:select>
             </form>
         </flux:tab.panel>
@@ -215,9 +216,41 @@
 
     <x-slot name="footer">
         <flux:spacer />
-        <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+        <flux:button wire:click="confirmRemove" variant="danger">Remove</flux:button>
         <flux:button type="submit" form="lead_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
     </x-slot>
 
     {{-- <livewire:users.user-create /> --}}
 </x-form-modal>
+
+{{-- DELETE LEAD CONFIRMATION --}}
+<flux:modal wire:model.self="showLeadDelete" name="lead-delete-confirm" class="max-w-md">
+    @if($lead?->exists)
+        @php($impact = $this->deleteImpact)
+        <div class="space-y-4">
+            <flux:heading size="lg">Delete this lead?</flux:heading>
+
+            <flux:text>{{ $full_name ?: 'This lead' }} — {{ $lead->origin }}{{ $lead->date ? ', ' . $lead->date->format('M j, Y') : '' }}</flux:text>
+
+            <ul class="list-disc pl-5 space-y-1 text-sm text-zinc-600 dark:text-zinc-300">
+                <li>The lead, its statuses and its message history are removed.</li>
+
+                @foreach($impact['clients'] as $clientName)
+                    <li>The client record <strong>{{ $clientName }}</strong> is removed — it has no projects and no other contacts.</li>
+                @endforeach
+
+                @if($impact['user'])
+                    <li>The contact <strong>{{ $impact['user'] }}</strong> and their portal access are removed — they aren't linked to anything else.</li>
+                @elseif($lead->user)
+                    <li>The contact {{ $lead->user->full_name }} keeps their account — they're linked to other records.</li>
+                @endif
+            </ul>
+
+            <div class="flex justify-end gap-2 pt-2">
+                <flux:button variant="ghost" wire:click="$set('showLeadDelete', false)">Cancel</flux:button>
+                <flux:button variant="danger" icon="trash" wire:click="remove">Delete Lead</flux:button>
+            </div>
+        </div>
+    @endif
+</flux:modal>
+</div>

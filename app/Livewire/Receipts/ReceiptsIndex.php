@@ -23,6 +23,25 @@ class ReceiptsIndex extends Component
 
     public string $search = '';
 
+    /**
+     * Column defs for the receipts table — the real header row AND the loading
+     * skeleton render from this one array, so widths can never drift apart.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Vendor', 'width' => 'w-[24%] min-w-0', 'skeletonWidth' => 'w-28'],
+            ['label' => 'From Address', 'width' => 'w-[30%] min-w-0', 'skeletonWidth' => 'w-40'],
+            ['label' => 'Subject Match', 'width' => 'w-[24%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ['label' => 'Type', 'width' => 'w-[14%]', 'skeleton' => 'badge'],
+            // Icon-only delete column. The real xs trash button is inset, so it
+            // no longer drives the row height — a plain skeleton line matches.
+            ['label' => '', 'width' => 'w-[8%]', 'skeletonWidth' => 'w-6'],
+        ];
+    }
+
     protected function rules(): array
     {
         return [

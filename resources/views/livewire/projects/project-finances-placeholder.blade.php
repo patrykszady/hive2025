@@ -1,10 +1,13 @@
 <x-island-card heading="Project Finances" wire:transition>
     <x-slot:actions>
-        <flux:skeleton class="h-8 w-20 rounded-md" animate="shimmer" />
+        @isset($project)
+            @include('livewire.projects.partials.finances-actions')
+        @endisset
     </x-slot:actions>
 
     <flux:separator variant="subtle" />
 
+    <div class="card-flush-bottom">
     <flux:table>
         <flux:table.rows>
             <flux:skeleton.group animate="shimmer">
@@ -52,4 +55,5 @@
             </flux:skeleton.group>
         </flux:table.rows>
     </flux:table>
+    </div>
 </x-island-card>

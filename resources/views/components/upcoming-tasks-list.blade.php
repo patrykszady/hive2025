@@ -23,36 +23,13 @@
         <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
     </x-slot:badge>
     <x-slot:actions>
-        <div class="flex items-center gap-2">
-            @if($projectId && $clickable)
-                <flux:button
-                    size="sm"
-                    variant="ghost"
-                    icon="plus"
-                    wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectId }} })"
-                />
-            @elseif($showAddTask && $clickable)
-                <flux:button
-                    size="sm"
-                    variant="ghost"
-                    icon="plus"
-                    wire:click="$dispatchTo('tasks.task-create', 'addTask', { {{ $clientId ? 'client_id: ' . $clientId . ', ' : '' }}user_ids: [{{ auth()->id() }}] })"
-                />
-            @endif
-            @if($showNotifications)
-                @auth
-                    <flux:button
-                        size="sm"
-                        variant="filled"
-                        :href="route('users.show', auth()->id())"
-                        icon="bell"
-                        class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
-                    >
-                        Notifications
-                    </flux:button>
-                @endauth
-            @endif
-        </div>
+        <x-upcoming-tasks-actions
+            :project-id="$projectId"
+            :client-id="$clientId"
+            :show-add-task="$showAddTask"
+            :clickable="$clickable"
+            :show-notifications="$showNotifications"
+        />
     </x-slot:actions>
 
     @if($groupedTasks->isEmpty() && (!$unscheduledTasks || $unscheduledTasks->isEmpty()))

@@ -37,7 +37,12 @@
                 @endif
 
                 @if($canViewLeads)
-                    <flux:sidebar.item wire:navigate.hover icon="magnifying-glass-plus" href="/leads">Leads</flux:sidebar.item>
+                    <flux:sidebar.item wire:navigate.hover icon="magnifying-glass-plus" href="/leads" tooltip="Leads" class="[&_[data-content]]:!overflow-visible">
+                        <span class="inline-flex items-center gap-2">
+                            <span>Leads</span>
+                            <livewire:leads.leads-sidebar-badge />
+                        </span>
+                    </flux:sidebar.item>
                 @endif
 
                 <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>

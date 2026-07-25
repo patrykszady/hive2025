@@ -39,6 +39,41 @@ class EmailTrackingTable extends Component
         $this->resetPage($this->pageName);
     }
 
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(): int
+    {
+        return 10;
+    }
+
+    /**
+     * Column defs — the real header rows and the loading skeleton render from
+     * this one array. The scoped variant (project/lead card) drops the Project
+     * column, which is implicit there.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(bool $scoped = false): array
+    {
+        $columns = [
+            ['label' => 'Event', 'width' => 'w-[18%]', 'skeleton' => 'badge'],
+            ['label' => 'Template', 'width' => 'w-[22%] min-w-0', 'skeleton' => 'badge'],
+        ];
+
+        if (! $scoped) {
+            $columns[] = ['label' => 'Project', 'width' => 'w-[24%] min-w-0', 'skeletonWidth' => 'w-28'];
+        }
+
+        $columns[] = ['label' => 'Recipients', 'width' => ($scoped ? 'w-[38%]' : 'w-[22%]').' min-w-0', 'skeletonWidth' => 'w-28'];
+        $columns[] = ['label' => 'Date', 'width' => ($scoped ? 'w-[22%]' : 'w-[14%]').' min-w-0', 'skeletonWidth' => 'w-16'];
+
+        return $columns;
+    }
+
     #[Computed]
     public function emailTrackingEvents()
     {
@@ -335,8 +370,16 @@ class EmailTrackingTable extends Component
         return view('livewire.projects.email-tracking-table');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
-        return view('livewire.projects.email-tracking-table-placeholder');
+        // Mirror the real card: scoped variants (project/lead) drop the
+        // Project column and the 640px table floor (they live in ~500px
+        // columns and modals).
+        $scoped = filled($params['projectId'] ?? $params['project-id'] ?? null)
+            || filled($params['leadId'] ?? $params['lead-id'] ?? null);
+
+        return view('livewire.projects.email-tracking-table-placeholder', [
+            'scoped' => $scoped,
+        ]);
     }
 }

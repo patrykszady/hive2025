@@ -149,7 +149,7 @@
             @if(!is_null($expense->associated_expenses))
                 <x-island-card heading="Linked Expenses" :separator="true" subheading="Associated Expenses are expenses that are linked to this Expense. For example, a debit from one account and a credit to another. Or a purchase and return expenses that belong together.">
 
-                    <div class="space-y-6">
+                    <div class="card-flush-bottom space-y-6">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
@@ -162,7 +162,7 @@
                                 @foreach ($expense->associated_expenses as $associated_expense)
                                     <flux:table.row :key="$associated_expense->id">
                                         <flux:table.cell variant="strong">
-                                            <a href="{{route('expenses.show', $associated_expense->id)}}" wire:navigate>
+                                            <a wire:navigate.hover href="{{route('expenses.show', $associated_expense->id)}}" wire:navigate.hover>
                                                 {{ money($associated_expense->amount) }}
                                             </a>
                                         </flux:table.cell>
@@ -180,7 +180,7 @@
             {{-- CHECK ASSOCIATED EXPENSES (other expenses paid by the same check) --}}
             @if($check_associated_expenses->isNotEmpty())
                 <x-island-card heading="Associated Expenses" :separator="true" subheading="Other expenses paid by the same check.">
-                    <div class="space-y-6">
+                    <div class="card-flush-bottom space-y-6">
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
@@ -193,7 +193,7 @@
                                 @foreach ($check_associated_expenses as $associated)
                                     <flux:table.row :key="'check-assoc-' . $associated->id">
                                         <flux:table.cell variant="strong">
-                                            <a href="{{ route('expenses.show', $associated->id) }}" wire:navigate>
+                                            <a wire:navigate.hover href="{{ route('expenses.show', $associated->id) }}" wire:navigate.hover>
                                                 {{ money($associated->amount) }}
                                             </a>
                                         </flux:table.cell>
@@ -201,7 +201,7 @@
                                         <flux:table.cell>{{ $associated->vendor?->name }}</flux:table.cell>
                                         <flux:table.cell>
                                             @if($associated->project_id && $associated->project)
-                                                <a href="{{ route('projects.show', $associated->project_id) }}" wire:navigate>
+                                                <a wire:navigate.hover href="{{ route('projects.show', $associated->project_id) }}" wire:navigate.hover>
                                                     {{ Str::limit($associated->project->name, 25) }}
                                                 </a>
                                             @else

@@ -39,7 +39,7 @@
                 size="sm"
                 icon="chevron-left"
                 :href="$prevUrl"
-                wire:navigate
+                wire:navigate.hover
                 :disabled="$position <= 1"
             >
                 Previous
@@ -59,7 +59,7 @@
                 size="sm"
                 icon-trailing="chevron-right"
                 :href="$nextUrl"
-                wire:navigate
+                wire:navigate.hover
                 :disabled="$position >= $total"
             >
                 Next
@@ -69,7 +69,7 @@
                 size="sm"
                 variant="ghost"
                 href="{{ route('expenses.index') }}"
-                wire:navigate
+                wire:navigate.hover
             >
                 Back to Expenses
             </flux:button>

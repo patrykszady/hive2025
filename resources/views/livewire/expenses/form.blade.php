@@ -17,6 +17,7 @@
         @endif
     </x-slot>
 
+    @if($hydrated)
     <form
         id="expenses_form_modal_form"
         wire:submit="{{$view_text['form_submit']}}"
@@ -348,6 +349,7 @@
             />
         </div>
     </form>
+    @endif
 
     <x-slot name="footer">
         @if($expense->exists && (!$expense->transactions()->exists() || auth()->user()->vendor_role === 'Admin'))
@@ -397,6 +399,7 @@
 
 {{-- UPLOAD RECEIPT MODAL --}}
 <flux:modal name="upload_receipt_modal" class="sm:max-w-md space-y-4">
+@if($hydrated)
     <flux:heading size="lg">Upload Receipt</flux:heading>
 
     <form wire:submit="uploadReceipt" class="space-y-4">
@@ -427,5 +430,6 @@
             </flux:button>
         </div>
     </form>
+@endif
 </flux:modal>
 </div>

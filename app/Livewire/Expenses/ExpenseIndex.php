@@ -30,6 +30,63 @@ class ExpenseIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
+    /**
+     * How many skeleton rows the loading placeholder should paint — the card's
+     * page size, so the skeleton is the same height as the table that replaces
+     * it (no jump on load). Callers that can cheaply COUNT the real rows pass
+     * the smaller of the two.
+     */
+    public static function placeholderRows(?string $view = null): int
+    {
+        return $view === null ? 8 : 5;
+    }
+
+    /**
+     * Column defs for the expenses table — the loading skeleton renders from
+     * the same array as the real header row, so widths can never drift apart.
+     * Columns vary by view, so the caller passes the same $view the table uses.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(?string $view = null): array
+    {
+        $isEmbedView = in_array($view, ['checks.show', 'vendors.show'], true);
+
+        $columns = [
+            ['label' => 'Amount', 'width' => $isEmbedView ? 'w-[20%] min-w-[4.5rem]' : 'w-[14%] min-w-[5.5rem]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Date', 'width' => $isEmbedView ? 'w-[18%] min-w-[4.5rem]' : 'w-[14%] min-w-[6rem]', 'skeletonWidth' => 'w-16'],
+        ];
+
+        if (! $isEmbedView) {
+            $columns[] = ['label' => 'Vendor', 'width' => 'w-[25%] min-w-0', 'skeletonWidth' => 'w-28'];
+        }
+
+        if ($view !== 'projects.show') {
+            $columns[] = ['label' => 'Project', 'width' => ($isEmbedView ? 'w-[37%]' : 'w-[30%]').' min-w-0', 'skeletonWidth' => 'w-32'];
+        }
+
+        $columns[] = ['label' => 'Status', 'width' => ($isEmbedView ? 'w-[25%] min-w-[4.5rem]' : 'w-[17%] min-w-[5rem]').' shrink-0', 'skeleton' => 'badge'];
+
+        return $columns;
+    }
+
+    /**
+     * Column defs for the unmatched-Transactions card on /expenses — its
+     * loading skeleton renders from the same array as the real header row.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function transactionColumnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[16%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Date', 'width' => 'w-[16%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Vendor', 'width' => 'w-[30%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ['label' => 'Bank', 'width' => 'w-[20%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Account', 'width' => 'w-[18%] min-w-0', 'skeletonWidth' => 'w-20'],
+        ];
+    }
+
     #[Url(except: '')]
     public $amount = '';
 
@@ -64,7 +121,6 @@ class ExpenseIndex extends Component
     public $paginate_number = 8;
     public $sortBy = 'date';
     public $sortDirection = 'desc';
-    public bool $transactionsReady = false;
     public array $removedTransactionIds = [];
     public array $matchedReceiptItems = [];
     public string $upcProductName = '';
@@ -213,10 +269,6 @@ class ExpenseIndex extends Component
             $this->paginate_number = 5;
         }
 
-        if ($this->view === null && auth()->user()?->can('create', Expense::class)) {
-            $this->transactionsReady = true;
-        }
-
         $vendorId = auth()->user()->vendor->id;
 
         $this->vendors = Cache::remember("filters:v{$vendorId}:vendors", 600, function () {
@@ -281,11 +333,6 @@ class ExpenseIndex extends Component
         }
 
         unset($this->expenses);
-    }
-
-    public function loadTransactions()
-    {
-        $this->transactionsReady = true;
     }
 
     #[On('transaction-used')]
@@ -454,7 +501,13 @@ class ExpenseIndex extends Component
             'transaction_date',
             'desc',
             $hasTextSearch,
-        )->paginate(100, pageName: 'transactions-page');
+        )->paginate(
+            // 8, matching the Expenses card: inserting a 100-row subtree froze
+            // the page on load — DOM build + style/layout on the main thread.
+            // The card paginates, so the rest is a click away.
+            8,
+            pageName: 'transactions-page'
+        );
 
         // Filter out transactions that were just converted (MeiliSearch may not have indexed yet)
         if (!empty($this->removedTransactionIds)) {
