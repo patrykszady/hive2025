@@ -41,21 +41,26 @@
         @endif
     </flux:table.cell>
     @if(!$projectId)
-    <flux:table.cell class="!px-2 whitespace-nowrap">
+    {{-- min-w-0 + overflow-hidden so a long project name truncates inside its
+         column instead of running under Recipients. --}}
+    <flux:table.cell class="!px-2 whitespace-nowrap min-w-0 overflow-hidden">
         @if($event->project)
             {{-- Expressions inlined: a php directive directly following an if directive miscompiles under Blaze. --}}
             @if($shortProjectName)
-                {{-- Truncated name — tooltip supplies the address context. --}}
-                <flux:tooltip :content="trim(($event->project->project_name ?? '') . ' · ' . ($event->project->address ?? ''), ' ·')" position="top">
-                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400">
-                        {{ \Illuminate\Support\Str::limit($event->project->project_name ?? $event->project->address ?? '-', 16) }}
+                {{-- Client page: just the name; the tooltip adds the address. --}}
+                <x-truncate-tooltip :content="trim(($event->project->project_name ?? '') . ' · ' . ($event->project->address ?? ''), ' ·')">
+                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="block truncate font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400">
+                        {{ $event->project->project_name ?? $event->project->address ?? '-' }}
                     </a>
-                </flux:tooltip>
+                </x-truncate-tooltip>
             @else
-                {{-- Full "address | name" is already self-explanatory. --}}
-                <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400">
-                    {{ $event->project->name ?? '-' }}
-                </a>
+                {{-- Standalone index: full "address | name", truncated to its
+                     column with the tooltip showing only when it's clipped. --}}
+                <x-truncate-tooltip :content="$event->project->name ?? ''">
+                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="block truncate font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400">
+                        {{ $event->project->name ?? '-' }}
+                    </a>
+                </x-truncate-tooltip>
             @endif
         @else
             <span class="text-gray-400">-</span>
