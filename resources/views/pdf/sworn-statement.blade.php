@@ -19,6 +19,11 @@
         .ln .lbl { white-space: nowrap; padding-right: 6px; }
         .ln .lbl.sfx { padding-right: 0; padding-left: 8px; }
         .ln .uline { flex: 1 1 auto; border-bottom: 1px solid #333; min-width: 30px; min-height: 1.15em; font-weight: 600; padding: 0 6px 1px; text-align: center; }
+        /* Sign-here marker: highlighter-yellow asterisk (same as the lien waiver). */
+        .req-star { background: #fde047; padding: 0 2px; font-weight: 700; }
+        /* Caption under a blank the affiant fills in by hand. */
+        .ln .fld { display: flex; flex-direction: column; flex: 1 1 auto; }
+        .ln .fld .cap { font-size: 6.5pt; text-align: center; letter-spacing: 0.02em; }
         .recital { font-size: 7.4pt; font-style: italic; margin: 5px 0 4px; }
         .ss-table { width: 100%; border-collapse: collapse; margin: 4px 0; font-size: 7.7pt; }
         .ss-table th, .ss-table td { border: 1px solid #333; padding: 2px 4px; text-align: left; }
@@ -68,8 +73,11 @@
         </tr>
     </table>
 
-    <div class="ln"><span class="lbl">The affiant,</span><span class="uline">{{ mb_strtoupper($affiantName ?? '') }}</span><span class="lbl sfx">being first duly sworn, on oath deposes and says that he/she is</span></div>
-    <div class="ln"><span class="uline" style="flex: 0 0 26%;">{{ mb_strtoupper($affiantPosition ?? '') }}</span><span class="lbl sfx">of</span><span class="uline">{{ $contractor->business_name }}</span><span class="lbl sfx">that</span><span class="uline" style="flex: 0 0 8%;">it</span><span class="lbl sfx">has contract with</span></div>
+    {{-- NAME and POSITION are signed for by hand at the notary, so they print
+         blank with a highlighted asterisk and a caption, like the lien waiver's
+         DATE / SIGNATURE AND TITLE blanks. --}}
+    <div class="ln"><span class="lbl">The affiant<span class="req-star">*</span></span><span class="fld"><span class="uline">&nbsp;</span><span class="cap">(NAME)</span></span><span class="lbl sfx">being first duly sworn, on oath deposes and says that he/she is</span></div>
+    <div class="ln"><span class="fld" style="flex: 0 0 26%;"><span class="uline">&nbsp;</span><span class="cap">(POSITION)<span class="req-star">*</span></span></span><span class="lbl sfx">of</span><span class="uline">{{ $contractor->business_name }}</span><span class="lbl sfx">that</span><span class="uline" style="flex: 0 0 8%;">it</span><span class="lbl sfx">has contract with</span></div>
     <div class="ln"><span class="uline">{{ $ownerName }}</span><span class="lbl sfx">owner, for</span><span class="uline">general construction &mdash; {{ $project->project_name }}</span></div>
     <div class="ln"><span class="lbl">following described premise in</span><span class="uline" style="flex: 0 0 18%;">{{ mb_strtoupper($projectCounty ?? '') }}</span><span class="lbl sfx">County, {{ $stateName }}, to-wit:</span><span class="uline">{{ $premises }}</span></div>
 

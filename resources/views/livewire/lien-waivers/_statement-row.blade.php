@@ -5,16 +5,14 @@
             <div class="text-xs text-zinc-500">{{ $statement->project?->address }}</div>
         </flux:table.cell>
     @endunless
-    <flux:table.cell :class="$cell">
-        <div class="flex items-center gap-1">
-            <flux:tooltip :content="$this->contractorVendor?->business_name ?? ''" position="top">
-                <span>{{ Str::limit($this->contractorVendor?->short_name ?? $this->contractorVendor?->business_name ?? '—', $nameLimit) }}</span>
-            </flux:tooltip>
+    {{-- Same shared link + action affordance as the waiver rows, so the GCSS
+         row reads as part of the same table. --}}
+    <flux:table.cell class="!px-2 whitespace-nowrap min-w-0">
+        <div class="flex items-center gap-1 min-w-0">
+            <x-table-link :label="$this->contractorVendor?->short_name ?? $this->contractorVendor?->business_name ?? '—'" />
 
-            <flux:dropdown>
-                <button type="button" class="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Statement actions">
-                    <flux:icon.pencil-square variant="micro" />
-                </button>
+            <flux:dropdown position="bottom" align="start">
+                <flux:button variant="ghost" size="xs" icon="pencil-square" inset="top bottom" class="shrink-0" aria-label="Statement actions" />
 
                 <flux:menu>
                     {{-- Project card has "Download all" on the draw header; only the
@@ -39,20 +37,26 @@
             </flux:dropdown>
         </div>
     </flux:table.cell>
-    <flux:table.cell :class="$cell">${{ number_format((float) $statement->this_payment, 2) }}</flux:table.cell>
+    <flux:table.cell class="!px-2 whitespace-nowrap">${{ number_format((float) $statement->this_payment, 2) }}</flux:table.cell>
     @unless($isProjectScoped)
-        <flux:table.cell :class="$cell">{{ optional($statement->created_at)->format('m/d/y') }}</flux:table.cell>
+        <flux:table.cell>{{ optional($statement->created_at)->format('m/d/y') }}</flux:table.cell>
     @endunless
-    <flux:table.cell :class="$cell">
+    {{-- GCSS is an abbreviation, so its tooltip earns its place. --}}
+    <flux:table.cell class="!px-2 whitespace-nowrap">
         <flux:tooltip content="General Contractor Sworn Statement" position="top">
-            <flux:badge size="sm" color="indigo">GCSS</flux:badge>
+            <flux:badge size="sm" color="indigo" inset="top bottom">GCSS</flux:badge>
         </flux:tooltip>
     </flux:table.cell>
-    <flux:table.cell :class="$cell">
+    <flux:table.cell class="!px-2 whitespace-nowrap">
         @if($statement->status)
-            <flux:tooltip :content="$statement->status->label()" position="top">
-                <flux:badge size="sm" :color="$statement->status->color()">{{ $isProjectScoped ? $statement->status->name : $statement->status->label() }}</flux:badge>
-            </flux:tooltip>
+            @php($statusText = $isProjectScoped ? $statement->status->name : $statement->status->label())
+            @if($statusText !== $statement->status->label())
+                <flux:tooltip :content="$statement->status->label()" position="top">
+                    <flux:badge size="sm" :color="$statement->status->color()" inset="top bottom">{{ $statusText }}</flux:badge>
+                </flux:tooltip>
+            @else
+                <flux:badge size="sm" :color="$statement->status->color()" inset="top bottom">{{ $statusText }}</flux:badge>
+            @endif
         @endif
     </flux:table.cell>
 </flux:table.row>

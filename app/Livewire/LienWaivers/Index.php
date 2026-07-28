@@ -94,15 +94,29 @@ class Index extends Component
     }
 
     /**
-     * Column defs for the standalone /lien-waivers table — the loading skeleton
-     * renders from this array so it can never drift from the real header row.
-     * (The project-scoped card uses the per-draw accordion in _table.blade.php,
-     * not this flat table.)
+     * Column defs — ONE source for the real header row, the cells and the
+     * skeleton, so they can never drift (same contract as
+     * EmailTrackingTable::columnDefs).
+     *
+     * scoped = the per-draw table inside a project card: no Project column
+     * (it's implied) and no Through date (the draw header carries the date),
+     * squeezed into a ~500px column, so widths are explicit percentages.
      *
      * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
      */
-    public static function columnDefs(): array
+    public static function columnDefs(bool $scoped = false): array
     {
+        if ($scoped) {
+            // Width budget: Vendor is the only column that truncates in
+            // practice, so it takes the slack; Type/Status hold short badges.
+            return [
+                ['label' => 'Vendor', 'width' => 'w-[40%] min-w-0', 'skeletonWidth' => 'w-24'],
+                ['label' => 'Amount', 'width' => 'w-[22%] min-w-0', 'skeletonWidth' => 'w-16'],
+                ['label' => 'Type', 'width' => 'w-[18%] min-w-0', 'skeleton' => 'badge'],
+                ['label' => 'Status', 'width' => 'w-[20%] min-w-0', 'skeleton' => 'badge'],
+            ];
+        }
+
         // The real table declares no per-column widths — .index-table is
         // table-fixed, so the six columns split evenly. Mirror that exactly.
         return [

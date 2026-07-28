@@ -436,8 +436,13 @@ it('splits change orders into extras and credits, appends the kind-of-work suffi
         ->toContain('Shipping')                                              // retail: kind as typed…
         ->not->toContain('Shipping — labor')                                 // …never suffixed
         ->toContain('General construction — labor &amp; material (incl. extras)')
-        ->toContain('TEST USER')                                             // affiant name, uppercased
-        ->toContain('SECRETARY');                                            // affiant pivot position
+        // NAME and POSITION are sworn in front of a notary, so they print as
+        // captioned blanks with the highlighted asterisk — never pre-filled.
+        ->toContain('(NAME)')
+        ->toContain('(POSITION)')
+        ->toContain('req-star')
+        ->not->toContain('TEST USER')
+        ->not->toContain('SECRETARY');
 });
 
 it('gives a sub waiver its own affidavit with the sub-contract math, GC affidavit stays single-line', function () {

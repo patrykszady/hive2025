@@ -39,24 +39,22 @@
                  row partials get their own copy of the outer flag — always false
                  here, since this branch IS the standalone page. --}}
             @php($isProjectScoped = $this->scoped)
-            @php($cell = '')
-            @php($nameLimit = 20)
+            {{-- Header labels AND widths come from columnDefs(), same as the
+                 project card, so the two variants can't drift. --}}
+            @php($columns = \App\Livewire\LienWaivers\Index::columnDefs())
             @if($this->waivers->isNotEmpty() || $this->swornStatements->isNotEmpty())
                 <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
                     <flux:table.columns>
-                        <flux:table.column>Project</flux:table.column>
-                        <flux:table.column>Vendor</flux:table.column>
-                        <flux:table.column>Amount</flux:table.column>
-                        <flux:table.column>Through</flux:table.column>
-                        <flux:table.column>Type</flux:table.column>
-                        <flux:table.column>Status</flux:table.column>
+                        @foreach($columns as $column)
+                            <flux:table.column class="{{ $column['width'] }}">{{ $column['label'] }}</flux:table.column>
+                        @endforeach
                     </flux:table.columns>
                     <flux:table.rows>
                         @foreach($this->swornStatements as $statement)
-                            @include('livewire.lien-waivers._statement-row', ['statement' => $statement])
+                            @include('livewire.lien-waivers._statement-row', ['statement' => $statement, 'columns' => $columns])
                         @endforeach
                         @foreach($this->waivers as $waiver)
-                            @include('livewire.lien-waivers._waiver-row', ['waiver' => $waiver])
+                            @include('livewire.lien-waivers._waiver-row', ['waiver' => $waiver, 'columns' => $columns])
                         @endforeach
                     </flux:table.rows>
                 </flux:table>
@@ -71,7 +69,9 @@
              (x-details.card drops the chevron and the clickable header when
              :accordion is false.) --}}
         @php($hasWaivers = $this->drawGroups['draws']->isNotEmpty() || $this->drawGroups['other']->isNotEmpty())
-        <x-details.card title="Lien Waivers" :expanded="false" :details_text="false" :separator="false" :accordion="$hasWaivers">
+        {{-- Expanded on load when there's something to show: the draws and their
+             waivers are the point of the card. --}}
+        <x-details.card title="Lien Waivers" :expanded="$hasWaivers" :details_text="false" :separator="false" :accordion="$hasWaivers">
             <x-slot:header_buttons>
                 <flux:button size="sm" variant="primary" icon="document-text" wire:click="openSwornStatement"
                     class="!bg-indigo-500 hover:!bg-indigo-600 !text-white">
@@ -186,11 +186,13 @@
                 <flux:field>
                     <flux:label>Net amount of this payment</flux:label>
                     <flux:description class="italic">The draw the owner is paying you now.</flux:description>
-                    {{-- Flux inputs cap at the default size — XL emulated with classes. --}}
+                    {{-- Plain Flux sizing: the old "XL emulation" only ever hit
+                         the prefix (flux:input inside a group doesn't take
+                         !h-14/!text-2xl), leaving a 56px "$" beside a 40px
+                         input. --}}
                     <flux:input.group>
-                        <flux:input.group.prefix class="!text-xl">$</flux:input.group.prefix>
+                        <flux:input.group.prefix>$</flux:input.group.prefix>
                         <flux:input
-                            class="!h-14 !text-2xl font-semibold"
                             wire:model="ssThisPayment"
                             mask:dynamic="$money($input)"
                             inputmode="decimal"

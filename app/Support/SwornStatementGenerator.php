@@ -281,16 +281,10 @@ class SwornStatementGenerator
         // directly so the owner line always fills in.
         $owner = $project->client()->withoutGlobalScopes()->first();
 
-        // The affiant is whoever generates the statement; their business title
-        // at the contractor comes from the user↔vendor pivot.
-        $affiantUser = auth()->user();
-        $affiantName = trim((string) ($affiantUser?->first_name ?? '') . ' ' . (string) ($affiantUser?->last_name ?? ''));
-        $affiantPosition = $affiantUser
-            ? (string) (\App\Models\UserVendor::query()
-                ->where('user_id', $affiantUser->id)
-                ->where('vendor_id', $contractor->id)
-                ->value('position') ?? '')
-            : '';
+        // NOTE: the affiant's NAME and POSITION are deliberately NOT resolved
+        // here. The GCSS is sworn in front of a notary, so those blanks print
+        // empty (with a highlighted asterisk) and are completed by hand — the
+        // person generating the PDF is not necessarily the one who signs it.
 
         $estimateNumber = (string) ($project->estimates?->first()?->number ?? '');
 
@@ -308,8 +302,6 @@ class SwornStatementGenerator
             'view' => [
                 'project' => $project,
                 'contractor' => $contractor,
-                'affiantName' => $affiantName,
-                'affiantPosition' => $affiantPosition,
                 'ownerName' => (string) ($owner?->name ?? ''),
                 'projectCounty' => LienWaiverDocumentGenerator::lookupProjectCounty($project),
                 'lines' => $lines->all(),

@@ -134,6 +134,7 @@ class PickTimes extends Component
     protected static function hasWindowOnOrAfter(string $date, \Illuminate\Support\Carbon $earliest): bool
     {
         return collect(self::WINDOWS)
+            ->reject(fn (string $window) => $window === 'Anytime')
             ->contains(function (string $window) use ($date, $earliest) {
                 $times = Lead::parseSlotTimes($window);
 
@@ -199,19 +200,30 @@ class PickTimes extends Component
             return;
         }
 
-        // The slot must START at least MIN_LEAD_HOURS from now. Anytime counts
-        // from midnight, so on the boundary day only explicit later windows
-        // qualify.
-        $times = Lead::parseSlotTimes($window);
-        $start = \Illuminate\Support\Carbon::parse(
-            $this->date.' '.($times[0] ?? '00:00'),
-            static::timezone(),
-        );
+        // The slot must START at least the required notice from now. "Anytime"
+        // means "any window you offer that day", so it qualifies whenever the
+        // day has at least one qualifying window — measuring it from midnight
+        // would offer a button the picker then refuses.
+        $earliest = static::earliestStart($this->lead);
 
-        if ($start->lt(static::earliestStart($this->lead))) {
-            $this->addError('times', 'Please pick a later time — we need at least '.static::minLeadHours($this->lead).' hours notice.');
+        if ($window === 'Anytime') {
+            if (! static::hasWindowOnOrAfter($this->date, $earliest)) {
+                $this->addError('times', 'Please pick a later date — we need at least '.static::minLeadHours($this->lead).' hours notice.');
 
-            return;
+                return;
+            }
+        } else {
+            $times = Lead::parseSlotTimes($window);
+            $start = \Illuminate\Support\Carbon::parse(
+                $this->date.' '.($times[0] ?? '00:00'),
+                static::timezone(),
+            );
+
+            if ($start->lt($earliest)) {
+                $this->addError('times', 'Please pick a later time — we need at least '.static::minLeadHours($this->lead).' hours notice.');
+
+                return;
+            }
         }
 
         $slot = ['date' => $this->date, 'time' => $window];
