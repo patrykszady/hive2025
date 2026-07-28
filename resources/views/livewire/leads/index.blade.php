@@ -14,6 +14,7 @@
                 heading="Leads"
                 :columns="\App\Livewire\Leads\LeadsIndex::columnDefs()"
                 :rows="\App\Livewire\Leads\LeadsIndex::placeholderRows()"
+                :page-size="\App\Livewire\Leads\LeadsIndex::placeholderRows()"
             >
                 <x-slot:actions>
                     @include('livewire.leads.partials.index-actions')
@@ -47,6 +48,15 @@
                                 </flux:menu.item>
                             @endforeach
                         </flux:menu.submenu>
+                        <flux:menu.separator />
+                        <flux:menu.item
+                            variant="danger"
+                            icon="trash"
+                            wire:click="confirmBulkDelete"
+                            x-bind:disabled="$wire.selected.length === 0"
+                        >
+                            Delete
+                        </flux:menu.item>
                     </flux:menu>
                 </flux:dropdown>
             </div>
@@ -57,24 +67,24 @@
 
             <flux:table
                 wire:loading.class.delay.shortest="opacity-50 pointer-events-none"
-                wire:target="bulkSetStatus"
+                wire:target="bulkSetStatus, bulkDelete"
                 class="transition-opacity duration-150 index-table compact-table [:where(&)]:p-0 [:where(&)]:space-y-0"
             >
                 <flux:table.columns>
-                    <flux:table.column class="w-10 !px-3" x-show="bulkMode" x-cloak>
+                    <flux:table.column class="w-12 !px-3" x-show="bulkMode" x-cloak>
                         <span class="sr-only">Select</span>
                     </flux:table.column>
                     <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" class="w-[14%]">Date</flux:table.column>
                     <flux:table.column class="w-[17%] min-w-0">Client</flux:table.column>
-                    <flux:table.column class="w-[20%]">Status</flux:table.column>
-                    <flux:table.column class="w-[14%]">Last</flux:table.column>
-                    <flux:table.column class="w-[12%] min-w-0">Origin</flux:table.column>
-                    <flux:table.column class="w-[23%] min-w-0">Address</flux:table.column>
+                    <flux:table.column class="w-[12%]">Status</flux:table.column>
+                    <flux:table.column class="w-[10%]">Last</flux:table.column>
+                    <flux:table.column class="w-[16%] min-w-0">Origin</flux:table.column>
+                    <flux:table.column class="w-[31%] min-w-0">Address</flux:table.column>
                 </flux:table.columns>
                 <flux:table.rows>
                     @foreach ($this->leads as $lead)
                         <flux:table.row :key="$lead->id">
-                            <flux:table.cell class="w-10 !px-3" x-show="bulkMode" x-cloak>
+                            <flux:table.cell class="w-12 !px-3" x-show="bulkMode" x-cloak>
                                 <flux:checkbox size="sm" wire:model="selected" value="{{ $lead->id }}" />
                             </flux:table.cell>
                             <flux:table.cell
@@ -82,7 +92,8 @@
                                 variant="strong"
                                 class="cursor-pointer w-[14%] whitespace-nowrap hover:text-indigo-600 dark:hover:text-indigo-400"
                                 >
-                                {{ $lead->date->format('m/d/y') }}
+                                {{-- Stored UTC (now() at intake) — same reason as Last below. --}}
+                                {{ $lead->date->copy()->setTimezone(browser_timezone())->format('m/d/y') }}
                             </flux:table.cell>
 
                             <flux:table.cell class="w-[17%] min-w-0">
@@ -92,7 +103,7 @@
                                 />
                             </flux:table.cell>
 
-                            <flux:table.cell class="w-[20%]">
+                            <flux:table.cell class="w-[12%]">
                                 <x-status-select
                                     :value="$lead->last_status?->title ?? ''"
                                     :options="\App\Models\Lead::selectableStatuses()"
@@ -101,19 +112,21 @@
                                 />
                             </flux:table.cell>
 
-                            <flux:table.cell class="w-[14%] whitespace-nowrap">
+                            <flux:table.cell class="w-[10%] whitespace-nowrap">
                                 @if($lead->last_status && !in_array($lead->last_status->title, ['New', 'Won', 'Lost', 'Not a Fit']))
-                                    {{ $lead->last_status->created_at->format('m/d/y') }}
+                                    {{-- Stored UTC; show it in the viewer's/vendor's zone or a
+                                         late-evening reply reads as the next day. --}}
+                                    {{ $lead->last_status->created_at->copy()->setTimezone(browser_timezone())->format('m/d/y') }}
                                 @endif
                             </flux:table.cell>
 
-                            <flux:table.cell class="w-[12%] min-w-0">
+                            <flux:table.cell class="w-[16%] min-w-0">
                                 <x-truncate-tooltip :content="$lead->origin">
                                     <div class="truncate">{{ $lead->origin }}</div>
                                 </x-truncate-tooltip>
                             </flux:table.cell>
 
-                            <flux:table.cell class="w-[23%] min-w-0">
+                            <flux:table.cell class="w-[31%] min-w-0">
                                 @php($addressParts = $lead->shortAddressParts())
                                 <x-truncate-tooltip :content="trim($addressParts['city'].' | '.$addressParts['street'], ' |')">
                                     <div class="truncate">
@@ -132,6 +145,38 @@
                 </flux:table.rows>
             </flux:table>
     </x-index-table>
+
+    {{-- Bulk delete confirmation — same consequences as the single-lead delete
+         (leads plus any client records / contacts that exist only for them,
+         via Lead::deleteWithOrphans). Lives INSIDE the island: the bulk menu
+         triggers from in here, and island-originated updates re-render only
+         island content — outside, the modal would never open. Content gated
+         so the impact queries run only while the modal is open. --}}
+    <flux:modal wire:model.self="showBulkDelete" name="leads-bulk-delete-confirm" class="max-w-md">
+        @if($showBulkDelete)
+            @php($impact = $this->bulkDeleteImpact)
+            <div class="space-y-4">
+                <flux:heading size="lg">Delete {{ $impact['count'] }} {{ str('lead')->plural($impact['count']) }}?</flux:heading>
+
+                <ul class="list-disc pl-5 space-y-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    <li>The {{ str('lead')->plural($impact['count']) }}, their statuses and message history are removed.</li>
+
+                    @foreach($impact['clients'] as $clientName)
+                        <li>The client record <strong>{{ $clientName }}</strong> is removed — it has no projects and no other contacts.</li>
+                    @endforeach
+
+                    @foreach($impact['users'] as $userName)
+                        <li>The contact <strong>{{ $userName }}</strong> and their portal access are removed — they aren't linked to anything else.</li>
+                    @endforeach
+                </ul>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <flux:button variant="ghost" wire:click="$set('showBulkDelete', false)">Cancel</flux:button>
+                    <flux:button variant="danger" icon="trash" wire:click="bulkDelete">Delete {{ str('Lead')->plural($impact['count']) }}</flux:button>
+                </div>
+            </div>
+        @endif
+    </flux:modal>
     @endisland
     <livewire:leads.lead-create />
 </div>

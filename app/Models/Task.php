@@ -672,4 +672,54 @@ class Task extends Model
         // Fallback - least efficient, makes separate queries
         return $this->predecessorDependencies()->count() + $this->successorDependencies()->count();
     }
+
+    /**
+     * Per-day task-card counts for the loading skeleton, one entry per date
+     * block the loaded card paints. Mirrors groupedTasks(): the same 8-day
+     * window, the same options.dates / start_date grouping, and the same
+     * padding of empty days — so the skeleton is the same height as the card
+     * that replaces it. Two light columns, a handful of rows.
+     *
+     * @return array{past: bool, days: array<int, array<int, bool>>}
+     */
+    public static function skeletonDayCounts(\Illuminate\Database\Eloquent\Builder $tasks): array
+    {
+        $today = browser_today();
+        $cutoffStr = $today->copy()->subDay()->format('Y-m-d');
+        $windowEndStr = $today->copy()->addDays(6)->format('Y-m-d');
+
+        $rows = $tasks
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('start_date', '<=', $windowEndStr)
+            ->whereDate('end_date', '>=', $cutoffStr)
+            ->get(['id', 'start_date', 'options', 'user_ids', 'vendor_id']);
+
+        // Per day, one entry per task card: true when that card carries the
+        // avatar/vendor row (16px taller), so the skeleton matches both shapes.
+        $byDate = [];
+        foreach ($rows as $task) {
+            $dates = (array) data_get($task->options, 'dates', []);
+            $dates = $dates ?: [optional($task->start_date)->format('Y-m-d')];
+            $hasPeople = filled(array_filter((array) $task->user_ids)) || filled($task->vendor_id);
+
+            foreach (array_filter($dates) as $dateStr) {
+                if ($dateStr >= $cutoffStr && $dateStr <= $windowEndStr) {
+                    $byDate[$dateStr][] = $hasPeople;
+                }
+            }
+        }
+
+        // Yesterday is not a day block: the loaded card tucks past tasks into a
+        // collapsed accordion, so it contributes one slim row (represented by
+        // the 'past' key) instead.
+        $blocks = ['past' => ! empty($byDate[$cutoffStr]), 'days' => []];
+
+        for ($i = 0; $i < 7; $i++) {
+            $dateStr = $today->copy()->addDays($i)->format('Y-m-d');
+            $blocks['days'][] = $byDate[$dateStr] ?? [];
+        }
+
+        return $blocks;
+    }
 }

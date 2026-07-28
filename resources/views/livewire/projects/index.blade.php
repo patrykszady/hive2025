@@ -1,8 +1,13 @@
 @php
     $projectStatuses = \App\Models\ProjectStatus::selectableStatuses();
+
+    // Standalone /projects owns the page width and its tighter filter rhythm;
+    // embedded in a show-page column it must inherit that column's spacing
+    // instead (otherwise its cards sit 8px apart inside a 16px column).
+    $embedded = $view !== null;
 @endphp
 
-<div class="max-w-3xl space-y-2">
+<div class="{{ $embedded ? 'space-y-4' : 'max-w-3xl space-y-2' }}">
     @if($view === NULL && !auth()->user()->is_browsing_as_client)
         <x-filter-card class="mb-4">
             <x-slot:mobile>
@@ -27,7 +32,7 @@
         // Skip the component (and its lazy skeleton) entirely for clients with
         // no tracking rows, so no empty card ever flashes on the client page.
         $showEmailTracking = ! auth()->user()->is_browsing_as_client
-            && (! $client_id || \App\Models\EmailTracking::whereHas('project', fn ($q) => $q->where('client_id', $client_id))->exists());
+            && (! $client_id || \App\Models\EmailTracking::clientFacing()->forClientAndItsLeads($client_id)->exists());
     @endphp
 
     @if($showEmailTracking)

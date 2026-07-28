@@ -12,7 +12,7 @@
 <x-index-table.placeholder
     heading="Payments"
     :columns="\App\Livewire\Payments\PaymentsIndex::columnDefs($tableView)"
-    :rows="$isIndexView ? 5 : 3"
+    :rows="$rows ?? ($isIndexView ? 5 : 3)"
     :compact="false"
     :floor="$isIndexView"
     wire:transition

@@ -259,6 +259,13 @@ WebAuthnRoutes::register()->withoutMiddleware(VerifyCsrfToken::class);
 // Short URL for SMS (redirects to full availability page)
 Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availability.short');
 
+// Public lead time picker — linked from the consult email when the lead's
+// preferred times have passed (or none were given). The signed URL is the
+// credential; no auth. See Lead::availabilityUrl().
+Route::get('lead/times/{lead}', \App\Livewire\Leads\PickTimes::class)
+    ->name('lead.availability')
+    ->middleware('signed');
+
 // Short URL for client schedule SMS
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
 

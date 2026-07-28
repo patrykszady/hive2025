@@ -2,6 +2,7 @@
     heading="Clients"
     :columns="\App\Livewire\Clients\ClientsTable::columnDefs()"
     :rows="\App\Livewire\Clients\ClientsTable::placeholderRows()"
+    :page-size="\App\Livewire\Clients\ClientsTable::placeholderRows()"
     :compact="false"
     wire:transition
 >

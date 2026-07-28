@@ -50,8 +50,15 @@ class ProjectFinances extends Component
 
     public function placeholder(array $params = [])
     {
+        $project = $params['project'] ?? null;
+
         return view('livewire.projects.project-finances-placeholder', [
-            'project' => $params['project'] ?? null,
+            'project' => $project,
+            // The real card only shows Profit on Complete/Service Call projects
+            // (project-finances.blade.php); painting it always makes the
+            // skeleton a row taller than the card that replaces it.
+            'showProfit' => $project instanceof \App\Models\Project
+                && in_array($project->latestStatus?->title, ['Complete', 'Service Call'], true),
         ]);
     }
 }

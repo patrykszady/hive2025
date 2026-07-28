@@ -241,15 +241,7 @@ trait HasCallActions
             return 'Unknown';
         }
 
-        $digits = preg_replace('/\D/', '', $phone);
-        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            $digits = substr($digits, 1);
-        }
-        if (strlen($digits) === 10) {
-            return sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6));
-        }
-
-        return $phone;
+        return phone_display($phone);
     }
 
     public function inviteParticipantToCall(int $callLogId, int $participantId, string $participantPhone, string $participantName): void

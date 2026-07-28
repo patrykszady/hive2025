@@ -1,22 +1,12 @@
-<div>
-    <flux:card class="mt-4 space-y-2 !px-5 !py-2">
-        <div class="flex justify-between items-center min-h-[2.25rem] gap-4">
-            <flux:skeleton class="h-6 w-32" />
-        </div>
-        @if($expanded ?? false)
-            <flux:separator variant="subtle" />
-            <div class="space-y-3 py-2">
-                <div class="flex gap-4">
-                    <flux:skeleton class="h-4 w-20" />
-                    <flux:skeleton class="h-4 w-24" />
-                    <flux:skeleton class="h-4 w-28" />
-                </div>
-                <div class="flex gap-4">
-                    <flux:skeleton class="h-4 w-20" />
-                    <flux:skeleton class="h-4 w-24" />
-                    <flux:skeleton class="h-4 w-28" />
-                </div>
-            </div>
-        @endif
-    </flux:card>
+{{-- Skeleton for the Vendor Documents card — the SHARED index-table skeleton,
+     same shell and same columnDefs the loaded table renders from, with a real
+     row count so it paints exactly what will arrive (0 rows = header only). --}}
+<div wire:transition>
+    <x-index-table.placeholder
+        :heading="$view ? 'Vendor Documents' : ($vendor->name ?? 'Vendor Documents')"
+        :columns="\App\Livewire\VendorDocs\VendorDocsCard::columnDefs()"
+        :rows="$rows ?? \App\Livewire\VendorDocs\VendorDocsCard::placeholderRows()"
+        :floor="false"
+        :compact="false"
+    />
 </div>

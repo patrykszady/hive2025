@@ -1,6 +1,12 @@
-<div>
-    <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
-    <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-5">
+<x-page.shell
+    :cols="4"
+    :breadcrumbs="[
+        ['label' => 'Expenses', 'href' => route('expenses.index')],
+        ['label' => trim(money($expense->amount).' · '.($expense->vendor->business_name ?? 'Expense'), ' ·')],
+    ]"
+>
+    {{-- sticky passes straight through onto .page-col --}}
+    <x-page.column :span="2" class="lg:sticky lg:top-5">
             {{-- EXPENSE DETAILS --}}
             <x-details.card 
                 title="Expense Details"
@@ -142,9 +148,9 @@
                     :title="$expense->transactions()->exists() ? $transaction_word : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check ' . $transaction_word : $transaction_word)"
                 />
             @endif
-        </div>
+    </x-page.column>
 
-        <div class="col-span-4 space-y-2 lg:col-span-2">
+    <x-page.column :span="2">
             {{-- ASSOCIATED EXPENSES --}}
             @if(!is_null($expense->associated_expenses))
                 <x-island-card heading="Linked Expenses" :separator="true" subheading="Associated Expenses are expenses that are linked to this Expense. For example, a debit from one account and a credit to another. Or a purchase and return expenses that belong together.">
@@ -371,8 +377,7 @@
                     </x-slot:details>
                 </x-details.card>
             @endif
-        </div>
-    </div>
+    </x-page.column>
 
 	{{-- top level so content is in front of everything on page --}}
     @can('update', $expense)
@@ -384,4 +389,4 @@
     <flux:modal wire:model.self="showItemModal" class="md:min-w-lg">
         <x-expenses.item-detail-modal-content :item="$selectedItem" />
     </flux:modal>
-</div>
+</x-page.shell>

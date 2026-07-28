@@ -45,9 +45,12 @@ class EmailTrackingTable extends Component
      * it (no jump on load). Callers that can cheaply COUNT the real rows pass
      * the smaller of the two.
      */
+    /** Rows per page on the standalone index (also the skeleton's row ceiling). */
+    public const PER_PAGE = 10;
+
     public static function placeholderRows(): int
     {
-        return 10;
+        return self::PER_PAGE;
     }
 
     /**
@@ -57,19 +60,27 @@ class EmailTrackingTable extends Component
      *
      * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
      */
-    public static function columnDefs(bool $scoped = false): array
+    public static function columnDefs(bool $scoped = false, bool $narrow = false): array
     {
+        // Width budget, by what each column actually holds:
+        //  - Event      fixed-width badge ("Opened x11") — never squeeze it
+        //  - Template   the longest values ("Estimate Follow Up") — give it the
+        //               slack, it's the only column that truncates in practice
+        //  - Recipients a first name plus a "+N" ("Jason +1") — needs little
+        //  - Date       "03/23/26", or "2 hours ago" on a project card
+        // narrow = embedded in a ~500px card; scoped = project card, where the
+        // Project column is implied and its share goes to Template/Recipients.
         $columns = [
-            ['label' => 'Event', 'width' => 'w-[18%]', 'skeleton' => 'badge'],
-            ['label' => 'Template', 'width' => 'w-[22%] min-w-0', 'skeleton' => 'badge'],
+            ['label' => 'Event', 'width' => ($scoped ? 'w-[21%]' : ($narrow ? 'w-[19%]' : 'w-[18%]')), 'skeleton' => 'badge'],
+            ['label' => 'Template', 'width' => ($scoped ? 'w-[30%]' : ($narrow ? 'w-[25%]' : 'w-[22%]')).' min-w-0', 'skeleton' => 'badge'],
         ];
 
         if (! $scoped) {
-            $columns[] = ['label' => 'Project', 'width' => 'w-[24%] min-w-0', 'skeletonWidth' => 'w-28'];
+            $columns[] = ['label' => 'Project', 'width' => ($narrow ? 'w-[20%]' : 'w-[24%]').' min-w-0', 'skeletonWidth' => 'w-28'];
         }
 
-        $columns[] = ['label' => 'Recipients', 'width' => ($scoped ? 'w-[38%]' : 'w-[22%]').' min-w-0', 'skeletonWidth' => 'w-28'];
-        $columns[] = ['label' => 'Date', 'width' => ($scoped ? 'w-[22%]' : 'w-[14%]').' min-w-0', 'skeletonWidth' => 'w-16'];
+        $columns[] = ['label' => 'Recipients', 'width' => ($scoped ? 'w-[25%]' : ($narrow ? 'w-[18%]' : 'w-[22%]')).' min-w-0', 'skeletonWidth' => 'w-20'];
+        $columns[] = ['label' => 'Date', 'width' => ($scoped ? 'w-[24%]' : ($narrow ? 'w-[18%]' : 'w-[14%]')).' min-w-0', 'skeletonWidth' => 'w-16'];
 
         return $columns;
     }
@@ -78,22 +89,15 @@ class EmailTrackingTable extends Component
     public function emailTrackingEvents()
     {
         $allEvents = EmailTracking::with('project')
-            ->where(function ($query) {
-                // Internal/vendor-facing sends stay out of the client-facing
-                // tracking card.
-                $query->whereNull('email_template_name')
-                    ->orWhereNotIn('email_template_name', ['Vendor Payment', 'Lien Waiver Signing Request', 'Draw Package']);
-            })
+            ->clientFacing()
             ->when($this->projectId, function ($query) {
-                $query->where('project_id', $this->projectId);
+                $query->forProjectAndItsLeads((int) $this->projectId);
             })
             ->when($this->leadId, function ($query) {
                 $query->where('lead_id', $this->leadId);
             })
             ->when(! $this->projectId && ! $this->leadId && $this->clientId, function ($query) {
-                $query->whereHas('project', function ($q) {
-                    $q->where('client_id', $this->clientId);
-                });
+                $query->forClientAndItsLeads((int) $this->clientId);
             })
             ->orderBy('event_at', 'DESC')
             ->get();
@@ -270,6 +274,20 @@ class EmailTrackingTable extends Component
                     ->values()
                     ->all();
 
+                // The team-email filter can leave nothing (e.g. a test send
+                // to yourself) — fall back to the raw recipients rather than
+                // rendering an empty cell.
+                if (empty($eventRecipientEmails) && empty($threadRecipientEmails)) {
+                    $threadRecipientEmails = $threadEvents
+                        ->pluck('recipient_emails')
+                        ->flatten()
+                        ->filter()
+                        ->unique()
+                        ->values()
+                        ->all();
+                    $eventRecipientEmails = $threadRecipientEmails;
+                }
+
                 $users = collect($eventRecipientEmails)
                     ->map(fn ($email) => $usersByEmail->get($email))
                     ->filter()
@@ -353,7 +371,7 @@ class EmailTrackingTable extends Component
         $events = $collapsed;
 
         $currentPage = $this->getPage($this->pageName);
-        $perPage = 10;
+        $perPage = self::PER_PAGE;
         $currentPageItems = $events->slice(($currentPage - 1) * $perPage, $perPage)->values();
 
         return new LengthAwarePaginator(
@@ -375,11 +393,87 @@ class EmailTrackingTable extends Component
         // Mirror the real card: scoped variants (project/lead) drop the
         // Project column and the 640px table floor (they live in ~500px
         // columns and modals).
-        $scoped = filled($params['projectId'] ?? $params['project-id'] ?? null)
-            || filled($params['leadId'] ?? $params['lead-id'] ?? null);
+        $projectId = $params['projectId'] ?? $params['project-id'] ?? null;
+        $leadId = $params['leadId'] ?? $params['lead-id'] ?? null;
+        $clientId = $params['clientId'] ?? $params['client-id'] ?? null;
+        // Every embedded card (project, lead AND client) renders the collapsed
+        // presentation now — only the standalone index paginates.
+        $embedded = filled($projectId) || filled($leadId) || filled($clientId);
+
+        $pid = is_numeric($projectId) ? (int) $projectId : null;
+        $lid = is_numeric($leadId) ? (int) $leadId : null;
+        $cid = is_numeric($clientId) ? (int) $clientId : null;
+
+        $rows = static::placeholderRowsFor(projectId: $pid, leadId: $lid, clientId: $cid);
+
+        // Header + footer parity: the scoped card shows a history toggle once
+        // it has older events, and the paginated variants add a footer. Reserve
+        // both so the card measures the same before and after loading.
+        $threads = static::threadCountFor(projectId: $pid, leadId: $lid, clientId: $cid);
 
         return view('livewire.projects.email-tracking-table-placeholder', [
-            'scoped' => $scoped,
+            'scoped' => (bool) $projectId,
+            'embedded' => $embedded,
+            'clientId' => $clientId,
+            'rows' => $rows,
+            'historyCount' => $embedded ? max($threads - 1, 0) : 0,
+            'footer' => ! $embedded && $threads > self::PER_PAGE,
         ]);
+    }
+
+    /**
+     * Skeleton row count that matches what will actually paint: a COUNT is far
+     * cheaper than the query the skeleton stands in for, so no card ever
+     * flashes more (or fewer) fake rows than it ends up with. Scoped cards
+     * collapse to a single visible row; the paginated variant shows one row
+     * per email thread, which each 'sent' event roots.
+     */
+    public static function placeholderRowsFor(?int $projectId = null, ?int $leadId = null, ?int $clientId = null): int
+    {
+        // clientFacing(): the skeleton must count exactly what the loaded card
+        // renders, or it paints a card that then disappears.
+        $query = EmailTracking::query()->clientFacing();
+
+        if ($projectId) {
+            $query->forProjectAndItsLeads($projectId);
+        } elseif ($leadId) {
+            $query->where('lead_id', $leadId);
+        } elseif ($clientId) {
+            $query->forClientAndItsLeads($clientId);
+        } else {
+            return static::placeholderRows();
+        }
+
+        // Collapsed card: the latest event is the only visible row.
+        if ($projectId || $leadId || $clientId) {
+            return $query->exists() ? 1 : 0;
+        }
+
+        return min(static::threadCountFor(clientId: $clientId), static::placeholderRows());
+    }
+
+    /**
+     * Roughly how many rows the card will paint: one per email thread, each
+     * rooted at a 'sent' event. Scoped cards collapse everything after the
+     * latest into the history accordion.
+     */
+    public static function threadCountFor(?int $projectId = null, ?int $leadId = null, ?int $clientId = null): int
+    {
+        $query = EmailTracking::query()->clientFacing();
+
+        if ($projectId) {
+            $query->forProjectAndItsLeads($projectId);
+        } elseif ($leadId) {
+            $query->where('lead_id', $leadId);
+        } elseif ($clientId) {
+            $query->forClientAndItsLeads($clientId);
+        }
+        // No scope: the standalone index counts everything, which is what
+        // decides whether it paginates.
+
+        $threads = (clone $query)->where('event_type', 'sent')->count();
+
+        // Events with no 'sent' of their own still render a row each.
+        return $threads > 0 ? $threads : ($query->exists() ? 1 : 0);
     }
 }

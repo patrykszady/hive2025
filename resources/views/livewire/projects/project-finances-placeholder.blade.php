@@ -1,4 +1,4 @@
-<x-island-card heading="Project Finances" wire:transition>
+<x-island-card :enter="true" heading="Project Finances" wire:transition>
     <x-slot:actions>
         @isset($project)
             @include('livewire.projects.partials.finances-actions')
@@ -15,7 +15,7 @@
                 @foreach (['Estimate', 'Change Order', 'Reimbursements'] as $label)
                     <flux:table.row>
                         <flux:table.cell>{{ $label }}</flux:table.cell>
-                        <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                        <flux:table.cell><flux:skeleton.line class="w-20" /></flux:table.cell>
                     </flux:table.row>
                 @endforeach
 
@@ -29,7 +29,7 @@
                 @foreach (['Expenses', 'Timesheets'] as $label)
                     <flux:table.row>
                         <flux:table.cell>{{ $label }}</flux:table.cell>
-                        <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                        <flux:table.cell><flux:skeleton.line class="w-20" /></flux:table.cell>
                     </flux:table.row>
                 @endforeach
 
@@ -42,15 +42,18 @@
                 {{-- Bottom rows --}}
                 <flux:table.row>
                     <flux:table.cell>Payments</flux:table.cell>
-                    <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                    <flux:table.cell><flux:skeleton.line class="w-20" /></flux:table.cell>
                 </flux:table.row>
-                <flux:table.row>
-                    <flux:table.cell variant="strong">Profit</flux:table.cell>
-                    <flux:table.cell variant="strong" align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
-                </flux:table.row>
+                @if($showProfit ?? false)
+                    {{-- Only on Complete/Service Call, same as the loaded card. --}}
+                    <flux:table.row>
+                        <flux:table.cell variant="strong">Profit</flux:table.cell>
+                        <flux:table.cell variant="strong"><flux:skeleton.line class="w-20" /></flux:table.cell>
+                    </flux:table.row>
+                @endif
                 <flux:table.row>
                     <flux:table.cell>Balance</flux:table.cell>
-                    <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                    <flux:table.cell><flux:skeleton.line class="w-20" /></flux:table.cell>
                 </flux:table.row>
             </flux:skeleton.group>
         </flux:table.rows>

@@ -2,8 +2,15 @@
 @php($columnCount = $isProjectScoped ? 6 : 7)
 
 @if($isProjectScoped)
-    <x-details.card title="Lien Waivers" :expanded="false" :details_text="false" :separator="false">
+    {{-- No waivers = header-only card with no chevron, exactly what the loaded
+         card renders (x-details.card drops the toggle when :accordion is
+         false). --}}
+    <x-details.card :enter="true" title="Lien Waivers" :expanded="false" :details_text="false" :separator="false" :accordion="$hasWaivers ?? true">
+        {{-- Slot forwarded unconditionally (wrapping <x-slot> in @if breaks the
+             capture); :accordion above is what removes the chevron, and the
+             guard inside skips the shimmer rows. --}}
         <x-slot:details>
+            @if($hasWaivers ?? true)
             <div class="space-y-3">
                 <div class="grid gap-4 px-4 py-3 border-b border-zinc-200 dark:border-zinc-700" style="grid-template-columns: repeat({{ $columnCount }}, minmax(0, 1fr));">
                     @for ($i = 0; $i < $columnCount; $i++)
@@ -19,11 +26,12 @@
                     </div>
                 @endfor
             </div>
+            @endif
         </x-slot:details>
     </x-details.card>
 @else
     <div class="w-full max-w-3xl">
-        <x-island-card heading="Lien Waivers">
+        <x-island-card :enter="true" heading="Lien Waivers">
             <div class="space-y-3">
                 <div class="grid gap-4 px-4 py-3 border-b border-zinc-200 dark:border-zinc-700" style="grid-template-columns: repeat({{ $columnCount }}, minmax(0, 1fr));">
                     @for ($i = 0; $i < $columnCount; $i++)

@@ -11,6 +11,8 @@
     'accordion' => true,
     'nonLivewire' => false,
     'separator' => true,
+    // Fade in on insertion — true only for skeletons (see x-island-card).
+    'enter' => false,
 ])
 
 @php

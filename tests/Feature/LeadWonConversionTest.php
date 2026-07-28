@@ -94,7 +94,7 @@ it('does not overwrite a human decision like Lost or Not a Fit', function (strin
     (new MarkClientLeadWon($client->id, $vendor->id))->handle();
 
     expect($lead->fresh()->last_status->title)->toBe($status);
-})->with(['Lost', 'Not a Fit', 'Message 1']);
+})->with(['Lost', 'Not a Fit', 'Replied']);
 
 it('writes no duplicate status row when the lead is already Won', function () {
     $vendor = Vendor::factory()->create();

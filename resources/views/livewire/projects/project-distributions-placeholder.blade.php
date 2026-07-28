@@ -1,4 +1,4 @@
-<x-island-card heading="Project Distributions" :separator="true" wire:transition>
+<x-island-card :enter="true" heading="Project Distributions" :separator="true" wire:transition>
 
     <flux:skeleton.group animate="shimmer" class="space-y-2">
         @for ($i = 0; $i < 2; $i++)

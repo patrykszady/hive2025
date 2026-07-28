@@ -76,7 +76,9 @@ class UpcomingClientTasks extends Component
             return collect();
         }
 
-        $tasks = Task::withTrashed()
+        // Removed tasks stay out of the card — they used to render struck
+        // through, which read as clutter rather than information.
+        $tasks = Task::query()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -165,7 +167,7 @@ class UpcomingClientTasks extends Component
     {
         $projectIds = $this->getProjectIds();
 
-        return Task::withTrashed()
+        return Task::query()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date');
@@ -192,7 +194,7 @@ class UpcomingClientTasks extends Component
             return 0;
         }
 
-        return Task::withTrashed()
+        return Task::query()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -215,7 +217,7 @@ class UpcomingClientTasks extends Component
             return collect();
         }
 
-        return Task::withTrashed()
+        return Task::query()
             ->whereIn('project_id', $projectIds)
             ->whereNull('start_date')
             ->with(['vendor', 'project.client', 'project.latestStatus'])
@@ -246,15 +248,36 @@ class UpcomingClientTasks extends Component
         // A client with no projects can't have tasks — skip the skeleton
         // entirely rather than shimmering rows that resolve to an empty card.
         $client = $params['client'] ?? null;
-        $hasProjects = $client instanceof Client
-            ? $client->projects()->exists()
-            : true;
+        $projectIds = $client instanceof Client
+            ? $client->projects()->pluck('projects.id')
+            : collect();
 
         $isClientUser = (bool) auth()->user()?->is_browsing_as_client;
 
+        // Both flags mirror what the loaded card computes: the project-grouped
+        // layout only appears when tasks span more than one project (see
+        // upcoming-client-tasks.blade.php), and the day blocks come from the
+        // same window/grouping as groupedTasks().
+        $dayCounts = $projectIds->isNotEmpty()
+            ? \App\Models\Task::skeletonDayCounts(\App\Models\Task::query()->whereIn('project_id', $projectIds))
+            : [];
+
+        // Unscheduled tasks render as an expanded "Pending Tasks" section above
+        // the day blocks; same cheap shape as the day cards.
+        $pendingCards = $projectIds->isNotEmpty()
+            ? \App\Models\Task::query()
+                ->whereIn('project_id', $projectIds)
+                ->whereNull('start_date')
+                ->get(['id', 'user_ids', 'vendor_id'])
+                ->map(fn ($t) => filled(array_filter((array) $t->user_ids)) || filled($t->vendor_id))
+                ->all()
+            : [];
+
         return view('livewire.partials.tasks-placeholder', [
-            'showProjectInfo' => true,
-            'count' => $hasProjects ? null : 0,
+            'showProjectInfo' => $projectIds->count() > 1,
+            'pendingCards' => $pendingCards,
+            'taskCounts' => $dayCounts,
+            'count' => $projectIds->isNotEmpty() ? null : 0,
             // Mirror the real card's header exactly (see the blade).
             'clientId' => $client instanceof Client ? $client->id : null,
             'showAddTask' => ! $isClientUser,

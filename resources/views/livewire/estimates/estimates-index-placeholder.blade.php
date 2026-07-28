@@ -1,3 +1,7 @@
+{{-- Wrapped to mirror the loaded component's root (div > card): when the
+     shapes differ Livewire destroys and recreates the card instead of patching
+     it, which reads as a flash. --}}
+<div wire:transition>
 {{-- Loading skeleton for the Estimates card — the shared index-table skeleton,
      so it renders through the same card shell as the loaded table.
 
@@ -12,8 +16,13 @@
 <x-index-table.placeholder
     heading="Estimates"
     :columns="\App\Livewire\Estimates\EstimatesIndex::columnDefs($tableView)"
-    :rows="$isIndexView ? 5 : 1"
+    :rows="$rows ?? ($isIndexView ? 5 : 1)"
+    :row-heights="$rowHeights ?? null"
+    {{-- The embedded card renders no column header row (estimates/index.blade.php
+         gates <flux:table.columns> on the standalone view). --}}
+    :show-columns="$isIndexView"
     :compact="false"
     :floor="$isIndexView"
     wire:transition
 />
+</div>

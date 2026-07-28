@@ -17,6 +17,7 @@
                 floor-min="600px"
                 :columns="\App\Livewire\Vendors\VendorsIndex::columnDefs()"
                 :rows="\App\Livewire\Vendors\VendorsIndex::placeholderRows()"
+                :page-size="\App\Livewire\Vendors\VendorsIndex::placeholderRows()"
                 :compact="false"
                 class="mt-4"
             >

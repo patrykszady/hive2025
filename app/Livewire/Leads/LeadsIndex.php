@@ -57,10 +57,11 @@ class LeadsIndex extends Component
         return [
             ['label' => 'Date', 'width' => 'w-[14%]', 'skeletonWidth' => 'w-12'],
             ['label' => 'Client', 'width' => 'w-[17%] min-w-0', 'skeletonWidth' => 'w-20'],
-            ['label' => 'Status', 'width' => 'w-[20%]', 'skeleton' => 'badge'],
-            ['label' => 'Last', 'width' => 'w-[14%]', 'skeletonWidth' => 'w-12'],
-            ['label' => 'Origin', 'width' => 'w-[12%] min-w-0', 'skeletonWidth' => 'w-14'],
-            ['label' => 'Address', 'width' => 'w-[23%] min-w-0', 'skeletonWidth' => 'w-28'],
+            // Status is a compact badge trigger — "Not a Fit ⌄" is the widest.
+            ['label' => 'Status', 'width' => 'w-[12%]', 'skeleton' => 'badge'],
+            ['label' => 'Last', 'width' => 'w-[10%]', 'skeletonWidth' => 'w-12'],
+            ['label' => 'Origin', 'width' => 'w-[16%] min-w-0', 'skeletonWidth' => 'w-14'],
+            ['label' => 'Address', 'width' => 'w-[31%] min-w-0', 'skeletonWidth' => 'w-28'],
         ];
     }
 
@@ -123,6 +124,79 @@ class LeadsIndex extends Component
     protected function applyStatus(Lead $lead, string $title): void
     {
         $lead->setStatus($title);
+    }
+
+    public bool $showBulkDelete = false;
+
+    public function confirmBulkDelete(): void
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        if (empty($this->selected)) {
+            return;
+        }
+
+        $this->showBulkDelete = true;
+    }
+
+    /**
+     * Aggregate delete impact for the confirmation modal: orphaned client
+     * records and contacts that go away with the selected leads (each lead
+     * assessed by Lead::deleteImpact()).
+     *
+     * @return array{count: int, clients: array<int, string>, users: array<int, string>}
+     */
+    #[Computed]
+    public function bulkDeleteImpact(): array
+    {
+        // LeadScope keeps this to the current vendor's leads.
+        $leads = Lead::whereIn('id', $this->selected)->get();
+
+        $clients = [];
+        $users = [];
+
+        foreach ($leads as $lead) {
+            $impact = $lead->deleteImpact();
+            array_push($clients, ...$impact['clients']);
+
+            if ($impact['user']) {
+                $users[] = $impact['user'];
+            }
+        }
+
+        return [
+            'count' => $leads->count(),
+            'clients' => array_values(array_unique($clients)),
+            'users' => array_values(array_unique($users)),
+        ];
+    }
+
+    public function bulkDelete(): void
+    {
+        $this->authorize('viewAny', Lead::class);
+        $this->showBulkDelete = false;
+
+        if (empty($this->selected)) {
+            return;
+        }
+
+        $leads = Lead::whereIn('id', $this->selected)->get();
+
+        foreach ($leads as $lead) {
+            $lead->deleteWithOrphans();
+        }
+
+        $this->selected = [];
+        unset($this->leads, $this->bulkDeleteImpact);
+        $this->dispatch('lead-status-updated');
+
+        \Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: $leads->count().' '.str('lead')->plural($leads->count()).' deleted.',
+            text: '',
+        );
     }
 
     public function updating($name, $value): void

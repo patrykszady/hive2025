@@ -959,8 +959,25 @@ class ExpenseIndex extends Component
         return view('livewire.expenses.index');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
-        return view('livewire.expenses.expense-index-placeholder');
+        // Livewire hands mount params to placeholder() before mount(), so the
+        // public props still hold their defaults here.
+        $view = $params['view'] ?? null;
+        $projectId = $params['project_id'] ?? $params['projectId'] ?? null;
+
+        // Cheap COUNT capped at the card's page size, so the skeleton paints
+        // what will actually arrive instead of a fixed number.
+        $rows = is_numeric($projectId)
+            ? min(
+                Expense::withoutGlobalScope(ExpenseScope::class)->where('project_id', (int) $projectId)->count(),
+                static::placeholderRows($view)
+            )
+            : static::placeholderRows($view);
+
+        return view('livewire.expenses.expense-index-placeholder', [
+            'tableView' => $view,
+            'rows' => $rows,
+        ]);
     }
 }

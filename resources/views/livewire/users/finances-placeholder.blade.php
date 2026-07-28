@@ -1,5 +1,5 @@
 <div class="space-y-6 select-none" aria-busy="true" aria-live="polite">
-    <x-island-card :separator="true">
+    <x-island-card :enter="true" :separator="true">
         <x-slot:actions>
             <div class="flex gap-2">
                 <div class="h-6 w-6 rounded-full bg-zinc-200 dark:bg-zinc-700 animate-pulse"></div>

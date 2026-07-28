@@ -235,11 +235,24 @@ class ProjectsTable extends Component
         // no projects gets the card chrome alone instead of 5 fake rows that
         // vanish a moment later.
         $clientId = $params['clientId'] ?? $params['client-id'] ?? null;
-        $rows = 5;
 
-        if (filled($clientId)) {
-            $rows = min(Project::where('client_id', (int) $clientId)->count(), 5);
-        }
+        // Unscoped index: the table is Meilisearch-backed but its default view
+        // is just "latest status == the selected code", which a plain COUNT
+        // reproduces far more cheaply than the search round trip — and without
+        // it the skeleton was ~180px short of the real first page.
+        $statusCode = $params['projectStatusTitle'] ?? $params['project-status-title'] ?? null;
+
+        $rows = filled($clientId)
+            ? min(Project::where('client_id', (int) $clientId)->count(), 5)
+            : min(
+                Project::query()
+                    ->when(filled($statusCode), fn ($q) => $q->whereHas(
+                        'latestStatus',
+                        fn ($s) => $s->where('status_code', (int) $statusCode)
+                    ))
+                    ->count(),
+                static::placeholderRows()
+            );
 
         return view('livewire.projects.projects-table-placeholder', [
             'tableView' => $params['view'] ?? null,

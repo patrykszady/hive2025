@@ -159,6 +159,14 @@ class StoreEmailTracking
                 ->value('belongs_to_vendor_id');
         }
 
+        // Lead replies have no project — the vendor comes from the lead, else
+        // the row is invisible behind EmailTrackingScope's vendor filter.
+        if (! $belongsToVendorId && $leadId) {
+            $belongsToVendorId = \App\Models\Lead::withoutGlobalScopes()
+                ->whereKey($leadId)
+                ->value('belongs_to_vendor_id');
+        }
+
         // Create single tracking record with all recipients
         // This matches the webhook controller behavior and prevents duplicate "sent" events
         if (! empty($recipients)) {

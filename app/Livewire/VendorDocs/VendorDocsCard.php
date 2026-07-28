@@ -21,10 +21,52 @@ class VendorDocsCard extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
+    /**
+     * Column defs for the vendor-docs table — the real header row AND the
+     * loading skeleton render from this one array, so widths can never drift.
+     *
+     * @return array<int, array{label: string, width: string, skeleton?: string, skeletonWidth?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Type', 'width' => 'w-[38%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Exp Date', 'width' => 'w-[30%]', 'skeleton' => 'badge'],
+            ['label' => 'Policy #', 'width' => 'w-[32%] min-w-0', 'skeletonWidth' => 'w-28'],
+        ];
+    }
+
+    /** Skeleton row ceiling — the card lists every document. */
+    public static function placeholderRows(): int
+    {
+        return 6;
+    }
+
     public function placeholder(array $params = []): \Illuminate\Contracts\View\View
     {
+        $vendor = $params['vendor'] ?? null;
+        $vendorId = $vendor instanceof Vendor ? $vendor->id : (is_numeric($vendor) ? (int) $vendor : null);
+
+        // Cheap COUNT so the skeleton paints the rows that will actually
+        // arrive — and none when the vendor has no documents.
+        // render() collapses the docs to ONE row per type (latest of each), so
+        // the skeleton counts distinct types — counting every document painted
+        // 6 shimmer rows for a card that renders 3.
+        $rows = $vendorId
+            ? min(
+                VendorDoc::withoutGlobalScopes()
+                    ->where('vendor_id', $vendorId)
+                    ->distinct()
+                    ->count('type'),
+                static::placeholderRows()
+            )
+            : static::placeholderRows();
+
         return view('livewire.vendor-docs.placeholder', [
             'expanded' => !($params['view'] ?? false),
+            'view' => $params['view'] ?? false,
+            'vendor' => $vendor,
+            'rows' => $rows,
         ]);
     }
 

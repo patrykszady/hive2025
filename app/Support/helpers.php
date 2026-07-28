@@ -347,3 +347,28 @@ if (! function_exists('island_lazy')) {
         return true;
     }
 }
+
+if (! function_exists('phone_display')) {
+    /**
+     * Format a US phone number for display: (XXX) XXX-XXXX. Non-10-digit
+     * numbers (after stripping a leading 1) come back unchanged.
+     */
+    function phone_display(?string $phone): string
+    {
+        if (! $phone) {
+            return '';
+        }
+
+        $digits = preg_replace('/\D/', '', $phone);
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        if (strlen($digits) === 10) {
+            return sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6));
+        }
+
+        return $phone;
+    }
+}

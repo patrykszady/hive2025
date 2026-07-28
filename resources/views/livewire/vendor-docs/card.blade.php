@@ -1,53 +1,64 @@
-<div class="mt-4">
-    <x-details.card
-        :title="$view ? 'Vendor Documents' : $vendor->name"
-        :title_href="!$view ? route('vendors.show', $vendor->id) : null"
+{{-- No margin here: vertical rhythm belongs to the page column (.page-col
+     gap), and an extra mt-4 stacked on top of it made this card sit 32px below
+     its neighbour instead of 16px. --}}
+@php
+    // Computed here, not inside the slots: an @if/@can INSIDE a slot passed to
+    // a @blaze component is silently dropped (the whole slot renders empty).
+    $hasDocs = ! $vendor_docs->isEmpty();
+    $canCreateDoc = auth()->user()?->can('create', App\Models\VendorDoc::class) ?? false;
+@endphp
+<div>
+    {{-- Same shared card as Estimates/Checks/Payments: <x-index-table> owns the
+         header, the table chrome and the skeleton parity. Collapsible so the
+         header keeps its accordion behaviour. --}}
+    <x-index-table
+        :heading="$view ? 'Vendor Documents' : $vendor->name"
+        :collapsible="! $vendor_docs->isEmpty()"
+        x-data="{ open: true }"
     >
-        <x-slot:title_extras>
-            @if(!$vendor_docs->isEmpty())
-                <div x-show="!open" x-cloak class="flex items-center gap-2">
-                    @php
-                        $currentDocs = $vendor_docs->filter(fn($doc) => $doc->expiration_date > today());
-                        $expiredDocs = $vendor_docs->filter(fn($doc) => $doc->expiration_date <= today());
-                    @endphp
+        {{-- Always the same count badge, whatever the accordion state: swapping
+             between "3 Current" and nothing on open/close made the header jump. --}}
+        {{-- Always the same count badge, whatever the accordion state. --}}
+        <x-slot:badge>
+            <div class="{{ $hasDocs ? 'contents' : 'hidden' }}">
+                <flux:badge color="zinc" size="sm">{{ $vendor_docs->count() }}</flux:badge>
+            </div>
+        </x-slot:badge>
 
-                    @if($currentDocs->count() > 0)
-                        <flux:badge size="sm" color="green" inset="top bottom">
-                            {{ $currentDocs->count() }} Current
-                        </flux:badge>
-                    @endif
-
-                    @if($expiredDocs->count() > 0)
-                        <flux:badge size="sm" color="red" inset="top bottom">
-                            {{ $expiredDocs->count() }} Expired
-                        </flux:badge>
-                    @endif
-                </div>
-            @endif
-        </x-slot:title_extras>
-
-        <x-slot:header_buttons>
-            @can('create', App\Models\VendorDoc::class)
-                <div @if(!$vendor_docs->isEmpty()) x-show="open" x-cloak @endif>
+        <x-slot:actions>
+            {{-- Add is always visible; it no longer appears/disappears with the
+                 accordion state. --}}
+            {{-- Group ONLY when both buttons render. flux:button.group strips the
+                 right radius from ":first-child:not(:last-child)", and CSS
+                 structural selectors still count a display:none sibling — so a
+                 hidden "Request" wrapper left "Add" with a square right edge. --}}
+            @php($showRequestDoc = isset($vendor->expired_docs))
+            <div class="{{ $canCreateDoc ? 'contents' : 'hidden' }}">
+                @if($showRequestDoc)
                     <flux:button.group>
-                        <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'addDocument', { vendor: {{$vendor->id}} })">Add</flux:button>
-                        @if(isset($vendor->expired_docs))
-                            <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'requestDocument', { vendor: {{$vendor->id}} })">Request</flux:button>
-                        @endif
+                        <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'addDocument', { vendor: {{ $vendor->id }} })">Add</flux:button>
+                        <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'requestDocument', { vendor: {{ $vendor->id }} })">Request</flux:button>
                     </flux:button.group>
-                </div>
-            @endcan
-        </x-slot:header_buttons>
+                @else
+                    <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'addDocument', { vendor: {{ $vendor->id }} })">Add</flux:button>
+                @endif
+            </div>
+            {{-- Same chevron, same position and behaviour as Email Tracking. --}}
+            <div class="{{ $hasDocs ? 'contents' : 'hidden' }}">
+                <button type="button" @click.stop="open = !open" class="flex items-center p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" aria-label="Toggle documents">
+                    <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="open && 'rotate-180'" />
+                </button>
+            </div>
+        </x-slot:actions>
 
         @if(!$vendor_docs->isEmpty())
-            <x-slot:details>
-                {{-- table-fixed + min-w-0 so the card never scrolls horizontally;
-                     long values truncate with a title tooltip instead. --}}
-                <flux:table class="table-fixed min-w-0 w-full">
+            {{-- Widths come from the shared columnDefs, so the skeleton and the
+                 real header can never drift apart. --}}
+            <flux:table class="table-fixed min-w-0 w-full [:where(&)]:p-0 [:where(&)]:space-y-0">
                     <flux:table.columns>
-                        <flux:table.column class="w-[38%]">Type</flux:table.column>
-                        <flux:table.column class="w-[30%]">Exp Date</flux:table.column>
-                        <flux:table.column class="w-[32%]">Policy #</flux:table.column>
+                        @foreach(\App\Livewire\VendorDocs\VendorDocsCard::columnDefs() as $docColumn)
+                            <flux:table.column class="{{ $docColumn['width'] }}">{{ $docColumn['label'] }}</flux:table.column>
+                        @endforeach
                     </flux:table.columns>
 
                     <flux:table.rows>
@@ -76,7 +87,6 @@
                         @endforeach
                     </flux:table.rows>
                 </flux:table>
-            </x-slot:details>
         @endif
-    </x-details.card>
+    </x-index-table>
 </div>

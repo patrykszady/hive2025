@@ -124,6 +124,14 @@ class SendLeadReplyJob implements ShouldQueue
                     $headers->add(new \Mailtrap\EmailHeader\CategoryHeader('lead_reply'));
                     $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('tracking_id', $trackingId));
                     $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('lead_id', (string) $lead->id));
+                    $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('belongs_to_vendor_id', (string) $lead->belongs_to_vendor_id));
+
+                    // Consult bookings create the client project in the same
+                    // send — attach it so tracking shows on the project page.
+                    $projectId = $lead->resolveClient()?->projects()->withoutGlobalScopes()->latest('id')->value('id');
+                    if ($projectId) {
+                        $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('project_id', (string) $projectId));
+                    }
 
                     if (is_string($this->emailTemplateName) && $this->emailTemplateName !== '') {
                         $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('email_template_name', $this->emailTemplateName));

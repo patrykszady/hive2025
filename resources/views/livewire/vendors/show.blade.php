@@ -1,6 +1,11 @@
-<div>
-	<div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
-        <div class="col-span-4 space-y-4 lg:col-span-2">
+<x-page.shell
+    :cols="4"
+    :breadcrumbs="[
+        ['label' => 'Vendors', 'href' => route('vendors.index')],
+        ['label' => html_entity_decode((string) $vendor->name, ENT_QUOTES, 'UTF-8')],
+    ]"
+>
+    <x-page.column :span="2">
             {{-- VENDOR DETAILS --}}
             <div class="col-span-4 lg:col-span-2">
                 <livewire:vendors.vendor-details :vendor="$vendor" :expanded="true" />
@@ -19,10 +24,10 @@
                     <livewire:expenses.expense-index :expense_vendor="$vendor->id" :view="'vendors.show'" />
                 </div>
             @endif
-        </div>
+    </x-page.column>
 
         @if($vendor->business_type != 'Retail')
-            <div class="col-span-4 lg:col-span-2 space-y-4">
+    <x-page.column :span="2">
                 {{-- VENDOR TEAM MEMBERS --}}
                 <livewire:users.users-index :vendor="$vendor" :view="'vendors.show'"/>
 
@@ -45,11 +50,9 @@
                     @endif 
                     {{-- <livewire:vendors.vendor-finances :vendor="$vendor" /> --}}
                 @endcan
-            </div>
+    </x-page.column>
         @endif
-	</div>
-    <livewire:vendor-docs.vendor-doc-create />
-    {{-- <livewire:users.user-create />
-    <livewire:clients.client-create />
-     --}}
-</div>
+    <x-slot:offstage>
+        <livewire:vendor-docs.vendor-doc-create />
+    </x-slot:offstage>
+</x-page.shell>

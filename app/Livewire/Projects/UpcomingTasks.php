@@ -79,7 +79,9 @@ class UpcomingTasks extends Component
         $cutoffStr = $cutoff->format('Y-m-d');
         $windowEndStr = $windowEnd->format('Y-m-d');
 
-        $tasks = Task::withTrashed()
+        // Removed tasks stay out of the card — they used to render struck
+        // through, which read as clutter rather than information.
+        $tasks = Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -170,7 +172,7 @@ class UpcomingTasks extends Component
 
     protected function laterTasksBaseQuery(): Builder
     {
-        return Task::withTrashed()
+        return Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date');
@@ -191,7 +193,7 @@ class UpcomingTasks extends Component
         $cutoff = $today->copy()->subDay();
         $windowEnd = $today->copy()->addDays(4);
 
-        return Task::withTrashed()
+        return Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -208,7 +210,7 @@ class UpcomingTasks extends Component
     #[Computed]
     public function unscheduledTasks(): Collection
     {
-        $tasks = Task::withTrashed()
+        $tasks = Task::query()
             ->where('project_id', $this->project->id)
             ->whereNull('start_date')
             ->with('vendor')
@@ -243,6 +245,7 @@ class UpcomingTasks extends Component
         return view('livewire.projects.upcoming-tasks');
     }
 
+
     public function placeholder(array $params = [])
     {
         $isClientUser = (bool) auth()->user()?->is_browsing_as_client;
@@ -252,6 +255,19 @@ class UpcomingTasks extends Component
             // Mirror the real card's header exactly (see the blade).
             'projectId' => $project?->id,
             'clickable' => ! $isClientUser,
+            'taskCounts' => $project
+                ? \App\Models\Task::skeletonDayCounts(\App\Models\Task::query()->where('project_id', $project->id))
+                : null,
+            // Unscheduled tasks render as an expanded "Pending Tasks" section
+            // above the day blocks — same on the client card.
+            'pendingCards' => $project
+                ? \App\Models\Task::query()
+                    ->where('project_id', $project->id)
+                    ->whereNull('start_date')
+                    ->get(['id', 'user_ids', 'vendor_id'])
+                    ->map(fn ($t) => filled(array_filter((array) $t->user_ids)) || filled($t->vendor_id))
+                    ->all()
+                : [],
         ]);
     }
 }

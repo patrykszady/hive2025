@@ -1,10 +1,19 @@
-<div>
-	<div class="grid max-w-xl grid-cols-4 gap-4 lg:max-w-5xl sm:px-6">
-		{{-- Wrappers whose component rendered no card (e.g. Lien Waivers before
-		     a signed contract) collapse entirely, so they never double the gap. --}}
-		<div class="contents lg:col-span-2 lg:flex lg:flex-col lg:gap-4 [&>div:not(:has([data-flux-card]))]:hidden">
+<x-page.shell
+    :cols="4"
+    :breadcrumbs="array_values(array_filter([
+        ['label' => 'Projects', 'href' => route('projects.index')],
+        $project->client && ! auth()->user()->is_browsing_as_client
+            ? ['label' => html_entity_decode((string) $project->client->name, ENT_QUOTES, 'UTF-8'), 'href' => route('clients.show', $project->client)]
+            : null,
+        ['label' => $project->project_name],
+    ]))"
+>
+    {{-- interleave: below lg the column is display:contents so the global
+         order-* sequence weaves both columns into one mobile stack. Empty
+         wrappers collapse via the column's hidden-when-empty variant. --}}
+    <x-page.column :span="2" :interleave="true">
             {{-- PROJECT DETAILS --}}
-            <div class="col-span-4 order-1">
+            <div class="order-1">
             <x-details.card
                 :title="$project->short_address . ' | ' . $project->project_name"
                 :subheading="$project->client->name"
@@ -85,19 +94,19 @@
             </div>
 
             @can('update', $project)
-                <div class="col-span-4 order-2">
+                <div class="order-2">
                     <livewire:projects.project-vendors :project="$project" />
                 </div>
             @endcan
 
             @can('viewMaterials', $project)
-                <div class="col-span-4 order-2">
+                <div class="order-2">
                     <livewire:projects.project-materials :project="$project" lazy />
                 </div>
             @endcan
 
             @if($this->project->latestStatus?->title !== 'VIEW ONLY')
-                <div class="col-span-4 order-3">
+                <div class="order-3">
                     <livewire:projects.upcoming-tasks :project="$project" lazy />
                 </div>
             @endif
@@ -105,7 +114,7 @@
             @can('viewFinancials', $project)
                 @can('update', $project)
                     @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']) && $project->expenses()->exists())
-                        <div class="col-span-4 order-7 lg:order-3">
+                        <div class="order-7 lg:order-3">
                             <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
                         </div>
                     @endif
@@ -116,21 +125,21 @@
             {{-- <div class="h-180">
                 <livewire:planner.cards-index type="project" :project-id="$project->id" lazy />
             </div> --}}
-		</div>
+    </x-page.column>
 
         @can('viewFinancials', $project)
-            <div class="contents lg:col-span-2 lg:flex lg:flex-col lg:gap-4 lg:col-start-3 [&>div:not(:has([data-flux-card]))]:hidden">
+            <x-page.column :span="2" :interleave="true" class="lg:col-start-3">
                 {{-- PROJECT ESTIMATES --}}
                 @can('viewAny', App\Models\Estimate::class)
-                    <div class="col-span-4 order-4">
+                    <div class="order-4">
                         <livewire:estimates.estimates-index :project="$project" :view="'projects.show'" lazy />
                     </div>
                 @endcan
 
                 @can('update', $project)
                     {{-- EMAIL TRACKING --}}
-                    @if(\App\Models\EmailTracking::where('project_id', $project->id)->exists())
-                        <div class="col-span-4 order-5">
+                    @if(\App\Models\EmailTracking::clientFacing()->forProjectAndItsLeads($project->id)->exists())
+                        <div class="order-5">
                             <livewire:projects.email-tracking-table
                                 :project-id="$project->id"
                                 lazy
@@ -140,31 +149,36 @@
                 @endcan
 
                 {{-- PROJECT LIFESPAN --}}
-                <div class="col-span-4 order-3">
+                <div class="order-3">
                     <livewire:project-status.status-create :project="$project" lazy />
                 </div>
 
                 @can('update', $project)
                     @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                         {{-- PROJECT PAYMENTS --}}
-                        <div class="col-span-4 order-6">
+                        <div class="order-6">
                             <livewire:payments.payments-index :project="$project" :view="'projects.show'" lazy />
                         </div>
 
                         {{-- PROJECT FINANCIALS --}}
-                        <div class="col-span-4 order-8">
+                        <div class="order-8">
                             <livewire:projects.project-finances :project="$project" lazy />
                         </div>
 
-                        {{-- PROJECT DISTRIBUTIONS --}}
-                        <div class="col-span-4 order-9">
-                            <livewire:projects.project-distributions :project="$project" lazy />
-                        </div>
+                        {{-- PROJECT DISTRIBUTIONS — skip the component entirely
+                             when there are none, so its skeleton never paints a
+                             card that the loaded component then removes (same
+                             guard as Email Tracking / Materials). --}}
+                        @if($this->project->distributions()->exists())
+                            <div class="order-9">
+                                <livewire:projects.project-distributions :project="$project" lazy />
+                            </div>
+                        @endif
                     @endif
 
                     @if(in_array($this->project->latestStatus?->title, ['Prep', 'Scheduled', 'Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                         {{-- LIEN WAIVERS --}}
-                        <div class="col-span-4 order-7">
+                        <div class="order-7">
                             <livewire:lien-waivers.index :project="$project" lazy />
                         </div>
                     @endif
@@ -173,12 +187,12 @@
                 @cannot('update', $project)
                     @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                         {{-- CLIENT PAYMENTS (read-only) --}}
-                        <div class="col-span-4 order-6">
+                        <div class="order-6">
                             <livewire:payments.payments-index :project="$project" :view="'estimate.pdf'" lazy />
                         </div>
 
                         {{-- CLIENT-FRIENDLY PROJECT FINANCES --}}
-                        <div class="col-span-4 order-8">
+                        <div class="order-8">
                             <x-client-finances
                                 :project="$this->project"
                                 :showReimbursementDownload="true"
@@ -186,12 +200,13 @@
                         </div>
                     @endif
                 @endcannot
-            </div>
+            </x-page.column>
 
 		@endcan
-    </div>
 
-    @can('update', $project)
-        <livewire:tasks.task-create />
-    @endcan
-</div>
+    <x-slot:offstage>
+        @can('update', $project)
+            <livewire:tasks.task-create />
+        @endcan
+    </x-slot:offstage>
+</x-page.shell>

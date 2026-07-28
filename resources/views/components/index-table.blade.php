@@ -23,6 +23,14 @@
     'heading' => null,
     'subheading' => null,
     'paginator' => null,
+    // Collapsible index cards (e.g. Email Tracking's history): the whole
+    // heading row toggles Alpine's `open`, same as every other collapsible
+    // card — see resources/views/components/island-card/header.blade.php.
+    'clickable' => false,
+    // Whole-card accordion: the header toggles the table (and its toolbar and
+    // pagination) open/closed. The caller supplies x-data="{ open: true }" and
+    // gets a clickable header for free.
+    'collapsible' => false,
     // Set by x-index-table.placeholder: gives the skeleton's wrapper a
     // different wire:key so Livewire's morph REPLACES it with the loaded
     // wrapper (rather than patching it in place) — that insertion is what
@@ -37,15 +45,28 @@
 {{-- Header-only card (no rows): cancel the card's space-y rhythm so a
      zero-height child (a modal host in the `before` slot) can't add a stray
      gap — the card then measures exactly like a collapsed accordion card. --}}
-<x-island-card :heading="$heading" :subheading="$subheading" {{ $attributes->merge(['class' => 'overflow-hidden'.($hasTable ? '' : ' !space-y-0')]) }}>
-    @isset($badge)
+<x-island-card :heading="$heading" :subheading="$subheading" :clickable="$clickable || $collapsible" :enter="$skeleton" {{ $attributes->merge(['class' => 'overflow-hidden'.($hasTable ? '' : ' !space-y-0')]) }}>
+    {{-- Same emptiness guard as `actions`: Blade hoists <x-slot> out of an @if,
+         so a guarded badge still arrives — as <!--[if BLOCK]--> markers only.
+         Forwarding it would force a header onto a heading-less embedded card. --}}
+    @if(isset($badge) && trim(preg_replace('/<!--.*?-->/s', '', (string) $badge)) !== '')
         <x-slot:badge>{{ $badge }}</x-slot:badge>
-    @endisset
-    @if(isset($actions) && trim((string) $actions) !== '')
+    @endif
+    {{-- Strip Blade's <!--[if BLOCK]--> markers before the empty check: a slot
+         whose content is entirely inside an @if still arrives as those
+         comments, and would otherwise render an empty actions area. --}}
+    @if(isset($actions) && trim(preg_replace('/<!--.*?-->/s', '', (string) $actions)) !== '')
         <x-slot:actions>{{ $actions }}</x-slot:actions>
     @endif
 
     {{ $before ?? '' }}
+
+    {{-- Everything below the header collapses together when the card is
+         collapsible, so the accordion acts on the CARD, not on one control
+         inside it. --}}
+    @if($collapsible)
+        <div x-show="open" x-collapse>
+    @endif
 
     @if(isset($toolbar) && trim((string) $toolbar) !== '')
         <div class="index-table-toolbar">{{ $toolbar }}</div>
@@ -69,6 +90,10 @@
                     </div>
                 @endif
             </div>
+        </div>
+    @endif
+
+    @if($collapsible)
         </div>
     @endif
 </x-island-card>

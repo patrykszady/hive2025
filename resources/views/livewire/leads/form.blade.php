@@ -1,132 +1,27 @@
 {{-- Single root: the delete confirmation is a sibling of the lead modal. --}}
 <div>
-<x-form-modal name="lead_form_modal" title="Lead">
+<x-form-modal name="lead_form_modal" title="Lead" x-data="{ activeLeadTab: 'details' }"
+    x-on:lead-modal-opened.window="activeLeadTab = 'details'">
+    @if ($this->hasReplied)
+        {{-- Replied leads have nothing but Details — skip the tab chrome. --}}
+        <div class="pt-2">
+            @include('livewire.leads.partials.details-panel')
+        </div>
+    @else
     <flux:tab.group>
         <flux:tabs>
-            <flux:tab name="details">Details</flux:tab>
-            <flux:tab name="messages">Messages</flux:tab>
+            <flux:tab name="details" x-on:click="activeLeadTab = 'details'">Details</flux:tab>
+            @if (! $this->hasReplied)
+                <flux:tab name="messages" x-on:click="activeLeadTab = 'messages'">Message</flux:tab>
+            @endif
         </flux:tabs>
 
-        <flux:tab.panel name="details">
-            <form id="lead_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
-                <flux:textarea
-                    wire:model.live="message"
-                    disabled
-                    label="Message"
-                    rows="auto"
-                    resize="none"
-                />
-
-                <flux:input
-                    wire:model.live="date"
-                    disabled
-                    label="Date"
-                    type="date"
-                />
-
-                <flux:input
-                    wire:model.live="origin"
-                    disabled
-                    label="Origin"
-                    type="text"
-                />
-
-                @if ($client)
-                    <flux:field>
-                        <flux:label>Client</flux:label>
-                        <a href="{{ route('clients.show', $client) }}" wire:navigate.hover class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
-                            <flux:heading size="sm">{{ $client->name }}</flux:heading>
-                            @if ($client->address)
-                                <flux:text class="text-zinc-500">
-                                    {{ $client->address }}@if ($client->city), {{ $client->city }}@endif @if ($client->state) {{ $client->state }}@endif @if ($client->zip_code) {{ $client->zip_code }}@endif
-                                </flux:text>
-                            @endif
-                            @foreach ($client->users as $clientUser)
-                                @if ($clientUser->email)
-                                    <flux:text class="text-zinc-500">{{ $clientUser->email }}</flux:text>
-                                @endif
-                                @if ($clientUser->cell_phone)
-                                    <flux:text class="text-zinc-500">{{ $clientUser->cell_phone }}</flux:text>
-                                @endif
-                            @endforeach
-                        </a>
-                    </flux:field>
-                @elseif ($user)
-                    @php($linkedClient = $user->clients->first())
-                    <flux:field>
-                        <flux:label>User</flux:label>
-                        @if ($linkedClient)
-                            <a href="{{ route('clients.show', $linkedClient) }}" wire:navigate.hover class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
-                                <flux:heading size="sm">{{ $user->full_name }}</flux:heading>
-                                @if ($user->email)
-                                    <flux:text class="text-zinc-500">{{ $user->email }}</flux:text>
-                                @endif
-                                @if ($user->cell_phone)
-                                    <flux:text class="text-zinc-500">{{ $user->cell_phone }}</flux:text>
-                                @endif
-                            </a>
-                        @else
-                            <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1">
-                                <flux:heading size="sm">{{ $user->full_name }}</flux:heading>
-                                @if ($user->email)
-                                    <flux:text class="text-zinc-500">{{ $user->email }}</flux:text>
-                                @endif
-                                @if ($user->cell_phone)
-                                    <flux:text class="text-zinc-500">{{ $user->cell_phone }}</flux:text>
-                                @endif
-                            </div>
-                        @endif
-                    </flux:field>
-                @else
-                    <flux:input.group label="User">
-                        <flux:input
-                            wire:model.live="full_name"
-                            type="text"
-                            placeholder="Lead User"
-                        />
-
-                        <flux:button icon="plus">
-                            Add User
-                        </flux:button>
-                    </flux:input.group>
-
-                    <flux:input
-                        wire:model.live="phone"
-                        label="Phone"
-                        type="number"
-                        placeholder="Phone"
-                    />
-
-                    <flux:input
-                        wire:model.live="email"
-                        label="Email"
-                        type="text"
-                        placeholder="Email"
-                    />
-
-                    <flux:input
-                        wire:model.live="address"
-                        label="Address"
-                        type="text"
-                        placeholder="Address"
-                    />
-                @endif
-
-                {{--  id="new_project_id"  --}}
-                <flux:select
-                    wire:model.live="lead_status"
-                    label="Status"
-                    variant="listbox"
-                    placeholder="Choose Status..."
-                >
-                    @foreach(\App\Models\Lead::selectableStatuses() as $status)
-                        <flux:select.option value="{{ $status['code'] }}"><flux:badge :color="$status['color']">{{ $status['label'] }}</flux:badge></flux:select.option>
-                    @endforeach
-                </flux:select>
-            </form>
+        <flux:tab.panel name="details" class="pt-4">
+            @include('livewire.leads.partials.details-panel')
         </flux:tab.panel>
-        <flux:tab.panel name="messages">
-            <form wire:submit="send_message" class="space-y-4">
+        @if (! $this->hasReplied)
+        <flux:tab.panel name="messages" class="pt-4">
+            <form id="lead_messages_form" wire:submit="send_message" class="space-y-4">
                 <flux:textarea
                     wire:model.live="message"
                     disabled
@@ -177,15 +72,21 @@
                 @if (! empty($availability))
                     <flux:field>
                         <flux:label>Availability</flux:label>
-                        <flux:description class="mb-2">Click to select a slot for the email.</flux:description>
+                        @if ($this->hasUsableAvailability)
+                            <flux:description class="mb-2">Click to select a slot for the email.</flux:description>
+                        @else
+                            <flux:description class="mb-2">These preferred times have passed — the email asks {{ $full_name ?: 'the client' }} to pick new ones instead.</flux:description>
+                        @endif
                         <div class="flex flex-wrap gap-2">
                             @foreach ($availability as $index => $slot)
                                 @php($selected = in_array($index, $selectedAvailability, true))
+                                @php($past = ! \App\Models\Lead::slotIsBookable((array) $slot))
                                 <button type="button"
                                     wire:click="insertAvailabilitySlot({{ $index }})"
-                                    class="cursor-pointer"
+                                    @disabled($past)
+                                    class="{{ $past ? 'cursor-not-allowed' : 'cursor-pointer' }}"
                                 >
-                                    <flux:badge :color="$selected ? 'green' : 'sky'">
+                                    <flux:badge :color="$past ? 'zinc' : ($selected ? 'indigo' : 'sky')" :class="$past ? 'line-through opacity-60' : ''">
                                         @if ($selected)
                                             <flux:icon.check variant="micro" class="size-3.5" />
                                         @endif
@@ -194,30 +95,81 @@
                                 </button>
                             @endforeach
                         </div>
+
+                        @if (! empty($selectedAvailability) && $this->exactTimeOptions !== [])
+                            <flux:description class="mt-2 mb-1">Pick the exact time for the consult.</flux:description>
+                            <div class="flex flex-wrap gap-2">
+                                @foreach ($this->exactTimeOptions as $option)
+                                    @php($timeSelected = $selectedExactTime === $option['value'])
+                                    <button type="button"
+                                        wire:click="selectExactTime('{{ $option['value'] }}')"
+                                        class="cursor-pointer"
+                                    >
+                                        <flux:badge size="sm" :color="$timeSelected ? 'green' : 'zinc'">
+                                            @if ($timeSelected)
+                                                <flux:icon.check variant="micro" class="size-3.5" />
+                                            @endif
+                                            {{ $option['label'] }}
+                                        </flux:badge>
+                                    </button>
+                                @endforeach
+                            </div>
+                        @endif
+
+                        @if ($this->needsProjectName)
+                            <div class="mt-3">
+                                <flux:input
+                                    wire:model.live.debounce.300ms="projectName"
+                                    label="Project Name"
+                                    type="text"
+                                    placeholder="e.g. Kitchen Remodel"
+                                    description="Booking this consult creates the client's project."
+                                />
+                            </div>
+                        @endif
                     </flux:field>
                 @endif
 
                 <flux:editor wire:model.live="emailBody" label="Body" />
-
-                <div class="flex justify-end pt-2">
-                    <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="send_message">
-                        Send Email
-                    </flux:button>
-                </div>
             </form>
 
-            @if ($lead?->id)
-                <div class="mt-6">
-                    <livewire:projects.email-tracking-table :lead-id="$lead->id" :key="'lead-tracking-' . $lead->id" />
-                </div>
-            @endif
         </flux:tab.panel>
+        @endif
     </flux:tab.group>
+    @endif
 
     <x-slot name="footer">
         <flux:spacer />
-        <flux:button wire:click="confirmRemove" variant="danger">Remove</flux:button>
-        <flux:button type="submit" form="lead_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+        @if ($lead?->exists)
+            {{-- Status lives in the footer on Details; changes save immediately
+                 (LeadCreate::updated). --}}
+            <div x-show="activeLeadTab === 'details'" class="w-44">
+                <flux:select
+                    wire:model.live="lead_status"
+                    variant="listbox"
+                    placeholder="Choose Status..."
+                >
+                    @foreach(\App\Models\Lead::selectableStatuses() as $status)
+                        {{-- A replied lead can't go back to New. --}}
+                        <flux:select.option value="{{ $status['code'] }}" :disabled="$status['code'] === 'New' && $this->hasReplied"><flux:badge :color="$status['color']">{{ $status['label'] }}</flux:badge></flux:select.option>
+                    @endforeach
+                </flux:select>
+            </div>
+            @if (! $this->hasReplied)
+                <flux:button wire:click="confirmRemove" variant="danger">Remove</flux:button>
+                {{-- No Update button: status changes apply immediately (see
+                     LeadCreate::updated), everything else on Details is read-only. --}}
+                <div x-show="activeLeadTab === 'messages'">
+                    <flux:button type="submit" form="lead_messages_form" variant="primary"
+                        wire:loading.attr="disabled" wire:target="send_message"
+                        :disabled="$this->sendBlockedReason !== null">
+                        Send Email
+                    </flux:button>
+                </div>
+            @endif
+        @else
+            <flux:button type="submit" form="lead_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+        @endif
     </x-slot>
 
     {{-- <livewire:users.user-create /> --}}

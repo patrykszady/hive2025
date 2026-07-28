@@ -6,6 +6,7 @@ use App\Enums\LienWaiverStatus;
 use App\Enums\LienWaiverType;
 use App\Jobs\SendLienWaiverSigningRequestJob;
 use App\Models\LienWaiver;
+use App\Models\SwornStatement;
 use App\Models\Project;
 use Flux;
 use Illuminate\Validation\Rule;
@@ -1329,8 +1330,22 @@ class Index extends Component
         return view('livewire.lien-waivers.index');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
-        return view('livewire.lien-waivers.skeleton');
+        // The card renders header-only (and no accordion) when the project has
+        // no waivers — the skeleton has to know that too, or it paints a
+        // chevron and rows that vanish a moment later. A COUNT is far cheaper
+        // than the grouped query the skeleton stands in for.
+        $project = $params['project'] ?? null;
+        $projectId = $project instanceof Project
+            ? $project->id
+            : (is_numeric($project) ? (int) $project : null);
+
+        $hasWaivers = $projectId
+            ? LienWaiver::withoutGlobalScopes()->where('project_id', $projectId)->exists()
+                || SwornStatement::withoutGlobalScopes()->where('project_id', $projectId)->exists()
+            : true;
+
+        return view('livewire.lien-waivers.skeleton', ['hasWaivers' => $hasWaivers]);
     }
 }

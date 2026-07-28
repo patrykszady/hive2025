@@ -1,4 +1,8 @@
-<div class="max-w-3xl" wire:transition>
+@php
+    // Embedded in a show-page column: inherit that column's spacing/width.
+    $embedded = $view !== 'estimates.index';
+@endphp
+<div class="{{ $embedded ? 'space-y-4' : 'max-w-3xl' }}" wire:transition>
     @if($view === NULL)
         <x-island-card heading="Filters" class="mb-4">
         </x-island-card>
@@ -17,7 +21,28 @@
                 :compact="false"
             />
         @endplaceholder
-    <x-index-table heading="Estimates" :paginator="$this->estimates">
+    @php
+        // Active estimates are the ones that matter day to day; superseded /
+        // disabled ones collapse behind the header toggle, like the Email
+        // Tracking card's history.
+        $allEstimates = collect($this->estimates->items());
+        $activeEstimates = $allEstimates->filter(fn ($e) => $e->status === 'Active')->values();
+        $olderEstimates = $allEstimates->reject(fn ($e) => $e->status === 'Active')->values();
+        // Nothing active? Show them all rather than an empty-looking card.
+        if ($activeEstimates->isEmpty()) {
+            $activeEstimates = $olderEstimates;
+            $olderEstimates = collect();
+        }
+        $hasEstimateHistory = $olderEstimates->isNotEmpty();
+        $estimateTableClass = $view === 'estimates.index' ? 'index-table' : 'table-fixed min-w-0 w-full';
+    @endphp
+    <x-index-table heading="Estimates" :paginator="$this->estimates"
+        x-data="{ open: false }" :clickable="$hasEstimateHistory">
+        <x-slot:badge>
+            <div class="{{ $hasEstimateHistory ? 'contents' : 'hidden' }}">
+                <flux:badge color="zinc" size="sm">{{ $allEstimates->count() }}</flux:badge>
+            </div>
+        </x-slot:badge>
         <x-slot:actions>
         @if($view !== 'estimates.index')
             @can('create', [App\Models\Estimate::class, $project])
@@ -29,9 +54,17 @@
                 </flux:button>
             @endcan
         @endif
+            <div class="{{ $hasEstimateHistory ? 'contents' : 'hidden' }}">
+                <button type="button" @click.stop="open = !open" class="flex items-center p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" aria-label="Toggle previous estimates">
+                    <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="open && 'rotate-180'" />
+                </button>
+            </div>
         </x-slot:actions>
 
-            <flux:table class="{{ $view === 'estimates.index' ? 'index-table' : 'table-fixed min-w-0 w-full' }} [:where(&)]:p-0 [:where(&)]:space-y-0">
+        {{-- Empty card = header only (no stray table spacing) — same pattern as
+             the Projects card on clients.show. --}}
+        @if($allEstimates->isNotEmpty())
+            <flux:table class="{{ $estimateTableClass }} [:where(&)]:p-0 [:where(&)]:space-y-0">
                 @if($view === 'estimates.index')
                     <flux:table.columns>
                         <flux:table.column class="w-[40%] min-w-0">Estimate</flux:table.column>
@@ -40,77 +73,28 @@
                     </flux:table.columns>
                 @endif
 
-                <flux:table.rows>
-                    @foreach($this->estimates as $estimate)
-                        <flux:table.row :key="$estimate->id">
-                            @if($estimate->status === 'Active')
-                                <flux:table.cell variant="strong">
-                                    <div class="flex items-center gap-2">
-                                        <flux:link
-                                            href="{{route('estimates.show', $estimate->id)}}"
-                                            variant="ghost"
-                                            :accent="false"
-                                            class="font-bold no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400"
-                                            wire:navigate.hover
-                                        >
-                                            {{ money($estimate->estimate_sections->sum('total')) }}
-                                        </flux:link>
-                                        <flux:badge
-                                            size="sm"
-                                            :color="$estimate->status === 'Active' ? 'green' : 'orange'"
-                                            inset="top bottom"
-                                            >
-                                            {{$estimate->status}}
-                                        </flux:badge>
-                                    </div>
-                                </flux:table.cell>
-                            @else
-                                <flux:table.cell>
-                                    <div class="flex items-center gap-2">
-                                        <span>{{ money($estimate->estimate_sections->sum('total')) }}</span>
-                                        <flux:badge
-                                            size="sm"
-                                            color="orange"
-                                            inset="top bottom"
-                                            >
-                                            {{$estimate->status}}
-                                        </flux:badge>
-
-                                        @unless(auth()->user()->is_browsing_as_client)
-                                            <flux:dropdown position="bottom" align="start">
-                                                <flux:button
-                                                    variant="ghost"
-                                                    size="xs"
-                                                    icon="cog-6-tooth"
-                                                    class="!p-1"
-                                                    aria-label="Estimate actions"
-                                                />
-
-                                                <flux:menu>
-                                                    <flux:menu.item icon="arrow-path" wire:click="activateEstimate({{ $estimate->id }})">Restore</flux:menu.item>
-                                                    <flux:menu.item icon="trash" wire:click="removeEstimate({{ $estimate->id }})" variant="danger">Delete</flux:menu.item>
-                                                </flux:menu>
-                                            </flux:dropdown>
-                                        @endunless
-                                    </div>
-                                </flux:table.cell>
-                            @endif
-                            
-                            <flux:table.cell>{{ $estimate->created_at->format('m/d/y') }}</flux:table.cell>
-                            
-                            @if($view === 'estimates.index')
-                                <flux:table.cell
-                                    wire:navigate.hover
-                                    href="{{route('clients.show', $estimate->project->client->id)}}"
-                                    class="cursor-pointer"
-                                    >
-                                    {{ $estimate->project->client->name }}
-                                </flux:table.cell>
-                            @endif
-                        </flux:table.row>
-                    @endforeach
-                </flux:table.rows>
+                @include('livewire.estimates.partials.rows', ['estimateRows' => $activeEstimates])
             </flux:table>
+
+            @if($hasEstimateHistory)
+                {{-- Superseded estimates: a SECOND table inside a plain div —
+                     x-collapse animates height, which table elements ignore.
+                     Same column widths, so the two tables stay aligned. --}}
+                <div x-show="open" x-collapse x-cloak>
+                    <flux:table class="{{ $estimateTableClass }} [:where(&)]:p-0 [:where(&)]:space-y-0">
+                        @if($view === 'estimates.index')
+                            <colgroup>
+                                <col class="w-[40%]">
+                                <col class="w-[25%]">
+                                <col class="w-[35%]">
+                            </colgroup>
+                        @endif
+
+                        @include('livewire.estimates.partials.rows', ['estimateRows' => $olderEstimates])
+                    </flux:table>
+                </div>
+            @endif
+        @endif
     </x-index-table>
     @endisland
 </div>

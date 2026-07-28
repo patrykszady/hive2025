@@ -1,18 +1,20 @@
 <div wire:transition>
     {{-- PROJECT LIFESPAN / STATUS --}}
-    <x-island-card>
-        <div x-data="{ expanded: false }">
-            {{-- Header with toggle --}}
+    {{-- Heading comes from <x-island-card> like every other card — a hand-rolled
+         header here sits at a different height (the shared one reserves a
+         2.25rem row for action buttons) and shifts when the skeleton swaps out.
+         The history toggle rides in the actions slot. --}}
+    <x-island-card heading="Project Timeline" x-data="{ open: false }" :clickable="$statuses->count() > 1">
+        {{-- Slot forwarded unconditionally: Blade hoists <x-slot> out of an
+             @if, so the guard lives inside. --}}
+        <x-slot:actions>
             @if($statuses->count() > 1)
-                <button type="button" @click="expanded = !expanded" class="flex w-full items-center justify-between">
-                    <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
-                    <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="expanded && 'rotate-180'" />
+                <button type="button" @click.stop="open = !open" class="flex items-center p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" aria-label="Toggle status history">
+                    <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="open && 'rotate-180'" />
                 </button>
-            @else
-                <div class="flex w-full items-center justify-between">
-                    <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
-                </div>
             @endif
+        </x-slot:actions>
+        <div>
 
             @if($statuses->isNotEmpty())
                 <flux:timeline class="mt-4" align="start" style="--flux-timeline-indicator-size: 1.5rem;">
@@ -20,7 +22,7 @@
                     @if($statuses->count() > 1)
                         @foreach($statuses as $status)
                             @if(!$loop->last)
-                                <flux:timeline.item x-show="expanded" x-collapse x-cloak class="group">
+                                <flux:timeline.item x-show="open" x-collapse x-cloak class="group">
                                     <flux:timeline.indicator variant="bare">
                                         <div class="size-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
                                     </flux:timeline.indicator>

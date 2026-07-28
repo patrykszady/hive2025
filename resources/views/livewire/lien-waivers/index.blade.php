@@ -1,5 +1,12 @@
-<div class="max-w-3xl space-y-2" wire:transition>
-    @php($isProjectScoped = $this->scoped)
+@php
+    $isProjectScoped = $this->scoped;
+    // Project-scoped = embedded in a show-page column: inherit that column's
+    // width and rhythm instead of imposing this page's own.
+@endphp
+{{-- Embedded: NO spacing utility. This root also holds modal hosts after the
+     card, and space-y-* would give those zero-height elements a margin that
+     shows up as an extra gap under the card. --}}
+<div class="{{ $isProjectScoped ? '' : 'max-w-3xl space-y-2' }}" wire:transition>
 
     {{-- STANDALONE PAGE (NON-PROJECT SCOPED) --}}
     @if(!$isProjectScoped)
@@ -23,6 +30,7 @@
                     heading="Lien Waivers"
                     :columns="\App\Livewire\LienWaivers\Index::columnDefs()"
                     :rows="\App\Livewire\LienWaivers\Index::placeholderRows()"
+                    :page-size="\App\Livewire\LienWaivers\Index::placeholderRows()"
                     :compact="false"
                 />
             @endplaceholder
@@ -58,7 +66,12 @@
     @elseif($this->hasSignedContract)
         {{-- PROJECT-SCOPED VARIANT — hidden until the contract is signed
              (the base bid created at estimate acceptance). --}}
-        <x-details.card title="Lien Waivers" :expanded="false" :details_text="false" :separator="false">
+        {{-- No waivers yet = no accordion, same as every other card: a toggle
+             that only opens onto an empty body still changed the card height.
+             (x-details.card drops the chevron and the clickable header when
+             :accordion is false.) --}}
+        @php($hasWaivers = $this->drawGroups['draws']->isNotEmpty() || $this->drawGroups['other']->isNotEmpty())
+        <x-details.card title="Lien Waivers" :expanded="false" :details_text="false" :separator="false" :accordion="$hasWaivers">
             <x-slot:header_buttons>
                 <flux:button size="sm" variant="primary" icon="document-text" wire:click="openSwornStatement"
                     class="!bg-indigo-500 hover:!bg-indigo-600 !text-white">

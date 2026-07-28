@@ -223,8 +223,17 @@ class StatusCreate extends Component
         return view('livewire.project-status.create');
     }
 
-    public function placeholder()
+    public function placeholder(array $params = [])
     {
-        return view('livewire.project-status.status-create-placeholder');
+        // The skeleton has to know two things the real card decides at render
+        // time, or the card resizes on load: whether the status-change controls
+        // row is visible (policy-gated) and whether the header carries a
+        // history toggle.
+        $project = ($params['project'] ?? null) instanceof \App\Models\Project ? $params['project'] : null;
+
+        return view('livewire.project-status.status-create-placeholder', [
+            'canUpdateProject' => $project ? (bool) auth()->user()?->can('update', $project) : true,
+            'showHistoryToggle' => $project ? $project->statuses()->count() > 1 : false,
+        ]);
     }
 }

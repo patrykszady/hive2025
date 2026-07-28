@@ -1,8 +1,14 @@
-<div>
-    {{-- Two independent columns (items-start): cards stack per column, so a
-         tall card on one side never opens gaps on the other. --}}
-    <div class="grid grid-cols-1 gap-4 max-w-5xl lg:grid-cols-2 lg:items-start">
-        <div class="space-y-4">
+{{-- Layout comes from <x-page.shell>: same width, gutter, grid and 16px
+     rhythm as every other show page. --}}
+<x-page.shell
+    :cols="2"
+    width="flat"
+    :breadcrumbs="[
+        ['label' => 'Clients', 'href' => auth()->user()->can('viewAny', \App\Models\Client::class) ? route('clients.index') : null],
+        ['label' => html_entity_decode((string) $client->name, ENT_QUOTES, 'UTF-8')],
+    ]"
+>
+    <x-page.column>
             {{-- CLIENT DETAILS --}}
             <x-details.card 
                 :title="$client->name"
@@ -51,18 +57,21 @@
 
             {{-- CLIENT PROJECTS (includes Email Tracking) --}}
             <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
-        </div>
+    </x-page.column>
 
-        <div class="space-y-4">
+    <x-page.column>
             {{-- CLIENT USERS --}}
             <livewire:users.users-index :client="$client" :view="'clients.show'"/>
 
             {{-- CLIENT PROJECT TASKS --}}
             <livewire:clients.upcoming-client-tasks :client="$client" lazy />
-        </div>
-    </div>
-    @if(!auth()->user()->is_browsing_as_client)
-        <livewire:clients.client-create />
-        <livewire:tasks.task-create />
-    @endif
-</div>
+    </x-page.column>
+
+    {{-- Modal hosts: outside the grid so they contribute no gap. --}}
+    <x-slot:offstage>
+        @if(!auth()->user()->is_browsing_as_client)
+            <livewire:clients.client-create />
+            <livewire:tasks.task-create />
+        @endif
+    </x-slot:offstage>
+</x-page.shell>

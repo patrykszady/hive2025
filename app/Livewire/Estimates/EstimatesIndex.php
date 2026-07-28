@@ -150,8 +150,43 @@ class EstimatesIndex extends Component
         // through the mount params. The view data key can't be 'view': Livewire
         // merges the component's public properties into the placeholder view
         // afterwards and would clobber it.
+        $project = $params['project'] ?? null;
+        $projectId = $project instanceof \App\Models\Project
+            ? $project->id
+            : (is_numeric($project) ? (int) $project : null);
+
+        // A COUNT is far cheaper than the paginated query the skeleton stands
+        // in for, so the card shimmers exactly as many rows as will arrive —
+        // and none at all when the project has no estimates (the loaded card
+        // is header-only there).
+        $estimates = $projectId
+            ? \App\Models\Estimate::withTrashed()
+                ->where('project_id', $projectId)
+                ->orderBy('deleted_at')
+                ->orderByDesc('created_at')
+                ->limit(static::placeholderRows())
+                ->get(['id', 'deleted_at'])
+            : collect();
+
+        // The card shows ACTIVE estimates only — the rest collapse behind the
+        // header toggle — so the skeleton must count the VISIBLE rows, not all
+        // of them. (With nothing active the card falls back to showing them
+        // all, and so does this.)
+        $visible = $estimates->reject(fn ($e) => $e->deleted_at !== null);
+
+        if ($visible->isEmpty()) {
+            $visible = $estimates;
+        }
+
+        // Measured against the loaded card: an active estimate's cell is a
+        // money link + badge (44px row); a trashed one adds an actions
+        // dropdown (50px). Cheap to know, so the skeleton matches row for row.
+        $rowHeights = $visible->map(fn ($e) => $e->deleted_at ? 50 : 44)->all();
+
         return view('livewire.estimates.estimates-index-placeholder', [
             'tableView' => $params['view'] ?? $this->view,
+            'rows' => $projectId ? count($rowHeights) : static::placeholderRows(),
+            'rowHeights' => $projectId ? $rowHeights : null,
         ]);
     }
 }

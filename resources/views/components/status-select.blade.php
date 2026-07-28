@@ -1,7 +1,10 @@
 @blaze
 
-{{-- Inline status dropdown for table rows (single source of truth: used by the
+{{-- Inline status control for table rows (single source of truth: used by the
      Projects table and the Leads table).
+
+     Flux-native: the status BADGE itself is the trigger of a flux:dropdown —
+     no select box around it. The menu lists each status as its badge.
 
      - value:    current status (int code or string title)
      - options:  [['code' => ..., 'label' => ..., 'color' => ...], ...]
@@ -13,23 +16,36 @@
     'method',
     'modelId',
 ])
-{{-- wire:key includes the value: morph preserves Alpine x-data across
-     re-renders, so a server-side status change (bulk action, modal edit)
-     would otherwise leave the dropdown showing the stale old value. A key
-     change forces a node swap and Alpine re-initializes fresh. --}}
-<div wire:key="status-select-{{ $method }}-{{ $modelId }}-{{ $value }}" x-data="{ status: @js($value) }" x-init="$watch('status', value => $wire.{{ $method }}({{ Js::from($modelId) }}, value))">
-    <flux:select
-        x-model="status"
-        variant="listbox"
-        size="sm"
-        {{ $attributes->merge(['class' => '!min-w-0']) }}
-    >
-        @foreach($options as $option)
-            <flux:select.option :value="$option['code']">
-                <flux:badge size="sm" inset="top bottom" :color="$option['color']">
-                    {{ $option['label'] }}
-                </flux:badge>
-            </flux:select.option>
-        @endforeach
-    </flux:select>
+@php
+    $current = collect($options)->firstWhere('code', $value);
+@endphp
+{{-- wire:key includes the value so a server-side status change (bulk action,
+     modal edit) swaps the node instead of leaving a stale trigger. --}}
+<div wire:key="status-select-{{ $method }}-{{ $modelId }}-{{ $value }}" {{ $attributes }}>
+    <flux:dropdown position="bottom" align="start">
+        <flux:badge
+            as="button"
+            size="sm"
+            :color="$current['color'] ?? 'zinc'"
+            icon-trailing="chevron-down"
+            class="cursor-pointer"
+        >
+            {{ $current['label'] ?? 'Set status' }}
+        </flux:badge>
+
+        <flux:menu>
+            @foreach($options as $option)
+                {{-- :disabled bound, not @disabled — directives don't compile
+                     inside component tags. --}}
+                <flux:menu.item
+                    wire:click="{{ $method }}({{ Js::from($modelId) }}, {{ Js::from($option['code']) }})"
+                    :disabled="$option['disabled'] ?? false"
+                >
+                    <flux:badge size="sm" inset="top bottom" :color="$option['color']">
+                        {{ $option['label'] }}
+                    </flux:badge>
+                </flux:menu.item>
+            @endforeach
+        </flux:menu>
+    </flux:dropdown>
 </div>

@@ -9,8 +9,8 @@
             @endcan
         </div>
 
-        <div class="mt-3">
-            @if(count($this->materialExpenses))
+        @if(count($this->materialExpenses))
+            <div class="mt-3">
                 @php($itemsByExpense = $this->materialItemsByExpense)
                 @php($availabilityByExpense = $this->materialAvailabilityByExpense)
 
@@ -127,10 +127,8 @@
                         </flux:accordion.item>
                     @endforeach
                 </div>
-            @else
-                <flux:text class="py-2 text-zinc-400">No material orders yet.</flux:text>
-            @endif
-        </div>
+            </div>
+        @endif
     </flux:card>
 
     {{-- Item Detail Modal --}}

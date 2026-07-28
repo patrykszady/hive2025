@@ -24,13 +24,18 @@
             @endif
         </flux:badge>
     </flux:table.cell>
-    <flux:table.cell class="!px-2 whitespace-nowrap">
+    {{-- min-w-0 + overflow-hidden: a long template name would otherwise spill
+         out of its column and sit on top of the next one. --}}
+    <flux:table.cell class="!px-2 whitespace-nowrap min-w-0 overflow-hidden">
         @if($event->email_template_name)
             {{-- inset: without it this badge is 24px and the row grows to 49px,
                  4px taller than every other index row (and than the skeleton). --}}
-            <flux:badge size="sm" color="zinc" variant="outline" inset="top bottom">
-                {{ $event->email_template_name }}
-            </flux:badge>
+            {{-- Shared tooltip: shows only when the name is actually clipped. --}}
+            <x-truncate-tooltip :content="$event->email_template_name">
+                <flux:badge size="sm" color="zinc" variant="outline" inset="top bottom" class="max-w-full">
+                    <span class="block truncate">{{ $event->email_template_name }}</span>
+                </flux:badge>
+            </x-truncate-tooltip>
         @else
             <span class="text-gray-400">-</span>
         @endif

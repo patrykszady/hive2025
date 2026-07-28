@@ -1,4 +1,11 @@
-<div class="max-w-3xl space-y-2" wire:transition>
+@php
+    // Embedded in a show-page column (projects.show / vendors.show): inherit
+    // that column's width and 16px rhythm rather than imposing this page's own.
+    // No spacing utility when embedded — this root also hosts modals, and
+    // space-y-* would give those zero-height elements a stray margin.
+    $embedded = $view !== null;
+@endphp
+<div class="{{ $embedded ? '' : 'max-w-3xl space-y-2' }}" wire:transition>
     @if($view === NULL)
         {{-- Single-copy responsive filters: the inline layout already stacks
              below sm (flex-col sm:flex-row), so one render serves both
@@ -31,6 +38,7 @@
                 heading="Expenses"
                 :columns="\App\Livewire\Expenses\ExpenseIndex::columnDefs($view)"
                 :rows="\App\Livewire\Expenses\ExpenseIndex::placeholderRows($view)"
+                :page-size="\App\Livewire\Expenses\ExpenseIndex::placeholderRows($view)"
                 :compact="false"
             />
         @endplaceholder
@@ -39,8 +47,13 @@
          island requests don't compete for the connection. x-init runs once on
          insertion; island re-renders morph the same keyed node. --}}
     <div wire:key="expenses-table-loaded-ping" x-init="$dispatch('expenses-table-loaded')"></div>
-    <x-index-table :heading="!in_array($view, ['projects.show', 'vendors.show']) ? 'Expenses' : null" :paginator="$this->expenses" x-data="{
+    {{-- Same shared card as Payments/Checks/Estimates: heading from the card
+         header, no card-level accordion. The Filters toggle (unique to this
+         card) sits beside the title and opens only the filter fields. --}}
+    <x-index-table heading="Expenses" :paginator="$this->expenses"
+        x-data="{
         filtersOpen: false,
+        open: true,
         bulkMode: false,
         refreshAfterDeleteTimer: null,
         exitBulkMode() {
@@ -74,8 +87,13 @@
             });
         }
     }">
-        @if($view === null)
+            {{-- Bulk select belongs to the standalone /expenses page only.
+                 Gate it with a plain class interpolation: wrapping the
+                 <x-slot> in @if HOISTS it (the badge then showed on
+                 projects.show), and an @if or @class INSIDE the slot doesn't
+                 survive the Blaze slot compiler. --}}
             <x-slot:badge>
+                <div class="{{ $view === null ? 'contents' : 'hidden' }}">
                 <flux:badge as="button" size="sm" color="zinc" icon="cursor-arrow-rays" x-show="!bulkMode" x-on:click="bulkMode = true">Select Items</flux:badge>
                 <div class="flex items-center gap-2" x-show="bulkMode" x-cloak>
                     <flux:badge color="indigo" size="sm">
@@ -96,21 +114,24 @@
                         </flux:menu>
                     </flux:dropdown>
                 </div>
-            </x-slot:badge>
-        @endif
-        @if(in_array($view, ['projects.show', 'vendors.show']))
-            <button type="button" @click="filtersOpen = !filtersOpen" class="flex w-full items-center justify-between">
-                <flux:heading size="lg" class="mb-0">Expenses</flux:heading>
-                <div class="flex items-center gap-2">
-                    <span class="text-sm text-zinc-500 dark:text-zinc-400">Filters</span>
-                    <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="filtersOpen && 'rotate-180'" />
                 </div>
-            </button>
-
-            <div x-show="filtersOpen" x-collapse x-cloak class="mt-4">
-                @include('livewire.expenses.partials.filter-fields', ['layout' => 'stacked'])
+                <div class="{{ in_array($view, ['projects.show', 'vendors.show']) ? 'contents' : 'hidden' }}">
+                    @include('livewire.expenses.partials.filters-toggle')
+                </div>
+            </x-slot:badge>
+        {{-- Filter fields sit between header and table via `before` (no wrapper
+             padding), NOT the toolbar slot: .index-table-toolbar adds 20px of
+             padding that would show even while the panel is collapsed, which
+             the Payments card doesn't have. --}}
+        <x-slot:before>
+            <div class="{{ in_array($view, ['projects.show', 'vendors.show']) ? 'contents' : 'hidden' }}">
+                <div x-show="filtersOpen" x-collapse x-cloak>
+                    <div class="pt-3">
+                        @include('livewire.expenses.partials.filter-fields', ['layout' => 'stacked'])
+                    </div>
+                </div>
             </div>
-        @endif
+        </x-slot:before>
 
         @php $isEmbedView = in_array($view, ['checks.show', 'vendors.show']); @endphp
                 <flux:table

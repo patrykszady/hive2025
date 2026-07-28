@@ -89,6 +89,7 @@
                 heading="Confirmed Timesheets"
                 :columns="\App\Livewire\Timesheets\TimesheetsIndex::columnDefs()"
                 :rows="\App\Livewire\Timesheets\TimesheetsIndex::placeholderRows()"
+                :page-size="\App\Livewire\Timesheets\TimesheetsIndex::placeholderRows()"
                 :compact="false"
             />
         @endplaceholder

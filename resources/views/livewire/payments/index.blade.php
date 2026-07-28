@@ -1,4 +1,8 @@
-<div class="max-w-3xl space-y-2" wire:transition>
+@php
+    // Embedded in a show-page column: inherit that column's spacing/width.
+    $embedded = $view !== null;
+@endphp
+<div class="{{ $embedded ? 'space-y-4' : 'max-w-3xl space-y-2' }}" wire:transition>
     @if($view === null)
         <x-filter-card>
             {{-- single copy: the inline layout stacks below sm on its own --}}
@@ -15,6 +19,7 @@
                 heading="Payments"
                 :columns="\App\Livewire\Payments\PaymentsIndex::columnDefs($view)"
                 :rows="\App\Livewire\Payments\PaymentsIndex::placeholderRows($view)"
+                :page-size="\App\Livewire\Payments\PaymentsIndex::placeholderRows($view)"
                 :compact="false"
             />
         @endplaceholder

@@ -220,8 +220,20 @@ class PaymentsIndex extends Component
         // incoming view under its own key — Livewire re-merges the component's
         // public properties into the placeholder view data afterwards, which
         // would clobber a 'view' key.
+        $project = $params['project'] ?? null;
+        $projectId = $project instanceof \App\Models\Project
+            ? $project->id
+            : (is_numeric($project) ? (int) $project : null);
+
+        // Cheap COUNT so the embedded card shimmers exactly as many rows as
+        // will arrive — and none at all for a project with no payments.
+        $rows = $projectId
+            ? min(Payment::where('project_id', $projectId)->count(), static::placeholderRows($params['view'] ?? null))
+            : static::placeholderRows($params['view'] ?? null);
+
         return view('livewire.payments.payments-index-placeholder', [
             'tableView' => $params['view'] ?? $this->view,
+            'rows' => $rows,
         ]);
     }
 }

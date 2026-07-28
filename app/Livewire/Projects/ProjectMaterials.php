@@ -357,8 +357,33 @@ class ProjectMaterials extends Component
         return view('livewire.projects.project-materials');
     }
 
-    public function placeholder()
+    /** Skeleton ceiling — the card lists every material order, so cap the shimmer. */
+    public static function placeholderRows(): int
     {
-        return view('livewire.projects.project-materials-placeholder');
+        return 6;
+    }
+
+    public function placeholder(array $params = [])
+    {
+        $project = $params['project'] ?? null;
+        $projectId = $project instanceof Project
+            ? $project->id
+            : (is_numeric($project) ? (int) $project : null);
+
+        // A COUNT is far cheaper than the query the skeleton stands in for, so
+        // the shimmer paints exactly as many rows as will arrive — and none at
+        // all for a project with no material orders (the loaded card is
+        // header-only there).
+        $rows = $projectId
+            ? Expense::withoutGlobalScope(ExpenseScope::class)
+                ->where('project_id', $projectId)
+                ->whereHas('receipts', fn ($q) => $q->where('is_material_order', true))
+                ->count()
+            : static::placeholderRows();
+
+        return view('livewire.projects.project-materials-placeholder', [
+            'project' => $project,
+            'rows' => min($rows, static::placeholderRows()),
+        ]);
     }
 }

@@ -1,4 +1,9 @@
-<div class="max-w-3xl">
+@php
+    // Embedded in a show-page column: inherit that column's width instead of
+    // imposing this page's own.
+    $embedded = $view !== null;
+@endphp
+<div class="{{ $embedded ? '' : 'max-w-3xl' }}">
     @if($view === NULL)
         <x-filter-card class="mb-4">
             {{-- single copy: the inline layout stacks below sm on its own --}}
@@ -14,6 +19,7 @@
                 heading="Checks"
                 :columns="\App\Livewire\Checks\ChecksIndex::columnDefs()"
                 :rows="\App\Livewire\Checks\ChecksIndex::placeholderRows($view)"
+                :page-size="\App\Livewire\Checks\ChecksIndex::placeholderRows($view)"
                 :compact="false"
             />
         @endplaceholder
