@@ -1168,13 +1168,12 @@ class Index extends Component
                 continue;
             }
 
-            // Retail vendors (rentals, haulers, incidentals) appear on the
-            // sworn statement but don't get waivers — EXCEPT material
-            // suppliers (sheets_type "Materials"), who can lien for materials
-            // furnished and whose waiver-only document title companies expect.
-            if (! empty($row['is_retail']) && empty($row['is_material'])) {
-                continue;
-            }
+            // Every party listed on the statement swears a waiver — including
+            // retail vendors (rentals, haulers, incidentals). They rarely have
+            // an email on file, so their waiver is mailed to the draw's creator
+            // with a "please forward to {vendor}" banner (see $canEmail below)
+            // rather than being skipped, which left Groot and National
+            // Construction Rental on the GCSS with no waiver to chase.
 
             // Money received to date = discovered paid + any amount entered for
             // this draw. That's the "to date" consideration for the waiver.
@@ -1213,6 +1212,12 @@ class Index extends Component
             }
             if (! empty($row['is_retail'])) {
                 $notes['retail'] = true;
+            }
+            // Material suppliers sign the WAIVER ONLY — they furnish goods, so
+            // there's no contract math to swear to. Everyone else (subs and
+            // retail/rental/haulers alike) signs the affidavit too.
+            if (! empty($row['is_material'])) {
+                $notes['material'] = true;
             }
 
             $canEmail = $emailableVendorIds->contains($vendorId);

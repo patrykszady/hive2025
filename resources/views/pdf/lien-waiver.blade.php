@@ -207,6 +207,11 @@
         }
         $workKindSuffix = 'labor & material (incl. extras)';
         $isRetailClaimant = ! empty($waiverNotesArr['retail']) || ($vendor->business_type ?? null) === 'Retail';
+        // Only MATERIAL suppliers sign a waiver-only document (goods furnished,
+        // no contract math to swear to). Retail/rental/haulers swear the
+        // affidavit like every other party on the statement. The vendor
+        // fallback covers waivers written before the note existed.
+        $isMaterialSupplier = ! empty($waiverNotesArr['material']) || ($vendor->sheets_type ?? null) === 'Materials';
         // Open contract: a sub waiver that is NOT final but whose contract
         // equals the amount paid reads as "paid in full" on paper while the
         // contract is still running — mark those figures OPEN. Derived from
@@ -304,9 +309,9 @@
             {{-- Every claimant swears its own affidavit: the GC's recites the
                  owner contract, a sub's recites its sub-contract with the GC.
                  The all-subs listing lives on the standalone GCSS statement.
-                 Retail vendors (suppliers, rentals, haulers) sign the waiver
-                 only — they have no contract math to swear to. --}}
-            @if(! $isRetailClaimant)
+                 Material suppliers sign the waiver only — goods furnished,
+                 no contract math to swear to. --}}
+            @if(! $isMaterialSupplier)
             <div class="il-divider"></div>
 
             {{-- -------------------- CONTRACTOR'S AFFIDAVIT -------------------- --}}

@@ -246,10 +246,15 @@ it('one step: generating the statement also creates a sub waiver+affidavit for e
         ->assertFileDownloaded('gc-draw-package-gs-construction-remodeling-inc-mark-gail-brodson-3154-violet-ln-draw-1-' . now()->format('Y-m-d') . '.pdf');
 
     // PMG gets a fresh sub waiver; Cardona is skipped (already had an open
-    // one); the GC gets its own waiver for the draw.
+    // one); the GC gets its own waiver for the draw; and the retail vendor
+    // gets one too — every party listed on the statement swears a waiver, and
+    // retail vendors without an email are mailed to the draw's creator to
+    // forward (they used to be silently skipped, leaving haulers and rental
+    // companies on the GCSS with nothing to chase).
     $waivers = LienWaiver::withoutGlobalScopes()->where('project_id', $project->id)->get();
 
-    expect($waivers)->toHaveCount(3); // Cardona's original + PMG's new one + GC's draw waiver
+    expect($waivers)->toHaveCount(4) // Cardona + PMG + GC draw waiver + retail
+        ->and($waivers->firstWhere('vendor_id', $retail->id))->not->toBeNull();
 
     $pmg = $waivers->firstWhere('vendor_id', $sub->id);
     expect($pmg)->not->toBeNull()
@@ -289,7 +294,9 @@ it('one step: generating the statement also creates a sub waiver+affidavit for e
         ->and(json_decode($gcWaiver->notes, true)['payer']['name'])->toBe('Mark & Gail Brodson');
 
     expect($waivers->where('vendor_id', $cardona->id)->count())->toBe(1)  // not duplicated
-        ->and($waivers->where('vendor_id', $retail->id)->count())->toBe(0); // retail: on statement, never a waiver
+        // Retail vendors DO get a waiver now — one each, like everyone else on
+        // the statement.
+        ->and($waivers->where('vendor_id', $retail->id)->count())->toBe(1);
 });
 
 it('creates a fresh sub waiver when the previous one was deleted', function () {
@@ -654,7 +661,7 @@ it('saves selected kinds of work as WorkTypes and defaults the vendor to them ne
         ->and(\App\Models\WorkType::where('belongs_to_vendor_id', $gc->id)->count())->toBe(1);
 });
 
-it('renders retail waivers without an affidavit and furnishes the work type', function () {
+it('gives retail claimants an affidavit and reserves waiver-only for material suppliers', function () {
     [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
     $this->actingAs($user);
 
@@ -684,13 +691,23 @@ it('renders retail waivers without an affidavit and furnishes the work type', fu
         ])->render();
     };
 
-    // Retail claimant (FedEx fixture is business_type Retail): waiver only —
-    // no affidavit, no notary — and "to furnish" names the work type.
+    // Retail claimant (haulers, rentals): swears the affidavit like everyone
+    // else on the statement, and "to furnish" names the work type as typed
+    // (no "labor & material" suffix — they supply goods/services).
     $retailHtml = $render($retail, ['manual' => true, 'source' => 'sworn_statement', 'kind_of_work' => 'Debris removal', 'retail' => true]);
 
     expect($retailHtml)
         ->toContain('WAIVER OF LIEN TO DATE')
         ->toContain('to furnish</span><span class="uline">Debris removal')
+        ->toContain('CONTRACTOR&rsquo;S AFFIDAVIT')
+        ->toContain('NOTARY PUBLIC');
+
+    // MATERIAL suppliers are the waiver-only case: goods furnished, so there
+    // is no contract math to swear to.
+    $materialHtml = $render($retail, ['manual' => true, 'source' => 'sworn_statement', 'kind_of_work' => 'Lumber', 'material' => true]);
+
+    expect($materialHtml)
+        ->toContain('WAIVER OF LIEN TO DATE')
         ->not->toContain('CONTRACTOR&rsquo;S AFFIDAVIT')
         ->not->toContain('NOTARY PUBLIC');
 
