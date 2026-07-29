@@ -540,12 +540,72 @@ it('rejects a waiver-only document whose ADDRESS line is blank', function () {
     assertMovedTo(WSI_ERROR);
 });
 
-it('rejects a scan the analyzer says is not wet-signed', function () {
+it('rejects a scan the analyzer says is not wet-signed when nothing corroborates it', function () {
+    [, , , $waiver] = waiverScanFixtures();
+
+    // No affidavit and no seal: the boolean is the only signal there is, so it
+    // stays fully in force for waiver-only (retail/material) documents.
+    fakeScanPipeline([cuContentFor('HLW-' . $waiver->id, [
+        'IsWetSigned' => ['type' => 'boolean', 'valueBoolean' => false],
+        'HasNotaryStamp' => ['type' => 'boolean'],
+        'NotaryName' => ['type' => 'string'],
+        'NotaryCommissionNumber' => ['type' => 'string'],
+    ], withAffidavit: false)]);
+
+    app(WaiverScanIngest::class)->processInbox();
+
+    expect($waiver->refresh()->status)->toBe(LienWaiverStatus::Sent);
+    assertMovedTo(WSI_ERROR);
+});
+
+it('signs a notarized scan even when the analyzer says it is not wet-signed', function () {
+    // Regression: a returned National Construction Rental waiver — hand-signed
+    // in blue ink and notarized — was bounced to the error folder because the
+    // LLM-judged IsWetSigned came back false. Re-analyzing the same PDF
+    // returned null, so the field is not stable enough to veto a seal.
     [, , , $waiver] = waiverScanFixtures();
 
     fakeScanPipeline([cuContentFor('HLW-' . $waiver->id, [
         'IsWetSigned' => ['type' => 'boolean', 'valueBoolean' => false],
     ])]);
+
+    app(WaiverScanIngest::class)->processInbox();
+
+    expect($waiver->refresh()->status)->toBe(LienWaiverStatus::Signed);
+    assertMovedTo(WSI_SAVED);
+});
+
+it('reads the waiver id off an OCR-mangled footer filename when the barcode will not decode', function () {
+    // Regression: a CamScanner return hard-thresholded the page to B/W, which
+    // merged the Code 128 bars (nothing decoded) AND mangled the footer text to
+    // "lien-wa ver-12-pimg-corpentry-inx-...". An exact "lien-waiver" match
+    // missed it and the whole message went to the error folder.
+    [, , , $waiver] = waiverScanFixtures();
+
+    // No decoded-barcode annotation in the markdown: the footer filename is the
+    // only route left, exactly as in the real scan.
+    fakeScanPipeline([array_merge(
+        cuContentFor('HLW-' . $waiver->id, [
+            'FooterFilename' => ['type' => 'string', 'valueString' => "lien-wa ver-{$waiver->id}-pimg-corpentry-inx-:-263-364-214-mark-geil-orodson-3154-viclet-in-craw-1-7026-07-28.odf"],
+        ]),
+        ['markdown' => "## CONTRACTOR'S AFFIDAVIT\n<!-- PageFooter: no readable barcode -->"],
+    )]);
+
+    app(WaiverScanIngest::class)->processInbox();
+
+    expect($waiver->refresh()->status)->toBe(LienWaiverStatus::Signed);
+    assertMovedTo(WSI_SAVED);
+});
+
+it('does not mistake a GCSS footer filename for a lien waiver id', function () {
+    [, , , $waiver] = waiverScanFixtures();
+
+    fakeScanPipeline([array_merge(
+        cuContentFor('HLW-' . $waiver->id, [
+            'FooterFilename' => ['type' => 'string', 'valueString' => 'sworn-statement-7-3154-violet-ln-draw-1-2026-07-28.pdf'],
+        ]),
+        ['markdown' => "## CONTRACTOR'S AFFIDAVIT\n<!-- PageFooter: no readable barcode -->"],
+    )]);
 
     app(WaiverScanIngest::class)->processInbox();
 

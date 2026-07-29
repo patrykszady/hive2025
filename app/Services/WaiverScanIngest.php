@@ -353,11 +353,11 @@ class WaiverScanIngest
 
             // 2. Footer filename fallback: "lien-waiver-{id}-..." carries the
             //    same id as the barcode (GCSS filenames do not include the id).
-            //    OCR-tolerant about hyphens/whitespace: the field is scoped to
-            //    the footer card so loose matching is safe here.
-            $filename = (string) ($fields['FooterFilename'] ?? '');
-            if (preg_match('/lien[\s-]*waiver[\s-]*(\d{1,10})\b/i', $filename, $match)) {
-                $code = 'HLW-' . (int) $match[1];
+            //    OCR-tolerant: the field is scoped to the footer card so loose
+            //    matching is safe here.
+            $waiverId = $this->waiverIdFromFooterFilename((string) ($fields['FooterFilename'] ?? ''));
+            if ($waiverId !== null) {
+                $code = 'HLW-' . $waiverId;
                 $codes[$code] = $codes[$code] ?? $context;
             }
         }
@@ -370,6 +370,34 @@ class WaiverScanIngest
         }
 
         return $codes;
+    }
+
+    /**
+     * The waiver id out of the footer card's filename ("lien-waiver-{id}-...").
+     *
+     * This is the ONLY route left when the barcode doesn't decode, which is
+     * routine: phone scanner apps (CamScanner et al) hard-threshold to B/W and
+     * merge the Code 128 bars. The same processing mangles the tiny gray
+     * filename text — a real returned scan OCR'd as
+     * "lien-wa ver-12-pimg-corpentry-inx-..." — so an exact "lien-waiver"
+     * match is too brittle. Instead: drop whitespace, find the first
+     * "-{digits}-" group, and accept it when the text leading up to it still
+     * resembles "lien-waiver". A GCSS footer ("sworn-statement-...") scores far
+     * below the threshold, so it can't be mistaken for a waiver.
+     */
+    protected function waiverIdFromFooterFilename(string $filename): ?int
+    {
+        // OCR splits words with stray spaces ("lien-wa ver"); the real filename
+        // never contains any, so removing them only ever repairs damage.
+        $normalized = strtolower(preg_replace('/\s+/', '', $filename));
+
+        if ($normalized === '' || ! preg_match('/^(.{0,20}?)[-_](\d{1,10})[-_]/', $normalized, $match)) {
+            return null;
+        }
+
+        similar_text($match[1], 'lien-waiver', $percent);
+
+        return $percent >= 70.0 ? (int) $match[2] : null;
     }
 
     /**
@@ -391,7 +419,7 @@ class WaiverScanIngest
             return 'rejected_cancelled';
         }
 
-        if ($context['wet_signed'] === false) {
+        if ($this->rejectsAsUnsigned($context, ['lien_waiver_id' => $waiverId])) {
             Log::channel(self::LOG)->warning('Waiver scan: document is not wet-signed.', ['lien_waiver_id' => $waiverId]);
 
             return 'rejected_unsigned';
@@ -469,7 +497,7 @@ class WaiverScanIngest
             return 'unmatched';
         }
 
-        if ($context['wet_signed'] === false) {
+        if ($this->rejectsAsUnsigned($context, ['sworn_statement_id' => $statementId])) {
             Log::channel(self::LOG)->warning('Waiver scan: GCSS is not wet-signed.', ['sworn_statement_id' => $statementId]);
 
             return 'rejected_unsigned';
@@ -582,17 +610,64 @@ class WaiverScanIngest
                 $missing[] = 'notary_signature';
             }
 
-            // Stamp evidence: the explicit boolean, or the stamp's own text
-            // (notary name / commission number) having been extracted.
-            $hasStamp = $context['notary_stamp'] === true
-                || ! empty($details['notary_name'])
-                || ! empty($details['notary_commission_number']);
-            if (! $hasStamp) {
+            if (! $this->hasNotaryStampEvidence($context)) {
                 $missing[] = 'notary_stamp';
             }
         }
 
         return $missing;
+    }
+
+    /**
+     * Stamp evidence: the explicit boolean, or the stamp's own text (notary
+     * name / commission number) having been extracted off the seal.
+     *
+     * @param  array{notary_stamp:?bool, details:array}  $context
+     */
+    protected function hasNotaryStampEvidence(array $context): bool
+    {
+        $details = $context['details'] ?? [];
+
+        return $context['notary_stamp'] === true
+            || ! empty($details['notary_name'])
+            || ! empty($details['notary_commission_number']);
+    }
+
+    /**
+     * Whether an explicit "not wet-signed" verdict may reject the document.
+     *
+     * IsWetSigned is a `generate` (LLM-judged) field and it is NOT stable: a
+     * returned National Construction Rental waiver came back `false` on the
+     * ingest run and `null` on a re-analysis of the very same PDF, while every
+     * deterministic field — waiver signature, affidavit signature, notary
+     * signature, seal name and commission number — was populated both times.
+     * The document was hand-signed in blue ink and notarized.
+     *
+     * A notary seal is independent, deterministic evidence of wet execution:
+     * the jurat means a person signed in the notary's presence, and a typed
+     * name cannot be sworn to. So the flaky boolean only gets to reject when
+     * nothing corroborates it — which leaves it fully in force for the
+     * waiver-only (no affidavit, no notary) documents where it is the one
+     * signal we have.
+     *
+     * @param  array{wet_signed:?bool, notary_stamp:?bool, details:array}  $context
+     */
+    protected function rejectsAsUnsigned(array $context, array $logContext): bool
+    {
+        if ($context['wet_signed'] !== false) {
+            return false;
+        }
+
+        if (! $this->hasNotaryStampEvidence($context)) {
+            return true;
+        }
+
+        Log::channel(self::LOG)->info(
+            'Waiver scan: analyzer said not wet-signed, but the document is notarized — trusting the seal.',
+            $logContext + ['notary_name' => $context['details']['notary_name'] ?? null],
+        );
+
+        return false;
     }
 
     /**
