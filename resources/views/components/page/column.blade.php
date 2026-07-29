@@ -26,8 +26,11 @@
 @endphp
 
 {{-- Hide wrappers whose component rendered no card (a conditional card, or a
-     modal host): otherwise the empty div still takes a gap. Tailwind arbitrary
-     variant, the same idiom projects/show used before this component. --}}
-<div {{ $attributes->class([$spanClass, $layoutClass, '[&>*:not(:has([data-flux-card]))]:hidden']) }}>
+     modal host): otherwise the empty div still takes a gap.
+
+     :has() only matches DESCENDANTS, so the :not([data-flux-card]) clause is
+     load-bearing — without it a child that IS the card (a component whose root
+     element is the flux:card) gets hidden along with the empty ones. --}}
+<div {{ $attributes->class([$spanClass, $layoutClass, '[&>*:not(:has([data-flux-card])):not([data-flux-card])]:hidden']) }}>
     {{ $slot }}
 </div>

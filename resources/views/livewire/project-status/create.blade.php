@@ -9,9 +9,7 @@
              @if, so the guard lives inside. --}}
         <x-slot:actions>
             @if($statuses->count() > 1)
-                <button type="button" @click.stop="open = !open" class="flex items-center p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" aria-label="Toggle status history">
-                    <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="open && 'rotate-180'" />
-                </button>
+                <x-card-collapse-toggle label="Toggle status history" />
             @endif
         </x-slot:actions>
         <div>

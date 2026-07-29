@@ -43,11 +43,34 @@ class TimesheetsIndex extends Component
         return [
             ['label' => 'Date', 'width' => 'w-[13%]', 'skeletonWidth' => 'w-16'],
             ['label' => 'Name', 'width' => 'w-[22%] min-w-0', 'skeletonWidth' => 'w-24'],
-            ['label' => 'Project', 'width' => 'w-[27%] min-w-0', 'skeletonWidth' => 'w-32'],
+            ['label' => 'Projects', 'width' => 'w-[27%] min-w-0', 'skeletonWidth' => 'w-32'],
             ['label' => 'Hours', 'width' => 'w-[11%]', 'skeletonWidth' => 'w-10'],
             ['label' => 'Amount', 'width' => 'w-[13%]', 'skeletonWidth' => 'w-16'],
             ['label' => 'Status', 'width' => 'w-[14%]', 'skeleton' => 'badge'],
         ];
+    }
+
+    /**
+     * Status of one per-project timesheet row, shared by single-project weeks
+     * and the split-style sub-rows. Lives here (not a blade closure) because
+     * the table renders inside an island, which compiles to its own view —
+     * a closure defined outside it never reaches that scope.
+     *
+     * @return array{0: string, 1: string, 2: ?string} [label, color, href]
+     */
+    public static function rowStatus(Timesheet $row): array
+    {
+        if (! is_null($row->paid_by)) {
+            return ['Paid By', 'yellow', null];
+        }
+
+        if (! is_null($row->check_id)) {
+            return ['Paid', 'green', route('checks.show', $row->check_id)];
+        }
+
+        return ['Pay', 'yellow', auth()->user()->vendor_role === 'Admin'
+            ? route('timesheets.payment', $row->user_id)
+            : null];
     }
 
     #[Url(except: '')]
@@ -130,32 +153,122 @@ class TimesheetsIndex extends Component
         return $conditions;
     }
 
+    /**
+     * Timesheet rows matching the active filters — tenancy and the member
+     * own-rows restriction come from the global TimesheetScope, so this is the
+     * same visibility as the old per-row search. Text search still goes
+     * through Meilisearch (name / note / amount, including the numeric
+     * handling), constraining the SQL query to the matching row ids.
+     */
+    private function filteredRows(): \Illuminate\Database\Eloquent\Builder
+    {
+        $query = Timesheet::query();
+
+        if (! is_null($this->user_id) && $this->user_id !== '') {
+            $query->where('user_id', (int) $this->user_id);
+        }
+
+        $hasConfirmed = in_array('Confirmed', $this->paid_statuses, true);
+        $hasUnpaid = in_array('Unpaid', $this->paid_statuses, true);
+
+        if ($hasConfirmed && ! $hasUnpaid) {
+            $query->whereNotNull('check_id');
+        } elseif ($hasUnpaid && ! $hasConfirmed) {
+            $query->whereNull('check_id');
+        }
+
+        if ($this->date_range && $this->date_range->start() && $this->date_range->end()) {
+            $query->whereBetween('date', [
+                $this->date_range->start()->copy()->startOfDay(),
+                $this->date_range->end()->copy()->endOfDay(),
+            ]);
+        }
+
+        if ($this->search !== '') {
+            $query->whereIn('id', Timesheet::scopedSearch(
+                $this->search,
+                $this->buildFilterConditions(),
+            )->take(5000)->keys());
+        }
+
+        return $query;
+    }
+
+    /**
+     * One row per person-week: the per-project rows are summed here and broken
+     * down on /timesheets/{id} — mirroring the Confirm Weekly Timesheets card
+     * above, instead of the old rowspan-grouped per-project rows that were
+     * hard to scan.
+     */
     #[Computed]
     public function timesheets()
     {
-        $timesheets = Timesheet::scopedSearch(
-            $this->search,
-            $this->buildFilterConditions(),
-            $this->sortBy,
-            $this->sortDirection,
-        )->paginateWithSearchData($this->paginate_number);
+        $sortColumn = match ($this->sortBy) {
+            'hours' => 'total_hours',
+            'amount' => 'total_amount',
+            default => 'date',
+        };
 
-        if ($timesheets->isEmpty() && $timesheets->currentPage() > 1) {
+        $groups = $this->filteredRows()
+            ->selectRaw('user_id, date')
+            ->selectRaw('SUM(hours) as total_hours')
+            ->selectRaw('SUM(amount) as total_amount')
+            ->selectRaw('SUM(CASE WHEN check_id IS NULL AND paid_by IS NULL THEN 1 ELSE 0 END) as unpaid_count')
+            ->selectRaw('SUM(CASE WHEN check_id IS NOT NULL THEN 1 ELSE 0 END) as paid_count')
+            ->selectRaw('COUNT(DISTINCT check_id) as distinct_checks')
+            ->selectRaw('MIN(check_id) as single_check_id')
+            ->selectRaw('MIN(id) as first_timesheet_id')
+            ->groupBy('user_id', 'date')
+            ->orderBy($sortColumn, $this->sortDirection === 'asc' ? 'asc' : 'desc')
+            ->when($sortColumn !== 'date', fn ($q) => $q->orderBy('date', 'desc'))
+            ->orderBy('user_id')
+            ->paginate($this->paginate_number);
+
+        if ($groups->isEmpty() && $groups->currentPage() > 1) {
             $this->resetPage();
 
             return $this->timesheets();
         }
 
-        if ($timesheets->count() > 0) {
-            $timesheets->getCollection()->load([
-                'user:id,first_name,last_name',
-                'project:id,project_name,address',
-                'check:id,check_number',
-                'paidBy:id,first_name,last_name',
-            ]);
+        if ($groups->count() > 0) {
+            $this->hydrateGroups($groups->getCollection());
         }
 
-        return $timesheets;
+        return $groups;
+    }
+
+    /**
+     * Attach display data (member name, that week's per-project rows) to the
+     * current page of groups — one query for the users, one for the rows. The
+     * rows render as shaded sub-rows under the week row, same as expense
+     * splits under a main expense.
+     */
+    private function hydrateGroups($groups): void
+    {
+        $users = User::withoutGlobalScopes()
+            ->whereIn('id', $groups->pluck('user_id')->unique())
+            ->get(['id', 'first_name', 'last_name'])
+            ->keyBy('id');
+
+        $rows = $this->filteredRows()
+            ->where(function ($query) use ($groups) {
+                foreach ($groups as $group) {
+                    $query->orWhere(fn ($q) => $q
+                        ->where('user_id', $group->user_id)
+                        ->where('date', $group->date->format('Y-m-d')));
+                }
+            })
+            ->with('project:id,project_name,address')
+            ->get()
+            ->groupBy(fn ($row) => $row->user_id.'|'.$row->date->format('Y-m-d'));
+
+        foreach ($groups as $group) {
+            $user = $users->get($group->user_id);
+            $group->member_name = trim(($user->first_name ?? '').' '.($user->last_name ?? ''));
+            $group->week_rows = $rows
+                ->get($group->user_id.'|'.$group->date->format('Y-m-d'), collect())
+                ->values();
+        }
     }
 
     /**

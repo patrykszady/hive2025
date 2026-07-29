@@ -124,8 +124,9 @@ it('creates the project and the Meet task when sending with a slot and exact tim
         ->and($task->title)->toBe('GSC | Singh | Consult')
         ->and($task->type)->toBe('Meet')
         ->and($task->start_date->toDateString())->toBe(now()->addDays(2)->format('Y-m-d'))
+        // A consult is a 30-minute block: the window's start plus half an hour.
         ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.start_time'))->toBe('14:00')
-        ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.end_time'))->toBe('14:00')
+        ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.end_time'))->toBe('14:30')
         // Sending the reply moves the New lead to Replied.
         ->and($fx['lead']->fresh()->last_status->title)->toBe('Replied');
 });
@@ -208,7 +209,7 @@ it('books the Meet task at the exact time when one is picked within the slot', f
     $task = Task::withoutGlobalScopes()->where('title', 'GSC | Singh | Consult')->first();
     expect($task)->not->toBeNull()
         ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.start_time'))->toBe('14:30')
-        ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.end_time'))->toBe('14:30');
+        ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.end_time'))->toBe('15:00');
 });
 
 it('rejects an exact time outside the slot window', function () {
@@ -288,13 +289,17 @@ it('books nothing when no availability slot is selected', function () {
 
 it('keeps the meeting date without fixed times when the slot time is unparseable', function () {
     Queue::fake();
-    $fx = makeConsultFixture(['date' => '2026-07-28', 'time' => 'sometime in the afternoon']);
+
+    // Relative, not a hardcoded date: a fixed day silently becomes unbookable
+    // once it slips into the past and the booking stops happening.
+    $day = now()->addDays(4)->format('Y-m-d');
+    $fx = makeConsultFixture(['date' => $day, 'time' => 'sometime in the afternoon']);
 
     consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('send_message');
 
     $task = Task::withoutGlobalScopes()->where('title', 'GSC | Singh | Consult')->first();
     expect($task)->not->toBeNull()
-        ->and(data_get($task->options, 'time_settings.2026-07-28.use_time'))->toBeFalse();
+        ->and(data_get($task->options, 'time_settings.'.$day.'.use_time'))->toBeFalse();
 });
 
 it('renders the seeded Consult template with the selected slot', function () {

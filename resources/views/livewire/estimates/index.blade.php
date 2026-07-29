@@ -55,9 +55,7 @@
             @endcan
         @endif
             <div class="{{ $hasEstimateHistory ? 'contents' : 'hidden' }}">
-                <button type="button" @click.stop="open = !open" class="flex items-center p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" aria-label="Toggle previous estimates">
-                    <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="open && 'rotate-180'" />
-                </button>
+                <x-card-collapse-toggle label="Toggle previous estimates" />
             </div>
         </x-slot:actions>
 

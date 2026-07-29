@@ -20,6 +20,80 @@ class CheckShow extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
+    /**
+     * Column defs for the weekly-timesheet cards — one source of truth for the
+     * header and the cells, same contract as TimesheetShow::columnDefs.
+     * Widths sum to 100.
+     *
+     * @return array<int, array{label: string, width: string}>
+     */
+    public static function timesheetColumnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[26%] min-w-0'],
+            ['label' => 'Hours', 'width' => 'w-[18%] min-w-0'],
+            ['label' => 'Project', 'width' => 'w-[56%] min-w-0'],
+        ];
+    }
+
+    /**
+     * Expense rows settled by this check (paid expenses, vendor/user
+     * reimbursements): Amount / Date / Vendor / Project.
+     *
+     * @return array<int, array{label: string, width: string}>
+     */
+    public static function expenseColumnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[22%] min-w-0'],
+            ['label' => 'Date', 'width' => 'w-[20%] min-w-0'],
+            ['label' => 'Vendor', 'width' => 'w-[29%] min-w-0'],
+            ['label' => 'Project', 'width' => 'w-[29%] min-w-0'],
+        ];
+    }
+
+    /**
+     * Reimbursements this check paid off for another team member.
+     *
+     * @return array<int, array{label: string, width: string}>
+     */
+    public static function reimbursementColumnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[22%] min-w-0'],
+            ['label' => 'Date', 'width' => 'w-[20%] min-w-0'],
+            ['label' => 'Team Member', 'width' => 'w-[29%] min-w-0'],
+            ['label' => 'Vendor', 'width' => 'w-[29%] min-w-0'],
+        ];
+    }
+
+    /**
+     * Expenses the payee paid back (no date column — grouped by vendor).
+     *
+     * @return array<int, array{label: string, width: string}>
+     */
+    public static function paidBackColumnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[24%] min-w-0'],
+            ['label' => 'Vendor', 'width' => 'w-[38%] min-w-0'],
+            ['label' => 'Project', 'width' => 'w-[38%] min-w-0'],
+        ];
+    }
+
+    /**
+     * Distribution rows paid by this check.
+     *
+     * @return array<int, array{label: string, width: string}>
+     */
+    public static function distributionColumnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[28%] min-w-0'],
+            ['label' => 'Distribution', 'width' => 'w-[72%] min-w-0'],
+        ];
+    }
+
     #[Title('Check')]
     public function render()
     {

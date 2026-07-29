@@ -4,20 +4,12 @@
 
      Expects: $columns, $waivers, and optionally $statement (the draw's GCSS row
      renders first). --}}
-<flux:table class="table-fixed min-w-0 w-full [:where(&)]:p-0 [:where(&)]:space-y-0">
-    <flux:table.columns>
-        @foreach($columns as $column)
-            <flux:table.column class="{{ $column['width'] }}">{{ $column['label'] }}</flux:table.column>
-        @endforeach
-    </flux:table.columns>
+<x-index-table.table :columns="$columns">
+    @isset($statement)
+        @include('livewire.lien-waivers._statement-row', ['statement' => $statement, 'columns' => $columns])
+    @endisset
 
-    <flux:table.rows>
-        @isset($statement)
-            @include('livewire.lien-waivers._statement-row', ['statement' => $statement, 'columns' => $columns])
-        @endisset
-
-        @foreach($waivers as $waiver)
-            @include('livewire.lien-waivers._waiver-row', ['waiver' => $waiver, 'columns' => $columns])
-        @endforeach
-    </flux:table.rows>
-</flux:table>
+    @foreach($waivers as $waiver)
+        @include('livewire.lien-waivers._waiver-row', ['waiver' => $waiver, 'columns' => $columns])
+    @endforeach
+</x-index-table.table>

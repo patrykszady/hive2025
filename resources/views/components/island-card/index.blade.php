@@ -1,6 +1,8 @@
 @props([
     'heading' => null,
     'href' => null,
+    // Internal heading links navigate in place; :navigate="false" opens a tab.
+    'navigate' => true,
     'subheading' => null,
     'separator' => false,
     // Collapsible cards: the whole heading row toggles Alpine's `open`, not
@@ -38,6 +40,7 @@
     <x-island-card.header
         :heading="$heading"
         :href="$href"
+        :navigate="$navigate"
         :subheading="$subheading"
         :separator="$separator"
         :clickable="$clickable"

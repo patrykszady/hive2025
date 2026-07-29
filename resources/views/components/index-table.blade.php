@@ -21,6 +21,9 @@
      - attributes (incl. x-data) fall through to the card --}}
 @props([
     'heading' => null,
+    // Links the card heading (e.g. a week card pointing at its timesheet).
+    'href' => null,
+    'navigate' => true,
     'subheading' => null,
     'paginator' => null,
     // Collapsible index cards (e.g. Email Tracking's history): the whole
@@ -41,11 +44,16 @@
     // Strip HTML comments first: Blade/Livewire emit <!--[if BLOCK]--> markers
     // around @if blocks, so a suppressed table still leaves a "non-empty" slot.
     $hasTable = trim(preg_replace('/<!--.*?-->/s', '', (string) $slot)) !== '';
+
+    // Cancel the card's space-y rhythm when a sibling gap would be wrong:
+    //  - header-only card (no rows): a zero-height child (a modal host in the
+    //    `before` slot) would otherwise add a stray gap;
+    //  - collapsible card: space-y-1 puts the gap on the HEADER's bottom, which
+    //    survives the body being hidden and left collapsed cards 4px taller
+    //    than every other card. The body owns that gap instead (see below).
+    $ownsSpacing = ! $hasTable || $collapsible;
 @endphp
-{{-- Header-only card (no rows): cancel the card's space-y rhythm so a
-     zero-height child (a modal host in the `before` slot) can't add a stray
-     gap — the card then measures exactly like a collapsed accordion card. --}}
-<x-island-card :heading="$heading" :subheading="$subheading" :clickable="$clickable || $collapsible" :enter="$skeleton" {{ $attributes->merge(['class' => 'overflow-hidden'.($hasTable ? '' : ' !space-y-0')]) }}>
+<x-island-card :heading="$heading" :href="$href" :navigate="$navigate" :subheading="$subheading" :clickable="$clickable || $collapsible" :enter="$skeleton" {{ $attributes->merge(['class' => 'overflow-hidden'.($ownsSpacing ? ' !space-y-0' : '')]) }}>
     {{-- Same emptiness guard as `actions`: Blade hoists <x-slot> out of an @if,
          so a guarded badge still arrives — as <!--[if BLOCK]--> markers only.
          Forwarding it would force a header onto a heading-less embedded card. --}}
@@ -65,7 +73,12 @@
          collapsible, so the accordion acts on the CARD, not on one control
          inside it. --}}
     @if($collapsible)
-        <div x-show="open" x-collapse>
+        {{-- Owns the header gap (the card's space-y is off — see above) as
+             PADDING, not a margin: padding sits inside the collapsing box, so
+             it's gone when the card is closed (display:none) without needing an
+             Alpine binding. A bound class would only land after Alpine boots,
+             and the card would visibly grow 4px on load. --}}
+        <div x-show="open" x-collapse class="pt-1">
     @endif
 
     @if(isset($toolbar) && trim((string) $toolbar) !== '')

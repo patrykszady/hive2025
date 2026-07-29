@@ -93,111 +93,120 @@
                 :compact="false"
             />
         @endplaceholder
-    <x-index-table heading="Confirmed Timesheets" :paginator="$this->timesheets" x-data="{ hoveredConfirmedGroup: null }">
-
+    {{-- One week per person as the main row (sums), its per-project rows as
+         shaded sub-rows — same pattern as expense splits under a main expense.
+         Single-project weeks stay one plain row, like an unsplit expense. --}}
+    <x-index-table heading="Confirmed Timesheets" :paginator="$this->timesheets">
             <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0">
                 <flux:table.columns>
                     <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" class="w-[13%]">Date</flux:table.column>
                     <flux:table.column class="w-[22%] min-w-0">Name</flux:table.column>
-                    <flux:table.column class="w-[27%] min-w-0">Project</flux:table.column>
+                    <flux:table.column class="w-[27%] min-w-0">Projects</flux:table.column>
                     <flux:table.column sortable :sorted="$sortBy === 'hours'" :direction="$sortDirection" wire:click="sort('hours')" class="w-[11%]">Hours</flux:table.column>
                     <flux:table.column sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')" class="w-[13%]">Amount</flux:table.column>
                     <flux:table.column class="w-[14%]">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
-                    @php
-                        $timesheetsByDate = $this->timesheets->getCollection()->groupBy(fn ($item) => $item->date->format('m/d/Y'));
-                    @endphp
+                    @forelse($this->timesheets as $group)
+                        @php
+                            $singleRow = $group->week_rows->count() === 1 ? $group->week_rows->first() : null;
 
-                    @if($timesheetsByDate->isNotEmpty())
-                        @foreach($timesheetsByDate as $timesheetDate => $timesheetsForDate)
-                            @php
-                                $timesheetsByMember = $timesheetsForDate->groupBy(fn ($item) => (string) ($item->user_id ?? 0));
-                            @endphp
+                            // Week-level status, action first: anything unpaid
+                            // means the week still needs a payment.
+                            if ($singleRow) {
+                                [$statusLabel, $statusColor, $statusHref] = \App\Livewire\Timesheets\TimesheetsIndex::rowStatus($singleRow);
+                            } elseif ($group->unpaid_count > 0) {
+                                $statusColor = 'yellow';
+                                $statusLabel = 'Pay';
+                                $statusHref = auth()->user()->vendor_role === 'Admin'
+                                    ? route('timesheets.payment', $group->user_id)
+                                    : null;
+                            } elseif ($group->paid_count > 0) {
+                                $statusColor = 'green';
+                                $statusLabel = 'Paid';
+                                // Link straight to the check when the whole
+                                // week settled on one.
+                                $statusHref = $group->distinct_checks == 1
+                                    ? route('checks.show', $group->single_check_id)
+                                    : route('timesheets.show', $group->first_timesheet_id);
+                            } else {
+                                $statusColor = 'yellow';
+                                $statusLabel = 'Paid By';
+                                $statusHref = null;
+                            }
+                        @endphp
 
-                            @foreach($timesheetsByMember as $timesheetMemberKey => $timesheetsForMember)
+                        <flux:table.row :key="'week-'.$group->user_id.'-'.$group->date->format('Y-m-d')">
+                            <flux:table.cell class="whitespace-nowrap">{{ $group->date->format('m/d/Y') }}</flux:table.cell>
+                            <flux:table.cell variant="strong" class="min-w-0">
+                                <x-table-link
+                                    :href="route('timesheets.show', $group->first_timesheet_id)"
+                                    :label="$group->member_name"
+                                />
+                            </flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                @if($singleRow)
+                                    <x-table-link
+                                        :href="$singleRow->project ? route('projects.show', $singleRow->project->id) : null"
+                                        :label="$singleRow->project->short_address ?? $singleRow->project->project_name ?? '—'"
+                                    />
+                                @endif
+                                {{-- Multi-project weeks: the sub-rows below
+                                     carry the names, the main row stays empty. --}}
+                            </flux:table.cell>
+                            <flux:table.cell class="whitespace-nowrap">{{ (float) $group->total_hours }}</flux:table.cell>
+                            <flux:table.cell class="whitespace-nowrap">{{ money($group->total_amount) }}</flux:table.cell>
+                            <flux:table.cell>
+                                @if($statusHref)
+                                    <a wire:navigate.hover href="{{ $statusHref }}">
+                                        <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ $statusLabel }}</flux:badge>
+                                    </a>
+                                @else
+                                    <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ $statusLabel }}</flux:badge>
+                                @endif
+                            </flux:table.cell>
+                        </flux:table.row>
+
+                        {{-- Per-project sub-rows, styled like expense splits:
+                             shaded, tighter, muted; empty cells keep column
+                             alignment. A sub-row only repeats a status badge
+                             when it differs from the week's own. --}}
+                        @unless($singleRow)
+                            @foreach($group->week_rows as $row)
                                 @php
-                                    $memberName = trim(optional($timesheetsForMember->first()->user)->first_name . ' ' . optional($timesheetsForMember->first()->user)->last_name);
-                                    $memberGroupKey = 'group:' . $timesheetDate . ':' . $timesheetMemberKey;
+                                    [$rowLabel, $rowColor, $rowHref] = \App\Livewire\Timesheets\TimesheetsIndex::rowStatus($row);
                                 @endphp
-
-                                @foreach($timesheetsForMember as $timesheet)
-                                    <flux:table.row
-                                        :key="'timesheet-'.$timesheet->id"
-                                        class="[&[data-hovered=true]>td]:bg-indigo-50/70 dark:[&[data-hovered=true]>td]:bg-indigo-900/20 [&>td]:transition-colors"
-                                        x-on:mouseenter="hoveredConfirmedGroup = '{{ $memberGroupKey }}'"
-                                        x-on:mouseleave="hoveredConfirmedGroup = null"
-                                        x-bind:data-hovered="hoveredConfirmedGroup === '{{ $memberGroupKey }}' ? 'true' : 'false'"
-                                    >
-                                        @if($loop->parent->first && $loop->first)
-                                            <flux:table.cell rowspan="{{ $timesheetsForDate->count() }}" class="align-top">{{ $timesheetDate }}</flux:table.cell>
-                                        @endif
-
-                                        @if($loop->first)
-                                            <flux:table.cell
-                                                rowspan="{{ $timesheetsForMember->count() }}"
-                                                wire:navigate.hover
-                                                href="{{route('timesheets.show', $timesheet->id)}}"
-                                                variant="strong"
-                                                class="align-top cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
-                                                >
-                                                {{ $memberName }}
-                                            </flux:table.cell>
-                                        @endif
-
-                                        <flux:table.cell>
-                                            @if($timesheet->project)
-                                                <x-truncate-tooltip :content="$timesheet->project->project_name ?? $timesheet->project->short_address ?? ''">
-                                                <a
-                                                    wire:navigate.hover
-                                                    href="{{ route('projects.show', $timesheet->project->id) }}"
-                                                    class="block truncate transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
-                                                >
-                                                    {{ $timesheet->project->short_address ?? '—' }}
-                                                </a>
-                                                </x-truncate-tooltip>
-                                            @else
-                                                <span>—</span>
-                                            @endif
-                                        </flux:table.cell>
-                                        <flux:table.cell>{{ $timesheet->hours }}</flux:table.cell>
-                                        <flux:table.cell>{{ money($timesheet->amount) }}</flux:table.cell>
-                                        <flux:table.cell>
-                                            @php
-                                                if (! is_null($timesheet->paid_by)) {
-                                                    $statusColor = 'yellow';
-                                                    $statusLabel = 'Paid By';
-                                                    $statusHref = null;
-                                                } elseif (! is_null($timesheet->check_id)) {
-                                                    $statusColor = 'green';
-                                                    $statusLabel = 'Paid';
-                                                    $statusHref = route('checks.show', $timesheet->check_id);
-                                                } else {
-                                                    $statusColor = 'yellow';
-                                                    $statusLabel = 'Pay';
-                                                    $statusHref = auth()->user()->vendor_role === 'Admin'
-                                                        ? route('timesheets.payment', $timesheet->user_id)
-                                                        : null;
-                                                }
-                                            @endphp
-                                            @if($statusHref)
-                                                <a wire:navigate.hover href="{{ $statusHref }}">
-                                                    <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ $statusLabel }}</flux:badge>
+                                <flux:table.row :key="'week-row-'.$row->id" class="bg-gray-50 dark:bg-gray-800/50 [&_td]:!py-2">
+                                    <flux:table.cell></flux:table.cell>
+                                    <flux:table.cell></flux:table.cell>
+                                    <flux:table.cell class="min-w-0 text-sm text-gray-600 dark:text-gray-400">
+                                        <x-table-link
+                                            :href="$row->project ? route('projects.show', $row->project->id) : null"
+                                            :label="$row->project->short_address ?? $row->project->project_name ?? '—'"
+                                        />
+                                    </flux:table.cell>
+                                    <flux:table.cell class="whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">{{ (float) $row->hours }}</flux:table.cell>
+                                    <flux:table.cell class="whitespace-nowrap text-sm text-gray-600 dark:text-gray-400 tabular-nums">{{ money($row->amount) }}</flux:table.cell>
+                                    <flux:table.cell>
+                                        @if($rowLabel !== $statusLabel)
+                                            @if($rowHref)
+                                                <a wire:navigate.hover href="{{ $rowHref }}">
+                                                    <flux:badge size="sm" :color="$rowColor" inset="top bottom">{{ $rowLabel }}</flux:badge>
                                                 </a>
                                             @else
-                                                <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ $statusLabel }}</flux:badge>
+                                                <flux:badge size="sm" :color="$rowColor" inset="top bottom">{{ $rowLabel }}</flux:badge>
                                             @endif
-                                        </flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
+                                        @endif
+                                    </flux:table.cell>
+                                </flux:table.row>
                             @endforeach
-                        @endforeach
-                    @else
+                        @endunless
+                    @empty
                         <flux:table.row>
                             <flux:table.cell colspan="6" class="text-center text-zinc-500 dark:text-zinc-400">No timesheets found.</flux:table.cell>
                         </flux:table.row>
-                    @endif
+                    @endforelse
                 </flux:table.rows>
             </flux:table>
     </x-index-table>

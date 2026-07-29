@@ -21,7 +21,7 @@
     <x-slot:actions>
         @if(($historyCount ?? 0) > 0)
             <div class="flex items-center text-zinc-500 dark:text-zinc-400">
-                <flux:icon.chevron-down variant="mini" />
+                <flux:icon.chevron-down class="size-4" />
             </div>
         @endif
     </x-slot:actions>

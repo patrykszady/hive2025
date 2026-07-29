@@ -45,48 +45,38 @@
             </div>
             {{-- Same chevron, same position and behaviour as Email Tracking. --}}
             <div class="{{ $hasDocs ? 'contents' : 'hidden' }}">
-                <button type="button" @click.stop="open = !open" class="flex items-center p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" aria-label="Toggle documents">
-                    <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="open && 'rotate-180'" />
-                </button>
+                <x-card-collapse-toggle label="Toggle documents" />
             </div>
         </x-slot:actions>
 
         @if(!$vendor_docs->isEmpty())
             {{-- Widths come from the shared columnDefs, so the skeleton and the
                  real header can never drift apart. --}}
-            <flux:table class="table-fixed min-w-0 w-full [:where(&)]:p-0 [:where(&)]:space-y-0">
-                    <flux:table.columns>
-                        @foreach(\App\Livewire\VendorDocs\VendorDocsCard::columnDefs() as $docColumn)
-                            <flux:table.column class="{{ $docColumn['width'] }}">{{ $docColumn['label'] }}</flux:table.column>
-                        @endforeach
-                    </flux:table.columns>
-
-                    <flux:table.rows>
-                        @foreach($vendor_docs as $doc)
-                            <flux:table.row :key="$doc->id">
-                                <flux:table.cell variant="strong" class="w-[38%]">
-                                    <x-truncate-tooltip :content="$doc->type_label">
-                                    <a
-                                        href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->doc_filename]) }}"
-                                        target="_blank"
-                                        class="block truncate"
-                                    >
-                                        {{$doc->type_label}}
-                                    </a>
-                                    </x-truncate-tooltip>
-                                </flux:table.cell>
-                                <flux:table.cell class="w-[30%]">
-                                    <flux:badge size="sm" :color="$doc->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
-                                        {{$doc->expiration_date->format('m/d/Y')}}
-                                    </flux:badge>
-                                </flux:table.cell>
-                                <flux:table.cell class="w-[32%]">
-                                    <x-truncate-tooltip :content="(string) $doc->number"><div class="truncate">{{ $doc->number }}</div></x-truncate-tooltip>
-                                </flux:table.cell>
-                            </flux:table.row>
-                        @endforeach
-                    </flux:table.rows>
-                </flux:table>
+            <x-index-table.table :columns="\App\Livewire\VendorDocs\VendorDocsCard::columnDefs()">
+                @foreach($vendor_docs as $doc)
+                    <flux:table.row :key="$doc->id">
+                        <flux:table.cell variant="strong" class="w-[38%]">
+                            <x-truncate-tooltip :content="$doc->type_label">
+                            <a
+                                href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->doc_filename]) }}"
+                                target="_blank"
+                                class="block truncate"
+                            >
+                                {{$doc->type_label}}
+                            </a>
+                            </x-truncate-tooltip>
+                        </flux:table.cell>
+                        <flux:table.cell class="w-[30%]">
+                            <flux:badge size="sm" :color="$doc->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
+                                {{$doc->expiration_date->format('m/d/Y')}}
+                            </flux:badge>
+                        </flux:table.cell>
+                        <flux:table.cell class="w-[32%]">
+                            <x-truncate-tooltip :content="(string) $doc->number"><div class="truncate">{{ $doc->number }}</div></x-truncate-tooltip>
+                        </flux:table.cell>
+                    </flux:table.row>
+                @endforeach
+            </x-index-table.table>
         @endif
     </x-index-table>
 </div>

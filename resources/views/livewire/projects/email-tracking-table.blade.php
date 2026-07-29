@@ -42,9 +42,7 @@
     </x-slot:badge>
     <x-slot:actions>
         @if($hasAccordion)
-            <button type="button" @click.stop="open = !open" class="flex items-center text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer" aria-label="Toggle email history">
-                <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="open && 'rotate-180'" />
-            </button>
+            <x-card-collapse-toggle label="Toggle email history" />
         @endif
     </x-slot:actions>
 

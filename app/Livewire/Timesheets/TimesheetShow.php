@@ -21,6 +21,37 @@ class TimesheetShow extends Component
     public $not_paid = false;
     public $daily_hours = [];
 
+    /**
+     * Column defs — ONE source for the header row and the cells, same contract
+     * as EmailTrackingTable::columnDefs. Widths sum to 100.
+     *
+     * @return array<int, array{label: string, width: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Amount', 'width' => 'w-[20%] min-w-0'],
+            ['label' => 'Hours', 'width' => 'w-[12%] min-w-0'],
+            ['label' => 'Project', 'width' => 'w-[30%] min-w-0'],
+            ['label' => 'Payment', 'width' => 'w-[20%] min-w-0'],
+            ['label' => 'Status', 'width' => 'w-[18%] min-w-0'],
+        ];
+    }
+
+    /**
+     * Column defs for the per-day hours cards — same one-source contract as
+     * columnDefs() above.
+     *
+     * @return array<int, array{label: string, width: string}>
+     */
+    public static function dailyColumnDefs(): array
+    {
+        return [
+            ['label' => 'Hours', 'width' => 'w-[22%] min-w-0'],
+            ['label' => 'Project', 'width' => 'w-[78%] min-w-0'],
+        ];
+    }
+
     public function mount()
     {
         $this->weekly_hours =

@@ -43,6 +43,9 @@ class LeadCreate extends Component
     public $address = null;
     public $reply_to_email = null;
     public ?string $origin = null;
+    /** A booked consult runs half an hour. */
+    public const CONSULT_MINUTES = 30;
+
     public array $availability = [];
 
     // Email composer state (Messages tab)
@@ -336,9 +339,17 @@ class LeadCreate extends Component
         }
 
         $date = $slot['date'];
-        $times = $this->selectedExactTime
-            ? [$this->selectedExactTime, $this->selectedExactTime]
-            : $this->parseSlotTimes((string) ($slot['time'] ?? ''));
+
+        // A consult is a 30-minute meeting: it starts at the exact time picked
+        // (or at the start of the offered window) and ends half an hour later.
+        // Without this the task was zero-length — start and end were identical
+        // — so the calendar event had no duration.
+        $startTime = $this->selectedExactTime
+            ?: (($window = $this->parseSlotTimes((string) ($slot['time'] ?? ''))) ? $window[0] : null);
+
+        $times = $startTime
+            ? [$startTime, Carbon::createFromFormat('H:i', $startTime)->addMinutes(self::CONSULT_MINUTES)->format('H:i')]
+            : null;
 
         $task = \App\Models\Task::create([
             'title' => $title,

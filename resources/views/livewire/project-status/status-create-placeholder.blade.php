@@ -6,7 +6,7 @@
         <x-slot:actions>
             @if($showHistoryToggle ?? false)
                 <div class="flex items-center p-1 text-zinc-400">
-                    <flux:icon.chevron-down variant="mini" />
+                    <flux:icon.chevron-down class="size-4" />
                 </div>
             @endif
         </x-slot:actions>
