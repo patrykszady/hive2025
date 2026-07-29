@@ -20,37 +20,36 @@
             ])
         @endisland
 
-        {{-- PAYMENT SCHEDULE --}}
+        {{-- PAYMENT SCHEDULE — shared index-table card (collapsible header +
+             columnDefs widths), so it matches every other card in the app
+             instead of a flux:accordion inside a raw flux:card. --}}
         @island(name: 'payment-schedule')
             @if($this->estimate->payments)
-                <flux:card class="space-y-2">
-                    <flux:accordion transition>
-                        <flux:accordion.item>
-                            <flux:accordion.heading>
-                                <flux:heading size="lg">Payment Schedule</flux:heading>
-                            </flux:accordion.heading>
+                <x-index-table heading="Payment Schedule" :collapsible="true" :expanded="false">
+                    <x-slot:badge>
+                        <flux:badge color="zinc" size="sm" inset="top bottom">{{ count($this->estimate->payments) }}</flux:badge>
+                    </x-slot:badge>
 
-                            <flux:accordion.content>
-                                <flux:separator variant="subtle" />
-                                <flux:table class="max-w-full">
-                                    <flux:table.columns>
-                                        <flux:table.column></flux:table.column>
-                                        <flux:table.column>Amount</flux:table.column>
-                                    </flux:table.columns>
+                    <x-slot:actions>
+                        <x-card-collapse-toggle label="Toggle payment schedule" />
+                    </x-slot:actions>
 
-                                    <flux:table.rows>
-                                        @foreach($this->estimate->payments as $payment)
-                                            <flux:table.row>
-                                                <flux:table.cell>{{$payment['description']}}</flux:table.cell>
-                                                <flux:table.cell>{{$loop->last && $payment['amount'] == '' ? 'Balance' : money($payment['amount'])}}</flux:table.cell>
-                                            </flux:table.row>
-                                        @endforeach
-                                    </flux:table.rows>
-                                </flux:table>
-                            </flux:accordion.content>
-                        </flux:accordion.item>
-                    </flux:accordion>
-                </flux:card>
+                    <x-index-table.table :columns="\App\Livewire\Estimates\EstimateShow::paymentColumnDefs()">
+                        @foreach($this->estimate->payments as $payment)
+                            <flux:table.row :key="'payment-'.$loop->index">
+                                <flux:table.cell class="min-w-0">
+                                    <x-truncate-tooltip :content="$payment['description']">
+                                        <div class="truncate">{{ $payment['description'] }}</div>
+                                    </x-truncate-tooltip>
+                                </flux:table.cell>
+                                {{-- Final row with no amount is the remaining balance. --}}
+                                <flux:table.cell variant="strong" class="whitespace-nowrap">
+                                    {{ $loop->last && $payment['amount'] == '' ? 'Balance' : money($payment['amount']) }}
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @endforeach
+                    </x-index-table.table>
+                </x-index-table>
             @endif
         @endisland
 

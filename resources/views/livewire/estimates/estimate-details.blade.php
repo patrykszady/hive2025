@@ -4,6 +4,16 @@
     :expanded="$expanded ?? true"
     :nonLivewire="$nonLivewire ?? false"
     >
+    {{-- Modal hosts, NOT a footer: they render nothing until opened, but any
+         footer slot switches x-details.card off card-flush-bottom, which left
+         the card's bottom padding showing as a strip of white under the last
+         row. The default slot is the documented spot for always-present body
+         content, and it keeps the modals mounted while the card is collapsed. --}}
+    @unless($nonLivewire ?? false)
+        <livewire:estimates.estimate-accept :estimate="$estimate"/>
+        <livewire:estimates.estimate-duplicate />
+    @endunless
+
     @unless($nonLivewire ?? false)
         <x-slot:header_buttons>
             <flux:dropdown>
@@ -171,10 +181,4 @@
         @endunless
     </x-slot:details>
 
-    @unless($nonLivewire ?? false)
-        <x-slot:footer>
-            <livewire:estimates.estimate-accept :estimate="$estimate"/>
-            <livewire:estimates.estimate-duplicate />
-        </x-slot:footer>
-    @endunless
 </x-details.card>

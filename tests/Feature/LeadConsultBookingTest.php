@@ -212,6 +212,53 @@ it('books the Meet task at the exact time when one is picked within the slot', f
         ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.end_time'))->toBe('15:00');
 });
 
+it('offers the whole bookable day as exact times when the slot is Anytime', function () {
+    Queue::fake();
+    // "Anytime" is not a parseable window, so it used to yield no exact-time
+    // chips at all and the email confirmed a literal "Anytime" back to the
+    // client. It means the whole bookable day instead.
+    $fx = makeConsultFixture(['date' => now()->addDays(2)->format('Y-m-d'), 'time' => 'Anytime']);
+
+    $component = consultComposer($fx)->call('insertAvailabilitySlot', 0);
+
+    expect(array_column($component->instance()->exactTimeOptions, 'value'))
+        ->toBe(['08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+            '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30']);
+
+    // A time inside the day sticks; one outside it is still refused.
+    expect($component->call('selectExactTime', '10:30')->get('selectedExactTime'))->toBe('10:30')
+        ->and($component->call('selectExactTime', '19:00')->get('selectedExactTime'))->toBe('10:30');
+});
+
+it('books an Anytime consult at the picked time, not the whole day', function () {
+    Queue::fake();
+    $fx = makeConsultFixture(['date' => now()->addDays(2)->format('Y-m-d'), 'time' => 'Anytime']);
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '09:00')
+        ->set('projectName', 'Consult')
+        ->call('send_message');
+
+    $task = Task::withoutGlobalScopes()->where('title', 'GSC | Singh | Consult')->first();
+    $day = now()->addDays(2)->format('Y-m-d');
+
+    expect($task)->not->toBeNull()
+        ->and(data_get($task->options, 'time_settings.'.$day.'.use_time'))->toBeTrue()
+        ->and(data_get($task->options, 'time_settings.'.$day.'.start_time'))->toBe('09:00')
+        ->and(data_get($task->options, 'time_settings.'.$day.'.end_time'))->toBe('09:30');
+});
+
+it('derives the bookable day from the windows clients pick from', function () {
+    // dayBounds() must track WINDOWS — if a window moves, "Anytime" moves too.
+    $windows = collect(\App\Livewire\Leads\PickTimes::WINDOWS)
+        ->reject(fn ($w) => $w === 'Anytime')
+        ->map(fn ($w) => \App\Models\Lead::parseSlotTimes($w));
+
+    expect(\App\Livewire\Leads\PickTimes::dayBounds())
+        ->toBe([$windows->min(fn ($r) => $r[0]), $windows->max(fn ($r) => $r[1])]);
+});
+
 it('rejects an exact time outside the slot window', function () {
     Queue::fake();
     $fx = makeConsultFixture();

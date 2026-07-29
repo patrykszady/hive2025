@@ -29,6 +29,21 @@ class EstimateShow extends Component
 {
     use AuthorizesRequests;
 
+    /**
+     * Column defs for the Payment Schedule card — the header row and the cells
+     * render from this one array, same contract as every other card table.
+     * Widths must sum to 100.
+     *
+     * @return array<int, array{label: string, width: string, skeletonWidth?: string}>
+     */
+    public static function paymentColumnDefs(): array
+    {
+        return [
+            ['label' => 'Payment', 'width' => 'w-[70%] min-w-0', 'skeletonWidth' => 'w-40'],
+            ['label' => 'Amount', 'width' => 'w-[30%]', 'skeletonWidth' => 'w-16'],
+        ];
+    }
+
     public Estimate $estimate;
 
     public $sections = [];

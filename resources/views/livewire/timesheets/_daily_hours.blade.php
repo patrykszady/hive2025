@@ -4,7 +4,6 @@
 @php($dailyColumns = \App\Livewire\Timesheets\TimesheetShow::dailyColumnDefs())
 <x-index-table
     heading="{{ \Carbon\Carbon::parse($date)->format('D, M j') }}"
-    x-data="{ open: true }"
     :collapsible="true"
 >
     <x-slot:badge>

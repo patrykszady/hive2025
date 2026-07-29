@@ -31,9 +31,13 @@
     // card — see resources/views/components/island-card/header.blade.php.
     'clickable' => false,
     // Whole-card accordion: the header toggles the table (and its toolbar and
-    // pagination) open/closed. The caller supplies x-data="{ open: true }" and
-    // gets a clickable header for free.
+    // pagination) open/closed, and the header becomes clickable. The card owns
+    // its own Alpine `open` — callers only choose the starting state below.
     'collapsible' => false,
+    // Starting state of a collapsible card. false renders the body x-cloaked:
+    // x-show only hides once Alpine boots, so a card that starts closed would
+    // otherwise flash its whole table open on load.
+    'expanded' => true,
     // Set by x-index-table.placeholder: gives the skeleton's wrapper a
     // different wire:key so Livewire's morph REPLACES it with the loaded
     // wrapper (rather than patching it in place) — that insertion is what
@@ -52,8 +56,15 @@
     //    survives the body being hidden and left collapsed cards 4px taller
     //    than every other card. The body owns that gap instead (see below).
     $ownsSpacing = ! $hasTable || $collapsible;
+
+    // A collapsible card owns its own Alpine scope, so callers just pick the
+    // starting state. Only the STRING is built here — the merge itself has to
+    // stay inline in the tag below, because the compiler recognises just
+    // `{{ $attributes }}` there; any other variable renders as a literal
+    // attribute and the whole bag (classes included) is silently lost.
+    $openState = $collapsible ? '{ open: '.($expanded ? 'true' : 'false').' }' : null;
 @endphp
-<x-island-card :heading="$heading" :href="$href" :navigate="$navigate" :subheading="$subheading" :clickable="$clickable || $collapsible" :enter="$skeleton" {{ $attributes->merge(['class' => 'overflow-hidden'.($ownsSpacing ? ' !space-y-0' : '')]) }}>
+<x-island-card :heading="$heading" :href="$href" :navigate="$navigate" :subheading="$subheading" :clickable="$clickable || $collapsible" :enter="$skeleton" {{ $attributes->merge(array_filter(['class' => 'overflow-hidden'.($ownsSpacing ? ' !space-y-0' : ''), 'x-data' => $openState])) }}>
     {{-- Same emptiness guard as `actions`: Blade hoists <x-slot> out of an @if,
          so a guarded badge still arrives — as <!--[if BLOCK]--> markers only.
          Forwarding it would force a header onto a heading-less embedded card. --}}
@@ -78,7 +89,7 @@
              it's gone when the card is closed (display:none) without needing an
              Alpine binding. A bound class would only land after Alpine boots,
              and the card would visibly grow 4px on load. --}}
-        <div x-show="open" x-collapse class="pt-1">
+        <div x-show="open" x-collapse class="pt-1" @unless($expanded) x-cloak @endunless>
     @endif
 
     @if(isset($toolbar) && trim((string) $toolbar) !== '')

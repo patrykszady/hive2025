@@ -14,7 +14,6 @@
     <x-index-table
         :heading="$view ? 'Vendor Documents' : $vendor->name"
         :collapsible="! $vendor_docs->isEmpty()"
-        x-data="{ open: true }"
     >
         {{-- Always the same count badge, whatever the accordion state: swapping
              between "3 Current" and nothing on open/close made the header jump. --}}

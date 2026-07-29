@@ -59,6 +59,22 @@ class PickTimes extends Component
         return $window === 'Anytime' ? 2 : 1;
     }
 
+    /**
+     * The bookable day as ['08:00', '16:00'] — what "Anytime" actually means.
+     * Derived from WINDOWS (earliest start, latest end) rather than written
+     * out again, so adding or moving a window can't leave the two disagreeing.
+     */
+    public static function dayBounds(): array
+    {
+        $ranges = collect(self::WINDOWS)
+            ->reject(fn (string $window) => $window === 'Anytime')
+            ->map(fn (string $window) => Lead::parseSlotTimes($window))
+            ->filter()
+            ->values();
+
+        return [$ranges->min(fn ($r) => $r[0]), $ranges->max(fn ($r) => $r[1])];
+    }
+
     /** Send stays disabled until the minimums are met (button + server). */
     public function getCanSubmitProperty(): bool
     {

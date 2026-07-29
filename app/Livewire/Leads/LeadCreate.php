@@ -4,6 +4,7 @@ namespace App\Livewire\Leads;
 
 use App\Jobs\SendLeadReplyJob;
 use App\Livewire\Forms\LeadForm;
+use App\Livewire\Leads\PickTimes;
 use App\Mail\LeadMessage;
 use App\Models\CompanyEmail;
 use App\Models\EmailTemplate;
@@ -706,7 +707,15 @@ class LeadCreate extends Component
             return [];
         }
 
-        $times = $this->parseSlotTimes((string) ($slot['time'] ?? ''));
+        $slotTime = trim((string) ($slot['time'] ?? ''));
+        $times = $this->parseSlotTimes($slotTime);
+
+        if (! $times && strcasecmp($slotTime, 'Anytime') === 0) {
+            // "Anytime" is the whole bookable day, not an unparseable window:
+            // offer every start in it so the confirmation names a real time
+            // instead of asking the client to read "Anytime" back to us.
+            $times = PickTimes::dayBounds();
+        }
 
         if (! $times) {
             return [];
