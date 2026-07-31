@@ -12,6 +12,9 @@ use Illuminate\Support\Facades\Log;
 
 class MeetTaskCalendarService
 {
+    /** Estimate — a Meet on such a project is a consult the client books. */
+    private const ESTIMATE_STATUS_CODE = 2;
+
     public function __construct(private readonly NylasService $nylasService)
     {
     }
@@ -525,7 +528,7 @@ class MeetTaskCalendarService
         }
 
         $lines[] = '';
-        $lines[] = 'Should anything change, please reach out to reschedule.';
+        $lines[] = $this->rescheduleLine($task);
         $lines[] = '';
         $lines[] = 'Thank you,';
         $lines[] = $vendorBusinessPhone !== ''
@@ -539,6 +542,77 @@ class MeetTaskCalendarService
         }
 
         return trim(implode("\n", array_filter($lines, fn ($line) => $line !== null)));
+    }
+
+    /**
+     * "Reschedule here: <link>" instead of asking people to reach out — an
+     * invite is where someone realises the time doesn't work, so the way to
+     * change it belongs in the invite.
+     *
+     * Two kinds of Meet get two different links:
+     *   - a consult on an Estimate project → the LEAD's pick-times page (the
+     *     same page the consult email and the SMS invite link to; it applies
+     *     the shorter reschedule notice once times were already given);
+     *   - anything else → the project's client schedule page.
+     * With neither available the original ask-us wording stands.
+     */
+    private function rescheduleLine(Task $task): string
+    {
+        $url = $this->rescheduleUrl($task);
+
+        if ($url === null) {
+            return 'Should anything change, please reach out to reschedule.';
+        }
+
+        return "Need a different time? Reschedule here: <a href=\"{$url}\">{$url}</a>";
+    }
+
+    private function rescheduleUrl(Task $task): ?string
+    {
+        $shortener = app(\App\Services\UrlShortener::class);
+
+        if ($lead = $this->resolveLead($task)) {
+            return $shortener->shorten($lead->availabilityUrl());
+        }
+
+        $project = $task->project;
+
+        if (! $project) {
+            return null;
+        }
+
+        $baseUrl = config('app.dev_webhook_url') ?: rtrim((string) config('app.url'), '/');
+
+        return $shortener->shorten("{$baseUrl}/s/{$project->getOrCreateScheduleToken()}");
+    }
+
+    /**
+     * The lead behind this consult, if this Meet is one: an unscheduled-or-not
+     * Meet on a project still at Estimate, whose client came from a lead.
+     */
+    private function resolveLead(Task $task): ?\App\Models\Lead
+    {
+        if ((int) ($task->project?->latestStatus?->status_code ?? 0) !== self::ESTIMATE_STATUS_CODE) {
+            return null;
+        }
+
+        $clientId = $task->project?->client_id;
+
+        if (! $clientId) {
+            return null;
+        }
+
+        $userIds = \App\Models\Client::withoutGlobalScopes()
+            ->find($clientId)?->users()->withoutGlobalScopes()->pluck('users.id') ?? collect();
+
+        if ($userIds->isEmpty()) {
+            return null;
+        }
+
+        return \App\Models\Lead::withoutGlobalScopes()
+            ->whereIn('user_id', $userIds)
+            ->latest('id')
+            ->first();
     }
 
     private function resolveSignatureVendor(Task $task): ?Vendor

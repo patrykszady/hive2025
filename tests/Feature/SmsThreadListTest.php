@@ -46,6 +46,71 @@ it('shows vendor threads in the list', function (): void {
         ->assertSee('Smartech Electric');
 });
 
+it('orders search results newest first, not by relevance', function (): void {
+    // Scout's collection engine keeps the search path (and its ordering) under
+    // test without a Meilisearch instance.
+    config(['scout.driver' => 'collection']);
+
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    // No primary vendor: the search path's vendor_visibility_ids filter is a
+    // Meilisearch-only construct the collection engine can't evaluate (the
+    // field is an array in the search document, not a column), so skipping it
+    // is what lets this test reach the ordering under test.
+    $user = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Tester',
+        'email' => 'patryk.thread-search-order@example.com',
+        'cell_phone' => '2245551188',
+        'primary_vendor_id' => null,
+    ]);
+
+    $this->actingAs($user);
+
+    // The match must come from indexed content — a thread's `name` column is
+    // NOT in its search document; message text is.
+    //
+    // Activity order is deliberately unrelated to BOTH the insertion order and
+    // the message order, so a list sorted by search relevance (either of those)
+    // cannot pass by coincidence. Expected: Swenson, Lunardini, Weyman.
+    $threads = [
+        // name,             message age, last activity
+        ['Scott Weyman',     2,           1200],
+        ['Scott Swenson',    20,          7],
+        ['Scott Lunardini',  200,         300],
+    ];
+
+    foreach ($threads as [$name, $messageAge, $activityAge]) {
+        $thread = SmsGroupThread::query()->create([
+            'name' => $name,
+            'from_number' => '+12245554444',
+            'participants' => ['+12245550001'],
+            'vendor_id' => $vendor->id,
+            'last_activity_at' => now()->subDays($activityAge),
+        ]);
+
+        SmsMessage::query()->create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_number' => '+12245550001',
+            'text' => "Hi {$name}, checking in.",
+            'status' => 'sent',
+            'created_at' => now()->subDays($messageAge),
+        ]);
+    }
+
+    $results = Livewire::test(SmsThreadList::class, ['isClientUser' => false, 'search' => 'Scott'])
+        ->instance()
+        ->threads;
+
+    expect($results->pluck('name')->all())
+        ->toBe(['Scott Swenson', 'Scott Lunardini', 'Scott Weyman']);
+
+    expect($results->pluck('last_activity_at')->all())
+        ->toEqual($results->pluck('last_activity_at')->sortDesc()->values()->all());
+});
+
 it('shows participant names for client users in the list', function (): void {
     $ownerVendor = Vendor::factory()->create([
         'business_name' => 'Acme Vendor LLC',

@@ -146,16 +146,15 @@ class SmsThreadList extends Component
                         }
                     })
                     ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) $user->id))
+                    // Newest first, exactly like the unfiltered list. Meili
+                    // relevance decides WHICH threads match; it must not decide
+                    // the order, or filtering reshuffles the list into an order
+                    // that reads as random (a 2022 thread above a 1-week-old one).
+                    ->orderByDesc('last_activity_at')
                     ->limit($this->limit)
                     ->get();
 
-                // Preserve Meili relevance ordering across DB drivers (MySQL FIELD()
-                // is not portable to SQLite). Sort the in-memory collection instead.
-                $position = array_flip($ids);
-
-                return $threads
-                    ->sortBy(fn ($t) => $position[$t->id] ?? PHP_INT_MAX)
-                    ->values();
+                return $threads;
             } catch (\Throwable $e) {
                 report($e);
                 // Fall through to SQL fallback below.
