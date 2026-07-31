@@ -36,6 +36,9 @@ class SendScheduleModal extends Component
      */
     private const SERVICE_CALL_STATUS_CODE = 8;
 
+    /** Estimate — a pending Meet on such a project is an unscheduled consult. */
+    private const ESTIMATE_STATUS_CODE = 2;
+
     #[On('openScheduleModal')]
     public function open(int $threadId): void
     {
@@ -637,6 +640,7 @@ class SendScheduleModal extends Component
                 ? $pendingTasks
                 : $pendingTasks->reject(
                     fn (Task $task): bool => (int) ($task->project?->latestStatus?->status_code ?? 0) === self::SERVICE_CALL_STATUS_CODE
+                        || $this->isConsultInviteTask($task)
                 )->values();
 
             if ($pendingForSection->isNotEmpty()) {
@@ -699,6 +703,8 @@ class SendScheduleModal extends Component
                 }
             }
         }
+
+        $invite = trim(implode("\n\n", array_filter([$invite, $this->consultInviteLine()])));
 
         if ($invite !== '' && $intro !== '') {
             $header = "{$greeting}\n{$invite}\n\n{$intro}";
@@ -780,6 +786,96 @@ class SendScheduleModal extends Component
         }
 
         return "{$inviteText}\n{$itemLines}";
+    }
+
+    /**
+     * A pending Meet on an Estimate-status project is a consult nobody has
+     * scheduled yet — the client picks the time, not us. So instead of listing
+     * it as a dead "Pending" line, invite them to the lead's pick-times page
+     * (the same signed page the consult EMAIL links to), which writes their
+     * choices back onto the lead for the composer to confirm.
+     *
+     * Empty when the thread has no such task, or when no lead backs the
+     * client — the page is lead-scoped, so there'd be nowhere to save to.
+     */
+    protected function consultInviteLine(): string
+    {
+        $tasks = $this->consultInviteTasks();
+
+        if ($tasks->isEmpty()) {
+            return '';
+        }
+
+        $lead = $this->threadLead();
+
+        if (! $lead) {
+            return '';
+        }
+
+        $vendor = $tasks->first()->project?->createdByVendor;
+        $contractor = trim((string) ($vendor?->short_name ?: $vendor?->name ?: '')) ?: 'your contractor';
+
+        $inviteText = match ($this->languageKey()) {
+            'pl' => "Wybierz termin konsultacji z {$contractor}:",
+            'es' => "Elige un horario de consulta con {$contractor}:",
+            default => "Pick a consultation time with {$contractor}:",
+        };
+
+        $itemLines = $tasks
+            ->map(fn (Task $task): string => '- ' . trim((string) ($task->title ?? 'Consult')))
+            ->implode("\n");
+
+        $url = app(\App\Services\UrlShortener::class)->shorten($lead->availabilityUrl());
+
+        $label = match ($this->languageKey()) {
+            'pl' => 'Terminy',
+            'es' => 'Horarios',
+            default => 'Times',
+        };
+
+        return "{$inviteText}\n{$itemLines}\n{$label}: {$url}";
+    }
+
+    /** Pending Meet tasks whose project is still at Estimate. */
+    protected function consultInviteTasks(): \Illuminate\Support\Collection
+    {
+        if ($this->thread?->subject_vendor_id) {
+            return collect();
+        }
+
+        return $this->pendingTasks->filter(fn (Task $task): bool => $this->isConsultInviteTask($task))->values();
+    }
+
+    protected function isConsultInviteTask(Task $task): bool
+    {
+        return $task->type === 'Meet'
+            && (int) ($task->project?->latestStatus?->status_code ?? 0) === self::ESTIMATE_STATUS_CODE;
+    }
+
+    /**
+     * The lead behind this client thread, if any — the pick-times page is
+     * lead-scoped. Newest first: a client who came back for a second project
+     * has more than one.
+     */
+    protected function threadLead(): ?\App\Models\Lead
+    {
+        $clientId = $this->thread?->client_id;
+
+        if (! $clientId) {
+            return null;
+        }
+
+        $userIds = \App\Models\Client::withoutGlobalScopes()
+            ->find($clientId)?->users()->withoutGlobalScopes()->pluck('users.id') ?? collect();
+
+        if ($userIds->isEmpty()) {
+            return null;
+        }
+
+        return \App\Models\Lead::withoutGlobalScopes()
+            ->whereIn('user_id', $userIds)
+            ->latest('id')
+            ->first();
     }
 
     /**

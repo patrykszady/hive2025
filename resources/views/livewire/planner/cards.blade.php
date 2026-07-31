@@ -159,22 +159,6 @@
             />
         </div>
 
-        @if ($viewMode === 'gantt')
-            {{-- Zoom switcher (only visible on gantt, desktop only) --}}
-            <div class="hidden lg:flex bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg overflow-hidden">
-                @foreach (['day' => 'Day', 'week' => 'Week', 'month' => 'Month'] as $zoomKey => $zoomLabel)
-                    <flux:button
-                        wire:click="$set('ganttZoom', '{{ $zoomKey }}')"
-                        variant="subtle"
-                        size="sm"
-                        inset
-                        :class="$ganttZoom === $zoomKey ? 'bg-zinc-200/80 dark:bg-zinc-700/80 font-semibold' : ''"
-                    >
-                        {{ $zoomLabel }}
-                    </flux:button>
-                @endforeach
-            </div>
-        @endif
 
         <flux:button
             wire:click="$toggle('showMobileFilters')"
@@ -498,49 +482,30 @@
                         class="min-w-0 pb-2 relative z-10 group/cell {{ $isWeekend ? 'w-52' : 'w-80' }} {{ $dayData->isToday ? 'bg-indigo-100/70 dark:bg-indigo-900/25' : '' }}"
                         style="grid-column: {{ $dayColIndex }}; grid-row: {{ $projectRowIndex }};"
                     >
-                        @php
-                            $latestStatus = $dayData->isWeekend ? null : $projectColumn->project->latestStatus;
-                        @endphp
-
                         <flux:kanban
                             class="w-full [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-1"
                             x-bind:class="getOpacityClass({{ $isWeekend ? 'true' : 'false' }}, {{ $hasTasks ? 'true' : 'false' }}, {{ $hasUndatedTasks ? 'true' : 'false' }}, {{ $dayIndex }})"
                         >
                             <flux:kanban.column class="!w-full !max-w-full {{ $dayData->isToday ? 'bg-transparent!' : 'bg-white dark:bg-zinc-900' }} rounded-lg border border-zinc-200 dark:border-zinc-700">
-                                            <flux:kanban.column.header
-                                                class="min-w-0 w-full [&>div:first-child>div:first-child]:!min-w-0 [&>div:first-child>div:first-child]:!flex-1 [&>div:first-child>div:first-child]:truncate [&>div:first-child>div:last-child]:!shrink-0 [&_[data-flux-subheading]]:!min-w-0 [&_[data-flux-subheading]]:truncate"
-                                            >
-                                                <flux:heading class="min-w-0 truncate flex items-center gap-2">
-                                                    <a
-                                                        href="{{ route('projects.show', $projectColumn->project) }}"
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        class="truncate hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                                                    >
-                                                        {{ $projectColumn->title }}
-                                                    </a>
-                                                    @if($latestStatus)
-                                                        <flux:badge :color="$latestStatus->badge_color" size="sm" inset="top bottom left right" class="shrink-0">
-                                                            {{ $latestStatus->title }}
-                                                        </flux:badge>
-                                                    @endif
-                                                </flux:heading>
-                                                <x-slot name="actions">
-                                                    <flux:button
-                                                        variant="subtle"
-                                                        icon="plus"
-                                                        size="sm"
-                                                        class="shrink-0 opacity-0 group-hover/cell:opacity-100 transition-opacity"
-                                                        wire:key="add-task-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
-                                                        wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectColumn->id }}, date: '{{ $dayData->day->format('Y-m-d') }}' })"
-                                                    />
-                                                </x-slot>
+                                            {{-- Shared project column — the same partial as the
+                                                 table/gantt sidebars, so the header can't drift.
+                                                 The pending affordance here is the shared CARD in
+                                                 the column below (chip off); add button prefills
+                                                 this column's day. --}}
+                                            <div class="p-2 pb-0">
+                                                <div class="px-3 pt-1">
+                                                    @include('livewire.planner._project-sidebar', [
+                                                        'project'       => $projectColumn->project,
+                                                        'projectId'     => $projectColumn->id,
+                                                        'title'         => $projectColumn->title,
+                                                        'undatedCount'  => $projectColumn->undated_tasks_count ?? 0,
+                                                        'date'          => $dayData->day->format('Y-m-d'),
+                                                        'revealOnHover' => true,
+                                                        'showStatus'    => ! $dayData->isWeekend,
+                                                        'showPending'   => false,
+                                                    ])
 
-                                                <x-slot name="subheading">
-                                                    <span class="block min-w-0 truncate">
-                                                        {{ $projectColumn->project->client->last_names }} | {{ $projectColumn->project->project_name }}
-                                                    </span>
-                                                    {{-- Task gap info (next/last task) - shown in subheading to preserve alignment, hidden on weekends --}}
+                                                    {{-- Task gap info (next/last task) — cards-view only, hidden on weekends --}}
                                                     @if ($projectColumn->task_gap_info && !$dayData->isWeekend)
                                                         <div
                                                             wire:key="task-gap-{{ $projectColumn->id }}-idx{{ $dayIndex }}"
@@ -559,8 +524,8 @@
                                                             @endif
                                                         </div>
                                                     @endif
-                                                </x-slot>
-                                            </flux:kanban.column.header>
+                                                </div>
+                                            </div>
                                             <flux:kanban.column.cards>
                                                 @include('livewire.planner._pending-tasks-card', [
                                                     'projectId' => $projectColumn->id,

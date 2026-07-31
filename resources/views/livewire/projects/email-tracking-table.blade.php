@@ -54,6 +54,7 @@
                 'floor' => false,
                 'projectId' => $projectId,
                 'shortProjectName' => ! $projectId,
+                'shortDate' => true,
             ])
 
             @if($olderEvents->isNotEmpty())
@@ -68,6 +69,7 @@
                         'floor' => false,
                         'projectId' => $projectId,
                         'shortProjectName' => ! $projectId,
+                        'shortDate' => true,
                     ])
                 </div>
             @endif

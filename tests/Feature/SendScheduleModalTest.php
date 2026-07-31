@@ -2,13 +2,16 @@
 
 use App\Livewire\Sms\SendScheduleModal;
 use App\Models\Client;
+use App\Models\Lead;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use App\Models\ShortLink;
 use App\Models\SmsGroupThread;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -829,6 +832,175 @@ it('shows the service call invite block and does not duplicate service call item
         ->toBe(1);
 
     expect($preview)->not->toContain('Upcoming tasks:');
+});
+
+it('invites the client to pick consult times when a Meet is pending on an Estimate project', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $vendor->short_name = 'GS Construction';
+    $vendor->save();
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-consult@example.com',
+        'cell_phone' => '2245550188',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $contact = User::query()->create([
+        'first_name' => 'Amy',
+        'last_name' => 'Sepiol',
+        'email' => 'amy.consult-invite@example.com',
+        'cell_phone' => '2245550189',
+    ]);
+
+    $client = Client::factory()->create();
+    $client->users()->attach($contact->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Basement Stairs',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    // Estimate — the consult hasn't been scheduled yet.
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 2,
+        'start_date' => now(),
+    ]));
+
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'GS/Sepiol Consult',
+        'type' => 'Meet',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+    ]));
+
+    $lead = Lead::create([
+        'date' => now(),
+        'origin' => 'gs.construction',
+        'user_id' => $contact->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $contact->id,
+        'lead_data' => ['name' => 'Amy Sepiol', 'message' => 'Basement stairs'],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain('Pick a consultation time with GS Construction:')
+        ->toContain('- GS/Sepiol Consult')
+        ->toContain('Times: ')
+        // The consult is the invite, not a dead "Pending" line.
+        ->not->toContain("Pending:\n- GS/Sepiol Consult");
+
+    // The link resolves to that lead's signed pick-times page — through the
+    // shortener when it's enabled, otherwise the signed URL itself.
+    $link = trim(Str::after($preview, 'Times: '));
+    $destination = ShortLink::where('code', Str::afterLast($link, '/'))->value('destination') ?? $link;
+
+    expect($destination)
+        ->toContain('/lead/times/'.$lead->id)
+        ->toContain('signature=');
+});
+
+it('keeps a pending Meet in Pending when the project is past Estimate', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $vendor->short_name = 'GS Construction';
+    $vendor->save();
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.schedule-modal-consult-active@example.com',
+        'cell_phone' => '2245550190',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $contact = User::query()->create([
+        'first_name' => 'Amy',
+        'last_name' => 'Sepiol',
+        'email' => 'amy.consult-active@example.com',
+        'cell_phone' => '2245550191',
+    ]);
+
+    $client = Client::factory()->create();
+    $client->users()->attach($contact->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Basement Stairs',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Cary',
+        'state' => 'IL',
+        'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 6,
+        'start_date' => now(),
+    ]));
+
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Walkthrough',
+        'type' => 'Meet',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+    ]));
+
+    Lead::create([
+        'date' => now(),
+        'origin' => 'gs.construction',
+        'user_id' => $contact->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $contact->id,
+        'lead_data' => ['name' => 'Amy Sepiol', 'message' => 'Basement stairs'],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Client Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550001'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->not->toContain('Pick a consultation time')
+        ->toContain('- Walkthrough');
 });
 
 it('uses plural service call wording when multiple service call tasks exist', function (): void {

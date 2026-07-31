@@ -36,6 +36,10 @@
                     : ($resolvedName ?? 'Unknown'));
             $effectiveStatus = $this->effectiveStatus($call);
             $dur = $call->duration_seconds ? abs($call->duration_seconds) : 0;
+            // Known contacts link to their page (client members -> the client,
+            // vendors and their members -> the vendor), same as the SMS
+            // conversation header.
+            $contactUrl = $otherNumber ? $this->resolvePhoneContactUrl($otherNumber) : null;
         @endphp
 
         <x-island-card class="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -68,7 +72,13 @@
                         @endif
                     </div>
                     <div class="min-w-0 flex-1">
-                        <div class="text-base font-semibold text-zinc-900 dark:text-zinc-100 truncate">{{ $displayName }}</div>
+                        <div class="text-base font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                            @if ($contactUrl)
+                                <a wire:navigate.hover href="{{ $contactUrl }}" class="hover:underline">{{ $displayName }}</a>
+                            @else
+                                {{ $displayName }}
+                            @endif
+                        </div>
                         @if ($formattedOther && $formattedOther !== $displayName)
                             <div class="text-sm text-zinc-500 truncate">{{ $formattedOther }}</div>
                         @endif

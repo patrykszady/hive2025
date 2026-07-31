@@ -4,29 +4,39 @@
     // Client page: projects all share the client's address, so just the
     // project name. Elsewhere the combined "address | name" disambiguates.
     'shortProjectName' => false,
+    // Embedded cards: "44m ago" instead of "44 minutes ago" — the narrow Date
+    // column fits the short form without truncating.
+    'shortDate' => false,
 ])
 
+@php
+    $eventLabel = ucfirst($event->event_type)
+        . ((isset($event->event_count) && $event->event_count > 1) ? ' x' . $event->event_count : '');
+@endphp
+
 <flux:table.row :key="$event->id" {{ $attributes }}>
-    <flux:table.cell class="!px-2 whitespace-nowrap">
-        <flux:badge
-            size="sm"
-            :color="match($event->event_type) {
-                'opened' => 'blue',
-                'clicked' => 'green',
-                'replied' => 'purple',
-                'bounced' => 'red',
-                default => 'zinc'
-            }"
-            inset="top bottom">
-            {{ ucfirst($event->event_type) }}
-            @if(isset($event->event_count) && $event->event_count > 1)
-                <span class="ml-1">x{{ $event->event_count }}</span>
-            @endif
-        </flux:badge>
+    {{-- min-w-0 + truncating badge, same as Template: nowrap content here
+         otherwise paints over the next column on narrow embedded cards. --}}
+    <flux:table.cell class="whitespace-nowrap min-w-0 overflow-hidden">
+        <x-truncate-tooltip :content="$eventLabel">
+            <flux:badge
+                size="sm"
+                :color="match($event->event_type) {
+                    'opened' => 'blue',
+                    'clicked' => 'green',
+                    'replied' => 'purple',
+                    'bounced' => 'red',
+                    default => 'zinc'
+                }"
+                inset="top bottom"
+                class="max-w-full">
+                <span class="block truncate">{{ $eventLabel }}</span>
+            </flux:badge>
+        </x-truncate-tooltip>
     </flux:table.cell>
     {{-- min-w-0 + overflow-hidden: a long template name would otherwise spill
          out of its column and sit on top of the next one. --}}
-    <flux:table.cell class="!px-2 whitespace-nowrap min-w-0 overflow-hidden">
+    <flux:table.cell class="whitespace-nowrap min-w-0 overflow-hidden">
         @if($event->email_template_name)
             {{-- inset: without it this badge is 24px and the row grows to 49px,
                  4px taller than every other index row (and than the skeleton). --}}
@@ -43,7 +53,7 @@
     @if(!$projectId)
     {{-- min-w-0 + overflow-hidden so a long project name truncates inside its
          column instead of running under Recipients. --}}
-    <flux:table.cell class="!px-2 whitespace-nowrap min-w-0 overflow-hidden">
+    <flux:table.cell class="whitespace-nowrap min-w-0 overflow-hidden">
         @if($event->project)
             {{-- Expressions inlined: a php directive directly following an if directive miscompiles under Blaze. --}}
             @if($shortProjectName)
@@ -67,7 +77,7 @@
         @endif
     </flux:table.cell>
     @endif
-    <flux:table.cell class="!px-2 whitespace-nowrap">
+    <flux:table.cell class="whitespace-nowrap min-w-0 overflow-hidden">
         @php
             $recipientUsers = $event->recipient_users ?? collect();
             $recipientCount = $recipientUsers instanceof \Illuminate\Support\Collection ? $recipientUsers->count() : 0;
@@ -94,7 +104,7 @@
         @endphp
         @if($displayName)
             <flux:tooltip :content="$recipientTooltip !== '' ? $recipientTooltip : (string) $displayName" position="top">
-                <div class="text-sm text-zinc-700 dark:text-zinc-300 cursor-default">
+                <div class="text-sm text-zinc-700 dark:text-zinc-300 cursor-default truncate">
                     {{ $displayName }}@if($extraCount > 0) <span class="text-xs text-zinc-500 dark:text-zinc-400">+{{ $extraCount }}</span>@endif
                 </div>
             </flux:tooltip>
@@ -102,15 +112,20 @@
             <span class="text-gray-400">-</span>
         @endif
     </flux:table.cell>
-    <flux:table.cell class="!px-2 whitespace-nowrap">
+    {{-- Last column: without truncation its nowrap content ("44 minutes ago")
+         juts past the table edge, and that overhang IS the card's horizontal
+         scrollbar on narrow embedded cards (lead modal, client page). --}}
+    <flux:table.cell class="whitespace-nowrap min-w-0 overflow-hidden">
         @if($event->event_at)
             @php
                 $daysAgo = $event->event_at->diffInDays(now());
                 $dateLabel = $daysAgo > 14
                     ? $event->event_at->format('m/d/y')
-                    : $event->event_at->diffForHumans();
+                    : $event->event_at->diffForHumans(['short' => (bool) $shortDate]);
             @endphp
-            <div class="text-sm text-zinc-700 dark:text-zinc-300">{{ $dateLabel }}</div>
+            <x-truncate-tooltip :content="$event->event_at->format('m/d/y g:i A')">
+                <div class="text-sm text-zinc-700 dark:text-zinc-300 truncate">{{ $dateLabel }}</div>
+            </x-truncate-tooltip>
         @else
             <span class="text-gray-400">-</span>
         @endif

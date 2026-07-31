@@ -81,10 +81,25 @@
                 style="height: {{ $headerHeight }}px;"
             >
                 <div
-                    class="sticky left-0 z-40 bg-zinc-50 dark:bg-zinc-800/95 flex items-center px-3"
+                    class="sticky left-0 z-40 bg-zinc-50 dark:bg-zinc-800/95 flex items-center justify-between gap-2 px-3"
                     style="width: {{ $projectColumnWidth }}px; min-width: {{ $projectColumnWidth }}px; box-shadow: inset -2px 0 0 0 #cbd5e1;"
                 >
                     <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-200">Project</flux:heading>
+                    {{-- Zoom lives with the timeline it controls (the shared
+                         toolbar squeezed it against the viewport edge). Same
+                         segmented-control chrome as the toolbar's mobile
+                         date-range switcher. --}}
+                    <div class="flex items-center gap-0.5 p-0.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shrink-0">
+                        @foreach (['day' => 'Day', 'week' => 'Week', 'month' => 'Month'] as $zoomKey => $zoomLabel)
+                            <button
+                                type="button"
+                                wire:click="$set('ganttZoom', '{{ $zoomKey }}')"
+                                class="px-2 py-0.5 text-xs font-semibold rounded-md transition-colors {{ $ganttZoom === $zoomKey ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-700/70' }}"
+                            >
+                                {{ $zoomLabel }}
+                            </button>
+                        @endforeach
+                    </div>
                 </div>
                 <div class="relative" style="width: {{ $timelineWidth }}px;">
                     {{-- Month/Week super-header --}}

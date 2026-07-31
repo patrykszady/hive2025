@@ -1,15 +1,28 @@
 {{--
-    Shared sticky-left project sidebar cell used by Planner table & gantt views.
-    Single source of truth for project name + status + add button + client info + pending badge.
+    THE Planner project column — table, gantt AND the cards view all render it,
+    so name + status + add button + client info + pending badge can't drift.
 
     Required:
         $project          – Project model
         $projectId        – int (project id; also used as row id for actions)
         $title            – string (display title, usually $project->short_address)
         $undatedCount     – int (count of pending/undated tasks for project)
+    Optional (the cards view repeats the column per day):
+        $date             – Y-m-d; the add button prefills this day
+        $revealOnHover    – add button appears on cell hover (needs group/cell)
+        $showStatus       – hide the status badge (narrow weekend columns)
+        $showPending      – hide the chip (cards view shows the shared
+                            pending-tasks CARD inside the column instead)
 --}}
 @php
     $latestStatus = $project->latestStatus;
+    $date = $date ?? null;
+    $revealOnHover = $revealOnHover ?? false;
+    $showStatus = $showStatus ?? true;
+    $showPending = $showPending ?? true;
+    // Built here: quotes inside a {{ }} attribute survive as entities, and the
+    // per-day columns need the date in both the payload and the wire:key.
+    $addPayload = '{ project_id: ' . (int) $projectId . ($date ? ", date: '" . $date . "'" : '') . ' }';
 @endphp
 
 <div class="flex flex-col gap-1 w-full min-w-0">
@@ -23,7 +36,7 @@
     >
         {{ $title }}
     </a>
-    @if ($latestStatus)
+    @if ($showStatus && $latestStatus)
         <flux:badge :color="$latestStatus->badge_color" size="sm" inset="top bottom" class="shrink-0">
             {{ $latestStatus->title }}
         </flux:badge>
@@ -32,9 +45,9 @@
         variant="subtle"
         icon="plus"
         size="xs"
-        class="shrink-0"
-        wire:key="planner-add-task-{{ $projectId }}"
-        wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectId }} })"
+        class="shrink-0 {{ $revealOnHover ? 'opacity-0 group-hover/cell:opacity-100 transition-opacity' : '' }}"
+        wire:key="planner-add-task-{{ $projectId }}{{ $date ? '-' . $date : '' }}"
+        wire:click="$dispatchTo('tasks.task-create', 'addTask', {{ $addPayload }})"
         aria-label="Add task"
     />
 </div>
@@ -43,7 +56,7 @@
     {{ $project->client->last_names ?? '' }}{{ $project->project_name ? ' | ' . $project->project_name : '' }}
 </div>
 
-@if ($undatedCount > 0)
+@if ($showPending && $undatedCount > 0)
     <button
         type="button"
         x-on:click="window.dispatchEvent(new CustomEvent('open-undated-tasks', { detail: { projectId: {{ (int) $projectId }} } }))"

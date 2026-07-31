@@ -330,15 +330,6 @@ class LeadCreate extends Component
 
         $title = $shortVendorName . ' | ' . $clientLastNames . ' | Consult';
 
-        $exists = \App\Models\Task::withoutGlobalScopes()
-            ->where('project_id', $project->id)
-            ->where('title', $title)
-            ->exists();
-
-        if ($exists) {
-            return false;
-        }
-
         $date = $slot['date'];
 
         // A consult is a 30-minute meeting: it starts at the exact time picked
@@ -352,6 +343,62 @@ class LeadCreate extends Component
             ? [$startTime, Carbon::createFromFormat('H:i', $startTime)->addMinutes(self::CONSULT_MINUTES)->format('H:i')]
             : null;
 
+        $timeSettings = $times
+            ? ['use_time' => true, 'start_time' => $times[0], 'end_time' => $times[1]]
+            : ['use_time' => false];
+
+        $notes = 'Booked from lead email reply — ' . $this->bookedSlotLabel((array) $slot) . '.';
+
+        // This client's consult, if we already booked one — INCLUDING a
+        // soft-deleted one: deleting the consult is how "that date didn't
+        // work" is expressed, so booking a new date revives the same task
+        // rather than leaving it dead (which silently blocked the booking) or
+        // spawning a duplicate. Matching on project+title (not on the date)
+        // is what makes a resend idempotent.
+        $task = \App\Models\Task::withoutGlobalScopes()
+            ->where('project_id', $project->id)
+            ->where('title', $title)
+            ->first();
+
+        if ($task) {
+            $wasTrashed = $task->trashed();
+
+            // Resending the same slot changes nothing — don't touch the task or
+            // re-notify the client's calendar. A trashed consult is never
+            // "unchanged": the point of rebooking is to bring it back.
+            $unchanged = ! $wasTrashed
+                && optional($task->start_date)->format('Y-m-d') === $date
+                && (array) data_get($task->options, 'time_settings.' . $date) == $timeSettings;
+
+            if ($unchanged) {
+                return false;
+            }
+
+            if ($wasTrashed) {
+                $task->restore();
+            }
+
+            $options = (array) ($task->options ?? []);
+            $options['dates'] = [$date];
+            // Drop the previous date's entry, or the task keeps a stale time.
+            $options['time_settings'] = [$date => $timeSettings];
+
+            $task->update([
+                'start_date' => $date,
+                'end_date' => $date,
+                'notes' => $notes,
+                'options' => $options,
+            ]);
+
+            // Move the existing calendar event; a task that never got one (the
+            // grant was missing at booking) still needs one created.
+            data_get($task->options, 'nylas_meet_event.event_id')
+                ? \App\Jobs\UpdateMeetTaskCalendarEvent::dispatch($task->id)
+                : \App\Jobs\CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
+
+            return true;
+        }
+
         $task = \App\Models\Task::create([
             'title' => $title,
             'project_id' => $project->id,
@@ -360,15 +407,11 @@ class LeadCreate extends Component
             'end_date' => $date,
             'order' => 0,
             'user_ids' => [auth()->id()],
-            'notes' => 'Booked from lead email reply — ' . $this->formatAvailabilitySlot((array) $slot) . '.',
+            'notes' => $notes,
             'options' => [
                 'dates' => [$date],
                 'checklist' => [],
-                'time_settings' => [
-                    $date => $times
-                        ? ['use_time' => true, 'start_time' => $times[0], 'end_time' => $times[1]]
-                        : ['use_time' => false],
-                ],
+                'time_settings' => [$date => $timeSettings],
                 'meeting_participants' => [],
                 'meeting_location_type' => 'in_person',
             ],
@@ -834,10 +877,7 @@ class LeadCreate extends Component
             $slot = (array) $slots->first();
 
             if ($this->selectedExactTime) {
-                $date = $slot['date'] ?? null;
-                $datePart = $date ? \Carbon\Carbon::parse($date)->format('D, M j') : '';
-
-                return trim($datePart . ' · ' . Carbon::createFromFormat('H:i', $this->selectedExactTime)->format('g:i A'));
+                return $this->bookedSlotLabel($slot);
             }
 
             // A parseable window offers exact-time chips — hold the email back
@@ -853,6 +893,24 @@ class LeadCreate extends Component
         return $slots
             ->map(fn ($slot) => '• ' . $this->formatAvailabilitySlot((array) $slot))
             ->implode("\n");
+    }
+
+    /**
+     * How a booked slot reads once a time is settled: the exact time when one
+     * was picked, otherwise the slot as the client offered it. The email line
+     * and the Meet task's note both use this, so a task can't say "Anytime"
+     * while the client was told 10:30 AM.
+     */
+    protected function bookedSlotLabel(array $slot): string
+    {
+        if (! $this->selectedExactTime) {
+            return $this->formatAvailabilitySlot($slot);
+        }
+
+        $date = $slot['date'] ?? null;
+        $datePart = $date ? \Carbon\Carbon::parse($date)->format('D, M j') : '';
+
+        return trim($datePart . ' · ' . Carbon::createFromFormat('H:i', $this->selectedExactTime)->format('g:i A'));
     }
 
     protected function formatAvailabilitySlot(array $slot): string

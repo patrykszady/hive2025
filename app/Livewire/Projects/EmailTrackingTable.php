@@ -70,17 +70,22 @@ class EmailTrackingTable extends Component
         //  - Date       "03/23/26", or "2 hours ago" on a project card
         // narrow = embedded in a ~500px card; scoped = project card, where the
         // Project column is implied and its share goes to Template/Recipients.
+        // Narrow (a ~480px embedded card, .narrow-table paddings) is budgeted
+        // from measured content: Event fits "Opened x11" whole, Recipients
+        // fits its own header (the widest label), Date leans on the short
+        // format ("44m ago"). Template and Project take the slack — they
+        // truncate behind tooltips.
         $columns = [
-            ['label' => 'Event', 'width' => ($scoped ? 'w-[21%]' : ($narrow ? 'w-[19%]' : 'w-[18%]')), 'skeleton' => 'badge'],
-            ['label' => 'Template', 'width' => ($scoped ? 'w-[30%]' : ($narrow ? 'w-[25%]' : 'w-[22%]')).' min-w-0', 'skeleton' => 'badge'],
+            ['label' => 'Event', 'width' => ($scoped ? 'w-[24%]' : ($narrow ? 'w-[25%]' : 'w-[18%]')).' min-w-0', 'skeleton' => 'badge'],
+            ['label' => 'Template', 'width' => ($scoped ? 'w-[31%]' : ($narrow ? 'w-[21%]' : 'w-[22%]')).' min-w-0', 'skeleton' => 'badge'],
         ];
 
         if (! $scoped) {
-            $columns[] = ['label' => 'Project', 'width' => ($narrow ? 'w-[20%]' : 'w-[24%]').' min-w-0', 'skeletonWidth' => 'w-28'];
+            $columns[] = ['label' => 'Project', 'width' => ($narrow ? 'w-[15%]' : 'w-[24%]').' min-w-0', 'skeletonWidth' => 'w-28'];
         }
 
-        $columns[] = ['label' => 'Recipients', 'width' => ($scoped ? 'w-[25%]' : ($narrow ? 'w-[18%]' : 'w-[22%]')).' min-w-0', 'skeletonWidth' => 'w-20'];
-        $columns[] = ['label' => 'Date', 'width' => ($scoped ? 'w-[24%]' : ($narrow ? 'w-[18%]' : 'w-[14%]')).' min-w-0', 'skeletonWidth' => 'w-16'];
+        $columns[] = ['label' => 'Recipients', 'width' => ($scoped ? 'w-[21%]' : ($narrow ? 'w-[19%]' : 'w-[22%]')).' min-w-0', 'skeletonWidth' => 'w-20'];
+        $columns[] = ['label' => 'Date', 'width' => ($scoped ? 'w-[24%]' : ($narrow ? 'w-[20%]' : 'w-[14%]')).' min-w-0', 'skeletonWidth' => 'w-16'];
 
         return $columns;
     }

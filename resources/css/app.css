@@ -149,6 +149,24 @@
     padding-block: 0 calc(var(--spacing) * 3);
   }
 
+  /* Narrow embedded tables (email tracking in a ~480px show-page card or the
+     lead modal): the global paddings above cost ~28px per column, and five
+     columns of that forced a horizontal scrollbar. Keep the 24px card-edge
+     alignment, tighten only the BETWEEN-column gaps. Same !important coin as
+     the base rules — utilities can't beat them, so a variant has to live here
+     beside them. */
+  .narrow-table th,
+  .narrow-table td,
+  .narrow-table [data-flux-cell] {
+    padding-inline: calc(var(--spacing) * 2) !important;
+  }
+  .narrow-table :is(th, td, [data-flux-cell]):first-child {
+    padding-inline-start: calc(var(--spacing) * 6) !important;
+  }
+  .narrow-table :is(th, td, [data-flux-cell]):last-child {
+    padding-inline-end: calc(var(--spacing) * 6) !important;
+  }
+
   /* Compact tables (e.g. Projects index): tighter row rhythm than Flux's
      default py-3 cells — rows with sm selects drop from 56px to ~46px. */
   .compact-table td[data-flux-cell] {

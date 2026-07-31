@@ -1805,7 +1805,10 @@ class CardsIndex extends Component
         // skip the heavy kanban / lane / undated computations entirely.
         $needsKanban = $isCards;                 // cards view: per-day project columns
         $needsRows = $isTable;                   // table view: day headers + lane rows
-        $needsUndated = $isCards || $isTable;    // pending-tasks modal (cards + table only)
+        // Pending-tasks modal: every view whose project sidebar shows the
+        // "N pending" chip — the gantt shares that sidebar, and without the
+        // modal data its chip silently did nothing.
+        $needsUndated = $isCards || $isTable || $isGantt;
 
         return view('livewire.planner.cards', [
             'kanbanColumns' => $needsKanban ? $this->kanbanColumns : collect(),

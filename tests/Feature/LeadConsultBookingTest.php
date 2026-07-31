@@ -73,16 +73,28 @@ function makeConsultFixture(?array $slot = null): array
  *
  * @return array<int, string>
  */
+/**
+ * Weekdays on which EVERY window is bookable. The first bookable date often
+ * qualifies only for its later windows — 72h notice measured at 1pm lands
+ * mid-day, so that day's "10-12 PM" is legitimately refused. Tests that toggle
+ * a morning window need a day that clears the notice period outright, or they
+ * pass or fail depending on the hour the suite runs.
+ */
 function bookableWeekdays(Lead $lead, int $count = 2): array
 {
     $tz = \App\Livewire\Leads\PickTimes::timezone();
+    $earliest = \App\Livewire\Leads\PickTimes::earliestStart($lead);
+    $dayOpens = \App\Livewire\Leads\PickTimes::dayBounds()[0];
     $day = \Illuminate\Support\Carbon::parse(\App\Livewire\Leads\PickTimes::firstBookableDate($lead), $tz);
     $days = [];
 
     while (count($days) < $count) {
-        if (! $day->isWeekend()) {
+        $opensAt = \Illuminate\Support\Carbon::parse($day->format('Y-m-d').' '.$dayOpens, $tz);
+
+        if (! $day->isWeekend() && $opensAt->greaterThanOrEqualTo($earliest)) {
             $days[] = $day->format('Y-m-d');
         }
+
         $day->addDay();
     }
 
@@ -321,6 +333,121 @@ it('does not duplicate the project or task on a resend', function () {
 
     expect(Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->count())->toBe(1)
         ->and(Task::withoutGlobalScopes()->where('title', 'GSC | Singh | Consult')->count())->toBe(1);
+});
+
+it('moves the existing consult when the client reschedules', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $firstDay = now()->addDays(2)->format('Y-m-d');
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '14:00')
+        ->set('projectName', 'Consult')->call('send_message');
+
+    // The client replies with new availability; we pick one of the new times.
+    $secondDay = now()->addDays(9)->format('Y-m-d');
+    $lead = $fx['lead']->fresh();
+    $data = $lead->lead_data;
+    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $lead->lead_data = $data;
+    $lead->save();
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '10:30')->call('send_message');
+
+    // One consult, moved — not a second task and not the stale first date.
+    $tasks = Task::withoutGlobalScopes()->where('title', 'GSC | Singh | Consult')->get();
+    expect($tasks)->toHaveCount(1);
+
+    $task = $tasks->first();
+    expect($task->start_date->format('Y-m-d'))->toBe($secondDay)
+        ->and($task->end_date->format('Y-m-d'))->toBe($secondDay)
+        ->and(data_get($task->options, 'time_settings.'.$secondDay.'.start_time'))->toBe('10:30')
+        ->and(data_get($task->options, 'time_settings.'.$secondDay.'.end_time'))->toBe('11:00')
+        // The old day's time settings must not linger.
+        ->and(data_get($task->options, 'time_settings.'.$firstDay))->toBeNull()
+        ->and(data_get($task->options, 'dates'))->toBe([$secondDay]);
+});
+
+it('creates the calendar event when a rescheduled consult never got one', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '14:00')
+        ->set('projectName', 'Consult')->call('send_message');
+
+    $secondDay = now()->addDays(9)->format('Y-m-d');
+    $lead = $fx['lead']->fresh();
+    $data = $lead->lead_data;
+    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $lead->lead_data = $data;
+    $lead->save();
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '10:30')->call('send_message');
+
+    // No nylas_meet_event was ever stored (no grant in tests), so the move must
+    // fall back to creating the event rather than updating a missing one.
+    Queue::assertPushed(\App\Jobs\CreateMeetTaskCalendarEvent::class, 2);
+    Queue::assertNotPushed(\App\Jobs\UpdateMeetTaskCalendarEvent::class);
+});
+
+it('revives a deleted consult when a new date is booked', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '14:00')
+        ->set('projectName', 'Consult')->call('send_message');
+
+    // The first date didn't work, so the consult was deleted — booking a new
+    // date must bring the SAME task back, not leave it dead or duplicate it.
+    $first = Task::withoutGlobalScopes()->where('title', 'GSC | Singh | Consult')->firstOrFail();
+    $first->delete();
+
+    $secondDay = now()->addDays(9)->format('Y-m-d');
+    $lead = $fx['lead']->fresh();
+    $data = $lead->lead_data;
+    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $lead->lead_data = $data;
+    $lead->save();
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '10:30')->call('send_message');
+
+    $live = Task::query()->where('title', 'GSC | Singh | Consult')->get();
+    expect($live)->toHaveCount(1)
+        ->and($live->first()->id)->toBe($first->id)
+        ->and($live->first()->deleted_at)->toBeNull()
+        ->and($live->first()->start_date->format('Y-m-d'))->toBe($secondDay)
+        ->and(data_get($live->first()->options, 'time_settings.'.$secondDay.'.start_time'))->toBe('10:30')
+        ->and(data_get($live->first()->options, 'time_settings.'.$secondDay.'.end_time'))->toBe('11:00');
+});
+
+it('sends recipients an updated calendar invite when the consult is rescheduled', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '14:00')
+        ->set('projectName', 'Consult')->call('send_message');
+
+    // The booking job normally stores the Nylas event metadata; the queue is
+    // faked here, so stamp what a created event leaves behind.
+    $task = Task::withoutGlobalScopes()->where('title', 'GSC | Singh | Consult')->firstOrFail();
+    $options = (array) $task->options;
+    $options['nylas_meet_event'] = ['event_id' => 'evt-1', 'grant_id' => 'grant-1', 'calendar_id' => 'cal-1'];
+    $task->updateQuietly(['options' => $options]);
+
+    $secondDay = now()->addDays(9)->format('Y-m-d');
+    $lead = $fx['lead']->fresh();
+    $data = $lead->lead_data;
+    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $lead->lead_data = $data;
+    $lead->save();
+
+    consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '10:30')->call('send_message');
+
+    // The move goes out as an UPDATE to the existing event — Nylas is called
+    // with notify_participants=true, so attendees receive the updated invite
+    // (and updateMeetEvent falls back to creating a fresh one if the event id
+    // is stale).
+    Queue::assertPushed(\App\Jobs\UpdateMeetTaskCalendarEvent::class, 1);
+    Queue::assertPushed(\App\Jobs\CreateMeetTaskCalendarEvent::class, 1); // the original booking only
 });
 
 it('books nothing when no availability slot is selected', function () {

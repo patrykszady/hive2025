@@ -5,8 +5,9 @@
      for mobile scroll). Widths always come from EmailTrackingTable::columnDefs.
 
      Expects: $columns, $events, $header (bool), $floor (bool), $projectId,
-     $shortProjectName. --}}
-<flux:table class="{{ ($floor ?? false) ? 'index-table' : 'table-fixed min-w-0 w-full' }} [:where(&)]:p-0 [:where(&)]:space-y-0">
+     $shortProjectName, $shortDate (embedded cards: "44m ago", so the narrow
+     Date column never overflows into a horizontal scrollbar). --}}
+<flux:table class="{{ ($floor ?? false) ? 'index-table' : 'narrow-table table-fixed min-w-0 w-full' }} [:where(&)]:p-0 [:where(&)]:space-y-0">
     @if($header ?? true)
         <flux:table.columns>
             @foreach($columns as $trackingColumn)
@@ -27,6 +28,7 @@
                 'event' => $event,
                 'projectId' => $projectId ?? null,
                 'shortProjectName' => $shortProjectName ?? false,
+                'shortDate' => $shortDate ?? false,
             ])
         @empty
             <flux:table.row>
