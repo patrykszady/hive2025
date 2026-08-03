@@ -28,9 +28,17 @@ class BackfillLeadContacts extends Command
     protected $signature = 'leads:backfill-contacts
         {--apply : Write the changes (without this it only reports what it would do)}
         {--lead= : Restrict to one lead id}
-        {--limit=200 : Most leads to examine}';
+        {--limit=200 : Most leads to examine}
+        {--include-junk : Provision solicitations too (by default they are skipped)}
+        {--mark-junk : Set skipped solicitations to "Not a Fit"}';
 
     protected $description = 'Complete addresses and provision contacts/clients for leads imported before those rules existed.';
+
+    /**
+     * A message shorter than this is never judged a solicitation — there isn't
+     * enough of it to tell, and a false positive costs a real customer.
+     */
+    private const MIN_TRIAGE_WORDS = 12;
 
     public function handle(LeadAddressCompleter $completer, LeadContactProvisioner $provisioner): int
     {
@@ -49,9 +57,35 @@ class BackfillLeadContacts extends Command
             : "DRY RUN — {$leads->count()} lead(s) would be touched. Re-run with --apply to write.");
         $this->newLine();
 
-        $stats = ['addresses' => 0, 'cc_emails' => 0, 'contacts' => 0, 'clients' => 0, 'ambiguous' => 0, 'still_short' => 0];
+        $stats = ['addresses' => 0, 'cc_emails' => 0, 'contacts' => 0, 'clients' => 0, 'ambiguous' => 0, 'still_short' => 0, 'junk' => 0];
 
         foreach ($leads as $lead) {
+            // Contractors get pitched constantly — domain sales, SEO, business
+            // brokers, equipment finance. Those are leads in the inbox sense
+            // only; building a contact and a client for each one fills the CRM
+            // with people who never wanted anything. The mailbox classifier
+            // already knows the difference (it asks which way the offer
+            // points), so ask it before provisioning anything.
+            if (! $this->option('include-junk') && ($reason = $this->junkReason($lead)) !== null) {
+                $stats['junk']++;
+
+                if ($apply && $this->option('mark-junk') && ($lead->last_status?->title ?? null) !== 'Not a Fit') {
+                    $lead->statuses()->create([
+                        'title' => 'Not a Fit',
+                        'belongs_to_vendor_id' => $lead->belongs_to_vendor_id,
+                    ]);
+                }
+
+                $this->line(sprintf(
+                    '  lead %-5s %-28s <fg=gray>skipped — %s</>',
+                    $lead->id,
+                    \Illuminate\Support\Str::limit((string) (((array) $lead->lead_data)['name'] ?? '—'), 26),
+                    $reason,
+                ));
+
+                continue;
+            }
+
             $before = $this->snapshot($lead);
             $changes = [];
 
@@ -128,8 +162,8 @@ class BackfillLeadContacts extends Command
 
         $this->newLine();
         $this->table(
-            ['addresses completed', 'cc emails recovered', 'contacts created', 'clients created/completed', 'ambiguous addresses', 'still incomplete'],
-            [[$stats['addresses'], $stats['cc_emails'], $stats['contacts'], $stats['clients'], $stats['ambiguous'], $stats['still_short']]],
+            ['addresses completed', 'cc emails recovered', 'contacts created', 'clients created/completed', 'ambiguous addresses', 'skipped as junk', 'still incomplete'],
+            [[$stats['addresses'], $stats['cc_emails'], $stats['contacts'], $stats['clients'], $stats['ambiguous'], $stats['junk'], $stats['still_short']]],
         );
 
         if ($stats['ambiguous'] > 0) {
@@ -142,6 +176,45 @@ class BackfillLeadContacts extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Why this lead isn't worth a contact record, or null if it is.
+     *
+     * Cheap checks first — a lead somebody already triaged, or one with
+     * nothing to say — then the classifier, which costs an API call.
+     */
+    private function junkReason(Lead $lead): ?string
+    {
+        $status = $lead->last_status?->title;
+
+        if (in_array($status, ['Lost', 'Not a Fit'], true)) {
+            return 'already triaged as '.$status;
+        }
+
+        $data = (array) $lead->lead_data;
+        $message = trim((string) ($data['message'] ?? ''));
+
+        // Too short to judge. Real homeowners write "Interior remodel" and
+        // nothing else, and the classifier reads brevity as a pitch — which
+        // would drop a customer to avoid a junk row. Wrong way round: keep it.
+        if (str_word_count($message) < self::MIN_TRIAGE_WORDS) {
+            return null;
+        }
+
+        $verdict = app(\App\Services\CrewLeadEmailService::class)->classify(
+            (string) ($data['subject'] ?? ''),
+            $message,
+            (string) ($data['email'] ?? ''),
+        );
+
+        // Only act on a confident NO. An unavailable or unsure classifier must
+        // never cause a real enquiry to be dropped.
+        if ($verdict['is_lead'] === false && $verdict['confidence'] >= 0.8) {
+            return 'solicitation — '.\Illuminate\Support\Str::limit((string) $verdict['reason'], 60);
+        }
+
+        return null;
     }
 
     /**

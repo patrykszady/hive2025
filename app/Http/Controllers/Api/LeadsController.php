@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Lead;
+use Illuminate\Support\Facades\Log;
+use App\Services\CrewLeadEmailService;
 use App\Services\LeadAddressCompleter;
 use App\Services\LeadContactProvisioner;
 use Illuminate\Http\JsonResponse;
@@ -164,7 +166,34 @@ class LeadsController extends Controller
             'created_at' => $date,
         ]);
 
-        app(LeadContactProvisioner::class)->provision($lead->fresh());
+        // The form is open to anyone, and contractors are a magnet for pitches
+        // — domain sales, SEO, equipment finance. Record every submission as a
+        // lead (so nothing disappears), but only build a contact and client
+        // for someone who actually wants work done. Same judgement the shared
+        // mailbox already applies; a failed or unsure classification provisions
+        // as normal rather than dropping a real enquiry.
+        // Short enquiries ("Interior remodel") carry too little to judge, and
+        // reading brevity as a pitch would cost a real customer — only longer
+        // messages are triaged at all.
+        $message = (string) ($leadData['message'] ?? '');
+
+        $verdict = str_word_count($message) < 12
+            ? ['is_lead' => null, 'confidence' => 0.0, 'reason' => null]
+            : app(CrewLeadEmailService::class)->classify(
+                (string) ($leadData['subject'] ?? ''),
+                $message,
+                (string) ($leadData['email'] ?? ''),
+            );
+
+        if ($verdict['is_lead'] === false && $verdict['confidence'] >= 0.8) {
+            Log::info('Website lead looks like a solicitation — recorded without provisioning', [
+                'lead_id' => $lead->id,
+                'reason' => $verdict['reason'],
+                'confidence' => $verdict['confidence'],
+            ]);
+        } else {
+            app(LeadContactProvisioner::class)->provision($lead->fresh());
+        }
 
         return response()->json([
             'data' => ['id' => $lead->id],

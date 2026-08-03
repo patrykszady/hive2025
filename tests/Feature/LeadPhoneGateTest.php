@@ -325,6 +325,7 @@ it('offers the matching addresses near the office instead of guessing one', func
     $fx = ['admin' => $admin, 'contact' => $contact, 'lead' => $lead];
 
     $this->mock(GeoapifyService::class)
+        ->shouldReceive('geocodeAddress')->andReturn(null)
         ->shouldReceive('nearbyAddressCandidates')
         ->andReturn([
             ['address' => '511 Sherwood Drive', 'city' => 'Addison', 'state' => 'IL', 'zip_code' => '60101', 'miles' => 12.0],
@@ -358,4 +359,93 @@ it('offers the matching addresses near the office instead of guessing one', func
         ->and($client->city)->toBe('Streamwood')
         ->and((string) $client->zip_code)->toBe('60107')
         ->and($component->instance()->missingContactInfo)->toBe([]);
+});
+
+it('takes the only nearby address without asking', function () {
+    // One match is an answer, not a question — the picker is for genuine
+    // ambiguity, and asking about a single option is just a chore.
+    $vendor = Vendor::factory()->create(['options' => (object) ['short_name' => 'GS']]);
+
+    $admin = new User();
+    $admin->forceFill([
+        'first_name' => 'Patryk',
+        'last_name' => 'Sender',
+        'email' => 'single-addr.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224555####'),
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $admin->save();
+    $vendor->users()->attach($admin->id, ['role_id' => 1]);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+
+    $this->mock(GeoapifyService::class)
+        ->shouldReceive('geocodeAddress')->andReturn(null)
+        ->shouldReceive('nearbyAddressCandidates')->andReturn([
+            ['address' => '960 Danielson Court', 'city' => 'Gurnee', 'state' => 'IL', 'zip_code' => '60031', 'miles' => 18.9],
+        ]);
+
+    $lead = Lead::create([
+        'date' => now(),
+        'origin' => 'Email',
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $admin->id,
+        'lead_data' => [
+            'name' => 'Rob Rothbaum',
+            'email' => 'rob.single@example.com',
+            'address' => '960 Danielson Ct',
+        ],
+    ]);
+    $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $vendor->id]);
+
+    $component = Livewire::actingAs($admin)->test(LeadCreate::class)->call('editLead', $lead);
+
+    $data = $lead->fresh()->lead_data;
+
+    expect($data['city'])->toBe('Gurnee')
+        ->and($data['state'])->toBe('IL')
+        ->and($data['zip'])->toBe('60031')
+        ->and($component->instance()->addressCandidates)->toBe([])
+        // Only the phone is outstanding now.
+        ->and($component->instance()->missingContactInfo)->toBe(['a phone number']);
+
+    $component->assertDontSee('Which address is this?', false);
+});
+
+it('does not report a complete lead address as missing just because no client exists yet', function () {
+    // No phone means no contact, which means no client — but the address on
+    // the lead is perfectly good, and saying otherwise sent people hunting.
+    $vendor = Vendor::factory()->create(['options' => (object) ['short_name' => 'GS']]);
+
+    $admin = new User();
+    $admin->forceFill([
+        'first_name' => 'Patryk',
+        'last_name' => 'Sender',
+        'email' => 'addr-complete.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224555####'),
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $admin->save();
+    $vendor->users()->attach($admin->id, ['role_id' => 1]);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+
+    $lead = Lead::create([
+        'date' => now(),
+        'origin' => 'Email',
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $admin->id,
+        'lead_data' => [
+            'name' => 'Rob Rothbaum',
+            'email' => 'rob.addrcomplete@example.com',
+            'address' => '960 Danielson Ct',
+            'city' => 'Gurnee',
+            'state' => 'IL',
+            'zip' => '60031',
+        ],
+    ]);
+    $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $vendor->id]);
+
+    $component = Livewire::actingAs($admin)->test(LeadCreate::class)->call('editLead', $lead);
+
+    expect($component->instance()->missingContactInfo)->toBe(['a phone number'])
+        ->and($lead->fresh()->user_id)->toBeNull();
 });

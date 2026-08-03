@@ -181,6 +181,7 @@ class LeadCreate extends Component
         $this->projectName = '';
         $this->origin = $this->lead->origin;
         $this->date = $this->lead->date->format('Y-m-d');
+        $this->completeAddress();
         $this->user = $this->lead->user;
         $this->client = $this->resolveClientForLead();
         $this->lead_status = $this->lead->last_status ? $this->lead->last_status->title : null;
@@ -377,7 +378,56 @@ class LeadCreate extends Component
             return [];
         }
 
-        return app(\App\Services\GeoapifyService::class)->nearbyAddressCandidates($street);
+        $candidates = app(\App\Services\GeoapifyService::class)->nearbyAddressCandidates($street);
+
+        // A single match is an answer, not a question — completeAddress()
+        // applies it on open, so nothing should be asked here.
+        return count($candidates) > 1 ? $candidates : [];
+    }
+
+    /**
+     * Fill in an incomplete address when it can be done unambiguously, so the
+     * lead opens already resolved rather than asking about the only option.
+     * Leads imported before address completion existed arrive here.
+     */
+    protected function completeAddress(): void
+    {
+        if (! $this->lead?->exists) {
+            return;
+        }
+
+        $data = (array) $this->lead->lead_data;
+
+        if ($this->addressIsComplete([
+            'address' => $data['address'] ?? null,
+            'city' => $data['city'] ?? null,
+            'state' => $data['state'] ?? null,
+            'zip_code' => $data['zip'] ?? null,
+        ])) {
+            return;
+        }
+
+        $completed = app(\App\Services\LeadAddressCompleter::class)->complete($data);
+
+        // Exactly one match near the office: take it.
+        $candidates = $completed['address_candidates'] ?? [];
+        if (is_array($candidates) && count($candidates) === 1) {
+            $only = (array) $candidates[0];
+            $completed['address'] = $only['address'];
+            $completed['city'] = $only['city'];
+            $completed['state'] = $only['state'];
+            $completed['zip'] = $only['zip_code'];
+            unset($completed['address_candidates']);
+        }
+
+        if ($completed === $data) {
+            return;
+        }
+
+        $this->lead->lead_data = $completed;
+        $this->lead->saveQuietly();
+        $this->lead = $this->lead->fresh(['user.clients.users', 'last_status']);
+        $this->address = $completed['address'] ?? $this->address;
     }
 
     /**
@@ -456,19 +506,38 @@ class LeadCreate extends Component
             $missing[] = 'a phone number';
         }
 
-        // A client record is only created from a whole address, so its absence
-        // IS the signal — either there's no client, or it has gaps.
-        $addressComplete = $client
-            && trim((string) $client->address) !== ''
-            && trim((string) $client->city) !== ''
-            && trim((string) $client->state) !== ''
-            && trim((string) $client->zip_code) !== '';
+        // Judge the address on the LEAD, not on the client: a lead with a
+        // perfectly good address still has no client while some OTHER field is
+        // missing (no phone → no contact → no client), and reporting the
+        // address as missing then sent people hunting for a problem that
+        // wasn't there. The client is the fallback for older leads whose
+        // address only ever lived on the client record.
+        $addressComplete = $this->addressIsComplete([
+            'address' => $data['address'] ?? null,
+            'city' => $data['city'] ?? null,
+            'state' => $data['state'] ?? null,
+            'zip_code' => $data['zip'] ?? null,
+        ]) || ($client && $this->addressIsComplete([
+            'address' => $client->address,
+            'city' => $client->city,
+            'state' => $client->state,
+            'zip_code' => $client->zip_code,
+        ]));
 
         if (! $addressComplete) {
             $missing[] = 'a full address';
         }
 
         return $missing;
+    }
+
+    /** @param  array<string, mixed>  $parts */
+    protected function addressIsComplete(array $parts): bool
+    {
+        return trim((string) ($parts['address'] ?? '')) !== ''
+            && trim((string) ($parts['city'] ?? '')) !== ''
+            && trim((string) ($parts['state'] ?? '')) !== ''
+            && trim((string) ($parts['zip_code'] ?? '')) !== '';
     }
 
     #[Computed]

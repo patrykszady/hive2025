@@ -333,9 +333,12 @@ class CrewLeadEmailService
      * One call does both: a second round trip to extract after classifying
      * doubles latency and cost for the same text.
      *
+     * Public so the same judgement can be applied to leads that arrived
+     * through the website form, which has no triage of its own.
+     *
      * @return array{is_lead:?bool, confidence:float, reason:?string, extraction_status:string, fields:array<string,mixed>}
      */
-    protected function classify(string $subject, string $body, string $fromEmail): array
+    public function classify(string $subject, string $body, string $fromEmail): array
     {
         $fallback = [
             'is_lead' => null,
