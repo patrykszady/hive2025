@@ -1,0 +1,577 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\CrewEmailIngest;
+use App\Models\Lead;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+/**
+ * Turns email sent to crew@gs.construction into CRM leads.
+ *
+ * The mailbox is a genuine human inbox, not a robot drop-box: it carries
+ * prospect enquiries, outbound client mail GS itself sent, vendor traffic,
+ * newsletters and at least one legal demand letter. So the work is mostly
+ * deciding what NOT to act on. That decision happens here rather than in a
+ * mail rule, because "is this a prospect?" is a judgement no Outlook filter
+ * can make.
+ *
+ * Order matters: cheap deterministic triage runs first and settles most
+ * messages for free; only what survives costs an LLM call.
+ *
+ * The lead is assembled from the sender and body BEFORE extraction runs, and
+ * extraction only merges over that. A model outage, a malformed response or a
+ * missing API key therefore degrades the lead's tidiness, never its existence.
+ * A junk lead costs one click; a dropped enquiry costs a job.
+ */
+class CrewLeadEmailService
+{
+    public function __construct(
+        protected NylasService $nylas,
+    ) {}
+
+    /** @return array{fetched:int, leads:int, skipped:int, failed:int, details:array<int,array<string,mixed>>} */
+    public function ingest(bool $dryRun = false, ?int $limit = null, ?\DateTimeInterface $since = null): array
+    {
+        $cfg = config('nylas.crew_leads');
+        $mailbox = (string) $cfg['mailbox'];
+        $since ??= $this->since();
+
+        $out = ['fetched' => 0, 'leads' => 0, 'skipped' => 0, 'failed' => 0, 'details' => []];
+
+        $messages = $this->fetch($mailbox, $limit ?? (int) $cfg['poll_limit'], $since, $grantId);
+        if ($messages === null) {
+            Log::channel('nylas')->error('Crew leads: no usable grant could read the shared mailbox', [
+                'mailbox' => $mailbox,
+            ]);
+
+            return $out;
+        }
+
+        $out['fetched'] = count($messages);
+
+        foreach ($messages as $message) {
+            $result = $this->ingestMessage($message, $mailbox, $grantId, $dryRun);
+            $out['details'][] = $result;
+            $key = match ($result['status']) {
+                CrewEmailIngest::STATUS_LEAD => 'leads',
+                CrewEmailIngest::STATUS_FAILED => 'failed',
+                default => 'skipped',
+            };
+            $out[$key]++;
+        }
+
+        if (! $dryRun && $out['fetched'] > 0) {
+            $this->rememberWatermark($messages);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Read the shared mailbox through whichever grant still works.
+     *
+     * `shared_from` is what makes this possible at all: crew@ has no grant of
+     * its own, so Nylas proxies the read to Microsoft Graph using a user grant
+     * that has access. Grants are tried in order so an expired one degrades to
+     * the next instead of stopping lead capture.
+     *
+     * @return array<int, array<string, mixed>>|null  null = every grant failed
+     */
+    protected function fetch(string $mailbox, int $limit, \DateTimeInterface $since, ?string &$grantId = null): ?array
+    {
+        foreach ((array) config('nylas.crew_leads.grant_ids') as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate === '') {
+                continue;
+            }
+
+            // Deliberately the raw endpoint rather than NylasService::getMessages():
+            // that helper runs `in` through resolveFolderIdentifier(), which
+            // knows nothing about shared mailboxes and would rewrite or drop
+            // the folder id.
+            $response = Http::withToken(config('nylas.api_key'))
+                ->timeout(60)
+                ->retry(2, 2000, throw: false)
+                ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/') . "/v3/grants/{$candidate}/messages", [
+                    'shared_from' => $mailbox,
+                    'in' => $this->inboxFolderId($candidate, $mailbox),
+                    'limit' => $limit,
+                    'received_after' => $since->getTimestamp(),
+                    // Headers carry the bulk-mail markers (List-Unsubscribe,
+                    // Precedence, Auto-Submitted) that let triage reject
+                    // marketing for free, and the RFC Message-ID used as the
+                    // stable dedupe identity. Without this the header checks
+                    // silently never fire — promotional mail reached the
+                    // classifier and dedupe fell back to the Nylas id.
+                    'fields' => 'include_headers',
+                ]);
+
+            if ($response->successful()) {
+                $grantId = $candidate;
+
+                return (array) ($response->json('data') ?? []);
+            }
+
+            Log::channel('nylas')->warning('Crew leads: grant could not read shared mailbox', [
+                'grant_id' => $candidate,
+                'status' => $response->status(),
+                'body' => Str::limit((string) $response->body(), 300),
+            ]);
+        }
+
+        return null;
+    }
+
+    /** Resolve (and cache) the shared mailbox's Inbox folder id for a grant. */
+    protected function inboxFolderId(string $grantId, string $mailbox): ?string
+    {
+        return cache()->remember(
+            "crew_leads:inbox:{$grantId}:{$mailbox}",
+            now()->addDay(),
+            function () use ($grantId, $mailbox): ?string {
+                $response = Http::withToken(config('nylas.api_key'))
+                    ->timeout(45)
+                    ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/') . "/v3/grants/{$grantId}/folders", [
+                        'shared_from' => $mailbox,
+                    ]);
+
+                if (! $response->successful()) {
+                    return null;
+                }
+
+                // The response mixes the shared mailbox's folders with the
+                // grant owner's own. The shared mailbox is the smaller one, so
+                // pick the FIRST Inbox — shared folders are returned first.
+                foreach ((array) $response->json('data') as $folder) {
+                    if (strcasecmp((string) ($folder['name'] ?? ''), 'Inbox') === 0) {
+                        return $folder['id'] ?? null;
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return array<string, mixed> */
+    protected function ingestMessage(array $message, string $mailbox, ?string $grantId, bool $dryRun): array
+    {
+        $nylasId = (string) ($message['id'] ?? '');
+        $from = ($message['from'][0] ?? []);
+        $fromEmail = strtolower(trim((string) ($from['email'] ?? '')));
+        $subject = (string) ($message['subject'] ?? '');
+        $body = $this->plainBody($message);
+
+        $base = [
+            'nylas_message_id' => $nylasId,
+            'grant_id' => (string) $grantId,
+            'mailbox' => $mailbox,
+            'thread_id' => $message['thread_id'] ?? null,
+            'from_email' => $fromEmail ?: null,
+            'from_name' => $from['name'] ?? null,
+            'recipients' => [
+                'to' => array_column($message['to'] ?? [], 'email'),
+                'cc' => array_column($message['cc'] ?? [], 'email'),
+            ],
+            'subject' => Str::limit($subject, 500, ''),
+            'message_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
+            'body_snippet' => Str::limit($body, 2000, ''),
+        ];
+
+        $summary = [
+            'subject' => Str::limit($subject, 60, ''),
+            'from' => $fromEmail,
+        ];
+
+        // Already handled on an earlier run.
+        if (! $dryRun && $nylasId !== '' && CrewEmailIngest::where('nylas_message_id', $nylasId)->exists()) {
+            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => 'already_ingested'];
+        }
+
+        if ($reason = $this->triage($fromEmail, $subject, $body, $message)) {
+            if (! $dryRun) {
+                CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
+                    'status' => CrewEmailIngest::STATUS_SKIPPED,
+                    'skip_reason' => $reason,
+                    'is_lead' => false,
+                ]);
+            }
+
+            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => $reason];
+        }
+
+        $verdict = $this->classify($subject, $body, $fromEmail);
+
+        // Only a CONFIDENT "not a lead" discards. An unsure model creates the
+        // lead — the asymmetry is intentional.
+        if ($verdict['is_lead'] === false && $verdict['confidence'] >= 0.8) {
+            if (! $dryRun) {
+                CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
+                    'status' => CrewEmailIngest::STATUS_SKIPPED,
+                    'skip_reason' => 'not_a_lead',
+                    'is_lead' => false,
+                    'confidence' => $verdict['confidence'],
+                ]);
+            }
+
+            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => 'not_a_lead', 'confidence' => $verdict['confidence']];
+        }
+
+        if ($dryRun) {
+            return $summary + ['status' => CrewEmailIngest::STATUS_LEAD, 'confidence' => $verdict['confidence'], 'reason' => $verdict['reason'] ?? null];
+        }
+
+        try {
+            $lead = $this->createLead($message, $base, $body, $verdict);
+
+            CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
+                'status' => CrewEmailIngest::STATUS_LEAD,
+                'is_lead' => true,
+                'confidence' => $verdict['confidence'],
+                'extraction_status' => $verdict['extraction_status'],
+                'lead_id' => $lead->id,
+            ]);
+
+            return $summary + ['status' => CrewEmailIngest::STATUS_LEAD, 'lead_id' => $lead->id];
+        } catch (\Throwable $e) {
+            CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
+                'status' => CrewEmailIngest::STATUS_FAILED,
+                'error' => Str::limit($e->getMessage(), 500),
+            ]);
+
+            Log::channel('nylas')->error('Crew leads: failed to create lead', [
+                'nylas_message_id' => $nylasId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $summary + ['status' => CrewEmailIngest::STATUS_FAILED, 'reason' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Cheap, certain exclusions. Returns a skip reason or null to continue.
+     *
+     * Everything here is something no model should be asked to judge and no
+     * model should be paid to judge.
+     */
+    protected function triage(string $fromEmail, string $subject, string $body, array $message): ?string
+    {
+        if ($fromEmail === '') {
+            return 'no_sender';
+        }
+
+        // Outbound mail GS sent to its own clients lands in this Inbox. Without
+        // this, every estimate and follow-up becomes a fake lead — verified as
+        // 3 of the 5 most recent messages.
+        $domain = Str::after($fromEmail, '@');
+        foreach ((array) config('nylas.crew_leads.internal_domains') as $internal) {
+            if ($domain === $internal || str_ends_with($domain, '.' . $internal)) {
+                return 'internal';
+            }
+        }
+
+        if (preg_match('/^(noreply|no-reply|donotreply|do-not-reply|mailer-daemon|postmaster|bounce)/i', $fromEmail)) {
+            return 'automated';
+        }
+
+        $headers = $this->headerMap($message);
+        if (isset($headers['list-unsubscribe'])
+            || (isset($headers['auto-submitted']) && strtolower($headers['auto-submitted']) !== 'no')
+            || (isset($headers['precedence']) && preg_match('/bulk|list|auto_reply/i', $headers['precedence']))
+            || isset($headers['x-auto-response-suppress'])) {
+            return 'automated';
+        }
+
+        // A reply is a continuation of a conversation GS is already having —
+        // typically someone answering a consultation or estimate we sent. The
+        // lead (or client) already exists; minting a new one duplicates it and
+        // makes the pipeline lie about how much fresh demand came in.
+        //
+        // In-Reply-To / References are the RFC-correct signal and survive
+        // subject editing. The "Re:"/"Fwd:" prefix is the human-visible
+        // fallback for senders whose client omits the headers, and covers the
+        // localised forms Outlook emits.
+        if (isset($headers['in-reply-to']) || isset($headers['references'])) {
+            return 'reply';
+        }
+
+        if (preg_match('/^\s*(re|aw|sv|vs|fw|fwd|tr|odp)\s*(\[\d+\])?\s*:/i', $subject)) {
+            return 'reply';
+        }
+
+        if (trim($subject) === '' && trim($body) === '') {
+            return 'empty';
+        }
+
+        return null;
+    }
+
+    /** @return array<string, string> lowercased header name => value */
+    protected function headerMap(array $message): array
+    {
+        $out = [];
+        foreach ((array) ($message['headers'] ?? []) as $key => $header) {
+            if (is_array($header) && isset($header['name'])) {
+                $out[strtolower((string) $header['name'])] = (string) ($header['value'] ?? '');
+            } elseif (is_string($key)) {
+                $out[strtolower($key)] = (string) $header;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ask the model whether this is a prospect enquiry, and pull out the
+     * details worth having on the lead.
+     *
+     * One call does both: a second round trip to extract after classifying
+     * doubles latency and cost for the same text.
+     *
+     * @return array{is_lead:?bool, confidence:float, reason:?string, extraction_status:string, fields:array<string,mixed>}
+     */
+    protected function classify(string $subject, string $body, string $fromEmail): array
+    {
+        $fallback = [
+            'is_lead' => null,
+            'confidence' => 0.0,
+            'reason' => null,
+            'extraction_status' => 'skipped',
+            'fields' => [],
+        ];
+
+        $apiKey = config('services.openai.api_key');
+        if (! $apiKey) {
+            return $fallback;
+        }
+
+        $system = <<<'TXT'
+You triage the shared inbox of GS Construction, a residential remodeling
+general contractor in the Chicago suburbs.
+
+Decide whether a message is a PROSPECT ENQUIRY: someone outside the company
+asking about work they want done, or responding to an estimate they requested.
+
+The direction of the offer is what decides it. A lead is someone who wants to
+BUY construction work from GS. Anyone SELLING something to GS is not a lead,
+however friendly the wording — subcontractors and suppliers touting their
+services, partnership or "collaboration" proposals, marketing and SEO
+agencies, recruiters, software vendors. This holds in any language: a Polish
+"oferta współpracy" or "współpraca" is a cooperation offer, i.e. a
+solicitation, not an enquiry.
+
+Also NOT enquiries: mail the company itself sent, invoices and payment
+notices, newsletters and promotions, legal or demand letters, automated
+notifications, and platform emails that merely announce a lead exists
+elsewhere.
+
+When a message IS an enquiry, extract what it actually states. Never invent a
+value — use null for anything not present. Quote the address exactly as
+written. Keep scope_summary to one or two sentences in plain language.
+TXT;
+
+        $schema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['is_lead', 'confidence', 'reason', 'name', 'phone', 'address', 'city', 'project_type', 'scope_summary', 'timeline', 'budget'],
+            'properties' => [
+                'is_lead' => ['type' => 'boolean'],
+                'confidence' => ['type' => 'number'],
+                'reason' => ['type' => 'string'],
+                'name' => ['type' => ['string', 'null']],
+                'phone' => ['type' => ['string', 'null']],
+                'address' => ['type' => ['string', 'null']],
+                'city' => ['type' => ['string', 'null']],
+                'project_type' => ['type' => ['string', 'null']],
+                'scope_summary' => ['type' => ['string', 'null']],
+                'timeline' => ['type' => ['string', 'null']],
+                'budget' => ['type' => ['string', 'null']],
+            ],
+        ];
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->timeout(45)
+                ->post('https://api.openai.com/v1/chat/completions', [
+                    'model' => config('services.openai.model', 'gpt-4o-mini'),
+                    'messages' => [
+                        ['role' => 'system', 'content' => $system],
+                        ['role' => 'user', 'content' => "From: {$fromEmail}\nSubject: {$subject}\n\n" . Str::limit($body, 6000, '')],
+                    ],
+                    'response_format' => [
+                        'type' => 'json_schema',
+                        'json_schema' => ['name' => 'crew_lead_triage', 'strict' => true, 'schema' => $schema],
+                    ],
+                ]);
+
+            if (! $response->successful()) {
+                Log::channel('nylas')->warning('Crew leads: classification request failed', [
+                    'status' => $response->status(),
+                ]);
+
+                return $fallback + ['extraction_status' => 'failed'];
+            }
+
+            $data = json_decode((string) data_get($response->json(), 'choices.0.message.content'), true);
+            if (! is_array($data)) {
+                return array_merge($fallback, ['extraction_status' => 'failed']);
+            }
+
+            return [
+                'is_lead' => (bool) ($data['is_lead'] ?? false),
+                'confidence' => (float) ($data['confidence'] ?? 0),
+                'reason' => $data['reason'] ?? null,
+                'extraction_status' => 'ok',
+                'fields' => $data,
+            ];
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Crew leads: classification threw', ['error' => $e->getMessage()]);
+
+            return array_merge($fallback, ['extraction_status' => 'failed']);
+        }
+    }
+
+    /**
+     * Build the Lead from the email itself, then let extraction improve it.
+     *
+     * This ordering is the whole safety story: everything the CRM needs to act
+     * on the enquiry — who sent it, what they wrote — comes from the message,
+     * not the model.
+     */
+    protected function createLead(array $message, array $base, string $body, array $verdict): Lead
+    {
+        $cfg = config('nylas.crew_leads');
+        $fields = $verdict['fields'];
+
+        $leadData = array_filter([
+            'name' => $fields['name'] ?? $base['from_name'] ?? null,
+            'email' => $base['from_email'],
+            'phone' => $fields['phone'] ?? null,
+            'address' => $fields['address'] ?? null,
+            'city' => $fields['city'] ?? null,
+            'project_type' => $fields['project_type'] ?? null,
+            'scope_summary' => $fields['scope_summary'] ?? null,
+            'timeline' => $fields['timeline'] ?? null,
+            'budget' => $fields['budget'] ?? null,
+            'subject' => $base['subject'],
+            // The full text, always. Whatever extraction missed is still here.
+            'message' => $body,
+            'source_mailbox' => $base['mailbox'],
+            'extraction_status' => $verdict['extraction_status'],
+        ], fn ($v) => $v !== null && $v !== '');
+
+        $date = $base['message_at'] ?? now();
+        $vendorId = (int) $cfg['vendor_id'];
+
+        $lead = Lead::create([
+            'date' => $date,
+            'origin' => 'Email',
+            'external_source' => (string) $cfg['external_source'],
+            'external_id' => $this->externalId($message, $base),
+            'lead_data' => $leadData,
+            'belongs_to_vendor_id' => $vendorId,
+            'created_by_user_id' => (int) $cfg['created_by_user_id'],
+            // `leads.notes` is varchar(255) and shared with the rest of the
+            // CRM, so it gets a headline, not the email. The full body is
+            // already on lead_data['message'], which is JSON and unbounded —
+            // widening a shared column to fit an email body would be the
+            // wrong trade.
+            'notes' => Str::limit(
+                trim(($base['subject'] ?? '') . ' — ' . ($fields['scope_summary'] ?? Str::squish($body))),
+                250,
+            ),
+        ]);
+
+        // Parity with the website-form path (Api\LeadsController::store).
+        // Without the status row the lead has no pipeline stage and does not
+        // appear where the team works leads; without provisioning it has no
+        // contact record. An email lead must look exactly like a form lead
+        // once it lands.
+        $lead->statuses()->create([
+            'title' => 'New',
+            'belongs_to_vendor_id' => $vendorId,
+            'created_at' => $date,
+        ]);
+
+        try {
+            app(\App\Services\LeadContactProvisioner::class)->provision($lead->fresh());
+        } catch (\Throwable $e) {
+            // Contact provisioning is an enhancement, not the lead itself.
+            Log::channel('nylas')->warning('Crew leads: contact provisioning failed', [
+                'lead_id' => $lead->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $lead;
+    }
+
+    /**
+     * Stable dedupe identity, hashed to fit `leads.external_id` (varchar 64).
+     *
+     * The RFC Message-ID is preferred: Graph ids are not guaranteed stable
+     * across folder moves, and the RFC id also matches if the same mail is
+     * ever read through a different grant.
+     */
+    protected function externalId(array $message, array $base): string
+    {
+        $rfc = $this->headerMap($message)['message-id'] ?? null;
+
+        return $rfc
+            ? sha1(strtolower(trim($rfc)))
+            : sha1('nylas:' . $base['nylas_message_id']);
+    }
+
+    /** Prefer a plain-text part; fall back to stripping the HTML body. */
+    protected function plainBody(array $message): string
+    {
+        $body = (string) ($message['body'] ?? '');
+        if ($body === '') {
+            return (string) ($message['snippet'] ?? '');
+        }
+
+        if (! Str::contains($body, '<')) {
+            return trim($body);
+        }
+
+        $text = preg_replace('#<(script|style)\b[^>]*>.*?</\1>#is', ' ', $body) ?? $body;
+        $text = preg_replace('#<br\s*/?>|</p>|</div>|</tr>#i', "\n", $text) ?? $text;
+
+        return trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    }
+
+    /**
+     * Only look at mail newer than the last run.
+     *
+     * On the very first run there is no watermark, so the lookback window
+     * applies instead — deploying must not import years of archived mail as
+     * fresh leads.
+     */
+    protected function since(): \DateTimeInterface
+    {
+        $stored = cache()->get('crew_leads:watermark');
+        if ($stored) {
+            // Small overlap: provider timestamps are not perfectly ordered and
+            // the ingest ledger makes re-reads free.
+            return now()->setTimestamp((int) $stored)->subMinutes(10);
+        }
+
+        return now()->subDays((int) config('nylas.crew_leads.initial_lookback_days'));
+    }
+
+    /** @param array<int, array<string, mixed>> $messages */
+    protected function rememberWatermark(array $messages): void
+    {
+        $latest = 0;
+        foreach ($messages as $m) {
+            $latest = max($latest, (int) ($m['date'] ?? 0));
+        }
+
+        if ($latest > 0) {
+            cache()->forever('crew_leads:watermark', $latest);
+        }
+    }
+}

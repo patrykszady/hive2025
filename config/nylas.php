@@ -4,6 +4,7 @@ return [
     // Core credentials (read from env here only; use config() elsewhere)
     'client_id' => env('NYLAS_CLIENT_ID'),
     'api_key' => env('NYLAS_API_KEY'),
+    'api_uri' => rtrim(env('NYLAS_API_URI', 'https://api.us.nylas.com'), '/'),
     'redirect_uri' => env('NYLAS_REDIRECT_URI'),
     'pkce_code_verifier' => env('NYLAS_PKCE_CODE_VERIFIER', 'nylas'),
     
@@ -54,6 +55,63 @@ return [
         // When true and opens=true, we will also record custom pixel opens as event_type=opened_pixel
         // so you can compare them against Nylas webhook opens.
         'compare_opens' => (bool) env('NYLAS_COMPARE_OPENS', env('APP_ENV') === 'production'),
+    ],
+
+    /*
+     * crew@gs.construction lead capture.
+     *
+     * crew@ is a Microsoft 365 SHARED mailbox with no grant of its own. It is
+     * read through an existing user grant plus Nylas' `shared_from` parameter,
+     * which proxies to Microsoft Graph against the shared mailbox. Two
+     * consequences worth knowing before changing anything here:
+     *
+     *  - Nylas native search (`search_query_native`) queries the grant's OWN
+     *    synced mailbox and does NOT traverse shared folders, so searching for
+     *    a message that exists in crew@ returns nothing. Only `shared_from`
+     *    listing works.
+     *  - For the same reason a `message.created` webhook can never fire for
+     *    this mailbox — Nylas has no synced object to notify about. Polling is
+     *    the only option, not a preference.
+     */
+    'crew_leads' => [
+        'enabled' => (bool) env('NYLAS_CREW_LEADS_ENABLED', true),
+
+        // The shared mailbox to read.
+        'mailbox' => env('NYLAS_CREW_LEADS_MAILBOX', 'crew@gs.construction'),
+
+        // Grants able to proxy that mailbox, tried in order. Both are
+        // gs.construction users with access to the shared mailbox; the second
+        // is a fallback for when the first grant expires.
+        'grant_ids' => array_values(array_filter(explode(',', (string) env(
+            'NYLAS_CREW_LEADS_GRANT_IDS',
+            '023bfe85-9c79-4afa-9569-d53c8cccf25f,c8f93079-4bb5-4d5b-a2ca-8f11f41327f0',
+        )))),
+
+        // Which vendor the resulting leads belong to (GS Construction).
+        'vendor_id' => (int) env('NYLAS_CREW_LEADS_VENDOR_ID', 1),
+
+        // `leads.created_by_user_id` is NOT NULL with no default, and there is
+        // no authenticated user on a scheduled run. Matches what the website
+        // contact form already records for all 69 of its leads.
+        'created_by_user_id' => (int) env('NYLAS_CREW_LEADS_CREATED_BY_USER_ID', 1),
+
+        // Namespace for the dedupe key. Deliberately distinct from
+        // 'gs.construction', which the website contact form already uses —
+        // sharing it would collide with that form's id counter.
+        'external_source' => 'crew-email',
+
+        // How far back the FIRST run may look. After that a watermark takes
+        // over and only newer mail is considered. Keeps a deploy from
+        // importing years of history as fresh leads.
+        'initial_lookback_days' => (int) env('NYLAS_CREW_LEADS_LOOKBACK_DAYS', 14),
+
+        'poll_limit' => (int) env('NYLAS_CREW_LEADS_POLL_LIMIT', 25),
+
+        // Senders that are US, not a prospect. Verified live: 3 of the 5 most
+        // recent messages in that Inbox are outbound client mail from
+        // support@hive.contractors, so without this every email GS sends
+        // manufactures a fake lead.
+        'internal_domains' => ['gs.construction', 'hive.contractors'],
     ],
 
     // Calendar events for Meet tasks

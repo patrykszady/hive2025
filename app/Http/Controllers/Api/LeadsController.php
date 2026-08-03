@@ -24,6 +24,52 @@ use Illuminate\Validation\Rule;
  */
 class LeadsController extends Controller
 {
+    /**
+     * List this vendor's leads, newest first.
+     *
+     * Exists so gs.construction can mirror leads it did not create itself —
+     * enquiries emailed to crew@ are captured here, not on the website, but
+     * the site's admin is where that team looks. Scoped to the token's vendor
+     * exactly like store(), so a partner token can only ever read its own.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $vendorId = $request->user()?->vendor?->id;
+        if (! $vendorId) {
+            return response()->json([
+                'message' => 'Authenticated user is not associated with a vendor.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'source' => ['nullable', 'string', 'max:64'],
+            'since' => ['nullable', 'date'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:200'],
+        ]);
+
+        $leads = Lead::query()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->when($data['source'] ?? null, fn ($q, $source) => $q->where('external_source', $source))
+            ->when($data['since'] ?? null, fn ($q, $since) => $q->where('date', '>=', $since))
+            ->orderByDesc('date')
+            ->limit((int) ($data['limit'] ?? 50))
+            ->get();
+
+        return response()->json([
+            'data' => $leads->map(fn (Lead $lead) => [
+                'id' => $lead->id,
+                'external_source' => $lead->external_source,
+                'external_id' => $lead->external_id,
+                'origin' => $lead->origin,
+                'date' => optional($lead->date)->toIso8601String(),
+                'notes' => $lead->notes,
+                // lead_data is an ArrayObject cast; cast back so the JSON is a
+                // plain object rather than a serialised ArrayObject.
+                'lead_data' => (array) $lead->lead_data,
+            ])->values(),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();

@@ -22,6 +22,18 @@ Schedule::command('calls:process-recordings --retry-failed')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Prospect enquiries emailed to the crew@gs.construction shared mailbox.
+// Polling rather than a webhook is forced, not chosen: crew@ is read through
+// another grant's `shared_from`, and Nylas only raises message.created for a
+// grant's OWN synced mailbox — a webhook could never fire for this one.
+// Volume is tiny (281 messages lifetime), so five minutes is ample.
+Schedule::command('crew:ingest-leads')
+    ->everyFiveMinutes()
+    ->name('ingest-crew-lead-emails')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('calls:reconcile-stale --execute')
     ->everyFiveMinutes()
     ->name('reconcile-stale-active-calls')

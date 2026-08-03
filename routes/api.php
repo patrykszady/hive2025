@@ -10,6 +10,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])
         Route::get('projects/zip-counts', ProjectZipCountsController::class)
             ->name('api.v1.projects.zip-counts');
 
+        Route::get('leads', [LeadsController::class, 'index'])
+            ->name('api.v1.leads.index');
+
         Route::post('leads', [LeadsController::class, 'store'])
             ->name('api.v1.leads.store');
     });
