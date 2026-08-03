@@ -902,7 +902,9 @@ class TaskCreate extends Component
             $project = \App\Models\Project::with('client.users')->find($this->form->project_id);
             if ($project?->client) {
                 $emails = $emails->merge(
-                    collect($project->client->users)->pluck('email')
+                    collect($project->client->users)
+                        ->filter(fn ($user) => $user->hasRoutableEmail())
+                        ->pluck('email')
                 );
             }
         }

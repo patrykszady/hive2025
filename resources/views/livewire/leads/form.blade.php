@@ -11,7 +11,9 @@
     <flux:tab.group>
         <flux:tabs>
             <flux:tab name="details" x-on:click="activeLeadTab = 'details'">Details</flux:tab>
-            @if (! $this->hasReplied)
+            {{-- Incomplete contact: finish it on Details first. We never invent
+                 the missing pieces, so the blanks are the prompt. --}}
+            @if (! $this->hasReplied && $this->missingContactInfo === [])
                 <flux:tab name="messages" x-on:click="activeLeadTab = 'messages'">Message</flux:tab>
             @endif
         </flux:tabs>
@@ -19,7 +21,7 @@
         <flux:tab.panel name="details" class="pt-4">
             @include('livewire.leads.partials.details-panel')
         </flux:tab.panel>
-        @if (! $this->hasReplied)
+        @if (! $this->hasReplied && $this->missingContactInfo === [])
         <flux:tab.panel name="messages" class="pt-4">
             <form id="lead_messages_form" wire:submit="send_message" class="space-y-4">
                 <flux:textarea

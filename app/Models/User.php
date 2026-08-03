@@ -39,6 +39,23 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     }
 
     /**
+     * Domain stamped on contacts we know of but have no address for — the
+     * second person on a household lead, say. users.email is NOT NULL UNIQUE,
+     * so such a contact still needs a value; .invalid is reserved by RFC 2606
+     * and never resolves, so nothing can be delivered to a real stranger.
+     * Guard recipient lists with hasRoutableEmail().
+     */
+    public const PLACEHOLDER_EMAIL_DOMAIN = 'no-email.invalid';
+
+    /**
+     * Leading digits of the stand-in numbers used for contacts we have no
+     * phone for (0000000001, 0000000008, … — the convention already in the
+     * data). users.cell_phone is NOT NULL UNIQUE, so such a contact still
+     * needs a distinct value. No real US number starts this way.
+     */
+    public const PLACEHOLDER_PHONE_PREFIX = '0000000';
+
+    /**
      * Languages a user can choose as their preferred communication language.
      *
      * @var list<string>
@@ -57,6 +74,29 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
         'Vietnamese',
         'Arabic',
     ];
+
+    /**
+     * Is this user's email one we can actually send to? False for the
+     * placeholder stamped on contacts provisioned without an address.
+     */
+    public function hasRoutableEmail(): bool
+    {
+        $email = trim((string) $this->email);
+
+        return $email !== ''
+            && ! str_ends_with(strtolower($email), '@'.self::PLACEHOLDER_EMAIL_DOMAIN);
+    }
+
+    /**
+     * Is this user's number one we can actually text? False for the stand-in
+     * numbers, so nothing tries to SMS +10000000008.
+     */
+    public function hasRoutablePhone(): bool
+    {
+        $digits = preg_replace('/\D/', '', (string) $this->cell_phone) ?? '';
+
+        return $digits !== '' && ! str_starts_with($digits, self::PLACEHOLDER_PHONE_PREFIX);
+    }
 
     protected $fillable = [
         'first_name',
@@ -393,6 +433,13 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     public function routeNotificationForTelnyx()
     {
         if (!$this->cell_phone) {
+            return null;
+        }
+
+        // Stand-in numbers exist so a phone-less contact can have a user row;
+        // they are not reachable. Returning null here keeps every Telnyx
+        // notification path from attempting a send to them.
+        if (! $this->hasRoutablePhone()) {
             return null;
         }
 

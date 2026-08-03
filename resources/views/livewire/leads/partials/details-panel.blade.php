@@ -1,5 +1,12 @@
 {{-- Details tab content — ONE source for both modal layouts (tabbed for New
      leads, tab-less for Replied leads whose only content this is). --}}
+@php
+    // Read the computed properties ONCE at the top level. Blaze's slot
+    // compiler mis-scopes $this-> reads nested inside @if/@foreach within a
+    // component slot (it warns "Undefined array key" while rendering).
+    $missingContactInfo = $this->missingContactInfo;
+    $addressCandidates = $this->addressCandidates;
+@endphp
     <form id="lead_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-3">
         <flux:textarea
             wire:model.live="message"
@@ -28,6 +35,67 @@
                 />
             </div>
         </div>
+
+        {{-- Say what's still needed before this lead can be replied to. The
+             Message tab appears once nothing is outstanding. --}}
+        @if ($missingContactInfo !== [])
+            <flux:callout icon="exclamation-triangle" variant="warning" inline>
+                <flux:callout.heading>Incomplete contact</flux:callout.heading>
+                <flux:callout.text>
+                    This enquiry is missing {{ collect($missingContactInfo)->join(', ', ' and ') }}.
+                    Add {{ count($missingContactInfo) === 1 ? 'it' : 'them' }} to reply.
+                </flux:callout.text>
+            </flux:callout>
+
+            {{-- The same street can be a real address in more than one town
+                 ("511 Sherwood Dr" is both Addison and Streamwood), so offer
+                 the matches near the office rather than picking one. --}}
+            @if ($addressCandidates !== [])
+                <flux:field>
+                    <flux:label>Which address is this?</flux:label>
+                    <flux:description class="mb-2">
+                        Matches near the office, closest first.
+                    </flux:description>
+                    <div class="flex flex-col gap-2">
+                        @foreach ($addressCandidates as $index => $candidate)
+                            <flux:button
+                                size="sm"
+                                class="justify-start"
+                                wire:click="selectAddressCandidate({{ $index }})"
+                                wire:loading.attr="disabled"
+                                wire:target="selectAddressCandidate"
+                            >
+                                {{ $candidate['address'] }}, {{ $candidate['city'] }}, {{ $candidate['state'] }} {{ $candidate['zip_code'] }}
+                                <span class="ms-2 text-zinc-500">{{ $candidate['miles'] }} mi</span>
+                            </flux:button>
+                        @endforeach
+                    </div>
+                </flux:field>
+            @endif
+        @endif
+
+        {{-- The enquiry carried no phone. We don't invent one, so this is where
+             it gets filled in. --}}
+        @if ($this->needsPhone)
+            <flux:field>
+                <flux:label>Phone Number</flux:label>
+                <flux:description>
+                    This enquiry didn't include a phone number. Add one to reply.
+                </flux:description>
+                <flux:input.group>
+                    <flux:input
+                        wire:model="phoneEntry"
+                        type="tel"
+                        placeholder="(224) 555-0134"
+                        wire:keydown.enter.prevent="saveContactPhone"
+                    />
+                    <flux:button wire:click="saveContactPhone" wire:loading.attr="disabled" wire:target="saveContactPhone">
+                        Save
+                    </flux:button>
+                </flux:input.group>
+                <flux:error name="phoneEntry" />
+            </flux:field>
+        @endif
 
         @if ($client)
             <flux:field>
@@ -101,12 +169,18 @@
                 </flux:button>
             </flux:input.group>
 
-            <flux:input
-                wire:model.live="phone"
-                label="Phone"
-                type="number"
-                placeholder="Phone"
-            />
+            {{-- Hidden while the gate prompt is up: two boxes for the same
+                 number is confusing, and this one is the legacy edit field.
+                 type=tel, not number — a phone isn't a quantity (number strips
+                 leading zeros and shows spinners). --}}
+            @if (! $this->needsPhone)
+                <flux:input
+                    wire:model.live="phone"
+                    label="Phone"
+                    type="tel"
+                    placeholder="Phone"
+                />
+            @endif
 
             <flux:input
                 wire:model.live="email"

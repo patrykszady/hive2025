@@ -106,6 +106,7 @@ class EstimateEmail extends Component
         $this->estimate = $estimate->fresh(['project.client.users', 'project.latestStatus', 'vendor']);
 
         $this->to = $this->estimate->client->users
+            ->filter(fn ($user) => $user->hasRoutableEmail())
             ->pluck('email')
             ->filter()
             ->unique()
@@ -120,6 +121,7 @@ class EstimateEmail extends Component
 
         // Build available contacts list (client users + vendor admin users)
         $clientUsers = $this->estimate->client->users
+            ->filter(fn ($user) => $user->hasRoutableEmail())
             ->map(fn ($user) => [
                 'email' => $user->email,
                 // Nickname-first display ("Dick" for Richard) — matches the

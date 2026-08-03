@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Lead;
+use App\Services\LeadAddressCompleter;
 use App\Services\LeadContactProvisioner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -140,6 +141,10 @@ class LeadsController extends Controller
             ]),
             'submitted_at' => $date->toIso8601String(),
         ];
+
+        // A lead's address becomes a client record — complete it before the
+        // lead is stored, so what lands is whole rather than a bare street.
+        $leadData = app(LeadAddressCompleter::class)->complete($leadData);
 
         $lead = Lead::create([
             'date' => $date,

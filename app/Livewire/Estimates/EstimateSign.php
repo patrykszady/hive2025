@@ -227,7 +227,8 @@ class EstimateSign extends Component
         }
 
         $clientEmails = $this->estimate->project?->client?->users
-            ?->pluck('email')
+            ?->filter(fn ($user) => $user->hasRoutableEmail())
+            ->pluck('email')
             ->filter()
             ->map(fn (string $e) => strtolower(trim($e)))
             ->values()

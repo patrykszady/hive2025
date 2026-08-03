@@ -40,6 +40,14 @@ class LeadCreate extends Component
 
     public $message = null;
     public $phone = null;
+
+    /**
+     * The phone-entry box on Details, kept SEPARATE from $phone: the gate is
+     * derived from what's persisted, so binding the box to $phone let any
+     * keystroke — even garbage, even a half-typed number flushed by an
+     * unrelated round-trip — satisfy the gate and open the Message tab.
+     */
+    public ?string $phoneEntry = null;
     public $email = null;
     public $address = null;
     public $reply_to_email = null;
@@ -162,6 +170,7 @@ class LeadCreate extends Component
         $this->address = $this->lead->lead_data->address ?? null;
         $this->reply_to_email = $this->lead->lead_data->reply_to_email ?? null;
         $this->phone = $this->lead->lead_data->phone ?? null;
+        $this->phoneEntry = null;
         $this->email = $this->lead->lead_data->email ?? null;
         $rawAvailability = $this->lead->lead_data['availability'] ?? [];
         $this->availability = is_array($rawAvailability) || $rawAvailability instanceof \Traversable
@@ -242,6 +251,241 @@ class LeadCreate extends Component
     public function hasReplied(): bool
     {
         return ($this->lead?->last_status?->title ?? null) === 'Replied';
+    }
+
+    /**
+     * Save a hand-entered phone onto the lead AND its contact, so the number
+     * we just learned is on the record people actually call from, not only in
+     * the lead payload.
+     */
+    public function saveContactPhone(): void
+    {
+        $digits = preg_replace('/\D/', '', (string) $this->phoneEntry) ?? '';
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        if (strlen($digits) !== 10) {
+            $this->addError('phoneEntry', 'Enter a 10-digit phone number.');
+
+            return;
+        }
+
+        $taken = \App\Models\User::query()
+            ->where('cell_phone', $digits)
+            ->when($this->lead?->user_id, fn ($q) => $q->whereKeyNot($this->lead->user_id))
+            ->exists();
+
+        if ($taken) {
+            $this->addError('phoneEntry', 'Another contact already uses this number.');
+
+            return;
+        }
+
+        $this->resetErrorBag('phoneEntry');
+
+        if ($this->lead?->exists) {
+            $data = $this->lead->lead_data;
+            $data['phone'] = $digits;
+            $this->lead->lead_data = $data;
+            $this->lead->saveQuietly();
+
+            // The number is often the missing piece that lets provisioning
+            // run at all: a name plus a way to reach them is the bar, so an
+            // enquiry with neither phone nor usable email had no contact and
+            // no client until now. Runs whether or not a user exists — an
+            // existing contact may still be missing its client/address.
+            try {
+                app(\App\Services\LeadContactProvisioner::class)->provision($this->lead->fresh());
+            } catch (\Throwable $e) {
+                Log::warning('Lead contact provisioning after manual phone entry failed', [
+                    'lead_id' => $this->lead->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Persist the number BEFORE reloading anything for display. The client
+        // card renders from $client->users, so refreshing first left it
+        // holding the pre-save copy and the new number only appeared once the
+        // modal was reopened.
+        $contact = $this->lead?->fresh()?->user ?? $this->user;
+
+        if ($contact && ! $contact->hasRoutablePhone()) {
+            $contact->forceFill(['cell_phone' => $digits])->save();
+        }
+
+        if ($this->lead?->exists) {
+            $this->lead = $this->lead->fresh(['user.clients.users', 'last_status']);
+            $this->user = $this->lead->user;
+            $this->client = $this->resolveClientForLead();
+        } else {
+            $this->user = $contact?->fresh();
+        }
+
+        $this->phone = $digits;
+        $this->phoneEntry = null;
+        unset($this->needsPhone, $this->missingContactInfo, $this->addressCandidates);
+        $this->prepareEmailComposer();
+
+        Flux::toast(
+            duration: 3000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Phone number saved.',
+            text: '',
+        );
+    }
+
+    /**
+     * An enquiry can arrive with no phone number (emailed leads often do). We
+     * don't invent one, so the contact is incomplete until someone fills it in
+     * — and the Message tab stays shut until they have, rather than replying
+     * to a contact we can't call.
+     */
+    /**
+     * Real addresses matching this lead's street near the office, nearest
+     * first. Shown when the address is short of a city/ZIP and more than one
+     * place matches — the lead's own street is the same in two towns often
+     * enough that guessing is how the wrong one gets saved.
+     *
+     * @return array<int, array{address: string, city: string, state: string, zip_code: string, miles: float}>
+     */
+    #[Computed]
+    public function addressCandidates(): array
+    {
+        if (! $this->lead?->exists || ! in_array('a full address', $this->missingContactInfo, true)) {
+            return [];
+        }
+
+        $data = $this->lead->lead_data;
+
+        $stored = $data['address_candidates'] ?? null;
+
+        if (is_iterable($stored)) {
+            $stored = collect($stored)->map(fn ($c) => (array) $c)->all();
+
+            if ($stored !== []) {
+                return $stored;
+            }
+        }
+
+        $street = trim((string) ($data['address'] ?? ''));
+
+        if ($street === '') {
+            return [];
+        }
+
+        return app(\App\Services\GeoapifyService::class)->nearbyAddressCandidates($street);
+    }
+
+    /**
+     * Commit one of those candidates as the lead's address, then let
+     * provisioning build the client it was waiting on.
+     */
+    public function selectAddressCandidate(int $index): void
+    {
+        $candidate = $this->addressCandidates[$index] ?? null;
+
+        if (! $candidate || ! $this->lead?->exists) {
+            return;
+        }
+
+        $data = $this->lead->lead_data;
+        $data['address'] = $candidate['address'];
+        $data['city'] = $candidate['city'];
+        $data['state'] = $candidate['state'];
+        $data['zip'] = $candidate['zip_code'];
+        unset($data['address_candidates']);
+        $this->lead->lead_data = $data;
+        $this->lead->saveQuietly();
+
+        try {
+            app(\App\Services\LeadContactProvisioner::class)->provision($this->lead->fresh());
+        } catch (\Throwable $e) {
+            Log::warning('Lead contact provisioning after address selection failed', [
+                'lead_id' => $this->lead->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->lead = $this->lead->fresh(['user.clients.users', 'last_status']);
+        $this->user = $this->lead->user;
+        $this->client = $this->resolveClientForLead();
+        $this->address = $candidate['address'];
+
+        unset($this->needsPhone, $this->missingContactInfo, $this->addressCandidates);
+        $this->prepareEmailComposer();
+
+        Flux::toast(
+            duration: 3000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Address saved.',
+            text: '',
+        );
+    }
+
+    /**
+     * What's still missing before this lead can be replied to: a contact we
+     * can reach and an address we can put on a client record. Replying to an
+     * enquiry we can't call, email or locate just moves the problem later.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function missingContactInfo(): array
+    {
+        if (! $this->lead?->exists) {
+            return [];
+        }
+
+        $data = $this->lead->lead_data;
+        $contact = $this->lead->user;
+        $client = $this->client;
+
+        $missing = [];
+
+        $email = trim((string) ($data['email'] ?? ''));
+        if ($email === '' && ! ($contact?->hasRoutableEmail() ?? false)) {
+            $missing[] = 'an email address';
+        }
+
+        if ($this->needsPhone) {
+            $missing[] = 'a phone number';
+        }
+
+        // A client record is only created from a whole address, so its absence
+        // IS the signal — either there's no client, or it has gaps.
+        $addressComplete = $client
+            && trim((string) $client->address) !== ''
+            && trim((string) $client->city) !== ''
+            && trim((string) $client->state) !== ''
+            && trim((string) $client->zip_code) !== '';
+
+        if (! $addressComplete) {
+            $missing[] = 'a full address';
+        }
+
+        return $missing;
+    }
+
+    #[Computed]
+    public function needsPhone(): bool
+    {
+        if (! $this->lead?->exists) {
+            return false;
+        }
+
+        // Persisted state ONLY. Reading the bound input here is what let a
+        // half-typed or invalid number open the Message tab without anything
+        // being saved.
+        if (trim((string) ($this->lead->lead_data['phone'] ?? '')) !== '') {
+            return false;
+        }
+
+        return ! ($this->lead->user?->hasRoutablePhone() ?? false);
     }
 
     public function confirmRemove(): void
@@ -602,7 +846,9 @@ class LeadCreate extends Component
 
         if ($this->client) {
             foreach ($this->client->users as $u) {
-                if (! empty($u->email)) {
+                // Placeholder addresses exist so a phone-only household member
+                // can have a user row — never offer them as a recipient.
+                if ($u->hasRoutableEmail()) {
                     $recipients->push($u->email);
                 }
             }

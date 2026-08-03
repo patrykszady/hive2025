@@ -1295,6 +1295,281 @@ it('does not play the voicemail menu twice when the caller does not press a digi
     });
 });
 
+it('does not replay the voicemail menu when gather_using_speak never emits speak.ended', function () {
+    // Production reality (call 1940, 2026-07-31): gather_using_speak does NOT
+    // reliably emit its own call.speak.ended, so the old "was the TTS played?"
+    // cache flag was never set and EVERY voicemail caller heard the full menu
+    // twice. Only gather.ended arrives here — no speak.ended at all.
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => ['admin_call_control_ids' => []],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    // The menu was issued 14s ago — long enough that it must have spoken.
+    Cache::put('telnyx_voicemail_gather_started:incoming-cc', microtime(true) - 14.0, now()->addMinutes(5));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.gather.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'incoming-cc',
+                'digits' => '',
+                'status' => 'timeout',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'voicemail_ivr_menu',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+15555550100',
+                    'is_known_caller' => false,
+                    'retry_count' => 0,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/actions/gather_using_speak'));
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'incoming-cc/actions/speak') || $request->method() !== 'POST') {
+            return false;
+        }
+        $clientState = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+        return ($clientState['action'] ?? null) === 'voicemail_prompt_done';
+    });
+});
+
+it('retries the voicemail menu only when the gather died before speaking', function () {
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => ['admin_call_control_ids' => []],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    // Ended after ~1s — the ~14s prompt cannot have played.
+    Cache::put('telnyx_voicemail_gather_started:incoming-cc', microtime(true) - 1.0, now()->addMinutes(5));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.gather.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'incoming-cc',
+                'digits' => '',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'voicemail_ivr_menu',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+15555550100',
+                    'is_known_caller' => false,
+                    'retry_count' => 0,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), '/actions/gather_using_speak')) {
+            return false;
+        }
+        $clientState = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+        return ($clientState['retry_count'] ?? null) === 1;
+    });
+});
+
+it('marks the caller bridged before stopping ringback so it cannot restart over the conference', function () {
+    // Production (call 1949, 2026-07-31 21:54:41): playback_stop fired, the
+    // resulting call.playback.ended arrived while createConference was still
+    // in flight, and the re-loop guard restarted ringback TWICE — it then
+    // played over the live conference and the caller heard ring tone instead
+    // of the admin. The flag must be set before playback_stop.
+    $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'call_recipients' => [$admin->id],
+        'admin_screening_enabled' => false,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => ['tts_complete' => true, 'joined_admin_ids' => []],
+    ]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+
+    // Reproduce the race deterministically: while the conference-create call
+    // is in flight, Telnyx delivers the caller's call.playback.ended.
+    $test = $this;
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => function () use ($test, $callLog) {
+            $test->postJson('/webhooks/telnyx/voice', [
+                'data' => [
+                    'event_type' => 'call.playback.ended',
+                    'record_type' => 'event',
+                    'payload' => [
+                        'call_control_id' => 'incoming-cc',
+                        'client_state' => base64_encode(json_encode([
+                            'action' => 'caller_waiting',
+                            'call_log_id' => $callLog->id,
+                        ])),
+                    ],
+                ],
+            ]);
+
+            return Http::response(['data' => ['id' => 'conf-uuid-123']], 200);
+        },
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin->id,
+                    'conference_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // The ringback must NOT have been restarted on the caller's leg.
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/playback_start'));
+});
+
+it('drops conference bookkeeping noise without logging or dedup work', function () {
+    // conference.floor.changed alone was 412 of 616 voice webhooks on
+    // 2026-07-31. Each must cost one 200 and nothing else — no dedup cache
+    // entry, no outbound command.
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    foreach (['conference.floor.changed', 'conference.participant.joined', 'call.playback.started'] as $eventType) {
+        $this->postJson('/webhooks/telnyx/voice', [
+            'data' => [
+                'id' => 'evt-noise-'.$eventType,
+                'event_type' => $eventType,
+                'record_type' => 'event',
+                'payload' => ['call_control_id' => 'incoming-cc'],
+            ],
+        ])->assertSuccessful();
+
+        // Returned before the dedup cache write — the real proof the event was
+        // dropped early rather than falling through to the unknown-event path.
+        expect(Cache::has('telnyx_event:evt-noise-'.$eventType))->toBeFalse();
+    }
+
+    Http::assertNothingSent();
+});
+
+it('hangs up the target instead of bridging when the click-to-call already ended', function () {
+    // Production call 1945: the user gave up during the disclosure, then this
+    // event fired and bridgeCalls was attempted against a dead leg.
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'user-cc',
+        'status' => CallLog::STATUS_COMPLETED,
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'target-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_target_intro_done',
+                    'call_log_id' => $callLog->id,
+                    'user_call_control_id' => 'user-cc',
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // Target leg dropped; no bridge attempted against the dead user leg.
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'target-cc/actions/hangup'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/actions/bridge'));
+});
+
+it('does not request answering machine detection on admin ring legs', function () {
+    // handleAmdEnded discards every admin_ring AMD result, so requesting it
+    // billed premium detection on every inbound call for nothing.
+    // Inside business hours — outside them the call routes straight to
+    // voicemail and no admin is dialed at all.
+    $this->travelTo(\Carbon\Carbon::parse('2026-08-05 10:00:00', 'America/Chicago'));
+
+    $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'call_recipients' => [$admin->id],
+    ]]);
+
+    Http::fake([
+        'api.telnyx.com/v2/calls' => Http::response(['data' => ['call_control_id' => 'admin-cc-1']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Bob Smith',
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'incoming-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'welcome_or_ring',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+15555550100',
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    $adminDials = collect(Http::recorded())
+        ->map(fn ($pair) => $pair[0])
+        ->filter(fn ($request) => str_ends_with($request->url(), '/v2/calls') && $request->method() === 'POST')
+        ->filter(function ($request) {
+            $clientState = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+
+            return ($clientState['action'] ?? null) === 'admin_ring';
+        });
+
+    expect($adminDials)->not->toBeEmpty();
+
+    foreach ($adminDials as $request) {
+        expect($request->data())
+            ->not->toHaveKey('answering_machine_detection')
+            ->not->toHaveKey('machine_detection');
+    }
+});
+
 it('triggerVoicemail is idempotent — admin hangup race does not produce two menus', function () {
     $admin = User::factory()->create([
         'first_name' => 'Patryk',
@@ -2188,4 +2463,3 @@ it('answers spam-flagged calls and routes them through the voicemail IVR instead
             && str_contains((string) ($r['payload'] ?? ''), 'identified as spam');
     });
 });
-

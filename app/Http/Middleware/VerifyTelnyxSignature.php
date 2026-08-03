@@ -26,8 +26,21 @@ class VerifyTelnyxSignature
     {
         $publicKeyBase64 = config('services.telnyx.public_key');
 
-        // No key configured → skip (dev/local). Production should set it.
+        // No key configured → skip (dev/local). Setting the key is all it
+        // takes to enforce verification — no second deploy, no flag.
         if (empty($publicKeyBase64)) {
+            // Outside local/testing this is a live hole: these endpoints start
+            // calls, send SMS and mutate call logs, so anyone who knows the URL
+            // can drive them. Say so loudly rather than failing open in
+            // silence. (Not fail-CLOSED: that would take voice down on deploy
+            // if the key hadn't been set yet.)
+            if (! app()->environment(['local', 'testing'])) {
+                Log::channel('telnyx')->error('Telnyx webhook accepted WITHOUT signature verification — TELNYX_PUBLIC_KEY is not set', [
+                    'path' => $request->path(),
+                    'ip' => $request->ip(),
+                ]);
+            }
+
             return $next($request);
         }
 

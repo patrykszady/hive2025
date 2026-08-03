@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\CrewEmailIngest;
+use App\Models\CompanyEmail;
 use App\Models\Lead;
+use App\Services\LeadAddressCompleter;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -371,12 +373,17 @@ elsewhere.
 When a message IS an enquiry, extract what it actually states. Never invent a
 value — use null for anything not present. Quote the address exactly as
 written. Keep scope_summary to one or two sentences in plain language.
+
+Enquiries often come from a couple: put EVERY name in `name` as written
+("Amy Dusto and Chris Ecker") and EVERY number in `phone` separated by " / ",
+in the same order as the names. Give `zip` only when the message states it —
+a guessed ZIP is worse than none.
 TXT;
 
         $schema = [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['is_lead', 'confidence', 'reason', 'name', 'phone', 'address', 'city', 'project_type', 'scope_summary', 'timeline', 'budget'],
+            'required' => ['is_lead', 'confidence', 'reason', 'name', 'phone', 'address', 'city', 'zip', 'project_type', 'scope_summary', 'timeline', 'budget'],
             'properties' => [
                 'is_lead' => ['type' => 'boolean'],
                 'confidence' => ['type' => 'number'],
@@ -385,6 +392,7 @@ TXT;
                 'phone' => ['type' => ['string', 'null']],
                 'address' => ['type' => ['string', 'null']],
                 'city' => ['type' => ['string', 'null']],
+                'zip' => ['type' => ['string', 'null']],
                 'project_type' => ['type' => ['string', 'null']],
                 'scope_summary' => ['type' => ['string', 'null']],
                 'timeline' => ['type' => ['string', 'null']],
@@ -449,9 +457,14 @@ TXT;
         $leadData = array_filter([
             'name' => $fields['name'] ?? $base['from_name'] ?? null,
             'email' => $base['from_email'],
+            // Couples write in together and CC each other. Those addresses are
+            // the other people on the enquiry — keep them, or provisioning has
+            // nothing to reach the second person by.
+            'cc_emails' => $this->partnerEmails($base),
             'phone' => $fields['phone'] ?? null,
             'address' => $fields['address'] ?? null,
             'city' => $fields['city'] ?? null,
+            'zip' => $fields['zip'] ?? null,
             'project_type' => $fields['project_type'] ?? null,
             'scope_summary' => $fields['scope_summary'] ?? null,
             'timeline' => $fields['timeline'] ?? null,
@@ -462,6 +475,8 @@ TXT;
             'source_mailbox' => $base['mailbox'],
             'extraction_status' => $verdict['extraction_status'],
         ], fn ($v) => $v !== null && $v !== '');
+
+        $leadData = app(LeadAddressCompleter::class)->complete($leadData);
 
         $date = $base['message_at'] ?? now();
         $vendorId = (int) $cfg['vendor_id'];
@@ -507,6 +522,34 @@ TXT;
         }
 
         return $lead;
+    }
+
+    /**
+     * Addresses on the enquiry that belong to the enquirers — every CC except
+     * the sender and our own mailboxes.
+     *
+     * @return array<int, string>
+     */
+    protected function partnerEmails(array $base): array
+    {
+        $ours = CompanyEmail::query()
+            ->withoutGlobalScopes()
+            ->pluck('email')
+            ->push((string) config('nylas.crew_leads.mailbox'))
+            ->filter()
+            ->map(fn ($email) => mb_strtolower(trim((string) $email)))
+            ->all();
+
+        $from = mb_strtolower((string) ($base['from_email'] ?? ''));
+
+        return collect($base['recipients']['cc'] ?? [])
+            ->merge($base['recipients']['to'] ?? [])
+            ->filter(fn ($email) => is_string($email) && $email !== '')
+            ->map(fn (string $email) => mb_strtolower(trim($email)))
+            ->reject(fn (string $email) => $email === $from || in_array($email, $ours, true))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

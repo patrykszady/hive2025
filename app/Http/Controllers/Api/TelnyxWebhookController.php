@@ -30,6 +30,31 @@ use Illuminate\Support\Facades\Log;
 
 class TelnyxWebhookController extends Controller
 {
+    /**
+     * A voicemail menu gather that ran at least this long must have spoken its
+     * prompt (the menu is ~14-18s of TTS; a gather that never speaks ends after
+     * just its ~2s DTMF timeout).
+     */
+    private const VOICEMAIL_PROMPT_MIN_SECONDS = 5.0;
+
+    /**
+     * Voice events we deliberately do nothing with. Conference bookkeeping is
+     * already tracked from the commands we issue (conference id + participants
+     * live in call_logs.metadata), and playback.started/hold/unhold carry no
+     * information we act on. Listed here rather than falling through to
+     * handleUnknownVoiceEvent so they cost one 200 response, not a log pair.
+     */
+    private const IGNORED_VOICE_EVENTS = [
+        'conference.floor.changed',
+        'conference.participant.joined',
+        'conference.participant.left',
+        'conference.created',
+        'conference.ended',
+        'call.playback.started',
+        'call.hold',
+        'call.unhold',
+    ];
+
     public function __construct(
         protected GroupSmsService $groupSmsService,
         protected SpamFilterService $spamFilterService,
@@ -87,6 +112,16 @@ class TelnyxWebhookController extends Controller
         $payload = $request->all();
         $data = $payload['data'] ?? [];
         $eventType = $data['event_type'] ?? null;
+
+        // Telnyx has no per-event webhook filter, so the noisy conference
+        // events arrive whether we want them or not — conference.floor.changed
+        // alone fires on EVERY speaker change and was 412 of 616 voice webhooks
+        // on 2026-07-31 (67%). Drop them before the two log writes and the
+        // dedup cache round-trip: each one otherwise occupies a PHP-FPM worker
+        // that a real call event could be waiting on.
+        if (in_array($eventType, self::IGNORED_VOICE_EVENTS, true)) {
+            return response()->json(['status' => 'ok']);
+        }
 
         Log::channel('telnyx')->info('Telnyx voice webhook received', [
             'event_type' => $eventType,
@@ -671,9 +706,11 @@ class TelnyxWebhookController extends Controller
                 $conferenceLockKey = "telnyx_click_to_call_conference_lock:{$callLogId}";
                 if (Cache::add($conferenceLockKey, 'creating', 30)) {
                     $conferenceName = "click_to_call_{$callLogId}_" . substr(md5($userCallControlId), 0, 8);
-                    // Stop ringback before conference creation/join.
+                    // Stop the ringback on the USER's leg only. The target just
+                    // answered and never had playback started, so stopping it
+                    // there was a wasted round trip sitting in the connect path
+                    // (5 sequential Telnyx calls between answer and audio).
                     $this->sendCallCommand($userCallControlId, 'playback_stop');
-                    $this->sendCallCommand($callControlId, 'playback_stop');
 
                     $conferenceId = $this->createConference($conferenceName, $userCallControlId);
 
@@ -1417,6 +1454,17 @@ class TelnyxWebhookController extends Controller
             'admin_user_id' => $adminUserId,
         ]);
 
+        // Mark BOTH legs bridged BEFORE stopping the ringback — never after.
+        // playback_stop makes Telnyx fire call.playback.ended immediately, and
+        // handleCallPlaybackEnded re-loops the ringback unless this flag is
+        // already set. Setting it after createConference() (an HTTP round trip)
+        // left a ~1s window in which the caller's ringback restarted twice and
+        // then played OVER the live conference — the caller heard ring tone
+        // instead of the admin and assumed nobody had picked up.
+        // (handleClickToCallTargetAnswered has always ordered it this way.)
+        Cache::put("telnyx_bridged:{$incomingCallControlId}", true, now()->addMinutes(60));
+        Cache::put("telnyx_bridged:{$adminCallControlId}", true, now()->addMinutes(60));
+
         // Stop any audio on both legs before joining the conference.
         $this->sendCallCommand($incomingCallControlId, 'playback_stop');
         $this->sendCallCommand($adminCallControlId, 'playback_stop');
@@ -1427,15 +1475,14 @@ class TelnyxWebhookController extends Controller
             Log::channel('telnyx')->error('Failed to create conference — hanging up admin leg', [
                 'call_log_id' => $callLogId,
             ]);
-            // Release the bridge lock so another answering admin can retry.
+            // Release the bridge lock so another answering admin can retry, and
+            // clear the flags so the caller's hold audio can resume.
             Cache::forget("telnyx_bridge_lock:{$callLogId}");
+            Cache::forget("telnyx_bridged:{$incomingCallControlId}");
+            Cache::forget("telnyx_bridged:{$adminCallControlId}");
             $this->sendCallCommand($adminCallControlId, 'hangup');
             return;
         }
-
-        // Mark caller as bridged (used by ringback re-loop guard).
-        Cache::put("telnyx_bridged:{$incomingCallControlId}", true, now()->addMinutes(60));
-        Cache::put("telnyx_bridged:{$adminCallControlId}", true, now()->addMinutes(60));
 
         // Persist conference id and mark first admin joined.
         $metadata = $callLog->metadata ?? [];
@@ -2116,13 +2163,6 @@ class TelnyxWebhookController extends Controller
             return $this->handleAdminScreenDone($callControlId, $clientState ?? []);
         }
 
-        if ($action === 'voicemail_ivr_menu') {
-            // Mark that the menu TTS finished playing so the gather.ended
-            // handler can distinguish "TTS played but caller didn't press"
-            // (skip retry) from "TTS never played" (retry once).
-            Cache::put("telnyx_voicemail_tts_played:{$callControlId}", true, now()->addMinutes(5));
-        }
-
         if ($action === 'welcome_done') {
             $callLogId = $clientState['call_log_id'] ?? null;
             $originalCaller = $clientState['original_caller'] ?? null;
@@ -2290,6 +2330,28 @@ class TelnyxWebhookController extends Controller
             $callLogId = $clientState['call_log_id'] ?? null;
             $userCallControlId = $clientState['user_call_control_id'] ?? null;
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+            // The disclosure outlives the call: the user can hang up while it
+            // is still playing (production call 1945 — user gave up at 24s,
+            // this fired 3s later). Bridging a dead leg just burns a failing
+            // API call and logs a scary "intro bridge failed"; drop the target
+            // leg instead.
+            if ($callLog && in_array($callLog->status, [
+                CallLog::STATUS_COMPLETED,
+                CallLog::STATUS_MISSED,
+                CallLog::STATUS_FAILED,
+            ], true)) {
+                Log::channel('telnyx')->info('Click-to-call: intro finished after the call ended — hanging up target leg', [
+                    'target_call_control_id' => $callControlId,
+                    'user_call_control_id' => $userCallControlId,
+                    'call_log_id' => $callLogId,
+                    'status' => $callLog->status,
+                ]);
+
+                $this->sendCallCommand($callControlId, 'hangup');
+
+                return response()->json(['status' => 'ok']);
+            }
 
             // If call is already TRANSFERRED (via conference join), skip bridge attempt
             if ($callLog && $callLog->status === CallLog::STATUS_TRANSFERRED) {
@@ -2923,8 +2985,13 @@ class TelnyxWebhookController extends Controller
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
                         'preferred_codecs' => config('services.telnyx.preferred_codecs'),
-                        'machine_detection' => 'premium',
-                        'answering_machine_detection' => 'detect_beep',
+                        // No answering_machine_detection here — deliberately.
+                        // handleAmdEnded discards every AMD result for
+                        // admin_ring legs (screening replaced it), so
+                        // requesting it billed premium detection on every admin
+                        // leg of every inbound call for nothing. The companion
+                        // 'machine_detection' key wasn't even a real Dial
+                        // parameter, so Telnyx silently ignored it.
                         'client_state' => base64_encode(json_encode([
                             'action' => 'admin_ring',
                             'call_log_id' => $callLogId,
@@ -3198,6 +3265,11 @@ class TelnyxWebhookController extends Controller
 
         $retryCount = $context['retry_count'] ?? 0;
 
+        // Stamp when the prompt started so gather.ended can tell "the menu
+        // played and nobody pressed" (normal — go to voicemail) from "the
+        // gather died before speaking" (retry). See handleCallGatherEnded.
+        Cache::put("telnyx_voicemail_gather_started:{$callControlId}", microtime(true), now()->addMinutes(5));
+
         $this->sendCallCommand($callControlId, 'gather_using_speak', [
             'payload' => $ivrPrompt,
             ...$this->ttsVoiceParams(),
@@ -3333,18 +3405,33 @@ class TelnyxWebhookController extends Controller
             }
         } else {
             // ── No digit / timeout ──
-            // Only retry the menu if the TTS truly didn't play (no speak.ended
-            // event was seen). Otherwise we were just hearing silence; go
-            // straight to the voicemail greeting so the caller doesn't hear
-            // the menu prompt twice.
+            // Staying on the line IS the advertised way to reach voicemail, so
+            // no-digit is the normal path — never replay the menu just because
+            // nobody pressed.
+            //
+            // Retry only when the prompt genuinely never played, and decide
+            // that from HOW LONG the gather ran, not from a companion webhook:
+            // gather_using_speak does not reliably emit its own
+            // call.speak.ended, so the old telnyx_voicemail_tts_played flag was
+            // almost never set and every voicemail caller heard the whole menu
+            // twice (12 of 17 sampled transcripts; production call 1940 played
+            // a 14s menu and still logged "TTS never played").
+            // A gather that spoke the menu runs ~14-18s; one that died before
+            // speaking ends after just the DTMF timeout (~2s).
             $retryCount = $clientState['retry_count'] ?? 0;
-            $ttsPlayed = Cache::pull("telnyx_voicemail_tts_played:{$callControlId}", false);
+            $gatherStartedAt = Cache::pull("telnyx_voicemail_gather_started:{$callControlId}");
+            $gatherSeconds = $gatherStartedAt ? microtime(true) - (float) $gatherStartedAt : null;
+            // Unknown elapsed time (cache miss) counts as played: replaying is
+            // the worse failure.
+            $promptPlayed = $gatherSeconds === null || $gatherSeconds >= self::VOICEMAIL_PROMPT_MIN_SECONDS;
 
-            if ($retryCount < 1 && ! $ttsPlayed) {
-                Log::channel('telnyx')->info('IVR: no digit pressed and TTS never played — retrying menu once', [
+            if ($retryCount < 1 && ! $promptPlayed) {
+                Log::channel('telnyx')->info('IVR: gather ended before the menu could play — retrying once', [
                     'call_control_id' => $callControlId,
                     'retry_count' => $retryCount,
                     'call_log_id' => $callLogId,
+                    'gather_seconds' => $gatherSeconds,
+                    'gather_status' => $payload['status'] ?? null,
                 ]);
 
                 $this->startVoicemailGather($callControlId, [
@@ -3359,12 +3446,15 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
-            // TTS played (or we already retried) — go directly to voicemail greeting
             Log::channel('telnyx')->info('IVR: no digit pressed — playing voicemail greeting', [
                 'call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
+                'gather_seconds' => $gatherSeconds,
+                'gather_status' => $payload['status'] ?? null,
+                'retry_count' => $retryCount,
             ]);
 
+            // Menu played (or we already retried) — go directly to voicemail greeting
             $vendor = Vendor::find(1);
             $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'us');
 
