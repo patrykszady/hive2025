@@ -54,11 +54,18 @@
 
                         @foreach (\App\Livewire\Leads\PickTimes::WINDOWS as $w)
                             @php($active = in_array(['date' => $date, 'time' => $w], $times, true))
+                            @php($booked = in_array($w, $this->busyWindows, true))
+                            {{-- Booked = something already on Patryk's or Greg's
+                                 calendar overlaps this window: disabled and
+                                 struck through (like the calendar's blocked
+                                 days), but no "booked" label. toggleWindow
+                                 refuses these server-side too. --}}
                             <flux:button
                                 wire:click="toggleWindow('{{ $w }}')"
                                 :variant="$active ? 'primary' : 'outline'"
-                                class="w-full"
+                                class="w-full {{ $booked ? 'line-through' : '' }}"
                                 size="sm"
+                                :disabled="$booked"
                             >
                                 {{ $w }}
                             </flux:button>
@@ -89,7 +96,9 @@
                 </flux:button>
 
                 <flux:text class="text-xs text-zinc-500">
-                    If you need a weekday late afternoon or Saturday morning appointment, please email us.
+                    Our crew puts in long days on site, so early morning and daytime
+                    consultations suit us best &mdash; thank you for understanding. If only a
+                    weekday late afternoon or Saturday morning works for you, please email us.
                 </flux:text>
             @endif
         </div>

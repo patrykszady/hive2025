@@ -24,6 +24,7 @@ class PickTimes extends Component
      *
      * @var array<int, array{date: string, time: string}>
      */
+    #[Locked]
     public array $times = [];
 
     public string $date = '';
@@ -31,7 +32,7 @@ class PickTimes extends Component
     public bool $submitted = false;
 
     /** Same windows the gs.construction lead form offers. */
-    public const WINDOWS = ['Anytime', '8-10 AM', '10-12 PM', '12-2 PM', '2-4 PM'];
+    public const WINDOWS = ['Anytime', '7-9 AM', '9-11 AM', '11-1 PM', '1-3 PM'];
 
     public const MAX_SLOTS = 6;
 
@@ -162,6 +163,26 @@ class PickTimes extends Component
     }
 
     /**
+     * Windows on the SELECTED day the admins already have something for —
+     * the blade disables these buttons; toggleWindow refuses them.
+     *
+     * @return array<int, string>
+     */
+    public function getBusyWindowsProperty(): array
+    {
+        if ($this->date === '' || static::isWeekend($this->date)) {
+            return [];
+        }
+
+        $busy = app(\App\Services\AdminCalendarBusy::class);
+
+        return collect(self::WINDOWS)
+            ->filter(fn (string $window) => $busy->windowIsBusy($this->date, $window))
+            ->values()
+            ->all();
+    }
+
+    /**
      * Weekend dates in the months the calendar can show, for its `unavailable`
      * prop — the picker refuses them server-side too.
      *
@@ -179,7 +200,15 @@ class PickTimes extends Component
             }
         }
 
-        return $dates;
+        // Days where every window clashes with the admins' calendars offer
+        // nothing either — grey them like weekends. (Only within the free/busy
+        // horizon; further-out days stay open and are re-checked on toggle.)
+        $dates = array_merge(
+            $dates,
+            app(\App\Services\AdminCalendarBusy::class)->fullyBusyDates(static::firstBookableDate($lead)),
+        );
+
+        return array_values(array_unique($dates));
     }
 
     public function getLeadProperty(): Lead
@@ -228,6 +257,14 @@ class PickTimes extends Component
 
                 return;
             }
+
+            // "Anytime" promises the whole day — one existing booking that day
+            // breaks the promise, so it's only offered on completely free days.
+            if (app(\App\Services\AdminCalendarBusy::class)->windowIsBusy($this->date, 'Anytime')) {
+                $this->addError('times', "Anytime isn't available that day — please pick a specific time.");
+
+                return;
+            }
         } else {
             $times = Lead::parseSlotTimes($window);
             $start = \Illuminate\Support\Carbon::parse(
@@ -237,6 +274,12 @@ class PickTimes extends Component
 
             if ($start->lt($earliest)) {
                 $this->addError('times', 'Please pick a later time — we need at least '.static::minLeadHours($this->lead).' hours notice.');
+
+                return;
+            }
+
+            if (app(\App\Services\AdminCalendarBusy::class)->windowIsBusy($this->date, $window)) {
+                $this->addError('times', 'That time is already booked — please pick another.');
 
                 return;
             }
@@ -286,6 +329,27 @@ class PickTimes extends Component
 
     public function submit(): void
     {
+        // The calendars may have filled up between picking and submitting —
+        // an event booked five minutes ago must not slip through. Drop any
+        // slot that went busy and ask for a replacement instead of storing it.
+        $busy = app(\App\Services\AdminCalendarBusy::class);
+        $stale = collect($this->times)
+            ->filter(fn (array $slot) => $busy->windowIsBusy($slot['date'], $slot['time']))
+            ->values();
+
+        if ($stale->isNotEmpty()) {
+            $this->times = collect($this->times)
+                ->reject(fn (array $slot) => $busy->windowIsBusy($slot['date'], $slot['time']))
+                ->values()
+                ->all();
+
+            $this->addError('times', 'Sorry — '.$stale
+                ->map(fn (array $slot) => \Illuminate\Support\Carbon::parse($slot['date'])->format('D, M j').' · '.$slot['time'])
+                ->implode(', ').' just became unavailable. Please pick a replacement.');
+
+            return;
+        }
+
         if (! $this->canSubmit) {
             $this->addError('times', 'Please select at least '.self::MIN_TIMES.' times across '.self::MIN_DAYS.' different days.');
 

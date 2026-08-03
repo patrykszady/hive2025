@@ -19,7 +19,7 @@ uses(RefreshDatabase::class);
 
 function makeConsultFixture(?array $slot = null): array
 {
-    $slot ??= ['date' => now()->addDays(2)->format('Y-m-d'), 'time' => '2-4 PM'];
+    $slot ??= ['date' => now()->addDays(2)->format('Y-m-d'), 'time' => '1-3 PM'];
     config(['email_tracking.provider' => 'mailtrap']);
 
     $vendor = Vendor::factory()->create(['options' => ['short_name' => 'GSC']]);
@@ -76,7 +76,7 @@ function makeConsultFixture(?array $slot = null): array
 /**
  * Weekdays on which EVERY window is bookable. The first bookable date often
  * qualifies only for its later windows — 72h notice measured at 1pm lands
- * mid-day, so that day's "10-12 PM" is legitimately refused. Tests that toggle
+ * mid-day, so that day's "9-11 AM" is legitimately refused. Tests that toggle
  * a morning window need a day that clears the notice period outright, or they
  * pass or fail depending on the hour the suite runs.
  */
@@ -214,7 +214,7 @@ it('books the Meet task at the exact time when one is picked within the slot', f
     $component = consultComposer($fx)->call('insertAvailabilitySlot', 0);
 
     expect(array_column($component->instance()->exactTimeOptions, 'label'))
-        ->toBe(['2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM']);
+        ->toBe(['1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM']);
 
     $component->call('selectExactTime', '14:30')->set('projectName', 'Consult')->call('send_message');
 
@@ -234,8 +234,8 @@ it('offers the whole bookable day as exact times when the slot is Anytime', func
     $component = consultComposer($fx)->call('insertAvailabilitySlot', 0);
 
     expect(array_column($component->instance()->exactTimeOptions, 'value'))
-        ->toBe(['08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-            '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30']);
+        ->toBe(['07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+            '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30']);
 
     // A time inside the day sticks; one outside it is still refused.
     expect($component->call('selectExactTime', '10:30')->get('selectedExactTime'))->toBe('10:30')
@@ -347,7 +347,7 @@ it('moves the existing consult when the client reschedules', function () {
     $secondDay = now()->addDays(9)->format('Y-m-d');
     $lead = $fx['lead']->fresh();
     $data = $lead->lead_data;
-    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $data['availability'] = [['date' => $secondDay, 'time' => '9-11 AM']];
     $lead->lead_data = $data;
     $lead->save();
 
@@ -377,7 +377,7 @@ it('creates the calendar event when a rescheduled consult never got one', functi
     $secondDay = now()->addDays(9)->format('Y-m-d');
     $lead = $fx['lead']->fresh();
     $data = $lead->lead_data;
-    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $data['availability'] = [['date' => $secondDay, 'time' => '9-11 AM']];
     $lead->lead_data = $data;
     $lead->save();
 
@@ -404,7 +404,7 @@ it('revives a deleted consult when a new date is booked', function () {
     $secondDay = now()->addDays(9)->format('Y-m-d');
     $lead = $fx['lead']->fresh();
     $data = $lead->lead_data;
-    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $data['availability'] = [['date' => $secondDay, 'time' => '9-11 AM']];
     $lead->lead_data = $data;
     $lead->save();
 
@@ -436,7 +436,7 @@ it('sends recipients an updated calendar invite when the consult is rescheduled'
     $secondDay = now()->addDays(9)->format('Y-m-d');
     $lead = $fx['lead']->fresh();
     $data = $lead->lead_data;
-    $data['availability'] = [['date' => $secondDay, 'time' => '10-12 PM']];
+    $data['availability'] = [['date' => $secondDay, 'time' => '9-11 AM']];
     $lead->lead_data = $data;
     $lead->save();
 
@@ -515,7 +515,7 @@ function makeConsultTemplate(array $fx): void
 }
 
 it('offers the signed pick-new-times link when every preferred slot has passed', function () {
-    $fx = makeConsultFixture(['date' => now()->subDays(3)->format('Y-m-d'), 'time' => '2-4 PM']);
+    $fx = makeConsultFixture(['date' => now()->subDays(3)->format('Y-m-d'), 'time' => '1-3 PM']);
     makeConsultTemplate($fx);
 
     $component = Livewire::actingAs($fx['admin'])
@@ -546,7 +546,7 @@ it('offers the link when the lead never gave availability', function () {
 });
 
 it('refuses to select a slot whose date has passed', function () {
-    $fx = makeConsultFixture(['date' => now()->subDay()->format('Y-m-d'), 'time' => '2-4 PM']);
+    $fx = makeConsultFixture(['date' => now()->subDay()->format('Y-m-d'), 'time' => '1-3 PM']);
 
     $component = consultComposer($fx)->call('insertAvailabilitySlot', 0);
 
@@ -554,22 +554,22 @@ it('refuses to select a slot whose date has passed', function () {
 });
 
 it('lets the lead submit new times through the signed page', function () {
-    $fx = makeConsultFixture(['date' => now()->subDay()->format('Y-m-d'), 'time' => '2-4 PM']);
+    $fx = makeConsultFixture(['date' => now()->subDay()->format('Y-m-d'), 'time' => '1-3 PM']);
 
     [$date, $date2] = bookableWeekdays($fx['lead']);
 
     Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
         ->set('date', $date)
-        ->call('toggleWindow', '10-12 PM')
-        ->call('toggleWindow', '2-4 PM')
+        ->call('toggleWindow', '9-11 AM')
+        ->call('toggleWindow', '1-3 PM')
         ->set('date', $date2)
         ->call('toggleWindow', 'Anytime')
         ->call('submit')
         ->assertSet('submitted', true);
 
     $fresh = Lead::withoutGlobalScopes()->find($fx['lead']->id);
-    expect($fresh->lead_data['availability'][0])->toMatchArray(['date' => $date, 'time' => '10-12 PM'])
-        ->and($fresh->lead_data['availability'][1])->toMatchArray(['date' => $date, 'time' => '2-4 PM'])
+    expect($fresh->lead_data['availability'][0])->toMatchArray(['date' => $date, 'time' => '9-11 AM'])
+        ->and($fresh->lead_data['availability'][1])->toMatchArray(['date' => $date, 'time' => '1-3 PM'])
         ->and($fresh->lead_data['availability'][2])->toMatchArray(['date' => $date2, 'time' => 'Anytime']);
 });
 
@@ -581,9 +581,9 @@ it('requires at least three times across two different days', function () {
     // 3 times but one day -> blocked
     Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
         ->set('date', $d1)
-        ->call('toggleWindow', '8-10 AM')
-        ->call('toggleWindow', '10-12 PM')
-        ->call('toggleWindow', '2-4 PM')
+        ->call('toggleWindow', '7-9 AM')
+        ->call('toggleWindow', '9-11 AM')
+        ->call('toggleWindow', '1-3 PM')
         ->call('submit')
         ->assertHasErrors('times')
         ->assertSet('submitted', false);
@@ -591,9 +591,9 @@ it('requires at least three times across two different days', function () {
     // 2 days but only 2 times -> blocked
     Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
         ->set('date', $d1)
-        ->call('toggleWindow', '2-4 PM')
+        ->call('toggleWindow', '1-3 PM')
         ->set('date', $d2)
-        ->call('toggleWindow', '2-4 PM')
+        ->call('toggleWindow', '1-3 PM')
         ->call('submit')
         ->assertHasErrors('times')
         ->assertSet('submitted', false);
@@ -611,13 +611,13 @@ it('rejects past dates and caps the number of picker slots', function () {
 
     $picker = Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
         ->set('date', now()->subDay()->format('Y-m-d'))
-        ->call('toggleWindow', '2-4 PM')
+        ->call('toggleWindow', '1-3 PM')
         ->assertHasErrors('date');
 
     expect($picker->get('times'))->toBe([]);
 
     foreach (bookableWeekdays($fx['lead'], \App\Livewire\Leads\PickTimes::MAX_SLOTS + 1) as $day) {
-        $picker->set('date', $day)->call('toggleWindow', '2-4 PM');
+        $picker->set('date', $day)->call('toggleWindow', '1-3 PM');
     }
 
     expect(count($picker->get('times')))->toBe(\App\Livewire\Leads\PickTimes::MAX_SLOTS);
@@ -629,8 +629,8 @@ it('treats Anytime as the whole day, like the vendor availability flow', functio
 
     $picker = Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
         ->set('date', $day)
-        ->call('toggleWindow', '8-10 AM')
-        ->call('toggleWindow', '2-4 PM')
+        ->call('toggleWindow', '7-9 AM')
+        ->call('toggleWindow', '1-3 PM')
         // Anytime supersedes the day's specific windows...
         ->call('toggleWindow', 'Anytime');
 
@@ -639,10 +639,10 @@ it('treats Anytime as the whole day, like the vendor availability flow', functio
     // ...and a specific window replaces the day's Anytime, without touching
     // other days.
     $picker->set('date', $day2)->call('toggleWindow', 'Anytime')
-        ->set('date', $day)->call('toggleWindow', '2-4 PM');
+        ->set('date', $day)->call('toggleWindow', '1-3 PM');
 
     expect($picker->get('times'))->toBe([
-        ['date' => $day, 'time' => '2-4 PM'],
+        ['date' => $day, 'time' => '1-3 PM'],
         ['date' => $day2, 'time' => 'Anytime'],
     ]);
 });
@@ -653,7 +653,7 @@ it('rejects times less than 72 hours ahead', function () {
     // Tomorrow fails date validation outright.
     Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
         ->set('date', now()->addDay()->format('Y-m-d'))
-        ->call('toggleWindow', '2-4 PM')
+        ->call('toggleWindow', '1-3 PM')
         ->assertHasErrors('date');
 
     // Beyond the boundary is fine (first bookable weekday).
@@ -661,7 +661,7 @@ it('rejects times less than 72 hours ahead', function () {
 
     $picker = Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
         ->set('date', $ok)
-        ->call('toggleWindow', '2-4 PM');
+        ->call('toggleWindow', '1-3 PM');
 
     expect(count($picker->get('times')))->toBe(1);
 });
@@ -704,7 +704,7 @@ it('counts Anytime as two times toward the minimum', function () {
 
     // Anytime + one window on another day = 3 -> passes.
     expect($picker()->set('date', $d1)->call('toggleWindow', 'Anytime')
-        ->set('date', $d2)->call('toggleWindow', '2-4 PM')
+        ->set('date', $d2)->call('toggleWindow', '1-3 PM')
         ->get('canSubmit'))->toBeTrue();
 
     // Anytime on a single day is worth 2 but only one day -> still blocked.
@@ -712,8 +712,8 @@ it('counts Anytime as two times toward the minimum', function () {
         ->get('canSubmit'))->toBeFalse();
 
     // Two plain windows across two days = 2 -> still blocked.
-    expect($picker()->set('date', $d1)->call('toggleWindow', '8-10 AM')
-        ->set('date', $d2)->call('toggleWindow', '2-4 PM')
+    expect($picker()->set('date', $d1)->call('toggleWindow', '7-9 AM')
+        ->set('date', $d2)->call('toggleWindow', '1-3 PM')
         ->get('canSubmit'))->toBeFalse();
 });
 
@@ -753,7 +753,7 @@ it('leaves a Won or Lost lead status alone when times are submitted', function (
 });
 
 it('drops the follow-up line when no time was proposed', function () {
-    $fx = makeConsultFixture(['date' => now()->subDays(3)->format('Y-m-d'), 'time' => '2-4 PM']);
+    $fx = makeConsultFixture(['date' => now()->subDays(3)->format('Y-m-d'), 'time' => '1-3 PM']);
     makeConsultTemplate($fx);
 
     $body = Livewire::actingAs($fx['admin'])
@@ -839,9 +839,9 @@ it('gives a rescheduling client 24h notice instead of 72h', function () {
         ->call('toggleWindow', $window)
         ->get('times');
 
-    expect($pick('8-10 AM'))->toBe([])
-        ->and($pick('12-2 PM'))->toBe([])
-        ->and($pick('2-4 PM'))->toBe([['date' => $tomorrow, 'time' => '2-4 PM']]);
+    expect($pick('7-9 AM'))->toBe([])
+        ->and($pick('11-1 PM'))->toBe([])
+        ->and($pick('1-3 PM'))->toBe([['date' => $tomorrow, 'time' => '1-3 PM']]);
 
     \Illuminate\Support\Carbon::setTestNow();
 });
@@ -858,7 +858,7 @@ it('never offers weekends or a 4-6 PM window', function () {
     foreach ([$saturday, $sunday] as $weekend) {
         expect(Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
             ->set('date', $weekend)
-            ->call('toggleWindow', '2-4 PM')
+            ->call('toggleWindow', '1-3 PM')
             ->get('times'))->toBe([]);
     }
 

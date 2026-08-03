@@ -6,6 +6,7 @@
     // component slot (it warns "Undefined array key" while rendering).
     $missingContactInfo = $this->missingContactInfo;
     $addressCandidates = $this->addressCandidates;
+    $lastEmailBounced = $this->lastEmailBounced;
 @endphp
     <form id="lead_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-3">
         <flux:textarea
@@ -38,6 +39,18 @@
 
         {{-- Say what's still needed before this lead can be replied to. The
              Message tab appears once nothing is outstanding. --}}
+        {{-- A bounce means the reply never arrived, so the lead is only
+             "Replied" on paper — say so, and the Message tab is back. --}}
+        @if ($lastEmailBounced)
+            <flux:callout icon="exclamation-triangle" variant="danger" inline>
+                <flux:callout.heading>Email bounced</flux:callout.heading>
+                <flux:callout.text>
+                    Our last reply didn't reach {{ $full_name ?: 'this contact' }}. Check the
+                    address and send again from the Message tab.
+                </flux:callout.text>
+            </flux:callout>
+        @endif
+
         @if ($missingContactInfo !== [])
             <flux:callout icon="exclamation-triangle" variant="warning" inline>
                 <flux:callout.heading>Incomplete contact</flux:callout.heading>

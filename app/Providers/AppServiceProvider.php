@@ -148,11 +148,19 @@ class AppServiceProvider extends ServiceProvider
 
             if ($devEmail !== '') {
                 Mail::alwaysTo($devEmail);
+
+                // alwaysTo() binds only the DEFAULT mailer instance —
+                // Mail::mailer('nylas') would still deliver to real people.
+                // MailManager falls back to config('mail.to') when resolving
+                // every mailer, so setting it here makes the redirect hold no
+                // matter which mailer a job picks.
+                config(['mail.to' => ['address' => $devEmail, 'name' => 'Dev Inbox']]);
             } elseif (! app()->environment('testing')) {
                 // Fail CLOSED: without a dev inbox configured, route to an
                 // unroutable address rather than letting dev mail reach real
                 // vendors/clients. (Tests use the array mailer — no risk.)
                 Mail::alwaysTo('dev-mail-blackhole@invalid.localhost');
+                config(['mail.to' => ['address' => 'dev-mail-blackhole@invalid.localhost', 'name' => null]]);
                 \Illuminate\Support\Facades\Log::warning('MAIL_DEV_EMAIL is not set — dev mail is being blackholed. Set it to receive dev email.');
             }
         }

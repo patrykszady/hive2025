@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Models\Vendor;
 use App\Support\ApiErrorFormatter;
 use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -17,7 +17,14 @@ class GeoapifyService
 
     public function __construct()
     {
-        $this->httpClient = new Client();
+        // Timeouts are NOT optional here: this client is called from request
+        // paths (opening a lead, rendering a picker). Guzzle's default is to
+        // wait forever, so one slow geocode hung the whole page — a lead that
+        // "sometimes doesn't open" is this, not a broken click.
+        $this->httpClient = new Client([
+            'timeout' => (float) config('services.geoapify.timeout', 4),
+            'connect_timeout' => (float) config('services.geoapify.connect_timeout', 2),
+        ]);
         $this->apiKey = (string) config('services.geoapify.key', '');
     }
 
@@ -77,7 +84,7 @@ class GeoapifyService
             Cache::put($cacheKey, $suggestions, now()->addMinutes(10));
 
             return $suggestions;
-        } catch (RequestException $e) {
+        } catch (GuzzleException $e) {
             Log::channel('google_places')->error('Geoapify Autocomplete API Error', ApiErrorFormatter::format($e, [
                 'input' => $input,
             ]));
@@ -170,7 +177,7 @@ class GeoapifyService
                 }
 
                 return $first['lon'] . ',' . $first['lat'];
-            } catch (RequestException $e) {
+            } catch (GuzzleException $e) {
                 Log::channel('google_places')->error('Geoapify vendor geocode error', ApiErrorFormatter::format($e));
 
                 return null;
@@ -216,7 +223,7 @@ class GeoapifyService
                 $county = trim(preg_replace('/\s+County$/i', '', $county));
 
                 return $county !== '' ? $county : null;
-            } catch (RequestException $e) {
+            } catch (GuzzleException $e) {
                 Log::channel('google_places')->error('Geoapify county lookup error', ApiErrorFormatter::format($e, [
                     'address' => $address,
                 ]));
@@ -263,7 +270,7 @@ class GeoapifyService
                 $zip = trim((string) ($first['postcode'] ?? ''));
 
                 return preg_match('/^\d{5}(?:-\d{4})?$/', $zip) === 1 ? $zip : null;
-            } catch (RequestException $e) {
+            } catch (GuzzleException $e) {
                 Log::channel('google_places')->error('Geoapify zip lookup error', ApiErrorFormatter::format($e, [
                     'address' => $address,
                 ]));
@@ -305,7 +312,11 @@ class GeoapifyService
 
         $cacheKey = 'geoapify_full_'.md5(strtolower($address));
 
-        return Cache::remember($cacheKey, now()->addDays(30), function () use ($address, $anchor) {
+        // Successes are stable and cached for a month; FAILURES are not cached
+        // for a month. A geocoder hiccup — or a lookup made before a bug was
+        // fixed — otherwise pins that address as "unresolvable" until the key
+        // expires, which is exactly how a lead sat incomplete for days.
+        return $this->rememberResolved($cacheKey, function () use ($address, $anchor) {
             // Structured first: free text makes the geocoder guess which
             // "N Magnolia Ave" you meant and it answers 60642 (wrong) with
             // confidence 0.5, while the same address split into fields answers
@@ -320,19 +331,20 @@ class GeoapifyService
                 }
 
                 // Without a state the geocoder searches the whole country and
-                // hedges — "5647 N Magnolia Ave, Chicago" comes back 60642 at
-                // confidence 0.5. Its guess at the STATE is reliable even when
-                // the ZIP isn't, so pin that and ask again: the same address
-                // then answers 60660 at confidence 1.
-                if (! isset($parts['state'])) {
-                    $state = $this->probeState($parts);
+                // hedges: "5647 N Magnolia Ave, Chicago" comes back 60642 at
+                // confidence 0.5, and "424 Broadview Ave., Highland Park"
+                // comes back LOS ANGELES — Highland Park is an LA
+                // neighbourhood too. Asking it for the state first is no good
+                // (it answers CA); anchoring the search to the office is,
+                // because that is where the work actually is.
+                if (! isset($parts['state']) && ($office = $this->officeLocation()) !== null) {
+                    $result = $this->geocodeQuery($parts + [
+                        'filter' => 'circle:'.$office.','.self::SERVICE_RADIUS_METERS,
+                        'bias' => 'proximity:'.$office,
+                    ], $address, $anchor);
 
-                    if ($state !== null) {
-                        $result = $this->geocodeQuery($parts + ['state' => $state], $address, $anchor);
-
-                        if ($result !== null) {
-                            return $result;
-                        }
+                    if ($result !== null) {
+                        return $result;
                     }
                 }
             }
@@ -412,7 +424,7 @@ class GeoapifyService
                 'state' => $state,
                 'zip_code' => $zip,
             ];
-        } catch (RequestException $e) {
+        } catch (GuzzleException $e) {
             Log::channel('google_places')->error('Geoapify address lookup error', ApiErrorFormatter::format($e, [
                 'address' => $address,
             ]));
@@ -500,7 +512,7 @@ class GeoapifyService
 
         $cacheKey = 'geoapify_nearby_'.md5(strtolower($address).$office);
 
-        return Cache::remember($cacheKey, now()->addDays(30), function () use ($parts, $office, $address, $limit) {
+        return $this->rememberResolved($cacheKey, function () use ($parts, $office, $address, $limit) {
             try {
                 $response = $this->httpClient->get('https://api.geoapify.com/v1/geocode/search', [
                     'query' => $parts + [
@@ -547,7 +559,7 @@ class GeoapifyService
                     ->take($limit)
                     ->values()
                     ->all();
-            } catch (RequestException $e) {
+            } catch (GuzzleException $e) {
                 Log::channel('google_places')->error('Geoapify nearby address lookup error', ApiErrorFormatter::format($e, [
                     'address' => $address,
                 ]));
@@ -600,30 +612,35 @@ class GeoapifyService
     }
 
     /**
-     * Ask only what state this address is in — used to narrow a second,
-     * decisive lookup. Returns null unless the answer is unambiguous.
+     * Cache an answer for a month, a non-answer for minutes.
      *
-     * @param  array<string, string>  $parts
+     * @template T
+     * @param  callable(): T  $resolve
+     * @return T
      */
-    private function probeState(array $parts): ?string
+    private function rememberResolved(string $key, callable $resolve): mixed
     {
-        try {
-            $response = $this->httpClient->get('https://api.geoapify.com/v1/geocode/search', [
-                'query' => $parts + [
-                    'apiKey' => $this->apiKey,
-                    'format' => 'json',
-                    'limit' => 1,
-                    'filter' => 'countrycode:us',
-                ],
-            ]);
+        $cached = Cache::get($key);
 
-            $data = json_decode($response->getBody(), true);
-            $state = strtoupper(trim((string) ($data['results'][0]['state_code'] ?? '')));
-
-            return preg_match('/^[A-Z]{2}$/', $state) === 1 ? $state : null;
-        } catch (RequestException) {
-            return null;
+        if ($cached !== null && $cached !== []) {
+            return $cached;
         }
+
+        $value = $resolve();
+
+        Cache::put(
+            $key,
+            $value,
+            $value === null || $value === [] ? now()->addMinutes(15) : now()->addDays(30),
+        );
+
+        return $value;
+    }
+
+    /** "lon,lat" of the office, or null when it can't be resolved. */
+    private function officeLocation(): ?string
+    {
+        return $this->getVendorLocation(1) ?? $this->getUserVendorLocation();
     }
 
     /** The city segment the sender wrote, if any. */
@@ -737,7 +754,7 @@ class GeoapifyService
             Cache::put('geoapify_place_' . $normalized['place_id'], $normalized, now()->addHours(24));
 
             return $normalized;
-        } catch (RequestException $e) {
+        } catch (GuzzleException $e) {
             Log::channel('google_places')->error('Geoapify Place Details API Error', ApiErrorFormatter::format($e, [
                 'place_id' => $placeId,
             ]));

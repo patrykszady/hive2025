@@ -135,6 +135,9 @@ return [
     ],
 
     'geoapify' => [
+        // Request-path calls must fail fast rather than hold a page open.
+        'timeout' => (float) env('GEOAPIFY_TIMEOUT', 4),
+        'connect_timeout' => (float) env('GEOAPIFY_CONNECT_TIMEOUT', 2),
         'key' => env('GEOAPIFY_API_KEY'),
     ],
 

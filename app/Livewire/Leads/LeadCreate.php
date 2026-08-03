@@ -247,11 +247,40 @@ class LeadCreate extends Component
     /**
      * Replied leads are locked in: the Message composer is gone (the reply
      * went out — tracking shows on Details) and the lead can't be deleted.
+     *
+     * Unless it BOUNCED. A bounce means nobody read it, so the lead is only
+     * "replied" on paper — locking the composer would leave the one person who
+     * could fix the address with no way to send again.
      */
     #[Computed]
     public function hasReplied(): bool
     {
-        return ($this->lead?->last_status?->title ?? null) === 'Replied';
+        if (($this->lead?->last_status?->title ?? null) !== 'Replied') {
+            return false;
+        }
+
+        return ! $this->lastEmailBounced;
+    }
+
+    /**
+     * Did the most recent send attempt bounce? Judged on the latest delivery
+     * outcome only — a later successful send supersedes an older bounce.
+     */
+    #[Computed]
+    public function lastEmailBounced(): bool
+    {
+        if (! $this->lead?->exists) {
+            return false;
+        }
+
+        $outcome = \App\Models\EmailTracking::withoutGlobalScopes()
+            ->where('lead_id', $this->lead->id)
+            ->whereIn('event_type', ['bounced', 'delivered', 'opened', 'clicked'])
+            ->orderByDesc('event_at')
+            ->orderByDesc('id')
+            ->value('event_type');
+
+        return $outcome === 'bounced';
     }
 
     /**
@@ -372,17 +401,10 @@ class LeadCreate extends Component
             }
         }
 
-        $street = trim((string) ($data['address'] ?? ''));
-
-        if ($street === '') {
-            return [];
-        }
-
-        $candidates = app(\App\Services\GeoapifyService::class)->nearbyAddressCandidates($street);
-
-        // A single match is an answer, not a question — completeAddress()
-        // applies it on open, so nothing should be asked here.
-        return count($candidates) > 1 ? $candidates : [];
+        // Stored candidates ONLY. This is a computed property read during
+        // render; geocoding here put a third-party API call in the path of
+        // every lead click. CompleteLeadAddress writes them instead.
+        return [];
     }
 
     /**
@@ -407,27 +429,10 @@ class LeadCreate extends Component
             return;
         }
 
-        $completed = app(\App\Services\LeadAddressCompleter::class)->complete($data);
-
-        // Exactly one match near the office: take it.
-        $candidates = $completed['address_candidates'] ?? [];
-        if (is_array($candidates) && count($candidates) === 1) {
-            $only = (array) $candidates[0];
-            $completed['address'] = $only['address'];
-            $completed['city'] = $only['city'];
-            $completed['state'] = $only['state'];
-            $completed['zip'] = $only['zip_code'];
-            unset($completed['address_candidates']);
-        }
-
-        if ($completed === $data) {
-            return;
-        }
-
-        $this->lead->lead_data = $completed;
-        $this->lead->saveQuietly();
-        $this->lead = $this->lead->fresh(['user.clients.users', 'last_status']);
-        $this->address = $completed['address'] ?? $this->address;
+        // Queued, not inline: completing an address means calling Geoapify,
+        // and nobody should wait on a third party to see a lead. The modal
+        // shows what's on file now; the next open shows the completion.
+        \App\Jobs\CompleteLeadAddress::dispatch($this->lead->id);
     }
 
     /**
@@ -1082,12 +1087,29 @@ class LeadCreate extends Component
         $cursor = Carbon::createFromFormat('H:i', $times[0]);
         $end = Carbon::createFromFormat('H:i', $times[1]);
 
+        // Starts that collide with what's already on Patryk's or Greg's
+        // calendar are withheld — offering them books a clash the office then
+        // has to untangle. selectExactTime() validates against this list, so
+        // the filter holds server-side too.
+        $busyIntervals = app(\App\Services\AdminCalendarBusy::class)
+            ->busyIntervalsFor((string) ($slot['date'] ?? ''));
+
         $options = [];
         while ($cursor < $end) {
-            $options[] = [
-                'value' => $cursor->format('H:i'),
-                'label' => $cursor->format('g:i A'),
-            ];
+            $chipStart = $cursor->format('H:i');
+            $chipEnd = $cursor->copy()->addMinutes(self::CONSULT_MINUTES)->format('H:i');
+
+            $clashes = collect($busyIntervals)->contains(
+                fn (array $busy) => $chipStart < $busy[1] && $busy[0] < $chipEnd,
+            );
+
+            if (! $clashes) {
+                $options[] = [
+                    'value' => $chipStart,
+                    'label' => $cursor->format('g:i A'),
+                ];
+            }
+
             $cursor->addMinutes(30);
         }
 

@@ -1,8 +1,10 @@
 <?php
 
+use App\Jobs\CompleteLeadAddress;
 use App\Livewire\Leads\LeadCreate;
 use App\Models\Client;
 use App\Models\CompanyEmail;
+use App\Models\EmailTracking;
 use App\Models\Lead;
 use App\Models\User;
 use App\Models\Vendor;
@@ -284,6 +286,13 @@ it('offers the matching addresses near the office instead of guessing one', func
     // "511 Sherwood Dr" is a real address in Addison (12.0 mi from the office)
     // AND Streamwood (13.4 mi). Taking the nearest would have filed this lead
     // under the wrong town — the correct one here is Streamwood.
+    // Candidates are written by CompleteLeadAddress (off the request path) and
+    // read from the lead — opening it must never geocode.
+    $candidates = [
+        ['address' => '511 Sherwood Drive', 'city' => 'Addison', 'state' => 'IL', 'zip_code' => '60101', 'miles' => 12.0],
+        ['address' => '511 Sherwood Drive', 'city' => 'Streamwood', 'state' => 'IL', 'zip_code' => '60107', 'miles' => 13.4],
+    ];
+
     $vendor = Vendor::factory()->create(['options' => (object) ['short_name' => 'GS']]);
 
     $admin = new User();
@@ -317,6 +326,7 @@ it('offers the matching addresses near the office instead of guessing one', func
             'email' => $contact->email,
             'phone' => '6308354185',
             'address' => '511 Sherwood Dr',
+            'address_candidates' => $candidates,
             'message' => 'New front door',
         ],
     ]);
@@ -324,13 +334,6 @@ it('offers the matching addresses near the office instead of guessing one', func
 
     $fx = ['admin' => $admin, 'contact' => $contact, 'lead' => $lead];
 
-    $this->mock(GeoapifyService::class)
-        ->shouldReceive('geocodeAddress')->andReturn(null)
-        ->shouldReceive('nearbyAddressCandidates')
-        ->andReturn([
-            ['address' => '511 Sherwood Drive', 'city' => 'Addison', 'state' => 'IL', 'zip_code' => '60101', 'miles' => 12.0],
-            ['address' => '511 Sherwood Drive', 'city' => 'Streamwood', 'state' => 'IL', 'zip_code' => '60107', 'miles' => 13.4],
-        ]);
 
     $component = Livewire::actingAs($fx['admin'])
         ->test(LeadCreate::class)
@@ -362,6 +365,8 @@ it('offers the matching addresses near the office instead of guessing one', func
 });
 
 it('takes the only nearby address without asking', function () {
+    // The completion runs in CompleteLeadAddress now — that job is what the
+    // modal's "open" schedules, so exercise it directly.
     // One match is an answer, not a question — the picker is for genuine
     // ambiguity, and asking about a single option is just a chore.
     $vendor = Vendor::factory()->create(['options' => (object) ['short_name' => 'GS']]);
@@ -397,15 +402,22 @@ it('takes the only nearby address without asking', function () {
     ]);
     $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $vendor->id]);
 
-    $component = Livewire::actingAs($admin)->test(LeadCreate::class)->call('editLead', $lead);
+    (new CompleteLeadAddress($lead->id))->handle(
+        app(\App\Services\LeadAddressCompleter::class),
+        app(\App\Services\LeadContactProvisioner::class),
+    );
 
     $data = $lead->fresh()->lead_data;
 
     expect($data['city'])->toBe('Gurnee')
         ->and($data['state'])->toBe('IL')
         ->and($data['zip'])->toBe('60031')
-        ->and($component->instance()->addressCandidates)->toBe([])
-        // Only the phone is outstanding now.
+        // Nothing left to ask about.
+        ->and($data['address_candidates'] ?? null)->toBeNull();
+
+    $component = Livewire::actingAs($admin)->test(LeadCreate::class)->call('editLead', $lead->fresh());
+
+    expect($component->instance()->addressCandidates)->toBe([])
         ->and($component->instance()->missingContactInfo)->toBe(['a phone number']);
 
     $component->assertDontSee('Which address is this?', false);
@@ -448,4 +460,154 @@ it('does not report a complete lead address as missing just because no client ex
 
     expect($component->instance()->missingContactInfo)->toBe(['a phone number'])
         ->and($lead->fresh()->user_id)->toBeNull();
+});
+
+it('never calls the geocoder while opening a lead', function () {
+    // Opening a lead used to geocode inline; one slow third-party call made
+    // the modal look like the click did nothing (worst case seen: 40s).
+    \Illuminate\Support\Facades\Queue::fake();
+
+    $vendor = Vendor::factory()->create(['options' => (object) ['short_name' => 'GS']]);
+
+    $admin = new User();
+    $admin->forceFill([
+        'first_name' => 'Patryk',
+        'last_name' => 'Sender',
+        'email' => 'no-geocode.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224555####'),
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $admin->save();
+    $vendor->users()->attach($admin->id, ['role_id' => 1]);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+
+    $lead = Lead::create([
+        'date' => now(),
+        'origin' => 'Email',
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $admin->id,
+        'lead_data' => [
+            'name' => 'Slow Address',
+            'email' => 'slow@example.com',
+            'address' => '511 Sherwood Dr',
+        ],
+    ]);
+    $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $vendor->id]);
+
+    // A spy records calls without intercepting them, so opening the lead
+    // behaves exactly as it does in production.
+    $geo = $this->spy(GeoapifyService::class);
+
+    Livewire::actingAs($admin)->test(LeadCreate::class)->call('editLead', $lead);
+
+    // Nothing reached out to the geocoder…
+    $geo->shouldNotHaveReceived('geocodeAddress');
+    $geo->shouldNotHaveReceived('nearbyAddressCandidates');
+
+    // …the work happens on the queue instead.
+    \Illuminate\Support\Facades\Queue::assertPushed(CompleteLeadAddress::class);
+});
+
+/** A lead whose reply already went out, with the given tracking outcomes. */
+function repliedLeadWithTracking(array $events): array
+{
+    $vendor = Vendor::factory()->create(['options' => (object) ['short_name' => 'GS']]);
+
+    $admin = new User();
+    $admin->forceFill([
+        'first_name' => 'Patryk',
+        'last_name' => 'Sender',
+        'email' => 'bounce-admin.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224555####'),
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $admin->save();
+    $vendor->users()->attach($admin->id, ['role_id' => 1]);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+
+    $contact = User::query()->create([
+        'first_name' => 'Jon',
+        'last_name' => 'Green',
+        'email' => 'jon.bounce.'.uniqid().'@example.com',
+        'cell_phone' => fake()->unique()->numerify('847555####'),
+    ]);
+
+    $client = Client::factory()->create(['address' => '424 Broadview Ave.', 'city' => 'Highland Park', 'state' => 'IL', 'zip_code' => '60035']);
+    $client->vendors()->attach($vendor->id);
+    $client->users()->attach($contact->id);
+
+    $lead = Lead::create([
+        'date' => now(),
+        'origin' => 'gs.construction',
+        'user_id' => $contact->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $contact->id,
+        'lead_data' => [
+            'name' => 'Jon Green',
+            'email' => $contact->email,
+            'phone' => $contact->cell_phone,
+            'address' => '424 Broadview Ave.',
+            'city' => 'Highland Park',
+            'state' => 'IL',
+            'zip' => '60035',
+            'message' => 'Do you install new bathrooms?',
+        ],
+    ]);
+    $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $vendor->id]);
+    $lead->statuses()->create(['title' => 'Replied', 'belongs_to_vendor_id' => $vendor->id]);
+
+    foreach ($events as $i => $event) {
+        EmailTracking::withoutGlobalScopes()->create([
+            'lead_id' => $lead->id,
+            'belongs_to_vendor_id' => $vendor->id,
+            'event_type' => $event,
+            'email_template_name' => 'Consult',
+            'event_at' => now()->addMinutes($i),
+        ]);
+    }
+
+    return ['admin' => $admin, 'lead' => $lead];
+}
+
+it('reopens the Message tab when the reply bounced', function () {
+    // A bounce means nobody read it — locking the composer would leave the one
+    // person who could fix the address with no way to send again.
+    $fx = repliedLeadWithTracking(['sent', 'bounced']);
+
+    $component = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']);
+
+    expect($component->instance()->lastEmailBounced)->toBeTrue()
+        ->and($component->instance()->hasReplied)->toBeFalse();
+
+    $component->assertSee('name="messages"', false)
+        ->assertSee('Email bounced', false);
+});
+
+it('keeps a delivered reply locked', function () {
+    $fx = repliedLeadWithTracking(['sent', 'delivered']);
+
+    $component = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']);
+
+    expect($component->instance()->lastEmailBounced)->toBeFalse()
+        ->and($component->instance()->hasReplied)->toBeTrue();
+
+    $component->assertDontSee('name="messages"', false)
+        ->assertDontSee('Email bounced', false);
+});
+
+it('locks again once a later send gets through', function () {
+    // An old bounce must not reopen the composer forever — the latest
+    // delivery outcome is what counts.
+    $fx = repliedLeadWithTracking(['sent', 'bounced', 'sent', 'delivered']);
+
+    $component = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']);
+
+    expect($component->instance()->lastEmailBounced)->toBeFalse()
+        ->and($component->instance()->hasReplied)->toBeTrue();
 });

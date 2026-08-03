@@ -218,6 +218,24 @@ class NylasService
     }
 
     /**
+     * Busy blocks for one or more mailboxes over a time range.
+     *
+     * One grant can query coworkers' mailboxes in the same org, so a single
+     * call covers every admin. Each entry of data[] is either
+     * {email, time_slots: [{start_time, end_time, status}], object: "free_busy"}
+     * or {email, error, object: "error"} for an address the grant can't see.
+     * Times are unix seconds; Microsoft caps the range at 62 days.
+     */
+    public function getFreeBusy(string $grantId, array $emails, int $startTime, int $endTime): array
+    {
+        return $this->makeNylasRequest('POST', "/grants/{$grantId}/calendars/free-busy", [
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'emails' => array_values($emails),
+        ]);
+    }
+
+    /**
      * Create a calendar event for a given grant.
      */
     public function createEvent(string $grantId, array $payload): array
