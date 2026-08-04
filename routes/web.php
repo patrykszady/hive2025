@@ -575,6 +575,12 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     //PROJECTS
     Route::get('/projects', ProjectsIndex::class)->name('projects.index');
     Route::get('/projects/{project}', ProjectShow::class)->name('projects.show');
+    // The stop-motion camera: crew shoot the next progress frame with the
+    // last one onion-skinned over the viewfinder.
+    Route::get('/projects/{project}/images', \App\Livewire\Projects\TimelapseStudio::class)->name('projects.images');
+    // Old name kept working — links and bookmarks predate the rename.
+    Route::redirect('/projects/{project}/timelapse', '/projects/{project}/images')->name('projects.timelapse');
+    Route::get('/timelapse/frames/{frame}', [\App\Http\Controllers\TimelapseController::class, 'frame'])->name('projects.timelapse.frame');
     // Route::get('projects/reimbursments/print/{project}', [ReceiptController::class, 'printReimbursment'])->name('print_reimbursment');
 
     //TIMESHEETS

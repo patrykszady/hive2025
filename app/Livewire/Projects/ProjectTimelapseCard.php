@@ -1,0 +1,68 @@
+<?php
+
+namespace App\Livewire\Projects;
+
+use App\Models\Project;
+use App\Models\ProjectTimelapseFrame;
+use Livewire\Attributes\Computed;
+use Livewire\Component;
+
+/**
+ * The project page's Timelapse card: latest frame, count, and the way into
+ * the camera. Kept deliberately small — shooting and reviewing happen in the
+ * studio page.
+ */
+class ProjectTimelapseCard extends Component
+{
+    public Project $project;
+
+    /**
+     * The six newest shots across every collection. Newest by id, not
+     * sort_order — sort_order only ranks WITHIN a timelapse, and "the last
+     * six photos on this job" means most recently taken, whatever album.
+     *
+     * @return \Illuminate\Support\Collection<int, ProjectTimelapseFrame>
+     */
+    #[Computed]
+    public function recentFrames()
+    {
+        return ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->with('takenBy:id,first_name,nickname')
+            ->orderByDesc('id')
+            ->limit(6)
+            ->get();
+    }
+
+    #[Computed]
+    public function frameCount(): int
+    {
+        return ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->count();
+    }
+
+    public function render()
+    {
+        return view('livewire.projects.project-timelapse-card');
+    }
+
+    /**
+     * Same-chrome skeleton; the COUNT is far cheaper than the card it stands
+     * in for, and an empty card never flashes fake content.
+     */
+    public function placeholder(array $params = []): \Illuminate\Contracts\View\View
+    {
+        $projectId = $params['project'] instanceof Project
+            ? $params['project']->id
+            : (int) ($params['project'] ?? 0);
+
+        $hasFrames = ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $projectId))
+            ->exists();
+
+        return view('livewire.projects.project-timelapse-card-placeholder', [
+            'hasFrames' => $hasFrames,
+        ]);
+    }
+}

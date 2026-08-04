@@ -111,6 +111,11 @@
                 </div>
             @endif
 
+            {{-- TIMELAPSE — progress shots with onion-skin capture --}}
+            <div class="order-4 lg:order-3">
+                <livewire:projects.project-timelapse-card :project="$project" lazy />
+            </div>
+
             @can('viewFinancials', $project)
                 @can('update', $project)
                     @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']) && $project->expenses()->exists())

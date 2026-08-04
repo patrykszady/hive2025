@@ -3,6 +3,13 @@
 return [
     'ffmpeg_path' => env('FFMPEG_PATH', '/usr/bin/ffmpeg'),
 
+    // Timelapse frame registration (scripts/align_frame.py). The venv keeps
+    // opencv out of the system Python; provision the same path on the server.
+    'timelapse_align' => [
+        'python' => env('TIMELAPSE_ALIGN_PYTHON', '/home/patryk/.venvs/hive-cv/bin/python'),
+        'min_inliers' => (int) env('TIMELAPSE_ALIGN_MIN_INLIERS', 25),
+    ],
+
     'url_shortener' => [
         'enabled' => env('URL_SHORTENER_ENABLED', true),
     ],
