@@ -104,7 +104,9 @@
     @pointercancel.window="endDrag()"
     class="relative w-full"
 >
-    <div class="relative overflow-hidden rounded-lg bg-zinc-950 aspect-[4/3]">
+    {{-- Capped and centred: at full page width a 4:3 box would run past a
+         laptop screen, leaving one photo to fill the whole viewport. --}}
+    <div class="relative mx-auto w-full max-w-3xl overflow-hidden rounded-lg bg-zinc-950 aspect-[4/3]">
         {{-- Blur placeholder while the first frame loads --}}
         <img
             x-cloak

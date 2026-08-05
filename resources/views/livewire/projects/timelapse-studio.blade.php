@@ -6,7 +6,19 @@
      <video>), so the overlay updates from JS: after a successful upload the
      just-captured canvas becomes the new overlay — no round trip, never
      stale. --}}
+@php
+    // Desktop layout turns on whether the camera is out. Closed (the usual
+    // case: you came to LOOK at photos) the collections take the whole width
+    // and the grids go wide; open, the camera keeps its half and the grids
+    // narrow to suit.
+    $cameraOpen = (bool) $this->collection;
+    $photoGrid = $cameraOpen
+        ? 'grid grid-cols-3 gap-2 pt-1 sm:grid-cols-4 xl:grid-cols-5'
+        : 'grid grid-cols-3 gap-2 pt-1 sm:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8';
+@endphp
+
 <x-page.shell
+    width="wide"
     :cols="4"
     :breadcrumbs="[
         ['label' => 'Projects', 'href' => route('projects.index')],
@@ -28,11 +40,12 @@
         </flux:callout>
     </div>
 
-    <x-page.column :span="2">
-        {{-- The camera only exists once a collection is chosen: arriving here
-             is usually about looking at photos, and an unrequested camera
-             means an unrequested permission prompt. --}}
-        @if ($this->collection)
+    {{-- The camera only exists once a collection is chosen: arriving here is
+         usually about looking at photos, and an unrequested camera means an
+         unrequested permission prompt. No collection, no column — an empty
+         half-page placeholder helped nobody. --}}
+    @if ($this->collection)
+        <x-page.column :span="2" class="lg:sticky lg:top-4 lg:self-start">
             <x-island-card heading="Camera">
                 <x-slot:badge>
                     <flux:badge color="indigo" size="sm" inset="top bottom">{{ $this->collection->title }}</flux:badge>
@@ -49,54 +62,81 @@
             <div
                 wire:ignore
                 wire:key="camera-{{ $this->collection?->id }}"
-                x-data="timelapseCapture($wire, @js($this->latestFrame ? route('projects.timelapse.frame', $this->latestFrame) : ''), @js((bool) $this->collection?->isTimelapse()))"
+                x-data="timelapseCapture($wire, @js($this->latestFrame ? route('projects.timelapse.frame', [$this->latestFrame, 'v' => $this->latestFrame->version]) : ''), @js((bool) $this->collection?->isTimelapse()))"
                 class="space-y-3"
+                x-bind:class="fullscreen ? 'fixed inset-0 z-50 bg-black' : ''"
             >
                 {{-- Viewfinder: live camera with the last frame ghosted on
                      top. The ring is the framing guide — the live image is
                      compared against the last frame a few times a second, and
                      the ring turns green when the shot lines up. --}}
                 <div
-                    class="relative overflow-hidden rounded-lg bg-zinc-950 aspect-[4/3] ring-4 transition-[--tw-ring-color] duration-300"
+                    class="relative overflow-hidden bg-zinc-950 ring-4 transition-[--tw-ring-color] duration-300"
                     x-show="cameraReady" x-cloak
-                    x-bind:class="(aligned ? 'ring-green-500 cursor-pointer' : (onionSrc ? 'ring-zinc-500/40' : 'ring-transparent'))"
+                    x-bind:class="(fullscreen ? 'absolute inset-0 rounded-none' : 'aspect-[4/3] rounded-lg') + ' ' + (aligned ? 'ring-green-500 cursor-pointer' : (onionSrc ? 'ring-zinc-500/40' : 'ring-transparent'))"
                     x-on:click="aligned && !shutter && captureSharp()"
                 >
-                    <video x-ref="video" autoplay playsinline muted class="absolute inset-0 h-full w-full object-contain"></video>
+                    {{-- object-cover: the box shows exactly what capture will
+                         store — a portrait stream's centered landscape band.
+                         Fullscreen letterboxes (contain) so nothing is hidden
+                         while framing. --}}
+                    <video x-ref="video" autoplay playsinline muted class="absolute inset-0 h-full w-full"
+                        x-bind:class="fullscreen ? 'object-contain' : 'object-cover'"></video>
                     <img
                         x-show="onionOn && onionSrc"
                         x-bind:src="onionSrc || null"
-                        class="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                        class="pointer-events-none absolute inset-0 h-full w-full"
+                        x-bind:class="fullscreen ? 'object-contain' : 'object-cover'"
                         x-bind:style="`opacity: ${onionOpacity / 100}`"
                         alt=""
                     />
 
-                    {{-- Bubble level: the dot is where the last frame's content
-                         sits relative to the viewfinder — walk it into the
-                         ring's center and the ring goes green. RED dot pinned
-                         center = the guide can't find the last frame's view at
-                         all; move until it turns amber, then walk it in. --}}
-                    <div x-show="onionSrc && guideVisible && !portraitBlock" x-cloak class="pointer-events-none absolute inset-0">
-                        <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 size-10 rounded-full border-2"
-                            x-bind:class="aligned ? 'border-green-400' : 'border-white/60'"></div>
-                        <div class="absolute size-4 rounded-full transition-transform duration-150"
-                            x-bind:class="aligned ? 'bg-green-400' : (lost ? 'bg-red-500 animate-pulse' : 'bg-amber-400')"
-                            x-bind:style="`left: calc(50% - 8px + ${bubbleX}px); top: calc(50% - 8px + ${bubbleY}px)`"></div>
+                    {{-- Merge-the-crosshairs guide (the camera-app level
+                         pattern): the faint cross is where you're pointing,
+                         the colored cross is where the last frame's view is.
+                         Pan toward the colored cross; it warms amber → green
+                         as the shot closes in, and both crosses sit on top of
+                         each other when it's right. RED pulsing dot = the
+                         guide can't find the last frame's view at all. --}}
+                    <div x-show="onionSrc && guideVisible" x-cloak class="pointer-events-none absolute inset-0">
+                        <svg class="absolute left-1/2 top-1/2 size-10 -translate-x-1/2 -translate-y-1/2 text-white/60"
+                            viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 6v9M20 25v9M6 20h9M25 20h9" />
+                        </svg>
+                        <svg x-show="!lost" class="absolute size-10 transition-transform duration-150"
+                            viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="3"
+                            x-bind:style="`left: calc(50% - 20px + ${bubbleX}px); top: calc(50% - 20px + ${bubbleY}px); color: ${guideColor}`">
+                            <path d="M20 6v9M20 25v9M6 20h9M25 20h9" />
+                            <circle cx="20" cy="20" r="3.5" fill="currentColor" stroke="none" />
+                        </svg>
+                        <div x-show="lost" class="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500 animate-pulse"></div>
                     </div>
 
-                    {{-- state chip --}}
-                    <div x-show="onionSrc && !portraitBlock" x-cloak class="absolute left-2 top-2 rounded px-2 py-0.5 text-xs font-medium"
+                    {{-- state chip: says the actual move to make --}}
+                    <div x-show="onionSrc" x-cloak class="absolute left-2 top-2 rounded px-2 py-0.5 text-xs font-medium"
                         x-bind:class="aligned ? 'bg-green-500/90 text-white' : (lost ? 'bg-red-500/90 text-white' : 'bg-black/60 text-white')"
-                        x-text="aligned ? 'Lined up — take the frame' : (lost ? `Find the last frame’s view` : (guideVisible ? 'Match the last frame' : ''))"></div>
+                        x-text="aligned ? 'Lined up — take the frame' : (lost ? `Find the last frame’s view` : (guideVisible ? hint : ''))"></div>
 
-                    {{-- Portrait phone = rotated capture. Block until turned. --}}
-                    <div x-show="portraitBlock" x-cloak class="absolute inset-0 z-10 grid place-items-center bg-black/70 text-center">
-                        <div class="space-y-2 px-6">
-                            <flux:icon.device-phone-mobile class="mx-auto size-10 rotate-90 text-white" />
-                            <p class="text-sm font-medium text-white">Turn your phone sideways</p>
-                            <p class="text-xs text-zinc-300">Frames are shot landscape so they match the sequence.</p>
-                        </div>
-                    </div>
+                    {{-- Fullscreen chrome: exit up top, a camera-app shutter
+                         floating at the bottom — the button row below the
+                         viewfinder is hidden while the viewfinder IS the
+                         screen. --}}
+                    <button type="button" x-show="fullscreen" x-cloak x-on:click.stop="exitFullscreen()"
+                        class="absolute right-2 top-2 z-20 rounded-full bg-black/60 p-2 text-white">
+                        <flux:icon.x-mark class="size-5" />
+                    </button>
+                    <button type="button" x-show="fullscreen" x-cloak x-on:click.stop="captureSharp()" x-bind:disabled="shutter"
+                        class="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border-2 border-white/60 p-1"
+                        x-bind:class="aligned ? 'bg-green-500' : 'bg-black/60'">
+                        <span class="block size-10 rounded-full bg-white"></span>
+                    </button>
+
+                    {{-- Manual way into fullscreen — rotation is the usual
+                         trigger, but a tap should work on any device. --}}
+                    <button type="button" x-show="!fullscreen" x-cloak x-on:click.stop="enterFullscreen()"
+                        class="absolute bottom-2 right-2 z-10 rounded bg-black/50 p-1.5 text-white">
+                        <flux:icon.arrows-pointing-out class="size-4" />
+                    </button>
 
                     {{-- steadying: between tap and shutter --}}
                     <div x-show="armingCapture" x-cloak class="absolute inset-x-0 bottom-2 z-10 text-center">
@@ -137,8 +177,8 @@
                     <flux:text class="text-xs text-zinc-500">You can still add photos with the upload below.</flux:text>
                 </div>
 
-                <div class="flex items-center gap-3" x-show="cameraReady" x-cloak>
-                    <flux:button variant="primary" icon="camera" x-on:click="captureSharp()" x-bind:disabled="shutter || portraitBlock" class="flex-1"
+                <div class="flex items-center gap-3" x-show="cameraReady && !fullscreen" x-cloak>
+                    <flux:button variant="primary" icon="camera" x-on:click="captureSharp()" x-bind:disabled="shutter" class="flex-1"
                         x-bind:class="aligned ? '!bg-green-600 hover:!bg-green-700' : ''">
                         Take Frame
                     </flux:button>
@@ -146,126 +186,62 @@
 
 
                 {{-- Onion-skin controls --}}
-                <div class="flex items-center gap-3" x-show="cameraReady && onionSrc" x-cloak>
+                <div class="flex items-center gap-3" x-show="cameraReady && onionSrc && !fullscreen" x-cloak>
                     <flux:switch x-model="onionOn" label="Overlay last frame" />
                     <input type="range" min="10" max="90" x-model="onionOpacity" class="flex-1 accent-indigo-500" x-show="onionOn" />
                 </div>
             </div>
 
-            {{-- Fallback / bulk add: plain upload, same pipeline --}}
-            <form wire:submit="uploadFile" class="flex items-end gap-2 pt-1">
-                <div class="flex-1">
-                    <flux:input type="file" wire:model="file" label="Add a photo instead" accept="image/jpeg,image/png" />
-                    <flux:error name="file" />
-                </div>
-                <flux:button type="submit" wire:loading.attr="disabled" wire:target="file, uploadFile">Add</flux:button>
-            </form>
-        </x-island-card>
-        @else
-            <x-island-card heading="Camera">
-                <div class="space-y-2 py-6 text-center">
-                    <flux:icon.camera class="mx-auto size-8 text-zinc-400" />
-                    <flux:text class="text-sm text-zinc-500">
-                        Pick a collection on the right to start shooting.
-                    </flux:text>
-                </div>
-            </x-island-card>
-        @endif
-    </x-page.column>
-
-    <x-page.column :span="2">
-        {{-- Every collection on this project. A timelapse shows its playback
-             and frames; a photo album just its photos. The one being shot
-             into is called out, and clicking any other switches the camera. --}}
-        @foreach ($this->collections as $collection)
-            @php($isTarget = $collection->id === $this->collection?->id)
-            <x-index-table
-                :heading="$collection->title"
-                :collapsible="true"
-                :expanded="false"
-                wire:key="collection-{{ $collection->id }}-{{ $collection->frames->count() }}"
-            >
-                <x-slot:badge>
-                    <flux:badge :color="$collection->isTimelapse() ? 'indigo' : 'zinc'" size="sm" inset="top bottom">
-                        {{ $collection->isTimelapse() ? 'Timelapse' : 'Photos' }}
-                    </flux:badge>
-                    <flux:badge color="zinc" size="sm" inset="top bottom">
-                        {{ $collection->frames->count() }}
-                    </flux:badge>
-                    @if ($isTarget)
-                        <flux:badge color="green" size="sm" inset="top bottom">Shooting into</flux:badge>
-                    @endif
-                </x-slot:badge>
-
-                <x-slot:actions>
-                    @unless ($isTarget)
-                        <flux:button size="xs" variant="ghost" icon="camera" wire:click="selectCollection({{ $collection->id }})">
-                            {{ $collection->isTimelapse() ? 'Shoot frame' : 'Add photo' }}
-                        </flux:button>
-                    @endunless
-                    @if (auth()->user()->vendor_role === 'Admin' && $collection->title !== 'Project Images')
-                        {{-- Destructive, so only offered once the card is open
-                             and the owner can see what they'd be deleting. --}}
-                        <flux:button size="xs" variant="ghost" icon="trash"
-                            x-show="open" x-cloak
-                            wire:click="deleteCollection({{ $collection->id }})"
-                            wire:confirm="Delete “{{ $collection->title }}” and all {{ $collection->frames->count() }} of its images?" />
-                    @endif
-                    {{-- The shared chevron every collapsible card uses; sits
-                         last so it's always the rightmost control. --}}
-                    <x-card-collapse-toggle :label="'Toggle '.$collection->title" />
-                </x-slot:actions>
-
-                {{-- Playback: sequences only, and only once there's something
-                     to play. --}}
-                @if ($collection->isTimelapse() && $collection->frames->count() >= 2)
-                    @include('livewire.projects._timelapse-viewer', [
-                        'frameUrls' => $collection->frames->map(fn ($f) => route('projects.timelapse.frame', $f))->values()->all(),
-                    ])
-                @endif
-
-                @if ($collection->frames->isEmpty())
-                    <flux:text class="py-6 text-center text-sm text-zinc-500">
-                        {{ $collection->isTimelapse() ? 'No frames yet — line up the camera and take the first one.' : 'No photos yet.' }}
-                    </flux:text>
-                @else
-                    {{-- The lightbox payload is the WHOLE collection, so build
-                         it once here rather than re-encoding it into every
-                         tile's click handler. --}}
-                    <div class="grid grid-cols-3 gap-2 pt-1 sm:grid-cols-4"
-                        x-data="{ lb: {{ Js::from($this->lightboxFrames($collection)) }} }">
-                        @foreach ($collection->frames as $index => $frame)
-                            <button type="button"
-                                wire:key="thumb-{{ $frame->id }}"
-                                x-on:click="$dispatch('open-lightbox', { frames: lb, index: {{ $index }} })"
-                                class="group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800 cursor-pointer">
-                                <img src="{{ route('projects.timelapse.frame', $frame) }}" alt=""
-                                    class="h-full w-full object-cover transition group-hover:opacity-90" loading="lazy" />
-                                <span class="absolute inset-x-0 bottom-0 bg-black/50 px-1 py-0.5 text-[10px] text-white">
-                                    {{ $frame->created_at->format('M j') }}
-                                </span>
-                            </button>
-                        @endforeach
+            {{-- Fallback / bulk add: plain upload, same pipeline. Folded away
+                 behind a link — it's the exception, and the camera card is
+                 tall enough already on a phone. --}}
+            <div x-data="{ up: false }" class="pt-1">
+                <flux:button variant="ghost" size="xs" icon="arrow-up-tray" x-on:click="up = !up">
+                    Upload a photo instead
+                </flux:button>
+                <form wire:submit="uploadFile" x-show="up" x-cloak class="flex items-end gap-2 pt-2">
+                    <div class="flex-1">
+                        <flux:input type="file" wire:model="file" accept="image/jpeg,image/png" />
                     </div>
-                @endif
-            </x-index-table>
+                    <flux:button type="submit" wire:loading.attr="disabled" wire:target="file, uploadFile">Add</flux:button>
+                </form>
+            </div>
+        </x-island-card>
+        </x-page.column>
+    @endif
+
+    <x-page.column :span="$cameraOpen ? 2 : 4">
+        {{-- The project's own photos lead: the album first, then the texted
+             ones. Timelapses are the specialist view, so they sit below both
+             (further down this column). --}}
+        @foreach ($this->collections->reject->isTimelapse() as $collection)
+            @include('livewire.projects._collection-card')
         @endforeach
 
         {{-- Photos texted about this job. Read-only: they belong to the
              message thread, so they're shown here but managed there. --}}
         @if ($this->messageImages->isNotEmpty())
-            <x-index-table heading="Message Images" :collapsible="true" :expanded="false">
+            <x-index-table heading="Message Images" :collapsible="true" :expanded="true">
                 <x-slot:badge>
                     <flux:badge color="zinc" size="sm" inset="top bottom">{{ $this->messageImages->count() }}</flux:badge>
                 </x-slot:badge>
 
                 <x-slot:actions>
+                    {{-- Texted photos can be selected and forwarded too. --}}
+                    <span x-show="open && $store.picsel.on" x-cloak class="flex items-center gap-1">
+                        <flux:button size="xs" variant="primary" color="indigo" icon="chat-bubble-left-right"
+                            x-on:click="$wire.openTextImagesModal($store.picsel.ids, $store.picsel.msgs)"
+                            x-bind:disabled="$store.picsel.count === 0">
+                            <span x-text="$store.picsel.count ? `Text ${$store.picsel.count}` : 'Text'"></span>
+                        </flux:button>
+                        <flux:button size="xs" variant="ghost" x-on:click="$store.picsel.stop()">Cancel</flux:button>
+                    </span>
+                    <flux:button size="xs" variant="ghost" x-show="open && !$store.picsel.on" x-cloak
+                        x-on:click="$store.picsel.start()">
+                        Select
+                    </flux:button>
                     <x-card-collapse-toggle label="Toggle message images" />
                 </x-slot:actions>
-
-                <flux:description class="pb-1">
-                    Photos sent to or from {{ $project->client?->name ?? 'the client' }} by text.
-                </flux:description>
 
                 {{-- One chip per person who has sent a photo — tap to see just
                      theirs, tap again to clear. --}}
@@ -285,13 +261,17 @@
                      wire:key ties the grid to the active filter: morphs leave
                      x-data alone, so without it a filter change would keep
                      serving the OLD payload to the lightbox. --}}
-                <div class="grid grid-cols-3 gap-2 pt-1 sm:grid-cols-4"
+                <div x-data="photoRows({{ $this->messageImages->count() }})">
+                <div class="{{ $photoGrid }}" data-photo-grid
                     wire:key="msg-grid-{{ $messageSender ?? 'all' }}"
                     x-data="{ lb: {{ Js::from($this->lightboxMessageImages()) }} }">
                     @foreach ($this->messageImages as $index => $image)
                         <button type="button"
                             wire:key="msg-image-{{ $index }}"
-                            x-on:click="$dispatch('open-lightbox', { frames: lb, index: {{ $index }} })"
+                            x-show="show({{ $index }})"
+                            x-on:click="$store.picsel.on
+                                ? $store.picsel.toggleMsg(@js($image['raw']))
+                                : $dispatch('open-lightbox', { frames: lb, index: {{ $index }} })"
                             class="group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
                             {{-- A failed load gets two retries before the tile
                                  dims: one dropped request on jobsite wifi must
@@ -300,18 +280,36 @@
                                  answers every image with login HTML, and
                                  removing on error would silently empty the
                                  whole grid while the count still said 45. --}}
-                            <img src="{{ $image['url'] }}" alt=""
+                            <img src="{{ $image['thumb'] }}" alt=""
                                 x-data="{ tries: 0 }"
                                 x-on:error="if (tries < 2) { tries++; const b = $el.src.replace(/[?&]r=\d+$/, ''); setTimeout(() => $el.src = b + (b.includes('?') ? '&' : '?') + 'r=' + tries, 700 * tries) } else { $el.style.display = 'none'; $el.closest('button').classList.add('opacity-40', 'pointer-events-none') }"
                                 class="h-full w-full object-cover transition group-hover:opacity-90" loading="lazy" />
                             <span class="absolute inset-x-0 bottom-0 truncate bg-black/50 px-1 py-0.5 text-[10px] text-white">
-                                {{ $image['sender'] }} · {{ $image['sent_at']->format('M j') }}
+                                {{ $image['sender'] }} · {{ $image['sent_at']->format('n/j') }}
+                            </span>
+                            {{-- selection ring + check --}}
+                            <span x-show="$store.picsel.on" x-cloak
+                                class="absolute inset-0 rounded-lg"
+                                x-bind:class="$store.picsel.hasMsg(@js($image['raw'])) ? 'ring-4 ring-indigo-500 ring-inset bg-indigo-500/20' : ''"></span>
+                            <span x-show="$store.picsel.on" x-cloak
+                                class="absolute right-1 top-1 grid size-5 place-items-center rounded-full text-white"
+                                x-bind:class="$store.picsel.hasMsg(@js($image['raw'])) ? 'bg-indigo-500' : 'bg-black/40'">
+                                <flux:icon.check class="size-3" x-show="$store.picsel.hasMsg(@js($image['raw']))" />
                             </span>
                         </button>
                     @endforeach
                 </div>
+                @include('livewire.projects._show-more')
+                </div>
             </x-index-table>
         @endif
+
+        {{-- The sequences, below both photo cards. Each shows its playback and
+             its frames; the one being shot into is called out, and clicking
+             any other switches the camera. --}}
+        @foreach ($this->collections->filter->isTimelapse() as $collection)
+            @include('livewire.projects._collection-card')
+        @endforeach
 
         {{-- Start another room's timelapse, or an album for loose photos. --}}
         <x-island-card heading="New Timelapse">
@@ -337,6 +335,22 @@
             @endif
         </x-island-card>
     </x-page.column>
+
+    {{-- Selection mode lives in the card headers; this only clears the
+         picked set after a successful send. --}}
+    <div x-data x-on:text-images-sent.window="$store.picsel.stop()" class="hidden"></div>
+
+    {{-- Text selected photos: pick the conversation, add an optional note. --}}
+    <flux:modal
+        wire:key="text-images-modal"
+        name="text-images"
+        @close="$wire.set('showTextImagesModal', false, false)"
+        class="max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden !p-0"
+    >
+        @if($showTextImagesModal)
+            @include('livewire.projects._text-images-modal')
+        @endif
+    </flux:modal>
 
     {{-- Photo lightbox — same behaviour as the gs.construction project
          gallery: teleported to <body> so no card can clip it, blurred
@@ -418,6 +432,11 @@
                             <flux:icon.arrow-top-right-on-square class="size-4" />
                             Show original
                         </a>
+                        <a x-show="current.map" :href="current.map" target="_blank" rel="noopener" x-on:click.stop
+                            class="inline-flex items-center gap-1 rounded-full bg-black/50 px-3 py-1.5 text-white/80 transition-colors hover:text-white">
+                            <flux:icon.map-pin class="size-4" />
+                            Map
+                        </a>
                     </div>
 
                     {{-- counter --}}
@@ -464,6 +483,57 @@
         next() { if (this.index !== null && this.frames.length) this.index = (this.index + 1) % this.frames.length; },
     }));
 
+    // Page-wide photo selection: one mode, one set of ids, so a selection
+    // can span collections and the bar/modal see the same state.
+    // One row on arrival, then a few more per click. Revealing EVERY tile at
+    // once meant one click asked for every remaining photo at the same time —
+    // the click felt stuck until they all landed. A bounded step keeps each
+    // press cheap. The column count is a breakpoint decision, so read it off
+    // the rendered grid rather than duplicating the breakpoints here — resize
+    // and it re-measures.
+    Alpine.data('photoRows', (total) => ({
+        total,
+        rows: 1,
+        perRow: 3,
+        STEP: 3,
+        init() {
+            this.measure();
+            this.onResize = () => this.measure();
+            window.addEventListener('resize', this.onResize);
+        },
+        destroy() { window.removeEventListener('resize', this.onResize); },
+        measure() {
+            const grid = this.$el.querySelector('[data-photo-grid]');
+            if (!grid) return;
+            const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
+            if (cols) this.perRow = cols;
+        },
+        get shown() { return this.rows * this.perRow; },
+        show(index) { return index < this.shown; },
+        get more() { return this.total > this.shown; },
+        get remaining() { return Math.max(0, this.total - this.shown); },
+        get opened() { return this.rows > 1; },
+        showMore() { this.rows += this.STEP; },
+        showLess() { this.rows = 1; },
+    }));
+
+    Alpine.store('picsel', {
+        on: false,
+        ids: [],   // frame ids (the project's own photos)
+        msgs: [],  // stored media values of texted photos
+        start() { this.on = true; this.ids = []; this.msgs = []; },
+        stop() { this.on = false; this.ids = []; this.msgs = []; },
+        toggle(id) {
+            this.ids = this.ids.includes(id) ? this.ids.filter((i) => i !== id) : [...this.ids, id];
+        },
+        has(id) { return this.ids.includes(id); },
+        toggleMsg(raw) {
+            this.msgs = this.msgs.includes(raw) ? this.msgs.filter((r) => r !== raw) : [...this.msgs, raw];
+        },
+        hasMsg(raw) { return this.msgs.includes(raw); },
+        get count() { return this.ids.length + this.msgs.length; },
+    });
+
     Alpine.data('timelapsePermissionCallout', () => ({
         visible: false,
         instructions: '',
@@ -490,12 +560,20 @@
             const ua = navigator.userAgent;
             const isIos = /iPad|iPhone|iPod/.test(ua)
                 || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            // The Home-Screen app has no address bar, so no in-Safari path
+            // exists — and iOS never persists a web app's camera grant anyway
+            // (it re-asks every launch; long-standing WebKit limitation).
+            const isInstalledApp = navigator.standalone === true
+                || window.matchMedia('(display-mode: standalone)').matches;
 
+            if (isIos && isInstalledApp) {
+                return 'iPhone asks again each time you reopen the Hive app — an Apple limit on Home Screen apps. Tap Allow when asked, or stop the prompts for good in Settings → Apps → Safari → Camera → Allow.';
+            }
             if (isIos && /CriOS|FxiOS|EdgiOS/.test(ua)) {
-                return 'Open iOS Settings → your browser → Camera and choose Allow, so it stops asking on every visit.';
+                return 'Open iOS Settings → Apps → your browser → Camera and choose Allow, so it stops asking on every visit.';
             }
             if (isIos) {
-                return 'Tap ᴀA in the address bar → Website Settings → Camera → Allow. Safari will remember this site.';
+                return 'Tap the page-menu icon in Safari’s address bar → Camera → Allow. Or in Settings → Apps → Safari → Settings for Websites → Camera, set this site to Allow.';
             }
             if (/Edg\//.test(ua)) {
                 return 'Click the lock icon next to the address → Permissions for this site → Camera → Allow.';
@@ -538,6 +616,11 @@
         onionOpacity: 45,
         onionSrc: initialOnion,
         stream: null,
+        // Latest GPS fix while the camera is open — stamped onto every shot.
+        // Null when the user declined or the device has no fix; frames still
+        // save, just without a location.
+        geo: null,
+        geoWatch: null,
 
         // Live framing guide: the viewfinder is compared against the last
         // frame ~5×/s on tiny grayscale thumbnails. Cheap enough for any
@@ -550,10 +633,15 @@
         lastLiveThumb: null,
         armingCapture: false,
         MOTION_STILL: 6, // mean gray delta between ticks below this = holding steady
-        portraitBlock: false,
+        fullscreen: false,
+        // Tapping X in fullscreen means "stay small until I rotate again" —
+        // without this flag the orientation watcher would slam it back open.
+        manualExit: false,
         guideVisible: false,
         bubbleX: 0,
         bubbleY: 0,
+        hint: 'Match the last frame',
+        guideColor: '#fbbf24',
         refThumb: null,
         guideTimer: null,
         THUMB_W: 96,
@@ -576,13 +664,48 @@
             // stream — reacquire so the aspect is truthful.
             this.onRotate = () => setTimeout(() => this.start(), 400);
             window.addEventListener('orientationchange', this.onRotate);
+            // Rotating a phone to landscape makes the viewfinder the whole
+            // screen; back upright collapses it. Change-driven and gated on a
+            // coarse pointer, so desktops (always landscape) never trigger it.
+            this.landscapeMq = window.matchMedia('(orientation: landscape)');
+            this.onOrient = () => {
+                if (!this.landscapeMq.matches) {
+                    this.fullscreen = false;
+                    this.manualExit = false;
+                } else if (this.cameraReady && !this.manualExit && window.matchMedia('(pointer: coarse)').matches) {
+                    this.fullscreen = true;
+                }
+            };
+            this.landscapeMq.addEventListener('change', this.onOrient);
+        },
+
+        enterFullscreen() { this.fullscreen = true; this.manualExit = false; },
+
+        exitFullscreen() { this.fullscreen = false; this.manualExit = true; },
+
+        // Largest centered LANDSCAPE 4:3 rectangle of the stream. A landscape
+        // stream passes through whole; a portrait stream contributes its
+        // middle band — the phone can stay upright and still produce a frame
+        // that matches the sequence.
+        cropRect(vw, vh) {
+            const sw = Math.min(vw, Math.round(vh * 4 / 3));
+            const sh = Math.round(sw * 3 / 4);
+            return { sx: Math.round((vw - sw) / 2), sy: Math.round((vh - sh) / 2), sw, sh };
         },
 
         grayFrom(source, w, h) {
             const canvas = this.$refs.thumbCanvas || (this.$refs.thumbCanvas = document.createElement('canvas'));
             canvas.width = w; canvas.height = h;
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            ctx.drawImage(source, 0, 0, w, h);
+            // The live video is judged on the same centered band capture will
+            // store, or the guide would chase pixels that never land in the
+            // frame.
+            if (source instanceof HTMLVideoElement && source.videoWidth) {
+                const c = this.cropRect(source.videoWidth, source.videoHeight);
+                ctx.drawImage(source, c.sx, c.sy, c.sw, c.sh, 0, 0, w, h);
+            } else {
+                ctx.drawImage(source, 0, 0, w, h);
+            }
             const { data } = ctx.getImageData(0, 0, w, h);
             const gray = new Float32Array(w * h);
             let sum = 0;
@@ -622,16 +745,7 @@
         scoreAlignment() {
             const video = this.$refs.video;
 
-            // A portrait stream would store a rotated frame — block capture
-            // until the phone is turned. Desktop webcams are landscape and
-            // never trip this.
-            // Only a SEQUENCE cares about orientation: every frame has to
-            // line up with the last, and a portrait shot can't. A loose
-            // project photo is just a photo — take it however you like.
-            this.portraitBlock = this.isSequence
-                && !!(video && video.videoWidth && video.videoHeight > video.videoWidth);
-
-            if (!this.refThumb || !this.cameraReady || !video || !video.videoWidth || this.shutter || this.portraitBlock) {
+            if (!this.refThumb || !this.cameraReady || !video || !video.videoWidth || this.shutter) {
                 this.aligned = false;
                 this.lost = false;
                 return;
@@ -679,14 +793,33 @@
                 return;
             }
 
-            // The bubble mirrors where the last frame's content sits relative
-            // to the viewfinder (clamped to the ring's reach).
+            // The floating cross sits where the last frame's view actually is
+            // (+dx, not -dx: the old dot was mirrored, which made the correct
+            // move "pan away from the dot" — hence never intuitive). Panning
+            // toward the cross now converges: the offset shrinks and the
+            // cross walks into the center.
             const px = 44 / this.SEARCH;
-            this.bubbleX = Math.max(-44, Math.min(44, -best.dx * px));
-            this.bubbleY = Math.max(-44, Math.min(44, -best.dy * px));
+            this.bubbleX = Math.max(-44, Math.min(44, best.dx * px));
+            this.bubbleY = Math.max(-44, Math.min(44, best.dy * px));
 
             const distance = Math.hypot(best.dx, best.dy);
             const hit = best.score >= this.OK_SCORE && distance <= this.OK_OFFSET;
+
+            // Continuous feedback while closing in: the cross warms from
+            // amber (hue 45) to green (hue 120) with proximity, and the chip
+            // says the actual move — pan toward the cross.
+            const proximity = Math.max(0, 1 - distance / this.SEARCH);
+            this.guideColor = hit ? '#4ade80' : `hsl(${Math.round(45 + proximity * 75)} 90% 55%)`;
+
+            const dirs = [];
+            if (this.bubbleY < -6) dirs.push('up'); else if (this.bubbleY > 6) dirs.push('down');
+            if (this.bubbleX < -6) dirs.push('left'); else if (this.bubbleX > 6) dirs.push('right');
+            const arrows = {
+                'up': '↑', 'down': '↓', 'left': '←', 'right': '→',
+                'up left': '↖', 'up right': '↗', 'down left': '↙', 'down right': '↘',
+            };
+            const key = dirs.join(' ');
+            this.hint = key ? `${arrows[key]} Pan ${key}` : 'Almost there — hold still';
 
             // Green only after TWO consecutive passing ticks: crossing the
             // target mid-swing shouldn't flash green and invite a moving tap.
@@ -717,6 +850,24 @@
                 this.$refs.video.srcObject = this.stream;
                 this.cameraReady = true;
                 this.cameraError = '';
+                // Already sideways when the camera came up → go fullscreen now.
+                if (this.onOrient) this.onOrient();
+                // A live fix beats per-shot lookups: no shutter latency, and
+                // the freshest position is always at hand. Watching starts
+                // inside the same gesture that started the camera.
+                if (this.geoWatch === null && navigator.geolocation) {
+                    this.geoWatch = navigator.geolocation.watchPosition(
+                        (pos) => {
+                            this.geo = {
+                                lat: pos.coords.latitude,
+                                lng: pos.coords.longitude,
+                                accuracy: Math.round(pos.coords.accuracy || 0),
+                            };
+                        },
+                        () => { this.geo = null; },
+                        { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 },
+                    );
+                }
             } catch (e) {
                 this.cameraReady = false;
                 this.cameraError = this.describeCameraError(e);
@@ -756,12 +907,16 @@
                 this.stream.getTracks().forEach((t) => t.stop());
                 this.stream = null;
             }
+            if (this.geoWatch !== null) {
+                navigator.geolocation.clearWatch(this.geoWatch);
+                this.geoWatch = null;
+            }
         },
 
         // Wait out the tap's own shake: capture fires once the phone holds
         // still (or after 1s regardless — never eat the shot).
         captureSharp() {
-            if (this.shutter || this.portraitBlock || this.armingCapture) return;
+            if (this.shutter || this.armingCapture) return;
             this.armingCapture = true;
             const started = performance.now();
             const attempt = () => {
@@ -777,12 +932,15 @@
 
         capture() {
             const video = this.$refs.video;
-            if (!video.videoWidth || this.shutter || this.portraitBlock) return;
+            if (!video.videoWidth || this.shutter) return;
 
+            // Always the centered landscape band — a portrait-held phone
+            // still stores a landscape frame.
+            const c = this.cropRect(video.videoWidth, video.videoHeight);
             const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
+            canvas.width = c.sw;
+            canvas.height = c.sh;
+            canvas.getContext('2d').drawImage(video, c.sx, c.sy, c.sw, c.sh, 0, 0, c.sw, c.sh);
 
             // Shutter is over the moment the pixels are in hand.
             this.shutter = true;
@@ -792,8 +950,17 @@
             // waiting for the server.
             this.onionSrc = canvas.toDataURL('image/jpeg', 0.6);
 
+            // The shutter's own moment and the freshest GPS fix travel with
+            // the pixels — a canvas JPEG has no EXIF to carry either.
+            const meta = {
+                takenAt: new Date().toISOString(),
+                lat: this.geo?.lat ?? null,
+                lng: this.geo?.lng ?? null,
+                accuracy: this.geo?.accuracy ?? null,
+            };
+
             canvas.toBlob((blob) => {
-                this.queue.push(blob);
+                this.queue.push({ blob, meta });
                 this.pump();
                 // 0.98: the archive copy is encoded once, here — anything
                 // lost now is lost for good. The server derives the smaller
@@ -809,8 +976,14 @@
         pump() {
             if (this.uploading || !this.queue.length) return;
 
-            const blob = this.queue.shift();
+            const { blob, meta } = this.queue.shift();
             this.uploading++;
+
+            // Deferred set (third arg false): no request of its own — it
+            // rides the upload's finish commit, so the metadata is on the
+            // component before updatedFrame() runs. Serial uploads keep each
+            // meta paired with its own shot.
+            $wire.set('captureMeta', meta, false);
 
             $wire.upload('frame', new File([blob], 'frame.jpg', { type: 'image/jpeg' }),
                 () => { this.uploading--; this.pump(); },
@@ -822,6 +995,7 @@
             this.stop();
             clearInterval(this.guideTimer);
             window.removeEventListener('orientationchange', this.onRotate);
+            if (this.landscapeMq) this.landscapeMq.removeEventListener('change', this.onOrient);
         },
     }));
 </script>

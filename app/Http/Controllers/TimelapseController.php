@@ -38,6 +38,19 @@ class TimelapseController extends Controller
 
         abort_unless($disk->exists($path), 404);
 
+        // Grids ask for ?thumb=1: a small copy built once and kept, rather
+        // than the 1920px sequence frame behind every 120px tile.
+        if (request()->boolean('thumb') && ! request()->boolean('download')) {
+            $thumb = \App\Support\ImageThumbs::path(
+                $frame->disk.':'.$path.':'.$disk->size($path),
+                fn () => $disk->get($path),
+            );
+
+            if ($thumb) {
+                return response()->file($thumb, \App\Support\ImageThumbs::headers());
+            }
+        }
+
         $headers = [
             'Content-Type' => 'image/jpeg',
             'Content-Length' => (string) $disk->size($path),

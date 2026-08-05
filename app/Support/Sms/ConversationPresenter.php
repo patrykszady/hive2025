@@ -468,33 +468,40 @@ class ConversationPresenter
      * Convert a media URL to the proper public streaming URL.
      * Handles both old /storage/... paths and new relative paths.
      */
-    public static function mediaUrl(string $url): string
+    /**
+     * $thumb asks for the small cached copy instead of the original — for
+     * grids, where a tile is a fraction of the photo's size. An external
+     * absolute URL has no thumbnail; it comes back untouched either way.
+     */
+    public static function mediaUrl(string $url, bool $thumb = false): string
     {
         // If it's already an absolute HTTP URL, return as-is
         if (str_starts_with($url, 'http')) {
             return $url;
         }
 
+        $extra = $thumb ? ['thumb' => 1] : [];
+
         // If it's an old /storage/sms-media/... path, extract just the path after the prefix
         if (str_starts_with($url, '/storage/sms-media/')) {
             $path = substr($url, strlen('/storage/sms-media/'));
 
-            return route('sms.media', ['filename' => $path]);
+            return route('sms.media', ['filename' => $path] + $extra);
         }
 
         if (str_starts_with($url, '/storage/sms-attachments/')) {
             $path = substr($url, strlen('/storage/sms-attachments/'));
 
-            return route('sms.media', ['filename' => 'sms-attachments/' . $path]);
+            return route('sms.media', ['filename' => 'sms-attachments/' . $path] + $extra);
         }
 
         // If it's a relative path starting with sms-media/ or sms-attachments/, use as-is
         if (str_starts_with($url, 'sms-media/') || str_starts_with($url, 'sms-attachments/')) {
-            return route('sms.media', ['filename' => $url]);
+            return route('sms.media', ['filename' => $url] + $extra);
         }
 
         // Otherwise assume it's a bare filename that goes in sms-media/
-        return route('sms.media', ['filename' => 'sms-media/' . $url]);
+        return route('sms.media', ['filename' => 'sms-media/' . $url] + $extra);
     }
 
     /* ─── Names & contacts ────────────────────────────────────────── */

@@ -15,6 +15,9 @@ Pipeline (each stage measurable, each stage safe to skip):
      tools) are too sharp/local to survive the smoothing and stay untouched.
   4. Photometric match — the L channel's mean/std eased toward the anchor
      (clamped gain/offset), so different-day lighting doesn't flicker.
+  5. The gap — how much of the anchor's canvas the warped shot never reached.
+     Past ALIGN_MAX_BORDER the whole alignment is refused; under it the gap is
+     left black. Never filled with invented content.
 
     align_frame.py <reference> <target> <output> [min_inliers]
 
@@ -38,6 +41,11 @@ GEOMETRY_ENABLED = os.environ.get("ALIGN_GEOMETRY", "1") != "0"
 TARGET_STATS = os.environ.get("ALIGN_TARGET", "")
 FLOW_CAP_PX = 30.0
 FLOW_GRID = 24  # flow is averaged into cells this size (full-res px) then blurred
+# Warping a shot onto the anchor's canvas leaves a gap wherever the shot didn't
+# reach. There is nothing real to put there, so past this share of the canvas
+# the alignment is refused outright: a frame that is a third invented is worse
+# than an honestly unaligned one.
+MAX_FABRICATED = float(os.environ.get("ALIGN_MAX_BORDER", "0.08"))
 
 
 def lab_stats(image):
@@ -311,12 +319,23 @@ def main():
     scored.sort(key=lambda row: row[0])
     _, chosen, matrix, perspective = scored[0]
 
+    # Carried through every geometric stage alongside the pixels: 255 where the
+    # canvas holds real photo, 0 where the warp left a gap. It used to be
+    # BORDER_REPLICATE here — the gap filled by smearing the outermost real
+    # pixel outward, which reads as content and costs bytes. Now the gap is
+    # measured, and what survives is left honestly black.
+    covered = np.full(target.shape[:2], 255, np.uint8)
+
     if perspective:
         warped = cv2.warpPerspective(target, matrix, (width, height),
-                                     flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+                                     flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        covered = cv2.warpPerspective(covered, matrix, (width, height),
+                                      flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT)
     else:
         warped = cv2.warpAffine(target, matrix, (width, height),
-                                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+                                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        covered = cv2.warpAffine(covered, matrix, (width, height),
+                                 flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT)
 
     transform = matrix if not perspective else matrix[:2]
 
@@ -327,7 +346,9 @@ def main():
         shift_px = float(np.hypot(refinement[0, 2], refinement[1, 2]))
         if shift_px < 40:  # a huge ECC "correction" means it diverged — skip
             warped = cv2.warpAffine(warped, refinement, (width, height),
-                                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+                                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+            covered = cv2.warpAffine(covered, refinement, (width, height),
+                                     flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT)
 
     # ── stage 3: parallax easing ──────────────────────────────────────────
     # Heavy-parallax frames (poor global fit) get a second, stronger pass —
@@ -353,6 +374,25 @@ def main():
     if PHOTO_ENABLED:
         warped, luma_gain, luma_offset = photometric_match(ref, warped)
 
+    # ── stage 5: the gap ──────────────────────────────────────────────────
+    # Judged on GEOMETRY only: flow easing shifts pixels by ≤30px locally and
+    # can't meaningfully change how much of the canvas the photo reached.
+    gap = covered == 0
+    fabricated = float(gap.mean())
+
+    if fabricated > MAX_FABRICATED:
+        fail("border too large",
+             fabricated=round(fabricated, 4),
+             limit=MAX_FABRICATED,
+             transform=chosen,
+             error=round(scored[0][0], 2),
+             inliers=inliers)
+
+    # What's left is under the limit but still isn't photo — say so in black
+    # rather than smearing. Applied last, so neither the flow remap nor the
+    # deflicker can bleed real pixels back into it.
+    warped[gap] = 0
+
     ok = cv2.imwrite(out_path, warped, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
 
     if not ok:
@@ -374,6 +414,7 @@ def main():
         "rotation_deg": round(float(np.degrees(np.arctan2(transform[0, 1], transform[0, 0]))), 2),
         "center_offset_px": round(offset_px, 1),
         "ecc_cc": round(ecc_cc, 4),
+        "fabricated": round(fabricated, 4),
         "flow_median_px": round(flow_median, 1),
         "luma_gain": luma_gain,
         "luma_offset": luma_offset,

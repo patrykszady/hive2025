@@ -363,9 +363,27 @@ class VendorDocsController extends Controller
 
         $mime = $mimeMap[$ext] ?? 'application/octet-stream';
 
-        // For images, use Intervention Image to handle resizing/optimization
         if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'], true)) {
-            return Image::make($resolvedPath)->response();
+            // Grids ask for ?thumb=1 and get a small copy built once and kept.
+            if (request()->boolean('thumb')) {
+                $thumb = \App\Support\ImageThumbs::path(
+                    $resolvedPath.':'.filesize($resolvedPath).':'.filemtime($resolvedPath),
+                    fn () => $resolvedPath,
+                );
+
+                if ($thumb) {
+                    return response()->file($thumb, \App\Support\ImageThumbs::headers());
+                }
+            }
+
+            // Otherwise the file as it is. It used to be decoded and re-encoded
+            // through Intervention on EVERY request — no resize, no format
+            // change, just cost — and answered without a cache header, so every
+            // view paid it again. Send the bytes and let the browser keep them.
+            return response()->file($resolvedPath, [
+                'Content-Type' => $mime,
+                'Cache-Control' => 'private, max-age=604800, immutable',
+            ]);
         }
 
         // For video/audio/pdf, stream with proper headers and range request support

@@ -1213,9 +1213,10 @@ class SmsConversation extends Component
     }
 
     /**
-     * Forward a single message from its per-message menu. Mirrors the thread
-     * "Forward messages" flow by entering selection mode, but pre-selects the
-     * clicked message so the user can add more and forward from the same bar.
+     * Forward a single message from its per-message menu — straight to the
+     * destination picker. (It used to drop into selection mode instead,
+     * which put a bar at the bottom of the thread and otherwise looked like
+     * the click did nothing; multi-forward still lives in the thread menu.)
      */
     public function forwardSingleMessage(int $messageId): void
     {
@@ -1232,9 +1233,157 @@ class SmsConversation extends Component
             return;
         }
 
-        $this->selectionMode = true;
         $this->selectedMessageIds = [$messageId];
-        $this->dispatch('sms-selection-started', ids: [$messageId]);
+        $this->openForwardModal();
+    }
+
+    /* ─── Add photos to a project ─────────────────────────────────── */
+
+    public bool $showAddToProjectModal = false;
+
+    public ?int $addToProjectTargetId = null;
+
+    public string $addToProjectSearch = '';
+
+    /** When the photos were messaged — anchors the project ordering. */
+    public ?string $addToProjectMessageDate = null;
+
+    /** @var array<int, int> */
+    public array $addToProjectMessageIds = [];
+
+    /** Image entries on a message — the things worth copying to a project. */
+    protected function imageUrlsFor(SmsMessage $message): \Illuminate\Support\Collection
+    {
+        return collect(is_array($message->media_urls) ? $message->media_urls : [])
+            ->filter(fn ($url) => is_string($url)
+                && preg_match('/\.(jpe?g|png|heic|webp|gif)$/i', $url) === 1)
+            ->values();
+    }
+
+    public function openAddToProjectModal(int $messageId): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $message = SmsMessage::where('thread_id', $this->threadId)->whereKey($messageId)->first();
+
+        if (! $message || $this->imageUrlsFor($message)->isEmpty()) {
+            Flux::toast(variant: 'warning', text: 'That message has no photos to add.', duration: 4000, position: 'top right');
+
+            return;
+        }
+
+        $this->addToProjectMessageIds = [$messageId];
+        // Which job was in motion when these were texted — that's the
+        // ordering that puts the right project on top.
+        $this->addToProjectMessageDate = $message->created_at->toDateTimeString();
+        // The thread's own project is almost always the answer — preselect it.
+        $this->addToProjectTargetId = $this->thread?->project_id;
+        $this->addToProjectSearch = '';
+        $this->showAddToProjectModal = true;
+        Flux::modal('add-to-project')->show();
+    }
+
+    /**
+     * Projects the photos could belong to: the thread's client's projects
+     * first (that's who texted them), then whichever were most recently
+     * active AS OF THE DAY the photos were messaged — a photo from July
+     * belongs to a July job, not to whatever changed this morning.
+     */
+    #[Computed]
+    public function addableProjects(): \Illuminate\Support\Collection
+    {
+        $clientId = $this->thread?->client_id;
+        $asOf = $this->addToProjectMessageDate ?: now()->toDateTimeString();
+
+        return \App\Models\Project::query()
+            ->with(['client', 'latestStatus'])
+            ->when($this->addToProjectSearch !== '', function ($q) {
+                $term = '%'.trim($this->addToProjectSearch).'%';
+                $q->where(fn ($inner) => $inner->where('address', 'like', $term)
+                    ->orWhere('project_name', 'like', $term));
+            })
+            ->when($clientId, fn ($q) => $q->orderByRaw('CASE WHEN client_id = ? THEN 0 ELSE 1 END', [$clientId]))
+            // Projects that were ACTIVE (status 6) on the day the photos were
+            // messaged lead — the crew was standing on one of those.
+            ->orderByRaw(
+                'CASE WHEN (SELECT ps.status_code FROM project_status ps
+                    WHERE ps.project_id = projects.id AND ps.start_date <= ?
+                    ORDER BY ps.start_date DESC LIMIT 1) = 6 THEN 0 ELSE 1 END',
+                [$asOf]
+            )
+            // Then touched before the message date → newest of those first;
+            // only then projects that didn't exist or move until later.
+            ->orderByRaw('CASE WHEN updated_at <= ? THEN 0 ELSE 1 END', [$asOf])
+            ->orderByRaw('CASE WHEN updated_at <= ? THEN -UNIX_TIMESTAMP(updated_at) ELSE UNIX_TIMESTAMP(updated_at) END', [$asOf])
+            ->limit(60)
+            ->get();
+    }
+
+    public function addImagesToProject(): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $this->validate([
+            'addToProjectTargetId' => 'required|integer',
+            'addToProjectMessageIds' => 'required|array|min:1',
+        ], [], ['addToProjectTargetId' => 'project']);
+
+        // Global ProjectScope limits this to the user's vendor — an id from
+        // outside it simply doesn't resolve.
+        $project = \App\Models\Project::find($this->addToProjectTargetId);
+
+        if (! $project) {
+            $this->addError('addToProjectTargetId', 'Pick a project.');
+
+            return;
+        }
+
+        $messages = SmsMessage::where('thread_id', $this->threadId)
+            ->whereIn('id', $this->addToProjectMessageIds)
+            ->get();
+
+        // PIN the message to the project — nothing is copied. The photos
+        // stay in the message and surface under the project's Message
+        // Images, where the sender is resolved the same way this thread
+        // shows it. (Frames/"Project Images" are for photos the crew takes.)
+        $added = 0;
+
+        foreach ($messages as $message) {
+            $photos = $this->imageUrlsFor($message)->count();
+
+            if ($photos === 0) {
+                continue;
+            }
+
+            $pinned = \Illuminate\Support\Facades\DB::table('project_pinned_messages')->insertOrIgnore([
+                'project_id' => $project->id,
+                'sms_message_id' => $message->id,
+                'added_by_user_id' => auth()->id(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            if ($pinned) {
+                $added += $photos;
+            }
+        }
+
+        $this->showAddToProjectModal = false;
+        Flux::modal('add-to-project')->close();
+
+        Flux::toast(
+            variant: $added ? 'success' : 'warning',
+            heading: $added ? 'Photos Added' : 'Already There',
+            text: $added
+                ? ($added === 1 ? '1 photo' : "{$added} photos").' added to Message Images on '.($project->short_address ?? $project->address).'.'
+                : 'Those photos are already on that project.',
+            duration: 5000,
+            position: 'top right'
+        );
     }
 
     /**

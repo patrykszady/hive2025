@@ -188,13 +188,16 @@ it('streams a frame only to someone who can view the project', function () {
 it('opens the studio for a crew member of the project vendor', function () {
     $fx = timelapseFixture(role: 'Member');
 
-    // The camera is closed on arrival — no unrequested permission prompt.
+    // The camera is closed on arrival — no unrequested permission prompt,
+    // and no camera card at all: the collections take the whole width.
     $this->actingAs($fx['user'])
         ->get(route('projects.images', $fx['project']))
         ->assertSuccessful()
         ->assertSee('Project Images')
-        ->assertSee('Pick a collection on the right')
-        ->assertDontSee('Take Frame');
+        // No viewfinder and no camera card — "Camera" itself still appears in
+        // the permission callout's script, so the shutter is the tell.
+        ->assertDontSee('Take Frame')
+        ->assertDontSee('Upload a photo instead');
 });
 
 it('serves the untouched original on request, with a download name', function () {
@@ -383,6 +386,63 @@ it('serves the archive copy for ?original=1, and the aligned one otherwise', fun
         ->and($displayW)->toBe(TimelapseStudio::MAX_EDGE);
 });
 
+it('serves a small cached copy for ?thumb=1, built once and kept', function () {
+    $fx = timelapseFixture();
+
+    Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->set('frame', UploadedFile::fake()->image('shot.jpg', 3000, 2250));
+
+    $frame = ProjectTimelapseFrame::latest('id')->firstOrFail();
+    $url = route('projects.timelapse.frame', [$frame, 'thumb' => 1]);
+
+    $thumb = $this->actingAs($fx['user'])->get($url);
+    $thumb->assertSuccessful();
+
+    [$width] = getimagesizefromstring($thumb->streamedContent());
+
+    // A grid tile is ~120px; sending the 1920px sequence frame for each one is
+    // what made "Show more" crawl.
+    expect($width)->toBe(\App\Support\ImageThumbs::MAX_EDGE)
+        ->and($thumb->headers->get('Cache-Control'))->toContain('immutable');
+
+    // Second ask is served off disk — same bytes, no re-encode.
+    $again = $this->actingAs($fx['user'])->get($url);
+
+    expect($again->streamedContent())->toBe($thumb->streamedContent());
+
+    // The cache lives outside the faked disk, so clear what this test wrote.
+    array_map('unlink', glob(storage_path('app/thumbs/*.jpg')) ?: []);
+});
+
+it('points photo grids at the thumbnail while the lightbox keeps the original', function () {
+    $fx = timelapseFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $fx['project']->forceFill(['client_id' => $client->id])->save();
+
+    $thread = \App\Models\SmsGroupThread::create([
+        'from_number' => '+12247354200',
+        'client_id' => $client->id,
+        'vendor_id' => $fx['vendor']->id,
+        'participants' => ['+18475550101'],
+    ]);
+
+    \App\Models\SmsMessage::create([
+        'thread_id' => $thread->id,
+        'direction' => 'inbound',
+        'from_number' => '+18475550101',
+        'media_urls' => ['sms-media/2026/05/relative.jpg'],
+    ]);
+
+    $image = Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->instance()->messageImages->first();
+
+    expect($image['thumb'])->toContain('thumb=1')
+        ->and($image['url'])->not->toContain('thumb=1');
+});
+
 it('removes every copy when a frame is deleted', function () {
     $fx = timelapseFixture();
 
@@ -440,8 +500,8 @@ it('shows photos texted about the project alongside its own', function () {
         ->and($images->first()['url'])->toContain('/files/sms_media/')
         ->and($images->first()['url'])->toEndWith('2026/08/wall.jpg')
         // Named from the phone number, the way the messages screen does it.
-        ->and($images->first()['sender'])->toBe('Mark Brodson')
-        ->and($images->first()['label'])->toStartWith('Mark Brodson · ');
+        ->and($images->first()['sender'])->toBe('Mark')
+        ->and($images->first()['label'])->toStartWith('Mark · ');
 
     $component->assertSee('Message Images');
 });
@@ -521,4 +581,110 @@ it('serves texted photos through the media route whatever shape the stored url i
             ->and($image['url'])->toContain('/files/sms_media/')
             ->and($image['url'])->toEndWith('.jpg');
     }
+});
+
+it('stamps a camera capture with the browser fix and shutter time', function () {
+    $fx = timelapseFixture();
+
+    $takenAt = now()->subSeconds(8)->startOfSecond();
+
+    Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->set('captureMeta', [
+            'lat' => 41.8850012,
+            'lng' => -87.7940031,
+            'accuracy' => 12.4,
+            'takenAt' => $takenAt->toIso8601String(),
+        ])
+        ->set('frame', UploadedFile::fake()->image('frame.jpg', 1600, 1200))
+        ->assertHasNoErrors();
+
+    $frame = \App\Models\ProjectTimelapseFrame::latest('id')->first();
+
+    expect($frame->latitude)->toEqualWithDelta(41.8850012, 0.0000001)
+        ->and($frame->longitude)->toEqualWithDelta(-87.7940031, 0.0000001)
+        ->and($frame->location_accuracy)->toBe(12)
+        ->and($frame->shot_at->timestamp)->toBe($takenAt->timestamp);
+});
+
+it('drops off-globe coordinates and broken phone clocks instead of storing them', function () {
+    $fx = timelapseFixture();
+
+    Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->set('captureMeta', [
+            'lat' => 999,
+            'lng' => -87.79,
+            'accuracy' => 5,
+            'takenAt' => now()->addYears(2)->toIso8601String(),
+        ])
+        ->set('frame', UploadedFile::fake()->image('frame.jpg', 1600, 1200))
+        ->assertHasNoErrors();
+
+    $frame = \App\Models\ProjectTimelapseFrame::latest('id')->first();
+
+    expect($frame->latitude)->toBeNull()
+        ->and($frame->longitude)->toBeNull()
+        // Rejected clock → the upload moment stands in.
+        ->and($frame->shot_at->diffInMinutes(now()))->toBeLessThan(2);
+});
+
+it('converts EXIF degree/minute/second rationals to signed decimals', function () {
+    expect(\App\Services\ProjectImageImporter::gpsToDecimal(['41/1', '52/1', '3456/100'], 'N'))
+        ->toEqualWithDelta(41.87626667, 0.000001)
+        ->and(\App\Services\ProjectImageImporter::gpsToDecimal(['87/1', '47/1', '2160/100'], 'W'))
+        ->toEqualWithDelta(-87.78933333, 0.000001)
+        ->and(\App\Services\ProjectImageImporter::gpsToDecimal(['33/1', '51/1', '0/0'], 'S'))->toBeNull();
+});
+
+it('shows photos from a message pinned to the project via Add to Project', function () {
+    $fx = timelapseFixture();
+
+    // A crew thread with NO client or project link — its photos would never
+    // reach this project on their own.
+    $thread = \App\Models\SmsGroupThread::create([
+        'from_number' => '+12247354200',
+        'vendor_id' => $fx['vendor']->id,
+        'participants' => ['+17735550142'],
+    ]);
+
+    $message = \App\Models\SmsMessage::create([
+        'thread_id' => $thread->id,
+        'direction' => 'inbound',
+        'from_number' => '+17735550142',
+        'media_urls' => ['sms-media/2026/07/demo-day.jpg'],
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('project_pinned_messages')->insert([
+        'project_id' => $fx['project']->id,
+        'sms_message_id' => $message->id,
+        'added_by_user_id' => $fx['user']->id,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $images = Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->instance()->messageImages;
+
+    expect($images)->toHaveCount(1)
+        ->and($images->first()['url'])->toContain('/files/sms_media/')
+        // Pinned photos keep their sender, resolved from the phone number.
+        ->and($images->first()['sender'])->not->toBeEmpty();
+});
+
+it('shortens sender names to first names unless two people share one', function () {
+    $short = TimelapseStudio::firstNames([
+        1 => 'Mark Brodson',
+        2 => 'Mark Smith',
+        3 => 'Patryk Szady',
+        4 => 'Mark & Gail Brodson',
+        5 => '(773) 251-3666',
+    ]);
+
+    expect($short[1])->toBe('Mark Brodson')      // collides with Mark Smith
+        ->and($short[2])->toBe('Mark Smith')
+        ->and($short[3])->toBe('Patryk')
+        ->and($short[4])->toBe('Mark & Gail')
+        ->and($short[5])->toBe('(773) 251-3666'); // numbers pass through
 });

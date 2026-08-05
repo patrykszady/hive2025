@@ -332,7 +332,7 @@
             <button
                 type="button"
                 class="flex items-center self-center transition-opacity p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:text-zinc-300 dark:hover:bg-zinc-700/50 {{ $msg->isOutbound() ? 'order-first mr-1' : 'ml-1' }}"
-                x-bind:class="showActions
+                x-bind:class="(isTouch || showActions)
                     ? 'opacity-100'
                     : 'opacity-0 group-hover:opacity-100'"
                 x-show="!selectionMode"
@@ -342,6 +342,7 @@
                     anchor: $el,
                     canTask: @js($allowsTaskCreation($msg)),
                     hasText: @js(filled($translatedTextForUi)),
+                    images: @js(collect(is_array($msg->media_urls) ? $msg->media_urls : [])->filter(fn ($u) => is_string($u) && preg_match('/\.(jpe?g|png|heic|webp|gif)$/i', $u) === 1)->count()),
                     text: showOriginal ? @js($originalTextForUi) : @js($translatedTextForUi),
                 })"
             >

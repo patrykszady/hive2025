@@ -13,11 +13,16 @@ use Illuminate\Support\Facades\Storage;
  */
 class ProjectTimelapseFrame extends Model
 {
-    protected $casts = ['shot_at' => 'datetime'];
+    protected $casts = [
+        'shot_at' => 'datetime',
+        'latitude' => 'float',
+        'longitude' => 'float',
+    ];
 
     protected $fillable = [
         'project_timelapse_id',
         'taken_by_user_id',
+        'taken_by_name',
         'filename',
         'original_filename',
         'path',
@@ -25,6 +30,9 @@ class ProjectTimelapseFrame extends Model
         'aligned_path',
         'disk',
         'shot_at',
+        'latitude',
+        'longitude',
+        'location_accuracy',
         'sort_order',
     ];
 
@@ -42,6 +50,29 @@ class ProjectTimelapseFrame extends Model
     public function getDisplayPathAttribute(): string
     {
         return $this->aligned_path ?: $this->path;
+    }
+
+    /**
+     * Cache-buster for the frame's URLs. The pixels behind one URL DO change —
+     * a re-run of the aligner replaces the registered copy, or drops it and
+     * falls back to the original — and the route answers `immutable`, so
+     * without this a browser would keep showing the superseded image for a
+     * week.
+     */
+    public function getVersionAttribute(): int
+    {
+        return (int) ($this->updated_at?->timestamp ?? 0);
+    }
+
+    /**
+     * Who this photo came from, for captions: the linked user when there is
+     * one, else the name recorded at import (a client who texted it).
+     */
+    public function getTakerNameAttribute(): ?string
+    {
+        return $this->takenBy?->nickname
+            ?: $this->takenBy?->first_name
+            ?: $this->taken_by_name;
     }
 
     protected static function booted(): void

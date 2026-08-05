@@ -425,7 +425,7 @@
                      with the message context + anchor element). Lives OUTSIDE
                      the sms-bubbles island so island morphs never touch it. --}}
                 <div
-                    x-data="{ mmOpen: false, mm: { id: null, canTask: false, hasText: false, text: '' }, mmAnchor: null }"
+                    x-data="{ mmOpen: false, mm: { id: null, canTask: false, hasText: false, text: '', images: 0 }, mmAnchor: null }"
                     x-on:sms-message-menu.window="mm = $event.detail; mmAnchor = $event.detail.anchor; mmOpen = true"
                     x-on:sms-new-message-received.window="mmOpen = false"
                     x-on:thread-ready.window="mmOpen = false"
@@ -447,6 +447,11 @@
                                 class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-600"
                                 x-on:click="mmOpen = false; $wire.forwardSingleMessage(mm.id)">
                                 <flux:icon.arrow-right-circle variant="mini" class="size-4 text-zinc-400 dark:text-zinc-300" /> Forward
+                            </button>
+                            <button type="button" x-show="mm.images > 0"
+                                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-600"
+                                x-on:click="mmOpen = false; $wire.openAddToProjectModal(mm.id)">
+                                <flux:icon.folder-plus variant="mini" class="size-4 text-zinc-400 dark:text-zinc-300" /> Add to Project
                             </button>
                             <button type="button" x-show="mm.hasText"
                                 class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-600"
@@ -542,6 +547,85 @@
                     <flux:button type="button" variant="ghost" x-on:click="$flux.modal('forward-messages').close()">Cancel</flux:button>
                     <flux:button type="submit" variant="primary" icon="arrow-right-circle">
                         Forward
+                    </flux:button>
+                </div>
+            </form>
+            @endif
+        </flux:modal>
+
+        {{-- Add photos to a project --}}
+        <flux:modal
+            wire:key="add-to-project-modal"
+            name="add-to-project"
+            @close="$wire.set('showAddToProjectModal', false, false)"
+            class="max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden !p-0"
+        >
+            @if($showAddToProjectModal)
+            <form wire:submit="addImagesToProject" class="flex flex-col min-h-0 min-w-0 flex-1 w-full" x-data="{ q: '' }">
+                <div class="px-6 pt-6 pb-4 space-y-4 border-b border-zinc-200 dark:border-zinc-700">
+                    <div>
+                        <flux:heading size="lg">Add Photos to Project</flux:heading>
+                        <flux:text class="mt-1">Copies this message's photos into the project's images.</flux:text>
+                    </div>
+
+                    <flux:field>
+                        <flux:label>Search projects</flux:label>
+                        <flux:input x-model="q" placeholder="Search by address or name..." />
+                    </flux:field>
+                </div>
+
+                <div class="flex-1 min-h-0 min-w-0 overflow-auto forward-modal-scroll px-6 py-4">
+                    <flux:field>
+                        <flux:label>Project</flux:label>
+                        @if ($this->addableProjects->isEmpty())
+                            <div class="px-3 py-6 text-sm text-zinc-500 dark:text-zinc-400 text-center border border-zinc-200 dark:border-zinc-700 rounded-lg">
+                                No matching projects.
+                            </div>
+                        @else
+                            <flux:radio.group wire:model="addToProjectTargetId" variant="cards" class="flex-col gap-1" :indicator="true">
+                                @foreach ($this->addableProjects as $candidate)
+                                    @php
+                                        $label = $candidate->short_address ?: ($candidate->address ?: ($candidate->project_name ?: 'Project #'.$candidate->id));
+                                        $secondary = collect([$candidate->project_name, $candidate->client?->name])
+                                            ->filter()->unique()->implode(' · ');
+                                        $haystack = mb_strtolower($label.' '.($candidate->address ?? '').' '.$secondary);
+                                    @endphp
+                                    <div
+                                        wire:key="add-project-{{ $candidate->id }}"
+                                        x-show="typeof q === 'undefined' || q === '' || @js($haystack).includes(q.toLowerCase())"
+                                    >
+                                        {{-- Same shape as the shared project select: address with
+                                             the status badge beside it, detail line underneath. --}}
+                                        <flux:radio :value="$candidate->id">
+                                            {{-- One block child: the card slot is a flex row, so
+                                                 two siblings would sit side by side instead of
+                                                 stacking like the shared project select. --}}
+                                            <span class="block min-w-0 flex-1">
+                                                <span class="flex items-center gap-2">
+                                                    <span class="min-w-0 flex-1 truncate">{{ $label }}</span>
+                                                    @if ($candidate->latestStatus)
+                                                        <flux:badge size="sm" :color="$candidate->latestStatus->badge_color" inset="top bottom" class="shrink-0">
+                                                            {{ $candidate->latestStatus->title }}
+                                                        </flux:badge>
+                                                    @endif
+                                                </span>
+                                                @if ($secondary !== '')
+                                                    <span class="mt-0.5 block text-sm font-normal text-zinc-500 dark:text-zinc-400">{{ $secondary }}</span>
+                                                @endif
+                                            </span>
+                                        </flux:radio>
+                                    </div>
+                                @endforeach
+                            </flux:radio.group>
+                        @endif
+                        <flux:error name="addToProjectTargetId" />
+                    </flux:field>
+                </div>
+
+                <div class="flex justify-end gap-2 px-6 py-4 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50">
+                    <flux:button type="button" variant="ghost" x-on:click="$flux.modal('add-to-project').close()">Cancel</flux:button>
+                    <flux:button type="submit" variant="primary" icon="folder-plus">
+                        Add Photos
                     </flux:button>
                 </div>
             </form>

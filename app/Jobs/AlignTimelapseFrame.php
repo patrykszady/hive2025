@@ -99,6 +99,7 @@ class AlignTimelapseFrame implements ShouldQueue
             // The sequence's median LAB profile: every frame eases toward the
             // collective look, not toward frame #1's own quirks.
             'ALIGN_TARGET' => $this->sequenceTarget($frame),
+            'ALIGN_MAX_BORDER' => (string) config('services.timelapse_align.max_border', 0.08),
             // Strict filter — bare array_filter eats the '0' string and would
             // silently turn photo-only back into full geometry.
         ], fn ($v) => $v !== null));
@@ -106,14 +107,23 @@ class AlignTimelapseFrame implements ShouldQueue
         $process->run();
 
         $diagnostics = json_decode(trim($process->getOutput()), true) ?: [];
+        $aligned = $process->getExitCode() === 0;
 
         // A poor fit against the distant anchor often just means the crew's
         // stance drifted over time — the PREVIOUS aligned frame shares the
         // newer viewpoint AND already lives in anchor space, so retry against
         // it and keep whichever result measures tighter.
+        $looseFit = $aligned && ($diagnostics['error'] ?? 0) > self::RETRY_ERROR;
+
+        // Same story with a worse ending: the stance drifted so far that the
+        // warp onto anchor space left more canvas empty than the aligner will
+        // invent. The nearer viewpoint is exactly what that needs, so this is
+        // worth a retry before giving up on aligning the frame at all.
+        $tooFar = $process->getExitCode() === 2
+            && ($diagnostics['reason'] ?? '') === 'border too large';
+
         if (! $photoOnly
-            && $process->getExitCode() === 0
-            && ($diagnostics['error'] ?? 0) > self::RETRY_ERROR
+            && ($looseFit || $tooFar)
             && ($neighbor = $this->previousAlignedFrame($frame)) !== null) {
             $retryAbsolute = $alignedAbsolute.'.retry.jpg';
 
@@ -124,23 +134,31 @@ class AlignTimelapseFrame implements ShouldQueue
                 $targetPath,
                 $retryAbsolute,
                 (string) config('services.timelapse_align.min_inliers', 25),
-            ], null, ['ALIGN_TARGET' => $this->sequenceTarget($frame) ?? '']);
+            ], null, [
+                'ALIGN_TARGET' => $this->sequenceTarget($frame) ?? '',
+                'ALIGN_MAX_BORDER' => (string) config('services.timelapse_align.max_border', 0.08),
+            ]);
             $retry->setTimeout(50);
             $retry->run();
 
             $retryDiag = json_decode(trim($retry->getOutput()), true) ?: [];
 
+            // Nothing to beat when the first pass produced no frame at all —
+            // any confident retry is an improvement on staying unaligned.
+            $baseline = $looseFit ? ($diagnostics['error'] ?? PHP_FLOAT_MAX) : PHP_FLOAT_MAX;
+
             if ($retry->getExitCode() === 0
                 && is_file($retryAbsolute)
-                && ($retryDiag['error'] ?? PHP_FLOAT_MAX) < ($diagnostics['error'] ?? PHP_FLOAT_MAX)) {
+                && ($retryDiag['error'] ?? PHP_FLOAT_MAX) < $baseline) {
                 rename($retryAbsolute, $alignedAbsolute);
                 $diagnostics = $retryDiag + ['reference' => 'previous frame #'.$neighbor->id];
+                $aligned = true;
             } else {
                 @unlink($retryAbsolute);
             }
         }
 
-        if ($process->getExitCode() === 0 && is_file($alignedAbsolute)) {
+        if ($aligned && is_file($alignedAbsolute)) {
             $frame->forceFill(['aligned_path' => $alignedRelative])->save();
 
             Log::info('Timelapse frame aligned', ['frame_id' => $frame->id] + $diagnostics);

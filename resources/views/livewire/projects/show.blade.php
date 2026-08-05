@@ -93,15 +93,15 @@
             </x-details.card>
             </div>
 
+            {{-- IMAGES — sits directly under the details card; ties with the
+                 cards below on order-2, so DOM order keeps it first. --}}
+            <div class="order-2">
+                <livewire:projects.project-timelapse-card :project="$project" lazy />
+            </div>
+
             @can('update', $project)
                 <div class="order-2">
                     <livewire:projects.project-vendors :project="$project" />
-                </div>
-            @endcan
-
-            @can('viewMaterials', $project)
-                <div class="order-2">
-                    <livewire:projects.project-materials :project="$project" lazy />
                 </div>
             @endcan
 
@@ -111,10 +111,15 @@
                 </div>
             @endif
 
-            {{-- TIMELAPSE — progress shots with onion-skin capture --}}
-            <div class="order-4 lg:order-3">
-                <livewire:projects.project-timelapse-card :project="$project" lazy />
-            </div>
+            {{-- MATERIALS — between tasks and expenses. It ties with expenses
+                 at both sizes (order-7 in the mobile stack, order-3 in the lg
+                 column) and leads on DOM order, so it sits directly on top of
+                 expenses either way. --}}
+            @can('viewMaterials', $project)
+                <div class="order-7 lg:order-3">
+                    <livewire:projects.project-materials :project="$project" lazy />
+                </div>
+            @endcan
 
             @can('viewFinancials', $project)
                 @can('update', $project)

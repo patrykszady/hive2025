@@ -47,6 +47,13 @@ class TimelapseStudio extends Component
     /** Camera capture arrives here as a JPEG blob via Livewire's JS upload. */
     public $frame = null;
 
+    /**
+     * Rides along with each camera capture (deferred $wire.set just before
+     * the upload): the browser's GPS fix and the shutter's wall-clock moment.
+     * Canvas JPEGs carry no EXIF, so this is the only source of either.
+     */
+    public ?array $captureMeta = null;
+
     /** Fallback for devices without camera access: a plain file upload. */
     public $file = null;
 
@@ -179,20 +186,36 @@ class TimelapseStudio extends Component
                 ->when($clientId, fn ($inner) => $inner->orWhere('client_id', $clientId)))
             ->pluck('id');
 
-        if ($threadIds->isEmpty()) {
+        // Messages pinned here by "Add to Project" — photos texted on some
+        // OTHER thread (a crew chat, say) that belong to this job.
+        $pinnedIds = \Illuminate\Support\Facades\DB::table('project_pinned_messages')
+            ->where('project_id', $this->project->id)
+            ->pluck('sms_message_id');
+
+        if ($threadIds->isEmpty() && $pinnedIds->isEmpty()) {
             return collect();
         }
 
         $messages = \App\Models\SmsMessage::query()
             ->withoutGlobalScopes()
-            ->whereIn('thread_id', $threadIds)
+            ->where(function ($q) use ($threadIds, $pinnedIds) {
+                if ($threadIds->isNotEmpty()) {
+                    $q->whereIn('thread_id', $threadIds);
+                }
+
+                if ($pinnedIds->isNotEmpty()) {
+                    $threadIds->isNotEmpty()
+                        ? $q->orWhereIn('id', $pinnedIds)
+                        : $q->whereIn('id', $pinnedIds);
+                }
+            })
             ->whereNotNull('media_urls')
             ->latest('created_at')
             ->limit(120)
             ->get(['id', 'direction', 'media_urls', 'created_at', 'from_number', 'sent_by_user_id']);
 
         // Resolve every sender in two queries rather than one per photo.
-        $senders = $this->senderNames($messages);
+        $senders = self::firstNames($this->senderNames($messages));
 
         $images = $messages
             ->flatMap(function ($message) use ($senders) {
@@ -209,9 +232,15 @@ class TimelapseStudio extends Component
                     // use that same resolver rather than guessing a prefix.
                     ->map(fn ($url) => [
                         'url' => \App\Support\Sms\ConversationPresenter::mediaUrl($url),
+                        // What the grid tile loads — the lightbox still opens
+                        // the full photo from 'url'.
+                        'thumb' => \App\Support\Sms\ConversationPresenter::mediaUrl($url, thumb: true),
+                        // The stored value, verbatim — selection hands it back
+                        // when texting these photos onward.
+                        'raw' => $url,
                         'sent_at' => $message->created_at,
                         'sender' => $sender,
-                        'label' => $sender.' · '.$message->created_at->format('M j, Y'),
+                        'label' => $sender.' · '.$message->created_at->format('n/j/y'),
                     ]);
             })
             ->values();
@@ -322,6 +351,37 @@ class TimelapseStudio extends Component
         })->all();
     }
 
+    /**
+     * First names only — "Mark & Gail Brodson" reads as "Mark & Gail",
+     * "Patryk Szady" as "Patryk" — EXCEPT when two different people would
+     * collapse to the same first name; those keep their full names apart.
+     * Phone numbers and single-word names pass through untouched.
+     *
+     * @param  array<int|string, string>  $names
+     * @return array<int|string, string>
+     */
+    public static function firstNames(array $names): array
+    {
+        $shorts = [];
+
+        foreach (array_unique(array_values($names)) as $full) {
+            $tokens = preg_split('/\s+/', trim($full)) ?: [];
+            $shorts[$full] = (count($tokens) > 1 && ! preg_match('/\d/', $full))
+                ? implode(' ', array_slice($tokens, 0, -1))
+                : $full;
+        }
+
+        $collisions = array_count_values($shorts);
+
+        foreach ($shorts as $full => $short) {
+            if ($collisions[$short] > 1) {
+                $shorts[$full] = $full;
+            }
+        }
+
+        return array_map(fn ($full) => $shorts[$full] ?? $full, $names);
+    }
+
     /** Lightbox payload for the texted photos. */
     public function lightboxMessageImages(): array
     {
@@ -334,15 +394,230 @@ class TimelapseStudio extends Component
         ])->values()->all();
     }
 
+    /**
+     * Who took each frame in a collection, shortened to first names — the
+     * tiles and the lightbox both caption from this, so they never disagree.
+     *
+     * @return array<int, string>
+     */
+    public function frameTakers(ProjectTimelapse $collection): array
+    {
+        return self::firstNames(
+            $collection->frames->mapWithKeys(fn ($f) => [$f->id => (string) $f->taker_name])->all()
+        );
+    }
+
+    /**
+     * Tile captions for every frame on the page — "Patryk · 8/1", or just
+     * the date when nobody is recorded, keyed [collection id][frame id].
+     *
+     * A computed rather than an @if or @php inside the tile loop: both of
+     * those positions trip Blaze's compiler, and the view can read this with
+     * a plain echo.
+     *
+     * @return array<int, array<int, string>>
+     */
+    #[Computed]
+    public function frameCaptions(): array
+    {
+        return $this->collections->mapWithKeys(function (ProjectTimelapse $collection) {
+            $takers = $this->frameTakers($collection);
+
+            $captions = $collection->frames->mapWithKeys(function (ProjectTimelapseFrame $frame) use ($takers) {
+                $date = ($frame->shot_at ?? $frame->created_at)->format('n/j');
+                $who = trim((string) ($takers[$frame->id] ?? ''));
+
+                return [$frame->id => $who === '' ? $date : $who.' · '.$date];
+            })->all();
+
+            return [$collection->id => $captions];
+        })->all();
+    }
+
     public function lightboxFrames(ProjectTimelapse $collection): array
     {
+        $takers = $this->frameTakers($collection);
+
         return $collection->frames->map(fn (ProjectTimelapseFrame $frame) => [
             'id' => $frame->id,
-            'url' => route('projects.timelapse.frame', $frame),
+            'url' => route('projects.timelapse.frame', [$frame, 'v' => $frame->version]),
             'original' => route('projects.timelapse.frame', ['frame' => $frame, 'original' => 1]),
-            'label' => $frame->created_at->format('M j, Y').' · '
-                .($frame->takenBy?->nickname ?? $frame->takenBy?->first_name ?? ''),
+            'label' => ($frame->shot_at ?? $frame->created_at)->format('n/j/y g:iA').' · '
+                .($takers[$frame->id] ?? ''),
+            // Where it was taken, when we know — camera GPS or upload EXIF.
+            'map' => $frame->latitude !== null
+                ? sprintf('https://maps.google.com/?q=%.7f,%.7f', $frame->latitude, $frame->longitude)
+                : null,
         ])->values()->all();
+    }
+
+    /* ─── Text selected photos ────────────────────────────────────── */
+
+    public bool $showTextImagesModal = false;
+
+    public ?int $textTargetThreadId = null;
+
+    public string $textThreadSearch = '';
+
+    public string $textNote = '';
+
+    /** @var array<int, int> */
+    public array $textFrameIds = [];
+
+    /** @var array<int, string> Stored media values of selected texted photos. */
+    public array $textMessageUrls = [];
+
+    public function openTextImagesModal(array $frameIds, array $messageUrls = []): void
+    {
+        $ids = collect($frameIds)->map(fn ($id) => (int) $id)->filter()->unique()->values();
+
+        // Only this project's frames — an id from anywhere else just drops.
+        $this->textFrameIds = ProjectTimelapseFrame::query()
+            ->whereIn('id', $ids)
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->pluck('id')
+            ->all();
+
+        // Texted photos: only values actually on this project's Message
+        // Images card — anything else from the client just drops.
+        $known = $this->messageImages->pluck('raw')->all();
+        $this->textMessageUrls = collect($messageUrls)
+            ->filter(fn ($raw) => is_string($raw) && in_array($raw, $known, true))
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($this->textFrameIds) && empty($this->textMessageUrls)) {
+            \Flux\Flux::toast(variant: 'warning', text: 'Select at least one photo to text.', duration: 4000, position: 'top right');
+
+            return;
+        }
+
+        $this->textTargetThreadId = null;
+        $this->textThreadSearch = '';
+        $this->textNote = '';
+        $this->showTextImagesModal = true;
+        \Flux\Flux::modal('text-images')->show();
+    }
+
+    /** Conversations the photos could go to, newest activity first. */
+    #[Computed]
+    public function textableThreads(): \Illuminate\Support\Collection
+    {
+        $vendorId = auth()->user()->vendor?->id;
+
+        if (! $vendorId) {
+            return collect();
+        }
+
+        return \App\Models\SmsGroupThread::query()
+            ->visibleToVendor($vendorId)
+            ->when($this->textThreadSearch !== '', function ($q) {
+                $term = '%'.trim($this->textThreadSearch).'%';
+                $q->where(fn ($inner) => $inner->where('name', 'like', $term)
+                    ->orWhereHas('client', fn ($c) => $c->where('business_name', 'like', $term))
+                    ->orWhereHas('project', fn ($p) => $p->where('address', 'like', $term)));
+            })
+            ->with(['client:id,business_name', 'project:id,address'])
+            ->orderByDesc('last_activity_at')
+            ->limit(100)
+            ->get();
+    }
+
+    public function textThreadLabel(\App\Models\SmsGroupThread $thread): string
+    {
+        return $thread->name
+            ?: ($thread->client?->name ?: $thread->client?->business_name)
+            ?: $thread->project?->address
+            ?: 'Conversation #'.$thread->id;
+    }
+
+    public function textImages(\App\Services\GroupSmsService $sms): void
+    {
+        $this->authorize('view', $this->project);
+
+        $this->validate([
+            'textTargetThreadId' => 'required|integer',
+            'textFrameIds' => 'array',
+            'textMessageUrls' => 'array',
+            'textNote' => 'nullable|string|max:1200',
+        ], [], ['textTargetThreadId' => 'conversation']);
+
+        if (empty($this->textFrameIds) && empty($this->textMessageUrls)) {
+            $this->addError('textFrameIds', 'Select at least one photo.');
+
+            return;
+        }
+
+        $thread = $this->textableThreads->firstWhere('id', (int) $this->textTargetThreadId);
+
+        if (! $thread) {
+            $this->addError('textTargetThreadId', 'Pick a conversation.');
+
+            return;
+        }
+
+        if ($thread->hasPendingOptIn()) {
+            \Flux\Flux::toast(variant: 'warning', heading: 'Awaiting START Replies', text: 'That conversation has participants who have not replied START yet.', duration: 5000, position: 'top right');
+
+            return;
+        }
+
+        $frames = ProjectTimelapseFrame::query()
+            ->whereIn('id', $this->textFrameIds)
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->get();
+
+        // MMS attachments live in sms-attachments/ — the send pipeline
+        // already knows how to sign and serve that path, so give it copies
+        // there rather than teaching it about timelapse storage.
+        $mediaUrls = $frames->map(function (ProjectTimelapseFrame $frame) {
+            $source = Storage::disk($frame->disk)->path($frame->display_path);
+
+            if (! is_file($source)) {
+                return null;
+            }
+
+            $target = 'sms-attachments/'.Str::uuid().'.jpg';
+            Storage::disk('files')->put($target, file_get_contents($source));
+
+            return $target;
+        })->filter()->values()->all();
+
+        // Texted photos forward as-is: their stored sms-media/… values (or
+        // external URLs) are already shapes the send pipeline signs/serves —
+        // no copy needed. Re-checked against the card, same as on open.
+        $known = $this->messageImages->pluck('raw')->all();
+        $mediaUrls = array_merge(
+            $mediaUrls,
+            array_values(array_filter($this->textMessageUrls, fn ($raw) => in_array($raw, $known, true))),
+        );
+
+        if (empty($mediaUrls)) {
+            $this->addError('textFrameIds', 'Those photos are not available on this server.');
+
+            return;
+        }
+
+        $text = trim($this->textNote) !== ''
+            ? trim($this->textNote)
+            : 'Photos from '.($this->project->short_address ?? $this->project->address);
+
+        $sms->sendToThread($thread, $text, $mediaUrls, auth()->id());
+
+        $this->showTextImagesModal = false;
+        $this->textFrameIds = [];
+        $this->textMessageUrls = [];
+        \Flux\Flux::modal('text-images')->close();
+        $this->dispatch('text-images-sent');
+
+        \Flux\Flux::toast(
+            variant: 'success',
+            heading: 'Sent',
+            text: count($mediaUrls).' '.\Illuminate\Support\Str::plural('photo', count($mediaUrls)).' texted to '.$this->textThreadLabel($thread).'.',
+            duration: 4000,
+            position: 'top right'
+        );
     }
 
     /** Switching target reloads the onion skin and the alignment guide. */
@@ -398,8 +673,54 @@ class TimelapseStudio extends Component
     public function updatedFrame(): void
     {
         $this->validate(['frame' => 'required|mimes:jpg,jpeg,png|max:20480']);
-        $this->storeFrame($this->frame);
+        $this->storeFrame($this->frame, null, $this->sanitizedCaptureMeta());
         $this->frame = null;
+        $this->captureMeta = null;
+    }
+
+    /**
+     * Client-supplied metadata is still client-supplied: coordinates outside
+     * the globe or a "taken at" from a wildly wrong phone clock are dropped,
+     * never stored.
+     *
+     * @return array{lat: ?float, lng: ?float, accuracy: ?int, takenAt: ?\Illuminate\Support\Carbon}|null
+     */
+    protected function sanitizedCaptureMeta(): ?array
+    {
+        $meta = $this->captureMeta;
+
+        if (! is_array($meta)) {
+            return null;
+        }
+
+        $lat = is_numeric($meta['lat'] ?? null) ? (float) $meta['lat'] : null;
+        $lng = is_numeric($meta['lng'] ?? null) ? (float) $meta['lng'] : null;
+
+        if ($lat === null || $lng === null || abs($lat) > 90 || abs($lng) > 180 || ($lat === 0.0 && $lng === 0.0)) {
+            $lat = $lng = null;
+        }
+
+        $accuracy = is_numeric($meta['accuracy'] ?? null)
+            ? (int) min(max((float) $meta['accuracy'], 0), 1000000)
+            : null;
+
+        $takenAt = null;
+
+        if (is_string($meta['takenAt'] ?? null)) {
+            try {
+                $parsed = \Illuminate\Support\Carbon::parse($meta['takenAt']);
+
+                // The shutter fired seconds before this request — anything
+                // outside a generous window is a broken phone clock.
+                if ($parsed->between(now()->subDay(), now()->addMinutes(5))) {
+                    $takenAt = $parsed;
+                }
+            } catch (\Throwable) {
+                // Unparseable timestamp — the upload time will do.
+            }
+        }
+
+        return ($lat === null && $takenAt === null) ? null : compact('lat', 'lng', 'accuracy', 'takenAt');
     }
 
     /** Plain file-upload fallback (camera denied / desktop). */
@@ -412,87 +733,26 @@ class TimelapseStudio extends Component
         $this->file = null;
     }
 
-    protected function storeFrame($upload, ?string $originalName = null): void
+    protected function storeFrame($upload, ?string $originalName = null, ?array $meta = null): void
     {
         $this->authorize('view', $this->project);
 
-        // Read the capture time BEFORE touching the pixels: orientate/encode
-        // strips EXIF, so this is the only moment the true "when was this
-        // taken" exists. Falls back to the file's own timestamp, then now.
-        $shotAt = $this->exifShotAt($upload->getRealPath());
-
         $timelapse = $this->collection ?? ProjectTimelapse::generalFor($this->project);
 
-        $filename = Str::uuid().'.jpg';
-        $directory = sprintf('timelapse/%d', $this->project->id);
-
-        // 1. THE ARCHIVE COPY — the file exactly as the camera produced it,
-        //    full resolution, byte-for-byte. Written first and never touched
-        //    again: everything below is derived and can be regenerated, this
-        //    cannot.
-        $originalPath = sprintf('%s/original-%s', $directory, $filename);
-        Storage::disk('files')->put($originalPath, file_get_contents($upload->getRealPath()));
-
-        // 2. THE SEQUENCE COPY — oriented (phones lean on the EXIF tag; the
-        //    gsc slider and any later video render do not) and capped, so
-        //    playback stays uniform and light. This is what alignment reads
-        //    and what the timelapse shows.
-        $image = Image::make($upload->getRealPath())->orientate();
-
-        if (max($image->width(), $image->height()) > self::MAX_EDGE) {
-            $image->resize(self::MAX_EDGE, self::MAX_EDGE, function ($constraint) {
-                $constraint->aspectRatio();
-                $constraint->upsize();
-            });
-        }
-
-        $path = sprintf('%s/%s', $directory, $filename);
-        Storage::disk('files')->put($path, (string) $image->encode('jpg', 88));
-
-        $frame = ProjectTimelapseFrame::create([
-            'project_timelapse_id' => $timelapse->id,
-            'taken_by_user_id' => auth()->id(),
-            'filename' => $filename,
-            'original_filename' => $originalName,
-            'path' => $path,
-            'original_path' => $originalPath,
-            'disk' => 'files',
-            'shot_at' => $shotAt,
-            'sort_order' => ((int) $timelapse->frames()->max('sort_order')) + 1,
-        ]);
-
-        // Sequences get registered onto their anchor in the background (the
-        // onion skin got it close; alignment removes the residual wobble).
-        // A photo album is not a sequence — nothing to align it to.
-        if ($timelapse->isTimelapse()) {
-            \App\Jobs\AlignTimelapseFrame::dispatch($frame->id)->afterCommit();
-        }
+        app(\App\Services\ProjectImageImporter::class)->storeImage(
+            $timelapse,
+            $upload->getRealPath(),
+            $originalName,
+            null,
+            // The camera's live fix beats EXIF (canvas JPEGs have none).
+            ($meta['lat'] ?? null) !== null
+                ? ['lat' => $meta['lat'], 'lng' => $meta['lng'], 'accuracy' => $meta['accuracy'] ?? null]
+                : null,
+            $meta['takenAt'] ?? null,
+            auth()->id(),
+        );
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
-    }
-
-    /**
-     * EXIF DateTimeOriginal, else the file's own mtime, else now. Bad or
-     * missing EXIF is normal (canvas captures carry none) — never fatal.
-     */
-    protected function exifShotAt(string $path): \Illuminate\Support\Carbon
-    {
-        if (function_exists('exif_read_data')) {
-            try {
-                $exif = @exif_read_data($path);
-                $taken = $exif['DateTimeOriginal'] ?? $exif['DateTimeDigitized'] ?? null;
-
-                if (is_string($taken) && $taken !== '' && ! str_starts_with($taken, '0000')) {
-                    return \Illuminate\Support\Carbon::createFromFormat('Y:m:d H:i:s', $taken);
-                }
-            } catch (\Throwable) {
-                // Unreadable EXIF is not a reason to lose the photo.
-            }
-        }
-
-        $mtime = @filemtime($path);
-
-        return $mtime ? \Illuminate\Support\Carbon::createFromTimestamp($mtime) : now();
     }
 
     /** The taker can remove their own bad frame; Admins can remove any. */

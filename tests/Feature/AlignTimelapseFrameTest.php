@@ -104,12 +104,17 @@ PY]);
     expect($disk->exists($second->aligned_path))->toBeTrue();
 
     // The aligned copy must sit measurably closer to the anchor than the
-    // shifted original does.
+    // shifted original does. Measured on the interior: the strip the warp
+    // couldn't fill is black by design (it is not photo), and scoring an
+    // honest black border against a bright anchor would say nothing about how
+    // well the frames line up. Both images get the same window, so the
+    // comparison stays fair.
     $measure = new Process([$python, '-c', <<<PY
 import cv2, numpy as np
-ref = cv2.imread(r'{$dir}/anchor.jpg').astype(np.int16)
-orig = cv2.imread(r'{$dir}/second.jpg').astype(np.int16)
-aligned = cv2.imread(r'{$dir}/aligned-second.jpg').astype(np.int16)
+m = 40
+ref = cv2.imread(r'{$dir}/anchor.jpg').astype(np.int16)[m:-m, m:-m]
+orig = cv2.imread(r'{$dir}/second.jpg').astype(np.int16)[m:-m, m:-m]
+aligned = cv2.imread(r'{$dir}/aligned-second.jpg').astype(np.int16)[m:-m, m:-m]
 print(float(np.mean(np.abs(ref - orig))), float(np.mean(np.abs(ref - aligned))))
 PY]);
     $measure->mustRun();
@@ -127,6 +132,97 @@ PY]);
     [$aw, $ah] = getimagesizefromstring(Storage::disk('files')->get($anchorAligned));
     [$ow, $oh] = getimagesizefromstring(Storage::disk('files')->get($anchor->path));
     expect([$aw, $ah])->toBe([$ow, $oh]);
+});
+
+it('refuses a warp that would invent more border than photo it moved', function () {
+    $python = cvPython();
+
+    if ($python === null) {
+        $this->markTestSkipped('OpenCV venv not available on this machine.');
+    }
+
+    $fx = alignFixture();
+    $disk = Storage::disk('files');
+    $dir = $disk->path("timelapse/{$fx['project']->id}");
+    @mkdir($dir, 0777, true);
+
+    // Same scene shot from a long step aside: registering it onto the anchor
+    // pulls a fifth of the canvas in from beyond the photo's own edge. There
+    // is nothing real to put there, and the aligner used to smear the outermost
+    // pixel across it — a frame that is largely invented content.
+    $gen = new Process([$python, '-c', <<<PY
+import cv2, numpy as np
+rng = np.random.default_rng(11)
+ref = np.full((600, 800, 3), 235, np.uint8)
+for _ in range(160):
+    x, y = int(rng.integers(0, 740)), int(rng.integers(0, 540))
+    w, h = int(rng.integers(12, 60)), int(rng.integers(12, 60))
+    color = tuple(int(c) for c in rng.integers(0, 220, 3))
+    cv2.rectangle(ref, (x, y), (x + w, y + h), color, -1)
+matrix = np.float32([[1, 0, -150], [0, 1, -95]])
+drifted = cv2.warpAffine(ref, matrix, (800, 600), borderMode=cv2.BORDER_REPLICATE)
+cv2.imwrite(r'{$dir}/anchor.jpg', ref)
+cv2.imwrite(r'{$dir}/drifted.jpg', drifted)
+PY]);
+    $gen->mustRun();
+
+    alignFrameRow($fx['timelapse'], 'anchor.jpg', 1);
+    $drifted = alignFrameRow($fx['timelapse'], 'drifted.jpg', 2);
+
+    (new AlignTimelapseFrame($drifted->id))->handle();
+
+    // Kept as shot — its own framing, every pixel real — rather than warped
+    // onto the anchor with a fabricated border.
+    expect($drifted->fresh()->aligned_path)->toBeNull()
+        ->and($disk->exists("timelapse/{$fx['project']->id}/aligned-drifted.jpg"))->toBeFalse();
+});
+
+it('fills what little border a kept alignment has with black, never smear', function () {
+    $python = cvPython();
+
+    if ($python === null) {
+        $this->markTestSkipped('OpenCV venv not available on this machine.');
+    }
+
+    $fx = alignFixture();
+    $disk = Storage::disk('files');
+    $dir = $disk->path("timelapse/{$fx['project']->id}");
+    @mkdir($dir, 0777, true);
+
+    $gen = new Process([$python, '-c', <<<PY
+import cv2, numpy as np
+rng = np.random.default_rng(3)
+ref = np.full((600, 800, 3), 235, np.uint8)
+for _ in range(160):
+    x, y = int(rng.integers(0, 740)), int(rng.integers(0, 540))
+    w, h = int(rng.integers(12, 60)), int(rng.integers(12, 60))
+    color = tuple(int(c) for c in rng.integers(0, 220, 3))
+    cv2.rectangle(ref, (x, y), (x + w, y + h), color, -1)
+shifted = cv2.warpAffine(ref, np.float32([[1, 0, -14], [0, 1, -9]]), (800, 600),
+                         borderMode=cv2.BORDER_REPLICATE)
+cv2.imwrite(r'{$dir}/anchor.jpg', ref)
+cv2.imwrite(r'{$dir}/nudged.jpg', shifted)
+PY]);
+    $gen->mustRun();
+
+    alignFrameRow($fx['timelapse'], 'anchor.jpg', 1);
+    $nudged = alignFrameRow($fx['timelapse'], 'nudged.jpg', 2);
+
+    (new AlignTimelapseFrame($nudged->id))->handle();
+
+    expect($nudged->fresh()->aligned_path)->not->toBeNull();
+
+    // The strip the warp couldn't fill is black, not a copy of the column
+    // beside it — the scene here is bright (235), so smear would be far from 0.
+    $measure = new Process([$python, '-c', <<<PY
+import cv2, numpy as np
+a = cv2.imread(r'{$dir}/aligned-nudged.jpg', cv2.IMREAD_GRAYSCALE)
+print(float(a[:, -1].mean()), float(a[-1, :].mean()))
+PY]);
+    $measure->mustRun();
+    [$rightEdge, $bottomEdge] = array_map('floatval', explode(' ', trim($measure->getOutput())));
+
+    expect(min($rightEdge, $bottomEdge))->toBeLessThan(20.0);
 });
 
 it('leaves the frame unaligned when python is not available', function () {

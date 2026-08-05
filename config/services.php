@@ -8,6 +8,10 @@ return [
     'timelapse_align' => [
         'python' => env('TIMELAPSE_ALIGN_PYTHON', '/home/patryk/.venvs/hive-cv/bin/python'),
         'min_inliers' => (int) env('TIMELAPSE_ALIGN_MIN_INLIERS', 25),
+        // Share of the canvas a warp may leave with no photo behind it before
+        // the alignment is refused. Past this the frame is kept unaligned —
+        // an honest shot beats one that is largely invented border.
+        'max_border' => (float) env('TIMELAPSE_ALIGN_MAX_BORDER', 0.08),
     ],
 
     'url_shortener' => [

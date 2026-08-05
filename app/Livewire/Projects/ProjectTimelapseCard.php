@@ -8,30 +8,27 @@ use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
- * The project page's Timelapse card: latest frame, count, and the way into
- * the camera. Kept deliberately small — shooting and reviewing happen in the
- * studio page.
+ * The project page's Images card: frame count, when the last shot landed, and
+ * the way into the camera. Kept deliberately small — browsing and shooting
+ * happen on the images page.
  */
 class ProjectTimelapseCard extends Component
 {
     public Project $project;
 
     /**
-     * The six newest shots across every collection. Newest by id, not
-     * sort_order — sort_order only ranks WITHIN a timelapse, and "the last
-     * six photos on this job" means most recently taken, whatever album.
-     *
-     * @return \Illuminate\Support\Collection<int, ProjectTimelapseFrame>
+     * The newest shot across every collection — newest by id, not sort_order,
+     * since sort_order only ranks WITHIN a timelapse and "the last photo on
+     * this job" means most recently taken, whatever album.
      */
     #[Computed]
-    public function recentFrames()
+    public function latestFrame(): ?ProjectTimelapseFrame
     {
         return ProjectTimelapseFrame::query()
             ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
             ->with('takenBy:id,first_name,nickname')
             ->orderByDesc('id')
-            ->limit(6)
-            ->get();
+            ->first();
     }
 
     #[Computed]
