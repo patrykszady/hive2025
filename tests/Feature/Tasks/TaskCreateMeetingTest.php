@@ -240,3 +240,56 @@ it('removes owner company business email from legacy participants when editing m
         ->toContain('pmg@example.test')
         ->not->toContain('crew@gs.construction');
 });
+
+it('gives a Meet half an hour: the end follows the start by 30 minutes', function (): void {
+    $date = '2026-05-19';
+
+    $component = Livewire::test(TaskCreate::class)
+        ->set('form.type', 'Meet')
+        ->set('form.dates', [$date])
+        ->set('form.time_settings', [$date => ['use_time' => true, 'start_time' => null, 'end_time' => null]])
+        ->set("form.time_settings.{$date}.start_time", '14:00');
+
+    expect($component->get("form.time_settings.{$date}.end_time"))->toBe('14:30');
+});
+
+it('opens the end picker at start + 30 for a Meet, and at the start itself otherwise', function (): void {
+    $date = '2026-05-19';
+
+    $meet = Livewire::test(TaskCreate::class)
+        ->set('form.type', 'Meet')
+        ->set('form.time_settings', [$date => ['use_time' => true, 'start_time' => '14:00', 'end_time' => '14:30']]);
+
+    expect($meet->instance()->minimumEndTime($date))->toBe('14:30');
+
+    $other = Livewire::test(TaskCreate::class)
+        ->set('form.type', 'Service')
+        ->set('form.time_settings', [$date => ['use_time' => true, 'start_time' => '14:00', 'end_time' => '14:00']]);
+
+    expect($other->instance()->minimumEndTime($date))->toBe('14:00');
+});
+
+it('keeps mirroring the start for task types that are not Meet', function (): void {
+    $date = '2026-05-19';
+
+    $component = Livewire::test(TaskCreate::class)
+        ->set('form.type', 'Service')
+        ->set('form.dates', [$date])
+        ->set('form.time_settings', [$date => ['use_time' => true, 'start_time' => null, 'end_time' => null]])
+        ->set("form.time_settings.{$date}.start_time", '14:00');
+
+    expect($component->get("form.time_settings.{$date}.end_time"))->toBe('14:00');
+});
+
+it('does not push a late Meet into the next day', function (): void {
+    $date = '2026-05-19';
+
+    $component = Livewire::test(TaskCreate::class)
+        ->set('form.type', 'Meet')
+        ->set('form.dates', [$date])
+        ->set('form.time_settings', [$date => ['use_time' => true, 'start_time' => null, 'end_time' => null]])
+        ->set("form.time_settings.{$date}.start_time", '23:45');
+
+    // 00:15 tomorrow is not an end time for today's meeting — keep the mirror.
+    expect($component->get("form.time_settings.{$date}.end_time"))->toBe('23:45');
+});

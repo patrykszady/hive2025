@@ -867,3 +867,77 @@ it('never offers weekends or a 4-6 PM window', function () {
     expect(\Illuminate\Support\Carbon::parse($first, $tz)->isWeekend())->toBeFalse()
         ->and(\App\Livewire\Leads\PickTimes::unavailableDates($fx['lead']))->toContain($saturday);
 });
+
+it('invites the homeowner to the consult it books', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Kitchen Remodel')
+        ->call('send_message');
+
+    $project = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->first();
+    $task = Task::withoutGlobalScopes()->where('project_id', $project->id)->first();
+
+    // The client's own contact is on the invite. This list used to be created
+    // empty, so the calendar event went out to the company mailboxes only and
+    // the homeowner never heard about their own consult.
+    expect(data_get($task->options, 'meeting_participants'))
+        ->toContain(strtolower($fx['contact']->email));
+});
+
+it('backfills the homeowner when an older empty consult is rebooked', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Kitchen Remodel')
+        ->call('send_message');
+
+    $project = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->first();
+    $task = Task::withoutGlobalScopes()->where('project_id', $project->id)->first();
+
+    // A consult booked before participants were defaulted here.
+    $options = (array) $task->options;
+    $options['meeting_participants'] = [];
+    $task->forceFill(['options' => $options])->save();
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '15:00')
+        ->call('send_message');
+
+    expect(data_get($task->fresh()->options, 'meeting_participants'))
+        ->toContain(strtolower($fx['contact']->email));
+});
+
+it('leaves an edited participant list alone when the consult is rebooked', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Kitchen Remodel')
+        ->call('send_message');
+
+    $project = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->first();
+    $task = Task::withoutGlobalScopes()->where('project_id', $project->id)->first();
+
+    // Someone deliberately took the homeowner off. Rebooking must not undo it.
+    $options = (array) $task->options;
+    $options['meeting_participants'] = ['site.super@example.test'];
+    $task->forceFill(['options' => $options])->save();
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '15:00')
+        ->call('send_message');
+
+    expect(data_get($task->fresh()->options, 'meeting_participants'))
+        ->toBe(['site.super@example.test']);
+});

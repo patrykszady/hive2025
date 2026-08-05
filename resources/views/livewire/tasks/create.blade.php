@@ -381,14 +381,13 @@
                                                 @foreach (['start_time' => 'Start', 'end_time' => 'End'] as $field => $placeholder)
                                                     @php
                                                         $isEnd = $field === 'end_time';
-                                                        $startTimeValue = data_get($form->time_settings, $date . '.start_time');
                                                         $fieldValue = data_get($form->time_settings, $date . '.' . $field);
                                                         $fieldValueToken = is_string($fieldValue) && $fieldValue !== ''
                                                             ? str_replace(':', '-', $fieldValue)
                                                             : 'empty';
-                                                        $minTime = $isEnd && is_string($startTimeValue) && $startTimeValue !== ''
-                                                            ? $startTimeValue
-                                                            : '06:00';
+                                                        // A Meet's end opens at start + 30: a meeting that
+                                                        // ends when it starts is not a meeting.
+                                                        $minTime = $isEnd ? $this->minimumEndTime($date) : '06:00';
                                                         $openTo = $isEnd ? '10:00' : '08:00';
                                                     @endphp
                                                     <div

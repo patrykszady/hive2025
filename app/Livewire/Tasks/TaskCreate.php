@@ -55,6 +55,9 @@ class TaskCreate extends Component
 
     protected $listeners = ['editTask', 'addTask', 'prefillTaskFromSms'];
 
+    /** How long a Meet runs by default — the same half hour a consult books. */
+    public const MEET_MINUTES = 30;
+
     /**
      * Maps a homeowner-selected time frame to concrete arrival start/end times.
      *
@@ -801,7 +804,7 @@ class TaskCreate extends Component
     }
 
     /**
-     * Ensure end_time is mirrored whenever a start_time changes.
+     * Ensure end_time follows whenever a start_time changes.
      *
      * @param  mixed  $value
      */
@@ -821,7 +824,57 @@ class TaskCreate extends Component
             return;
         }
 
-        $this->form->time_settings[$date]['end_time'] = $value;
+        $this->form->time_settings[$date]['end_time'] = $this->defaultEndTime($value);
+    }
+
+    /**
+     * Where a day's end time lands when the start moves.
+     *
+     * A Meet is a meeting someone has to be at, so it gets a real duration:
+     * end follows start by MEET_MINUTES. Everything else keeps the plain
+     * mirror it always had.
+     */
+    private function defaultEndTime(string $startTime): string
+    {
+        if ($this->form->type !== 'Meet') {
+            return $startTime;
+        }
+
+        return $this->shiftTime($startTime, self::MEET_MINUTES) ?? $startTime;
+    }
+
+    /**
+     * $time plus $minutes as H:i, or null when it can't be parsed or would
+     * roll into the next day — a 23:45 start keeps the plain mirror rather
+     * than proposing tomorrow morning.
+     */
+    private function shiftTime(string $time, int $minutes): ?string
+    {
+        try {
+            $start = Carbon::createFromFormat('H:i', substr(trim($time), 0, 5));
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        $end = $start->copy()->addMinutes($minutes);
+
+        return $end->isSameDay($start) ? $end->format('H:i') : null;
+    }
+
+    /**
+     * The earliest end the picker offers for a day. A Meet can't end when it
+     * starts, so its options open at start + MEET_MINUTES; anything else may
+     * end on its start. Falls back to the general floor with no start picked.
+     */
+    public function minimumEndTime(string $date): string
+    {
+        $start = data_get($this->form->time_settings, "$date.start_time");
+
+        if (! is_string($start) || trim($start) === '') {
+            return '06:00';
+        }
+
+        return $this->defaultEndTime($start);
     }
 
     /**
@@ -852,27 +905,14 @@ class TaskCreate extends Component
      */
     private function resolveExcludedMeetingParticipants(): array
     {
-        $ownerVendorId = null;
+        return \App\Services\MeetingParticipants::excluded($this->meetingProject());
+    }
 
-        if ($this->form->project_id) {
-            $project = \App\Models\Project::find($this->form->project_id);
-            $ownerVendorId = is_numeric($project?->belongs_to_vendor_id)
-                ? (int) $project->belongs_to_vendor_id
-                : null;
-        }
-
-        if (! is_int($ownerVendorId) || $ownerVendorId <= 0) {
-            return [];
-        }
-
-        $ownerVendor = Vendor::withoutGlobalScopes()->find($ownerVendorId);
-
-        return collect([$ownerVendor?->email ?? null, $ownerVendor?->business_email ?? null])
-            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
-            ->map(fn (string $email) => strtolower(trim($email)))
-            ->unique()
-            ->values()
-            ->all();
+    private function meetingProject(): ?\App\Models\Project
+    {
+        return $this->form->project_id
+            ? \App\Models\Project::with('client.users')->find($this->form->project_id)
+            : null;
     }
 
     /**
@@ -882,49 +922,11 @@ class TaskCreate extends Component
      */
     private function resolveDefaultMeetingParticipants(): array
     {
-        $emails = collect();
-
-        // Team member emails from selected user_ids
-        $userIds = collect($this->form->user_ids ?? [])
-            ->filter(fn ($id) => is_numeric($id) && (int) $id > 0)
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values();
-
-        if ($userIds->isNotEmpty()) {
-            $emails = $emails->merge(
-                User::query()->whereIn('id', $userIds->all())->pluck('email')
-            );
-        }
-
-        // Client user emails from the selected project
-        if ($this->form->project_id) {
-            $project = \App\Models\Project::with('client.users')->find($this->form->project_id);
-            if ($project?->client) {
-                $emails = $emails->merge(
-                    collect($project->client->users)
-                        ->filter(fn ($user) => $user->hasRoutableEmail())
-                        ->pluck('email')
-                );
-            }
-        }
-
-        // Selected vendor contact (e.g. the sub being scheduled for the meeting)
-        if ($this->form->vendor_id && is_numeric($this->form->vendor_id)) {
-            $vendor = Vendor::withoutGlobalScopes()->find((int) $this->form->vendor_id);
-            $vendorEmail = trim((string) ($vendor?->email ?? $vendor?->business_email ?? ''));
-
-            if ($vendorEmail !== '') {
-                $emails->push($vendorEmail);
-            }
-        }
-
-        return $emails
-            ->filter(fn ($email) => is_string($email) && $email !== '')
-            ->map(fn (string $email) => strtolower(trim($email)))
-            ->unique()
-            ->values()
-            ->all();
+        return \App\Services\MeetingParticipants::defaults(
+            $this->meetingProject(),
+            (array) ($this->form->user_ids ?? []),
+            is_numeric($this->form->vendor_id) ? (int) $this->form->vendor_id : null,
+        );
     }
 
     /**
@@ -1032,7 +1034,7 @@ class TaskCreate extends Component
     }
 
     /**
-     * Update end time to match start time, unless end time is already set
+     * Fill in an end time from the start, unless one is already set.
      */
     public function updateEndTime($date)
     {
@@ -1048,14 +1050,11 @@ class TaskCreate extends Component
             return;
         }
 
-        try {
-            $endTime = Carbon::createFromFormat('H:i', $startTime)
-                ->format('H:i');
-
-            $this->form->time_settings[$date]['end_time'] = $endTime;
-        } catch (\Exception $e) {
-            // If parsing fails, do nothing
+        if (! is_string($startTime) || trim($startTime) === '') {
+            return;
         }
+
+        $this->form->time_settings[$date]['end_time'] = $this->defaultEndTime($startTime);
     }
 
     /**
@@ -1384,7 +1383,7 @@ class TaskCreate extends Component
                 $timeSettings[$date] = [
                     'use_time' => true,
                     'start_time' => $startTime,
-                    'end_time' => $payload['end_time'] ?? $startTime,
+                    'end_time' => $payload['end_time'] ?? $this->defaultEndTime($startTime),
                 ];
                 $this->form->time_settings = $timeSettings;
             }

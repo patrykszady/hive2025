@@ -701,6 +701,17 @@ class LeadCreate extends Component
             // Drop the previous date's entry, or the task keeps a stale time.
             $options['time_settings'] = [$date => $timeSettings];
 
+            // Backfill an empty list only — consults booked before participants
+            // were defaulted here have nobody on them, and rebooking is the
+            // moment to fix that. A list someone has edited is left alone:
+            // removing an attendee is a decision, not a gap.
+            if (empty($options['meeting_participants'])) {
+                $options['meeting_participants'] = \App\Services\MeetingParticipants::defaults(
+                    $project,
+                    [auth()->id()],
+                );
+            }
+
             $task->update([
                 'start_date' => $date,
                 'end_date' => $date,
@@ -730,7 +741,15 @@ class LeadCreate extends Component
                 'dates' => [$date],
                 'checklist' => [],
                 'time_settings' => [$date => $timeSettings],
-                'meeting_participants' => [],
+                // The homeowner is the point of a consult — invite them, and
+                // whoever is going, exactly as the task form would. This used
+                // to be an empty list, so the calendar invite went only to the
+                // company mailboxes the calendar service adds on its own and
+                // the client never saw their own appointment.
+                'meeting_participants' => \App\Services\MeetingParticipants::defaults(
+                    $project,
+                    [auth()->id()],
+                ),
                 'meeting_location_type' => 'in_person',
             ],
         ]);
