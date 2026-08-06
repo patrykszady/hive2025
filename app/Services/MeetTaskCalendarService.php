@@ -367,16 +367,22 @@ class MeetTaskCalendarService
             return collect([$devRecipient])->filter();
         }
 
-        // meeting_participants remains the primary source, but always merge in
-        // owner-company contact fallbacks so PMG/company recipients are not skipped.
-        $meetingParticipants = collect((array) ($task->options->meeting_participants ?? []));
-
-        return $meetingParticipants
-            ->merge($this->resolveOwnerAndVendorContactEmails($task))
-            ->filter(fn (?string $email) => is_string($email) && $email !== '')
+        $meetingParticipants = collect((array) ($task->options->meeting_participants ?? []))
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
             ->map(fn (string $email) => strtolower(trim($email)))
             ->unique()
             ->values();
+
+        // The task's Participants list IS the guest list — whoever is on it,
+        // and nobody else. Every company mailbox on the vendor used to be
+        // merged in on top, so a second company address landed on invites it
+        // was never added to. That merge is now only what a task with an empty
+        // list falls back to.
+        if ($meetingParticipants->isNotEmpty()) {
+            return $meetingParticipants;
+        }
+
+        return $this->resolveOwnerAndVendorContactEmails($task);
     }
 
     private function resolveDateRange(Task $task): array

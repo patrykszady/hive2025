@@ -45,11 +45,15 @@ class PickTimes extends Component
     public const MIN_LEAD_HOURS = 72;
 
     /**
-     * Rescheduling: they've already picked once, so we need less notice — but
-     * it stays an HOURS rule, not "any time tomorrow". Asking at 1pm greys out
-     * tomorrow morning; asking after hours greys out tomorrow entirely.
+     * Rescheduling: no notice rule at all. Someone moving a consult they
+     * already have may take any window that hasn't started yet — including
+     * later today. Three days out is what we ask of a first contact, not of a
+     * homeowner shuffling an appointment on the morning of.
+     *
+     * "Hasn't started yet" still holds: the window-start check below measures
+     * against this moment, so a 1-3 PM slot stops being offered at 1 PM.
      */
-    public const MIN_LEAD_HOURS_RESCHEDULE = 24;
+    public const MIN_LEAD_HOURS_RESCHEDULE = 0;
 
     /**
      * How much a pick is worth toward MIN_TIMES: a whole free day ("Anytime")
@@ -104,11 +108,36 @@ class PickTimes extends Component
         return config('sms.business_hours.timezone', 'America/Chicago');
     }
 
+    /**
+     * Rescheduling covers both ways a homeowner arrives here with a meeting
+     * already in hand: they came back through the picker before, or there is
+     * a consult on the books (the "Need a different time?" link in the
+     * calendar invite). Only a genuine first contact waits the full notice.
+     */
+    public static function isRescheduling(?Lead $lead = null): bool
+    {
+        return (bool) ($lead?->hasRescheduled() || $lead?->hasBookedConsult());
+    }
+
     public static function minLeadHours(?Lead $lead = null): int
     {
-        return $lead?->hasRescheduled()
+        return static::isRescheduling($lead)
             ? self::MIN_LEAD_HOURS_RESCHEDULE
             : self::MIN_LEAD_HOURS;
+    }
+
+    /**
+     * Why a pick was refused. With a notice rule it's about notice; without
+     * one the only thing left to say is that the slot has already begun —
+     * "we need at least 0 hours notice" is not an explanation.
+     */
+    protected function noticeError(string $noun = 'time'): string
+    {
+        $hours = static::minLeadHours($this->lead);
+
+        return $hours > 0
+            ? "Please pick a later {$noun} — we need at least {$hours} hours notice."
+            : "That {$noun} has already passed — please pick a later one.";
     }
 
     public static function earliestStart(?Lead $lead = null): \Illuminate\Support\Carbon
@@ -232,7 +261,7 @@ class PickTimes extends Component
         $this->validate([
             'date' => ['required', 'date', 'after_or_equal:'.static::firstBookableDate($this->lead)],
         ], [
-            'date.after_or_equal' => 'Please pick a later date — we need at least '.static::minLeadHours($this->lead).' hours notice.',
+            'date.after_or_equal' => $this->noticeError('date'),
         ]);
 
         if (! in_array($window, self::WINDOWS, true)) {
@@ -253,7 +282,7 @@ class PickTimes extends Component
 
         if ($window === 'Anytime') {
             if (! static::hasWindowOnOrAfter($this->date, $earliest)) {
-                $this->addError('times', 'Please pick a later date — we need at least '.static::minLeadHours($this->lead).' hours notice.');
+                $this->addError('times', $this->noticeError('date'));
 
                 return;
             }
@@ -273,7 +302,7 @@ class PickTimes extends Component
             );
 
             if ($start->lt($earliest)) {
-                $this->addError('times', 'Please pick a later time — we need at least '.static::minLeadHours($this->lead).' hours notice.');
+                $this->addError('times', $this->noticeError());
 
                 return;
             }

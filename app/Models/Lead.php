@@ -330,6 +330,30 @@ class Lead extends Model
         return filled($this->lead_data['availability_updated_at'] ?? null);
     }
 
+    /**
+     * Is there a consult on the books for this lead already?
+     *
+     * The "Need a different time?" link in a calendar invite lands on the same
+     * picker a brand-new lead uses, and a homeowner who never went through the
+     * picker before was being held to the first-contact notice — three days out
+     * to move a meeting they already have. Having a consult IS the difference
+     * between booking and rescheduling.
+     */
+    public function hasBookedConsult(): bool
+    {
+        if (! $this->user_id) {
+            return false;
+        }
+
+        return \App\Models\Task::withoutGlobalScopes()
+            ->where('type', 'Meet')
+            ->whereHas('project', fn ($project) => $project->withoutGlobalScopes()
+                ->whereHas('client', fn ($client) => $client->withoutGlobalScopes()
+                    ->whereHas('users', fn ($user) => $user->withoutGlobalScopes()
+                        ->where('users.id', $this->user_id))))
+            ->exists();
+    }
+
     public static function statusColor(?string $title): string
     {
         return collect(self::selectableStatuses())->firstWhere('code', $title)['color'] ?? 'zinc';

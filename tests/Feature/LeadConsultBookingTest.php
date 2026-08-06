@@ -815,12 +815,12 @@ it('thanks the client for rescheduling once they have sent new times', function 
         ->and($compose())->not->toContain('Thank you for reaching out');
 });
 
-it('gives a rescheduling client 24h notice instead of 72h', function () {
+it('lets someone who already picked once take any slot that has not started', function () {
     $fx = makeConsultFixture();
     $tz = \App\Livewire\Leads\PickTimes::timezone();
 
-    // Pretend it is 1pm on a Tuesday so the boundary is deterministic.
-    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-07-28 13:00', $tz));
+    // Pretend it is 9am on a Tuesday so the boundary is deterministic.
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-07-28 09:00', $tz));
 
     $data = $fx['lead']->lead_data;
     $data['availability_updated_at'] = now()->toDateTimeString();
@@ -828,49 +828,35 @@ it('gives a rescheduling client 24h notice instead of 72h', function () {
     $fx['lead']->save();
 
     $lead = Lead::withoutGlobalScopes()->find($fx['lead']->id);
-    $tomorrow = '2026-07-29'; // Wednesday
+    $today = '2026-07-28';
 
-    expect(\App\Livewire\Leads\PickTimes::minLeadHours($lead))->toBe(24)
-        ->and(\App\Livewire\Leads\PickTimes::firstBookableDate($lead))->toBe($tomorrow);
+    expect(\App\Livewire\Leads\PickTimes::minLeadHours($lead))->toBe(0)
+        ->and(\App\Livewire\Leads\PickTimes::firstBookableDate($lead))->toBe($today);
 
-    // Asking at 1pm greys out tomorrow morning but leaves 2-4 PM.
     $pick = fn (string $window) => Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $lead->id])
-        ->set('date', $tomorrow)
+        ->set('date', $today)
         ->call('toggleWindow', $window)
         ->get('times');
 
+    // 7-9 AM has begun; the rest of today is theirs.
     expect($pick('7-9 AM'))->toBe([])
-        ->and($pick('11-1 PM'))->toBe([])
-        ->and($pick('1-3 PM'))->toBe([['date' => $tomorrow, 'time' => '1-3 PM']]);
+        ->and($pick('9-11 AM'))->toBe([['date' => $today, 'time' => '9-11 AM']])
+        ->and($pick('1-3 PM'))->toBe([['date' => $today, 'time' => '1-3 PM']]);
 
     \Illuminate\Support\Carbon::setTestNow();
 });
 
-it('never offers weekends or a 4-6 PM window', function () {
+it('treats a booked consult as rescheduling, even if the picker was never used', function () {
+    Queue::fake();
     $fx = makeConsultFixture();
     $tz = \App\Livewire\Leads\PickTimes::timezone();
 
-    expect(\App\Livewire\Leads\PickTimes::WINDOWS)->not->toContain('4-6 PM');
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-07-28 09:00', $tz));
 
-    $saturday = \Illuminate\Support\Carbon::now($tz)->next(\Carbon\Carbon::SATURDAY)->format('Y-m-d');
-    $sunday = \Illuminate\Support\Carbon::now($tz)->next(\Carbon\Carbon::SUNDAY)->format('Y-m-d');
+    $lead = Lead::withoutGlobalScopes()->find($fx['lead']->id);
 
-    foreach ([$saturday, $sunday] as $weekend) {
-        expect(Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
-            ->set('date', $weekend)
-            ->call('toggleWindow', '1-3 PM')
-            ->get('times'))->toBe([]);
-    }
-
-    // The calendar's opening day is a weekday, and weekends are marked out.
-    $first = \App\Livewire\Leads\PickTimes::firstBookableDate($fx['lead']);
-    expect(\Illuminate\Support\Carbon::parse($first, $tz)->isWeekend())->toBeFalse()
-        ->and(\App\Livewire\Leads\PickTimes::unavailableDates($fx['lead']))->toContain($saturday);
-});
-
-it('invites the homeowner to the consult it books', function () {
-    Queue::fake();
-    $fx = makeConsultFixture();
+    // A first contact waits the full notice.
+    expect(\App\Livewire\Leads\PickTimes::minLeadHours($lead))->toBe(72);
 
     consultComposer($fx)
         ->call('insertAvailabilitySlot', 0)
@@ -878,66 +864,35 @@ it('invites the homeowner to the consult it books', function () {
         ->set('projectName', 'Kitchen Remodel')
         ->call('send_message');
 
-    $project = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->first();
-    $task = Task::withoutGlobalScopes()->where('project_id', $project->id)->first();
+    // Now they have a meeting. The "Need a different time?" link in the invite
+    // lands here, and moving an appointment they already have is not a first
+    // contact — this used to hold them to three days out.
+    $lead = Lead::withoutGlobalScopes()->find($fx['lead']->id);
 
-    // The client's own contact is on the invite. This list used to be created
-    // empty, so the calendar event went out to the company mailboxes only and
-    // the homeowner never heard about their own consult.
-    expect(data_get($task->options, 'meeting_participants'))
-        ->toContain(strtolower($fx['contact']->email));
+    expect($lead->hasRescheduled())->toBeFalse()
+        ->and($lead->hasBookedConsult())->toBeTrue()
+        ->and(\App\Livewire\Leads\PickTimes::minLeadHours($lead))->toBe(0)
+        ->and(\App\Livewire\Leads\PickTimes::firstBookableDate($lead))->toBe('2026-07-28');
+
+    \Illuminate\Support\Carbon::setTestNow();
 });
 
-it('backfills the homeowner when an older empty consult is rebooked', function () {
-    Queue::fake();
+it('still holds a brand-new lead to three days notice', function () {
     $fx = makeConsultFixture();
+    $tz = \App\Livewire\Leads\PickTimes::timezone();
 
-    consultComposer($fx)
-        ->call('insertAvailabilitySlot', 0)
-        ->call('selectExactTime', '14:00')
-        ->set('projectName', 'Kitchen Remodel')
-        ->call('send_message');
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-07-28 09:00', $tz));
 
-    $project = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->first();
-    $task = Task::withoutGlobalScopes()->where('project_id', $project->id)->first();
+    $lead = Lead::withoutGlobalScopes()->find($fx['lead']->id);
 
-    // A consult booked before participants were defaulted here.
-    $options = (array) $task->options;
-    $options['meeting_participants'] = [];
-    $task->forceFill(['options' => $options])->save();
+    expect(\App\Livewire\Leads\PickTimes::minLeadHours($lead))->toBe(72);
 
-    consultComposer($fx)
-        ->call('insertAvailabilitySlot', 0)
-        ->call('selectExactTime', '15:00')
-        ->call('send_message');
+    $times = Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $lead->id])
+        ->set('date', '2026-07-29')
+        ->call('toggleWindow', '9-11 AM')
+        ->get('times');
 
-    expect(data_get($task->fresh()->options, 'meeting_participants'))
-        ->toContain(strtolower($fx['contact']->email));
-});
+    expect($times)->toBe([]);
 
-it('leaves an edited participant list alone when the consult is rebooked', function () {
-    Queue::fake();
-    $fx = makeConsultFixture();
-
-    consultComposer($fx)
-        ->call('insertAvailabilitySlot', 0)
-        ->call('selectExactTime', '14:00')
-        ->set('projectName', 'Kitchen Remodel')
-        ->call('send_message');
-
-    $project = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->first();
-    $task = Task::withoutGlobalScopes()->where('project_id', $project->id)->first();
-
-    // Someone deliberately took the homeowner off. Rebooking must not undo it.
-    $options = (array) $task->options;
-    $options['meeting_participants'] = ['site.super@example.test'];
-    $task->forceFill(['options' => $options])->save();
-
-    consultComposer($fx)
-        ->call('insertAvailabilitySlot', 0)
-        ->call('selectExactTime', '15:00')
-        ->call('send_message');
-
-    expect(data_get($task->fresh()->options, 'meeting_participants'))
-        ->toBe(['site.super@example.test']);
+    \Illuminate\Support\Carbon::setTestNow();
 });

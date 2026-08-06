@@ -211,3 +211,119 @@ it('keeps the reach-out wording when there is nothing to link to', function (): 
         ->toContain('Should anything change, please reach out to reschedule.')
         ->not->toContain('Reschedule here:');
 });
+
+/**
+ * A Meet whose invite is built for real — outside local/testing, where the
+ * service otherwise redirects every recipient to the dev address.
+ *
+ * @return array{task: Task, vendor: Vendor}
+ */
+function meetRecipientFixture(array $participants): array
+{
+    config([
+        'nylas.api_key' => 'test-key',
+        'nylas.meet.enabled' => true,
+    ]);
+
+    app()->detectEnvironment(fn () => 'production');
+
+    $vendor = Vendor::factory()->create([
+        'business_name' => 'GS Construction',
+        'business_email' => 'crew@gs.test',
+    ]);
+
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Bedroom',
+        'client_id' => $client->id,
+        'address' => '806 Parkside',
+        'city' => 'Lake Zurich',
+        'state' => 'IL',
+        'zip_code' => '60047',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+
+    // Two company mailboxes, both with calendar grants — the organizer's and a
+    // colleague's.
+    CompanyEmail::withoutGlobalScopes()->create([
+        'vendor_id' => $vendor->id,
+        'email' => 'patryk@gs.test',
+        'grant_id' => 'grant_123',
+    ]);
+    CompanyEmail::withoutGlobalScopes()->create([
+        'vendor_id' => $vendor->id,
+        'email' => 'greg@gs.test',
+        'grant_id' => 'grant_456',
+    ]);
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'GS Construction | Andersen | Consult',
+        'type' => 'Meet',
+        'order' => 1,
+        'project_id' => $project->id,
+        'vendor_id' => null,
+        'user_ids' => [],
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => 1,
+        'start_date' => '2026-08-05',
+        'end_date' => '2026-08-05',
+        'options' => [
+            'meeting_participants' => $participants,
+            'time_settings' => ['2026-08-05' => ['use_time' => false]],
+        ],
+    ]));
+
+    Http::fake([
+        'https://api.us.nylas.com/v3/grants/*/calendars*' => Http::response([
+            'data' => [['id' => 'cal_abc', 'is_primary' => true]],
+        ], 200),
+        'https://api.us.nylas.com/v3/grants/*/events*' => Http::response([
+            'data' => ['id' => 'evt_123'],
+        ], 200),
+    ]);
+
+    return ['task' => $task, 'vendor' => $vendor];
+}
+
+function sentInviteParticipants(): array
+{
+    $found = [];
+
+    Http::assertSent(function ($request) use (&$found): bool {
+        if (! str_contains($request->url(), '/events')) {
+            return false;
+        }
+
+        $found = collect($request->data()['participants'] ?? [])
+            ->pluck('email')
+            ->sort()
+            ->values()
+            ->all();
+
+        return true;
+    });
+
+    return $found;
+}
+
+it('invites exactly who is on the participant list, and nobody else', function (): void {
+    $fx = meetRecipientFixture(['patryk@gs.test', 'andersensarah924@example.test']);
+
+    app(MeetTaskCalendarService::class)->createMeetEvent($fx['task']);
+
+    // greg@ is a company mailbox on the same vendor. It used to be merged onto
+    // every Meet invite regardless of who the task actually listed.
+    expect(sentInviteParticipants())->toBe(['andersensarah924@example.test', 'patryk@gs.test']);
+});
+
+it('falls back to the company contacts when a Meet lists nobody', function (): void {
+    $fx = meetRecipientFixture([]);
+
+    app(MeetTaskCalendarService::class)->createMeetEvent($fx['task']);
+
+    // Nothing to honour, so the old safety net still applies — better a
+    // company mailbox than an invite with no one on it. The vendor's own
+    // generic address stays out.
+    expect(sentInviteParticipants())->toBe(['greg@gs.test', 'patryk@gs.test']);
+});
