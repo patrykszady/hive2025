@@ -722,3 +722,35 @@ it('files a queued capture into the collection it was shot in, not the one now o
     expect($foreign->frames()->count())->toBe(0)
         ->and($general->frames()->count())->toBe(1);
 });
+
+it('answers the upload right away and leaves the pixel work to the queue', function () {
+    $fx = timelapseFixture();
+
+    Queue::fake([\App\Jobs\ProcessTimelapseFrame::class]);
+
+    Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->set('frame', UploadedFile::fake()->image('frame-0.jpg', 3000, 2250))
+        ->assertHasNoErrors();
+
+    $frame = ProjectTimelapseFrame::latest('id')->firstOrFail();
+
+    // The request wrote only the archive copy and the row; the sequence copy
+    // belongs to the job.
+    Storage::disk('files')->assertExists($frame->original_path);
+    Storage::disk('files')->assertMissing($frame->path);
+    Queue::assertPushed(\App\Jobs\ProcessTimelapseFrame::class, fn ($job) => $job->frameId === $frame->id);
+
+    // Until the job runs, the frame still serves — the archive stands in.
+    $pending = $this->actingAs($fx['user'])->get(route('projects.timelapse.frame', $frame));
+    $pending->assertSuccessful();
+    [$width] = getimagesizefromstring($pending->getContent());
+    expect($width)->toBe(3000);
+
+    // The job derives the capped sequence copy.
+    (new \App\Jobs\ProcessTimelapseFrame($frame->id))->handle();
+
+    Storage::disk('files')->assertExists($frame->path);
+    [$seqWidth] = getimagesizefromstring(Storage::disk('files')->get($frame->path));
+    expect($seqWidth)->toBe(TimelapseStudio::MAX_EDGE);
+});

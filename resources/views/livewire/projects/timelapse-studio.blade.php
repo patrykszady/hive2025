@@ -221,7 +221,11 @@
                         x-bind:class="fullscreen ? 'right-[calc(env(safe-area-inset-right)+3.5rem)] top-[max(0.5rem,env(safe-area-inset-top))]' : 'right-2 top-2'">
                         <span x-show="$store.tlUploads.pending" class="flex items-center gap-1">
                             <flux:icon.arrow-path class="size-3 animate-spin" />
-                            <span x-text="$store.tlUploads.pending > 1 ? `Saving ${$store.tlUploads.pending}…` : 'Saving…'"></span>
+                            {{-- Percent while the bytes move — a multi-MB
+                                 photo on jobsite signal takes long enough
+                                 that a bare "Saving…" reads as stuck. --}}
+                            <span x-text="($store.tlUploads.pending > 1 ? `Saving ${$store.tlUploads.pending}` : 'Saving')
+                                + ($store.tlUploads.progress > 0 ? ` · ${$store.tlUploads.progress}%` : '…')"></span>
                         </span>
                         {{-- Not just a count: the pixels are still here, so
                              offer the way to send them again. --}}
@@ -612,8 +616,18 @@
         queue: [],
         failedShots: [],
         uploading: false,
+        // 0-100 while the file is on the wire — the chip shows it, because a
+        // multi-MB photo on a jobsite uplink takes long enough that a bare
+        // "Saving…" reads as stuck.
+        progress: 0,
         timer: null,
+        stallTimer: null,
         MAX_TRIES: 4,
+        // A Livewire upload is three round-trips, and a failure in the LAST
+        // one calls back to nobody — the queue would sit "Saving…" forever.
+        // No progress for this long → cancel the upload ourselves and let the
+        // retry/backoff path deal with it.
+        STALL_MS: 30000,
 
         /** Shots still trying, including the one in flight. */
         get pending() { return this.queue.length; },
@@ -636,6 +650,23 @@
             this.pump();
         },
 
+        feedStallWatchdog() {
+            clearTimeout(this.stallTimer);
+            this.stallTimer = setTimeout(() => {
+                // Aborts the in-flight request AND fires the cancelled
+                // callback, which routes into the same retry path as an
+                // explicit error. If the upload actually finished in the
+                // meantime, Livewire's bag is empty and this is a no-op.
+                try { this.wire?.cancelUpload('frame'); } catch (e) {}
+            }, this.STALL_MS);
+        },
+
+        settle() {
+            clearTimeout(this.stallTimer);
+            this.uploading = false;
+            this.progress = 0;
+        },
+
         pump() {
             if (this.uploading || !this.queue.length || !this.wire) return;
 
@@ -644,6 +675,23 @@
             // pixels instead of discarding them and ticking a counter.
             const shot = this.queue[0];
             this.uploading = true;
+            this.progress = 0;
+            this.feedStallWatchdog();
+
+            const failedOnce = () => {
+                this.settle();
+                shot.tries = (shot.tries || 0) + 1;
+
+                if (shot.tries >= this.MAX_TRIES) {
+                    this.failedShots.push(this.queue.shift());
+                    this.pump();
+
+                    return;
+                }
+
+                clearTimeout(this.timer);
+                this.timer = setTimeout(() => this.pump(), 900 * shot.tries);
+            };
 
             // Deferred set (third arg false): no request of its own — it rides
             // the upload's finish commit, so the metadata is on the component
@@ -653,24 +701,16 @@
 
             this.wire.upload('frame', new File([shot.blob], `frame-${shot.collectionId ?? 0}.jpg`, { type: 'image/jpeg' }),
                 () => {
+                    this.settle();
                     this.queue.shift();
-                    this.uploading = false;
                     this.pump();
                 },
-                () => {
-                    this.uploading = false;
-                    shot.tries = (shot.tries || 0) + 1;
-
-                    if (shot.tries >= this.MAX_TRIES) {
-                        this.failedShots.push(this.queue.shift());
-                        this.pump();
-
-                        return;
-                    }
-
-                    clearTimeout(this.timer);
-                    this.timer = setTimeout(() => this.pump(), 900 * shot.tries);
+                failedOnce,
+                (e) => {
+                    this.progress = e?.detail?.progress ?? this.progress;
+                    this.feedStallWatchdog();
                 },
+                failedOnce,
             );
         },
     });
@@ -1794,10 +1834,12 @@
                 // The shot carries its own destination: it may still be in
                 // the queue long after the camera has moved on.
                 Alpine.store('tlUploads').add({ blob, meta, collectionId: this.collectionId });
-                // 0.98: the archive copy is encoded once, here — anything
-                // lost now is lost for good. The server derives the smaller
+                // 0.92: the archive copy is encoded once, here — but 0.98 was
+                // ~3MB a frame, which is a minute on jobsite signal and most
+                // of why saving felt stuck. 0.92 is visually the same photo
+                // at roughly half the bytes; the server derives the smaller
                 // sequence copy from it.
-            }, 'image/jpeg', 0.98);
+            }, 'image/jpeg', 0.92);
         },
 
         destroy() {

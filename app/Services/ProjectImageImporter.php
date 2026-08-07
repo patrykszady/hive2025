@@ -23,6 +23,13 @@ class ProjectImageImporter
     /**
      * @param  array{lat: ?float, lng: ?float, accuracy: ?int}|null  $gps  overrides EXIF (the camera's live fix)
      */
+    /**
+     * $deferProcessing skips the expensive part (decode/orientate/resize/
+     * re-encode of a multi-MB photo) and queues it instead — for the capture
+     * upload path, where that work inline was most of the time a crew member
+     * stood watching "Saving…". The archive copy and the row are written
+     * either way; until the job runs, the frame route serves the archive.
+     */
     public function storeImage(
         ProjectTimelapse $timelapse,
         string $sourcePath,
@@ -32,6 +39,7 @@ class ProjectImageImporter
         ?Carbon $shotAtOverride = null,
         ?int $takenByUserId = null,
         ?string $takenByName = null,
+        bool $deferProcessing = false,
     ): ProjectTimelapseFrame {
         // Read time and location BEFORE touching the pixels — orientate/
         // encode strips EXIF, so this is the only moment either exists.
@@ -46,17 +54,21 @@ class ProjectImageImporter
         Storage::disk('files')->put($originalPath, file_get_contents($sourcePath));
 
         // 2. THE SEQUENCE COPY — oriented and capped for playback/alignment.
-        $image = Image::make($sourcePath)->orientate();
-
-        if (max($image->width(), $image->height()) > self::MAX_EDGE) {
-            $image->resize(self::MAX_EDGE, self::MAX_EDGE, function ($constraint) {
-                $constraint->aspectRatio();
-                $constraint->upsize();
-            });
-        }
-
+        //    Deferred mode leaves this to ProcessTimelapseFrame.
         $path = sprintf('%s/%s', $directory, $filename);
-        Storage::disk('files')->put($path, (string) $image->encode('jpg', 88));
+
+        if (! $deferProcessing) {
+            $image = Image::make($sourcePath)->orientate();
+
+            if (max($image->width(), $image->height()) > self::MAX_EDGE) {
+                $image->resize(self::MAX_EDGE, self::MAX_EDGE, function ($constraint) {
+                    $constraint->aspectRatio();
+                    $constraint->upsize();
+                });
+            }
+
+            Storage::disk('files')->put($path, (string) $image->encode('jpg', 88));
+        }
 
         $frame = ProjectTimelapseFrame::create([
             'project_timelapse_id' => $timelapse->id,
@@ -74,7 +86,11 @@ class ProjectImageImporter
             'sort_order' => ((int) $timelapse->frames()->max('sort_order')) + 1,
         ]);
 
-        if ($timelapse->isTimelapse()) {
+        if ($deferProcessing) {
+            // The job derives the sequence copy, then chains alignment itself
+            // — alignment needs the file this job writes.
+            \App\Jobs\ProcessTimelapseFrame::dispatch($frame->id)->afterCommit();
+        } elseif ($timelapse->isTimelapse()) {
             \App\Jobs\AlignTimelapseFrame::dispatch($frame->id)->afterCommit();
         }
 

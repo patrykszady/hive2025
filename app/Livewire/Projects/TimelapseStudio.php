@@ -574,6 +574,13 @@ class TimelapseStudio extends Component
         $mediaUrls = $frames->map(function (ProjectTimelapseFrame $frame) {
             $source = Storage::disk($frame->disk)->path($frame->display_path);
 
+            // A just-shot frame's sequence copy may still be in the queue —
+            // the archive copy stands in rather than silently dropping the
+            // photo from the text.
+            if (! is_file($source) && $frame->original_path) {
+                $source = Storage::disk($frame->disk)->path($frame->original_path);
+            }
+
             if (! is_file($source)) {
                 return null;
             }
@@ -759,6 +766,10 @@ class TimelapseStudio extends Component
                 : null,
             $meta['takenAt'] ?? null,
             auth()->id(),
+            null,
+            // The crew is standing there watching "Saving…" — write the bytes,
+            // answer, and let the queue do the pixel work.
+            deferProcessing: true,
         );
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);

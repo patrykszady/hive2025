@@ -36,6 +36,13 @@ class TimelapseController extends Controller
             ? ($frame->original_path ?: $frame->path)
             : $frame->display_path;
 
+        // A just-uploaded frame's sequence copy is written by a queued job
+        // (ProcessTimelapseFrame) — until it lands, the archive copy stands
+        // in so the frame is visible the moment the upload finishes.
+        if (! $disk->exists($path) && $frame->original_path && $disk->exists($frame->original_path)) {
+            $path = $frame->original_path;
+        }
+
         abort_unless($disk->exists($path), 404);
 
         // Grids ask for ?thumb=1: a small copy built once and kept, rather
