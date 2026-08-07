@@ -188,14 +188,21 @@
                          above those. Corner-stacking them collided on a
                          phone. --}}
                     <div x-show="lenses.length > 1" x-cloak x-on:click.stop
-                        class="absolute z-10 flex gap-1"
+                        class="absolute z-30 flex gap-1"
                         x-bind:class="fullscreen ? 'bottom-[calc(env(safe-area-inset-bottom)+5rem)] left-1/2 -translate-x-1/2' : 'bottom-2 left-2'">
                         <template x-for="lens in lenses" :key="lens.id">
-                            <button type="button" x-on:click="selectLens(lens.id)"
+                            <button type="button" x-on:click="selectLens(lens)"
                                 class="min-w-9 cursor-pointer rounded-full px-2 py-1.5 text-xs font-semibold transition"
-                                x-bind:class="lens.id === activeLensId ? 'bg-white text-black' : 'bg-black/50 text-white'"
+                                x-bind:class="(lens.zoom != null ? lens.zoom === activeZoom : lens.id === activeLensId) ? 'bg-white text-black' : 'bg-black/50 text-white'"
                                 x-text="lens.label"></button>
                         </template>
+                    </div>
+
+                    {{-- Why a pill just disappeared ("0.5× isn't available in
+                         this browser") — shows briefly, then clears. --}}
+                    <div x-show="lensNote" x-cloak class="absolute inset-x-0 z-30 text-center"
+                        x-bind:class="fullscreen ? 'bottom-[calc(env(safe-area-inset-bottom)+8.5rem)]' : 'top-8'">
+                        <span class="rounded bg-black/70 px-2 py-0.5 text-xs font-medium text-amber-300" x-text="lensNote"></span>
                     </div>
 
                     {{-- steadying: between tap and shutter. Rides above the
@@ -759,14 +766,37 @@
         cameraReady: false,
         cameraError: '',
         needsTap: false,
-        // Back lenses, camera-app style. Phones expose each rear lens as its
-        // own camera; a sequence must be shot through the SAME one every time
-        // — a 0.5× first frame can never line up through the 1× lens, however
-        // carefully the phone is aimed. The pick is remembered per collection.
+        // Back lenses, camera-app style. A sequence must be shot through the
+        // SAME optic every time — a 0.5× first frame can never line up
+        // through the 1× lens. The pick is remembered per collection.
+        //
+        // TWO mechanisms, best one wins at runtime:
+        //  - zoom: iPhones expose a virtual multi-lens camera whose zoom
+        //    capability reaches below 1; applyConstraints({zoom}) switches
+        //    the PHYSICAL lens inside the running stream — native-app
+        //    seamless, nothing to restart, nothing to go black. Preferred
+        //    wherever capabilities report min < 1.
+        //  - deviceId: open the other lens as its own camera. The fallback,
+        //    because on iOS the running stream dies with the request and on
+        //    some phones the second stream is permanently black.
         lensKey,
         lenses: [],
         lensId: null,
         activeLensId: null,
+        zoomMode: false,
+        zoomCaps: null,
+        activeZoom: 1,
+        // A zoom-capable virtual camera is only tried once per component —
+        // if it comes up black we stay on what works.
+        virtualTried: false,
+        // deviceId lenses that produced a black stream this session: dropped
+        // from the pills instead of being offered again.
+        lensUnavailable: [],
+        // One-line explanation when a lens gets dropped ("0.5× isn't
+        // available here") — cleared after a moment.
+        lensNote: '',
+        lensNoteTimer: null,
+        savedZoom: null,
         // Lens change in progress: the frozen last-live-frame is on screen.
         switching: false,
         frozenSrc: '',
@@ -924,7 +954,18 @@
             Alpine.store('tlUploads').wire = $wire;
             Alpine.store('tlUploads').pump();
 
-            try { this.lensId = localStorage.getItem(this.lensKey) || null; } catch (e) {}
+            // Remembered pick: {"zoom":0.5} or {"device":"..."} (older saves
+            // were a bare device id).
+            try {
+                const saved = localStorage.getItem(this.lensKey);
+                if (saved?.startsWith('{')) {
+                    const parsed = JSON.parse(saved);
+                    this.lensId = parsed.device ?? null;
+                    this.savedZoom = parsed.zoom ?? null;
+                } else {
+                    this.lensId = saved || null;
+                }
+            } catch (e) {}
             this.start();
             if (!this.isSequence) { this.onionSrc = ''; this.onionOn = false; }
             this.$watch('onionSrc', () => this.prepareRefThumb());
@@ -1397,16 +1438,44 @@
 
                 if (gen !== this.startGen) return;
 
-                if (!live && (opts.attempt ?? 0) < 2) {
+                if (!live && (opts.attempt ?? 0) < 1) {
                     this.stopTracks(stream);
                     this.stream = null;
 
                     return this.start({ ...opts, attempt: (opts.attempt ?? 0) + 1 });
                 }
 
+                // Still black after a restart: this lens does not work in
+                // this browser (a real iOS failure mode — the ultra-wide via
+                // deviceId can be permanently black). NEVER leave the user
+                // on a black camera: drop the lens from the pills and go
+                // back to the one that was live before the switch.
+                if (!live && opts.switchFrom !== undefined && !opts.reverting) {
+                    if (this.lensId) this.lensUnavailable.push(this.lensId);
+                    this.lenses = this.lenses.filter((l) => l.id !== this.lensId);
+                    this.lensId = opts.switchFrom;
+                    this.persistLens();
+                    this.noteLens("That lens isn't available in this browser");
+
+                    return this.start({ reverting: true });
+                }
+
                 this.cameraReady = true;
                 this.cameraError = '';
                 this.activeLensId = stream.getVideoTracks()[0]?.getSettings()?.deviceId ?? null;
+
+                // Seamless-zoom support: capabilities with min < 1 mean this
+                // stream can move between physical lenses by itself.
+                const caps = stream.getVideoTracks()[0]?.getCapabilities?.() ?? {};
+                this.zoomCaps = caps.zoom && typeof caps.zoom.min === 'number' ? caps.zoom : null;
+                this.zoomMode = !!(this.zoomCaps && this.zoomCaps.min < 1);
+
+                if (this.zoomMode) {
+                    this.buildZoomPills();
+                    const startAt = this.savedZoom ?? this.activeZoom ?? 1;
+                    this.applyZoom(Math.min(Math.max(startAt, this.zoomCaps.min), this.zoomCaps.max));
+                }
+
                 this.unfreeze();
                 this.discoverLenses();
                 // Already sideways when the camera came up → go fullscreen now.
@@ -1484,14 +1553,42 @@
          * Unlabeled duplicates (some Androids) collapse to one entry; with
          * fewer than two distinct lenses the switcher stays hidden.
          */
+        /**
+         * Populate the pills. In zoom mode they were already built from the
+         * track's own capabilities; here we only look for the SEAMLESS
+         * multi-lens virtual camera ("Back Dual/Triple Camera") and switch
+         * onto it once — after that, every lens change is an
+         * applyConstraints({zoom}) inside the running stream. Only if no such
+         * camera exists do the pills fall back to one-device-per-lens.
+         */
         async discoverLenses() {
+            if (this.zoomMode) return;
+
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
+                const backs = devices.filter((d) =>
+                    d.kind === 'videoinput' && d.deviceId && /back|rear|environment/i.test(d.label));
+
+                // The virtual multi-lens camera switches optics by ZOOM, the
+                // way the native app does. Worth one still-covered switch to
+                // get onto it; if it comes up black we revert and never try
+                // again this session.
+                const virtual = backs.find((d) => /dual|triple/i.test(d.label));
+
+                if (virtual && !this.virtualTried && !this.lensUnavailable.includes(virtual.deviceId)
+                    && virtual.deviceId !== this.activeLensId) {
+                    this.virtualTried = true;
+                    const from = this.lensId;
+                    this.lensId = virtual.deviceId;
+
+                    return this.start({ switchFrom: from ?? null });
+                }
+
                 const order = ['0.5×', '1×', '2×', '5×'];
                 const seen = new Set();
 
-                this.lenses = devices
-                    .filter((d) => d.kind === 'videoinput' && d.deviceId && /back|rear|environment/i.test(d.label))
+                this.lenses = backs
+                    .filter((d) => !this.lensUnavailable.includes(d.deviceId))
                     .map((d) => ({ id: d.deviceId, label: this.lensLabel(d.label) }))
                     .filter((l) => {
                         if (!l.label || seen.has(l.label)) return false;
@@ -1514,20 +1611,74 @@
             return '1×';
         },
 
-        async selectLens(id) {
-            if (id === this.activeLensId || this.switching) return;
+        /** Pills from the zoom range: only steps the hardware actually has. */
+        buildZoomPills() {
+            const caps = this.zoomCaps;
+            const presets = [
+                { zoom: Math.min(Math.max(0.5, caps.min), 1), label: '0.5×' },
+                { zoom: 1, label: '1×' },
+                { zoom: 2, label: '2×' },
+            ];
+
+            this.lenses = presets
+                .filter((p) => p.zoom >= caps.min && p.zoom <= caps.max)
+                .filter((p, i, all) => all.findIndex((q) => q.zoom === p.zoom) === i)
+                .map((p) => ({ id: `zoom:${p.zoom}`, label: p.label, zoom: p.zoom }));
+
+            if (this.lenses.length < 2) this.lenses = [];
+        },
+
+        /** One tap = one lens, whichever mechanism this stream offers. */
+        async selectLens(lens) {
+            if (this.switching) return;
+
+            if (lens.zoom != null) {
+                this.applyZoom(lens.zoom);
+                this.persistLens();
+
+                return;
+            }
+
+            if (lens.id === this.activeLensId) return;
 
             // Optimistic, camera-app feel: the tapped pill flips NOW; the
-            // frozen still + fade carry the sensor swap. On failure start()'s
-            // error path repaints truthfully (activeLensId comes from the
-            // stream that actually opened).
-            this.lensId = id;
-            this.activeLensId = id;
-            try { localStorage.setItem(this.lensKey, id); } catch (e) {}
+            // frozen still + fade carry the sensor swap, and the black-pixel
+            // check reverts to the previous lens if the new one is dead.
+            const from = this.lensId ?? this.activeLensId;
+            this.lensId = lens.id;
+            this.activeLensId = lens.id;
+            this.persistLens();
             // The onion skin and reference thumb stay — they ARE the point:
             // the guide now compares the new lens's view against the frame
             // being matched.
-            await this.start();
+            await this.start({ switchFrom: from ?? null });
+        },
+
+        /** Physical lens change via the running stream — nothing restarts. */
+        applyZoom(zoom) {
+            const track = this.stream?.getVideoTracks?.()[0];
+            if (!track) return;
+
+            track.applyConstraints({ advanced: [{ zoom }] })
+                .catch(() => track.applyConstraints({ zoom }).catch(() => {}));
+            this.activeZoom = zoom;
+            this.savedZoom = zoom;
+        },
+
+        persistLens() {
+            try {
+                localStorage.setItem(this.lensKey, JSON.stringify(
+                    this.zoomMode
+                        ? { device: this.lensId, zoom: this.activeZoom }
+                        : { device: this.lensId },
+                ));
+            } catch (e) {}
+        },
+
+        noteLens(text) {
+            this.lensNote = text;
+            clearTimeout(this.lensNoteTimer);
+            this.lensNoteTimer = setTimeout(() => { this.lensNote = ''; }, 3500);
         },
 
         describeCameraError(e) {
