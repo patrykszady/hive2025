@@ -62,30 +62,64 @@
             <div
                 wire:ignore
                 wire:key="camera-{{ $this->collection?->id }}"
-                x-data="timelapseCapture($wire, @js($this->latestFrame ? route('projects.timelapse.frame', [$this->latestFrame, 'v' => $this->latestFrame->version]) : ''), @js((bool) $this->collection?->isTimelapse()))"
+                x-data="timelapseCapture($wire, @js($this->latestFrame ? route('projects.timelapse.frame', [$this->latestFrame, 'v' => $this->latestFrame->version]) : ''), @js((bool) $this->collection?->isTimelapse()), @js('tl-lens-'.$this->collection?->id), @js($this->collection?->id))"
                 class="space-y-3"
-                x-bind:class="fullscreen ? 'fixed inset-0 z-50 bg-black' : ''"
+                x-on:keydown.escape.window="fullscreen && exitFullscreen()"
             >
                 {{-- Viewfinder: live camera with the last frame ghosted on
                      top. The ring is the framing guide — the live image is
                      compared against the last frame a few times a second, and
-                     the ring turns green when the shot lines up. --}}
+                     the ring turns green when the shot lines up.
+
+                     Fullscreen PORTALS this node to <body> (openFullscreen):
+                     fixed inset-0 only fills the real screen from there — from
+                     inside the card, any transformed ancestor becomes the
+                     containing block and swallows the overlay, which is why
+                     fullscreen used to show nothing. --}}
+                {{-- Position class lives ONLY in the binding: a static
+                     `relative` would tie with the bound `fixed` and win on
+                     stylesheet order (Tailwind emits .fixed before .relative),
+                     collapsing fullscreen to a zero-height block. --}}
                 <div
-                    class="relative overflow-hidden bg-zinc-950 ring-4 transition-[--tw-ring-color] duration-300"
+                    x-ref="viewfinder"
+                    class="overflow-hidden bg-zinc-950 ring-4 transition-[--tw-ring-color] duration-300"
                     x-show="cameraReady" x-cloak
-                    x-bind:class="(fullscreen ? 'absolute inset-0 rounded-none' : 'aspect-[4/3] rounded-lg') + ' ' + (aligned ? 'ring-green-500 cursor-pointer' : (onionSrc ? 'ring-zinc-500/40' : 'ring-transparent'))"
+                    x-bind:class="(fullscreen ? 'fixed left-0 top-0 z-50 w-full h-[100dvh] rounded-none bg-black' : 'relative aspect-[4/3] rounded-lg') + ' ' + (aligned ? 'ring-green-500 cursor-pointer' : (onionSrc ? 'ring-zinc-500/40' : 'ring-transparent'))"
                     x-on:click="aligned && !shutter && captureSharp()"
                 >
                     {{-- object-cover: the box shows exactly what capture will
                          store — a portrait stream's centered landscape band.
                          Fullscreen letterboxes (contain) so nothing is hidden
                          while framing. --}}
-                    <video x-ref="video" autoplay playsinline muted class="absolute inset-0 h-full w-full"
+                    {{-- Explicit z on video and every overlay: iOS composites a
+                         playing <video> into its own layer, and positioned
+                         siblings with no z-index can paint UNDERNEATH it —
+                         the onion ghost was invisible on iPhones (and again
+                         after every lens switch re-promoted the layer) while
+                         desktops looked fine. --}}
+                    <video x-ref="video" autoplay playsinline muted
+                        class="absolute inset-0 z-0 h-full w-full"
                         x-bind:class="fullscreen ? 'object-contain' : 'object-cover'"></video>
+
+                    {{-- The lens-change transition, native-camera style: iOS
+                         permits ONE live camera stream — the OS kills the old
+                         one the instant a new request is granted, so any
+                         "keep the old lens playing during the handover" plan
+                         shows a dead black stream on an iPhone. Instead the
+                         last live frame is frozen BEFORE the stream is
+                         touched, shown slightly blurred while the sensor
+                         swaps, and faded out once the new lens has actually
+                         painted. Nothing black is ever on screen. --}}
+                    <img x-show="switching && frozenSrc" x-cloak
+                        x-bind:src="frozenSrc || null"
+                        class="pointer-events-none absolute inset-0 z-[1] h-full w-full blur-[2px] transition-opacity duration-300"
+                        x-bind:class="(fullscreen ? 'object-contain' : 'object-cover') + ' ' + (stillFading ? 'opacity-0' : 'opacity-100')"
+                        alt=""
+                    />
                     <img
                         x-show="onionOn && onionSrc"
                         x-bind:src="onionSrc || null"
-                        class="pointer-events-none absolute inset-0 h-full w-full"
+                        class="pointer-events-none absolute inset-0 z-[5] h-full w-full"
                         x-bind:class="fullscreen ? 'object-contain' : 'object-cover'"
                         x-bind:style="`opacity: ${onionOpacity / 100}`"
                         alt=""
@@ -98,7 +132,7 @@
                          as the shot closes in, and both crosses sit on top of
                          each other when it's right. RED pulsing dot = the
                          guide can't find the last frame's view at all. --}}
-                    <div x-show="onionSrc && guideVisible" x-cloak class="pointer-events-none absolute inset-0">
+                    <div x-show="onionSrc && guideVisible" x-cloak class="pointer-events-none absolute inset-0 z-[6]">
                         <svg class="absolute left-1/2 top-1/2 size-10 -translate-x-1/2 -translate-y-1/2 text-white/60"
                             viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M20 6v9M20 25v9M6 20h9M25 20h9" />
@@ -112,21 +146,26 @@
                         <div x-show="lost" class="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500 animate-pulse"></div>
                     </div>
 
-                    {{-- state chip: says the actual move to make --}}
-                    <div x-show="onionSrc" x-cloak class="absolute left-2 top-2 rounded px-2 py-0.5 text-xs font-medium"
-                        x-bind:class="aligned ? 'bg-green-500/90 text-white' : (lost ? 'bg-red-500/90 text-white' : 'bg-black/60 text-white')"
+                    {{-- state chip: says the actual move to make. Fullscreen
+                         clamps to the safe areas — landscape (the auto-
+                         fullscreen orientation) puts the notch on a SIDE. --}}
+                    <div x-show="onionSrc" x-cloak class="absolute z-10 rounded px-2 py-0.5 text-xs font-medium"
+                        x-bind:class="(fullscreen ? 'left-[max(0.5rem,env(safe-area-inset-left))] top-[max(0.5rem,env(safe-area-inset-top))]' : 'left-2 top-2') + ' ' + (aligned ? 'bg-green-500/90 text-white' : (lost ? 'bg-red-500/90 text-white' : (scaleHint ? 'bg-amber-500/90 text-white' : 'bg-black/60 text-white')))"
                         x-text="aligned ? 'Lined up — take the frame' : (lost ? `Find the last frame’s view` : (guideVisible ? hint : ''))"></div>
 
                     {{-- Fullscreen chrome: exit up top, a camera-app shutter
                          floating at the bottom — the button row below the
                          viewfinder is hidden while the viewfinder IS the
                          screen. --}}
+                    {{-- Safe-area margins: the notch and the home indicator sit
+                         exactly where these controls live once the viewfinder
+                         IS the screen. --}}
                     <button type="button" x-show="fullscreen" x-cloak x-on:click.stop="exitFullscreen()"
-                        class="absolute right-2 top-2 z-20 rounded-full bg-black/60 p-2 text-white">
+                        class="absolute right-[max(0.5rem,env(safe-area-inset-right))] top-[max(0.5rem,env(safe-area-inset-top))] z-20 rounded-full bg-black/60 p-2 text-white">
                         <flux:icon.x-mark class="size-5" />
                     </button>
                     <button type="button" x-show="fullscreen" x-cloak x-on:click.stop="captureSharp()" x-bind:disabled="shutter"
-                        class="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border-2 border-white/60 p-1"
+                        class="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-20 -translate-x-1/2 rounded-full border-2 border-white/60 p-1"
                         x-bind:class="aligned ? 'bg-green-500' : 'bg-black/60'">
                         <span class="block size-10 rounded-full bg-white"></span>
                     </button>
@@ -138,27 +177,55 @@
                         <flux:icon.arrows-pointing-out class="size-4" />
                     </button>
 
-                    {{-- steadying: between tap and shutter --}}
-                    <div x-show="armingCapture" x-cloak class="absolute inset-x-0 bottom-2 z-10 text-center">
+                    {{-- Lens switcher (0.5× / 1× / 2×), camera-app style. A
+                         sequence lives on ONE lens: a first frame shot at 0.5×
+                         can never be matched through the 1× lens. The pick is
+                         remembered per collection, so the next visit reopens
+                         on the lens the sequence was started with. --}}
+                    {{-- Fullscreen stacks the chrome in bands measured off the
+                         bottom safe area, camera-app style: shutter on the
+                         floor, zoom pills directly above it, steadying note
+                         above those. Corner-stacking them collided on a
+                         phone. --}}
+                    <div x-show="lenses.length > 1" x-cloak x-on:click.stop
+                        class="absolute z-10 flex gap-1"
+                        x-bind:class="fullscreen ? 'bottom-[calc(env(safe-area-inset-bottom)+5rem)] left-1/2 -translate-x-1/2' : 'bottom-2 left-2'">
+                        <template x-for="lens in lenses" :key="lens.id">
+                            <button type="button" x-on:click="selectLens(lens.id)"
+                                class="min-w-9 cursor-pointer rounded-full px-2 py-1.5 text-xs font-semibold transition"
+                                x-bind:class="lens.id === activeLensId ? 'bg-white text-black' : 'bg-black/50 text-white'"
+                                x-text="lens.label"></button>
+                        </template>
+                    </div>
+
+                    {{-- steadying: between tap and shutter. Rides above the
+                         fullscreen shutter button, which owns bottom-center. --}}
+                    <div x-show="armingCapture" x-cloak class="absolute inset-x-0 z-10 text-center"
+                        x-bind:class="fullscreen ? 'bottom-[calc(env(safe-area-inset-bottom)+8.5rem)]' : 'bottom-2'">
                         <span class="rounded bg-black/60 px-2 py-0.5 text-xs font-medium text-white">Hold still…</span>
                     </div>
 
                     {{-- Uploads ride along behind the shutter — a chip, not a
                          veil, so the next shot is never waiting on the last. --}}
-                    <div x-show="uploading || failed" x-cloak class="absolute right-2 top-2 z-10 flex items-center gap-1 rounded bg-black/60 px-2 py-0.5 text-xs font-medium text-white">
-                        <template x-if="uploading">
-                            <span class="flex items-center gap-1">
-                                <flux:icon.arrow-path class="size-3 animate-spin" />
-                                <span x-text="uploading > 1 ? `Saving ${uploading}…` : 'Saving…'"></span>
-                            </span>
-                        </template>
-                        <template x-if="!uploading && failed">
-                            <span class="text-red-300" x-text="`${failed} failed to save`"></span>
-                        </template>
+                    {{-- In fullscreen this steps left so the X button (same
+                         corner, higher z) can't paint over a "failed to save". --}}
+                    <div x-show="$store.tlUploads.pending || $store.tlUploads.failed" x-cloak
+                        class="absolute z-10 flex items-center gap-1 rounded bg-black/60 px-2 py-0.5 text-xs font-medium text-white"
+                        x-bind:class="fullscreen ? 'right-[calc(env(safe-area-inset-right)+3.5rem)] top-[max(0.5rem,env(safe-area-inset-top))]' : 'right-2 top-2'">
+                        <span x-show="$store.tlUploads.pending" class="flex items-center gap-1">
+                            <flux:icon.arrow-path class="size-3 animate-spin" />
+                            <span x-text="$store.tlUploads.pending > 1 ? `Saving ${$store.tlUploads.pending}…` : 'Saving…'"></span>
+                        </span>
+                        {{-- Not just a count: the pixels are still here, so
+                             offer the way to send them again. --}}
+                        <button type="button" x-show="$store.tlUploads.failed" x-on:click.stop="$store.tlUploads.retryFailed()"
+                            class="flex cursor-pointer items-center gap-1 text-red-300 underline underline-offset-2">
+                            <span x-text="`${$store.tlUploads.failed} didn’t save — retry`"></span>
+                        </button>
                     </div>
 
                     {{-- shutter flash --}}
-                    <div x-show="shutter" x-cloak class="pointer-events-none absolute inset-0 bg-white/70"></div>
+                    <div x-show="shutter" x-cloak class="pointer-events-none absolute inset-0 z-20 bg-white/70"></div>
                 </div>
 
                 {{-- Camera unavailable → explain, offer a real tap to retry
@@ -517,6 +584,90 @@
         showLess() { this.rows = 1; },
     }));
 
+    /**
+     * The outbox for captured frames — a STORE, not component state, because
+     * it has to outlive the camera. Closing the camera or switching
+     * collections tears the Alpine component down, and a queue living there
+     * took the unsent pixels with it: exactly the frames the retry exists to
+     * save. The store belongs to the page, so shots keep flying either way.
+     *
+     * Every shot carries its own collectionId (stamped into the upload
+     * filename, resolved server-side in updatedFrame), so a frame that lands
+     * after the camera moved on is still filed where it was SHOT.
+     *
+     * Serial on purpose: uploads all land on the same Livewire property, so
+     * two in flight would overwrite each other.
+     */
+    // Guarded: re-registering would hand the page a fresh empty store and
+    // drop whatever was still in flight.
+    if (!Alpine.store('tlUploads')) Alpine.store('tlUploads', {
+        wire: null,
+        queue: [],
+        failedShots: [],
+        uploading: false,
+        timer: null,
+        MAX_TRIES: 4,
+
+        /** Shots still trying, including the one in flight. */
+        get pending() { return this.queue.length; },
+        /** Shots that gave up — pixels still here, one tap from another go. */
+        get failed() { return this.failedShots.length; },
+
+        add(shot) {
+            this.queue.push(shot);
+            this.pump();
+        },
+
+        retryFailed() {
+            if (!this.failedShots.length) return;
+
+            this.failedShots.forEach((shot) => {
+                shot.tries = 0;
+                this.queue.push(shot);
+            });
+            this.failedShots = [];
+            this.pump();
+        },
+
+        pump() {
+            if (this.uploading || !this.queue.length || !this.wire) return;
+
+            // Peek, don't shift: the shot stays at the head until it actually
+            // lands, so a dropped request on jobsite wifi retries the same
+            // pixels instead of discarding them and ticking a counter.
+            const shot = this.queue[0];
+            this.uploading = true;
+
+            // Deferred set (third arg false): no request of its own — it rides
+            // the upload's finish commit, so the metadata is on the component
+            // before updatedFrame() runs. Serial uploads keep each meta paired
+            // with its own shot.
+            this.wire.set('captureMeta', shot.meta, false);
+
+            this.wire.upload('frame', new File([shot.blob], `frame-${shot.collectionId ?? 0}.jpg`, { type: 'image/jpeg' }),
+                () => {
+                    this.queue.shift();
+                    this.uploading = false;
+                    this.pump();
+                },
+                () => {
+                    this.uploading = false;
+                    shot.tries = (shot.tries || 0) + 1;
+
+                    if (shot.tries >= this.MAX_TRIES) {
+                        this.failedShots.push(this.queue.shift());
+                        this.pump();
+
+                        return;
+                    }
+
+                    clearTimeout(this.timer);
+                    this.timer = setTimeout(() => this.pump(), 900 * shot.tries);
+                },
+            );
+        },
+    });
+
     Alpine.store('picsel', {
         on: false,
         ids: [],   // frame ids (the project's own photos)
@@ -597,21 +748,110 @@
         },
     }));
 
-    Alpine.data('timelapseCapture', ($wire, initialOnion, isSequence = true) => ({
+    Alpine.data('timelapseCapture', ($wire, initialOnion, isSequence = true, lensKey = 'tl-lens', collectionId = null) => ({
         // A photo album isn't a sequence: no onion skin, no alignment guide —
         // just shoot. Only timelapses need a frame to line up against.
         isSequence,
+        // Stamped into each upload's filename so the server files the frame
+        // where it was SHOT — a queued upload can land after the camera has
+        // moved to another collection.
+        collectionId,
         cameraReady: false,
         cameraError: '',
         needsTap: false,
-        // Two different things, deliberately not one flag:
-        //   shutter   — the instant the pixels are grabbed (a few hundred ms)
-        //   uploading — how many shots are still in flight to the server
-        // Only the first one blocks the button; the upload rides along behind.
+        // Back lenses, camera-app style. Phones expose each rear lens as its
+        // own camera; a sequence must be shot through the SAME one every time
+        // — a 0.5× first frame can never line up through the 1× lens, however
+        // carefully the phone is aimed. The pick is remembered per collection.
+        lensKey,
+        lenses: [],
+        lensId: null,
+        activeLensId: null,
+        // Lens change in progress: the frozen last-live-frame is on screen.
+        switching: false,
+        frozenSrc: '',
+        stillFading: false,
+        freezeTimer: null,
+
+        get videoEl() { return this.$refs.video; },
+
+        /**
+         * Resolves once this element is actually showing pixels — not merely
+         * "has a stream". requestVideoFrameCallback is exact where it exists
+         * (Chrome/Safari 15.4+); the events are the fallback, and the timeout
+         * guarantees a switch can never hang on a silent browser. Resolves
+         * `true` only when frames are confirmed — a timeout resolves `false`
+         * so the caller can treat "granted a stream that never paints" (a
+         * real WebKit failure mode when camera switches race) as a failure.
+         */
+        firstFrame(el) {
+            return new Promise((resolve) => {
+                let settled = false;
+                const done = (painted) => { if (!settled) { settled = true; resolve(painted); } };
+
+                if (el.requestVideoFrameCallback) {
+                    el.requestVideoFrameCallback(() => done(true));
+                } else {
+                    el.addEventListener('loadeddata', () => done(true), { once: true });
+                    el.addEventListener('playing', () => done(true), { once: true });
+                }
+
+                setTimeout(() => done(false), 2500);
+            });
+        },
+
+        /**
+         * Are actual pixels flowing? Samples the video into a tiny canvas a
+         * few times (~1s worst case) and calls it live as soon as any frame
+         * is not essentially black. A genuinely dark room can fail this —
+         * that's why the caller restarts at most twice and then shows the
+         * feed as-is instead of looping.
+         */
+        async looksLive(video, gen) {
+            const w = 32, h = 24;
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+            for (let i = 0; i < 5; i++) {
+                if (gen !== this.startGen) return false;
+
+                try {
+                    ctx.drawImage(video, 0, 0, w, h);
+                    const { data } = ctx.getImageData(0, 0, w, h);
+                    let max = 0;
+                    for (let p = 0; p < data.length; p += 4) {
+                        const v = Math.max(data[p], data[p + 1], data[p + 2]);
+                        if (v > max) max = v;
+                    }
+
+                    // Any real scene — even a dim one — clears this easily;
+                    // a dead stream is a flat 0.
+                    if (max > 16) return true;
+                } catch (e) { /* frame not readable yet — try again */ }
+
+                await new Promise((r) => setTimeout(r, 200));
+            }
+
+            return false;
+        },
+
+        /** Fade the frozen still out over the now-live viewfinder. */
+        unfreeze() {
+            if (!this.switching) return;
+            this.stillFading = true;
+            clearTimeout(this.freezeTimer);
+            this.freezeTimer = setTimeout(() => {
+                this.switching = false;
+                this.frozenSrc = '';
+                this.stillFading = false;
+            }, 320);
+        },
+        // Only the shutter (the few hundred ms of grabbing pixels) blocks the
+        // button. Sending lives in the $store.tlUploads queue, which outlives
+        // this component on purpose — see the store.
         shutter: false,
-        uploading: 0,
-        failed: 0,
-        queue: [],
         onionOn: true,
         onionOpacity: 45,
         onionSrc: initialOnion,
@@ -631,9 +871,22 @@
         bestScore: 0,
         motion: 0,
         lastLiveThumb: null,
+        thumbCanvas: null,
         armingCapture: false,
         MOTION_STILL: 6, // mean gray delta between ticks below this = holding steady
         fullscreen: false,
+        // Where the viewfinder goes back to after fullscreen — a comment node
+        // left in its place while the node itself visits <body>.
+        vfHome: null,
+        viewportWas: undefined,
+        // True only when the browser granted REAL fullscreen (Android). iPhone
+        // Safari never does, so its absence must not be read as "user exited".
+        nativeFs: false,
+        // Generation counter for start(): each call supersedes the previous,
+        // so a slow getUserMedia resolving late stops ITS OWN stream instead
+        // of leaking it or clobbering a newer one.
+        startGen: 0,
+        rotateTimer: null,
         // Tapping X in fullscreen means "stay small until I rotate again" —
         // without this flag the orientation watcher would slam it back open.
         manualExit: false,
@@ -643,6 +896,16 @@
         hint: 'Match the last frame',
         guideColor: '#fbbf24',
         refThumb: null,
+        // Zoomed copy of the reference + the distance verdict it produces.
+        refThumbZoomed: null,
+        scaleHint: '',
+        scaleLast: '',
+        scaleStreak: 0,
+        probeTick: 0,
+        // How much closer the probe simulates (~1 step forward in a room) and
+        // how much better it must score before the guide says so.
+        ZOOM_PROBE: 1.18,
+        ZOOM_MARGIN: 0.05,
         guideTimer: null,
         THUMB_W: 96,
         THUMB_H: 72,
@@ -655,14 +918,26 @@
         LOST_SCORE: 0.42,
 
         init() {
+            // Hand the outbox a live $wire and let it drain anything a
+            // previous camera (other collection, or one that was closed) left
+            // unsent. $wire is the STUDIO component, which outlives the camera.
+            Alpine.store('tlUploads').wire = $wire;
+            Alpine.store('tlUploads').pump();
+
+            try { this.lensId = localStorage.getItem(this.lensKey) || null; } catch (e) {}
             this.start();
             if (!this.isSequence) { this.onionSrc = ''; this.onionOn = false; }
             this.$watch('onionSrc', () => this.prepareRefThumb());
             if (this.onionSrc) this.prepareRefThumb();
             this.guideTimer = setInterval(() => this.scoreAlignment(), 200);
             // iOS re-orients the stream on rotation, but not always mid-
-            // stream — reacquire so the aspect is truthful.
-            this.onRotate = () => setTimeout(() => this.start(), 400);
+            // stream — reacquire so the aspect is truthful. Tracked so a
+            // rapid double-rotate collapses to one restart and destroy() can
+            // cancel a pending one.
+            this.onRotate = () => {
+                clearTimeout(this.rotateTimer);
+                this.rotateTimer = setTimeout(() => this.start(), 400);
+            };
             window.addEventListener('orientationchange', this.onRotate);
             // Rotating a phone to landscape makes the viewfinder the whole
             // screen; back upright collapses it. Change-driven and gated on a
@@ -670,18 +945,132 @@
             this.landscapeMq = window.matchMedia('(orientation: landscape)');
             this.onOrient = () => {
                 if (!this.landscapeMq.matches) {
-                    this.fullscreen = false;
+                    this.closeFullscreen();
                     this.manualExit = false;
                 } else if (this.cameraReady && !this.manualExit && window.matchMedia('(pointer: coarse)').matches) {
-                    this.fullscreen = true;
+                    this.openFullscreen();
                 }
             };
             this.landscapeMq.addEventListener('change', this.onOrient);
+
+            // The browser can drop out of real fullscreen without telling us
+            // (Android back gesture, Esc) — follow it rather than leaving the
+            // overlay believing it is still up. Only meaningful where native
+            // fullscreen was actually granted.
+            this.onFsChange = () => {
+                if (this.fullscreen && this.nativeFs && !document.fullscreenElement) {
+                    this.exitFullscreen();
+                }
+            };
+            document.addEventListener('fullscreenchange', this.onFsChange);
         },
 
-        enterFullscreen() { this.fullscreen = true; this.manualExit = false; },
+        enterFullscreen() { this.openFullscreen(); this.manualExit = false; },
 
-        exitFullscreen() { this.fullscreen = false; this.manualExit = true; },
+        exitFullscreen() { this.closeFullscreen(); this.manualExit = true; },
+
+        /**
+         * Fullscreen = move the viewfinder node itself to <body> and let its
+         * fixed-inset-0 class fill the real viewport. Same-node move: the
+         * stream, Alpine bindings, and listeners all ride along untouched.
+         * Alpine.mutateDom keeps Alpine's mutation observer from trying to
+         * re-initialize the (already live) moved tree; wire:ignore on the
+         * camera root means Livewire never notices the node is gone.
+         */
+        openFullscreen() {
+            if (this.fullscreen) return;
+            const vf = this.$refs.viewfinder;
+            if (!vf) return;
+            // Pin the component's data stack onto the viewfinder itself:
+            // <template x-for>/<template x-if> clones inside it resolve scope
+            // by walking parentNode AT CLONE TIME, and from <body> that walk
+            // never reaches the x-data root left behind in the card — lens
+            // pills cloned while ported would be dead, upload chips blank.
+            if (!vf._x_dataStack) Alpine.addScopeToNode(vf, {}, this.$el);
+            this.vfHome = document.createComment('viewfinder-home');
+            Alpine.mutateDom(() => {
+                vf.before(this.vfHome);
+                document.body.appendChild(vf);
+            });
+            this.fullscreen = true;
+            document.body.style.overflow = 'hidden';
+            // env(safe-area-inset-*) reads 0 unless the viewport is cover, but
+            // cover shoves every OTHER page under the notch — so it is on only
+            // while the overlay is, and restored on the way out.
+            this.setViewportCover(true);
+
+            // Real fullscreen where the browser offers it (Android Chrome):
+            // that genuinely removes the address and tool bars. iPhone Safari
+            // has no element fullscreen, which is why the sizing below is not
+            // optional.
+            vf.requestFullscreen?.({ navigationUI: 'hide' })
+                .then(() => { this.nativeFs = true; })
+                .catch(() => {});
+
+            // A `fixed` overlay covers the LAYOUT viewport, which on a phone
+            // continues underneath the browser's own toolbar — that is why
+            // Safari's nav buttons sat on top of the camera. Size to the
+            // VISUAL viewport instead, and follow it as the chrome slides in
+            // and out.
+            this.onViewportResize = () => this.sizeToViewport();
+            window.visualViewport?.addEventListener('resize', this.onViewportResize);
+            window.visualViewport?.addEventListener('scroll', this.onViewportResize);
+            this.sizeToViewport();
+
+            // Moving a <video> node can pause it (iOS) — nudge it back.
+            this.$nextTick(() => this.videoEl?.play?.().catch(() => {}));
+        },
+
+        /** Match the overlay to what is actually on screen, chrome excluded. */
+        sizeToViewport() {
+            const vf = this.$refs.viewfinder;
+            const vv = window.visualViewport;
+            if (!vf || !this.fullscreen) return;
+
+            if (vv) {
+                vf.style.height = `${vv.height}px`;
+                vf.style.width = `${vv.width}px`;
+            } else {
+                vf.style.height = `${window.innerHeight}px`;
+            }
+        },
+
+        setViewportCover(on) {
+            const meta = document.querySelector('meta[name="viewport"]');
+            if (!meta) return;
+            if (on && this.viewportWas === undefined) this.viewportWas = meta.content;
+            if (on) {
+                meta.content = `${this.viewportWas}, viewport-fit=cover`;
+            } else if (this.viewportWas !== undefined) {
+                meta.content = this.viewportWas;
+                this.viewportWas = undefined;
+            }
+        },
+
+        closeFullscreen() {
+            if (!this.fullscreen) return;
+            this.fullscreen = false;
+            document.body.style.overflow = '';
+            this.setViewportCover(false);
+
+            window.visualViewport?.removeEventListener('resize', this.onViewportResize);
+            window.visualViewport?.removeEventListener('scroll', this.onViewportResize);
+            if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+            this.nativeFs = false;
+
+            const vf = this.$refs.viewfinder;
+            // Inline sizing belongs to the overlay only — back in the card the
+            // aspect-ratio class owns the box again.
+            if (vf) { vf.style.height = ''; vf.style.width = ''; }
+            if (vf && this.vfHome?.parentNode) {
+                Alpine.mutateDom(() => {
+                    this.vfHome.parentNode.insertBefore(vf, this.vfHome);
+                    this.vfHome.remove();
+                });
+            }
+            this.vfHome = null;
+            this.$nextTick(() => this.videoEl?.play?.().catch(() => {}));
+        },
 
         // Largest centered LANDSCAPE 4:3 rectangle of the stream. A landscape
         // stream passes through whole; a portrait stream contributes its
@@ -693,8 +1082,18 @@
             return { sx: Math.round((vw - sw) / 2), sy: Math.round((vh - sh) / 2), sw, sh };
         },
 
-        grayFrom(source, w, h) {
-            const canvas = this.$refs.thumbCanvas || (this.$refs.thumbCanvas = document.createElement('canvas'));
+        /**
+         * Mean-subtracted grayscale thumbnail. `zoom` > 1 samples a TIGHTER
+         * centre and stretches it — simulating standing closer. Always crops
+         * inward, never outward, so the source rect can't leave the frame;
+         * the "step back" case is probed by zooming the REFERENCE instead.
+         */
+        grayFrom(source, w, h, zoom = 1) {
+            // Plain property, not $refs: $refs is a merged proxy over the
+            // x-ref registry, so stashing a scratch canvas there is not
+            // reliably readable back — this ran several times a second and
+            // could allocate a fresh canvas every call.
+            const canvas = this.thumbCanvas || (this.thumbCanvas = document.createElement('canvas'));
             canvas.width = w; canvas.height = h;
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
             // The live video is judged on the same centered band capture will
@@ -702,9 +1101,11 @@
             // frame.
             if (source instanceof HTMLVideoElement && source.videoWidth) {
                 const c = this.cropRect(source.videoWidth, source.videoHeight);
-                ctx.drawImage(source, c.sx, c.sy, c.sw, c.sh, 0, 0, w, h);
+                const zw = c.sw / zoom, zh = c.sh / zoom;
+                ctx.drawImage(source, c.sx + (c.sw - zw) / 2, c.sy + (c.sh - zh) / 2, zw, zh, 0, 0, w, h);
             } else {
-                ctx.drawImage(source, 0, 0, w, h);
+                const sw = source.width / zoom, sh = source.height / zoom;
+                ctx.drawImage(source, (source.width - sw) / 2, (source.height - sh) / 2, sw, sh, 0, 0, w, h);
             }
             const { data } = ctx.getImageData(0, 0, w, h);
             const gray = new Float32Array(w * h);
@@ -719,13 +1120,83 @@
         },
 
         prepareRefThumb() {
-            if (!this.isSequence || !this.onionSrc) { this.refThumb = null; this.guideVisible = false; return; }
+            if (!this.isSequence || !this.onionSrc) {
+                this.refThumb = null;
+                this.refThumbZoomed = null;
+                this.guideVisible = false;
+
+                return;
+            }
             const img = new Image();
             img.onload = () => {
-                try { this.refThumb = this.grayFrom(img, this.THUMB_W, this.THUMB_H); this.guideVisible = true; }
-                catch (e) { this.refThumb = null; this.guideVisible = false; }
+                try {
+                    this.refThumb = this.grayFrom(img, this.THUMB_W, this.THUMB_H);
+                    // A zoomed-in copy of the reference: when THIS matches the
+                    // live view better than the plain one, the live view is
+                    // the zoomed-in one — you're standing too close.
+                    this.refThumbZoomed = this.grayFrom(img, this.THUMB_W, this.THUMB_H, this.ZOOM_PROBE);
+                    this.guideVisible = true;
+                } catch (e) {
+                    this.refThumb = null;
+                    this.refThumbZoomed = null;
+                    this.guideVisible = false;
+                }
             };
             img.src = this.onionSrc;
+        },
+
+        /**
+         * Best correlation of two thumbs over a small offset search, so a
+         * distance probe isn't defeated by the pan being slightly off.
+         */
+        bestNear(ref, live, cx, cy, span = 4, step = 2) {
+            let best = -2;
+
+            for (let dy = cy - span; dy <= cy + span; dy += step) {
+                for (let dx = cx - span; dx <= cx + span; dx += step) {
+                    const score = this.nccAt(ref, live, dx, dy);
+                    if (score > best) best = score;
+                }
+            }
+
+            return best;
+        },
+
+        /**
+         * Is the camera at the wrong DISTANCE? Panning can't fix that, and the
+         * translation-only search just reads it as a poor match ("Find the
+         * last frame's view") with nothing actionable to say. Probe both
+         * directions: zoom the live in, and zoom the reference in. Whichever
+         * beats the straight comparison by a clear margin names the move.
+         * Run sparsely — this is a step-forward/step-back cue, not a jitter.
+         */
+        probeDistance(live, baseScore, dx, dy) {
+            if (!this.refThumbZoomed) return;
+
+            let closer = -2;
+            try {
+                closer = this.bestNear(this.refThumb, this.grayFrom(this.videoEl, this.THUMB_W, this.THUMB_H, this.ZOOM_PROBE), dx, dy);
+            } catch (e) { /* frame not readable this tick */ }
+
+            const back = this.bestNear(this.refThumbZoomed, live, dx, dy);
+            const bestZoom = Math.max(closer, back);
+
+            // Only speak up when a zoom genuinely explains the mismatch AND
+            // the straight comparison isn't already good.
+            if (bestZoom < baseScore + this.ZOOM_MARGIN || baseScore >= this.OK_SCORE) {
+                this.scaleStreak = 0;
+                this.scaleHint = '';
+
+                return;
+            }
+
+            // Confirmed twice before it counts: this verdict suppresses the
+            // red "lost" dot and blocks the green ring, so a single noisy
+            // probe must not be able to park the guide in the wrong state.
+            const direction = closer >= back ? 'Step closer' : 'Step back';
+            this.scaleStreak = direction === this.scaleLast ? this.scaleStreak + 1 : 0;
+            this.scaleLast = direction;
+            this.scaleHint = this.scaleStreak >= 1 ? direction : '';
         },
 
         // Normalized cross-correlation of ref vs live at offset (dx, dy).
@@ -743,11 +1214,16 @@
         },
 
         scoreAlignment() {
-            const video = this.$refs.video;
+            const video = this.videoEl;
 
-            if (!this.refThumb || !this.cameraReady || !video || !video.videoWidth || this.shutter) {
+            // `switching` too: scoring a frozen still (or the black frame
+            // behind it) against the reference would flash a false "lost".
+            if (!this.refThumb || !this.cameraReady || !video || !video.videoWidth || this.shutter || this.switching) {
                 this.aligned = false;
                 this.lost = false;
+                this.scaleHint = '';
+                this.scaleStreak = 0;
+
                 return;
             }
 
@@ -784,12 +1260,33 @@
             // range makes the content match. Park a red dot in the center —
             // direction hints would be noise.
             this.bestScore = best.score;
-            this.lost = best.score < this.LOST_SCORE;
 
-            if (this.lost) {
+            // A good straight match settles the distance question outright —
+            // clear it THIS tick rather than letting a stale probe verdict
+            // block the green ring until the next one runs.
+            if (best.score >= this.OK_SCORE) {
+                this.scaleHint = '';
+                this.scaleStreak = 0;
+            }
+
+            // Distance is the one error panning can never fix, so check it
+            // before deciding the view is simply "lost". Every 3rd tick
+            // (~600ms) — it costs one extra thumbnail and a small search.
+            if (++this.probeTick % 3 === 0) {
+                this.probeDistance(live, best.score, best.dx, best.dy);
+            }
+
+            // A wrong-distance view scores like a wrong view. If a zoom probe
+            // explains it, say which way to walk instead of the dead-end red
+            // "Find the last frame's view".
+            this.lost = best.score < this.LOST_SCORE && !this.scaleHint;
+
+            if (this.lost || best.score < this.LOST_SCORE) {
                 this.bubbleX = 0;
                 this.bubbleY = 0;
                 this.aligned = false;
+                this.hint = this.scaleHint || this.hint;
+
                 return;
             }
 
@@ -803,7 +1300,9 @@
             this.bubbleY = Math.max(-44, Math.min(44, best.dy * px));
 
             const distance = Math.hypot(best.dx, best.dy);
-            const hit = best.score >= this.OK_SCORE && distance <= this.OK_OFFSET;
+            // Never green while the framing is the wrong size — a perfectly
+            // panned shot from the wrong distance still breaks the sequence.
+            const hit = best.score >= this.OK_SCORE && distance <= this.OK_OFFSET && !this.scaleHint;
 
             // Continuous feedback while closing in: the cross warms from
             // amber (hue 45) to green (hue 120) with proximity, and the chip
@@ -819,7 +1318,10 @@
                 'up left': '↖', 'up right': '↗', 'down left': '↙', 'down right': '↘',
             };
             const key = dirs.join(' ');
-            this.hint = key ? `${arrows[key]} Pan ${key}` : 'Almost there — hold still';
+            // Distance first: no amount of panning fixes standing in the
+            // wrong place, so that instruction outranks the pan arrow.
+            this.hint = this.scaleHint
+                || (key ? `${arrows[key]} Pan ${key}` : 'Almost there — hold still');
 
             // Green only after TWO consecutive passing ticks: crossing the
             // target mid-swing shouldn't flash green and invite a moving tap.
@@ -827,31 +1329,92 @@
             this.aligned = this.alignedStreak >= 2;
         },
 
-        async start() {
+        async start(opts = {}) {
+            // Supersede any start still in flight: whoever finishes with a
+            // stale gen throws its stream away. Covers the rotate timer racing
+            // a lens switch AND getUserMedia resolving after the component
+            // died mid-prompt (destroy() bumps the gen too) — either way a
+            // camera can't stay lit with nothing showing it.
+            const gen = ++this.startGen;
+
+            // ONE camera at a time, on every platform — not a compromise but
+            // the only model iOS permits: the OS kills the running stream the
+            // instant a new getUserMedia is granted, so an "overlap handover"
+            // just shows a dead black stream on an iPhone. The order here is
+            // the whole fix for the black flash:
+            //   1. freeze the last LIVE frame (before anything is touched),
+            //   2. release the old lens,
+            //   3. acquire and wait for the new lens to actually paint,
+            //   4. fade the still out over live pixels.
+            if (this.stream) this.freezeFrame();
             this.stop();
+
             try {
-                // ONE getUserMedia per page: the stream stays live and every
-                // capture reads from it — nothing here re-prompts. Whether the
-                // browser asks again on the NEXT visit is its permission
-                // policy (iOS Safari defaults to per-visit; the tip below
-                // shows the setting that makes it permanent).
-                this.stream = await navigator.mediaDevices.getUserMedia({
-                    // Ask for the most the sensor will give: the stored
-                    // original is whatever resolution lands here, and a
-                    // capped request would throw away detail we can never
-                    // recover. Browsers clamp to the nearest supported mode.
+                // Ask for the most the sensor will give: the stored original
+                // is whatever resolution lands here, and a capped request
+                // would throw away detail we can never recover. Browsers
+                // clamp to the nearest supported mode. A remembered lens pins
+                // the exact camera (0.5× vs 1×); otherwise whatever back
+                // camera the browser prefers.
+                const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        facingMode: 'environment',
+                        ...(this.lensId
+                            ? { deviceId: { exact: this.lensId } }
+                            : { facingMode: 'environment' }),
                         width: { ideal: 4096 },
                         height: { ideal: 3072 },
                     },
                     audio: false,
                 });
-                this.$refs.video.srcObject = this.stream;
+
+                const video = this.videoEl;
+
+                if (gen !== this.startGen || !video) {
+                    this.stopTracks(stream);
+
+                    return;
+                }
+
+                this.stream = stream;
+                video.srcObject = stream;
+                // autoplay usually covers this, but iOS occasionally leaves a
+                // re-assigned stream paused — an explicit play() costs nothing.
+                video.play?.().catch(() => {});
+
+                // Hold the still until the new lens is genuinely painting.
+                const painted = await this.firstFrame(video);
+
+                if (gen !== this.startGen) return;
+
+                // Don't take the browser's word for it — WebKit happily
+                // reports a stream as playing while delivering nothing but
+                // black after a lens switch. Look at the actual PIXELS, and
+                // if they stay black, restart the stream (stop + reacquire)
+                // up to twice. The frozen still covers every attempt, so the
+                // user sees the last live frame, then the new lens — never
+                // the black in between.
+                const live = painted && await this.looksLive(video, gen);
+
+                if (gen !== this.startGen) return;
+
+                if (!live && (opts.attempt ?? 0) < 2) {
+                    this.stopTracks(stream);
+                    this.stream = null;
+
+                    return this.start({ ...opts, attempt: (opts.attempt ?? 0) + 1 });
+                }
+
                 this.cameraReady = true;
                 this.cameraError = '';
+                this.activeLensId = stream.getVideoTracks()[0]?.getSettings()?.deviceId ?? null;
+                this.unfreeze();
+                this.discoverLenses();
                 // Already sideways when the camera came up → go fullscreen now.
-                if (this.onOrient) this.onOrient();
+                // Only when NOT already fullscreen: onOrient force-closes in
+                // portrait, and start() is now also called by selectLens(),
+                // which would collapse a manually-opened portrait fullscreen
+                // out from under the tap that switched lenses.
+                if (this.onOrient && !this.fullscreen) this.onOrient();
                 // A live fix beats per-shot lookups: no shutter latency, and
                 // the freshest position is always at hand. Watching starts
                 // inside the same gesture that started the camera.
@@ -869,6 +1432,40 @@
                     );
                 }
             } catch (e) {
+                // A newer start() owns the state now — a stale failure must
+                // not clobber its stream with an error panel.
+                if (gen !== this.startGen) return;
+
+                // Forget the remembered lens ONLY when the error actually says
+                // the id is bad (reshuffled ids, different phone). A transient
+                // NotReadableError mid-rotation used to wipe the pin and
+                // silently drop the sequence onto the wrong lens.
+                if (this.lensId && !opts.lensRetry && ['OverconstrainedError', 'NotFoundError'].includes(e?.name)) {
+                    this.lensId = null;
+                    try { localStorage.removeItem(this.lensKey); } catch (err) {}
+
+                    return this.start({ ...opts, lensRetry: true });
+                }
+
+                // The camera briefly held by the OS mid-switch resolves
+                // itself — one quiet second-ask before surfacing an error.
+                if (e?.name === 'NotReadableError' && !opts.reacquired) {
+                    await new Promise((r) => setTimeout(r, 300));
+
+                    if (gen !== this.startGen) return;
+
+                    return this.start({ ...opts, reacquired: true });
+                }
+
+                this.switching = false;
+                this.frozenSrc = '';
+                this.stillFading = false;
+
+                // A failed camera hides the viewfinder (x-show="cameraReady")
+                // — while fullscreen that node holds the only touch exit and
+                // the body scroll lock, so come home before showing the error.
+                this.closeFullscreen();
+
                 this.cameraReady = false;
                 this.cameraError = this.describeCameraError(e);
                 // iOS Safari refuses getUserMedia that isn't inside a user
@@ -877,6 +1474,60 @@
                 // button whose own tap IS the gesture.
                 this.needsTap = !e || e.name === 'NotAllowedError';
             }
+        },
+
+        /**
+         * The phone's back lenses, labeled like the camera app. Runs after the
+         * stream is live because labels are empty before permission. Virtual
+         * multi-lens devices ("Back Dual/Triple Camera") are skipped — they
+         * auto-switch lenses, which is exactly what a sequence can't have.
+         * Unlabeled duplicates (some Androids) collapse to one entry; with
+         * fewer than two distinct lenses the switcher stays hidden.
+         */
+        async discoverLenses() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const order = ['0.5×', '1×', '2×', '5×'];
+                const seen = new Set();
+
+                this.lenses = devices
+                    .filter((d) => d.kind === 'videoinput' && d.deviceId && /back|rear|environment/i.test(d.label))
+                    .map((d) => ({ id: d.deviceId, label: this.lensLabel(d.label) }))
+                    .filter((l) => {
+                        if (!l.label || seen.has(l.label)) return false;
+                        seen.add(l.label);
+                        return true;
+                    })
+                    .sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label));
+
+                if (this.lenses.length < 2) this.lenses = [];
+            } catch (e) {
+                this.lenses = [];
+            }
+        },
+
+        lensLabel(raw) {
+            if (/dual|triple/i.test(raw)) return null;
+            if (/ultra/i.test(raw)) return '0.5×';
+            if (/tele/i.test(raw)) return '2×';
+
+            return '1×';
+        },
+
+        async selectLens(id) {
+            if (id === this.activeLensId || this.switching) return;
+
+            // Optimistic, camera-app feel: the tapped pill flips NOW; the
+            // frozen still + fade carry the sensor swap. On failure start()'s
+            // error path repaints truthfully (activeLensId comes from the
+            // stream that actually opened).
+            this.lensId = id;
+            this.activeLensId = id;
+            try { localStorage.setItem(this.lensKey, id); } catch (e) {}
+            // The onion skin and reference thumb stay — they ARE the point:
+            // the guide now compares the new lens's view against the frame
+            // being matched.
+            await this.start();
         },
 
         describeCameraError(e) {
@@ -902,9 +1553,37 @@
         },
 
 
+        stopTracks(stream) {
+            stream?.getTracks?.().forEach((t) => t.stop());
+        },
+
+        /**
+         * Paint the current viewfinder into a still, shown over the <video>
+         * while the sensor changes over. A stopped or not-yet-playing video
+         * element renders BLACK, which is what a lens switch looked like.
+         */
+        freezeFrame() {
+            const video = this.videoEl;
+            if (!video?.videoWidth) return;
+
+            try {
+                const c = this.cropRect(video.videoWidth, video.videoHeight);
+                const canvas = document.createElement('canvas');
+                canvas.width = c.sw;
+                canvas.height = c.sh;
+                canvas.getContext('2d').drawImage(video, c.sx, c.sy, c.sw, c.sh, 0, 0, c.sw, c.sh);
+                this.frozenSrc = canvas.toDataURL('image/jpeg', 0.7);
+                this.switching = true;
+            } catch (e) {
+                // Tainted or not readable — better a brief black than a throw.
+                this.frozenSrc = '';
+                this.switching = true;
+            }
+        },
+
         stop() {
             if (this.stream) {
-                this.stream.getTracks().forEach((t) => t.stop());
+                this.stopTracks(this.stream);
                 this.stream = null;
             }
             if (this.geoWatch !== null) {
@@ -916,7 +1595,8 @@
         // Wait out the tap's own shake: capture fires once the phone holds
         // still (or after 1s regardless — never eat the shot).
         captureSharp() {
-            if (this.shutter || this.armingCapture) return;
+            // A frozen still is not a live view — never shoot mid-swap.
+            if (this.shutter || this.armingCapture || this.switching) return;
             this.armingCapture = true;
             const started = performance.now();
             const attempt = () => {
@@ -931,7 +1611,7 @@
         },
 
         capture() {
-            const video = this.$refs.video;
+            const video = this.videoEl;
             if (!video.videoWidth || this.shutter) return;
 
             // Always the centered landscape band — a portrait-held phone
@@ -960,42 +1640,48 @@
             };
 
             canvas.toBlob((blob) => {
-                this.queue.push({ blob, meta });
-                this.pump();
+                // The shot carries its own destination: it may still be in
+                // the queue long after the camera has moved on.
+                Alpine.store('tlUploads').add({ blob, meta, collectionId: this.collectionId });
                 // 0.98: the archive copy is encoded once, here — anything
                 // lost now is lost for good. The server derives the smaller
                 // sequence copy from it.
             }, 'image/jpeg', 0.98);
         },
 
-        /**
-         * Sends queued shots one at a time in the background. Serial on
-         * purpose: they all land on the same Livewire property, so two in
-         * flight would overwrite each other.
-         */
-        pump() {
-            if (this.uploading || !this.queue.length) return;
-
-            const { blob, meta } = this.queue.shift();
-            this.uploading++;
-
-            // Deferred set (third arg false): no request of its own — it
-            // rides the upload's finish commit, so the metadata is on the
-            // component before updatedFrame() runs. Serial uploads keep each
-            // meta paired with its own shot.
-            $wire.set('captureMeta', meta, false);
-
-            $wire.upload('frame', new File([blob], 'frame.jpg', { type: 'image/jpeg' }),
-                () => { this.uploading--; this.pump(); },
-                () => { this.uploading--; this.failed++; this.pump(); },
-            );
-        },
-
         destroy() {
+            // Anything still waiting on getUserMedia now belongs to no one —
+            // the gen bump makes it stop its own stream when it resolves.
+            this.startGen++;
+            clearTimeout(this.rotateTimer);
+            clearTimeout(this.freezeTimer);
+
+            // A viewfinder still ported to <body> would outlive the page.
+            // RE-HOME it (not remove): wire:navigate snapshots the DOM for
+            // back/forward right after teardown, and a snapshot missing the
+            // <video> node would restore a camera card that can never start.
+            if (this.vfHome) {
+                document.body.style.overflow = '';
+                this.setViewportCover(false);
+                window.visualViewport?.removeEventListener('resize', this.onViewportResize);
+                window.visualViewport?.removeEventListener('scroll', this.onViewportResize);
+                const vf = this.$refs.viewfinder;
+                if (vf) { vf.style.height = ''; vf.style.width = ''; }
+                Alpine.mutateDom(() => {
+                    if (vf && this.vfHome.parentNode) {
+                        this.vfHome.parentNode.insertBefore(vf, this.vfHome);
+                    } else {
+                        vf?.remove();
+                    }
+                    this.vfHome.remove();
+                });
+                this.vfHome = null;
+            }
             this.stop();
             clearInterval(this.guideTimer);
             window.removeEventListener('orientationchange', this.onRotate);
             if (this.landscapeMq) this.landscapeMq.removeEventListener('change', this.onOrient);
+            document.removeEventListener('fullscreenchange', this.onFsChange);
         },
     }));
 </script>

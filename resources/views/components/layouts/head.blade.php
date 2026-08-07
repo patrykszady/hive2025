@@ -67,6 +67,9 @@
     @endif
 
     <meta charset="utf-8">
+    {{-- No viewport-fit=cover here: it would push EVERY page under the notch
+         in the installed app, and nothing else has safe-area padding. The
+         fullscreen camera turns it on for exactly as long as it is up. --}}
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     @auth

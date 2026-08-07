@@ -688,3 +688,37 @@ it('shortens sender names to first names unless two people share one', function 
         ->and($short[4])->toBe('Mark & Gail')
         ->and($short[5])->toBe('(773) 251-3666'); // numbers pass through
 });
+
+it('files a queued capture into the collection it was shot in, not the one now open', function () {
+    $fx = timelapseFixture();
+
+    $component = Livewire::actingAs($fx['user'])->test(TimelapseStudio::class, ['project' => $fx['project']]);
+
+    $component->set('newTitle', 'Kitchen Timelapse')->call('createCollection');
+    $kitchen = ProjectTimelapse::where('project_id', $fx['project']->id)->where('title', 'Kitchen Timelapse')->firstOrFail();
+    $general = ProjectTimelapse::where('project_id', $fx['project']->id)->where('title', 'Project Images')->firstOrFail();
+
+    // The camera stamps the shot's collection into the filename; by the time
+    // the upload lands, the user has switched the camera to the album.
+    $component->call('selectCollection', $general->id)
+        ->set('frame', UploadedFile::fake()->image("frame-{$kitchen->id}.jpg", 800, 600));
+
+    expect($kitchen->frames()->count())->toBe(1)
+        ->and($general->frames()->count())->toBe(0);
+
+    // A filename pointing at another project's collection resolves to nothing
+    // and falls back to the open collection.
+    $foreign = ProjectTimelapse::withoutEvents(fn () => ProjectTimelapse::create([
+        'project_id' => \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+            'project_name' => 'Elsewhere', 'client_id' => \App\Models\Client::factory()->create()->id,
+            'belongs_to_vendor_id' => Vendor::factory()->create()->id,
+            'address' => '1 Other St', 'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601',
+        ]))->id,
+        'title' => 'Not Yours', 'kind' => ProjectTimelapse::KIND_TIMELAPSE, 'display_mode' => 'slider', 'sort_order' => 1,
+    ]));
+
+    $component->set('frame', UploadedFile::fake()->image("frame-{$foreign->id}.jpg", 800, 600));
+
+    expect($foreign->frames()->count())->toBe(0)
+        ->and($general->frames()->count())->toBe(1);
+});

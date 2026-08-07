@@ -673,7 +673,16 @@ class TimelapseStudio extends Component
     public function updatedFrame(): void
     {
         $this->validate(['frame' => 'required|mimes:jpg,jpeg,png|max:20480']);
-        $this->storeFrame($this->frame, null, $this->sanitizedCaptureMeta());
+
+        // The camera stamps the shot's collection into the filename
+        // ("frame-{id}.jpg"): uploads are queued client-side and the finish
+        // request can land AFTER the user switched collections — resolving
+        // "current collection" then would misfile the frame. The lookup is
+        // against this project's own collections, so a forged id gets nothing.
+        preg_match('/^frame-(\d+)\.jpg$/', (string) $this->frame->getClientOriginalName(), $m);
+        $target = $m ? $this->collections->firstWhere('id', (int) $m[1]) : null;
+
+        $this->storeFrame($this->frame, null, $this->sanitizedCaptureMeta(), $target);
         $this->frame = null;
         $this->captureMeta = null;
     }
@@ -733,11 +742,11 @@ class TimelapseStudio extends Component
         $this->file = null;
     }
 
-    protected function storeFrame($upload, ?string $originalName = null, ?array $meta = null): void
+    protected function storeFrame($upload, ?string $originalName = null, ?array $meta = null, ?ProjectTimelapse $target = null): void
     {
         $this->authorize('view', $this->project);
 
-        $timelapse = $this->collection ?? ProjectTimelapse::generalFor($this->project);
+        $timelapse = $target ?? $this->collection ?? ProjectTimelapse::generalFor($this->project);
 
         app(\App\Services\ProjectImageImporter::class)->storeImage(
             $timelapse,
