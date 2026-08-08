@@ -28,7 +28,21 @@ use Livewire\WithFileUploads;
  */
 class TimelapseStudio extends Component
 {
-    use AuthorizesRequests, WithFileUploads;
+    use AuthorizesRequests, WithFileUploads {
+        _startUpload as baseStartUpload;
+    }
+
+    /**
+     * The signed-URL handshake changes no state, so re-rendering this whole
+     * page for it is pure cost — every captured frame pays it once before the
+     * bytes even start moving.
+     */
+    public function _startUpload($name, $fileInfo, $isMultiple)
+    {
+        $this->skipRender();
+
+        return $this->baseStartUpload($name, $fileInfo, $isMultiple);
+    }
 
     public Project $project;
 
@@ -679,6 +693,9 @@ class TimelapseStudio extends Component
     /** A camera capture (JPEG blob) landed — store it as the next frame. */
     public function updatedFrame(): void
     {
+        $t0 = microtime(true);
+        $bytes = (int) $this->frame?->getSize();
+
         $this->validate(['frame' => 'required|mimes:jpg,jpeg,png|max:20480']);
 
         // The camera stamps the shot's collection into the filename
@@ -689,9 +706,37 @@ class TimelapseStudio extends Component
         preg_match('/^frame-(\d+)\.jpg$/', (string) $this->frame->getClientOriginalName(), $m);
         $target = $m ? $this->collections->firstWhere('id', (int) $m[1]) : null;
 
-        $this->storeFrame($this->frame, null, $this->sanitizedCaptureMeta(), $target);
+        $meta = $this->sanitizedCaptureMeta();
+        $this->storeFrame($this->frame, null, $meta, $target);
         $this->frame = null;
         $this->captureMeta = null;
+
+        // Two numbers tell the whole story when "Saving…" drags:
+        //   store_ms   — writing the archive + the row (should be small now
+        //                that the resize is queued);
+        //   request_ms — the WHOLE finish commit, logged at terminate so it
+        //                includes re-rendering this (large) component. A big
+        //                request_ms with a small store_ms means the render is
+        //                the problem; small both means the time is on the
+        //                wire or in the client.
+        $storeMs = (int) round((microtime(true) - $t0) * 1000);
+        $shutterAt = $meta['takenAt'] ?? null;
+
+        app()->terminating(function () use ($bytes, $storeMs, $shutterAt) {
+            \Illuminate\Support\Facades\Log::channel('timelapse')->info('Frame upload commit', [
+                'project_id' => $this->project->id,
+                'bytes' => $bytes,
+                'store_ms' => $storeMs,
+                'request_ms' => defined('LARAVEL_START')
+                    ? (int) round((microtime(true) - LARAVEL_START) * 1000)
+                    : null,
+                // Shutter-press → this commit finishing, in seconds: the
+                // number the crew member actually experiences.
+                'shutter_to_saved_s' => $shutterAt
+                    ? max(0, round(now()->diffInMilliseconds(\Illuminate\Support\Carbon::parse($shutterAt), true) / 1000, 1))
+                    : null,
+            ]);
+        });
     }
 
     /**

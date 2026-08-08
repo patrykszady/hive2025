@@ -626,22 +626,49 @@
         // A Livewire upload is three round-trips, and a failure in the LAST
         // one calls back to nobody — the queue would sit "Saving…" forever.
         // No progress for this long → cancel the upload ourselves and let the
-        // retry/backoff path deal with it.
+        // retry/backoff path deal with it. Once the file has FULLY uploaded
+        // (100%) the server is doing its part — give that phase far more
+        // grace: cancelling there throws away a completed upload and re-sends
+        // the whole file, which is exactly the "Saving in a loop" shape.
         STALL_MS: 30000,
+        STALL_AFTER_UPLOADED_MS: 120000,
 
         /** Shots still trying, including the one in flight. */
         get pending() { return this.queue.length; },
         /** Shots that gave up — pixels still here, one tap from another go. */
         get failed() { return this.failedShots.length; },
 
+        /**
+         * The phone's side of the story, written into the timelapse log
+         * channel — matched by timestamp with the server lines, one test
+         * shot tells exactly which hop misbehaved. keepalive: survives
+         * navigation. Never lets logging break uploading.
+         */
+        report(event, detail = {}) {
+            try {
+                fetch('/timelapse/client-log', {
+                    method: 'POST',
+                    keepalive: true,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                    },
+                    body: JSON.stringify({ event, detail }),
+                }).catch(() => {});
+            } catch (e) {}
+        },
+
         add(shot) {
+            shot.bytes = shot.blob?.size ?? null;
             this.queue.push(shot);
+            this.report('shot queued', { bytes: shot.bytes, collection: shot.collectionId, queued: this.queue.length });
             this.pump();
         },
 
         retryFailed() {
             if (!this.failedShots.length) return;
 
+            this.report('manual retry', { count: this.failedShots.length });
             this.failedShots.forEach((shot) => {
                 shot.tries = 0;
                 this.queue.push(shot);
@@ -650,15 +677,16 @@
             this.pump();
         },
 
-        feedStallWatchdog() {
+        feedStallWatchdog(ms = this.STALL_MS) {
             clearTimeout(this.stallTimer);
             this.stallTimer = setTimeout(() => {
+                this.report('stalled — cancelling', { progress: this.progress, after_ms: ms });
                 // Aborts the in-flight request AND fires the cancelled
                 // callback, which routes into the same retry path as an
                 // explicit error. If the upload actually finished in the
                 // meantime, Livewire's bag is empty and this is a no-op.
                 try { this.wire?.cancelUpload('frame'); } catch (e) {}
-            }, this.STALL_MS);
+            }, ms);
         },
 
         settle() {
@@ -678,11 +706,16 @@
             this.progress = 0;
             this.feedStallWatchdog();
 
-            const failedOnce = () => {
+            const startedAt = Date.now();
+            this.report('upload start', { bytes: shot.bytes, collection: shot.collectionId, try: (shot.tries || 0) + 1 });
+
+            const failedOnce = (why) => () => {
                 this.settle();
                 shot.tries = (shot.tries || 0) + 1;
+                this.report('upload '+why, { try: shot.tries, ms: Date.now() - startedAt });
 
                 if (shot.tries >= this.MAX_TRIES) {
+                    this.report('gave up', { tries: shot.tries });
                     this.failedShots.push(this.queue.shift());
                     this.pump();
 
@@ -701,17 +734,26 @@
 
             this.wire.upload('frame', new File([shot.blob], `frame-${shot.collectionId ?? 0}.jpg`, { type: 'image/jpeg' }),
                 () => {
+                    this.report('upload finished', { ms: Date.now() - startedAt });
                     this.settle();
                     this.queue.shift();
                     this.pump();
                 },
-                failedOnce,
+                failedOnce('errored'),
                 (e) => {
                     this.progress = e?.detail?.progress ?? this.progress;
-                    this.feedStallWatchdog();
+                    // File fully out the door → the remaining wait is the
+                    // server's finish commit. Long grace, and say so once.
+                    if (this.progress >= 100 && !this.uploadedReported) {
+                        this.uploadedReported = true;
+                        this.report('file fully uploaded', { ms: Date.now() - startedAt });
+                    }
+                    this.feedStallWatchdog(this.progress >= 100 ? this.STALL_AFTER_UPLOADED_MS : this.STALL_MS);
                 },
-                failedOnce,
+                failedOnce('cancelled'),
             );
+
+            this.uploadedReported = false;
         },
     });
 

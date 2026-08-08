@@ -40,6 +40,7 @@ class ProcessTimelapseFrame implements ShouldQueue
 
     public function handle(): void
     {
+        $t0 = microtime(true);
         $frame = ProjectTimelapseFrame::find($this->frameId);
 
         if (! $frame) {
@@ -50,7 +51,7 @@ class ProcessTimelapseFrame implements ShouldQueue
 
         if (! $disk->exists($frame->path)) {
             if (! $frame->original_path || ! $disk->exists($frame->original_path)) {
-                Log::warning('Timelapse frame processing skipped — no archive copy', [
+                Log::channel('timelapse')->warning('Frame processing skipped — no archive copy', [
                     'frame_id' => $frame->id,
                 ]);
 
@@ -69,6 +70,11 @@ class ProcessTimelapseFrame implements ShouldQueue
             $disk->put($frame->path, (string) $image->encode('jpg', 88));
             $image->destroy();
         }
+
+        Log::channel('timelapse')->info('Frame processed', [
+            'frame_id' => $frame->id,
+            'ms' => (int) round((microtime(true) - $t0) * 1000),
+        ]);
 
         // Alignment needs the sequence copy this job just wrote — that's why
         // it's chained from here rather than dispatched alongside.

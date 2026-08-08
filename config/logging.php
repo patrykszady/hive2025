@@ -157,6 +157,16 @@ return [
             'days' => 30
         ],
 
+        // The frame pipeline: upload commit timings, queued processing,
+        // alignment. When "Saving…" drags, this file says which hop ate the
+        // time — the wire, the commit render, the resize job, or the aligner.
+        'timelapse' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/timelapse.log'),
+            'level' => 'debug',
+            'days' => 14,
+        ],
+
         'waiver_scans' => [
             'driver' => 'daily',
             'path' => storage_path('logs/waiver_scans.log'),

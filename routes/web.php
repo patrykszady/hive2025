@@ -581,6 +581,22 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // Old name kept working — links and bookmarks predate the rename.
     Route::redirect('/projects/{project}/timelapse', '/projects/{project}/images')->name('projects.timelapse');
     Route::get('/timelapse/frames/{frame}', [\App\Http\Controllers\TimelapseController::class, 'frame'])->name('projects.timelapse.frame');
+    // The camera's upload state machine, reported from the phone into the
+    // timelapse log channel — the client is otherwise a black box exactly
+    // when "Saving…" misbehaves in the field.
+    Route::post('/timelapse/client-log', function (\Illuminate\Http\Request $request) {
+        $data = $request->validate([
+            'event' => 'required|string|max:60',
+            'detail' => 'nullable|array',
+        ]);
+
+        \Illuminate\Support\Facades\Log::channel('timelapse')->info('client: '.$data['event'], [
+            'user_id' => auth()->id(),
+            'ua' => mb_substr((string) $request->userAgent(), 0, 120),
+        ] + ($data['detail'] ?? []));
+
+        return response()->noContent();
+    })->name('projects.timelapse.clientlog');
     // Route::get('projects/reimbursments/print/{project}', [ReceiptController::class, 'printReimbursment'])->name('print_reimbursment');
 
     //TIMESHEETS

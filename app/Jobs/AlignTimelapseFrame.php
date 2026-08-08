@@ -71,7 +71,7 @@ class AlignTimelapseFrame implements ShouldQueue
         $python = (string) config('services.timelapse_align.python');
 
         if (! is_executable($python)) {
-            Log::warning('Timelapse align skipped — python not executable', ['python' => $python]);
+            Log::channel('timelapse')->warning('Align skipped — python not executable', ['python' => $python]);
 
             return;
         }
@@ -161,7 +161,7 @@ class AlignTimelapseFrame implements ShouldQueue
         if ($aligned && is_file($alignedAbsolute)) {
             $frame->forceFill(['aligned_path' => $alignedRelative])->save();
 
-            Log::info('Timelapse frame aligned', ['frame_id' => $frame->id] + $diagnostics);
+            Log::channel('timelapse')->info('Frame aligned', ['frame_id' => $frame->id] + $diagnostics);
 
             return;
         }
@@ -171,14 +171,14 @@ class AlignTimelapseFrame implements ShouldQueue
         // Exit 2 = a considered "not confident enough" — expected sometimes,
         // never an error. Anything else is.
         if ($process->getExitCode() === 2) {
-            Log::info('Timelapse frame left unaligned (low confidence)', [
+            Log::channel('timelapse')->info('Frame left unaligned (low confidence)', [
                 'frame_id' => $frame->id,
             ] + $diagnostics);
 
             return;
         }
 
-        Log::error('Timelapse align failed', [
+        Log::channel('timelapse')->error('Align failed', [
             'frame_id' => $frame->id,
             'exit' => $process->getExitCode(),
             'stderr' => mb_substr($process->getErrorOutput(), 0, 1500),
