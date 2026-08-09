@@ -612,7 +612,11 @@
     // Guarded: re-registering would hand the page a fresh empty store and
     // drop whatever was still in flight.
     if (!Alpine.store('tlUploads')) Alpine.store('tlUploads', {
-        wire: null,
+        // A CLOSURE over the raw $wire, never $wire itself: the store is
+        // Vue-reactive, and calling a Livewire proxy through the reactive
+        // wrapper leaks Vue's __v_raw probe into Livewire's method dispatch —
+        // the server 500s trying to call a component method named "__v_raw".
+        refresh: null,
         // The direct frame-upload endpoint (set at camera init) and the
         // request currently on the wire, so the watchdog can abort it.
         uploadUrl: null,
@@ -728,7 +732,7 @@
                 this.queue.shift();
                 // One cheap refresh once the queue drains, so the grid and
                 // counts show the new frames without a per-shot re-render.
-                if (!this.queue.length) { try { this.wire?.call('$refresh'); } catch (e) {} }
+                if (!this.queue.length) { try { this.refresh?.(); } catch (e) {} }
                 this.pump();
             };
 
@@ -1071,7 +1075,8 @@
             // Hand the outbox a live $wire and let it drain anything a
             // previous camera (other collection, or one that was closed) left
             // unsent. $wire is the STUDIO component, which outlives the camera.
-            Alpine.store('tlUploads').wire = $wire;
+            // The closure keeps $wire RAW — see the store's `refresh` note.
+            Alpine.store('tlUploads').refresh = () => $wire.$refresh();
             Alpine.store('tlUploads').uploadUrl = @js(route('projects.timelapse.frame.store', $project));
             Alpine.store('tlUploads').pump();
 
