@@ -194,15 +194,26 @@ class CrewLeadEmailService
         }
 
         if ($reason = $this->triage($fromEmail, $subject, $body, $message)) {
+            // A reply is skipped as a NEW lead, but it is not nothing: it's a
+            // lead answering us, and until now it lived only in Outlook while
+            // the CRM showed "Replied" as if the ball were still in their
+            // court. Attach it to the lead it answers and put that lead back
+            // in front of the team.
+            $repliedLeadId = null;
+            if ($reason === 'reply' && ! $dryRun) {
+                $repliedLeadId = $this->recordLeadReply($base, $body);
+            }
+
             if (! $dryRun) {
                 CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
                     'status' => CrewEmailIngest::STATUS_SKIPPED,
                     'skip_reason' => $reason,
                     'is_lead' => false,
+                    'lead_id' => $repliedLeadId,
                 ]);
             }
 
-            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => $reason];
+            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => $reason, 'lead_id' => $repliedLeadId];
         }
 
         $verdict = $this->classify($subject, $body, $fromEmail);
@@ -292,15 +303,26 @@ class CrewLeadEmailService
         // lead (or client) already exists; minting a new one duplicates it and
         // makes the pipeline lie about how much fresh demand came in.
         //
-        // In-Reply-To / References are the RFC-correct signal and survive
-        // subject editing. The "Re:"/"Fwd:" prefix is the human-visible
-        // fallback for senders whose client omits the headers, and covers the
-        // localised forms Outlook emits.
-        if (isset($headers['in-reply-to']) || isset($headers['references'])) {
+        // A FORWARD is not a reply. A homeowner who prepares one bid-request
+        // email and forwards it to every contractor she found is a brand-new
+        // enquiry — exactly the mail this pipeline exists to catch — and her
+        // subject starts with "Fwd:" while her headers carry References to
+        // the original in HER OWN mailbox. So a forward is never skipped
+        // here: it goes on to the classifier, which still rejects forwarded
+        // newsletters and solicitations on their content.
+        //
+        // In-Reply-To / References are the RFC-correct reply signal and
+        // survive subject editing — but only when the subject doesn't say
+        // forward, since forwarding clients set those headers too. The "Re:"
+        // prefix family is the fallback for senders whose client omits the
+        // headers, covering the localised forms Outlook emits.
+        $isForward = (bool) preg_match('/^\s*(fw|fwd|tr|wg|pd|i)\s*(\[\d+\])?\s*:/i', $subject);
+
+        if (! $isForward && (isset($headers['in-reply-to']) || isset($headers['references']))) {
             return 'reply';
         }
 
-        if (preg_match('/^\s*(re|aw|sv|vs|fw|fwd|tr|odp)\s*(\[\d+\])?\s*:/i', $subject)) {
+        if (! $isForward && preg_match('/^\s*(re|aw|sv|vs|odp)\s*(\[\d+\])?\s*:/i', $subject)) {
             return 'reply';
         }
 
@@ -503,6 +525,23 @@ TXT;
             ),
         ]);
 
+        // Whatever the enquirer attached — a bid request form, drawings,
+        // photos of the damage — is often the substance of the enquiry.
+        // Failure is non-fatal: the lead exists either way, tidier with the
+        // files, complete without them.
+        try {
+            $files = $this->storeAttachments($message, $base, $lead);
+
+            if ($files !== []) {
+                $lead->update(['lead_data' => $leadData + ['attachments' => $files]]);
+            }
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Crew leads: attachment capture failed', [
+                'lead_id' => $lead->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Parity with the website-form path (Api\LeadsController::store).
         // Without the status row the lead has no pipeline stage and does not
         // appear where the team works leads; without provisioning it has no
@@ -525,6 +564,120 @@ TXT;
         }
 
         return $lead;
+    }
+
+    /**
+     * File an email reply onto the lead who sent it. Returns the lead id, or
+     * null when no lead matches the sender.
+     *
+     * The reply's text is kept on the lead (last 10, newest first) so the
+     * conversation is readable where the team works leads, and a lead we had
+     * already answered comes back to "New" — same semantics as the pick-times
+     * page: the ball is in OUR court again.
+     */
+    protected function recordLeadReply(array $base, string $body): ?int
+    {
+        $fromEmail = (string) ($base['from_email'] ?? '');
+
+        if ($fromEmail === '') {
+            return null;
+        }
+
+        $lead = Lead::withoutGlobalScopes()
+            ->where('lead_data->email', $fromEmail)
+            ->latest('id')
+            ->first();
+
+        if (! $lead) {
+            return null;
+        }
+
+        $data = $lead->lead_data instanceof \ArrayObject ? $lead->lead_data->toArray() : (array) $lead->lead_data;
+        $replies = array_slice((array) ($data['email_replies'] ?? []), 0, 9);
+
+        array_unshift($replies, array_filter([
+            'at' => ($base['message_at'] ?? now())->toDateTimeString(),
+            'subject' => $base['subject'] ?? null,
+            'body' => Str::limit(trim($body), 1500, '…'),
+        ]));
+
+        $data['email_replies'] = array_values($replies);
+        $lead->lead_data = $data;
+        $lead->saveQuietly();
+
+        if ($lead->last_status?->title === 'Replied') {
+            $lead->setStatus('New');
+        }
+
+        return $lead->id;
+    }
+
+    /**
+     * Download the enquiry's real attachments onto the lead.
+     *
+     * Images and PDFs only — those carry drawings, bid forms and photos;
+     * calendar invites and signature clutter don't. Inline parts (logos,
+     * tracking pixels) are already excluded by the is_inline flag. The
+     * shared_from parameter is what lets the download work at all: crew@ has
+     * no grant of its own, same story as fetch().
+     *
+     * @return array<int, array{path:string, name:string, mime:string, size:int}>
+     */
+    protected function storeAttachments(array $message, array $base, Lead $lead): array
+    {
+        $attachments = array_values(array_filter(
+            (array) ($message['attachments'] ?? []),
+            fn ($a) => ($a['is_inline'] ?? false) === false
+                && preg_match('#^(image/|application/pdf)#i', (string) ($a['content_type'] ?? ''))
+                && (int) ($a['size'] ?? 0) <= 25 * 1024 * 1024,
+        ));
+
+        $stored = [];
+
+        foreach (array_slice($attachments, 0, 10) as $attachment) {
+            $id = (string) ($attachment['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+
+            $response = Http::withToken(config('nylas.api_key'))
+                ->timeout(120)
+                ->retry(2, 2000, throw: false)
+                ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/') . "/v3/grants/{$base['grant_id']}/attachments/{$id}/download", [
+                    'message_id' => $base['nylas_message_id'],
+                    'shared_from' => $base['mailbox'],
+                ]);
+
+            if (! $response->successful() || $response->body() === '') {
+                Log::channel('nylas')->warning('Crew leads: attachment download failed', [
+                    'lead_id' => $lead->id,
+                    'attachment_id' => $id,
+                    'status' => $response->status(),
+                ]);
+
+                continue;
+            }
+
+            $name = trim((string) ($attachment['filename'] ?? '')) ?: 'attachment';
+            $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            $path = sprintf(
+                'leads/%d/%s%s',
+                $lead->id,
+                Str::uuid(),
+                $extension !== '' ? '.' . $extension : '',
+            );
+
+            \Illuminate\Support\Facades\Storage::disk('files')->put($path, $response->body());
+
+            $stored[] = [
+                'path' => $path,
+                'name' => Str::limit($name, 120, ''),
+                'mime' => strtolower((string) ($attachment['content_type'] ?? 'application/octet-stream')),
+                'size' => strlen($response->body()),
+            ];
+        }
+
+        return $stored;
     }
 
     /**

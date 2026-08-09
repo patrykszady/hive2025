@@ -116,7 +116,12 @@ class WaiverScanIngest
             }
         }
 
-        Log::channel(self::LOG)->info('Waiver scan ingest run finished.', $stats);
+        // An empty mailbox is the normal case every 10 minutes — logging it
+        // buried the runs that actually did something. Only a run that
+        // touched a message earns a line.
+        if (array_sum($stats) > 0) {
+            Log::channel(self::LOG)->info('Waiver scan ingest run finished.', $stats);
+        }
 
         return $stats;
     }

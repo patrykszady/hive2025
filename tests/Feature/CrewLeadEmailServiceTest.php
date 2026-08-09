@@ -170,9 +170,27 @@ class CrewLeadEmailServiceTest extends TestCase
         ]));
 
         // Header-less clients still announce it in the subject.
-        foreach (['Re: GS Construction & Remodeling Consultation', 'RE: quote', 'Fwd: plans', 'FW: plans'] as $subject) {
+        foreach (['Re: GS Construction & Remodeling Consultation', 'RE: quote'] as $subject) {
             $this->assertSame('reply', $this->triage(['subject' => $subject]), $subject);
         }
+    }
+
+    public function test_a_forwarded_enquiry_is_not_a_reply(): void
+    {
+        // A homeowner who prepares one bid-request email and forwards it to
+        // every contractor she found IS a fresh enquiry ("Fwd: Termite Repair
+        // Bid Request" was skipped as a reply exactly this way). Forwards
+        // carry References to the original in the SENDER'S mailbox, so
+        // neither the prefix nor the headers may kill them — the classifier
+        // judges their content instead.
+        foreach (['Fwd: Termite Repair Bid Request', 'FW: plans', 'Tr: devis maison'] as $subject) {
+            $this->assertNull($this->triage(['subject' => $subject]), $subject);
+        }
+
+        $this->assertNull($this->triage([
+            'subject' => 'Fwd: Termite Repair Bid Request',
+            'headers' => [['name' => 'References', 'value' => '<orig@mail.gmail.com>']],
+        ]));
     }
 
     public function test_a_subject_merely_starting_with_re_is_still_a_lead(): void

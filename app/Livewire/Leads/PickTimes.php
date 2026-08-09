@@ -31,6 +31,9 @@ class PickTimes extends Component
 
     public bool $submitted = false;
 
+    /** How they'd like to meet: at the house, or a Teams video call. */
+    public string $meeting = 'in_person';
+
     /** Same windows the gs.construction lead form offers. */
     public const WINDOWS = ['Anytime', '7-9 AM', '9-11 AM', '11-1 PM', '1-3 PM'];
 
@@ -389,6 +392,11 @@ class PickTimes extends Component
         $data = $lead->lead_data;
         $data['availability'] = $this->times;
         $data['availability_updated_at'] = now()->toDateTimeString();
+        // A stated preference only — the composer pre-selects it and the team
+        // confirms; garbage in the request can't become a meeting type.
+        $data['meeting_preference'] = in_array($this->meeting, ['in_person', 'virtual'], true)
+            ? $this->meeting
+            : 'in_person';
         $lead->lead_data = $data;
         $lead->save();
 

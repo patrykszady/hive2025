@@ -77,7 +77,21 @@ class LeadCreate extends Component
     /** Name for the project the consult booking creates (when the client has none yet). */
     public string $projectName = '';
 
+    /**
+     * How the consult happens: 'in_person' at the jobsite, or 'virtual' — a
+     * Teams call whose join link rides the calendar invite (Nylas
+     * autocreates the meeting). Defaults to whatever the homeowner asked
+     * for on the pick-times page.
+     */
+    public string $consultMeetingType = 'in_person';
+
     public bool $showLeadDelete = false;
+
+    /** A matching existing contact found while creating a lead by hand. */
+    public ?array $duplicateMatch = null;
+
+    /** Set by "Create anyway" after the duplicate warning. */
+    public bool $createAnyway = false;
 
     public $view_text = [
         'card_title' => 'Create Expense',
@@ -158,7 +172,100 @@ class LeadCreate extends Component
     #[On('addLead')]
     public function addLead()
     {
+        // A previously viewed lead's fields must not bleed into the blank
+        // form — this modal is reused for every lead on the page.
+        $this->reset([
+            'lead', 'full_name', 'email', 'phone', 'phoneEntry', 'address',
+            'message', 'origin', 'availability', 'selectedAvailability',
+            'selectedExactTime', 'projectName', 'to', 'subject', 'emailBody',
+            'selectedTemplateId', 'nylasMessageId', 'nylasReferences',
+            'duplicateMatch', 'createAnyway', 'consultMeetingType',
+        ]);
+        $this->view_text = [
+            'card_title' => 'New Lead',
+            'button_text' => 'Create Lead',
+            'form_submit' => 'save',
+        ];
+
         $this->modal('lead_form_modal')->show();
+    }
+
+    /**
+     * Create a lead by hand — the person who CALLED instead of emailing or
+     * filling the website form. Once the record exists, everything downstream
+     * (the consult email, the pick-times link, booking) works for them
+     * exactly as it does for any other lead — no project needed.
+     */
+    public function save(): void
+    {
+        $this->validate([
+            'full_name' => ['required', 'string', 'max:120'],
+            'email' => ['nullable', 'email'],
+            'phone' => ['nullable', 'string', 'max:30'],
+        ], [], ['full_name' => 'name']);
+
+        if (blank($this->email) && blank($this->phone)) {
+            $this->addError('email', 'An email or phone number is needed to reach them.');
+
+            return;
+        }
+
+        // The same person may already be here — as a lead (open that one
+        // instead of splitting the history) or as a client contact (worth
+        // knowing before creating a "lead" for an existing customer). One
+        // warning, then "Create anyway" goes through.
+        if (! $this->createAnyway && ($match = $this->findExistingContact())) {
+            $this->duplicateMatch = $match;
+
+            return;
+        }
+
+        $vendorId = auth()->user()->vendor->id;
+
+        $lead = Lead::create([
+            'date' => now(),
+            'origin' => $this->origin ?: 'Manual',
+            'lead_data' => array_filter([
+                'name' => trim((string) $this->full_name),
+                'email' => trim((string) $this->email) ?: null,
+                'phone' => preg_replace('/\D/', '', (string) $this->phone) ?: null,
+                'address' => $this->address,
+                'message' => $this->message,
+            ], fn ($v) => $v !== null && $v !== ''),
+            'belongs_to_vendor_id' => $vendorId,
+            'created_by_user_id' => auth()->id(),
+        ]);
+
+        // Same parity story as email leads: without the status row the lead
+        // has no pipeline stage; without provisioning it has no contact.
+        $lead->statuses()->create([
+            'title' => 'New',
+            'belongs_to_vendor_id' => $vendorId,
+        ]);
+
+        try {
+            app(\App\Services\LeadContactProvisioner::class)->provision($lead->fresh());
+        } catch (\Throwable $e) {
+            Log::warning('Manual lead: contact provisioning failed', [
+                'lead_id' => $lead->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->dispatch('refreshComponent')->to('leads.leads-index');
+        $this->dispatch('lead-status-updated');
+
+        // Straight into the working view — the composer with the schedule
+        // link is usually the very next thing needed.
+        $this->editLead($lead->fresh());
+
+        Flux::toast(
+            duration: 4000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Lead created',
+            text: 'Ready to send them a consultation email.',
+        );
     }
 
     #[On('editLead')]
@@ -172,6 +279,9 @@ class LeadCreate extends Component
         $this->phone = $this->lead->lead_data->phone ?? null;
         $this->phoneEntry = null;
         $this->email = $this->lead->lead_data->email ?? null;
+        $this->consultMeetingType = in_array($this->lead->lead_data['meeting_preference'] ?? null, ['in_person', 'virtual'], true)
+            ? $this->lead->lead_data['meeting_preference']
+            : 'in_person';
         $rawAvailability = $this->lead->lead_data['availability'] ?? [];
         $this->availability = is_array($rawAvailability) || $rawAvailability instanceof \Traversable
             ? collect($rawAvailability)->map(fn ($slot) => (array) $slot)->values()->all()
@@ -700,6 +810,8 @@ class LeadCreate extends Component
             $options['dates'] = [$date];
             // Drop the previous date's entry, or the task keeps a stale time.
             $options['time_settings'] = [$date => $timeSettings];
+            // Rebooking is also when "let's do a video call instead" happens.
+            $options['meeting_location_type'] = $this->consultMeetingType;
 
             // Backfill an empty list only — consults booked before participants
             // were defaulted here have nobody on them, and rebooking is the
@@ -750,7 +862,7 @@ class LeadCreate extends Component
                     $project,
                     [auth()->id()],
                 ),
-                'meeting_location_type' => 'in_person',
+                'meeting_location_type' => $this->consultMeetingType,
             ],
         ]);
 
@@ -816,6 +928,156 @@ class LeadCreate extends Component
         }
 
         $this->to[] = $email;
+    }
+
+    /**
+     * Someone reachable at this phone/email who already exists — an open
+     * lead first (its history should continue, not fork), else a client
+     * contact.
+     *
+     * @return array{kind:string, label:string, lead_id:?int, client_id:?int}|null
+     */
+    protected function findExistingContact(): ?array
+    {
+        $email = strtolower(trim((string) $this->email));
+        $digits = preg_replace('/\D/', '', (string) $this->phone) ?: null;
+        if ($digits && strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        $vendorId = auth()->user()->vendor->id;
+
+        $lead = Lead::withoutGlobalScopes()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->where(function ($q) use ($email, $digits) {
+                $q->when($email !== '', fn ($inner) => $inner->where('lead_data->email', $email));
+                $q->when($digits, fn ($inner) => $inner->orWhere('lead_data->phone', $digits));
+            })
+            ->latest('id')
+            ->first();
+
+        if ($lead) {
+            return [
+                'kind' => 'lead',
+                'label' => trim((string) ($lead->lead_data['name'] ?? 'a lead')).' — '.($lead->last_status?->title ?? 'lead').' since '.$lead->date?->format('M j'),
+                'lead_id' => $lead->id,
+                'client_id' => null,
+            ];
+        }
+
+        $user = \App\Models\User::query()
+            ->where(function ($q) use ($email, $digits) {
+                $q->when($email !== '', fn ($inner) => $inner->whereRaw('LOWER(email) = ?', [$email]));
+                $q->when($digits, fn ($inner) => $inner->orWhere('cell_phone', $digits));
+            })
+            ->first();
+
+        if ($user) {
+            $client = $user->clients()->withoutGlobalScopes()->first();
+
+            return [
+                'kind' => $client ? 'client' : 'user',
+                'label' => trim($user->full_name).($client ? ' — existing client '.$client->name : ' — existing contact'),
+                'lead_id' => null,
+                'client_id' => $client?->id,
+            ];
+        }
+
+        return null;
+    }
+
+    /** "Create anyway" from the duplicate warning. */
+    public function saveDespiteDuplicate(): void
+    {
+        $this->createAnyway = true;
+        $this->duplicateMatch = null;
+        $this->save();
+    }
+
+    /**
+     * The lead's own scheduling page as a short link — the signed pick-times
+     * URL is a working booking flow for anyone with a lead record, project or
+     * not. Shortened because it goes into emails and texts, and because the
+     * signed URL is unwieldy.
+     */
+    public function scheduleLink(): string
+    {
+        return app(\App\Services\UrlShortener::class)->shorten($this->lead->availabilityUrl());
+    }
+
+    /**
+     * Hand the schedule link to the clipboard — for pasting into a text
+     * message or any channel the composer doesn't cover.
+     */
+    public function copyScheduleLink(): void
+    {
+        if (! $this->lead) {
+            return;
+        }
+
+        $this->dispatch('lead-schedule-link-copied', url: $this->scheduleLink());
+    }
+
+    /**
+     * Text the booking link to the lead's phone through the normal SMS
+     * pipeline. An opted-in thread gets the link immediately; a fresh number
+     * first gets the consent prompt (compliance owns that flow), and the
+     * toast says so instead of pretending the link went out.
+     */
+    public function textScheduleLink(\App\Services\GroupSmsService $sms): void
+    {
+        if (! $this->lead) {
+            return;
+        }
+
+        $digits = preg_replace('/\D/', '', (string) ($this->lead->lead_data['phone'] ?? ''));
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        if (strlen($digits) !== 10) {
+            Flux::toast(duration: 5000, position: 'top right', variant: 'warning',
+                heading: 'No phone number', text: 'Add a phone number to this lead first.');
+
+            return;
+        }
+
+        $e164 = \App\Services\GroupSmsService::formatE164($digits);
+
+        $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
+        $contractor = trim((string) (data_get($vendor?->options, 'short_name') ?: $vendor?->name)) ?: config('app.name');
+        $firstName = strtok(trim((string) ($this->lead->lead_data['name'] ?? '')), ' ');
+        $text = 'Hi'.($firstName ? " {$firstName}" : '')."! Pick a consultation time with {$contractor} here: ".$this->scheduleLink();
+
+        $thread = \App\Models\SmsGroupThread::query()
+            ->whereJsonContains('participants', $e164)
+            ->whereJsonLength('participants', 1)
+            ->latest('last_activity_at')
+            ->first();
+
+        if ($thread && $thread->hasPendingOptIn()) {
+            Flux::toast(duration: 6000, position: 'top right', variant: 'warning',
+                heading: 'Awaiting START reply',
+                text: 'This number has not replied START yet — the link can go out once they do.');
+
+            return;
+        }
+
+        if ($thread) {
+            $sms->sendToThread($thread, $text, [], auth()->id());
+
+            Flux::toast(duration: 4000, position: 'top right', variant: 'success',
+                heading: 'Texted', text: 'Schedule link sent to '.phone_display($digits).'.');
+
+            return;
+        }
+
+        $clientId = $this->lead->user?->clients()->withoutGlobalScopes()->first()?->id;
+        $sms->sendNewGroup([$e164], $text, null, $clientId, auth()->id(), auth()->user()->vendor?->id);
+
+        Flux::toast(duration: 7000, position: 'top right', variant: 'success',
+            heading: 'Consent request sent',
+            text: 'New number — they get the START prompt first. Text the link from Messages once they opt in.');
     }
 
     public function send_message(): void
@@ -1315,10 +1577,17 @@ class LeadCreate extends Component
             ? 'Thank you for sending over your new availability! We appreciate you taking the time to reschedule.'
             : 'Thank you for reaching out to '.e($vendorName).'! We&rsquo;d love to learn more about your project and set up a consultation.';
 
+        // Say what KIND of meeting this books — a homeowner expecting a
+        // doorbell should not get a Teams link, and vice versa.
+        $formatLine = $this->consultMeetingType === 'virtual'
+            ? ' This will be a video consultation &mdash; the calendar invite includes the Microsoft Teams link to join.'
+            : '';
+
         if ($this->hasUsableAvailability) {
             $timeBlock = ($rescheduled ? 'Based on your updated availability' : 'Based on the availability you shared')
                 .', we&rsquo;d like to confirm this consultation time:<br><strong>'
                 .$availabilityList.'</strong>'
+                .$formatLine
                 // Same signed picker as the no-time branch: let them reschedule
                 // themselves rather than asking for a reply we'd hand-handle.
                 .'</p><p></p><p>If this time no longer works for you, you can '
@@ -1348,6 +1617,7 @@ class LeadCreate extends Component
                 '{{short_vendor_name}}',
                 '{{sender_first_name}}',
                 '{{sender_last_name}}',
+                '{{schedule_link}}',
             ],
             [
                 $clientName,
@@ -1364,6 +1634,9 @@ class LeadCreate extends Component
                 $shortVendorName,
                 $senderFirstName,
                 $senderLastName,
+                // The signed pick-times page needs only the LEAD — no project,
+                // no account. Any template can carry it.
+                $this->scheduleLink(),
             ],
             $text
         );

@@ -34,6 +34,15 @@ Schedule::command('crew:ingest-leads')
     ->withoutOverlapping()
     ->onOneServer();
 
+// One nudge to leads we answered days ago that never booked or sent times.
+// Mid-morning Central: business-hours mail, after the overnight ingests.
+Schedule::command('leads:follow-up')
+    ->dailyAt('15:00') // 10:00 America/Chicago
+    ->name('lead-follow-ups')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('calls:reconcile-stale --execute')
     ->everyFiveMinutes()
     ->name('reconcile-stale-active-calls')

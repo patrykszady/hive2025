@@ -88,6 +88,25 @@
                         </div>
                     </flux:field>
                 @endif
+                {{-- How they'd like to meet: at the house, or a Teams video
+                     call. The team sees the pick and books that kind of
+                     consult. --}}
+                <flux:field>
+                    <flux:label>How would you like to meet?</flux:label>
+                    <div class="flex gap-2">
+                        <button type="button" wire:click="$set('meeting', 'in_person')" class="cursor-pointer">
+                            <flux:badge :color="$meeting === 'in_person' ? 'indigo' : 'zinc'" icon="map-pin">
+                                At our home
+                            </flux:badge>
+                        </button>
+                        <button type="button" wire:click="$set('meeting', 'virtual')" class="cursor-pointer">
+                            <flux:badge :color="$meeting === 'virtual' ? 'indigo' : 'zinc'" icon="video-camera">
+                                Video call
+                            </flux:badge>
+                        </button>
+                    </div>
+                </flux:field>
+
                 <flux:error name="date" />
                 <flux:error name="times" />
 

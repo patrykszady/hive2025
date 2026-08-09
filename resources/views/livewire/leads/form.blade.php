@@ -118,6 +118,27 @@
                             </div>
                         @endif
 
+                        {{-- How the consult happens. Virtual books a Teams
+                             meeting — the join link rides the calendar
+                             invite. Pre-set from the homeowner's own pick on
+                             the times page when they stated one. --}}
+                        <flux:description class="mt-3 mb-1">Meeting type</flux:description>
+                        <div class="flex gap-2">
+                            <button type="button" wire:click="$set('consultMeetingType', 'in_person')" class="cursor-pointer">
+                                <flux:badge :color="$consultMeetingType === 'in_person' ? 'indigo' : 'zinc'" icon="map-pin">
+                                    In person
+                                </flux:badge>
+                            </button>
+                            <button type="button" wire:click="$set('consultMeetingType', 'virtual')" class="cursor-pointer">
+                                <flux:badge :color="$consultMeetingType === 'virtual' ? 'indigo' : 'zinc'" icon="video-camera">
+                                    Video call (Teams)
+                                </flux:badge>
+                            </button>
+                            @if (($this->lead?->lead_data['meeting_preference'] ?? null) === 'virtual')
+                                <flux:badge size="sm" color="amber">They asked for a video call</flux:badge>
+                            @endif
+                        </div>
+
                         @if ($this->needsProjectName)
                             <div class="mt-3">
                                 <flux:input

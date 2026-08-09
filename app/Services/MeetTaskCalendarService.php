@@ -76,7 +76,7 @@ class MeetTaskCalendarService
             'calendar_id' => $calendarId,
             'title' => $task->title ?: 'Meet',
             'description' => $this->buildDescription($task, $recipientEmails),
-            'location' => $this->resolveProjectLocation($task),
+            'location' => $this->resolveMeetingLocation($task),
             'participants' => $recipientEmails
                 ->map(fn (string $email) => ['email' => $email])
                 ->values()
@@ -239,7 +239,7 @@ class MeetTaskCalendarService
             'calendar_id' => $calendarId,
             'title' => $task->title ?: 'Meet',
             'description' => $this->buildDescription($task, $recipientEmails),
-            'location' => $this->resolveProjectLocation($task),
+            'location' => $this->resolveMeetingLocation($task),
             'participants' => $recipientEmails
                 ->map(fn (string $email) => ['email' => $email])
                 ->values()
@@ -664,6 +664,20 @@ class MeetTaskCalendarService
         }
 
         return $entries;
+    }
+
+    /**
+     * The event's location line. A virtual meet's venue is the call itself —
+     * putting the jobsite address there sends somebody driving to a Teams
+     * meeting. The join link is attached by Nylas's autocreated conferencing.
+     */
+    private function resolveMeetingLocation(Task $task): ?string
+    {
+        if (($task->options->meeting_location_type ?? 'in_person') !== 'in_person') {
+            return 'Microsoft Teams';
+        }
+
+        return $this->resolveProjectLocation($task);
     }
 
     private function resolveProjectLocation(Task $task): ?string

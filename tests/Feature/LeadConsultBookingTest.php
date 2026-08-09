@@ -896,3 +896,56 @@ it('still holds a brand-new lead to three days notice', function () {
 
     \Illuminate\Support\Carbon::setTestNow();
 });
+
+it('books a virtual consult as a Teams meeting when asked', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+
+    consultComposer($fx)
+        ->set('consultMeetingType', 'virtual')
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Kitchen Remodel')
+        ->call('send_message');
+
+    $task = Task::withoutGlobalScopes()->where('type', 'Meet')->latest('id')->firstOrFail();
+
+    expect(data_get($task->options, 'meeting_location_type'))->toBe('virtual');
+
+    // The invite's location is the call, not the jobsite — nobody drives to
+    // a Teams meeting.
+    $service = app(\App\Services\MeetTaskCalendarService::class);
+    $method = new \ReflectionMethod($service, 'resolveMeetingLocation');
+    $method->setAccessible(true);
+
+    expect($method->invoke($service, $task->fresh()))->toBe('Microsoft Teams');
+});
+
+it('carries the homeowner meeting preference from the picker into the composer', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $tz = \App\Livewire\Leads\PickTimes::timezone();
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-07-20 09:00', $tz));
+
+    Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
+        ->set('date', '2026-07-27')
+        ->call('toggleWindow', '7-9 AM')
+        ->set('date', '2026-07-28')
+        ->call('toggleWindow', '9-11 AM')
+        ->call('toggleWindow', '11-1 PM')
+        ->set('meeting', 'virtual')
+        ->call('submit')
+        ->assertHasNoErrors();
+
+    $lead = Lead::withoutGlobalScopes()->find($fx['lead']->id);
+    expect($lead->lead_data['meeting_preference'])->toBe('virtual');
+
+    // Opening the composer picks the preference up as the default.
+    $composer = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $lead->id);
+
+    expect($composer->instance()->consultMeetingType)->toBe('virtual');
+
+    \Illuminate\Support\Carbon::setTestNow();
+});

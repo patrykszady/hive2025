@@ -490,6 +490,34 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //LEADS
     Route::get('/leads', LeadsIndex::class)->name('leads.index');
+    // Files the enquiry arrived with (bid forms, drawings, photos). The Lead
+    // global scope makes the binding vendor-scoped, so another vendor's lead
+    // 404s here the same as everywhere else.
+    Route::get('/leads/{lead}/file/{index}', function (\App\Models\Lead $lead, int $index) {
+        $file = $lead->lead_data['attachments'][$index] ?? null;
+        $disk = \Illuminate\Support\Facades\Storage::disk('files');
+
+        abort_unless(is_array($file) && ($file['path'] ?? '') !== '' && $disk->exists($file['path']), 404);
+
+        // Grid thumbnails for images — same cache ImageThumbs serves the
+        // photo grids from.
+        if (request()->boolean('thumb') && str_starts_with((string) $file['mime'], 'image/')) {
+            $thumb = \App\Support\ImageThumbs::path(
+                'lead:'.$file['path'].':'.$disk->size($file['path']),
+                fn () => $disk->path($file['path']),
+            );
+
+            if ($thumb) {
+                return response()->file($thumb, \App\Support\ImageThumbs::headers());
+            }
+        }
+
+        return response()->file($disk->path($file['path']), [
+            'Content-Type' => (string) ($file['mime'] ?? 'application/octet-stream'),
+            'Content-Disposition' => 'inline; filename="'.addslashes((string) ($file['name'] ?? 'attachment')).'"',
+            'Cache-Control' => 'private, max-age=604800, immutable',
+        ]);
+    })->name('leads.file');
 
     //BANKS
     Route::get('/banks', BankIndex::class)->name('banks.index');

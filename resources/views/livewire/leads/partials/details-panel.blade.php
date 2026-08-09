@@ -7,6 +7,12 @@
     $missingContactInfo = $this->missingContactInfo;
     $addressCandidates = $this->addressCandidates;
     $lastEmailBounced = $this->lastEmailBounced;
+    // Files that arrived with the enquiry (email leads): drawings, bid
+    // forms, photos of the damage.
+    $leadFiles = $this->lead?->lead_data['attachments'] ?? [];
+    $leadFileId = $this->lead?->id;
+    // Email replies the lead has sent since — filed by the crew@ ingest.
+    $leadReplies = $this->lead?->lead_data['email_replies'] ?? [];
 @endphp
     <form id="lead_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-3">
         <flux:textarea
@@ -16,6 +22,76 @@
             rows="auto"
             resize="none"
         />
+
+        {{-- What the enquiry arrived with — often the actual substance
+             (drawings, a bid request form, photos of the damage). Images
+             preview as thumbnails; documents open in a new tab. --}}
+        @if ($leadFiles !== [] && $leadFileId)
+            <div class="flex flex-wrap gap-2">
+                @foreach ($leadFiles as $index => $file)
+                    @if (str_starts_with((string) ($file['mime'] ?? ''), 'image/'))
+                        <a href="{{ route('leads.file', [$leadFileId, $index]) }}" target="_blank" rel="noopener"
+                            class="block size-20 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800"
+                            title="{{ $file['name'] ?? '' }}">
+                            <img src="{{ route('leads.file', [$leadFileId, $index, 'thumb' => 1]) }}" alt="{{ $file['name'] ?? '' }}"
+                                class="h-full w-full object-cover transition hover:opacity-90" loading="lazy" />
+                        </a>
+                    @else
+                        <a href="{{ route('leads.file', [$leadFileId, $index]) }}" target="_blank" rel="noopener"
+                            class="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
+                            <flux:icon.document class="size-4 shrink-0 text-zinc-400" />
+                            <span class="max-w-40 truncate">{{ $file['name'] ?? 'Attachment' }}</span>
+                        </a>
+                    @endif
+                @endforeach
+            </div>
+        @endif
+
+        {{-- What they wrote back — email replies land here via the crew@
+             ingest, so the conversation is readable without opening Outlook.
+             Newest first. --}}
+        @if ($leadReplies !== [])
+            <flux:field>
+                <flux:label>Their replies</flux:label>
+                <div class="space-y-2">
+                    @foreach ($leadReplies as $reply)
+                        <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+                            <div class="mb-1 flex items-baseline justify-between gap-2">
+                                <flux:heading size="sm" class="truncate">{{ $reply['subject'] ?? 'Reply' }}</flux:heading>
+                                @if (! empty($reply['at']))
+                                    <flux:text class="shrink-0 text-xs text-zinc-500">{{ \Carbon\Carbon::parse($reply['at'])->format('M j, g:ia') }}</flux:text>
+                                @endif
+                            </div>
+                            <flux:text class="whitespace-pre-line text-sm text-zinc-600 dark:text-zinc-300">{{ $reply['body'] ?? '' }}</flux:text>
+                        </div>
+                    @endforeach
+                </div>
+            </flux:field>
+        @endif
+
+        {{-- The lead's booking page needs only the lead — no project, no
+             account. Copy puts the short link on the clipboard for texts or
+             any channel the composer doesn't cover. --}}
+        @if ($this->lead?->exists)
+            <div x-data
+                x-on:lead-schedule-link-copied.window="
+                    navigator.clipboard?.writeText($event.detail.url);
+                    $el.querySelector('[data-copied]').classList.remove('hidden');
+                    setTimeout(() => $el.querySelector('[data-copied]')?.classList.add('hidden'), 2000);
+                "
+                class="flex items-center gap-2">
+                <flux:button size="sm" icon="link" wire:click="copyScheduleLink">
+                    Copy schedule link
+                </flux:button>
+                @if (! $this->needsPhone && trim((string) ($this->lead->lead_data['phone'] ?? '')) !== '')
+                    <flux:button size="sm" icon="chat-bubble-left-right" wire:click="textScheduleLink"
+                        wire:loading.attr="disabled" wire:target="textScheduleLink">
+                        Text it
+                    </flux:button>
+                @endif
+                <span data-copied class="hidden text-sm text-green-600 dark:text-green-400">Copied</span>
+            </div>
+        @endif
 
         <div class="flex gap-4 items-end">
             <div class="flex-1">
@@ -170,6 +246,30 @@
                 @endif
             </flux:field>
         @else
+            {{-- Manual entry found someone already reachable at this
+                 phone/email — continue their history instead of forking it,
+                 or create anyway deliberately. --}}
+            @if ($this->duplicateMatch)
+                <flux:callout icon="user" variant="warning" inline>
+                    <flux:callout.heading>Already in the system</flux:callout.heading>
+                    <flux:callout.text>{{ $this->duplicateMatch['label'] }}</flux:callout.text>
+                    <x-slot:controls>
+                        @if ($this->duplicateMatch['lead_id'])
+                            <flux:button size="sm" wire:click="editLead({{ $this->duplicateMatch['lead_id'] }})">
+                                Open existing lead
+                            </flux:button>
+                        @elseif ($this->duplicateMatch['client_id'])
+                            <flux:button size="sm" href="{{ route('clients.show', $this->duplicateMatch['client_id']) }}" target="_blank">
+                                View client
+                            </flux:button>
+                        @endif
+                        <flux:button size="sm" variant="ghost" wire:click="saveDespiteDuplicate">
+                            Create anyway
+                        </flux:button>
+                    </x-slot:controls>
+                </flux:callout>
+            @endif
+
             <flux:input.group label="User">
                 <flux:input
                     wire:model.live="full_name"
