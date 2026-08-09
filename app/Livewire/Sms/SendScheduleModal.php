@@ -706,10 +706,12 @@ class SendScheduleModal extends Component
 
         $invite = trim(implode("\n\n", array_filter([$invite, $this->consultInviteLine()])));
 
+        // Blank line after the greeting: "Hi Amy & Andy," reads as its own
+        // line, then the invite starts a fresh paragraph.
         if ($invite !== '' && $intro !== '') {
-            $header = "{$greeting}\n{$invite}\n\n{$intro}";
+            $header = "{$greeting}\n\n{$invite}\n\n{$intro}";
         } elseif ($invite !== '') {
-            $header = "{$greeting}\n{$invite}";
+            $header = "{$greeting}\n\n{$invite}";
         } elseif ($intro !== '') {
             // Greeting flows straight into the intro line — no blank line.
             $header = "{$greeting}\n{$intro}";
@@ -891,7 +893,7 @@ class SendScheduleModal extends Component
             return '';
         }
 
-        return "{$greeting}\n{$linksText}";
+        return "{$greeting}\n\n{$linksText}";
     }
 
     /**

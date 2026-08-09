@@ -55,6 +55,38 @@
                 </x-slot:details>
             </x-details.card>
 
+            {{-- CONSULTATION TIMES the homeowner picked on the scheduling
+                 page — shown while any are still ahead, so "when can they
+                 meet?" is answered right here. Internal chrome: hidden from
+                 clients browsing their own page. --}}
+            @if (! $this->isClientUser && ($la = $this->leadAvailability))
+                <x-island-card heading="Consultation Times">
+                    <x-slot:badge>
+                        @if ($la['preference'] === 'virtual')
+                            <flux:badge size="sm" color="amber" icon="video-camera" inset="top bottom">video call</flux:badge>
+                        @endif
+                    </x-slot:badge>
+                    <x-slot:actions>
+                        <flux:button size="sm" wire:click="$dispatchTo('leads.lead-create', 'editLead', { lead: {{ $la['lead_id'] }} })">
+                            Open Lead
+                        </flux:button>
+                    </x-slot:actions>
+
+                    <div class="flex flex-wrap gap-2">
+                        @foreach ($la['times'] as $slot)
+                            <flux:badge color="sky">
+                                {{ \Carbon\Carbon::parse($slot['date'])->format('D, M j') }} · {{ $slot['time'] }}
+                            </flux:badge>
+                        @endforeach
+                    </div>
+                    @if ($la['updated'])
+                        <flux:text class="text-xs text-zinc-500">
+                            Sent {{ \Carbon\Carbon::parse($la['updated'])->diffForHumans() }} — booking a consult from the lead uses these.
+                        </flux:text>
+                    @endif
+                </x-island-card>
+            @endif
+
             {{-- CLIENT PROJECTS (includes Email Tracking) --}}
             <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
     </x-page.column>
@@ -72,6 +104,8 @@
         @if(!auth()->user()->is_browsing_as_client)
             <livewire:clients.client-create />
             <livewire:tasks.task-create />
+            {{-- Host for the Consultation Times card's "Open Lead". --}}
+            <livewire:leads.lead-create />
         @endif
     </x-slot:offstage>
 </x-page.shell>

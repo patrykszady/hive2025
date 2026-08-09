@@ -1058,7 +1058,10 @@ class LeadCreate extends Component
         $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
         $contractor = trim((string) (data_get($vendor?->options, 'short_name') ?: $vendor?->name)) ?: config('app.name');
         $firstName = strtok(trim((string) ($this->lead->lead_data['name'] ?? '')), ' ');
-        $text = 'Hi'.($firstName ? " {$firstName}" : '')."! Pick a consultation time with {$contractor} here: ".$this->scheduleLink();
+        // Same shape as the Send Schedule modal's invite: greeting line, then
+        // the ask — one voice wherever the link goes out.
+        $text = 'Hi'.($firstName ? " {$firstName}" : '').","
+            ."\n\nPick a consultation time with {$contractor} here: ".$this->scheduleLink();
 
         $thread = \App\Models\SmsGroupThread::query()
             ->whereJsonContains('participants', $e164)

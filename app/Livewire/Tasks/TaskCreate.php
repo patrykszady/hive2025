@@ -58,6 +58,11 @@ class TaskCreate extends Component
     /** How long a Meet runs by default — the same half hour a consult books. */
     public const MEET_MINUTES = 30;
 
+    /** Homeowner-slot picker state (mirrors the lead composer's two stages). */
+    public ?int $homeownerSlotIndex = null;
+
+    public ?string $homeownerExactTime = null;
+
     /**
      * Maps a homeowner-selected time frame to concrete arrival start/end times.
      *
@@ -734,12 +739,25 @@ class TaskCreate extends Component
     }
 
     /**
-     * Remove a participant email from the meeting.
+     * Remove a participant email from the meeting. When the email belongs to
+     * a team member, they come off the Team Members select too — the two
+     * lists mirror each other for the team, in both directions.
      */
     public function removeMeetingParticipant(int $index): void
     {
+        $removed = strtolower(trim((string) ($this->form->meeting_participants[$index] ?? '')));
+
         unset($this->form->meeting_participants[$index]);
         $this->form->meeting_participants = array_values($this->form->meeting_participants);
+
+        $teamUserId = array_search($removed, $this->teamMemberEmails(), true);
+
+        if ($teamUserId !== false) {
+            $this->form->user_ids = array_values(array_filter(
+                (array) ($this->form->user_ids ?? []),
+                fn ($id) => (int) $id !== $teamUserId,
+            ));
+        }
     }
 
     /**
@@ -752,6 +770,8 @@ class TaskCreate extends Component
         $this->pendingSmsTasks = [];
         $this->selectedPredecessorId = null;
         $this->dependencyType = 'finish_to_start';
+        $this->homeownerSlotIndex = null;
+        $this->homeownerExactTime = null;
         $this->lagDays = 0;
     }
 
@@ -843,34 +863,23 @@ class TaskCreate extends Component
             return null;
         }
 
-        $client = \App\Models\Project::withoutGlobalScopes()
+        // Straight by client_id — Project::client() is a vendor-scoped
+        // HasOneThrough over the pivot, which is the wrong question here:
+        // we want THE project's client, not "the client as seen through the
+        // current vendor's pivot rows".
+        $clientId = \App\Models\Project::withoutGlobalScopes()
             ->find($this->form->project_id)
-            ?->client()->withoutGlobalScopes()->first();
+            ?->client_id;
+
+        $client = $clientId ? \App\Models\Client::withoutGlobalScopes()->find($clientId) : null;
 
         if (! $client) {
             return null;
         }
 
-        $users = $client->users()->withoutGlobalScopes()->get(['users.id', 'users.email']);
-
-        if ($users->isEmpty()) {
-            return null;
-        }
-
-        $emails = $users->pluck('email')
-            ->filter()
-            ->map(fn ($email) => mb_strtolower(trim((string) $email)))
-            ->values();
-
-        $lead = \App\Models\Lead::withoutGlobalScopes()
-            ->where(function ($q) use ($users, $emails) {
-                $q->whereIn('user_id', $users->pluck('id'));
-                if ($emails->isNotEmpty()) {
-                    $q->orWhereIn('lead_data->email', $emails);
-                }
-            })
-            ->latest('id')
-            ->first();
+        // Shared resolver: excludes trashed leads (a deleted stub must not
+        // shadow the real one) and prefers freshest availability.
+        $lead = \App\Models\Lead::latestForClient($client);
 
         $times = collect((array) ($lead?->lead_data['availability'] ?? []))
             ->filter(fn ($slot) => is_array($slot) && \App\Models\Lead::slotIsBookable($slot))
@@ -889,8 +898,10 @@ class TaskCreate extends Component
     }
 
     /**
-     * One tap on a homeowner slot books it into the form: that day selected,
-     * arrival at the window's start, a Meet-length block from there.
+     * Selecting a homeowner slot books its day into the form (arrival at the
+     * window start), then offers the exact half-hour starts — the same
+     * two-stage flow the lead composer's Availability section uses, so the
+     * chips read identically everywhere.
      */
     public function applyHomeownerTime(int $index): void
     {
@@ -900,6 +911,9 @@ class TaskCreate extends Component
             return;
         }
 
+        $this->homeownerSlotIndex = $index;
+        $this->homeownerExactTime = null;
+
         $date = $slot['date'];
         $window = \App\Models\Lead::parseSlotTimes((string) $slot['time']);
 
@@ -908,6 +922,55 @@ class TaskCreate extends Component
             $date => $window
                 ? ['use_time' => true, 'start_time' => $window[0], 'end_time' => $this->defaultEndTime($window[0])]
                 : ['use_time' => false],
+        ];
+    }
+
+    /**
+     * Exact start-time choices inside the selected homeowner slot, on the
+     * half hour — "4-6 PM" offers 4:00, 4:30, 5:00, 5:30.
+     *
+     * @return array<int, array{value: string, label: string}>
+     */
+    #[Computed]
+    public function homeownerExactOptions(): array
+    {
+        $slot = $this->homeownerSlotIndex !== null
+            ? ($this->homeownerAvailability['times'][$this->homeownerSlotIndex] ?? null)
+            : null;
+
+        $window = $slot ? \App\Models\Lead::parseSlotTimes((string) $slot['time']) : null;
+
+        if (! $window) {
+            return [];
+        }
+
+        $cursor = Carbon::createFromFormat('H:i', $window[0]);
+        $end = Carbon::createFromFormat('H:i', $window[1]);
+        $options = [];
+
+        while ($cursor < $end) {
+            $options[] = ['value' => $cursor->format('H:i'), 'label' => $cursor->format('g:i A')];
+            $cursor->addMinutes(self::MEET_MINUTES);
+        }
+
+        return $options;
+    }
+
+    /** Narrow the selected slot to an exact start; the Meet runs 30min from it. */
+    public function selectHomeownerExactTime(string $value): void
+    {
+        $slot = $this->homeownerSlotIndex !== null
+            ? ($this->homeownerAvailability['times'][$this->homeownerSlotIndex] ?? null)
+            : null;
+
+        if (! $slot || ! collect($this->homeownerExactOptions)->contains(fn ($o) => $o['value'] === $value)) {
+            return;
+        }
+
+        $this->homeownerExactTime = $value;
+        $this->form->dates = [$slot['date']];
+        $this->form->time_settings = [
+            $slot['date'] => ['use_time' => true, 'start_time' => $value, 'end_time' => $this->defaultEndTime($value)],
         ];
     }
 
@@ -970,12 +1033,39 @@ class TaskCreate extends Component
         $current = $this->form->meeting_participants;
         $excluded = $this->resolveExcludedMeetingParticipants();
 
+        // Team members' participation FOLLOWS the Team Members select, both
+        // ways: deselecting Greg up top must take him off the invite too —
+        // merging defaults only ever added people, so a deselected teammate
+        // used to linger as a participant forever.
+        $teamPool = $this->teamMemberEmails();
+        $selectedIds = array_map('intval', (array) ($this->form->user_ids ?? []));
+        $selectedTeamEmails = array_values(array_intersect_key(
+            $teamPool,
+            array_flip($selectedIds),
+        ));
+
         $this->form->meeting_participants = collect($defaults)
             ->merge($current)
             ->map(fn (string $email) => strtolower(trim($email)))
             ->reject(fn (string $email) => in_array($email, $excluded, true))
+            ->reject(fn (string $email) => in_array($email, $teamPool, true)
+                && ! in_array($email, $selectedTeamEmails, true))
             ->unique()
             ->values()
+            ->all();
+    }
+
+    /**
+     * The vendor team's emails keyed by user id — the pool the Team Members
+     * select draws from, lowercased to match participant normalization.
+     *
+     * @return array<int, string>
+     */
+    private function teamMemberEmails(): array
+    {
+        return $this->employees
+            ->filter(fn ($user) => filled($user->email))
+            ->mapWithKeys(fn ($user) => [(int) $user->id => strtolower(trim((string) $user->email))])
             ->all();
     }
 

@@ -100,7 +100,9 @@ it('texts the schedule link into an opted-in thread', function () {
         $mock->shouldReceive('sendToThread')
             ->once()
             ->withArgs(fn ($t, $text) => $t->id === $thread->id
-                && str_contains($text, 'Kathy')
+                // Same shape as Send Schedule: "Hi Kathy,\n<ask>: <link>".
+                && str_starts_with($text, "Hi Kathy,\n\n")
+                && str_contains($text, 'Pick a consultation time with')
                 && preg_match('#(l/|lead/times/)#', $text));
     });
 
@@ -263,4 +265,131 @@ it('warns the delete flows when a scheduling link is still out', function () {
         ->instance()->bulkDeleteImpact();
 
     expect($impact['holding'])->toBe(['Kathy Moseler']);
+});
+
+// ── Resolving the lead that speaks for a client ─────────────────────────
+
+it('resolves the client lead past trashed stubs and prefers freshest availability', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+
+    $original = Lead::withoutEvents(fn () => Lead::create([
+        'date' => now()->subDays(9), 'origin' => 'Website',
+        'user_id' => $fx['user']->id,
+        'lead_data' => [
+            'name' => 'Original', 'availability_updated_at' => now()->subDay()->toDateTimeString(),
+            'availability' => [['date' => now()->addDays(3)->format('Y-m-d'), 'time' => '9-11 AM']],
+        ],
+        'belongs_to_vendor_id' => $fx['vendor']->id, 'created_by_user_id' => $fx['user']->id,
+    ]));
+
+    // A NEWER, empty stub that was later soft-deleted (exactly the shape the
+    // Aug-7 recovery left behind) — it must never shadow the real lead.
+    $stub = Lead::withoutEvents(fn () => Lead::create([
+        'date' => now(), 'origin' => 'Manual', 'user_id' => $fx['user']->id,
+        'lead_data' => ['name' => 'Stub'],
+        'belongs_to_vendor_id' => $fx['vendor']->id, 'created_by_user_id' => $fx['user']->id,
+    ]));
+    $stub->delete();
+
+    expect(Lead::latestForClient($client)?->id)->toBe($original->id);
+
+    // A live lead with FRESHER availability outranks an older one even with
+    // a lower id.
+    $fresher = Lead::withoutEvents(fn () => Lead::create([
+        'date' => now(), 'origin' => 'Website', 'user_id' => $fx['user']->id,
+        'lead_data' => [
+            'name' => 'Fresher', 'availability_updated_at' => now()->toDateTimeString(),
+            'availability' => [['date' => now()->addDays(5)->format('Y-m-d'), 'time' => '1-3 PM']],
+        ],
+        'belongs_to_vendor_id' => $fx['vendor']->id, 'created_by_user_id' => $fx['user']->id,
+    ]));
+
+    expect(Lead::latestForClient($client)?->id)->toBe($fresher->id);
+});
+
+it('books a homeowner slot into the Meet form via the two-stage picker', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Deck', 'client_id' => $client->id,
+        'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+
+    $date = now()->addDays(4)->format('Y-m-d');
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
+        'availability' => [['date' => $date, 'time' => '4-6 PM']],
+        'availability_updated_at' => now()->toDateTimeString(),
+    ])]);
+    $fx['lead']->forceFill(['user_id' => $fx['user']->id])->save();
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('addTask', $project->id)
+        ->set('form.type', 'Meet');
+
+    // Stage 1: the slot books the day at the window start.
+    $component->call('applyHomeownerTime', 0);
+    expect($component->instance()->form->dates)->toBe([$date])
+        ->and(data_get($component->instance()->form->time_settings, "$date.start_time"))->toBe('16:00');
+
+    // The exact-time chips mirror the composer: 4:00 through 5:30.
+    expect(collect($component->instance()->homeownerExactOptions)->pluck('label')->all())
+        ->toBe(['4:00 PM', '4:30 PM', '5:00 PM', '5:30 PM']);
+
+    // Stage 2: narrowing to 4:30 makes a 30-minute Meet from there.
+    $component->call('selectHomeownerExactTime', '16:30');
+    expect(data_get($component->instance()->form->time_settings, "$date.start_time"))->toBe('16:30')
+        ->and(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('17:00');
+
+    // Garbage exact times are refused.
+    $component->call('selectHomeownerExactTime', '23:45');
+    expect(data_get($component->instance()->form->time_settings, "$date.start_time"))->toBe('16:30');
+});
+
+it('mirrors team members and participants in both directions on a Meet', function () {
+    $fx = leadFlowFixture();
+    // fx's user pivot lacks is_employed — set it so the employees pool sees them.
+    $fx['vendor']->users()->updateExistingPivot($fx['user']->id, ['is_employed' => 1]);
+
+    $greg = new User();
+    $greg->forceFill([
+        'first_name' => 'Grzegorz', 'last_name' => 'Szady',
+        'email' => 'greg.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224999####'),
+        'primary_vendor_id' => $fx['vendor']->id,
+        'registration' => ['registered' => true],
+    ]);
+    $greg->save();
+    $fx['vendor']->users()->attach($greg->id, ['role_id' => 1, 'is_employed' => 1]);
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('addTask')
+        ->set('form.type', 'Meet')
+        ->set('form.user_ids', [$fx['user']->id, $greg->id]);
+
+    expect($component->instance()->form->meeting_participants)
+        ->toContain(strtolower($fx['user']->email))
+        ->toContain(strtolower($greg->email));
+
+    // Deselect Greg up top → he leaves the invite.
+    $component->set('form.user_ids', [$fx['user']->id]);
+    expect($component->instance()->form->meeting_participants)
+        ->not->toContain(strtolower($greg->email))
+        ->toContain(strtolower($fx['user']->email));
+
+    // Remove Patryk's participant chip → he leaves Team Members too.
+    $index = array_search(strtolower($fx['user']->email), $component->instance()->form->meeting_participants, true);
+    $component->call('removeMeetingParticipant', $index);
+
+    expect($component->instance()->form->meeting_participants)->not->toContain(strtolower($fx['user']->email))
+        ->and($component->instance()->form->user_ids)->not->toContain($fx['user']->id);
 });

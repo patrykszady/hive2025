@@ -331,6 +331,45 @@ class Lead extends Model
     }
 
     /**
+     * The lead that speaks for a client — for showing the times its
+     * homeowner picked on the scheduling page.
+     *
+     * Matches the client's users by user link first, email as fallback
+     * (older leads lost their user link), never a trashed lead (a deleted
+     * lead must not shadow a live one), and when several match, the one
+     * whose availability is freshest wins — "the lead they most recently
+     * scheduled through", not "the newest row".
+     */
+    public static function latestForClient(Client $client): ?self
+    {
+        $users = $client->users()->withoutGlobalScopes()->get(['users.id', 'users.email']);
+
+        if ($users->isEmpty()) {
+            return null;
+        }
+
+        $emails = $users->pluck('email')
+            ->filter()
+            ->map(fn ($email) => mb_strtolower(trim((string) $email)))
+            ->values();
+
+        return static::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->where(function ($q) use ($users, $emails) {
+                $q->whereIn('user_id', $users->pluck('id'));
+                if ($emails->isNotEmpty()) {
+                    $q->orWhereIn('lead_data->email', $emails);
+                }
+            })
+            ->get()
+            ->sortByDesc(fn (self $lead) => [
+                (string) ($lead->lead_data['availability_updated_at'] ?? ''),
+                $lead->id,
+            ])
+            ->first();
+    }
+
+    /**
      * Does a scheduling link for this lead still live in someone's inbox or
      * messages? Consult emails, SMS invites and calendar invites all carry a
      * shortened pick-times URL; while one exists, deleting the lead breaks a

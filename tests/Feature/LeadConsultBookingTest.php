@@ -949,3 +949,32 @@ it('carries the homeowner meeting preference from the picker into the composer',
 
     \Illuminate\Support\Carbon::setTestNow();
 });
+
+it('notifies vendor admins when a homeowner picks consultation times', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $tz = \App\Livewire\Leads\PickTimes::timezone();
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-07-20 09:00', $tz));
+
+    Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
+        ->set('date', '2026-07-27')
+        ->call('toggleWindow', '7-9 AM')
+        ->set('date', '2026-07-28')
+        ->call('toggleWindow', '9-11 AM')
+        ->call('toggleWindow', '11-1 PM')
+        ->set('meeting', 'virtual')
+        ->call('submit')
+        ->assertHasNoErrors();
+
+    $notification = \App\Models\AppNotification::where('type', 'lead_times_picked')
+        ->where('user_id', $fx['admin']->id)
+        ->first();
+
+    expect($notification)->not->toBeNull()
+        ->and($notification->title)->toContain('picked consultation times')
+        ->and($notification->body)->toContain('Mon, Jul 27 · 7-9 AM')
+        ->and($notification->body)->toContain('video call')
+        ->and($notification->data['lead_id'])->toBe($fx['lead']->id);
+
+    \Illuminate\Support\Carbon::setTestNow();
+});

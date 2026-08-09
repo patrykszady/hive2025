@@ -332,10 +332,13 @@
                          lead — a Meet shouldn't require hunting through the
                          leads page to know the times they picked. One tap
                          books that slot into the form. --}}
+                    {{-- Same chips, same two stages as the lead composer's
+                         Availability section — select a slot, then narrow to
+                         the exact half-hour. One visual language everywhere. --}}
                     @if ($this->form->type === 'Meet' && ($ha = $this->homeownerAvailability))
                         <flux:field>
                             <div class="mb-2 flex items-center gap-2">
-                                <flux:label>Homeowner's picked times</flux:label>
+                                <flux:label>Availability</flux:label>
                                 @if ($ha['updated'])
                                     <flux:text class="text-xs text-zinc-500">sent {{ \Carbon\Carbon::parse($ha['updated'])->diffForHumans() }}</flux:text>
                                 @endif
@@ -343,16 +346,41 @@
                                     <flux:badge size="sm" color="amber" icon="video-camera">asked for a video call</flux:badge>
                                 @endif
                             </div>
+                            <flux:description class="mb-2">Click to select a slot for the meet.</flux:description>
                             <div class="flex flex-wrap gap-2">
                                 @foreach ($ha['times'] as $index => $slot)
-                                    <button type="button" wire:click="applyHomeownerTime({{ $index }})" class="cursor-pointer"
-                                        title="Use this slot">
-                                        <flux:badge color="sky">
+                                    @php
+                                        $selected = $this->homeownerSlotIndex === $index;
+                                    @endphp
+                                    <button type="button" wire:click="applyHomeownerTime({{ $index }})" class="cursor-pointer">
+                                        <flux:badge :color="$selected ? 'indigo' : 'sky'">
+                                            @if ($selected)
+                                                <flux:icon.check variant="micro" class="size-3.5" />
+                                            @endif
                                             {{ \Carbon\Carbon::parse($slot['date'])->format('D, M j') }} · {{ $slot['time'] }}
                                         </flux:badge>
                                     </button>
                                 @endforeach
                             </div>
+
+                            @if ($this->homeownerSlotIndex !== null && $this->homeownerExactOptions !== [])
+                                <flux:description class="mt-2 mb-1">Pick the exact time for the consult.</flux:description>
+                                <div class="flex flex-wrap gap-2">
+                                    @foreach ($this->homeownerExactOptions as $option)
+                                        @php
+                                            $timeSelected = $this->homeownerExactTime === $option['value'];
+                                        @endphp
+                                        <button type="button" wire:click="selectHomeownerExactTime('{{ $option['value'] }}')" class="cursor-pointer">
+                                            <flux:badge size="sm" :color="$timeSelected ? 'green' : 'zinc'">
+                                                @if ($timeSelected)
+                                                    <flux:icon.check variant="micro" class="size-3.5" />
+                                                @endif
+                                                {{ $option['label'] }}
+                                            </flux:badge>
+                                        </button>
+                                    @endforeach
+                                </div>
+                            @endif
                         </flux:field>
                     @endif
 

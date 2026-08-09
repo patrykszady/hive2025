@@ -407,7 +407,44 @@ class PickTimes extends Component
             $lead->setStatus('New');
         }
 
+        $this->notifyTeam($lead);
+
         $this->submitted = true;
+    }
+
+    /**
+     * Picked times land in /notifications for the vendor's admins — a
+     * homeowner choosing consult slots is the moment to book, not something
+     * to discover a week later on the lead. In-app only, no SMS.
+     */
+    protected function notifyTeam(Lead $lead): void
+    {
+        $vendor = Vendor::withoutGlobalScopes()->find($lead->belongs_to_vendor_id);
+
+        if (! $vendor) {
+            return;
+        }
+
+        $name = trim((string) ($lead->lead_data['name'] ?? '')) ?: 'A lead';
+        $summary = collect($this->times)
+            ->map(fn (array $slot) => \Illuminate\Support\Carbon::parse($slot['date'])->format('D, M j').' · '.$slot['time'])
+            ->implode(', ');
+        $format = ($lead->lead_data['meeting_preference'] ?? null) === 'virtual'
+            ? ' They asked for a video call.'
+            : '';
+
+        foreach ($vendor->users()->wherePivot('role_id', 1)->get() as $admin) {
+            \App\Models\AppNotification::create([
+                'user_id' => $admin->id,
+                'type' => 'lead_times_picked',
+                'title' => "{$name} picked consultation times",
+                'body' => trim("{$summary}.{$format}"),
+                'action_url' => route('leads.index'),
+                'data' => [
+                    'lead_id' => $lead->id,
+                ],
+            ]);
+        }
     }
 
     public function render()
