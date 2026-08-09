@@ -328,6 +328,34 @@
                         </flux:callout>
                     @endif
 
+                    {{-- What the homeowner asked for, read LIVE off their
+                         lead — a Meet shouldn't require hunting through the
+                         leads page to know the times they picked. One tap
+                         books that slot into the form. --}}
+                    @if ($this->form->type === 'Meet' && ($ha = $this->homeownerAvailability))
+                        <flux:field>
+                            <div class="mb-2 flex items-center gap-2">
+                                <flux:label>Homeowner's picked times</flux:label>
+                                @if ($ha['updated'])
+                                    <flux:text class="text-xs text-zinc-500">sent {{ \Carbon\Carbon::parse($ha['updated'])->diffForHumans() }}</flux:text>
+                                @endif
+                                @if (($ha['preference'] ?? null) === 'virtual')
+                                    <flux:badge size="sm" color="amber" icon="video-camera">asked for a video call</flux:badge>
+                                @endif
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                @foreach ($ha['times'] as $index => $slot)
+                                    <button type="button" wire:click="applyHomeownerTime({{ $index }})" class="cursor-pointer"
+                                        title="Use this slot">
+                                        <flux:badge color="sky">
+                                            {{ \Carbon\Carbon::parse($slot['date'])->format('D, M j') }} · {{ $slot['time'] }}
+                                        </flux:badge>
+                                    </button>
+                                @endforeach
+                            </div>
+                        </flux:field>
+                    @endif
+
                     {{-- DATES --}}
                     <flux:field>
                         <div class="mb-2 flex items-center gap-2">

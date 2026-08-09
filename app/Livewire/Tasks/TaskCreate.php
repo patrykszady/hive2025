@@ -828,6 +828,90 @@ class TaskCreate extends Component
     }
 
     /**
+     * The times the homeowner picked on the public scheduling page, read
+     * LIVE off their lead — never a stamped copy that can go stale. Resolves
+     * project → client → its users' latest lead, matching by user link first
+     * and by email as the fallback (some older leads lost their user link).
+     * Only future, still-bookable slots are offered.
+     *
+     * @return array{times: array<int, array{date: string, time: string}>, updated: ?string, preference: ?string}|null
+     */
+    #[Computed]
+    public function homeownerAvailability(): ?array
+    {
+        if ($this->form->type !== 'Meet' || ! $this->form->project_id) {
+            return null;
+        }
+
+        $client = \App\Models\Project::withoutGlobalScopes()
+            ->find($this->form->project_id)
+            ?->client()->withoutGlobalScopes()->first();
+
+        if (! $client) {
+            return null;
+        }
+
+        $users = $client->users()->withoutGlobalScopes()->get(['users.id', 'users.email']);
+
+        if ($users->isEmpty()) {
+            return null;
+        }
+
+        $emails = $users->pluck('email')
+            ->filter()
+            ->map(fn ($email) => mb_strtolower(trim((string) $email)))
+            ->values();
+
+        $lead = \App\Models\Lead::withoutGlobalScopes()
+            ->where(function ($q) use ($users, $emails) {
+                $q->whereIn('user_id', $users->pluck('id'));
+                if ($emails->isNotEmpty()) {
+                    $q->orWhereIn('lead_data->email', $emails);
+                }
+            })
+            ->latest('id')
+            ->first();
+
+        $times = collect((array) ($lead?->lead_data['availability'] ?? []))
+            ->filter(fn ($slot) => is_array($slot) && \App\Models\Lead::slotIsBookable($slot))
+            ->values()
+            ->all();
+
+        if ($times === []) {
+            return null;
+        }
+
+        return [
+            'times' => $times,
+            'updated' => $lead->lead_data['availability_updated_at'] ?? null,
+            'preference' => $lead->lead_data['meeting_preference'] ?? null,
+        ];
+    }
+
+    /**
+     * One tap on a homeowner slot books it into the form: that day selected,
+     * arrival at the window's start, a Meet-length block from there.
+     */
+    public function applyHomeownerTime(int $index): void
+    {
+        $slot = $this->homeownerAvailability['times'][$index] ?? null;
+
+        if (! $slot) {
+            return;
+        }
+
+        $date = $slot['date'];
+        $window = \App\Models\Lead::parseSlotTimes((string) $slot['time']);
+
+        $this->form->dates = [$date];
+        $this->form->time_settings = [
+            $date => $window
+                ? ['use_time' => true, 'start_time' => $window[0], 'end_time' => $this->defaultEndTime($window[0])]
+                : ['use_time' => false],
+        ];
+    }
+
+    /**
      * Where a day's end time lands when the start moves.
      *
      * A Meet is a meeting someone has to be at, so it gets a real duration:

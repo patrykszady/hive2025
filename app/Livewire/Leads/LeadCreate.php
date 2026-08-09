@@ -198,6 +198,13 @@ class LeadCreate extends Component
      */
     public function save(): void
     {
+        // A queued second submit (double-tap) arrives AFTER the first save
+        // already created the lead and flipped this modal into edit mode —
+        // it must not mint a twin.
+        if ($this->lead?->exists) {
+            return;
+        }
+
         $this->validate([
             'full_name' => ['required', 'string', 'max:120'],
             'email' => ['nullable', 'email'],
@@ -992,6 +999,10 @@ class LeadCreate extends Component
         $this->createAnyway = true;
         $this->duplicateMatch = null;
         $this->save();
+        // One override, one lead: left true, a queued second tap would have
+        // sailed past the duplicate check and made the very twin the warning
+        // exists to prevent.
+        $this->createAnyway = false;
     }
 
     /**

@@ -331,6 +331,22 @@ class Lead extends Model
     }
 
     /**
+     * Does a scheduling link for this lead still live in someone's inbox or
+     * messages? Consult emails, SMS invites and calendar invites all carry a
+     * shortened pick-times URL; while one exists, deleting the lead breaks a
+     * link a homeowner may be about to tap. (Soft deletion keeps the page
+     * working — this warning exists for the human deciding to delete.)
+     */
+    public function hasActiveScheduleLink(): bool
+    {
+        // The '?' terminator keeps lead 8 from matching lead 80 — the signed
+        // URL always carries a query string.
+        return \App\Models\ShortLink::query()
+            ->where('destination', 'like', '%/lead/times/'.$this->id.'?%')
+            ->exists();
+    }
+
+    /**
      * Is there a consult on the books for this lead already?
      *
      * The "Need a different time?" link in a calendar invite lands on the same
@@ -368,7 +384,15 @@ class Lead extends Model
      */
     public function deleteImpact(): array
     {
-        $impact = ['clients' => [], 'user' => null];
+        $impact = [
+            'clients' => [],
+            'user' => null,
+            // Deleting still works (the pick-times page resolves trashed
+            // leads), but the human deciding should know a homeowner may be
+            // holding a link or an appointment tied to this lead.
+            'schedule_link' => $this->hasActiveScheduleLink(),
+            'booked_consult' => $this->hasBookedConsult(),
+        ];
 
         $user = $this->user;
 

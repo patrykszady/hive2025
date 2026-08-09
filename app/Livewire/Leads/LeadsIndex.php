@@ -47,6 +47,29 @@ class LeadsIndex extends Component
     }
 
     /**
+     * Skeleton rows for THIS render: a cheap COUNT of what the table is about
+     * to show (same origin/status/search filters, no pagination or eager
+     * loads), capped at the page size. One lead gets one shimmering row —
+     * not fifteen fakes that vanish a moment later.
+     */
+    public function skeletonRows(): int
+    {
+        $count = Lead::query()
+            ->when($this->origin, fn ($query) => $query->where('origin', $this->origin))
+            ->when(! empty($this->statuses), fn ($query) => $query->whereLatestStatus($this->statuses))
+            ->when(trim((string) $this->search), function ($query, $term) {
+                $term = mb_strtolower($term);
+                $query->where(function ($q) use ($term) {
+                    $q->whereRaw('LOWER(lead_data) like ?', ["%{$term}%"])
+                        ->orWhereRaw('LOWER(notes) like ?', ["%{$term}%"]);
+                });
+            })
+            ->count();
+
+        return min($count, static::placeholderRows());
+    }
+
+    /**
      * Column defs for the leads table — the real header row AND the loading
      * skeleton render from this one array, so widths can never drift apart.
      *
@@ -154,6 +177,7 @@ class LeadsIndex extends Component
 
         $clients = [];
         $users = [];
+        $holding = [];
 
         foreach ($leads as $lead) {
             $impact = $lead->deleteImpact();
@@ -162,12 +186,19 @@ class LeadsIndex extends Component
             if ($impact['user']) {
                 $users[] = $impact['user'];
             }
+
+            // A homeowner may be holding this lead's scheduling link or an
+            // appointment booked through it — name them before the delete.
+            if ($impact['schedule_link'] || $impact['booked_consult']) {
+                $holding[] = trim((string) ($lead->lead_data['name'] ?? '')) ?: 'Lead #'.$lead->id;
+            }
         }
 
         return [
             'count' => $leads->count(),
             'clients' => array_values(array_unique($clients)),
             'users' => array_values(array_unique($users)),
+            'holding' => array_values(array_unique($holding)),
         ];
     }
 

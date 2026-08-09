@@ -89,7 +89,11 @@
 
         <flux:spacer />
 
-        <flux:button type="submit" form="project_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+        {{-- Disabled while the request is in flight: save() ends in a full
+             redirect, and the seconds before it lands were exactly when a
+             second click minted a twin project. --}}
+        <flux:button type="submit" form="project_form_modal_form" variant="primary"
+            wire:loading.attr="disabled" wire:target="save, edit">{{$view_text['button_text']}}</flux:button>
     </x-slot>
     </x-form-modal>
 

@@ -191,7 +191,10 @@
                 </div>
             @endif
         @else
-            <flux:button type="submit" form="lead_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+            {{-- Locked while in flight — a double-tap on Create was minting
+                 twin records before the first response landed. --}}
+            <flux:button type="submit" form="lead_form_modal_form" variant="primary"
+                wire:loading.attr="disabled" wire:target="save, edit, saveDespiteDuplicate">{{$view_text['button_text']}}</flux:button>
         @endif
     </x-slot>
 
@@ -206,6 +209,19 @@
             <flux:heading size="lg">Delete this lead?</flux:heading>
 
             <flux:text>{{ $full_name ?: 'This lead' }} — {{ $lead->origin }}{{ $lead->date ? ', ' . $lead->date->format('M j, Y') : '' }}</flux:text>
+
+            @if($impact['schedule_link'] || $impact['booked_consult'])
+                <flux:callout icon="exclamation-triangle" variant="warning" inline>
+                    <flux:callout.text>
+                        @if($impact['booked_consult'])
+                            This lead has a <strong>booked consultation</strong>.
+                        @endif
+                        @if($impact['schedule_link'])
+                            A <strong>scheduling link</strong> for this lead is still out in their email or texts — it keeps working only because deleted leads are kept recoverable.
+                        @endif
+                    </flux:callout.text>
+                </flux:callout>
+            @endif
 
             <ul class="list-disc pl-5 space-y-1 text-sm text-zinc-600 dark:text-zinc-300">
                 <li>The lead, its statuses and its message history are removed.</li>

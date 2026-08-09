@@ -203,3 +203,64 @@ it('warns before creating a lead for someone who already has one', function () {
 
     expect(Lead::withoutGlobalScopes()->count())->toBe(2);
 });
+
+it('does not mint a twin lead on a double-submitted Create', function () {
+    $fx = leadFlowFixture();
+    Lead::withoutGlobalScopes()->forceDelete();
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Leads\LeadCreate::class)
+        ->call('addLead')
+        ->set('full_name', 'Walk-in Caller')
+        ->set('email', 'caller@example.test')
+        ->call('save')
+        // The double-tap: a queued second submit lands after the first save
+        // created the lead and flipped the modal into edit mode.
+        ->call('save');
+
+    expect(Lead::withoutGlobalScopes()->count())->toBe(1);
+
+    // Same for the duplicate-override path: one tap, one lead.
+    $again = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Leads\LeadCreate::class)
+        ->call('addLead')
+        ->set('full_name', 'Walk-in Caller')
+        ->set('email', 'caller@example.test')
+        ->call('saveDespiteDuplicate');
+
+    expect(Lead::withoutGlobalScopes()->count())->toBe(2)
+        ->and($again->instance()->createAnyway)->toBeFalse();
+});
+
+// ── Deleting a lead a homeowner still holds a link to ───────────────────
+
+it('warns the delete flows when a scheduling link is still out', function () {
+    $fx = leadFlowFixture();
+
+    // No link yet — no warning.
+    expect($fx['lead']->deleteImpact()['schedule_link'])->toBeFalse();
+
+    \App\Models\ShortLink::create([
+        'code' => 'abc123',
+        'destination' => 'https://hive.test/lead/times/'.$fx['lead']->id.'?expires=1&signature=x',
+    ]);
+
+    // A lead whose id merely PREFIXES another id must not match (8 vs 80).
+    $other = Lead::withoutEvents(fn () => Lead::create([
+        'date' => now(), 'origin' => 'Email',
+        'lead_data' => ['name' => 'Other'],
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+        'created_by_user_id' => $fx['user']->id,
+    ]));
+
+    expect($fx['lead']->fresh()->deleteImpact()['schedule_link'])->toBeTrue()
+        ->and($other->deleteImpact()['schedule_link'])->toBeFalse();
+
+    // The bulk modal names who is holding something.
+    $impact = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Leads\LeadsIndex::class)
+        ->set('selected', [$fx['lead']->id, $other->id])
+        ->instance()->bulkDeleteImpact();
+
+    expect($impact['holding'])->toBe(['Kathy Moseler']);
+});

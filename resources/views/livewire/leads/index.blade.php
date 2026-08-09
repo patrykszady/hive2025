@@ -10,10 +10,13 @@
          real table swaps in — same loading treatment as the Projects card. --}}
     @island(name: 'leads-table', lazy: island_lazy(), always: true)
         @placeholder
+            {{-- The island's placeholder renders inside LeadsIndex, so it can
+                 COUNT what's actually coming (current filters included) and
+                 skeleton that many rows — not a fixed fifteen. --}}
             <x-index-table.placeholder
                 heading="Leads"
                 :columns="\App\Livewire\Leads\LeadsIndex::columnDefs()"
-                :rows="\App\Livewire\Leads\LeadsIndex::placeholderRows()"
+                :rows="$this->skeletonRows()"
                 :page-size="\App\Livewire\Leads\LeadsIndex::placeholderRows()"
             >
                 <x-slot:actions>
@@ -157,6 +160,16 @@
             @php($impact = $this->bulkDeleteImpact)
             <div class="space-y-4">
                 <flux:heading size="lg">Delete {{ $impact['count'] }} {{ str('lead')->plural($impact['count']) }}?</flux:heading>
+
+                @if($impact['holding'] !== [])
+                    <flux:callout icon="exclamation-triangle" variant="warning" inline>
+                        <flux:callout.text>
+                            {{ collect($impact['holding'])->join(', ', ' and ') }}
+                            {{ count($impact['holding']) === 1 ? 'has' : 'have' }} an active scheduling link or a booked
+                            consultation — homeowners may still be holding those links.
+                        </flux:callout.text>
+                    </flux:callout>
+                @endif
 
                 <ul class="list-disc pl-5 space-y-1 text-sm text-zinc-600 dark:text-zinc-300">
                     <li>The {{ str('lead')->plural($impact['count']) }}, their statuses and message history are removed.</li>

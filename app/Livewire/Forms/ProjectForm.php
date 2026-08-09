@@ -92,6 +92,22 @@ class ProjectForm extends Form
 
         $this->validate();
 
+        // A double-tapped Create fires two identical requests a breath
+        // apart, and both used to mint a project ("Basement Stairs" twins,
+        // two seconds apart). The second request must FIND the first's
+        // project instead. Only a same-name project created moments ago
+        // counts — a deliberate same-name project down the road stays
+        // possible.
+        $twin = Project::query()
+            ->where('client_id', $this->client_id)
+            ->whereRaw('LOWER(TRIM(project_name)) = ?', [mb_strtolower(trim((string) $this->project_name))])
+            ->where('created_at', '>=', now()->subMinutes(2))
+            ->first();
+
+        if ($twin) {
+            return $twin;
+        }
+
         return Project::create([
             'project_name' => $this->project_name,
             'client_id' => $this->client_id,
