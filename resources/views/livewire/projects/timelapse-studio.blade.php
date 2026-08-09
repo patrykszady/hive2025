@@ -133,17 +133,45 @@
                          each other when it's right. RED pulsing dot = the
                          guide can't find the last frame's view at all. --}}
                     <div x-show="onionSrc && guideVisible" x-cloak class="pointer-events-none absolute inset-0 z-[6]">
-                        <svg class="absolute left-1/2 top-1/2 size-10 -translate-x-1/2 -translate-y-1/2 text-white/60"
+                        {{-- Crosses grow with the screen — card-sized marks
+                             vanish on a fullscreen landscape view. --}}
+                        <svg class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/60"
+                            x-bind:class="fullscreen ? 'size-16' : 'size-10'"
                             viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M20 6v9M20 25v9M6 20h9M25 20h9" />
                         </svg>
-                        <svg x-show="!lost" class="absolute size-10 transition-transform duration-150"
+                        <svg x-show="!lost" class="absolute transition-[left,top] duration-150"
+                            x-bind:class="fullscreen ? 'size-16' : 'size-10'"
                             viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="3"
-                            x-bind:style="`left: calc(50% - 20px + ${bubbleX}px); top: calc(50% - 20px + ${bubbleY}px); color: ${guideColor}`">
+                            x-bind:style="`left: calc(50% + ${bubbleX}px); top: calc(50% + ${bubbleY}px); transform: translate(-50%, -50%); color: ${guideColor}`">
                             <path d="M20 6v9M20 25v9M6 20h9M25 20h9" />
                             <circle cx="20" cy="20" r="3.5" fill="currentColor" stroke="none" />
                         </svg>
                         <div x-show="lost" class="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500 animate-pulse"></div>
+                    </div>
+
+                    {{-- Fullscreen loses the card's colored ring at the bezel
+                         where thumbs cover it — this inset frame is the same
+                         signal where the eye actually is: green = lined up,
+                         red = can't find the view. --}}
+                    <div x-show="fullscreen && onionSrc" x-cloak
+                        class="pointer-events-none absolute inset-0 z-[7] border-4 transition-colors duration-300"
+                        x-bind:class="aligned ? 'border-green-500' : (lost ? 'border-red-500/80' : 'border-white/15')"></div>
+
+                    {{-- The card shows the ghost toggle + opacity slider below
+                         the viewfinder; fullscreen hides that row, which left
+                         landscape with no way to adjust the onion skin. Same
+                         controls, top-center band. --}}
+                    <div x-show="fullscreen && onionSrc" x-cloak x-on:click.stop
+                        class="absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/60 px-3 py-1.5"
+                        x-bind:class="'top-[max(0.5rem,env(safe-area-inset-top))]'">
+                        <button type="button" x-on:click="onionOn = !onionOn"
+                            class="cursor-pointer text-xs font-semibold"
+                            x-bind:class="onionOn ? 'text-white' : 'text-white/50'">
+                            Ghost
+                        </button>
+                        <input type="range" min="10" max="90" x-model="onionOpacity" x-show="onionOn"
+                            class="w-24 accent-indigo-500" />
                     </div>
 
                     {{-- state chip: says the actual move to make. Fullscreen
@@ -1046,6 +1074,7 @@
         manualExit: false,
         guideVisible: false,
         bubbleX: 0,
+        guideRange: 44,
         bubbleY: 0,
         hint: 'Match the last frame',
         guideColor: '#fbbf24',
@@ -1462,9 +1491,16 @@
             // move "pan away from the dot" — hence never intuitive). Panning
             // toward the cross now converges: the offset shrinks and the
             // cross walks into the center.
-            const px = 44 / this.SEARCH;
-            this.bubbleX = Math.max(-44, Math.min(44, best.dx * px));
-            this.bubbleY = Math.max(-44, Math.min(44, best.dy * px));
+            // The cross's travel scales with the VIEWFINDER, not a constant:
+            // ±44px reads fine on the card but is an invisible wiggle on a
+            // fullscreen landscape view. A thumb-pixel offset maps to the
+            // same fraction of whatever the video is displayed at.
+            const shown = this.videoEl;
+            const range = Math.max(44, Math.round((shown?.clientWidth || 440) * (this.SEARCH / this.THUMB_W)));
+            this.guideRange = range;
+            const px = range / this.SEARCH;
+            this.bubbleX = Math.max(-range, Math.min(range, best.dx * px));
+            this.bubbleY = Math.max(-range, Math.min(range, best.dy * px));
 
             const distance = Math.hypot(best.dx, best.dy);
             // Never green while the framing is the wrong size — a perfectly
@@ -1477,9 +1513,12 @@
             const proximity = Math.max(0, 1 - distance / this.SEARCH);
             this.guideColor = hit ? '#4ade80' : `hsl(${Math.round(45 + proximity * 75)} 90% 55%)`;
 
+            // Direction words kick in past the same FRACTION of travel the
+            // old 6-of-44px threshold meant, whatever the screen size.
+            const dirThresh = this.guideRange * 0.14;
             const dirs = [];
-            if (this.bubbleY < -6) dirs.push('up'); else if (this.bubbleY > 6) dirs.push('down');
-            if (this.bubbleX < -6) dirs.push('left'); else if (this.bubbleX > 6) dirs.push('right');
+            if (this.bubbleY < -dirThresh) dirs.push('up'); else if (this.bubbleY > dirThresh) dirs.push('down');
+            if (this.bubbleX < -dirThresh) dirs.push('left'); else if (this.bubbleX > dirThresh) dirs.push('right');
             const arrows = {
                 'up': '↑', 'down': '↓', 'left': '←', 'right': '→',
                 'up left': '↖', 'up right': '↗', 'down left': '↙', 'down right': '↘',
