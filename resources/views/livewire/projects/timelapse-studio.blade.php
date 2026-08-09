@@ -613,6 +613,10 @@
     // drop whatever was still in flight.
     if (!Alpine.store('tlUploads')) Alpine.store('tlUploads', {
         wire: null,
+        // The direct frame-upload endpoint (set at camera init) and the
+        // request currently on the wire, so the watchdog can abort it.
+        uploadUrl: null,
+        activeXhr: null,
         queue: [],
         failedShots: [],
         uploading: false,
@@ -680,12 +684,10 @@
         feedStallWatchdog(ms = this.STALL_MS) {
             clearTimeout(this.stallTimer);
             this.stallTimer = setTimeout(() => {
-                this.report('stalled — cancelling', { progress: this.progress, after_ms: ms });
-                // Aborts the in-flight request AND fires the cancelled
-                // callback, which routes into the same retry path as an
-                // explicit error. If the upload actually finished in the
-                // meantime, Livewire's bag is empty and this is a no-op.
-                try { this.wire?.cancelUpload('frame'); } catch (e) {}
+                this.report('stalled — aborting', { progress: this.progress, after_ms: ms });
+                // Aborting fires the XHR's abort handler, which routes into
+                // the same retry path as an explicit error.
+                try { this.activeXhr?.abort(); } catch (e) {}
             }, ms);
         },
 
@@ -695,8 +697,16 @@
             this.progress = 0;
         },
 
+        /**
+         * ONE request per shot: a plain authed POST straight to our own
+         * endpoint. This replaced Livewire's $wire.upload, whose three-leg
+         * handshake (commit → signed URL → file POST → finish commit) stalled
+         * silently on iPhones — progress 0, no error, no server line, nothing
+         * to debug. A single XHR has a status code or it has an abort; every
+         * outcome lands in the retry path and the log.
+         */
         pump() {
-            if (this.uploading || !this.queue.length || !this.wire) return;
+            if (this.uploading || !this.queue.length || !this.uploadUrl) return;
 
             // Peek, don't shift: the shot stays at the head until it actually
             // lands, so a dropped request on jobsite wifi retries the same
@@ -709,10 +719,24 @@
             const startedAt = Date.now();
             this.report('upload start', { bytes: shot.bytes, collection: shot.collectionId, try: (shot.tries || 0) + 1 });
 
-            const failedOnce = (why) => () => {
+            let settled = false;
+
+            const done = () => {
+                this.report('upload finished', { ms: Date.now() - startedAt });
                 this.settle();
+                this.activeXhr = null;
+                this.queue.shift();
+                // One cheap refresh once the queue drains, so the grid and
+                // counts show the new frames without a per-shot re-render.
+                if (!this.queue.length) { try { this.wire?.call('$refresh'); } catch (e) {} }
+                this.pump();
+            };
+
+            const failedOnce = (why) => {
+                this.settle();
+                this.activeXhr = null;
                 shot.tries = (shot.tries || 0) + 1;
-                this.report('upload '+why, { try: shot.tries, ms: Date.now() - startedAt });
+                this.report('upload ' + why, { try: shot.tries, ms: Date.now() - startedAt });
 
                 if (shot.tries >= this.MAX_TRIES) {
                     this.report('gave up', { tries: shot.tries });
@@ -726,34 +750,48 @@
                 this.timer = setTimeout(() => this.pump(), 900 * shot.tries);
             };
 
-            // Deferred set (third arg false): no request of its own — it rides
-            // the upload's finish commit, so the metadata is on the component
-            // before updatedFrame() runs. Serial uploads keep each meta paired
-            // with its own shot.
-            this.wire.set('captureMeta', shot.meta, false);
+            const form = new FormData();
+            form.append('frame', new File([shot.blob], 'frame.jpg', { type: 'image/jpeg' }));
+            if (shot.collectionId) form.append('collection_id', shot.collectionId);
+            const meta = shot.meta || {};
+            if (meta.takenAt) form.append('taken_at', meta.takenAt);
+            if (meta.lat != null) {
+                form.append('lat', meta.lat);
+                form.append('lng', meta.lng);
+                if (meta.accuracy != null) form.append('accuracy', meta.accuracy);
+            }
 
-            this.wire.upload('frame', new File([shot.blob], `frame-${shot.collectionId ?? 0}.jpg`, { type: 'image/jpeg' }),
-                () => {
-                    this.report('upload finished', { ms: Date.now() - startedAt });
-                    this.settle();
-                    this.queue.shift();
-                    this.pump();
-                },
-                failedOnce('errored'),
-                (e) => {
-                    this.progress = e?.detail?.progress ?? this.progress;
-                    // File fully out the door → the remaining wait is the
-                    // server's finish commit. Long grace, and say so once.
-                    if (this.progress >= 100 && !this.uploadedReported) {
-                        this.uploadedReported = true;
-                        this.report('file fully uploaded', { ms: Date.now() - startedAt });
-                    }
-                    this.feedStallWatchdog(this.progress >= 100 ? this.STALL_AFTER_UPLOADED_MS : this.STALL_MS);
-                },
-                failedOnce('cancelled'),
-            );
+            const xhr = new XMLHttpRequest();
+            this.activeXhr = xhr;
+            xhr.open('POST', this.uploadUrl);
+            xhr.setRequestHeader('X-CSRF-TOKEN', document.querySelector('meta[name="csrf-token"]')?.content ?? '');
+            xhr.setRequestHeader('Accept', 'application/json');
 
-            this.uploadedReported = false;
+            xhr.upload.addEventListener('progress', (e) => {
+                if (!e.lengthComputable) return;
+                this.progress = Math.floor(e.loaded * 100 / e.total);
+                // File fully out the door → the remaining wait is the server
+                // writing it. Long grace there: cancelling would throw away
+                // a completed upload and re-send the whole file.
+                this.feedStallWatchdog(this.progress >= 100 ? this.STALL_AFTER_UPLOADED_MS : this.STALL_MS);
+            });
+            xhr.addEventListener('load', () => {
+                if (settled) return;
+                settled = true;
+                String(xhr.status)[0] === '2' ? done() : failedOnce('http ' + xhr.status);
+            });
+            xhr.addEventListener('error', () => {
+                if (settled) return;
+                settled = true;
+                failedOnce('network error');
+            });
+            xhr.addEventListener('abort', () => {
+                if (settled) return;
+                settled = true;
+                failedOnce('aborted');
+            });
+
+            xhr.send(form);
         },
     });
 
@@ -1034,6 +1072,7 @@
             // previous camera (other collection, or one that was closed) left
             // unsent. $wire is the STUDIO component, which outlives the camera.
             Alpine.store('tlUploads').wire = $wire;
+            Alpine.store('tlUploads').uploadUrl = @js(route('projects.timelapse.frame.store', $project));
             Alpine.store('tlUploads').pump();
 
             // Remembered pick: {"zoom":0.5} or {"device":"..."} (older saves

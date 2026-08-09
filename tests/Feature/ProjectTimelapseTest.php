@@ -754,3 +754,78 @@ it('answers the upload right away and leaves the pixel work to the queue', funct
     [$seqWidth] = getimagesizefromstring(Storage::disk('files')->get($frame->path));
     expect($seqWidth)->toBe(TimelapseStudio::MAX_EDGE);
 });
+
+it('stores a camera frame through the direct upload endpoint', function () {
+    $fx = timelapseFixture();
+
+    Queue::fake([\App\Jobs\ProcessTimelapseFrame::class]);
+
+    $component = Livewire::actingAs($fx['user'])->test(TimelapseStudio::class, ['project' => $fx['project']]);
+    $component->set('newTitle', 'Back Timelapse')->call('createCollection');
+    $kitchen = ProjectTimelapse::where('project_id', $fx['project']->id)->where('title', 'Back Timelapse')->firstOrFail();
+
+    $response = $this->actingAs($fx['user'])->post(
+        route('projects.timelapse.frame.store', $fx['project']),
+        [
+            'frame' => UploadedFile::fake()->image('shot.jpg', 1600, 1200),
+            'collection_id' => $kitchen->id,
+            'taken_at' => now()->subSeconds(5)->toIso8601String(),
+            'lat' => 42.1181, 'lng' => -87.9773, 'accuracy' => 12,
+        ],
+    );
+
+    $response->assertCreated();
+
+    $frame = ProjectTimelapseFrame::findOrFail($response->json('frame_id'));
+
+    expect($frame->project_timelapse_id)->toBe($kitchen->id)
+        ->and((float) $frame->latitude)->toBe(42.1181)
+        ->and($frame->shot_at)->not->toBeNull();
+
+    Storage::disk('files')->assertExists($frame->original_path);
+    Queue::assertPushed(\App\Jobs\ProcessTimelapseFrame::class);
+
+    // A forged collection id (another project's) falls back to the catch-all
+    // album — never someone else's sequence.
+    $foreignProject = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Other', 'client_id' => \App\Models\Client::factory()->create()->id,
+        'address' => '2 Other St', 'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601',
+        'belongs_to_vendor_id' => Vendor::factory()->create()->id,
+    ]));
+    $foreign = ProjectTimelapse::withoutEvents(fn () => ProjectTimelapse::create([
+        'project_id' => $foreignProject->id, 'title' => 'Not Yours',
+        'kind' => ProjectTimelapse::KIND_TIMELAPSE, 'display_mode' => 'slider', 'sort_order' => 1,
+    ]));
+
+    $second = $this->actingAs($fx['user'])->post(
+        route('projects.timelapse.frame.store', $fx['project']),
+        ['frame' => UploadedFile::fake()->image('shot2.jpg', 800, 600), 'collection_id' => $foreign->id],
+    );
+
+    $second->assertCreated();
+    expect($foreign->frames()->count())->toBe(0)
+        ->and(ProjectTimelapse::where('project_id', $fx['project']->id)->where('title', 'Project Images')->first()->frames()->count())->toBe(1);
+});
+
+it('refuses direct frame uploads from out-of-scope users', function () {
+    $fx = timelapseFixture();
+
+    $strangerVendor = Vendor::factory()->create();
+    $strangerVendor->forceFill(['business_type' => 'LLC', 'registration' => ['registered' => true]])->save();
+    $stranger = new User();
+    $stranger->forceFill([
+        'first_name' => 'Stranger', 'last_name' => 'Vendor',
+        'email' => 'stranger.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224888####'),
+        'primary_vendor_id' => $strangerVendor->id,
+        'registration' => ['registered' => true],
+    ]);
+    $stranger->save();
+    $strangerVendor->users()->attach($stranger->id, ['role_id' => 1]);
+
+    $this->actingAs($stranger)
+        ->post(route('projects.timelapse.frame.store', $fx['project']), [
+            'frame' => UploadedFile::fake()->image('shot.jpg', 800, 600),
+        ])
+        ->assertNotFound();
+});

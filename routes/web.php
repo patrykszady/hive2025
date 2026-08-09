@@ -609,6 +609,9 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // Old name kept working — links and bookmarks predate the rename.
     Route::redirect('/projects/{project}/timelapse', '/projects/{project}/images')->name('projects.timelapse');
     Route::get('/timelapse/frames/{frame}', [\App\Http\Controllers\TimelapseController::class, 'frame'])->name('projects.timelapse.frame');
+    // The camera's direct frame upload — one authed POST, no Livewire
+    // handshake (which stalled silently on iPhones).
+    Route::post('/projects/{project}/timelapse/frames', [\App\Http\Controllers\TimelapseController::class, 'store'])->name('projects.timelapse.frame.store');
     // The camera's upload state machine, reported from the phone into the
     // timelapse log channel — the client is otherwise a black box exactly
     // when "Saving…" misbehaves in the field.

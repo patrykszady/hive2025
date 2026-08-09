@@ -2,17 +2,85 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ProjectTimelapse;
 use App\Models\ProjectTimelapseFrame;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Streams timelapse frames to the browser. Frames live on the private
- * 'files' disk (never symlinked into public/), so the browser reaches them
- * only through here — and only after proving it may view the project.
+ * Streams timelapse frames to the browser, and accepts the camera's direct
+ * frame uploads. Frames live on the private 'files' disk (never symlinked
+ * into public/), so the browser reaches them only through here — and only
+ * after proving it may view the project.
  */
 class TimelapseController extends Controller
 {
+    /**
+     * A captured frame, POSTed straight from the camera in ONE request.
+     *
+     * This exists because Livewire's file-upload handshake (signed-url
+     * commit, then the POST, then a finish commit) stalled silently on
+     * iPhones — progress 0, no error callback, nothing in any log. A plain
+     * authed endpoint has a status code or it has nothing, and either way
+     * the client's retry queue knows what happened.
+     */
+    public function store(Request $request, \App\Models\Project $project)
+    {
+        Gate::authorize('view', $project);
+
+        $request->validate([
+            'frame' => 'required|file|mimes:jpg,jpeg,png|max:20480',
+            'collection_id' => 'nullable|integer',
+            'taken_at' => 'nullable|string|max:64',
+            'lat' => 'nullable|numeric',
+            'lng' => 'nullable|numeric',
+            'accuracy' => 'nullable|numeric',
+        ]);
+
+        $t0 = microtime(true);
+
+        // The shot names its own collection; the lookup is scoped to THIS
+        // project, so a forged id lands in the catch-all album, never in
+        // someone else's sequence.
+        $target = $request->filled('collection_id')
+            ? ProjectTimelapse::where('project_id', $project->id)->find($request->integer('collection_id'))
+            : null;
+        $timelapse = $target ?? ProjectTimelapse::generalFor($project);
+
+        $meta = \App\Livewire\Projects\TimelapseStudio::sanitizeCaptureMeta([
+            'lat' => $request->input('lat'),
+            'lng' => $request->input('lng'),
+            'accuracy' => $request->input('accuracy'),
+            'takenAt' => $request->input('taken_at'),
+        ]);
+
+        $frame = app(\App\Services\ProjectImageImporter::class)->storeImage(
+            $timelapse,
+            $request->file('frame')->getRealPath(),
+            null,
+            null,
+            ($meta['lat'] ?? null) !== null
+                ? ['lat' => $meta['lat'], 'lng' => $meta['lng'], 'accuracy' => $meta['accuracy'] ?? null]
+                : null,
+            $meta['takenAt'] ?? null,
+            auth()->id(),
+            null,
+            deferProcessing: true,
+        );
+
+        Log::channel('timelapse')->info('Frame stored (direct upload)', [
+            'frame_id' => $frame->id,
+            'project_id' => $project->id,
+            'collection_id' => $timelapse->id,
+            'bytes' => (int) $request->file('frame')->getSize(),
+            'store_ms' => (int) round((microtime(true) - $t0) * 1000),
+        ]);
+
+        return response()->json(['frame_id' => $frame->id], 201);
+    }
+
     public function frame(ProjectTimelapseFrame $frame)
     {
         // Resolve the project THROUGH ProjectScope — that scope IS the app's

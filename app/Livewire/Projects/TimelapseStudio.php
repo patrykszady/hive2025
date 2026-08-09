@@ -748,8 +748,17 @@ class TimelapseStudio extends Component
      */
     protected function sanitizedCaptureMeta(): ?array
     {
-        $meta = $this->captureMeta;
+        return self::sanitizeCaptureMeta(is_array($this->captureMeta) ? $this->captureMeta : null);
+    }
 
+    /**
+     * Static so the direct-upload endpoint (TimelapseController::store) can
+     * apply exactly the same rules to the same fields.
+     *
+     * @return array{lat: ?float, lng: ?float, accuracy: ?int, takenAt: ?\Illuminate\Support\Carbon}|null
+     */
+    public static function sanitizeCaptureMeta(?array $meta): ?array
+    {
         if (! is_array($meta)) {
             return null;
         }
