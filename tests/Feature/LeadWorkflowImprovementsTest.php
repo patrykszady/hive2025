@@ -354,6 +354,46 @@ it('books a homeowner slot into the Meet form via the two-stage picker', functio
     expect(data_get($component->instance()->form->time_settings, "$date.start_time"))->toBe('16:30');
 });
 
+it('offers the whole bookable day of exact times for an Anytime slot', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Bath', 'client_id' => $client->id,
+        'address' => '2 Bath St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+
+    $date = now()->addDays(4)->format('Y-m-d');
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
+        'availability' => [['date' => $date, 'time' => 'Anytime']],
+        'availability_updated_at' => now()->toDateTimeString(),
+    ])]);
+    $fx['lead']->forceFill(['user_id' => $fx['user']->id])->save();
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('addTask', $project->id)
+        ->set('form.type', 'Meet')
+        ->call('applyHomeownerTime', 0);
+
+    // "Anytime" spans PickTimes::dayBounds(), same as the lead composer —
+    // not an unparseable window with no chips at all.
+    [$dayStart, $dayEnd] = \App\Livewire\Leads\PickTimes::dayBounds();
+    $labels = collect($component->instance()->homeownerExactOptions)->pluck('label');
+    expect($labels->first())->toBe(\Carbon\Carbon::createFromFormat('H:i', $dayStart)->format('g:i A'))
+        ->and($labels->last())->toBe(\Carbon\Carbon::createFromFormat('H:i', $dayEnd)->subMinutes(30)->format('g:i A'))
+        ->and($labels)->toContain('11:00 AM');
+
+    // And a picked exact time books a real 30-minute Meet.
+    $component->call('selectHomeownerExactTime', '11:00');
+    expect(data_get($component->instance()->form->time_settings, "$date.start_time"))->toBe('11:00')
+        ->and(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('11:30');
+});
+
 it('mirrors team members and participants in both directions on a Meet', function () {
     $fx = leadFlowFixture();
     // fx's user pivot lacks is_employed — set it so the employees pool sees them.

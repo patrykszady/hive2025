@@ -940,6 +940,13 @@ class TaskCreate extends Component
 
         $window = $slot ? \App\Models\Lead::parseSlotTimes((string) $slot['time']) : null;
 
+        if (! $window && $slot && strcasecmp(trim((string) $slot['time']), 'Anytime') === 0) {
+            // "Anytime" is the whole bookable day, not an unparseable window —
+            // same treatment as the lead composer, so both pickers offer the
+            // identical exact-time chips.
+            $window = \App\Livewire\Leads\PickTimes::dayBounds();
+        }
+
         if (! $window) {
             return [];
         }
