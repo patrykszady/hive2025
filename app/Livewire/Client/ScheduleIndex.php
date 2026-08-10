@@ -27,6 +27,9 @@ class ScheduleIndex extends Component
      */
     private const SERVICE_CALL_STATUS_CODE = 8;
 
+    /** Complete project status code. */
+    private const COMPLETE_STATUS_CODE = 7;
+
     /**
      * Selectable service-window time frames.
      *
@@ -405,7 +408,10 @@ class ScheduleIndex extends Component
             return collect();
         }
 
-        return Task::withTrashed()
+        // No withTrashed here, unlike the dated queries: a cancelled visit
+        // struck through on its DAY still communicates; a deleted task that
+        // never had a date is not "pending" anything — it's just gone.
+        return Task::query()
             ->with('project')
             ->whereIn('project_id', $projectIds)
             ->whereNull('start_date')
@@ -435,12 +441,24 @@ class ScheduleIndex extends Component
     }
 
     /**
-     * Whether the project is currently in the Service Call status.
+     * Whether the schedule page should offer the service-window picker.
+     *
+     * True in the Service Call status — and equally on a COMPLETE project
+     * that has unscheduled work left ("Electrical Issues — Pending" on a
+     * finished remodel IS a service call in practice; the homeowner picks
+     * time windows the same way).
      */
     #[Computed]
     public function isServiceCall(): bool
     {
-        return $this->getProject()?->latestStatus?->status_code === self::SERVICE_CALL_STATUS_CODE;
+        $code = $this->getProject()?->latestStatus?->status_code;
+
+        if ($code === self::SERVICE_CALL_STATUS_CODE) {
+            return true;
+        }
+
+        return $code === self::COMPLETE_STATUS_CODE
+            && $this->unscheduledTasks->isNotEmpty();
     }
 
     /**

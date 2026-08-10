@@ -88,6 +88,33 @@ it('does not show the picker for a non Service Call project', function (): void 
         ->assertDontSee('Preferred Service Times');
 });
 
+it('shows the picker on a Complete project with unscheduled work — a service call in practice', function (): void {
+    $project = makeServiceCallProject(7); // Complete
+
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Electrical Issues',
+        'type' => 'task',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
+        'created_by_user_id' => 1,
+        'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
+        'created_at' => now(),
+    ]));
+
+    Livewire::test(ScheduleIndex::class, ['token' => $project->schedule_token])
+        ->assertSet('valid', true)
+        ->assertSee('Preferred Service Times');
+});
+
+it('keeps the picker hidden on a Complete project with nothing unscheduled', function (): void {
+    $project = makeServiceCallProject(7); // Complete, all work done
+
+    Livewire::test(ScheduleIndex::class, ['token' => $project->schedule_token])
+        ->assertSet('valid', true)
+        ->assertDontSee('Preferred Service Times');
+});
+
 it('stores the selection and notifies the vendor when submitting valid times', function (): void {
     Notification::fake();
 

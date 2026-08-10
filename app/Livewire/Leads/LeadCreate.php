@@ -128,15 +128,9 @@ class LeadCreate extends Component
 
         // The modal footer has no Update button — a status change saves right
         // away, same as the status dropdowns on the /leads index rows.
+        // Replied → New is deliberate and allowed: it reopens the composer
+        // so a consult email can be re-sent from scratch.
         if ($field === 'lead_status' && $this->lead->exists && $this->lead_status) {
-            // A replied lead can't go back to New (the option is disabled in
-            // the UI; this guards stale clients).
-            if ($this->lead_status === 'New' && $this->hasReplied) {
-                $this->lead_status = $this->lead->last_status?->title;
-
-                return;
-            }
-
             $this->lead->setStatus($this->lead_status);
             $this->lead->unsetRelation('last_status');
             unset($this->hasReplied);

@@ -160,6 +160,20 @@ it('locks a Replied lead: no composer, no delete', function () {
     expect(Lead::withoutGlobalScopes()->find($fx['lead']->id))->not->toBeNull();
 });
 
+it('reverts a Replied lead back to New, reopening the composer for a re-send', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $fx['lead']->setStatus('Replied');
+
+    $component = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']->id)
+        ->set('lead_status', 'New');
+
+    expect($fx['lead']->fresh()->last_status->title)->toBe('New')
+        ->and($component->instance()->hasReplied)->toBeFalse();
+});
+
 it('does not downgrade an already-progressed lead on send', function () {
     Queue::fake();
     $fx = makeConsultFixture();

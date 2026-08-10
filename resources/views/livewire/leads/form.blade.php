@@ -174,7 +174,7 @@
                 >
                     @foreach(\App\Models\Lead::selectableStatuses() as $status)
                         {{-- A replied lead can't go back to New. --}}
-                        <flux:select.option value="{{ $status['code'] }}" :disabled="$status['code'] === 'New' && $this->hasReplied"><flux:badge :color="$status['color']">{{ $status['label'] }}</flux:badge></flux:select.option>
+                        <flux:select.option value="{{ $status['code'] }}"><flux:badge :color="$status['color']">{{ $status['label'] }}</flux:badge></flux:select.option>
                     @endforeach
                 </flux:select>
             </div>
