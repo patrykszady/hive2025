@@ -127,12 +127,12 @@
             </flux:callout>
         @endif
 
-        @if ($missingContactInfo !== [])
+        @if ($this->blockingContactInfo !== [])
             <flux:callout icon="exclamation-triangle" variant="warning" inline>
                 <flux:callout.heading>Incomplete contact</flux:callout.heading>
                 <flux:callout.text>
-                    This enquiry is missing {{ collect($missingContactInfo)->join(', ', ' and ') }}.
-                    Add {{ count($missingContactInfo) === 1 ? 'it' : 'them' }} to reply.
+                    This enquiry is missing {{ collect($this->blockingContactInfo)->join(', ', ' and ') }}.
+                    Add {{ count($this->blockingContactInfo) === 1 ? 'it' : 'them' }} to reply.
                 </flux:callout.text>
             </flux:callout>
 
@@ -302,12 +302,37 @@
                 placeholder="Email"
             />
 
+            {{-- Full address, split like the client and project forms —
+                 one blob field is how city/state/zip went missing. --}}
             <flux:input
                 wire:model.live="address"
                 label="Address"
                 type="text"
-                placeholder="Address"
+                placeholder="Street address"
             />
+
+            <div class="grid grid-cols-4 items-end gap-2">
+                <div class="col-span-2">
+                    <flux:input
+                        wire:model.live="city"
+                        label="City"
+                        type="text"
+                        placeholder="City"
+                    />
+                </div>
+                <flux:input
+                    wire:model.live="state"
+                    label="State"
+                    type="text"
+                    placeholder="IL"
+                />
+                <flux:input
+                    wire:model.live="zip"
+                    label="Zip"
+                    type="text"
+                    placeholder="Zip"
+                />
+            </div>
         @endif
 
     </form>

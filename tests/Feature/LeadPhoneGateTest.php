@@ -65,16 +65,18 @@ function phonelessLeadFixture(): array
     return ['admin' => $admin, 'contact' => $contact, 'lead' => $lead];
 }
 
-it('hides the Message tab until a phone number is on file', function () {
+it('keeps the Message tab open without a phone — the prompt stays, nothing blocks', function () {
     $fx = phonelessLeadFixture();
 
     $component = Livewire::actingAs($fx['admin'])
         ->test(LeadCreate::class)
         ->call('editLead', $fx['lead']);
 
+    // The phone is still visibly missing…
     expect($component->instance()->needsPhone)->toBeTrue();
 
-    $component->assertDontSee('name="messages"', false)
+    // …but an email reply never needed one: the composer stays available.
+    $component->assertSee('name="messages"', false)
         ->assertSee("This enquiry didn't include a phone number", false);
 });
 
@@ -219,16 +221,15 @@ it('keeps the prompt and the error on screen when the number is rejected', funct
 
     $component->assertSee("This enquiry didn't include a phone number", false)
         ->assertSee('Enter a 10-digit phone number.', false)
-        ->assertSee('saveContactPhone', false)
-        ->assertDontSee('name="messages"', false);
+        ->assertSee('saveContactPhone', false);
 
     expect($fx['contact']->fresh()->cell_phone)->toBeNull();
 });
 
-it('does not unlock the tab from a half-typed number flushed by another action', function () {
+it('does not treat a half-typed number flushed by another action as saved', function () {
     // wire:model on the entry box is deferred: Livewire ships the dirty value
-    // with the NEXT request of any kind (the status select, say). Bound to the
-    // gate's own property, "224" was enough to open the Message tab.
+    // with the NEXT request of any kind (the status select, say). The prompt
+    // must keep showing and nothing may persist until saveContactPhone runs.
     $fx = phonelessLeadFixture();
 
     $component = Livewire::actingAs($fx['admin'])
@@ -238,8 +239,7 @@ it('does not unlock the tab from a half-typed number flushed by another action',
 
     expect($component->instance()->needsPhone)->toBeTrue();
 
-    $component->assertDontSee('name="messages"', false)
-        ->assertSee("This enquiry didn't include a phone number", false);
+    $component->assertSee("This enquiry didn't include a phone number", false);
 
     expect($fx['contact']->fresh()->cell_phone)->toBeNull();
 });

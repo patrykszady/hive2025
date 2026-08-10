@@ -50,6 +50,9 @@ class LeadCreate extends Component
     public ?string $phoneEntry = null;
     public $email = null;
     public $address = null;
+    public $city = null;
+    public $state = null;
+    public $zip = null;
     public $reply_to_email = null;
     public ?string $origin = null;
     /** A booked consult runs half an hour. */
@@ -170,6 +173,7 @@ class LeadCreate extends Component
         // form — this modal is reused for every lead on the page.
         $this->reset([
             'lead', 'full_name', 'email', 'phone', 'phoneEntry', 'address',
+            'city', 'state', 'zip',
             'message', 'origin', 'availability', 'selectedAvailability',
             'selectedExactTime', 'projectName', 'to', 'subject', 'emailBody',
             'selectedTemplateId', 'nylasMessageId', 'nylasReferences',
@@ -276,6 +280,9 @@ class LeadCreate extends Component
 
         $this->message = $this->lead->lead_data->message ?? null;
         $this->address = $this->lead->lead_data->address ?? null;
+        $this->city = $this->lead->lead_data->city ?? null;
+        $this->state = $this->lead->lead_data->state ?? null;
+        $this->zip = $this->lead->lead_data->zip ?? null;
         $this->reply_to_email = $this->lead->lead_data->reply_to_email ?? null;
         $this->phone = $this->lead->lead_data->phone ?? null;
         $this->phoneEntry = null;
@@ -330,6 +337,9 @@ class LeadCreate extends Component
     {
         $lead = Lead::findOrFail($this->lead->id);
         $lead->lead_data['address'] = $this->address;
+        $lead->lead_data['city'] = $this->city;
+        $lead->lead_data['state'] = $this->state;
+        $lead->lead_data['zip'] = $this->zip;
         $lead->lead_data['phone'] = $this->phone;
         $lead->lead_data['email'] = $this->email;
         $lead->origin = $this->origin;
@@ -467,7 +477,7 @@ class LeadCreate extends Component
 
         $this->phone = $digits;
         $this->phoneEntry = null;
-        unset($this->needsPhone, $this->missingContactInfo, $this->addressCandidates);
+        unset($this->needsPhone, $this->missingContactInfo, $this->blockingContactInfo, $this->addressCandidates);
         $this->prepareEmailComposer();
 
         Flux::toast(
@@ -581,7 +591,7 @@ class LeadCreate extends Component
         $this->client = $this->resolveClientForLead();
         $this->address = $candidate['address'];
 
-        unset($this->needsPhone, $this->missingContactInfo, $this->addressCandidates);
+        unset($this->needsPhone, $this->missingContactInfo, $this->blockingContactInfo, $this->addressCandidates);
         $this->prepareEmailComposer();
 
         Flux::toast(
@@ -645,6 +655,22 @@ class LeadCreate extends Component
         }
 
         return $missing;
+    }
+
+    /**
+     * The missing pieces that actually BLOCK the composer — email and a full
+     * address. A missing phone stays a visible prompt on Details but never
+     * stops an email reply: plenty of homeowners simply don't give one.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function blockingContactInfo(): array
+    {
+        return array_values(array_filter(
+            $this->missingContactInfo,
+            fn (string $item) => $item !== 'a phone number',
+        ));
     }
 
     /** @param  array<string, mixed>  $parts */
