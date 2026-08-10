@@ -256,7 +256,9 @@ class MeetTaskCalendarService
         $response = $this->nylasService->updateEvent($grantId, $eventId, $payload);
 
         if ($response['success'] ?? false) {
-            $this->sendArchiveCopy($task, $grantId, $payload, 'rescheduled');
+            // No archive copy here, deliberately: the booked copy (create)
+            // gives crew@ its record, and every date/participant tweak after
+            // that was one more "rescheduled" email nobody needed.
 
             Log::channel('nylas')->info('Meet calendar event updated', [
                 'task_id' => $task->id,
@@ -611,7 +613,9 @@ class MeetTaskCalendarService
             return 'Should anything change, please reach out to reschedule.';
         }
 
-        return "Need a different time? Reschedule here: <a href=\"{$url}\">{$url}</a>";
+        // The label IS the link — a bare URL pasted after it reads as clutter
+        // in the calendar body.
+        return "Need a different time? <a href=\"{$url}\">Reschedule here</a>";
     }
 
     private function rescheduleUrl(Task $task): ?string

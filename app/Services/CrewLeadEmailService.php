@@ -633,6 +633,12 @@ TXT;
         ));
 
         $stored = [];
+        // Filename → bytes from the message's raw MIME, fetched once and only
+        // if the per-attachment endpoint fails. That endpoint rejects
+        // `shared_from` outright ("invalid path"), so for the crew@ shared
+        // mailbox every direct download 400s — the raw MIME (which the
+        // messages endpoint DOES proxy) is the only way to the bytes.
+        $mimeBytes = null;
 
         foreach (array_slice($attachments, 0, 10) as $attachment) {
             $id = (string) ($attachment['id'] ?? '');
@@ -648,7 +654,15 @@ TXT;
                     'shared_from' => $base['mailbox'],
                 ]);
 
-            if (! $response->successful() || $response->body() === '') {
+            $name = trim((string) ($attachment['filename'] ?? '')) ?: 'attachment';
+            $bytes = ($response->successful() && $response->body() !== '') ? $response->body() : null;
+
+            if ($bytes === null) {
+                $mimeBytes ??= $this->rawMimeAttachmentContents($base);
+                $bytes = $mimeBytes[$name] ?? null;
+            }
+
+            if ($bytes === null) {
                 Log::channel('nylas')->warning('Crew leads: attachment download failed', [
                     'lead_id' => $lead->id,
                     'attachment_id' => $id,
@@ -658,7 +672,6 @@ TXT;
                 continue;
             }
 
-            $name = trim((string) ($attachment['filename'] ?? '')) ?: 'attachment';
             $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
             $path = sprintf(
                 'leads/%d/%s%s',
@@ -667,17 +680,66 @@ TXT;
                 $extension !== '' ? '.' . $extension : '',
             );
 
-            \Illuminate\Support\Facades\Storage::disk('files')->put($path, $response->body());
+            \Illuminate\Support\Facades\Storage::disk('files')->put($path, $bytes);
 
             $stored[] = [
                 'path' => $path,
                 'name' => Str::limit($name, 120, ''),
                 'mime' => strtolower((string) ($attachment['content_type'] ?? 'application/octet-stream')),
-                'size' => strlen($response->body()),
+                'size' => strlen($bytes),
             ];
         }
 
         return $stored;
+    }
+
+    /**
+     * Every attachment's bytes keyed by filename, pulled from the message's
+     * base64url raw MIME. One request for the whole email — heavier than a
+     * per-attachment download, but it works through `shared_from`.
+     *
+     * @return array<string, string>
+     */
+    protected function rawMimeAttachmentContents(array $base): array
+    {
+        $response = Http::withToken(config('nylas.api_key'))
+            ->timeout(180)
+            ->retry(2, 2000, throw: false)
+            ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/') . "/v3/grants/{$base['grant_id']}/messages/{$base['nylas_message_id']}", [
+                'shared_from' => $base['mailbox'],
+                'fields' => 'raw_mime',
+            ]);
+
+        $encoded = (string) $response->json('data.raw_mime');
+
+        if (! $response->successful() || $encoded === '') {
+            return [];
+        }
+
+        $raw = base64_decode(strtr($encoded, '-_', '+/'), true) ?: base64_decode($encoded);
+
+        if (! is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        try {
+            $contents = [];
+            foreach (\Opcodes\MailParser\Message::fromString($raw)->getAttachments() as $part) {
+                $filename = trim((string) $part->getFilename());
+                if ($filename !== '') {
+                    $contents[$filename] = $part->getContent();
+                }
+            }
+
+            return $contents;
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Crew leads: raw MIME parse failed', [
+                'message_id' => $base['nylas_message_id'] ?? null,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
     }
 
     /**

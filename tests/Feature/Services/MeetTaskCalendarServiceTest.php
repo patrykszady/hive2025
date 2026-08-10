@@ -150,7 +150,7 @@ function meetInviteDescription(Task $task): string
 
 function meetInviteLinkDestination(string $description): string
 {
-    $url = Str::before(Str::after($description, 'Reschedule here: <a href="'), '"');
+    $url = Str::before(Str::after($description, 'Need a different time? <a href="'), '"');
 
     return ShortLink::where('code', Str::afterLast($url, '/'))->value('destination') ?? $url;
 }
@@ -178,7 +178,7 @@ it('links a consult invite to the lead pick-times page instead of asking people 
     $description = meetInviteDescription($fx['task']);
 
     expect($description)
-        ->toContain('Need a different time? Reschedule here:')
+        ->toContain('>Reschedule here</a>')
         ->not->toContain('please reach out to reschedule');
 
     expect(meetInviteLinkDestination($description))
@@ -191,7 +191,7 @@ it('links a non-consult meet invite to the project schedule page', function (): 
 
     $description = meetInviteDescription($fx['task']);
 
-    expect($description)->toContain('Need a different time? Reschedule here:');
+    expect($description)->toContain('>Reschedule here</a>');
 
     expect(meetInviteLinkDestination($description))
         ->toContain('/s/'.$fx['project']->fresh()->schedule_token);

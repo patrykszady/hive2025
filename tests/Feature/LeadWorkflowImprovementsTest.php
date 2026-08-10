@@ -157,6 +157,13 @@ it('nudges a lead that sat in Replied, exactly once', function () {
 
     Queue::assertPushed(\App\Jobs\SendLeadReplyJob::class, 1);
 
+    // Signs off with the same footer every company email uses.
+    Queue::assertPushed(\App\Jobs\SendLeadReplyJob::class, function ($job) {
+        $body = (fn () => $this->body)->call($job);
+
+        return str_contains($body, 'Best of Houzz') && str_contains($body, '(224) 735-4200');
+    });
+
     expect(Lead::withoutGlobalScopes()->find($fx['lead']->id)->lead_data['follow_up_sent_at'])->not->toBeNull();
 
     // Second run: the marker holds — nobody gets nagged twice.
