@@ -36,6 +36,9 @@ class SendScheduleModal extends Component
      */
     private const SERVICE_CALL_STATUS_CODE = 8;
 
+    /** Complete — leftover unscheduled work on one is a service call in practice. */
+    private const COMPLETE_STATUS_CODE = 7;
+
     /** Estimate — a pending Meet on such a project is an unscheduled consult. */
     private const ESTIMATE_STATUS_CODE = 2;
 
@@ -639,7 +642,7 @@ class SendScheduleModal extends Component
             $pendingForSection = $showProject
                 ? $pendingTasks
                 : $pendingTasks->reject(
-                    fn (Task $task): bool => (int) ($task->project?->latestStatus?->status_code ?? 0) === self::SERVICE_CALL_STATUS_CODE
+                    fn (Task $task): bool => $this->needsServiceAvailability($task)
                         || $this->isConsultInviteTask($task)
                 )->values();
 
@@ -734,6 +737,20 @@ class SendScheduleModal extends Component
     }
 
     /**
+     * Whether this pending task should ask the homeowner for availability:
+     * a Service Call project, or a Complete project's leftover work — the
+     * same rule the client schedule page uses to show its service-window
+     * picker, so the text promises exactly what the page delivers.
+     */
+    protected function needsServiceAvailability(Task $task): bool
+    {
+        $code = (int) ($task->project?->latestStatus?->status_code ?? 0);
+
+        return $code === self::SERVICE_CALL_STATUS_CODE
+            || $code === self::COMPLETE_STATUS_CODE;
+    }
+
+    /**
      * Client-facing invite shown before the task list when the client has a
      * pending Service Call task, asking them to share availability.
      */
@@ -744,7 +761,7 @@ class SendScheduleModal extends Component
         }
 
         $serviceCallTasks = $this->pendingTasks->filter(
-            fn (Task $task): bool => (int) ($task->project?->latestStatus?->status_code ?? 0) === self::SERVICE_CALL_STATUS_CODE
+            fn (Task $task): bool => $this->needsServiceAvailability($task)
         );
 
         if ($serviceCallTasks->isEmpty()) {

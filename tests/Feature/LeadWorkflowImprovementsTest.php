@@ -42,6 +42,81 @@ function leadFlowFixture(): array
     return ['vendor' => $vendor, 'user' => $user, 'lead' => $lead];
 }
 
+it('asks a fresh email lead for exactly the missing contact details, once', function () {
+    Queue::fake();
+    $fx = leadFlowFixture();
+    CompanyEmail::withoutEvents(fn () => CompanyEmail::create([
+        'email' => 'support@example.test', 'vendor_id' => $fx['vendor']->id, 'grant_id' => 'grant-1',
+    ]));
+
+    // Missing address entirely, phone present.
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), ['address' => null, 'city' => null])]);
+
+    $method = new \ReflectionMethod(CrewLeadEmailService::class, 'requestMissingInfo');
+    $method->setAccessible(true);
+    $method->invoke(app(CrewLeadEmailService::class), $fx['lead']->fresh(), ['subject' => 'Fwd: Bid Request', 'rfc_message_id' => '<abc@x>']);
+
+    Queue::assertPushed(\App\Jobs\SendLeadReplyJob::class, function ($job) {
+        $body = (fn () => $this->body)->call($job);
+        $subject = (fn () => $this->subject)->call($job);
+
+        return str_contains($body, 'the project address')
+            && ! str_contains($body, 'phone number')
+            && str_contains($body, 'Best of Houzz')
+            && $subject === 'Re: Bid Request';
+    });
+
+    expect(Lead::withoutGlobalScopes()->find($fx['lead']->id)->lead_data['missing_info_requested_at'])->not->toBeNull();
+
+    // One-shot: asking again is a no-op.
+    $method->invoke(app(CrewLeadEmailService::class), $fx['lead']->fresh(), ['subject' => 'Fwd: Bid Request']);
+    Queue::assertPushed(\App\Jobs\SendLeadReplyJob::class, 1);
+});
+
+it('does not ask when the enquiry already has address and phone', function () {
+    Queue::fake();
+    $fx = leadFlowFixture();
+    CompanyEmail::withoutEvents(fn () => CompanyEmail::create([
+        'email' => 'support@example.test', 'vendor_id' => $fx['vendor']->id, 'grant_id' => 'grant-1',
+    ]));
+
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
+        'address' => '2 Regan Blvd', 'city' => 'Barrington',
+    ])]);
+
+    $method = new \ReflectionMethod(CrewLeadEmailService::class, 'requestMissingInfo');
+    $method->setAccessible(true);
+    $method->invoke(app(CrewLeadEmailService::class), $fx['lead']->fresh(), ['subject' => 'Bid Request']);
+
+    Queue::assertNotPushed(\App\Jobs\SendLeadReplyJob::class);
+});
+
+it('mines a reply for the address the lead was missing', function () {
+    config(['services.openai.api_key' => 'test-key']);
+    \Illuminate\Support\Facades\Http::fake([
+        'api.openai.com/*' => \Illuminate\Support\Facades\Http::response([
+            'choices' => [['message' => ['content' => json_encode([
+                'address' => '2 Regan Blvd', 'city' => 'Barrington', 'state' => 'IL', 'zip' => '60010', 'phone' => null,
+            ])]]],
+        ]),
+    ]);
+
+    $fx = leadFlowFixture();
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), ['address' => null, 'city' => null])]);
+
+    $method = new \ReflectionMethod(CrewLeadEmailService::class, 'fillMissingContactFromReply');
+    $method->setAccessible(true);
+    $method->invoke(app(CrewLeadEmailService::class), $fx['lead']->fresh(), 'Our address is 2 Regan Blvd, Barrington, IL 60010. Kathy');
+
+    $data = Lead::withoutGlobalScopes()->find($fx['lead']->id)->lead_data;
+    expect($data['address'])->toBe('2 Regan Blvd')
+        ->and($data['city'])->toBe('Barrington')
+        ->and($data['state'])->toBe('IL')
+        ->and($data['zip'])->toBe('60010')
+        // The phone already on the lead is never overwritten.
+        ->and($data['phone'])->toBe('7606853015');
+});
+
 // ── Inbound replies land on the lead ────────────────────────────────────
 
 it('files an email reply onto the lead and hands the ball back to the team', function () {

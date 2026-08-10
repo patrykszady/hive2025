@@ -240,6 +240,10 @@ class CrewLeadEmailService
         try {
             $lead = $this->createLead($message, $base, $body, $verdict);
 
+            // An enquiry without an address or phone can't be scheduled —
+            // ask the sender for exactly what's missing, right away, once.
+            $this->requestMissingInfo($lead, $base);
+
             CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
                 'status' => CrewEmailIngest::STATUS_LEAD,
                 'is_lead' => true,
@@ -453,6 +457,19 @@ TXT;
                 return array_merge($fallback, ['extraction_status' => 'failed']);
             }
 
+            // The schema says string-or-null, and the model occasionally
+            // satisfies it with the STRING "null" — which then renders as
+            // the word "null" in every form field it lands in. Junk
+            // placeholders become real nulls before anything merges.
+            $data = array_map(function ($value) {
+                if (is_string($value)
+                    && in_array(mb_strtolower(trim($value)), ['null', 'none', 'n/a', 'unknown', ''], true)) {
+                    return null;
+                }
+
+                return $value;
+            }, $data);
+
             return [
                 'is_lead' => (bool) ($data['is_lead'] ?? false),
                 'confidence' => (float) ($data['confidence'] ?? 0),
@@ -605,11 +622,216 @@ TXT;
         $lead->lead_data = $data;
         $lead->saveQuietly();
 
+        // People often answer the "what's your address?" ask right here in
+        // the reply — mine it for whatever contact fields are still missing.
+        $this->fillMissingContactFromReply($lead->fresh(), $body);
+
         if ($lead->last_status?->title === 'Replied') {
             $lead->setStatus('New');
         }
 
         return $lead->id;
+    }
+
+    /**
+     * Fill contact fields the lead still lacks from a reply's text — address,
+     * city, state, zip, phone. Merge is missing-fields-only: anything already
+     * on the lead wins over the model's reading, and junk placeholders never
+     * land. Then provisioning gets a chance to build the client the lead was
+     * waiting on.
+     */
+    protected function fillMissingContactFromReply(Lead $lead, string $body): void
+    {
+        try {
+            $data = $lead->lead_data instanceof \ArrayObject ? $lead->lead_data->toArray() : (array) $lead->lead_data;
+
+            $wanted = collect(['address', 'city', 'state', 'zip', 'phone'])
+                ->filter(fn (string $key) => trim((string) ($data[$key] ?? '')) === '')
+                ->values();
+
+            if ($wanted->isEmpty()) {
+                return;
+            }
+
+            $fields = $this->extractContactFromText($body);
+
+            $dirty = false;
+            foreach ($wanted as $key) {
+                $value = trim((string) ($fields[$key] ?? ''));
+                if ($value !== '') {
+                    $data[$key] = $value;
+                    $dirty = true;
+                }
+            }
+
+            if (! $dirty) {
+                return;
+            }
+
+            $lead->lead_data = $data;
+            $lead->saveQuietly();
+
+            Log::channel('nylas')->info('Crew leads: contact fields filled from reply', [
+                'lead_id' => $lead->id,
+                'fields' => $wanted->all(),
+            ]);
+
+            app(\App\Services\LeadContactProvisioner::class)->provision($lead->fresh());
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Crew leads: reply contact mining failed', [
+                'lead_id' => $lead->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Contact fields stated in a piece of text, via the same model the
+     * classifier uses. Empty array when no key is configured or the model
+     * has nothing — never invented values.
+     *
+     * @return array<string, ?string>
+     */
+    protected function extractContactFromText(string $text): array
+    {
+        $apiKey = (string) config('services.openai.api_key');
+
+        if ($apiKey === '' || trim($text) === '') {
+            return [];
+        }
+
+        $schema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['address', 'city', 'state', 'zip', 'phone'],
+            'properties' => [
+                'address' => ['type' => ['string', 'null']],
+                'city' => ['type' => ['string', 'null']],
+                'state' => ['type' => ['string', 'null']],
+                'zip' => ['type' => ['string', 'null']],
+                'phone' => ['type' => ['string', 'null']],
+            ],
+        ];
+
+        $response = Http::withToken($apiKey)
+            ->timeout(30)
+            ->post('https://api.openai.com/v1/chat/completions', [
+                'model' => config('services.openai.model', 'gpt-4o-mini'),
+                'messages' => [
+                    ['role' => 'system', 'content' => 'Extract the postal address parts and phone number the WRITER states as their own, from their message only (ignore quoted earlier messages where possible). Use null for anything not stated — never invent or guess. street address goes in `address` without city/state/zip.'],
+                    ['role' => 'user', 'content' => Str::limit($text, 4000, '')],
+                ],
+                'response_format' => [
+                    'type' => 'json_schema',
+                    'json_schema' => ['name' => 'reply_contact', 'strict' => true, 'schema' => $schema],
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        $fields = json_decode((string) data_get($response->json(), 'choices.0.message.content'), true);
+
+        if (! is_array($fields)) {
+            return [];
+        }
+
+        return array_map(function ($value) {
+            if (is_string($value)
+                && in_array(mb_strtolower(trim($value)), ['null', 'none', 'n/a', 'unknown', ''], true)) {
+                return null;
+            }
+
+            return $value;
+        }, $fields);
+    }
+
+    /**
+     * One automatic email back to a fresh enquiry that can't be scheduled
+     * yet: name exactly what's missing (address, city, phone) and ask for it.
+     * One-shot — the marker is written before the queue runs, so a crashed
+     * worker can never re-ask.
+     */
+    protected function requestMissingInfo(Lead $lead, array $base): void
+    {
+        try {
+            $data = $lead->lead_data instanceof \ArrayObject ? $lead->lead_data->toArray() : (array) $lead->lead_data;
+
+            $email = trim((string) ($data['email'] ?? ''));
+
+            if ($email === '' || isset($data['missing_info_requested_at'])) {
+                return;
+            }
+
+            $missing = [];
+            if (trim((string) ($data['address'] ?? '')) === '') {
+                $missing[] = 'the project address';
+            } elseif (trim((string) ($data['city'] ?? '')) === '') {
+                $missing[] = 'your city or town';
+            }
+            if (trim((string) ($data['phone'] ?? '')) === '') {
+                $missing[] = 'the best phone number to reach you';
+            }
+
+            if ($missing === []) {
+                return;
+            }
+
+            $companyEmail = CompanyEmail::withoutGlobalScopes()
+                ->where('vendor_id', $lead->belongs_to_vendor_id)
+                ->whereNotNull('grant_id')
+                ->orderBy('id')
+                ->first();
+
+            if (! $companyEmail) {
+                return;
+            }
+
+            $vendor = \App\Models\Vendor::withoutGlobalScopes()->find($lead->belongs_to_vendor_id);
+            $vendorName = $vendor?->name ?? config('app.name');
+            $shortVendorName = data_get($vendor?->options, 'short_name') ?: $vendorName;
+            $firstName = strtok(trim((string) ($data['name'] ?? '')), ' ');
+
+            $list = count($missing) === 1
+                ? $missing[0]
+                : implode(' and ', [implode(', ', array_slice($missing, 0, -1)), end($missing)]);
+
+            $htmlBody = '<p>Hi'.($firstName ? ' '.e($firstName) : '').',</p>'
+                .'<p>Thank you for reaching out to '.e($vendorName).'! '
+                .'To get your consultation scheduled, could you send over '.e($list).'?</p>'
+                .\App\Support\EmailSignature::html($shortVendorName);
+
+            // Written BEFORE dispatch: losing the job costs one ask; crashing
+            // after the send must never earn the sender a second one.
+            $data['missing_info_requested_at'] = now()->toDateTimeString();
+            $lead->lead_data = $data;
+            $lead->saveQuietly();
+
+            \App\Jobs\SendLeadReplyJob::dispatch(
+                leadId: $lead->id,
+                companyEmailId: $companyEmail->id,
+                userId: (int) $lead->created_by_user_id,
+                recipients: [$email],
+                fromEmail: $companyEmail->email,
+                subject: trim((string) ($base['subject'] ?? '')) !== ''
+                    ? 'Re: '.preg_replace('/^\s*(re|fwd?|fw)\s*:\s*/i', '', (string) $base['subject'])
+                    : 'Your project enquiry — '.$vendorName,
+                body: $htmlBody,
+                emailTemplateName: 'auto-missing-info',
+                inReplyToMessageId: $base['rfc_message_id'] ?? null,
+            );
+
+            Log::channel('nylas')->info('Crew leads: asked sender for missing info', [
+                'lead_id' => $lead->id,
+                'missing' => $missing,
+            ]);
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Crew leads: missing-info request failed', [
+                'lead_id' => $lead->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
