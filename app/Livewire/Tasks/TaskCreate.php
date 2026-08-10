@@ -790,6 +790,18 @@ class TaskCreate extends Component
     {
         if ($this->form->type === 'Meet') {
             $this->syncMeetingParticipants();
+
+            // Meets are single-day: a task drafted with several days keeps
+            // only its last one when it becomes a Meet.
+            if (count($this->form->dates) > 1) {
+                $keep = collect($this->form->dates)->sort()->last();
+                $this->form->dates = [$keep];
+                $this->form->time_settings = array_intersect_key(
+                    (array) $this->form->time_settings,
+                    [$keep => true],
+                );
+            }
+            $this->previousDates = $this->form->dates;
         }
     }
 
@@ -898,6 +910,79 @@ class TaskCreate extends Component
     }
 
     /**
+     * A saved Meet with a confirmed day + time is settled with the homeowner:
+     * the Dates tab goes read-only. It reopens only when the homeowner picks
+     * new times (their availability is then fresher than the booking) — or
+     * the task is deleted and rebooked.
+     */
+    #[Computed]
+    public function meetBookingLocked(): bool
+    {
+        return $this->bookingLockedFor($this->form->dates);
+    }
+
+    /**
+     * Same rule against an explicit date set — updatedFormDates() checks the
+     * PRE-change dates, or deselecting the booked day would defeat the lock.
+     *
+     * @param  array<int, string>  $dates
+     */
+    protected function bookingLockedFor(array $dates): bool
+    {
+        $task = $this->form->task;
+
+        if ($this->form->type !== 'Meet' || ! $task?->exists || $task->trashed()) {
+            return false;
+        }
+
+        $date = $dates[0] ?? null;
+        $settings = $date ? (array) ($this->form->time_settings[$date] ?? []) : [];
+
+        if (! $date || empty($settings['use_time']) || empty($settings['start_time'])) {
+            return false;
+        }
+
+        // Homeowner re-picked their times after we booked — that's the reset.
+        $availabilityUpdated = $this->homeownerAvailability['updated'] ?? null;
+        if ($availabilityUpdated && $task->updated_at
+            && Carbon::parse($availabilityUpdated)->gt($task->updated_at)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Reflect an already-booked Meet in the two-stage picker on modal open:
+     * check the offered slot the booking sits on and highlight its exact
+     * time, so the confirmed appointment reads back instead of a blank picker.
+     */
+    protected function seedHomeownerSelection(): void
+    {
+        $this->homeownerSlotIndex = null;
+        $this->homeownerExactTime = null;
+
+        $date = $this->form->dates[0] ?? null;
+        $slots = $this->homeownerAvailability['times'] ?? [];
+
+        if (! $date || $slots === []) {
+            return;
+        }
+
+        foreach ($slots as $index => $slot) {
+            if (($slot['date'] ?? null) === $date) {
+                $this->homeownerSlotIndex = $index;
+                break;
+            }
+        }
+
+        $start = data_get($this->form->time_settings, $date . '.start_time');
+        if ($this->homeownerSlotIndex !== null && is_string($start) && $start !== '') {
+            $this->homeownerExactTime = $start;
+        }
+    }
+
+    /**
      * Selecting a homeowner slot books its day into the form (arrival at the
      * window start), then offers the exact half-hour starts — the same
      * two-stage flow the lead composer's Availability section uses, so the
@@ -907,7 +992,7 @@ class TaskCreate extends Component
     {
         $slot = $this->homeownerAvailability['times'][$index] ?? null;
 
-        if (! $slot) {
+        if (! $slot || $this->meetBookingLocked) {
             return;
         }
 
@@ -918,6 +1003,7 @@ class TaskCreate extends Component
         $window = \App\Models\Lead::parseSlotTimes((string) $slot['time']);
 
         $this->form->dates = [$date];
+        $this->previousDates = [$date];
         $this->form->time_settings = [
             $date => $window
                 ? ['use_time' => true, 'start_time' => $window[0], 'end_time' => $this->defaultEndTime($window[0])]
@@ -970,12 +1056,14 @@ class TaskCreate extends Component
             ? ($this->homeownerAvailability['times'][$this->homeownerSlotIndex] ?? null)
             : null;
 
-        if (! $slot || ! collect($this->homeownerExactOptions)->contains(fn ($o) => $o['value'] === $value)) {
+        if (! $slot || $this->meetBookingLocked
+            || ! collect($this->homeownerExactOptions)->contains(fn ($o) => $o['value'] === $value)) {
             return;
         }
 
         $this->homeownerExactTime = $value;
         $this->form->dates = [$slot['date']];
+        $this->previousDates = [$slot['date']];
         $this->form->time_settings = [
             $slot['date'] => ['use_time' => true, 'start_time' => $value, 'end_time' => $this->defaultEndTime($value)],
         ];
@@ -1114,9 +1202,42 @@ class TaskCreate extends Component
      * When dates change, auto-enable arrival time for newly added dates
      * if the main arrival time toggle is already on.
      */
+    /**
+     * The dates as of the previous calendar interaction — what lets the Meet
+     * rule below tell WHICH day a click just added.
+     *
+     * @var array<int, string>
+     */
+    public array $previousDates = [];
+
     public function updatedFormDates(): void
     {
+        // A locked booking's day is not editable from the calendar — put back
+        // whatever was there. (The calendar is also visually disabled; this is
+        // the server-side backstop.)
+        if ($this->form->dates !== $this->previousDates && $this->bookingLockedFor($this->previousDates)) {
+            $this->form->dates = $this->previousDates;
+
+            return;
+        }
+
         sort($this->form->dates);
+
+        // A Meet is one appointment on one day. The calendar stays the shared
+        // multi-select control, but picking another day MOVES the meet there
+        // instead of growing the selection.
+        if ($this->form->type === 'Meet' && count($this->form->dates) > 1) {
+            $added = array_values(array_diff($this->form->dates, $this->previousDates));
+            $keep = $added !== [] ? end($added) : end($this->form->dates);
+
+            $this->form->dates = [$keep];
+            $this->form->time_settings = array_intersect_key(
+                (array) $this->form->time_settings,
+                [$keep => true],
+            );
+        }
+
+        $this->previousDates = $this->form->dates;
 
         $hasArrivalTimeOn = collect($this->form->time_settings)->contains('use_time', true);
 
@@ -1405,6 +1526,7 @@ class TaskCreate extends Component
         $this->setupViewText('create');
         
         $this->form->dates = $date ? [Carbon::parse($date)->format('Y-m-d')] : [];
+        $this->previousDates = $this->form->dates;
 
         // Set the appropriate fields based on what was passed
         if ($project_id) {
@@ -1735,9 +1857,11 @@ class TaskCreate extends Component
         
         // Simply use the task as-is without reloading
         $this->form->setTask($task);
+        $this->previousDates = (array) $this->form->dates;
 
         if ($this->form->type === 'Meet') {
             $this->syncMeetingParticipants();
+            $this->seedHomeownerSelection();
         }
         
         $this->modal('task_create_form_modal')->show();

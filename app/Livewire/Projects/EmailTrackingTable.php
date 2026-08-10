@@ -108,7 +108,11 @@ class EmailTrackingTable extends Component
             ->get();
 
         $allEmails = $allEvents->pluck('recipient_emails')->flatten()->unique()->values()->all();
-        $usersByEmail = User::query()->whereIn('email', $allEmails)->get()->keyBy('email');
+        // Keyed lowercase: the DB matches emails case-insensitively but this
+        // PHP lookup doesn't, so a user saved as "Green2746@…" would silently
+        // miss events recorded as "green2746@…" and display as a raw address.
+        $usersByEmail = User::query()->whereIn('email', $allEmails)->get()
+            ->keyBy(fn (User $user) => strtolower((string) $user->email));
 
         // Build a set of vendor team member emails so opens from team members can be
         // excluded from display (only client opens matter).
@@ -294,7 +298,7 @@ class EmailTrackingTable extends Component
                 }
 
                 $users = collect($eventRecipientEmails)
-                    ->map(fn ($email) => $usersByEmail->get($email))
+                    ->map(fn ($email) => $usersByEmail->get(strtolower((string) $email)))
                     ->filter()
                     ->values();
 

@@ -25,35 +25,6 @@ class ClientsShow extends Component
         return auth()->user()->is_browsing_as_client;
     }
 
-    /**
-     * The consultation times this client's homeowner picked on the public
-     * scheduling page — read live off their lead so the client page answers
-     * "when can they meet?" without hunting through the leads list.
-     *
-     * @return array{lead_id: int, times: array<int, array{date: string, time: string}>, updated: ?string, preference: ?string}|null
-     */
-    #[Computed]
-    public function leadAvailability(): ?array
-    {
-        $lead = \App\Models\Lead::latestForClient($this->client);
-
-        $times = collect((array) ($lead?->lead_data['availability'] ?? []))
-            ->filter(fn ($slot) => is_array($slot) && \App\Models\Lead::slotIsBookable($slot))
-            ->values()
-            ->all();
-
-        if ($times === []) {
-            return null;
-        }
-
-        return [
-            'lead_id' => $lead->id,
-            'times' => $times,
-            'updated' => $lead->lead_data['availability_updated_at'] ?? null,
-            'preference' => $lead->lead_data['meeting_preference'] ?? null,
-        ];
-    }
-
     #[Title('Client')]
     public function render()
     {

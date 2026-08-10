@@ -394,6 +394,121 @@ it('offers the whole bookable day of exact times for an Anytime slot', function 
         ->and(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('11:30');
 });
 
+it('keeps a Meet to a single day — a second calendar click moves it', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Deck', 'client_id' => $client->id,
+        'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+
+    $dayOne = now()->addDays(3)->format('Y-m-d');
+    $dayTwo = now()->addDays(1)->format('Y-m-d'); // sorts BEFORE dayOne — the diff, not the sort, must decide
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('addTask', $project->id)
+        ->set('form.type', 'Meet')
+        ->set('form.dates', [$dayOne]);
+
+    expect($component->instance()->form->dates)->toBe([$dayOne]);
+
+    // Clicking a second (earlier) day moves the meet there.
+    $component->set('form.dates', [$dayOne, $dayTwo]);
+    expect($component->instance()->form->dates)->toBe([$dayTwo]);
+
+    // Non-Meet tasks keep multi-day selection.
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('addTask', $project->id)
+        ->set('form.dates', [$dayOne, $dayTwo]);
+    expect($component->instance()->form->dates)->toHaveCount(2);
+});
+
+it('locks a confirmed Meet booking until the homeowner re-picks times', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Deck', 'client_id' => $client->id,
+        'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+
+    $booked = now()->addDays(4)->format('Y-m-d');
+    $other = now()->addDays(5)->format('Y-m-d');
+
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
+        'availability' => [
+            ['date' => $booked, 'time' => '4-6 PM'],
+            ['date' => $other, 'time' => 'Anytime'],
+        ],
+        'availability_updated_at' => now()->subDay()->toDateTimeString(),
+    ])]);
+    $fx['lead']->forceFill(['user_id' => $fx['user']->id])->save();
+
+    // withoutEvents skipped the observer's vendor-pivot attach; the task
+    // observer's scoped Project::findOrFail needs it.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
+
+    $this->actingAs($fx['user']);
+
+    $task = \App\Models\Task::create([
+        'title' => 'GSC | Consult', 'project_id' => $project->id, 'type' => 'Meet',
+        'start_date' => $booked, 'end_date' => $booked, 'order' => 0,
+        'user_ids' => [$fx['user']->id],
+        'options' => [
+            'dates' => [$booked],
+            'time_settings' => [$booked => ['use_time' => true, 'start_time' => '16:30', 'end_time' => '17:00']],
+            'meeting_participants' => [], 'meeting_location_type' => 'in_person',
+        ],
+    ]);
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('editTask', $task->id);
+
+    // Opens read-back: the booked slot and its exact time are pre-selected...
+    $instance = $component->instance();
+    expect($instance->meetBookingLocked)->toBeTrue()
+        ->and($instance->homeownerSlotIndex)->toBe(0)
+        ->and($instance->homeownerExactTime)->toBe('16:30');
+
+    // ...and nothing about the booking can move: not the slot, not the exact
+    // time, not the calendar day.
+    $component->call('applyHomeownerTime', 1);
+    expect($component->instance()->form->dates)->toBe([$booked]);
+
+    $component->call('selectHomeownerExactTime', '17:00');
+    expect($component->instance()->homeownerExactTime)->toBe('16:30');
+
+    $component->set('form.dates', [$other]);
+    expect($component->instance()->form->dates)->toBe([$booked]);
+
+    // The homeowner re-picking times IS the reset: fresher availability
+    // unlocks the panel.
+    $task->touch();
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
+        'availability_updated_at' => now()->addMinute()->toDateTimeString(),
+    ])]);
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('editTask', $task->id);
+    expect($component->instance()->meetBookingLocked)->toBeFalse();
+
+    $component->call('applyHomeownerTime', 1);
+    expect($component->instance()->form->dates)->toBe([$other]);
+});
+
 it('mirrors team members and participants in both directions on a Meet', function () {
     $fx = leadFlowFixture();
     // fx's user pivot lacks is_employed — set it so the employees pool sees them.
