@@ -750,8 +750,9 @@ class LeadCreate extends Component
                 'client_id' => $this->client->id,
                 'address' => ($addressParts['street'] ?: $this->address) ?? '',
                 'city' => $addressParts['city'] ?: '',
-                'state' => $m[1] ?? '',
-                'zip_code' => $m[2] ?? '',
+                // Nothing stated → the client's state → the IL service area.
+                'state' => ($m[1] ?? '') ?: (trim((string) $this->client->state) ?: 'IL'),
+                'zip_code' => ($m[2] ?? '') ?: (string) ($this->client->zip_code ?? ''),
             ]);
         }
 

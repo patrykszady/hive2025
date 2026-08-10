@@ -335,9 +335,6 @@
                     {{-- Same chips, same two stages as the lead composer's
                          Availability section — select a slot, then narrow to
                          the exact half-hour. One visual language everywhere. --}}
-                    @php
-                        $meetLocked = $this->form->type === 'Meet' && $this->meetBookingLocked;
-                    @endphp
                     @if ($this->form->type === 'Meet' && ($ha = $this->homeownerAvailability))
                         <flux:field>
                             <div class="mb-2 flex items-center gap-2">
@@ -349,14 +346,7 @@
                                     <flux:badge size="sm" color="amber" icon="video-camera">asked for a video call</flux:badge>
                                 @endif
                             </div>
-                            @if ($meetLocked)
-                                <flux:description class="mb-2">
-                                    This time is confirmed with the homeowner. It changes only if they pick
-                                    new times — or delete this task and rebook.
-                                </flux:description>
-                            @else
-                                <flux:description class="mb-2">Click to select a slot for the meet.</flux:description>
-                            @endif
+                            <flux:description class="mb-2">Click to select a slot for the meet.</flux:description>
                             <div class="flex flex-wrap gap-2">
                                 @foreach ($ha['times'] as $index => $slot)
                                     @php
@@ -366,9 +356,7 @@
                                         $selected = $this->homeownerSlotIndex === $index
                                             || ($this->homeownerSlotIndex === null && (array) ($form->dates ?? []) === [$slot['date']]);
                                     @endphp
-                                    <button type="button" wire:click="applyHomeownerTime({{ $index }})"
-                                        @disabled($meetLocked)
-                                        class="{{ $meetLocked ? ($selected ? 'cursor-default' : 'cursor-default opacity-50') : 'cursor-pointer' }}">
+                                    <button type="button" wire:click="applyHomeownerTime({{ $index }})" class="cursor-pointer">
                                         <flux:badge :color="$selected ? 'indigo' : 'sky'">
                                             @if ($selected)
                                                 <flux:icon.check variant="micro" class="size-3.5" />
@@ -386,9 +374,7 @@
                                         @php
                                             $timeSelected = $this->homeownerExactTime === $option['value'];
                                         @endphp
-                                        <button type="button" wire:click="selectHomeownerExactTime('{{ $option['value'] }}')"
-                                            @disabled($meetLocked)
-                                            class="{{ $meetLocked ? ($timeSelected ? 'cursor-default' : 'cursor-default opacity-50') : 'cursor-pointer' }}">
+                                        <button type="button" wire:click="selectHomeownerExactTime('{{ $option['value'] }}')" class="cursor-pointer">
                                             <flux:badge size="sm" :color="$timeSelected ? 'green' : 'zinc'">
                                                 @if ($timeSelected)
                                                     <flux:icon.check variant="micro" class="size-3.5" />
@@ -414,7 +400,7 @@
                                 </flux:badge>
                             @endif
                         </div>
-                        <div @class(['rounded-lg border border-zinc-200 p-3 dark:border-zinc-700', 'pointer-events-none opacity-60' => $meetLocked]) x-init="$nextTick(() => { let t = $el.querySelector('ui-calendar-today'); if (t) t.behavior = 'navigate'; })">
+                        <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700" x-init="$nextTick(() => { let t = $el.querySelector('ui-calendar-today'); if (t) t.behavior = 'navigate'; })">
                             <flux:calendar
                                 multiple
                                 with-today
@@ -428,7 +414,7 @@
 
                     {{-- TIME SETTINGS --}}
                     @if(!empty($form->dates))
-                        <flux:field data-arrival-times-section @class(['mt-4', 'pointer-events-none opacity-60' => $meetLocked])>
+                        <flux:field data-arrival-times-section class="mt-4">
                             <div class="flex items-center justify-between">
                                 <flux:label>Arrival Time</flux:label>
                                 <flux:switch

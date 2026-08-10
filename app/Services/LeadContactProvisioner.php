@@ -451,7 +451,10 @@ class LeadContactProvisioner
         return Client::create([
             'address' => $parsed['address'],
             'city' => $parsed['city'],
-            'state' => $parsed['state'],
+            // Leads rarely type their state — and a stateless client breaks
+            // every later step that needs one (projects.state is NOT NULL).
+            // The service area is Illinois; out-of-state is typed explicitly.
+            'state' => $parsed['state'] ?: 'IL',
             'zip_code' => $parsed['zip_code'],
         ]);
     }
@@ -467,6 +470,12 @@ class LeadContactProvisioner
                 $client->{$field} = $parsed[$field];
                 $dirty = true;
             }
+        }
+
+        // Same default as creation: never leave a reused client stateless.
+        if (empty($client->state)) {
+            $client->state = 'IL';
+            $dirty = true;
         }
         if ($dirty) {
             $client->save();

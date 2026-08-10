@@ -910,49 +910,6 @@ class TaskCreate extends Component
     }
 
     /**
-     * A saved Meet with a confirmed day + time is settled with the homeowner:
-     * the Dates tab goes read-only. It reopens only when the homeowner picks
-     * new times (their availability is then fresher than the booking) — or
-     * the task is deleted and rebooked.
-     */
-    #[Computed]
-    public function meetBookingLocked(): bool
-    {
-        return $this->bookingLockedFor($this->form->dates);
-    }
-
-    /**
-     * Same rule against an explicit date set — updatedFormDates() checks the
-     * PRE-change dates, or deselecting the booked day would defeat the lock.
-     *
-     * @param  array<int, string>  $dates
-     */
-    protected function bookingLockedFor(array $dates): bool
-    {
-        $task = $this->form->task;
-
-        if ($this->form->type !== 'Meet' || ! $task?->exists || $task->trashed()) {
-            return false;
-        }
-
-        $date = $dates[0] ?? null;
-        $settings = $date ? (array) ($this->form->time_settings[$date] ?? []) : [];
-
-        if (! $date || empty($settings['use_time']) || empty($settings['start_time'])) {
-            return false;
-        }
-
-        // Homeowner re-picked their times after we booked — that's the reset.
-        $availabilityUpdated = $this->homeownerAvailability['updated'] ?? null;
-        if ($availabilityUpdated && $task->updated_at
-            && Carbon::parse($availabilityUpdated)->gt($task->updated_at)) {
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
      * Reflect an already-booked Meet in the two-stage picker on modal open:
      * check the offered slot the booking sits on and highlight its exact
      * time, so the confirmed appointment reads back instead of a blank picker.
@@ -992,7 +949,7 @@ class TaskCreate extends Component
     {
         $slot = $this->homeownerAvailability['times'][$index] ?? null;
 
-        if (! $slot || $this->meetBookingLocked) {
+        if (! $slot) {
             return;
         }
 
@@ -1056,8 +1013,7 @@ class TaskCreate extends Component
             ? ($this->homeownerAvailability['times'][$this->homeownerSlotIndex] ?? null)
             : null;
 
-        if (! $slot || $this->meetBookingLocked
-            || ! collect($this->homeownerExactOptions)->contains(fn ($o) => $o['value'] === $value)) {
+        if (! $slot || ! collect($this->homeownerExactOptions)->contains(fn ($o) => $o['value'] === $value)) {
             return;
         }
 
@@ -1212,15 +1168,6 @@ class TaskCreate extends Component
 
     public function updatedFormDates(): void
     {
-        // A locked booking's day is not editable from the calendar — put back
-        // whatever was there. (The calendar is also visually disabled; this is
-        // the server-side backstop.)
-        if ($this->form->dates !== $this->previousDates && $this->bookingLockedFor($this->previousDates)) {
-            $this->form->dates = $this->previousDates;
-
-            return;
-        }
-
         sort($this->form->dates);
 
         // A Meet is one appointment on one day. The calendar stays the shared

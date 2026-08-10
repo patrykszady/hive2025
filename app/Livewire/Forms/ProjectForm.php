@@ -114,8 +114,11 @@ class ProjectForm extends Form
             'address' => $this->component->address_1,
             'address_2' => $this->component->address_2,
             'city' => $this->component->city,
-            'state' => $this->component->state,
-            'zip_code' => $this->component->zip_code,
+            // projects.state is NOT NULL — a client saved stateless (old
+            // lead imports) must not crash project creation. IL is the
+            // service area default.
+            'state' => trim((string) $this->component->state) ?: 'IL',
+            'zip_code' => $this->component->zip_code ?? '',
         ]);
         // ProjectStatus with Estimate (code 2) is created automatically via ProjectObserver
     }

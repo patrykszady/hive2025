@@ -430,7 +430,7 @@ it('keeps a Meet to a single day — a second calendar click moves it', function
     expect($component->instance()->form->dates)->toHaveCount(2);
 });
 
-it('locks a confirmed Meet booking until the homeowner re-picks times', function () {
+it('lets a booked Meet move to another day and time, always as a single selection', function () {
     $fx = leadFlowFixture();
 
     $client = \App\Models\Client::factory()->create();
@@ -476,37 +476,20 @@ it('locks a confirmed Meet booking until the homeowner re-picks times', function
         ->test(\App\Livewire\Tasks\TaskCreate::class)
         ->call('editTask', $task->id);
 
-    // Opens read-back: the booked slot and its exact time are pre-selected...
+    // Opens read-back: the booked slot and its exact time are pre-selected.
     $instance = $component->instance();
-    expect($instance->meetBookingLocked)->toBeTrue()
-        ->and($instance->homeownerSlotIndex)->toBe(0)
+    expect($instance->homeownerSlotIndex)->toBe(0)
         ->and($instance->homeownerExactTime)->toBe('16:30');
 
-    // ...and nothing about the booking can move: not the slot, not the exact
-    // time, not the calendar day.
-    $component->call('applyHomeownerTime', 1);
-    expect($component->instance()->form->dates)->toBe([$booked]);
-
-    $component->call('selectHomeownerExactTime', '17:00');
-    expect($component->instance()->homeownerExactTime)->toBe('16:30');
-
-    $component->set('form.dates', [$other]);
-    expect($component->instance()->form->dates)->toBe([$booked]);
-
-    // The homeowner re-picking times IS the reset: fresher availability
-    // unlocks the panel.
-    $task->touch();
-    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
-        'availability_updated_at' => now()->addMinute()->toDateTimeString(),
-    ])]);
-
-    $component = Livewire::actingAs($fx['user'])
-        ->test(\App\Livewire\Tasks\TaskCreate::class)
-        ->call('editTask', $task->id);
-    expect($component->instance()->meetBookingLocked)->toBeFalse();
-
+    // Picking the other offered slot MOVES the meet — one day, one time.
     $component->call('applyHomeownerTime', 1);
     expect($component->instance()->form->dates)->toBe([$other]);
+
+    // A calendar click also moves it, never accumulates a second day —
+    // and never carries more than one day's time settings along.
+    $component->set('form.dates', [$other, $booked]);
+    expect($component->instance()->form->dates)->toBe([$booked])
+        ->and(count($component->instance()->form->time_settings))->toBeLessThanOrEqual(1);
 });
 
 it('mirrors team members and participants in both directions on a Meet', function () {
