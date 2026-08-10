@@ -7,6 +7,26 @@
             {{-- PASSKEYS --}}
             <livewire:users.passkeys :user="$user" wire:key="user-passkeys-{{ $user->id }}" />
 
+            {{-- CLIENTS this user is linked to — one person can sit on several
+                 client records (their own household, a property they manage),
+                 so name them all here. Internal chrome: hidden from clients
+                 browsing their own profile. --}}
+            @if (! auth()->user()->is_browsing_as_client && $user->clients->isNotEmpty())
+                <x-island-card heading="Clients">
+                    <div class="space-y-2">
+                        @foreach ($user->clients as $client)
+                            <a href="{{ route('clients.show', $client) }}" wire:navigate
+                                class="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">
+                                <flux:text class="truncate font-medium text-zinc-800 dark:text-zinc-200">{{ $client->name }}</flux:text>
+                                <flux:text class="shrink-0 text-xs text-zinc-500">
+                                    {{ $client->address }}{{ $client->city ? ' | ' . $client->city : '' }}
+                                </flux:text>
+                            </a>
+                        @endforeach
+                    </div>
+                </x-island-card>
+            @endif
+
             {{-- VENDOR DETAILS --}}
             {{-- @if($user->this_vendor)
                  <livewire:vendors.vendor-details :vendor="$user->vendor" :expanded="true">
