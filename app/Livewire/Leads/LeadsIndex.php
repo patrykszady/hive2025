@@ -36,6 +36,19 @@ class LeadsIndex extends Component
     public array $selected = [];
 
     /**
+     * Deep link from a notification: /leads?lead={id} opens that lead's
+     * modal on arrival, instead of leaving the visitor to hunt the row.
+     */
+    public function mount(): void
+    {
+        $leadId = (int) request()->query('lead');
+
+        if ($leadId > 0 && Lead::whereKey($leadId)->exists()) {
+            $this->dispatch('editLead', lead: $leadId)->to('leads.lead-create');
+        }
+    }
+
+    /**
      * How many skeleton rows the loading placeholder should paint — the card's
      * page size, so the skeleton is the same height as the table that replaces
      * it (no jump on load). Callers that can cheaply COUNT the real rows pass

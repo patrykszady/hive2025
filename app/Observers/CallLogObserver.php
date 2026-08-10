@@ -58,7 +58,9 @@ class CallLogObserver
                 'type' => $isVoicemail ? 'voicemail_received' : 'missed_call',
                 'title' => $title,
                 'body' => $body,
-                'action_url' => route('notifications.index'),
+                // Straight to the call — the calls tab seeds its selection
+                // from ?callId.
+                'action_url' => '/messages?activeTab=calls&callId='.$callLog->id,
                 'data' => [
                     'call_log_id' => $callLog->id,
                     'from_number' => $callLog->from_number,

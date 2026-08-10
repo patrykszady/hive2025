@@ -137,6 +137,12 @@ class MeetTaskCalendarService
                 ]);
             }
 
+            // Archive copy to the company mailbox (crew@) — the same "we have
+            // a copy" treatment payment and estimate emails get. A plain
+            // email, deliberately NOT a participant: a mailbox must never
+            // appear as an attendee on the homeowner's invite.
+            $this->sendArchiveCopy($task, $grantId, $payload, 'booked');
+
             Log::channel('nylas')->info('Meet calendar event created', [
                 'task_id' => $task->id,
                 'grant_id' => $grantId,
@@ -250,6 +256,8 @@ class MeetTaskCalendarService
         $response = $this->nylasService->updateEvent($grantId, $eventId, $payload);
 
         if ($response['success'] ?? false) {
+            $this->sendArchiveCopy($task, $grantId, $payload, 'rescheduled');
+
             Log::channel('nylas')->info('Meet calendar event updated', [
                 'task_id' => $task->id,
                 'event_id' => $eventId,
@@ -282,6 +290,39 @@ class MeetTaskCalendarService
             'status' => $status,
             'error' => $response['error'] ?? $response['body'] ?? null,
         ]);
+    }
+
+    /**
+     * A plain-email copy of the invite to the owning company's mailbox
+     * (crew@) so the consult booking is archived like payment and estimate
+     * emails are. Never a participant — an archive, not an attendee. Failure
+     * is logged and swallowed: the invite itself already succeeded.
+     */
+    private function sendArchiveCopy(Task $task, string $grantId, array $payload, string $verb): void
+    {
+        $archiveEmail = trim((string) ($this->resolveSignatureVendor($task)?->business_email ?? ''));
+
+        if ($archiveEmail === '') {
+            return;
+        }
+
+        $body = nl2br((string) ($payload['description'] ?? ''));
+        $location = trim((string) ($payload['location'] ?? ''));
+
+        $response = $this->nylasService->sendEmail($grantId, [
+            'to' => [['email' => $archiveEmail]],
+            'subject' => 'Consult '.$verb.': '.($payload['title'] ?? 'Meet'),
+            'body' => '<p>Calendar invite '.$verb.' for this consult.</p>'
+                .($location !== '' ? '<p>Location: '.e($location).'</p>' : '')
+                .'<hr><p>'.$body.'</p>',
+        ]);
+
+        if (! ($response['success'] ?? false)) {
+            Log::channel('nylas')->warning('Meet archive copy to company mailbox failed', [
+                'task_id' => $task->id,
+                'archive_email' => $archiveEmail,
+            ]);
+        }
     }
 
     private function resolveGrantId(Task $task, ?int $actorUserId = null): ?string

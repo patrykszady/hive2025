@@ -393,3 +393,83 @@ it('mirrors team members and participants in both directions on a Meet', functio
     expect($component->instance()->form->meeting_participants)->not->toContain(strtolower($fx['user']->email))
         ->and($component->instance()->form->user_ids)->not->toContain($fx['user']->id);
 });
+
+it('refreshes the sidebar badge when notifications are cleared', function () {
+    $fx = leadFlowFixture();
+
+    \App\Models\AppNotification::create([
+        'user_id' => $fx['user']->id, 'type' => 'lead_created',
+        'title' => 'New Lead', 'body' => 'x',
+    ]);
+
+    Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Notifications\NotificationIndex::class)
+        ->call('markAllAsRead')
+        // The sidebar badge listens for this event — it is what makes the
+        // count clear without a page reload.
+        ->assertDispatched('notification-read');
+
+    expect(\App\Models\AppNotification::where('user_id', $fx['user']->id)->whereNull('read_at')->count())->toBe(0);
+});
+
+it('groups identical notifications per day with a count', function () {
+    $fx = leadFlowFixture();
+
+    // Two identical missed calls today + one different + one yesterday.
+    foreach (range(1, 2) as $i) {
+        \App\Models\AppNotification::create([
+            'user_id' => $fx['user']->id, 'type' => 'missed_call',
+            'title' => 'Missed call from Mark Brodson', 'body' => 'No one was available to answer.',
+        ]);
+    }
+    \App\Models\AppNotification::create([
+        'user_id' => $fx['user']->id, 'type' => 'lead_created', 'title' => 'New Lead: Kathy', 'body' => 'x',
+    ]);
+    \App\Models\AppNotification::create([
+        'user_id' => $fx['user']->id, 'type' => 'missed_call',
+        'title' => 'Missed call from Mark Brodson', 'body' => 'No one was available to answer.',
+    ])->forceFill(['created_at' => now()->subDay()])->save();
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Notifications\NotificationIndex::class);
+
+    $grouped = $component->instance()->grouped;
+
+    // Two day buckets, newest first.
+    expect($grouped->keys()->all())->toBe([now()->toDateString(), now()->subDay()->toDateString()]);
+
+    $today = $grouped[now()->toDateString()];
+    $missed = $today->firstWhere(fn ($e) => $e['notification']->type === 'missed_call');
+
+    // Today's twin missed calls collapse to one ×2 row; yesterday's stays its own.
+    expect($today)->toHaveCount(2)
+        ->and($missed['count'])->toBe(2)
+        ->and($grouped[now()->subDay()->toDateString()])->toHaveCount(1);
+
+    // Reading the group clears BOTH copies and pings the sidebar badge.
+    $component->call('markGroupAsRead', $missed['ids'])
+        ->assertDispatched('notification-read');
+
+    expect(\App\Models\AppNotification::whereIn('id', $missed['ids'])->whereNull('read_at')->count())->toBe(0);
+});
+
+it('opens the lead modal when arriving from a notification deep link', function () {
+    $fx = leadFlowFixture();
+
+    Livewire::actingAs($fx['user'])
+        ->withQueryParams(['lead' => $fx['lead']->id])
+        ->test(\App\Livewire\Leads\LeadsIndex::class)
+        ->assertDispatchedTo('leads.lead-create', 'editLead', lead: $fx['lead']->id);
+
+    // A forged id from another vendor dispatches nothing (LeadScope).
+    $foreign = Vendor::factory()->create();
+    $lead = Lead::withoutEvents(fn () => Lead::create([
+        'date' => now(), 'origin' => 'Email', 'lead_data' => ['name' => 'X'],
+        'belongs_to_vendor_id' => $foreign->id, 'created_by_user_id' => $fx['user']->id,
+    ]));
+
+    Livewire::actingAs($fx['user'])
+        ->withQueryParams(['lead' => $lead->id])
+        ->test(\App\Livewire\Leads\LeadsIndex::class)
+        ->assertNotDispatched('editLead');
+});

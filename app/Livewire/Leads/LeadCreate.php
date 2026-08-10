@@ -1169,7 +1169,7 @@ class LeadCreate extends Component
         // Replying moves a New lead to Replied (never downgrades a lead that
         // already progressed — Won/Lost/etc stay put). Runs BEFORE bookConsult
         // so a booked consult's MarkClientLeadWon job (which only converts New
-        // leads) can't race this into Won.
+        // leads) can't race this into Won — booking sets Won explicitly below.
         if (($this->lead->last_status?->title ?? 'New') === 'New') {
             $this->lead->setStatus('Replied');
             $this->lead->unsetRelation('last_status');
@@ -1178,6 +1178,16 @@ class LeadCreate extends Component
         }
 
         $booked = $this->bookConsult();
+
+        // A booked consult is a converted lead: the client now has a project
+        // and a Meet task on the calendar. Move it out of New/Replied so the
+        // Replied filter keeps showing only leads still waiting on us. Lost /
+        // Not a Fit are someone's decision — never resurrect those here.
+        if ($booked && in_array($this->lead->last_status?->title ?? 'New', ['New', 'Replied'], true)) {
+            $this->lead->setStatus('Won');
+            $this->lead->unsetRelation('last_status');
+            $this->lead_status = 'Won';
+        }
 
         $this->modal('lead_form_modal')->close();
         $this->dispatch('refreshComponent')->to('leads.leads-index');

@@ -1332,6 +1332,32 @@
 @script
 <script>
     const container = $wire.$el.querySelector('.sms-messages');
+
+    // Deep link from a notification: ?messageId= scrolls the conversation to
+    // that exact text and flashes it. Retries briefly — bubbles render async
+    // behind the thread swap. The param is consumed (removed from the URL) so
+    // reopening the thread later doesn't jump again.
+    (() => {
+        const url = new URL(window.location.href);
+        const target = url.searchParams.get('messageId');
+        if (!target || !container) return;
+
+        let tries = 0;
+        const seek = () => {
+            const el = container.querySelector(`[data-msg-id="${CSS.escape(target)}"]`);
+            if (el) {
+                el.scrollIntoView({ block: 'center' });
+                el.classList.add('rounded-lg', 'ring-2', 'ring-sky-400', 'transition');
+                setTimeout(() => el.classList.remove('ring-2', 'ring-sky-400'), 2500);
+                url.searchParams.delete('messageId');
+                window.history.replaceState({}, '', url);
+            } else if (++tries < 15) {
+                setTimeout(seek, 300);
+            }
+        };
+        seek();
+    })();
+
     if (container) {
         // flex-col-reverse: scrollTop 0 = bottom (newest). Ensure we start there.
         container.scrollTop = 0;

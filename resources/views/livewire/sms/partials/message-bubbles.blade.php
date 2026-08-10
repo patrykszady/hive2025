@@ -122,7 +122,7 @@
         $languageBadge = $msg->language_badge ?? null;
         $canToggleOriginal = (bool) ($msg->show_original_toggle ?? false);
     @endphp
-    <div @if ($interactive)wire:key="msg-{{ $msg->id }}"@endif class="flex items-center group"
+    <div @if ($interactive)wire:key="msg-{{ $msg->id }}"@endif data-msg-id="{{ $msg->id }}" class="flex items-center group"
         x-data="{ showOriginal: false, showActions: false, isTouch: window.matchMedia('(hover: none)').matches }"
         x-on:mouseenter="if (!isTouch) { $dispatch('sms-message-actions-focus', { id: {{ $msg->id }} }); showActions = true }"
         x-on:mouseleave="if (!isTouch) { showActions = false }"

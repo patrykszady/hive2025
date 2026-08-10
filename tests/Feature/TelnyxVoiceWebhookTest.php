@@ -2463,3 +2463,88 @@ it('answers spam-flagged calls and routes them through the voicemail IVR instead
             && str_contains((string) ($r['payload'] ?? ''), 'identified as spam');
     });
 });
+
+it('never offers press-1 after hours, and refuses it server-side even if pressed', function () {
+    $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+    // A KNOWN caller — the profile that normally gets the press-1 retry menu.
+    $known = User::factory()->create(['first_name' => 'Mark', 'cell_phone' => '8475551234']);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+        'business_hours_start' => '09:00',
+        'business_hours_end' => '17:00',
+        'business_hours_days' => [1, 2, 3, 4, 5],
+    ]]);
+
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::create(2025, 1, 4, 10, 0, 0, 'America/Chicago'));
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'ah-known-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'from_number' => '+18475551234',
+        'user_id' => $known->id,
+    ]);
+
+    // After-hours voicemail for a KNOWN caller: menu must be press-2 only.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'ah-known-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'welcome_or_ring',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+18475551234',
+                    'caller_name' => 'Mark',
+                    'caller_user_id' => $known->id,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'ah-known-cc/actions/gather_using_speak')) {
+            return false;
+        }
+
+        return ($request->data()['valid_digits'] ?? null) === '2';
+    });
+
+    // Even a stale press-1 (menu offered at 16:59, pressed at 17:01) must not
+    // ring phones: the speak-ended retry hook re-checks the clock.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'ah-known-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'ivr_retry_connect',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+18475551234',
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // No admin leg dialed...
+    Http::assertNotSent(function ($request) {
+        return str_ends_with($request->url(), '/v2/calls') && $request->method() === 'POST';
+    });
+
+    // ...the caller was sent to the voicemail greeting instead.
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'ah-known-cc/actions/speak') || $request->method() !== 'POST') {
+            return false;
+        }
+
+        $state = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+
+        return ($state['action'] ?? null) === 'voicemail_prompt_done';
+    });
+
+    \Carbon\Carbon::setTestNow();
+});

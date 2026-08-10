@@ -139,8 +139,8 @@ it('creates the project and the Meet task when sending with a slot and exact tim
         // A consult is a 30-minute block: the window's start plus half an hour.
         ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.start_time'))->toBe('14:00')
         ->and(data_get($task->options, 'time_settings.'.now()->addDays(2)->format('Y-m-d').'.end_time'))->toBe('14:30')
-        // Sending the reply moves the New lead to Replied.
-        ->and($fx['lead']->fresh()->last_status->title)->toBe('Replied');
+        // Booking the consult converts the lead: New -> Replied -> Won.
+        ->and($fx['lead']->fresh()->last_status->title)->toBe('Won');
 });
 
 it('locks a Replied lead: no composer, no delete', function () {

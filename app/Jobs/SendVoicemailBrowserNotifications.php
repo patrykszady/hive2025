@@ -50,7 +50,9 @@ class SendVoicemailBrowserNotifications implements ShouldQueue
 
         $title = "New Voicemail from {$callerLabel}";
         $body = 'Tap to listen to the recording.';
-        $actionUrl = route('notifications.index');
+        // Straight to the call itself — the calls tab seeds its selection from
+        // ?callId, so the recording is one tap away.
+        $actionUrl = '/messages?activeTab=calls&callId='.$callLog->id;
 
         // ── In-app notifications (powers /notifications view) ──
         foreach ($recipientUserIds as $userId) {

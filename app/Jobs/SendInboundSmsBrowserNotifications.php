@@ -44,8 +44,9 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
         // ── In-app notifications (powers /notifications view) ──
         // Notify every user who has at least one push-subscription opted in for inbound SMS.
         $recipientUserIds = $enabledSubscriptions->pluck('user_id')->unique()->values();
+        // threadId opens the conversation; messageId scrolls it to THIS text.
         $actionUrl = $message->thread_id
-            ? "/messages?threadId={$message->thread_id}"
+            ? "/messages?threadId={$message->thread_id}&messageId={$message->id}"
             : '/messages';
 
         foreach ($recipientUserIds as $userId) {

@@ -439,7 +439,7 @@ class PickTimes extends Component
                 'type' => 'lead_times_picked',
                 'title' => "{$name} picked consultation times",
                 'body' => trim("{$summary}.{$format}"),
-                'action_url' => route('leads.index'),
+                'action_url' => route('leads.index', ['lead' => $lead->id]),
                 'data' => [
                     'lead_id' => $lead->id,
                 ],

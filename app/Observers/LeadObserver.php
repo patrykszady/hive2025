@@ -37,7 +37,7 @@ class LeadObserver
                 'type' => 'lead_created',
                 'title' => "New Lead: {$name}",
                 'body' => trim("New lead{$origin}.".($address !== '' ? " {$address}" : '')),
-                'action_url' => route('leads.index'),
+                'action_url' => route('leads.index', ['lead' => $lead->id]),
                 'data' => [
                     'lead_id' => $lead->id,
                 ],

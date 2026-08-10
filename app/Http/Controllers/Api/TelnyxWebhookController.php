@@ -2277,6 +2277,35 @@ class TelnyxWebhookController extends Controller
             $callLogId = $clientState['call_log_id'] ?? null;
             $originalCaller = $clientState['original_caller'] ?? null;
 
+            // Server-side backstop for the after-hours rule: the menu no
+            // longer OFFERS press 1 after hours, but a call that straddles
+            // the cutoff can still arrive here — and phones must not ring
+            // outside business hours. Straight to the voicemail greeting.
+            $retryVendor = Vendor::find(1);
+            if ($retryVendor && ! $retryVendor->isWithinBusinessHours()) {
+                Log::channel('telnyx')->info('IVR retry pressed after hours — routing to voicemail instead of ringing admins', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+
+                $greetingTemplate = data_get($retryVendor->options ?? [], 'voicemail_greeting')
+                    ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_GREETING;
+                $this->sendCallCommand($callControlId, 'speak', [
+                    'payload' => $this->renderPrompt($greetingTemplate, [
+                        '{name}' => '',
+                        '{company}' => data_get($retryVendor->options ?? [], 'short_name') ?: ($retryVendor->business_name ?? 'us'),
+                        '{greeting}' => $this->buildTimeGreeting(),
+                    ]),
+                    ...$this->ttsVoiceParams(),
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'voicemail_prompt_done',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
+
             Log::channel('telnyx')->info('IVR retry — playing ringback and re-dialing admins', [
                 'call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
@@ -3157,8 +3186,13 @@ class TelnyxWebhookController extends Controller
             $isKnownCaller = true;
         }
 
-        // Known callers get full IVR (press 1 re-dial + press 2 SMS), unknown get press 2 + voicemail only
-        if ($isKnownCaller) {
+        // Known callers get full IVR (press 1 re-dial + press 2 SMS), unknown
+        // get press 2 + voicemail only. After hours NOBODY gets press 1 — the
+        // whole point of the after-hours route is that phones don't ring, and
+        // offering "press 1 to connect" would ring them anyway.
+        $afterHours = $vendor && ! $vendor->isWithinBusinessHours();
+
+        if ($isKnownCaller && ! $afterHours) {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message')
                 ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL;
             $validDigits = '12';

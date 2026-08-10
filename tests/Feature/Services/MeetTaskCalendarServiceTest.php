@@ -281,6 +281,7 @@ function meetRecipientFixture(array $participants): array
         'https://api.us.nylas.com/v3/grants/*/events*' => Http::response([
             'data' => ['id' => 'evt_123'],
         ], 200),
+        'https://api.us.nylas.com/v3/grants/*/messages/send*' => Http::response(['data' => ['id' => 'msg_1']], 200),
     ]);
 
     return ['task' => $task, 'vendor' => $vendor];
@@ -326,4 +327,34 @@ it('falls back to the company contacts when a Meet lists nobody', function (): v
     // company mailbox than an invite with no one on it. The vendor's own
     // generic address stays out.
     expect(sentInviteParticipants())->toBe(['greg@gs.test', 'patryk@gs.test']);
+});
+
+it('archives a copy of the invite to the company mailbox', function (): void {
+    $fx = meetRecipientFixture(['patryk@gs.test', 'homeowner@example.test']);
+
+    app(MeetTaskCalendarService::class)->createMeetEvent($fx['task']);
+
+    // The archive is an EMAIL to crew@'s stand-in (business_email), never a
+    // participant on the event itself.
+    Http::assertSent(function ($request): bool {
+        if (! str_contains($request->url(), '/messages/send')) {
+            return false;
+        }
+
+        $to = collect($request->data()['to'] ?? [])->pluck('email')->all();
+
+        return $to === ['crew@gs.test']
+            && str_contains((string) $request->data()['subject'], 'Consult booked');
+    });
+
+    // And the event's guest list stayed exactly the participants.
+    Http::assertSent(function ($request): bool {
+        if (! str_contains($request->url(), '/events')) {
+            return false;
+        }
+
+        $emails = collect($request->data()['participants'] ?? [])->pluck('email')->all();
+
+        return ! in_array('crew@gs.test', $emails, true);
+    });
 });
