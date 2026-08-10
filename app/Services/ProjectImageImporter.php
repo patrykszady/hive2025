@@ -40,6 +40,7 @@ class ProjectImageImporter
         ?int $takenByUserId = null,
         ?string $takenByName = null,
         bool $deferProcessing = false,
+        ?int $sortOrder = null,
     ): ProjectTimelapseFrame {
         // Read time and location BEFORE touching the pixels — orientate/
         // encode strips EXIF, so this is the only moment either exists.
@@ -83,7 +84,7 @@ class ProjectImageImporter
             'latitude' => $gps['lat'] ?? null,
             'longitude' => $gps['lng'] ?? null,
             'location_accuracy' => $gps['accuracy'] ?? null,
-            'sort_order' => ((int) $timelapse->frames()->max('sort_order')) + 1,
+            'sort_order' => $sortOrder ?? ((int) $timelapse->frames()->max('sort_order')) + 1,
         ]);
 
         if ($deferProcessing) {

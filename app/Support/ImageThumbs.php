@@ -61,6 +61,58 @@ class ImageThumbs
         }
     }
 
+    /** Longest edge of a micro preview — a handful of pixels, enough to blur up from. */
+    public const MICRO_EDGE = 24;
+
+    /**
+     * The cached thumbnail file for this key, if one was already built —
+     * lets micro previews derive from the 480px thumb instead of decoding
+     * the full photo again.
+     */
+    public static function thumbFileFor(string $key): ?string
+    {
+        $file = self::directory().'/'.sha1($key).'.jpg';
+
+        return is_file($file) ? $file : null;
+    }
+
+    /**
+     * A base64 data-URI micro preview (~24px) for these bytes, cached on
+     * disk like the thumbnails. Inlined into the page under each grid tile:
+     * blurred up, it gives the real image something to fade in over instead
+     * of popping out of a blank square. Null when the source can't be read.
+     */
+    public static function microDataUri(string $key, callable $contents): ?string
+    {
+        $file = self::directory().'/micro/'.sha1($key).'.jpg';
+
+        if (! is_file($file)) {
+            try {
+                File::ensureDirectoryExists(dirname($file));
+
+                $image = Image::make($contents());
+                $image->orientate();
+                $image->resize(self::MICRO_EDGE, self::MICRO_EDGE, function ($constraint) {
+                    $constraint->aspectRatio();
+                    $constraint->upsize();
+                });
+
+                $image->save($file, 40, 'jpg');
+                $image->destroy();
+            } catch (\Throwable $e) {
+                report($e);
+
+                return null;
+            }
+        }
+
+        $bytes = @file_get_contents($file);
+
+        return $bytes === false || $bytes === ''
+            ? null
+            : 'data:image/jpeg;base64,'.base64_encode($bytes);
+    }
+
     /** Headers for a thumbnail response — they never change once written. */
     public static function headers(): array
     {

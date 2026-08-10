@@ -163,7 +163,9 @@
                                 }
 
                                 if ($thread->client) {
-                                    $clientLabel = trim((string) $thread->client->name);
+                                    // Participant-aware: Emily's 1:1 thread says
+                                    // "Emily Jordan", not the whole household.
+                                    $clientLabel = trim((string) $this->clientDisplayNameForThread($thread));
                                     if ($clientLabel !== '' && ! $participantLabels->contains($clientLabel)) {
                                         $participantLabels->push($clientLabel);
                                     }

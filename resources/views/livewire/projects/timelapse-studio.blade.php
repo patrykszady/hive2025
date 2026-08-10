@@ -305,11 +305,16 @@
                 <flux:button variant="ghost" size="xs" icon="arrow-up-tray" x-on:click="up = !up">
                     Upload a photo instead
                 </flux:button>
-                <form wire:submit="uploadFile" x-show="up" x-cloak class="flex items-end gap-2 pt-2">
-                    <div class="flex-1">
-                        <flux:input type="file" wire:model="file" accept="image/jpeg,image/png" />
+                <form wire:submit="uploadFile" x-show="up" x-cloak class="space-y-2 pt-2">
+                    <div class="flex items-end gap-2">
+                        <div class="flex-1">
+                            <flux:input type="file" wire:model="file" accept="image/jpeg,image/png" />
+                        </div>
+                        <flux:button type="submit" wire:loading.attr="disabled" wire:target="file, uploadFile">Add</flux:button>
                     </div>
-                    <flux:button type="submit" wire:loading.attr="disabled" wire:target="file, uploadFile">Add</flux:button>
+                    @if ($this->collection?->isTimelapse())
+                        <flux:checkbox wire:model="uploadAsFirst" label="Make this the first frame" />
+                    @endif
                 </form>
             </div>
         </x-island-card>
@@ -374,7 +379,9 @@
                     @foreach ($this->messageImages as $index => $image)
                         <button type="button"
                             wire:key="msg-image-{{ $index }}"
+                            @if ($index >= 8) x-cloak @endif
                             x-show="show({{ $index }})"
+                            x-transition.duration.200ms
                             x-on:click="$store.picsel.on
                                 ? $store.picsel.toggleMsg(@js($image['raw']))
                                 : $dispatch('open-lightbox', { frames: lb, index: {{ $index }} })"
@@ -386,10 +393,29 @@
                                  answers every image with login HTML, and
                                  removing on error would silently empty the
                                  whole grid while the count still said 45. --}}
-                            <img src="{{ $image['thumb'] }}" alt=""
-                                x-data="{ tries: 0 }"
+                            {{-- Blur-up: a tiny inlined preview sits blurred
+                                 under the real thumb, which fades in over it
+                                 once loaded — no flash of blank-then-photo. --}}
+                            @if ($image['micro'])
+                                <img aria-hidden="true" src="{{ $image['micro'] }}" alt=""
+                                    class="absolute inset-0 h-full w-full object-cover"
+                                    style="filter: blur(10px); transform: scale(1.08)" />
+                            @endif
+                            {{-- Tiles past the first row carry no src until
+                                 "Show more" reveals them — 56 thumbs fetching
+                                 on page load is what made this card heavy.
+                                 8 = the grid's widest column count, so the
+                                 whole first row is always eager. --}}
+                            {{-- `keep` goes true on first reveal and stays: yanking
+                                 src while the hide transition still shows the tile
+                                 paints a broken-image glyph for a split second. --}}
+                            <img @if ($index < 8) src="{{ $image['thumb'] }}" @else x-effect="keep = keep || show({{ $index }})" x-bind:src="keep ? @js($image['thumb']) : null" @endif alt=""
+                                x-data="{ tries: 0, loaded: false, keep: false }"
+                                x-init="loaded = $el.complete && $el.naturalWidth > 0"
+                                x-on:load="loaded = true"
+                                x-bind:style="loaded ? 'opacity:1;transition:opacity .35s' : 'opacity:0'"
                                 x-on:error="if (tries < 2) { tries++; const b = $el.src.replace(/[?&]r=\d+$/, ''); setTimeout(() => $el.src = b + (b.includes('?') ? '&' : '?') + 'r=' + tries, 700 * tries) } else { $el.style.display = 'none'; $el.closest('button').classList.add('opacity-40', 'pointer-events-none') }"
-                                class="h-full w-full object-cover transition group-hover:opacity-90" loading="lazy" />
+                                class="relative h-full w-full object-cover transition group-hover:opacity-90" loading="lazy" />
                             <span class="absolute inset-x-0 bottom-0 truncate bg-black/50 px-1 py-0.5 text-[10px] text-white">
                                 {{ $image['sender'] }} · {{ $image['sent_at']->format('n/j') }}
                             </span>
@@ -597,8 +623,11 @@
     // press cheap. The column count is a breakpoint decision, so read it off
     // the rendered grid rather than duplicating the breakpoints here — resize
     // and it re-measures.
-    Alpine.data('photoRows', (total) => ({
+    Alpine.data('photoRows', (total, showAll = false) => ({
         total,
+        // A timelapse is a sequence — clipping it to a row hides the story,
+        // so showAll skips the row budget (and the buttons) entirely.
+        showAll,
         rows: 1,
         perRow: 3,
         STEP: 3,
@@ -615,12 +644,29 @@
             if (cols) this.perRow = cols;
         },
         get shown() { return this.rows * this.perRow; },
-        show(index) { return index < this.shown; },
-        get more() { return this.total > this.shown; },
+        show(index) { return this.showAll || index < this.shown; },
+        get more() { return ! this.showAll && this.total > this.shown; },
         get remaining() { return Math.max(0, this.total - this.shown); },
-        get opened() { return this.rows > 1; },
-        showMore() { this.rows += this.STEP; },
-        showLess() { this.rows = 1; },
+        get opened() { return ! this.showAll && this.rows > 1; },
+        showMore() { this.rows += this.STEP; this.scrollToEnd(); },
+        showLess() { this.rows = 1; this.scrollToEnd(); },
+        // Land the reader on the card's last visible row: the buttons sit
+        // right under it, so aligning them with the viewport bottom shows
+        // exactly the freshly revealed (or remaining) images. Driven through
+        // window.scrollTo with computed geometry — smooth scrollIntoView gets
+        // silently superseded by scroll anchoring while the grid is growing.
+        // Aimed twice: after Alpine's flush + a layout pass, and again once
+        // the 200ms tile transition has settled.
+        scrollToEnd() {
+            const scroll = () => {
+                const el = this.$el.querySelector('[data-show-more]');
+                if (!el) return;
+                const bottom = el.getBoundingClientRect().bottom + window.scrollY;
+                window.scrollTo({ top: Math.max(0, bottom + 16 - window.innerHeight), behavior: 'smooth' });
+            };
+            this.$nextTick(() => requestAnimationFrame(scroll));
+            setTimeout(scroll, 240);
+        },
     }));
 
     /**

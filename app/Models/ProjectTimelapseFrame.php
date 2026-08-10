@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -13,6 +14,8 @@ use Illuminate\Support\Facades\Storage;
  */
 class ProjectTimelapseFrame extends Model
 {
+    use SoftDeletes;
+
     protected $casts = [
         'shot_at' => 'datetime',
         'latitude' => 'float',
@@ -79,8 +82,13 @@ class ProjectTimelapseFrame extends Model
     {
         // All three copies go together — the archive original, the sequence
         // copy and the registered one. Leaving the original behind would
-        // orphan a full-resolution file nothing can reach.
+        // orphan a full-resolution file nothing can reach. A SOFT delete
+        // keeps every file: the frame is recoverable until force-deleted.
         static::deleting(function (self $frame) {
+            if (! $frame->isForceDeleting()) {
+                return;
+            }
+
             $disk = Storage::disk($frame->disk);
 
             foreach ([$frame->path, $frame->original_path, $frame->aligned_path] as $path) {

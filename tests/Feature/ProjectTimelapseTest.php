@@ -135,9 +135,10 @@ it('lets a member delete their own frame but not someone else\'s', function () {
         ->test(TimelapseStudio::class, ['project' => $fx['project']]);
 
     $component->call('deleteFrame', $own->id);
-    expect(ProjectTimelapseFrame::find($own->id))->toBeNull();
-    // Deleting removes the file too (gsc model behavior).
-    Storage::disk('files')->assertMissing("timelapse/{$fx['project']->id}/own.jpg");
+    expect(ProjectTimelapseFrame::find($own->id))->toBeNull()
+        ->and(ProjectTimelapseFrame::withTrashed()->find($own->id)->trashed())->toBeTrue();
+    // Soft delete keeps the file — only a force delete removes copies.
+    Storage::disk('files')->assertExists("timelapse/{$fx['project']->id}/own.jpg");
 
     $component->call('deleteFrame', $theirs->id)->assertStatus(403);
     expect(ProjectTimelapseFrame::find($theirs->id))->not->toBeNull();
@@ -443,7 +444,7 @@ it('points photo grids at the thumbnail while the lightbox keeps the original', 
         ->and($image['url'])->not->toContain('thumb=1');
 });
 
-it('removes every copy when a frame is deleted', function () {
+it('soft-deletes a frame keeping every copy, and removes them only on force delete', function () {
     $fx = timelapseFixture();
 
     Livewire::actingAs($fx['user'])
@@ -453,11 +454,42 @@ it('removes every copy when a frame is deleted', function () {
     $frame = ProjectTimelapseFrame::latest('id')->firstOrFail();
     $paths = array_filter([$frame->path, $frame->original_path]);
 
+    // Soft delete: recoverable, files intact, hidden from the sequence.
     $frame->delete();
+    expect($frame->fresh()->trashed())->toBeTrue()
+        ->and($frame->timelapse->frames()->count())->toBe(0);
+
+    foreach ($paths as $path) {
+        Storage::disk('files')->assertExists($path);
+    }
+
+    // Force delete is the destructive one.
+    $frame->forceDelete();
 
     foreach ($paths as $path) {
         Storage::disk('files')->assertMissing($path);
     }
+});
+
+it('slots an upload before every existing frame when asked to lead the timelapse', function () {
+    $fx = timelapseFixture();
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->set('newTitle', 'Back Wall')
+        ->call('createCollection')
+        ->set('frame', UploadedFile::fake()->image('first-shot.jpg', 2400, 1800));
+
+    $existing = ProjectTimelapseFrame::latest('id')->firstOrFail();
+
+    $component->set('uploadAsFirst', true)
+        ->set('file', UploadedFile::fake()->image('better-opening.jpg', 2400, 1800))
+        ->call('uploadFile');
+
+    $frames = $existing->timelapse->frames()->get();
+    expect($frames)->toHaveCount(2)
+        ->and($frames->first()->original_filename)->toBe('better-opening.jpg')
+        ->and($frames->first()->sort_order)->toBeLessThan($existing->sort_order);
 });
 
 it('shows photos texted about the project alongside its own', function () {
@@ -542,6 +574,50 @@ it('names the crew member who texted a photo out', function () {
         ->instance()->messageImages;
 
     expect($images->first()['sender'])->toContain($fx['user']->first_name);
+});
+
+it('names unstamped outbound photos from their "-PS" signature, never the business number', function () {
+    $fx = timelapseFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $fx['project']->forceFill(['client_id' => $client->id])->save();
+
+    $thread = \App\Models\SmsGroupThread::create([
+        'from_number' => '+12247354200',
+        'client_id' => $client->id,
+        'vendor_id' => $fx['vendor']->id,
+        'participants' => ['+18475550101'],
+    ]);
+
+    $initials = strtoupper(mb_substr($fx['user']->first_name, 0, 1).mb_substr($fx['user']->last_name, 0, 1));
+
+    // Sent from the shared number before sent_by_user_id existed — but signed.
+    \App\Models\SmsMessage::create([
+        'thread_id' => $thread->id,
+        'direction' => 'outbound',
+        'from_number' => '+12247354200',
+        'text' => "Brick staining:\n-{$initials}",
+        'media_urls' => ['/storage/sms-media/2026/08/brick.jpg'],
+    ]);
+
+    // Unsigned and unstamped — the company label, not "(224) 735-4200".
+    \App\Models\SmsMessage::create([
+        'thread_id' => $thread->id,
+        'direction' => 'outbound',
+        'from_number' => '+12247354200',
+        'text' => 'Automated update',
+        'media_urls' => ['/storage/sms-media/2026/08/auto.jpg'],
+    ]);
+
+    $images = Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->instance()->messageImages;
+
+    $senders = $images->pluck('sender');
+    // firstNames() shortens the company label to "GS" for the chips.
+    expect($senders)->toContain($fx['user']->first_name)
+        ->and($senders)->toContain('GS')
+        ->and($senders->filter(fn ($s) => str_contains($s, '224')))->toBeEmpty();
 });
 
 it('serves texted photos through the media route whatever shape the stored url is', function () {

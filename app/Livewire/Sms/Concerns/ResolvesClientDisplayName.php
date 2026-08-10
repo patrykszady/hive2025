@@ -64,9 +64,32 @@ trait ResolvesClientDisplayName
             return collect();
         }
 
-        return $client->relationLoaded('users')
+        $users = $client->relationLoaded('users')
             ? $client->users
             : $client->users()->get(['users.id', 'first_name', 'last_name', 'nickname', 'cell_phone']);
+
+        // Only the household members actually IN this thread name it —
+        // Emily's 1:1 with the office must not read as "Emily & Wyeth".
+        // No phone matches (odd formats, placeholder numbers) → whole client.
+        $participantPhones = ($thread->relationLoaded('threadParticipants')
+                ? $thread->threadParticipants->pluck('phone_number')
+                : $thread->threadParticipants()->pluck('phone_number'))
+            ->filter()
+            ->flip();
+
+        if ($participantPhones->isEmpty()) {
+            return $users;
+        }
+
+        $inThread = $users
+            ->filter(function (User $user) use ($participantPhones) {
+                $e164 = $user->routeNotificationForTelnyx();
+
+                return is_string($e164) && $participantPhones->has($e164);
+            })
+            ->values();
+
+        return $inThread->isNotEmpty() ? $inThread : $users;
     }
 
     protected function threadClientForDisplay(SmsGroupThread $thread): ?Client

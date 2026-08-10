@@ -16,8 +16,11 @@ Pipeline (each stage measurable, each stage safe to skip):
   4. Photometric match — the L channel's mean/std eased toward the anchor
      (clamped gain/offset), so different-day lighting doesn't flicker.
   5. The gap — how much of the anchor's canvas the warped shot never reached.
-     Past ALIGN_MAX_BORDER the whole alignment is refused; under it the gap is
-     left black. Never filled with invented content.
+     Past ALIGN_MAX_BORDER the whole alignment is refused. Under it, the gap
+     is filled from ALIGN_FILL — the previous aligned frame (or the anchor),
+     which lives on the same canvas — with a feathered seam. Real pixels from
+     an earlier moment of the same scene; never generated content. With no
+     fill source the gap stays honestly black.
 
     align_frame.py <reference> <target> <output> [min_inliers]
 
@@ -46,6 +49,9 @@ FLOW_GRID = 24  # flow is averaged into cells this size (full-res px) then blurr
 # the alignment is refused outright: a frame that is a third invented is worse
 # than an honestly unaligned one.
 MAX_FABRICATED = float(os.environ.get("ALIGN_MAX_BORDER", "0.08"))
+# Absolute path of a frame already on the anchor's canvas (previous aligned
+# frame, or the anchor itself) whose pixels patch the warp gap.
+FILL_PATH = os.environ.get("ALIGN_FILL", "")
 
 
 def lab_stats(image):
@@ -380,18 +386,53 @@ def main():
     gap = covered == 0
     fabricated = float(gap.mean())
 
-    if fabricated > MAX_FABRICATED:
+    # A gap that will be PATCHED with real earlier pixels is far less costly
+    # than one left black — with a fill source on hand, tolerate more of it.
+    has_fill = bool(FILL_PATH) and os.path.isfile(FILL_PATH)
+    limit = MAX_FABRICATED * 2.5 if has_fill else MAX_FABRICATED
+
+    if fabricated > limit:
         fail("border too large",
              fabricated=round(fabricated, 4),
-             limit=MAX_FABRICATED,
+             limit=limit,
              transform=chosen,
              error=round(scored[0][0], 2),
              inliers=inliers)
 
-    # What's left is under the limit but still isn't photo — say so in black
-    # rather than smearing. Applied last, so neither the flow remap nor the
-    # deflicker can bleed real pixels back into it.
-    warped[gap] = 0
+    # What's left is under the limit but isn't photo from THIS shot. Patch it
+    # with the same scene from an earlier moment when a fill frame is given —
+    # it already lives on the anchor's canvas, so its pixels drop straight in;
+    # a feathered seam keeps the boundary invisible. No fill source → black.
+    filled_from = None
+    fill = cv2.imread(FILL_PATH) if FILL_PATH else None
+
+    if fill is not None and fill.shape[:2] == warped.shape[:2] and gap.any():
+        # Two leaks past the coverage mask read as dark bars at the edges:
+        # the warp's INTER_LINEAR fringe, and the flow stage dragging the
+        # border (and its blended fringe — dark GRAY, not pure black) up to
+        # ~FLOW_CAP_PX inward AFTER coverage was measured. Catch them by
+        # geodesic growth: starting from the true gap, flood into CONNECTED
+        # dark pixels. Dark content in the middle of the photo has no dark
+        # path to the gap and is never touched.
+        dark_or_gap = ((cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY) < 45) | gap).astype(np.uint8)
+        region = gap.astype(np.uint8)
+        kernel3 = np.ones((3, 3), np.uint8)
+        prev = -1
+        for _ in range(int(FLOW_CAP_PX * 2)):
+            region = cv2.dilate(region, kernel3) & dark_or_gap
+            total = int(region.sum())
+            if total == prev:
+                break
+            prev = total
+        patch = cv2.dilate(region, np.ones((7, 7), np.uint8)) > 0
+        # Alpha 1 deep inside the gap, easing to 0 just inside the real photo.
+        alpha = cv2.GaussianBlur(patch.astype(np.float32), (0, 0), 4.0)
+        alpha = np.maximum(alpha, patch.astype(np.float32))[:, :, None]
+        warped = (fill.astype(np.float32) * alpha
+                  + warped.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
+        filled_from = os.path.basename(FILL_PATH)
+    else:
+        warped[gap] = 0
 
     ok = cv2.imwrite(out_path, warped, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
 
@@ -415,6 +456,7 @@ def main():
         "center_offset_px": round(offset_px, 1),
         "ecc_cc": round(ecc_cc, 4),
         "fabricated": round(fabricated, 4),
+        "filled_from": filled_from,
         "flow_median_px": round(flow_median, 1),
         "luma_gain": luma_gain,
         "luma_offset": luma_offset,

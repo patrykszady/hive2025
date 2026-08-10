@@ -87,6 +87,14 @@ class AlignTimelapseFrame implements ShouldQueue
         $alignedRelative = preg_replace('/([^\/]+)$/', 'aligned-$1', $frame->path);
         $alignedAbsolute = $disk->path($alignedRelative);
 
+        // Warp gaps get patched with the same scene from an earlier moment:
+        // the previous aligned frame shares the anchor's canvas exactly, and
+        // the anchor's own aligned (photo-only) copy is the fallback.
+        $neighbor = $photoOnly ? null : $this->previousAlignedFrame($frame);
+        $fillPath = $neighbor
+            ? $disk->path($neighbor->aligned_path)
+            : ($anchor->aligned_path ? $disk->path($anchor->aligned_path) : null);
+
         $process = new Process([
             $python,
             base_path('scripts/align_frame.py'),
@@ -100,6 +108,7 @@ class AlignTimelapseFrame implements ShouldQueue
             // collective look, not toward frame #1's own quirks.
             'ALIGN_TARGET' => $this->sequenceTarget($frame),
             'ALIGN_MAX_BORDER' => (string) config('services.timelapse_align.max_border', 0.08),
+            'ALIGN_FILL' => $fillPath && is_file($fillPath) ? $fillPath : null,
             // Strict filter — bare array_filter eats the '0' string and would
             // silently turn photo-only back into full geometry.
         ], fn ($v) => $v !== null));
@@ -124,7 +133,7 @@ class AlignTimelapseFrame implements ShouldQueue
 
         if (! $photoOnly
             && ($looseFit || $tooFar)
-            && ($neighbor = $this->previousAlignedFrame($frame)) !== null) {
+            && $neighbor !== null) {
             $retryAbsolute = $alignedAbsolute.'.retry.jpg';
 
             $retry = new Process([
@@ -137,6 +146,8 @@ class AlignTimelapseFrame implements ShouldQueue
             ], null, [
                 'ALIGN_TARGET' => $this->sequenceTarget($frame) ?? '',
                 'ALIGN_MAX_BORDER' => (string) config('services.timelapse_align.max_border', 0.08),
+                // The retry's reference doubles as its gap fill.
+                'ALIGN_FILL' => $disk->path($neighbor->aligned_path),
             ]);
             $retry->setTimeout(50);
             $retry->run();

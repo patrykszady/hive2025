@@ -72,6 +72,12 @@ class TimelapseStudio extends Component
     public $file = null;
 
     /**
+     * Slot the next upload BEFORE every existing frame — for replacing a
+     * timelapse's opening shot rather than appending to the end.
+     */
+    public bool $uploadAsFirst = false;
+
+    /**
      * New-collection form. Only timelapses are created here — every static
      * photo belongs in the project's one "Project Images" album, so there is
      * no type to choose.
@@ -226,13 +232,14 @@ class TimelapseStudio extends Component
             ->whereNotNull('media_urls')
             ->latest('created_at')
             ->limit(120)
-            ->get(['id', 'direction', 'media_urls', 'created_at', 'from_number', 'sent_by_user_id']);
+            ->get(['id', 'direction', 'media_urls', 'created_at', 'from_number', 'sent_by_user_id', 'text']);
 
         // Resolve every sender in two queries rather than one per photo.
         $senders = self::firstNames($this->senderNames($messages));
+        $tz = $this->vendorTimezone();
 
         $images = $messages
-            ->flatMap(function ($message) use ($senders) {
+            ->flatMap(function ($message) use ($senders, $tz) {
                 $sender = $senders[$message->id] ?? ($message->direction === 'inbound' ? 'Client' : 'GS Construction');
 
                 return collect($message->media_urls ?? [])
@@ -249,12 +256,14 @@ class TimelapseStudio extends Component
                         // What the grid tile loads — the lightbox still opens
                         // the full photo from 'url'.
                         'thumb' => \App\Support\Sms\ConversationPresenter::mediaUrl($url, thumb: true),
+                        // Inlined blur-up placeholder behind the tile.
+                        'micro' => $this->smsMicro($url),
                         // The stored value, verbatim — selection hands it back
                         // when texting these photos onward.
                         'raw' => $url,
-                        'sent_at' => $message->created_at,
+                        'sent_at' => $message->created_at->copy()->timezone($tz),
                         'sender' => $sender,
-                        'label' => $sender.' · '.$message->created_at->format('n/j/y'),
+                        'label' => $sender.' · '.$message->created_at->copy()->timezone($tz)->format('n/j/y'),
                     ]);
             })
             ->values();
@@ -298,6 +307,44 @@ class TimelapseStudio extends Component
     {
         $this->messageSender = $this->messageSender === $sender ? null : $sender;
         unset($this->messageImages);
+    }
+
+    /** Blur-up placeholder for a texted photo — null when the file isn't local. */
+    protected function smsMicro(string $url): ?string
+    {
+        $path = app(\App\Services\ProjectImageImporter::class)->resolveSmsMediaPath($url);
+
+        if (! $path || ! is_file($path)) {
+            return null;
+        }
+
+        // Same key the sms media thumb route uses, so the micro can derive
+        // from the already-built 480px thumb instead of the full photo.
+        $key = $path.':'.filesize($path).':'.filemtime($path);
+
+        return \App\Support\ImageThumbs::microDataUri(
+            $key,
+            fn () => \App\Support\ImageThumbs::thumbFileFor($key) ?? $path,
+        );
+    }
+
+    /** Blur-up placeholder for a stored frame. */
+    public function frameMicro(ProjectTimelapseFrame $frame): ?string
+    {
+        $disk = \Illuminate\Support\Facades\Storage::disk($frame->disk);
+        $path = $frame->aligned_path ?: $frame->path;
+
+        if (! $path || ! $disk->exists($path)) {
+            return null;
+        }
+
+        // Same key the frame thumb route uses (see TimelapseController).
+        $key = $frame->disk.':'.$path.':'.$disk->size($path);
+
+        return \App\Support\ImageThumbs::microDataUri(
+            $key,
+            fn () => \App\Support\ImageThumbs::thumbFileFor($key) ?? $disk->get($path),
+        );
     }
 
     /**
@@ -349,9 +396,37 @@ class TimelapseStudio extends Component
 
         $name = fn ($user) => trim(($user->nickname ?: $user->first_name).' '.($user->last_name ?? '')) ?: 'Unknown';
 
-        return $messages->mapWithKeys(function ($message) use ($users, $byPhone, $name) {
-            if ($message->direction !== 'inbound' && $message->sent_by_user_id) {
-                $user = $users->get($message->sent_by_user_id);
+        // Outbound sent before the app stamped sent_by_user_id: the crew signs
+        // texts "-PS" / "-GS", so trailing initials name the sender. Matched
+        // against this vendor's team; "-GSC" (the company sign-off) matches
+        // nobody and falls through to the company label.
+        $sigs = $messages
+            ->filter(fn ($m) => $m->direction !== 'inbound' && ! $m->sent_by_user_id)
+            ->map(fn ($m) => self::signatureInitials((string) $m->text))
+            ->filter()
+            ->unique();
+
+        $bySignature = $sigs->isEmpty()
+            ? collect()
+            : \App\Models\User::withoutGlobalScopes()
+                ->join('user_vendor', 'user_vendor.user_id', '=', 'users.id')
+                ->where('user_vendor.vendor_id', $this->project->belongs_to_vendor_id)
+                ->get(['users.id', 'users.first_name', 'users.last_name', 'users.nickname'])
+                ->unique('id')
+                ->keyBy(fn ($u) => strtoupper(mb_substr((string) $u->first_name, 0, 1).mb_substr((string) $u->last_name, 0, 1)));
+
+        return $messages->mapWithKeys(function ($message) use ($users, $byPhone, $bySignature, $name) {
+            if ($message->direction !== 'inbound') {
+                if ($message->sent_by_user_id) {
+                    $user = $users->get($message->sent_by_user_id);
+
+                    return [$message->id => $user ? $name($user) : 'GS Construction'];
+                }
+
+                // Never label our own outbound with the shared business
+                // number — it reads as a mystery sender on every chip.
+                $sig = self::signatureInitials((string) $message->text);
+                $user = $sig ? $bySignature->get($sig) : null;
 
                 return [$message->id => $user ? $name($user) : 'GS Construction'];
             }
@@ -363,6 +438,17 @@ class TimelapseStudio extends Component
                 ? $name($user)
                 : ($ten ? phone_display($ten) : 'Unknown')];
         })->all();
+    }
+
+    /**
+     * Trailing "-PS"-style sign-off initials from a text, uppercased —
+     * null when the message doesn't end in one.
+     */
+    protected static function signatureInitials(string $text): ?string
+    {
+        return preg_match('/-\s*([A-Za-z]{2,3})\s*$/', trim($text), $m)
+            ? strtoupper($m[1])
+            : null;
     }
 
     /**
@@ -431,14 +517,26 @@ class TimelapseStudio extends Component
      *
      * @return array<int, array<int, string>>
      */
+    /**
+     * Times on frames read in the vendor's local time (Chicago), not the
+     * server's UTC — "shot at 5:24 AM" for a midnight photo helps nobody.
+     */
+    public function vendorTimezone(): string
+    {
+        return \App\Models\Vendor::withoutGlobalScopes()
+            ->find($this->project->belongs_to_vendor_id)?->timezone ?: 'America/Chicago';
+    }
+
     #[Computed]
     public function frameCaptions(): array
     {
-        return $this->collections->mapWithKeys(function (ProjectTimelapse $collection) {
+        $tz = $this->vendorTimezone();
+
+        return $this->collections->mapWithKeys(function (ProjectTimelapse $collection) use ($tz) {
             $takers = $this->frameTakers($collection);
 
-            $captions = $collection->frames->mapWithKeys(function (ProjectTimelapseFrame $frame) use ($takers) {
-                $date = ($frame->shot_at ?? $frame->created_at)->format('n/j');
+            $captions = $collection->frames->mapWithKeys(function (ProjectTimelapseFrame $frame) use ($takers, $tz) {
+                $date = ($frame->shot_at ?? $frame->created_at)->copy()->timezone($tz)->format('n/j');
                 $who = trim((string) ($takers[$frame->id] ?? ''));
 
                 return [$frame->id => $who === '' ? $date : $who.' · '.$date];
@@ -456,7 +554,7 @@ class TimelapseStudio extends Component
             'id' => $frame->id,
             'url' => route('projects.timelapse.frame', [$frame, 'v' => $frame->version]),
             'original' => route('projects.timelapse.frame', ['frame' => $frame, 'original' => 1]),
-            'label' => ($frame->shot_at ?? $frame->created_at)->format('n/j/y g:iA').' · '
+            'label' => ($frame->shot_at ?? $frame->created_at)->copy()->timezone($this->vendorTimezone())->format('n/j/y g:iA').' · '
                 .($takers[$frame->id] ?? ''),
             // Where it was taken, when we know — camera GPS or upload EXIF.
             'map' => $frame->latitude !== null
@@ -809,6 +907,13 @@ class TimelapseStudio extends Component
 
         $timelapse = $target ?? $this->collection ?? ProjectTimelapse::generalFor($this->project);
 
+        // "Make first": everything currently in the sequence comes after it.
+        $sortOrder = null;
+        if ($this->uploadAsFirst) {
+            $sortOrder = ((int) $timelapse->frames()->min('sort_order')) - 1;
+            $this->uploadAsFirst = false;
+        }
+
         app(\App\Services\ProjectImageImporter::class)->storeImage(
             $timelapse,
             $upload->getRealPath(),
@@ -824,6 +929,7 @@ class TimelapseStudio extends Component
             // The crew is standing there watching "Saving…" — write the bytes,
             // answer, and let the queue do the pixel work.
             deferProcessing: true,
+            sortOrder: $sortOrder,
         );
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);

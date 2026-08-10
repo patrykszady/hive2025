@@ -5,9 +5,9 @@
 <x-index-table
     :heading="$collection->title"
     :collapsible="true"
-    {{-- The photo album opens on arrival (clipped to one row);
-         a timelapse stays shut until asked for. --}}
-    :expanded="! $collection->isTimelapse()"
+    {{-- The photo album opens on arrival (clipped to one row) — unless it
+         has nothing to show; a timelapse stays shut until asked for. --}}
+    :expanded="! $collection->isTimelapse() && $collection->frames->isNotEmpty()"
     wire:key="collection-{{ $collection->id }}-{{ $collection->frames->count() }}"
 >
     <x-slot:badge>
@@ -76,22 +76,45 @@
              it once here rather than re-encoding it into every
              tile's click handler. In select mode a tap picks the
              photo instead of opening it. --}}
-        <div x-data="photoRows({{ $collection->frames->count() }})">
+        <div x-data="photoRows({{ $collection->frames->count() }}, {{ $collection->isTimelapse() ? 'true' : 'false' }})">
         <div class="{{ $photoGrid }}" data-photo-grid
             x-data="{ lb: {{ Js::from($this->lightboxFrames($collection)) }} }">
             @foreach ($collection->frames as $index => $frame)
                 <button type="button"
                     wire:key="thumb-{{ $frame->id }}"
                     x-show="show({{ $index }})"
+                    x-transition.duration.200ms
                     x-on:click="$store.picsel.on
                         ? $store.picsel.toggle({{ $frame->id }})
                         : $dispatch('open-lightbox', { frames: lb, index: {{ $index }} })"
                     class="group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800 cursor-pointer">
+                    {{-- Blur-up: tiny inlined preview under the real thumb. --}}
+                    @php($micro = $this->frameMicro($frame))
+                    @if ($micro)
+                        <img aria-hidden="true" src="{{ $micro }}" alt=""
+                            class="absolute inset-0 h-full w-full object-cover"
+                            style="filter: blur(10px); transform: scale(1.08)" />
+                    @endif
                     <img src="{{ route('projects.timelapse.frame', [$frame, 'thumb' => 1, 'v' => $frame->version]) }}" alt=""
-                        class="h-full w-full object-cover transition group-hover:opacity-90" loading="lazy" />
+                        x-data="{ loaded: false }"
+                        x-init="loaded = $el.complete && $el.naturalWidth > 0"
+                        x-on:load="loaded = true"
+                        x-bind:style="loaded ? 'opacity:1;transition:opacity .35s' : 'opacity:0'"
+                        class="relative h-full w-full object-cover transition group-hover:opacity-90" loading="lazy" />
                     <span class="absolute inset-x-0 bottom-0 truncate bg-black/50 px-1 py-0.5 text-[10px] text-white">
                         {{ $this->frameCaptions[$collection->id][$frame->id] ?? '' }}
                     </span>
+                    {{-- Per-frame delete (soft — recoverable). Members remove
+                         their own shots, Admins any; deleteFrame() enforces
+                         the same rule server-side. Hidden in selection mode. --}}
+                    @if (auth()->user()->vendor_role === 'Admin' || $frame->taken_by_user_id === auth()->id())
+                        <span role="button" aria-label="Delete image" x-cloak
+                            x-show="!$store.picsel.on"
+                            x-on:click.stop="if (confirm('Delete this image?')) $wire.deleteFrame({{ $frame->id }})"
+                            class="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-black/55 text-white transition hover:bg-red-600">
+                            <flux:icon.trash variant="micro" class="size-3.5" />
+                        </span>
+                    @endif
                     {{-- selection ring + check --}}
                     <span x-show="$store.picsel.on" x-cloak
                         class="absolute inset-0 rounded-lg"
