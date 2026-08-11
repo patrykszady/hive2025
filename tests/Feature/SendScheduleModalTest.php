@@ -16,6 +16,16 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+// The preview is time-of-day aware (after closing, "Today" drops off) — pin
+// the clock to mid-morning so fixtures with today-tasks read deterministically.
+beforeEach(function (): void {
+    Carbon\Carbon::setTestNow(Carbon\Carbon::create(2026, 8, 10, 10, 0, 0, 'America/Chicago'));
+});
+
+afterEach(function (): void {
+    Carbon\Carbon::setTestNow();
+});
+
 it('uses vendor short name in schedule greeting for vendor-subject threads', function (): void {
     $ownerVendor = Vendor::factory()->create([
         'business_name' => 'GS Construction',
@@ -1611,4 +1621,69 @@ it('hides today tasks whose time window has already passed', function (): void {
         ->and($preview)->not->toContain('Roofer');
 
     \Illuminate\Support\Carbon::setTestNow();
+});
+
+it('drops the Today section once the vendor working day is over', function (): void {
+    // 8 PM Chicago — past the default 18:00 close.
+    Carbon\Carbon::setTestNow(Carbon\Carbon::create(2026, 8, 10, 20, 0, 0, 'America/Chicago'));
+
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.after-hours@example.com',
+        'cell_phone' => '2245550097',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $client = Client::factory()->create();
+    $contact = User::query()->create([
+        'first_name' => 'Carri',
+        'last_name' => 'Jones',
+        'email' => 'carri.after-hours@example.com',
+        'cell_phone' => '2245550096',
+        'primary_vendor_id' => null,
+    ]);
+    $client->users()->attach($contact->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'After Hours Project',
+        'client_id' => $client->id,
+        'address' => '100 Main St', 'city' => 'Cary', 'state' => 'IL', 'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    Task::query()->create([
+        'title' => 'Electrical',
+        'project_id' => $project->id, 'vendor_id' => $vendor->id, 'type' => 'Task',
+        'start_date' => today(), 'end_date' => today(),
+    ]);
+    Task::query()->create([
+        'title' => 'Follow Up',
+        'project_id' => $project->id, 'vendor_id' => $vendor->id, 'type' => 'Task',
+        'start_date' => today()->addDay(), 'end_date' => today()->addDay(),
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'After Hours Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550096'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    // No crew is coming today anymore — tomorrow leads the list.
+    expect($preview)->not->toContain('Electrical')
+        ->and($preview)->not->toContain('Today')
+        ->and($preview)->toContain('Follow Up');
+
+    Carbon\Carbon::setTestNow();
 });

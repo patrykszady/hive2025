@@ -196,6 +196,27 @@ class SendScheduleModal extends Component
      *
      * @return \Illuminate\Support\Collection<int, Task>
      */
+    /**
+     * Where the upcoming window opens: today — or tomorrow once the vendor's
+     * working day is over. A schedule texted after closing that still lists
+     * "Today" promises a crew that is not coming.
+     */
+    protected function scheduleWindowStart(): Carbon
+    {
+        $today = Carbon::today(browser_timezone());
+
+        $vendor = $this->thread?->ownerVendor ?? $this->thread?->subjectVendor;
+
+        if (! $vendor) {
+            return $today;
+        }
+
+        $tz = $vendor->timezone ?: 'America/Chicago';
+        $closing = Carbon::today($tz)->setTimeFromTimeString($vendor->businessHours()['end']);
+
+        return now($tz)->gt($closing) ? $today->addDay() : $today;
+    }
+
     #[Computed]
     public function upcomingTasks(): \Illuminate\Support\Collection
     {
@@ -205,7 +226,7 @@ class SendScheduleModal extends Component
             return collect();
         }
 
-        $today = Carbon::today(browser_timezone());
+        $today = $this->scheduleWindowStart();
         $endDate = $today->copy()->addDays($this->daysAhead - 1);
         $todayStr = $today->format('Y-m-d');
         $endDateStr = $endDate->format('Y-m-d');
@@ -235,7 +256,7 @@ class SendScheduleModal extends Component
     public function groupedUpcomingTasks(): \Illuminate\Support\Collection
     {
         $tasks = $this->upcomingTasks;
-        $today = Carbon::today(browser_timezone());
+        $today = $this->scheduleWindowStart();
         $endDate = $today->copy()->addDays($this->daysAhead - 1);
         $todayStr = $today->format('Y-m-d');
         $endDateStr = $endDate->format('Y-m-d');
