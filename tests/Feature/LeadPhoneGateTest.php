@@ -65,18 +65,18 @@ function phonelessLeadFixture(): array
     return ['admin' => $admin, 'contact' => $contact, 'lead' => $lead];
 }
 
-it('keeps the Message tab open without a phone — the prompt stays, nothing blocks', function () {
+it('hides the Message tab until a phone exists — a client and project need one', function () {
     $fx = phonelessLeadFixture();
 
     $component = Livewire::actingAs($fx['admin'])
         ->test(LeadCreate::class)
         ->call('editLead', $fx['lead']);
 
-    // The phone is still visibly missing…
+    // The phone is visibly missing — and it blocks: replying books work the
+    // pipeline can't finish (no whole contact → no client → no project).
     expect($component->instance()->needsPhone)->toBeTrue();
 
-    // …but an email reply never needed one: the composer stays available.
-    $component->assertSee('name="messages"', false)
+    $component->assertDontSee('name="messages"', false)
         ->assertSee("This enquiry didn't include a phone number", false);
 });
 

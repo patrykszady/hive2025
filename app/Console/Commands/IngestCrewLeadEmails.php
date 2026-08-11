@@ -44,6 +44,17 @@ class IngestCrewLeadEmails extends Command
             since: $since,
         );
 
+        // Leads reply to whichever address last emailed them — sweep the
+        // team's own inboxes for those replies too (capture-only; never
+        // creates leads).
+        if (! $dryRun) {
+            $sweep = $service->sweepPersonalInboxes(since: $since);
+            $this->line(sprintf(
+                '  personal sweep: %d mailbox(es) · %d message(s) · %d reply(ies) filed',
+                $sweep['mailboxes'], $sweep['fetched'], $sweep['replies'],
+            ));
+        }
+
         if ($result['fetched'] === 0) {
             $this->info('No new messages.');
 

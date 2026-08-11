@@ -126,6 +126,15 @@ return [
         'api_key' => env('IPQS_API_KEY'),
     ],
 
+    // The Azure app behind the Nylas Microsoft connector — used by
+    // nylas:rotate-microsoft-secret to renew its own client secret before
+    // the 2-year expiry (the 2026-08-11 outage).
+    'ms_graph' => [
+        'tenant_id' => env('MS_GRAPH_TENANT_ID'),
+        'client_id' => env('MS_GRAPH_CLIENT_ID'),
+        'client_secret' => env('MS_GRAPH_CLIENT_SECRET'),
+    ],
+
     'mailtrap-sdk' => [
         'host' => env('MAILTRAP_HOST', 'send.api.mailtrap.io'),
         'apiKey' => env('MAILTRAP_API_KEY'),

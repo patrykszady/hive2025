@@ -658,19 +658,17 @@ class LeadCreate extends Component
     }
 
     /**
-     * The missing pieces that actually BLOCK the composer — email and a full
-     * address. A missing phone stays a visible prompt on Details but never
-     * stops an email reply: plenty of homeowners simply don't give one.
+     * The missing pieces that BLOCK the composer — all of them, phone
+     * included. Creating the client (and the consult's project) requires a
+     * whole contact, so replying before the phone exists just books work the
+     * pipeline can't finish.
      *
      * @return array<int, string>
      */
     #[Computed]
     public function blockingContactInfo(): array
     {
-        return array_values(array_filter(
-            $this->missingContactInfo,
-            fn (string $item) => $item !== 'a phone number',
-        ));
+        return $this->missingContactInfo;
     }
 
     /** @param  array<string, mixed>  $parts */

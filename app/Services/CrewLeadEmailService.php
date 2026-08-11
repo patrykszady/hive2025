@@ -158,6 +158,148 @@ class CrewLeadEmailService
         );
     }
 
+    /**
+     * Read each grant's OWN inbox for replies from known lead senders.
+     *
+     * Kathy Moseler's phone number sat in a reply to patryk@gs.construction
+     * for three days while crew@ ingestion looked the other way — leads
+     * answer whichever address last emailed them. This sweep runs those
+     * personal-inbox replies through the same pipeline (file on the lead,
+     * mine missing contact fields, hand the ball back). It NEVER creates
+     * leads: personal mail is not an enquiry channel.
+     *
+     * @return array{mailboxes: int, fetched: int, replies: int}
+     */
+    public function sweepPersonalInboxes(?int $limit = null, ?\DateTimeInterface $since = null): array
+    {
+        $out = ['mailboxes' => 0, 'fetched' => 0, 'replies' => 0];
+        $since ??= now()->subDays(2);
+        $base = rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/');
+
+        foreach ((array) config('nylas.crew_leads.grant_ids') as $grantId) {
+            $grantId = trim((string) $grantId);
+
+            if ($grantId === '') {
+                continue;
+            }
+
+            $response = Http::withToken(config('nylas.api_key'))
+                ->timeout(60)
+                ->retry(2, 2000, throw: false)
+                ->get("$base/v3/grants/{$grantId}/messages", array_filter([
+                    'in' => $this->ownInboxFolderId($grantId),
+                    'limit' => $limit ?? 50,
+                    'received_after' => $since->getTimestamp(),
+                ]));
+
+            if (! $response->successful()) {
+                Log::channel('nylas')->warning('Personal inbox sweep: grant unreadable', [
+                    'grant_id' => $grantId,
+                    'status' => $response->status(),
+                ]);
+
+                continue;
+            }
+
+            $out['mailboxes']++;
+            $mailbox = strtolower((string) (Http::withToken(config('nylas.api_key'))
+                ->timeout(15)->get("$base/v3/grants/{$grantId}")->json('data.email') ?? $grantId));
+
+            foreach ((array) $response->json('data') as $message) {
+                $out['fetched']++;
+
+                $nylasId = (string) ($message['id'] ?? '');
+                $from = ($message['from'][0] ?? []);
+                $fromEmail = strtolower(trim((string) ($from['email'] ?? '')));
+
+                if ($nylasId === '' || $fromEmail === '') {
+                    continue;
+                }
+
+                // Team and system mail is not a lead reply.
+                if (str_ends_with($fromEmail, '@gs.construction') || str_ends_with($fromEmail, '@hive.contractors')) {
+                    continue;
+                }
+
+                // Same dedupe ledger the crew@ ingest uses — a reply CC'd to
+                // crew@ is captured once, whichever sweep sees it first.
+                if (CrewEmailIngest::where('nylas_message_id', $nylasId)->exists()) {
+                    continue;
+                }
+
+                // Only senders we already know as leads.
+                if (! Lead::withoutGlobalScopes()->whereNull('deleted_at')->where('lead_data->email', $fromEmail)->exists()) {
+                    continue;
+                }
+
+                $body = $this->plainBody($message);
+                $row = [
+                    'nylas_message_id' => $nylasId,
+                    'grant_id' => $grantId,
+                    'mailbox' => $mailbox,
+                    'thread_id' => $message['thread_id'] ?? null,
+                    'from_email' => $fromEmail,
+                    'from_name' => $from['name'] ?? null,
+                    'recipients' => [
+                        'to' => array_column($message['to'] ?? [], 'email'),
+                        'cc' => array_column($message['cc'] ?? [], 'email'),
+                    ],
+                    'subject' => Str::limit((string) ($message['subject'] ?? ''), 500, ''),
+                    'message_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
+                    'body_snippet' => Str::limit($body, 2000, ''),
+                ];
+
+                $leadId = $this->recordLeadReply($row, $body);
+
+                CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $row + [
+                    'status' => CrewEmailIngest::STATUS_SKIPPED,
+                    'skip_reason' => 'reply',
+                    'is_lead' => false,
+                    'lead_id' => $leadId,
+                ]);
+
+                if ($leadId) {
+                    $out['replies']++;
+
+                    Log::channel('nylas')->info('Personal inbox sweep: reply filed on lead', [
+                        'lead_id' => $leadId,
+                        'mailbox' => $mailbox,
+                    ]);
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /** The grant's own Inbox folder id (no shared_from), cached a day. */
+    protected function ownInboxFolderId(string $grantId): ?string
+    {
+        return cache()->remember(
+            "crew_leads:own_inbox:{$grantId}",
+            now()->addDay(),
+            function () use ($grantId): ?string {
+                $response = Http::withToken(config('nylas.api_key'))
+                    ->timeout(45)
+                    ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/')."/v3/grants/{$grantId}/folders");
+
+                if (! $response->successful()) {
+                    return null;
+                }
+
+                foreach ((array) $response->json('data') as $folder) {
+                    $attributes = array_map('strtolower', (array) ($folder['attributes'] ?? []));
+
+                    if (strcasecmp((string) ($folder['name'] ?? ''), 'Inbox') === 0 || in_array('\\inbox', $attributes, true)) {
+                        return $folder['id'] ?? null;
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
     /** @return array<string, mixed> */
     protected function ingestMessage(array $message, string $mailbox, ?string $grantId, bool $dryRun): array
     {
@@ -849,8 +991,14 @@ TXT;
     {
         $attachments = array_values(array_filter(
             (array) ($message['attachments'] ?? []),
+            // Images, PDFs — and Word documents: bid-request FORMS arrive as
+            // .docx and carry the contact details the email body leaves out
+            // (Kathy Moseler's phone lived only in hers).
             fn ($a) => ($a['is_inline'] ?? false) === false
-                && preg_match('#^(image/|application/pdf)#i', (string) ($a['content_type'] ?? ''))
+                && preg_match(
+                    '#^(image/|application/pdf|application/msword|application/vnd\.openxmlformats-officedocument\.wordprocessingml)#i',
+                    (string) ($a['content_type'] ?? '')
+                )
                 && (int) ($a['size'] ?? 0) <= 25 * 1024 * 1024,
         ));
 

@@ -34,6 +34,15 @@ Schedule::command('crew:ingest-leads')
     ->withoutOverlapping()
     ->onOneServer();
 
+// The Azure secret behind every mailbox: check monthly, renew inside the
+// 60-day window — its unwatched 2-year expiry took email down on 2026-08-11.
+Schedule::command('nylas:rotate-microsoft-secret')
+    ->monthlyOn(1, '11:00')
+    ->name('rotate-nylas-ms-secret')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // One nudge to leads we answered days ago that never booked or sent times.
 // Mid-morning Central: business-hours mail, after the overnight ingests.
 Schedule::command('leads:follow-up')
