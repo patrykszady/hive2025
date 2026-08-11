@@ -500,6 +500,42 @@ it('fills the Meet end time 30 minutes after a manually picked start', function 
         ->set("form.time_settings.$date.start_time", '10:30');
 
     expect(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('11:00');
+
+    // The browser's time-picker sends the WHOLE day object, not the leaf —
+    // the shape that was silently skipping the end-fill in real use.
+    $component->set("form.time_settings.$date", ['use_time' => true, 'start_time' => '12:00']);
+    expect(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('12:30');
+
+    // A deliberately longer end survives later object-shaped updates.
+    $component->set("form.time_settings.$date", ['use_time' => true, 'start_time' => '12:00', 'end_time' => '14:00']);
+    expect(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('14:00');
+});
+
+it('upgrades a mirrored end time to the 30-minute block when a Task becomes a Meet', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Deck', 'client_id' => $client->id,
+        'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+
+    $date = now()->addDays(2)->format('Y-m-d');
+
+    // Drafted as a plain Task: times mirror (12:00 → 12:00).
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('addTask', $project->id)
+        ->set('form.dates', [$date])
+        ->set("form.time_settings.$date", ['use_time' => true, 'start_time' => '12:00', 'end_time' => '12:00']);
+
+    // Switching to Meet makes it a real 30-minute appointment.
+    $component->set('form.type', 'Meet');
+    expect(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('12:30');
 });
 
 it('fills a missing Meet end time when opening an older task for edit', function () {

@@ -802,6 +802,17 @@ class TaskCreate extends Component
                 );
             }
             $this->previousDates = $this->form->dates;
+
+            // Times set while the task was still a plain Task mirrored the
+            // start — becoming a Meet upgrades them to the 30-minute block.
+            foreach ((array) $this->form->time_settings as $date => $settings) {
+                $start = trim((string) ($settings['start_time'] ?? ''));
+                $end = trim((string) ($settings['end_time'] ?? ''));
+
+                if (! empty($settings['use_time']) && $start !== '' && ($end === '' || $end <= $start)) {
+                    $this->form->time_settings[$date]['end_time'] = $this->defaultEndTime($start);
+                }
+            }
         }
     }
 
@@ -842,21 +853,37 @@ class TaskCreate extends Component
      */
     public function updated($property, $value): void
     {
-        if (! is_string($property) || ! str_starts_with($property, 'form.time_settings.') || ! str_ends_with($property, '.start_time')) {
+        if (! is_string($property) || ! str_starts_with($property, 'form.time_settings.')) {
             return;
         }
 
-        if (! is_string($value) || trim($value) === '') {
+        // The update arrives in one of two shapes: the start_time LEAF
+        // ("…2026-08-11.start_time" => "12:00"), or — what the time-picker
+        // actually sends — the whole DAY OBJECT ("…2026-08-11" =>
+        // ['use_time' => true, 'start_time' => '12:00']).
+        if (str_ends_with($property, '.start_time')) {
+            $date = substr($property, strlen('form.time_settings.'), -strlen('.start_time'));
+            $start = is_string($value) ? trim($value) : '';
+            $endMissing = true; // an explicit start move always re-derives the end
+        } else {
+            $date = substr($property, strlen('form.time_settings.'));
+
+            if (str_contains($date, '.')) {
+                return; // some other leaf (end_time, use_time) — nothing to derive
+            }
+
+            $start = trim((string) (is_array($value) ? ($value['start_time'] ?? '') : ''));
+            $end = trim((string) (is_array($value) ? ($value['end_time'] ?? '') : ''));
+            // Whole-object updates also fire when the END is edited — only
+            // fill when the end is absent or no longer after the start.
+            $endMissing = $end === '' || $end <= $start;
+        }
+
+        if ($date === '' || $start === '' || ! $endMissing || ! isset($this->form->time_settings[$date])) {
             return;
         }
 
-        $date = substr($property, strlen('form.time_settings.'), -strlen('.start_time'));
-
-        if ($date === '' || ! isset($this->form->time_settings[$date])) {
-            return;
-        }
-
-        $this->form->time_settings[$date]['end_time'] = $this->defaultEndTime($value);
+        $this->form->time_settings[$date]['end_time'] = $this->defaultEndTime($start);
     }
 
     /**

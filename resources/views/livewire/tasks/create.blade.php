@@ -418,7 +418,9 @@
                             <div class="flex items-center justify-between">
                                 <flux:label>Arrival Time</flux:label>
                                 <flux:switch
-                                    x-on:change="$wire.toggleAllArrivalTimes($event.target.checked)"
+                                    {{-- The pickers this reveals sit below the fold — follow them down. --}}
+                                    x-on:change="$wire.toggleAllArrivalTimes($event.target.checked).then(() =>
+                                        $el.closest('[data-arrival-times-section]')?.scrollIntoView({ behavior: 'smooth', block: 'end' }))"
                                     :checked="collect($form->time_settings)->contains('use_time', true)"
                                     size="sm"
                                 />
@@ -431,9 +433,10 @@
                                             <flux:subheading class="text-sm">
                                                 {{ \Carbon\Carbon::parse($date)->format('D, M j') }}
                                             </flux:subheading>
-                                            <flux:switch 
+                                            <flux:switch
                                                 wire:model.live="form.time_settings.{{ $date }}.use_time"
-                                                x-on:change="$wire.copyTimesToDate('{{ $date }}')"
+                                                x-on:change="$wire.copyTimesToDate('{{ $date }}').then(() =>
+                                                    $el.closest('[data-arrival-times-section]')?.scrollIntoView({ behavior: 'smooth', block: 'end' }))"
                                                 size="sm"
                                             />
                                         </div>
