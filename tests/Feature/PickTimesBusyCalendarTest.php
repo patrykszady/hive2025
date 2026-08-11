@@ -274,3 +274,41 @@ it('withholds exact-time chips that collide with a calendar event', function () 
     expect($values)->toBe(['13:00', '13:30', '14:30'])
         ->and($values)->not->toContain('14:00');
 });
+
+it('blocks a window when an event starts the minute it ends — no back-to-back bookings', function () {
+    $day = busySafeDay();
+    $tz = PickTimes::timezone();
+
+    // 3:00-3:30 PM event: outside the 1-3 PM window, but a consult booked at
+    // 2:30 would run straight into it with zero travel time.
+    busyCalendarFixture([[
+        Carbon::parse($day.' 15:00', $tz),
+        Carbon::parse($day.' 15:30', $tz),
+    ]]);
+
+    $busy = app(AdminCalendarBusy::class);
+
+    expect($busy->windowIsBusy($day, '1-3 PM'))->toBeTrue()
+        // The buffer reaches 30 minutes, not further back.
+        ->and($busy->windowIsBusy($day, '11-1 PM'))->toBeFalse()
+        // Same rule on the trailing edge: 7-9 AM before a 9:00 event is
+        // just as back-to-back.
+        ->and($busy->windowIsBusy($day, '9-11 AM'))->toBeFalse();
+});
+
+it('blocks the window before an event on its start boundary', function () {
+    $day = busySafeDay();
+    $tz = PickTimes::timezone();
+
+    // 9:00-9:30 AM event — the 7-9 AM window ends as it starts.
+    busyCalendarFixture([[
+        Carbon::parse($day.' 09:00', $tz),
+        Carbon::parse($day.' 09:30', $tz),
+    ]]);
+
+    $busy = app(AdminCalendarBusy::class);
+
+    expect($busy->windowIsBusy($day, '7-9 AM'))->toBeTrue()
+        ->and($busy->windowIsBusy($day, '9-11 AM'))->toBeTrue()
+        ->and($busy->windowIsBusy($day, '11-1 PM'))->toBeFalse();
+});

@@ -30,6 +30,12 @@ class AdminCalendarBusy
     private const CACHE_MINUTES = 10;
 
     /**
+     * Breathing room around calendar events when judging windows: travel /
+     * reset time, so a consult can't be offered back-to-back with a meeting.
+     */
+    private const BUFFER_MINUTES = 30;
+
+    /**
      * How far ahead busy data is fetched. Matches the Microsoft Graph cap
      * (62 days); the picker's calendar reaches further, but a lead booking
      * two months out is rare enough to leave un-gated.
@@ -62,9 +68,18 @@ class AdminCalendarBusy
 
         [$start, $end] = $times;
 
+        $toMinutes = fn (string $t): int => ((int) substr($t, 0, 2)) * 60 + (int) substr($t, 3, 2);
+        $toTime = fn (int $m): string => sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+
         foreach ($this->busyIntervalsFor($date) as [$busyStart, $busyEnd]) {
-            // Overlap: the window is unusable if any part of it is taken.
-            if ($start < $busyEnd && $busyStart < $end) {
+            // Overlap, with breathing room: an event starting the minute a
+            // window ends still blocks it — a consult booked at the window's
+            // last slot would run straight into that meeting with zero travel
+            // time. Same on the other edge.
+            $paddedStart = $toTime(max(0, $toMinutes($busyStart) - self::BUFFER_MINUTES));
+            $paddedEnd = $toTime(min(23 * 60 + 59, $toMinutes($busyEnd) + self::BUFFER_MINUTES));
+
+            if ($start < $paddedEnd && $paddedStart < $end) {
                 return true;
             }
         }
