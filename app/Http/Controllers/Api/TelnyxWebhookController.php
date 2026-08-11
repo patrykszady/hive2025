@@ -143,6 +143,29 @@ class TelnyxWebhookController extends Controller
                 $data['_webhook_received_at'] = now()->timestamp;
             }
 
+            // Lifecycle changes push straight to open browsers so the
+            // "In a call" badge tracks reality — especially the hangup,
+            // which used to linger until someone reloaded the page. Fired
+            // BEFORE the handler so a handler exception can't strand a
+            // stale badge; listeners re-query state rather than trust us.
+            if (in_array($eventType, ['call.initiated', 'call.answered', 'call.bridged', 'call.hangup', 'call.leave'], true)) {
+                $callControlId = $data['payload']['call_control_id'] ?? null;
+                $callLogId = $callControlId
+                    ? CallLog::where('call_control_id', $callControlId)->value('id')
+                    : null;
+
+                // After the handler persists its status change, tell the UIs.
+                app()->terminating(function () use ($callLogId, $eventType) {
+                    try {
+                        broadcast(new \App\Events\CallStatusChanged($callLogId, $eventType));
+                    } catch (\Throwable $e) {
+                        Log::channel('telnyx')->warning('Call status broadcast failed', [
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                });
+            }
+
             return match ($eventType) {
                 'call.initiated' => $this->handleCallInitiated($data),
                 'call.answered' => $this->handleCallAnswered($data),

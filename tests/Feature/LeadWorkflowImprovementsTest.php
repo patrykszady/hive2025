@@ -476,6 +476,67 @@ it('offers the whole bookable day of exact times for an Anytime slot', function 
         ->and(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('11:30');
 });
 
+it('fills the Meet end time 30 minutes after a manually picked start', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Deck', 'client_id' => $client->id,
+        'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+
+    $date = now()->addDays(3)->format('Y-m-d');
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('addTask', $project->id)
+        ->set('form.type', 'Meet')
+        ->set('form.dates', [$date])
+        ->set("form.time_settings.$date.use_time", true)
+        ->set("form.time_settings.$date.start_time", '10:30');
+
+    expect(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('11:00');
+});
+
+it('fills a missing Meet end time when opening an older task for edit', function () {
+    $fx = leadFlowFixture();
+
+    $client = \App\Models\Client::factory()->create();
+    $client->users()->attach($fx['user']->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Deck', 'client_id' => $client->id,
+        'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
+
+    $this->actingAs($fx['user']);
+    $date = now()->addDays(2)->format('Y-m-d');
+
+    // A Meet saved before the 30-minute rule: start on file, no end.
+    $task = \App\Models\Task::create([
+        'title' => 'GS/McMorrow Consult', 'project_id' => $project->id, 'type' => 'Meet',
+        'start_date' => $date, 'end_date' => $date, 'order' => 0,
+        'user_ids' => [$fx['user']->id],
+        'options' => [
+            'dates' => [$date],
+            'time_settings' => [$date => ['use_time' => true, 'start_time' => '10:30']],
+        ],
+    ]);
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Tasks\TaskCreate::class)
+        ->call('editTask', $task->id);
+
+    expect(data_get($component->instance()->form->time_settings, "$date.end_time"))->toBe('11:00');
+});
+
 it('keeps a Meet to a single day — a second calendar click moves it', function () {
     $fx = leadFlowFixture();
 

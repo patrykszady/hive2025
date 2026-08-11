@@ -469,7 +469,10 @@
                                                             },
                                                         }"
                                                     >
+                                                        {{-- type="input": the dropdown offers the half-hour
+                                                             grid, but any exact time (9:45 AM) can be typed. --}}
                                                         <flux:time-picker
+                                                            type="input"
                                                             wire:model.live="form.time_settings.{{ $date }}.{{ $field }}"
                                                             interval="30"
                                                             min="{{ $minTime }}"

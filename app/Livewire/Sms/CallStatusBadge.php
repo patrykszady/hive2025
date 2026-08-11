@@ -23,6 +23,9 @@ class CallStatusBadge extends Component
     #[On('call.answered')]
     #[On('call.initiated')]
     #[On('call.status.changed')]
+    // The Telnyx webhook broadcasts every lifecycle change over Reverb — the
+    // hangup clears this badge the second the carrier reports it.
+    #[On('echo-private:sms.notifications,CallStatusChanged')]
     public function updateCallStatus(): void
     {
         $this->refreshActiveCall();

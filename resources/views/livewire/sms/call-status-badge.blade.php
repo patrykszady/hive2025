@@ -1,4 +1,7 @@
-<div class="flex items-center gap-2">
+{{-- Poll only while the badge shows something: the websocket push is the
+     fast path; this is the safety net for a dropped connection, so a stale
+     "In a call" can outlive a hangup by 15s at most. --}}
+<div class="flex items-center gap-2" @if ($activeCallId) wire:poll.15s="updateCallStatus" @endif>
     @if ($activeCallId)
         <flux:badge color="green" icon="phone">
             <span>In a call</span>

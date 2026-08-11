@@ -1026,6 +1026,23 @@ class TaskCreate extends Component
     }
 
     /**
+     * Meets saved before the 30-minute rule carry a start with no end —
+     * reading one back into the form fills the default, so the modal never
+     * shows an open-ended meeting and Update can't re-save one.
+     */
+    protected function fillMissingMeetEndTimes(): void
+    {
+        foreach ((array) $this->form->time_settings as $date => $settings) {
+            $start = trim((string) ($settings['start_time'] ?? ''));
+
+            if (! empty($settings['use_time']) && $start !== ''
+                && trim((string) ($settings['end_time'] ?? '')) === '') {
+                $this->form->time_settings[$date]['end_time'] = $this->defaultEndTime($start);
+            }
+        }
+    }
+
+    /**
      * Where a day's end time lands when the start moves.
      *
      * A Meet is a meeting someone has to be at, so it gets a real duration:
@@ -1809,6 +1826,7 @@ class TaskCreate extends Component
         if ($this->form->type === 'Meet') {
             $this->syncMeetingParticipants();
             $this->seedHomeownerSelection();
+            $this->fillMissingMeetEndTimes();
         }
         
         $this->modal('task_create_form_modal')->show();
