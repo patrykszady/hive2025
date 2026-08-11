@@ -42,6 +42,9 @@ class SendScheduleModal extends Component
     /** Estimate — a pending Meet on such a project is an unscheduled consult. */
     private const ESTIMATE_STATUS_CODE = 2;
 
+    /** Response — estimate delivered, homeowner deciding; consults still welcome. */
+    private const RESPONSE_STATUS_CODE = 3;
+
     #[On('openScheduleModal')]
     public function open(int $threadId): void
     {
@@ -841,18 +844,36 @@ class SendScheduleModal extends Component
     protected function consultInviteLine(): string
     {
         $tasks = $this->consultInviteTasks();
+        $projects = $this->consultInviteProjects();
 
-        if ($tasks->isEmpty()) {
+        // Nothing consult-shaped on this thread: no pending consult Meet AND
+        // no project still in the pre-consult stages.
+        if ($tasks->isEmpty() && $projects->isEmpty()) {
+            return '';
+        }
+
+        // A consult already on the calendar answers the question — don't ask
+        // the homeowner to pick times for a meeting that exists.
+        if ($tasks->isEmpty() && $this->hasUpcomingConsult($projects)) {
             return '';
         }
 
         $lead = $this->threadLead();
 
+        // Clients from before the lead system have no lead to anchor the
+        // pick-times page — provision one on the spot (once) so their
+        // Estimate/Response projects can still offer consult scheduling.
+        if (! $lead && $projects->isNotEmpty()) {
+            $lead = $this->provisionLeadForThreadClient($projects->first());
+        }
+
         if (! $lead) {
             return '';
         }
 
-        $vendor = $tasks->first()->project?->createdByVendor;
+        $vendor = $tasks->first()?->project?->createdByVendor
+            ?? $projects->first()?->createdByVendor
+            ?? $this->thread?->ownerVendor;
         $contractor = trim((string) ($vendor?->short_name ?: $vendor?->name ?: '')) ?: 'your contractor';
 
         $inviteText = match ($this->languageKey()) {
@@ -873,7 +894,83 @@ class SendScheduleModal extends Component
             default => 'Times',
         };
 
-        return "{$inviteText}\n{$itemLines}\n{$label}: {$url}";
+        // With no pending Meet to list (an Estimate/Response project alone),
+        // the invite is just the ask + link.
+        return $itemLines === ''
+            ? "{$inviteText}\n{$label}: {$url}"
+            : "{$inviteText}\n{$itemLines}\n{$label}: {$url}";
+    }
+
+    /**
+     * The thread client's projects still in the pre-consult stages (Estimate
+     * / Response) — a schedule text to them should offer the pick-times link
+     * even before anyone drafted a consult Meet.
+     */
+    protected function consultInviteProjects(): \Illuminate\Support\Collection
+    {
+        if ($this->thread?->subject_vendor_id || ! $this->thread?->client_id) {
+            return collect();
+        }
+
+        return Project::withoutGlobalScopes()
+            ->with(['latestStatus', 'createdByVendor'])
+            ->where('client_id', $this->thread->client_id)
+            ->whereNull('deleted_at')
+            ->get()
+            ->filter(fn (Project $project): bool => in_array(
+                (int) ($project->latestStatus?->status_code ?? 0),
+                [self::ESTIMATE_STATUS_CODE, self::RESPONSE_STATUS_CODE],
+                true,
+            ))
+            ->values();
+    }
+
+    /**
+     * A minimal lead for a pre-lead-system client, so the pick-times page has
+     * somewhere to save. Born at Replied — this person is mid-conversation,
+     * not a fresh enquiry for the New queue.
+     */
+    protected function provisionLeadForThreadClient(Project $project): ?\App\Models\Lead
+    {
+        $clientId = $this->thread?->client_id;
+        $contact = $clientId
+            ? \App\Models\Client::withoutGlobalScopes()->find($clientId)?->users()->withoutGlobalScopes()->first()
+            : null;
+
+        if (! $contact) {
+            return null;
+        }
+
+        $lead = \App\Models\Lead::create([
+            'date' => now(),
+            'origin' => 'consult scheduling',
+            'user_id' => $contact->id,
+            'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
+            'created_by_user_id' => auth()->id(),
+            'lead_data' => [
+                'name' => trim($contact->first_name.' '.$contact->last_name),
+                'email' => $contact->email,
+                'phone' => $contact->cell_phone,
+                'address' => $project->address,
+                'city' => $project->city,
+                'state' => $project->state,
+                'zip' => (string) $project->zip_code,
+            ],
+        ]);
+
+        $lead->setStatus('Replied');
+
+        return $lead;
+    }
+
+    /** A consult Meet already scheduled (today or later) on any of these projects. */
+    protected function hasUpcomingConsult(\Illuminate\Support\Collection $projects): bool
+    {
+        return Task::whereIn('project_id', $projects->pluck('id'))
+            ->where('type', 'Meet')
+            ->whereNotNull('start_date')
+            ->whereDate('end_date', '>=', Carbon::today(browser_timezone())->format('Y-m-d'))
+            ->exists();
     }
 
     /** Pending Meet tasks whose project is still at Estimate. */
@@ -889,7 +986,11 @@ class SendScheduleModal extends Component
     protected function isConsultInviteTask(Task $task): bool
     {
         return $task->type === 'Meet'
-            && (int) ($task->project?->latestStatus?->status_code ?? 0) === self::ESTIMATE_STATUS_CODE;
+            && in_array(
+                (int) ($task->project?->latestStatus?->status_code ?? 0),
+                [self::ESTIMATE_STATUS_CODE, self::RESPONSE_STATUS_CODE],
+                true,
+            );
     }
 
     /**
@@ -931,7 +1032,14 @@ class SendScheduleModal extends Component
             return '';
         }
 
-        return "{$greeting}\n\n{$linksText}";
+        // A no-tasks thread can still be a homeowner mid-decision — an
+        // Estimate/Response project earns the pick-a-consult invite even
+        // when there is no schedule to show.
+        $invite = $this->consultInviteLine();
+
+        return $invite === ''
+            ? "{$greeting}\n\n{$linksText}"
+            : "{$greeting}\n\n{$invite}\n\n{$linksText}";
     }
 
     /**

@@ -1687,3 +1687,88 @@ it('drops the Today section once the vendor working day is over', function (): v
 
     Carbon\Carbon::setTestNow();
 });
+
+it('invites the client to pick consult times on a Response project with no Meet drafted', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $vendor->short_name = 'GS Construction';
+    $vendor->save();
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.response-invite@example.com',
+        'cell_phone' => '2245550186',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $contact = User::query()->create([
+        'first_name' => 'Rima',
+        'last_name' => 'Patel',
+        'email' => 'rima.response-invite@example.com',
+        'cell_phone' => '2245550187',
+    ]);
+
+    $client = Client::factory()->create();
+    $client->users()->attach($contact->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Bathrooms',
+        'client_id' => $client->id,
+        'address' => '100 Main St', 'city' => 'Cary', 'state' => 'IL', 'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    // Response: estimate delivered, homeowner deciding — consults still welcome.
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 3,
+        'start_date' => now(),
+    ]));
+
+    Lead::create([
+        'date' => now(),
+        'origin' => 'gs.construction',
+        'user_id' => $contact->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $contact->id,
+        'lead_data' => ['name' => 'Rima Patel', 'message' => 'Bathrooms'],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Response Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550187'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain('Pick a consultation time with GS Construction:')
+        ->toContain('Times: ');
+
+    // Once a consult is on the calendar the invite disappears.
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'GS/Patel Consult',
+        'type' => 'Meet',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+        'start_date' => today()->addDays(2),
+        'end_date' => today()->addDays(2),
+    ]));
+
+    $previewAfter = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($previewAfter)->not->toContain('Pick a consultation time');
+});
