@@ -35,7 +35,10 @@
                 <flux:text class="text-zinc-600 dark:text-zinc-400">{{ $message }}</flux:text>
             </flux:card>
         @else
-            @if($this->isServiceCall && $this->unscheduledTasks->isNotEmpty())
+            {{-- The gate itself knows which statuses need pending tasks
+                 (Complete) and which offer the picker outright (Service
+                 Call, Estimate, Response). --}}
+            @if($this->isServiceCall)
                 @include('livewire.client.partials.service-availability')
             @endif
 

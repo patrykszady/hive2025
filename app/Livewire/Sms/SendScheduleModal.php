@@ -860,15 +860,11 @@ class SendScheduleModal extends Component
 
         $lead = $this->threadLead();
 
-        // Clients from before the lead system have no lead to anchor the
-        // pick-times page — provision one on the spot (once) so their
-        // Estimate/Response projects can still offer consult scheduling.
-        if (! $lead && $projects->isNotEmpty()) {
-            $lead = $this->provisionLeadForThreadClient($projects->first());
-        }
-
+        // No lead to anchor the pick-times page — never invent one. The
+        // schedule page hosts the availability picker for Estimate/Response
+        // projects, so the SAME pick-times ask points there instead.
         if (! $lead) {
-            return '';
+            return $projects->isEmpty() ? '' : $this->schedulePickInviteLine($projects);
         }
 
         $vendor = $tasks->first()?->project?->createdByVendor
@@ -902,6 +898,38 @@ class SendScheduleModal extends Component
     }
 
     /**
+     * The pick-a-time ask for a lead-LESS client: same wording as the consult
+     * invite, but the link is the project schedule page — which shows the
+     * availability picker for Estimate/Response projects.
+     */
+    protected function schedulePickInviteLine(\Illuminate\Support\Collection $projects): string
+    {
+        $linkLine = $this->buildScheduleLink();
+        $url = trim((string) \Illuminate\Support\Str::after($linkLine, ': '));
+
+        if ($url === '') {
+            return '';
+        }
+
+        $vendor = $projects->first()?->createdByVendor ?? $this->thread?->ownerVendor;
+        $contractor = trim((string) ($vendor?->short_name ?: $vendor?->name ?: '')) ?: 'your contractor';
+
+        $inviteText = match ($this->languageKey()) {
+            'pl' => "Wybierz termin konsultacji z {$contractor}:",
+            'es' => "Elige un horario de consulta con {$contractor}:",
+            default => "Pick a consultation time with {$contractor}:",
+        };
+
+        $label = match ($this->languageKey()) {
+            'pl' => 'Terminy',
+            'es' => 'Horarios',
+            default => 'Times',
+        };
+
+        return "{$inviteText}\n{$label}: {$url}";
+    }
+
+    /**
      * The thread client's projects still in the pre-consult stages (Estimate
      * / Response) — a schedule text to them should offer the pick-times link
      * even before anyone drafted a consult Meet.
@@ -923,44 +951,6 @@ class SendScheduleModal extends Component
                 true,
             ))
             ->values();
-    }
-
-    /**
-     * A minimal lead for a pre-lead-system client, so the pick-times page has
-     * somewhere to save. Born at Replied — this person is mid-conversation,
-     * not a fresh enquiry for the New queue.
-     */
-    protected function provisionLeadForThreadClient(Project $project): ?\App\Models\Lead
-    {
-        $clientId = $this->thread?->client_id;
-        $contact = $clientId
-            ? \App\Models\Client::withoutGlobalScopes()->find($clientId)?->users()->withoutGlobalScopes()->first()
-            : null;
-
-        if (! $contact) {
-            return null;
-        }
-
-        $lead = \App\Models\Lead::create([
-            'date' => now(),
-            'origin' => 'consult scheduling',
-            'user_id' => $contact->id,
-            'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
-            'created_by_user_id' => auth()->id(),
-            'lead_data' => [
-                'name' => trim($contact->first_name.' '.$contact->last_name),
-                'email' => $contact->email,
-                'phone' => $contact->cell_phone,
-                'address' => $project->address,
-                'city' => $project->city,
-                'state' => $project->state,
-                'zip' => (string) $project->zip_code,
-            ],
-        ]);
-
-        $lead->setStatus('Replied');
-
-        return $lead;
     }
 
     /** A consult Meet already scheduled (today or later) on any of these projects. */
@@ -1006,15 +996,44 @@ class SendScheduleModal extends Component
             return null;
         }
 
-        $userIds = \App\Models\Client::withoutGlobalScopes()
-            ->find($clientId)?->users()->withoutGlobalScopes()->pluck('users.id') ?? collect();
+        $users = \App\Models\Client::withoutGlobalScopes()
+            ->find($clientId)?->users()->withoutGlobalScopes()->get(['users.id', 'users.email']) ?? collect();
 
-        if ($userIds->isEmpty()) {
+        if ($users->isEmpty()) {
+            return null;
+        }
+
+        $byUser = \App\Models\Lead::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->whereIn('user_id', $users->pluck('id'))
+            ->latest('id')
+            ->first();
+
+        if ($byUser) {
+            return $byUser;
+        }
+
+        // Older leads lost their user link — connect by email before ever
+        // concluding the client has none. Matched as-stored and lowercased:
+        // the JSON column compares case-sensitively and user emails arrive
+        // in whatever casing the homeowner typed.
+        $emails = $users->pluck('email')
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+            ->flatMap(fn (string $email) => [trim($email), mb_strtolower(trim($email))])
+            ->unique()
+            ->values();
+
+        if ($emails->isEmpty()) {
             return null;
         }
 
         return \App\Models\Lead::withoutGlobalScopes()
-            ->whereIn('user_id', $userIds)
+            ->whereNull('deleted_at')
+            ->where(function ($query) use ($emails) {
+                foreach ($emails as $email) {
+                    $query->orWhere('lead_data->email', $email);
+                }
+            })
             ->latest('id')
             ->first();
     }
@@ -1037,8 +1056,16 @@ class SendScheduleModal extends Component
         // when there is no schedule to show.
         $invite = $this->consultInviteLine();
 
-        return $invite === ''
-            ? "{$greeting}\n\n{$linksText}"
+        if ($invite === '') {
+            return "{$greeting}\n\n{$linksText}";
+        }
+
+        // A lead-less invite already carries the schedule URL as its
+        // pick-times link — repeating it as "View schedule" reads twice.
+        $scheduleUrl = trim((string) \Illuminate\Support\Str::after($linksText, ': '));
+
+        return $scheduleUrl !== '' && str_contains($invite, $scheduleUrl)
+            ? "{$greeting}\n\n{$invite}"
             : "{$greeting}\n\n{$invite}\n\n{$linksText}";
     }
 

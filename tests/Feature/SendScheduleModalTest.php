@@ -1772,3 +1772,65 @@ it('invites the client to pick consult times on a Response project with no Meet 
 
     expect($previewAfter)->not->toContain('Pick a consultation time');
 });
+
+it('asks a lead-less client to pick times via the schedule page, creating no lead', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $vendor->short_name = 'GS Construction';
+    $vendor->save();
+
+    $user = User::query()->create([
+        'first_name' => 'Owner',
+        'last_name' => 'User',
+        'email' => 'owner.leadless-invite@example.com',
+        'cell_phone' => '2245550184',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $this->actingAs($user);
+
+    $contact = User::query()->create([
+        'first_name' => 'Adam',
+        'last_name' => 'Krzeczowski',
+        'email' => 'adam.leadless@example.com',
+        'cell_phone' => '2245550185',
+    ]);
+
+    $client = Client::factory()->create();
+    $client->users()->attach($contact->id);
+
+    $project = Project::query()->create([
+        'project_name' => 'Bathrooms',
+        'client_id' => $client->id,
+        'address' => '15 N Kaspar Ave', 'city' => 'Arlington Heights', 'state' => 'IL', 'zip_code' => 60005,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 3,
+        'start_date' => now(),
+    ]));
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Leadless Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550185'],
+        'vendor_id' => $vendor->id,
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain('Pick a consultation time with GS Construction:')
+        ->toContain('Times: ')
+        // One link, not a duplicate "View schedule" of the same URL.
+        ->not->toContain('View schedule:');
+
+    // The rule that started all this: never invent a lead for the link.
+    expect(Lead::query()->count())->toBe(0);
+});

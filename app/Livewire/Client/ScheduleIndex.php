@@ -30,6 +30,11 @@ class ScheduleIndex extends Component
     /** Complete project status code. */
     private const COMPLETE_STATUS_CODE = 7;
 
+    /** Estimate / Response — pre-consult stages where availability is welcome. */
+    private const ESTIMATE_STATUS_CODE = 2;
+
+    private const RESPONSE_STATUS_CODE = 3;
+
     /**
      * Selectable service-window time frames.
      *
@@ -453,11 +458,16 @@ class ScheduleIndex extends Component
     {
         $code = $this->getProject()?->latestStatus?->status_code;
 
-        if ($code === self::SERVICE_CALL_STATUS_CODE) {
+        // Estimate/Response: the homeowner is mid-decision — their
+        // availability is exactly what schedules the consult, and these
+        // clients may predate the lead system (no pick-times page). No
+        // task requirement: the consult IS the work being scheduled.
+        if (in_array($code, [self::ESTIMATE_STATUS_CODE, self::RESPONSE_STATUS_CODE], true)) {
             return true;
         }
 
-        return $code === self::COMPLETE_STATUS_CODE
+        // Service Call / Complete: only with actual unscheduled work to book.
+        return in_array($code, [self::SERVICE_CALL_STATUS_CODE, self::COMPLETE_STATUS_CODE], true)
             && $this->unscheduledTasks->isNotEmpty();
     }
 
@@ -617,7 +627,17 @@ class ScheduleIndex extends Component
      */
     public function submitServiceAvailability(): void
     {
-        if (! $this->isServiceCall || ! $this->serviceSelectionMeetsMinimum) {
+        // Accepts by STATUS alone (display's task requirements don't gate
+        // saving): any project in a stage where availability is welcome.
+        $code = $this->getProject()?->latestStatus?->status_code;
+        $accepts = in_array($code, [
+            self::SERVICE_CALL_STATUS_CODE,
+            self::COMPLETE_STATUS_CODE,
+            self::ESTIMATE_STATUS_CODE,
+            self::RESPONSE_STATUS_CODE,
+        ], true);
+
+        if (! $accepts || ! $this->serviceSelectionMeetsMinimum) {
             return;
         }
 
