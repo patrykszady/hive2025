@@ -330,6 +330,16 @@ class AvailabilityIndex extends Component
      */
     public function updatedProposedDates(): void
     {
+        // With homeowner-submitted time frames on the table, the calendar is
+        // hidden and those frames are the ONLY valid days — a hand-posted
+        // date outside them is dropped so the UI rule holds server-side too.
+        $slots = $this->proposedPreferredSlots();
+
+        if ($slots !== []) {
+            $allowed = array_column($slots, 'date');
+            $this->proposedDates = array_values(array_intersect($this->proposedDates, $allowed));
+        }
+
         // Add new dates to time settings
         foreach ($this->proposedDates as $date) {
             if (! isset($this->proposedTimeSettings[$date])) {
@@ -423,6 +433,8 @@ class AvailabilityIndex extends Component
             'end_date' => count($sortedDates) > 1 ? $lastDate : $firstDate,
         ]);
 
+        $this->notifyTeamOfSelection($task, $sortedDates);
+
         $this->modal('vendor_propose_dates_modal')->close();
 
         Flux::toast(
@@ -451,6 +463,86 @@ class AvailabilityIndex extends Component
      *
      * @return array<int, array{date: string, label: string, times: array<int, array{time: string, applied: bool}>}>
      */
+    /**
+     * The sub picked dates — the GC's team finds out from the bell, not from
+     * stumbling onto the planner. Mirrors the lead_times_picked pattern.
+     */
+    protected function notifyTeamOfSelection(Task $task, array $dates): void
+    {
+        $owningVendorId = $task->project?->belongs_to_vendor_id ?? $task->belongs_to_vendor_id;
+        $owningVendor = \App\Models\Vendor::withoutGlobalScopes()->find($owningVendorId);
+        $subVendor = \App\Models\Vendor::withoutGlobalScopes()->find($this->vendorId);
+
+        if (! $owningVendor || ! $subVendor) {
+            return;
+        }
+
+        $summary = collect($dates)
+            ->map(function (string $date) {
+                $window = data_get($this->proposedTimeSettings, $date);
+                $times = ! empty($window['use_time']) && ! empty($window['start_time'])
+                    ? ' · '.trim($window['start_time'].'–'.($window['end_time'] ?? ''), '–')
+                    : '';
+
+                return Carbon::parse($date)->format('D, M j').$times;
+            })
+            ->implode(', ');
+
+        foreach ($owningVendor->users()->wherePivot('role_id', 1)->get() as $admin) {
+            \App\Models\AppNotification::create([
+                'user_id' => $admin->id,
+                'type' => 'vendor_times_selected',
+                'title' => "{$subVendor->name} scheduled \"{$task->title}\"",
+                'body' => trim($summary),
+                'action_url' => $task->project
+                    ? route('projects.show', $task->project)
+                    : route('planner.cards'),
+                'data' => [
+                    'task_id' => $task->id,
+                    'project_id' => $task->project_id,
+                ],
+            ]);
+        }
+    }
+
+    /**
+     * The sub ticks a checklist item off (or back on) right from their
+     * schedule page. Scoped hard to this token's vendor — the task id comes
+     * from the wire and proves nothing by itself.
+     */
+    public function toggleChecklistItem(int $taskId, int $index): void
+    {
+        if (! $this->valid || ! $this->vendorId) {
+            return;
+        }
+
+        $task = Task::where('vendor_id', $this->vendorId)->find($taskId);
+
+        if (! $task) {
+            return;
+        }
+
+        // Work gets checked off on site — the boxes go live on the task's
+        // scheduled day. Mirrors the blade gate so a crafted request can't
+        // tick early either.
+        if (! $task->start_date || $task->start_date->copy()->startOfDay()->gt(today(browser_timezone()))) {
+            return;
+        }
+
+        $options = json_decode(json_encode($task->options ?? []), true) ?: [];
+
+        if (! isset($options['checklist'][$index])) {
+            return;
+        }
+
+        $item = (array) $options['checklist'][$index];
+        $item['completed'] = ! (bool) ($item['completed'] ?? false);
+        $options['checklist'][$index] = $item;
+
+        $task->options = $options;
+        $task->saveQuietly();
+    }
+
     public function proposedPreferredSlots(): array
     {
         if (! $this->proposingTaskId) {

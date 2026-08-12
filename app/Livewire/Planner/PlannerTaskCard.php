@@ -17,6 +17,8 @@ use Livewire\Component;
  */
 class PlannerTaskCard extends Component
 {
+    use \App\Livewire\Concerns\TogglesTaskChecklist;
+
     /** Task primary key. */
     public int $taskId;
 

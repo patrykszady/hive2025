@@ -15,6 +15,8 @@ use Livewire\Component;
 
 class VendorTasks extends Component
 {
+    use \App\Livewire\Concerns\TogglesTaskChecklist;
+
     use HasLaterTasks;
     protected $listeners = ['refreshComponent' => 'refreshTasks'];
 

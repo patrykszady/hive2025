@@ -105,6 +105,10 @@
                                 @endphp
                                 <x-schedule.task-card wire:key="scheduled-task-{{ $date }}-{{ $task->id }}">
                                     <x-schedule.task-card-body :task="$task" :date="$date" :show-project="true" />
+                                    {{-- Checklist + notes; the sub can tick items off as they work. --}}
+                                    <div class="px-3 pb-3">
+                                        <x-schedule.task-details :task="$task" :interactive="true" />
+                                    </div>
 
                                     @if($footerType)
                                         <x-slot:footer>
@@ -193,8 +197,23 @@
                                                     <flux:badge size="sm" :color="data_get($task->type_ui, 'flux', 'sky')" inset="top bottom">
                                                         {{ $task->type ?? 'Task' }}
                                                     </flux:badge>
+                                                    @php
+                                                        $pendingStatusCode = (int) ($task->project?->latestStatus?->status_code ?? 0);
+                                                    @endphp
+                                                    @if(in_array($pendingStatusCode, [7, 8], true))
+                                                        {{-- Service Call status — or leftover work on a
+                                                             Complete project, a service call in practice.
+                                                             Same orange the project status badge uses. --}}
+                                                        <flux:badge size="sm" color="orange" inset="top bottom">Service Call</flux:badge>
+                                                    @endif
                                                 </div>
-                                                <flux:badge color="red" size="sm">No Date</flux:badge>
+                                                {{-- Homeowner-times state beats a bare "No Date": red
+                                                     "Schedule" says times are waiting to be picked. --}}
+                                                @if($task->preferredTimeIndicator())
+                                                    <x-task-preferred-indicator :task="$task" />
+                                                @else
+                                                    <flux:badge color="red" size="sm">No Date</flux:badge>
+                                                @endif
                                             </div>
 
                                             {{-- Address --}}
@@ -215,6 +234,9 @@
                                                     </div>
                                                 </div>
                                             @endif
+
+                                            {{-- Checklist + notes; the sub can tick items off as they work. --}}
+                                            <x-schedule.task-details :task="$task" :interactive="true" />
 
                                             {{-- Owner --}}
                                             @if($task->owner)
@@ -333,18 +355,22 @@
             </div>
         @endif
 
-        {{-- Dates Calendar --}}
-        <flux:field>
-            <flux:label>Select Days</flux:label>
-            <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
-                <flux:calendar
-                    multiple
-                    with-today
-                    size="sm"
-                    wire:model.live="proposedDates"
-                />
-            </div>
-        </flux:field>
+        {{-- Dates Calendar — only when the homeowner left the schedule open.
+             Once they've submitted time frames, those ARE the choices: the
+             vendor picks from the chips above, not around them. --}}
+        @if(empty($preferredSlots))
+            <flux:field>
+                <flux:label>Select Days</flux:label>
+                <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
+                    <flux:calendar
+                        multiple
+                        with-today
+                        size="sm"
+                        wire:model.live="proposedDates"
+                    />
+                </div>
+            </flux:field>
+        @endif
 
         {{-- Time Settings for each selected date --}}
         @if(!empty($proposedDates))
@@ -353,7 +379,11 @@
                 
                 <div class="space-y-3 max-h-48 overflow-y-auto">
                     @foreach($proposedDates as $date)
-                        <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 space-y-2">
+                        {{-- Value-carrying key: swapping the applied time frame
+                             swaps the date, and Flux inputs (wire:ignore inside)
+                             keep the OLD date's state unless the whole block
+                             remounts when date or times change. --}}
+                        <div wire:key="vendor-arrival-{{ $date }}-{{ ($proposedTimeSettings[$date]['use_time'] ?? false) ? 'on' : 'off' }}-{{ $proposedTimeSettings[$date]['start_time'] ?? '' }}-{{ $proposedTimeSettings[$date]['end_time'] ?? '' }}" class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 space-y-2">
                             <div class="flex items-center justify-between">
                                 <flux:subheading class="text-sm">
                                     {{ \Carbon\Carbon::parse($date)->format('D, M j') }}

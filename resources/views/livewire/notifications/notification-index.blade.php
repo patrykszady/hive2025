@@ -55,6 +55,9 @@
                                         @case('lead_times_picked')
                                             <flux:icon.bell class="size-5 text-green-500" />
                                             @break
+                                        @case('vendor_times_selected')
+                                            <flux:icon.calendar-days class="size-5 text-indigo-500" />
+                                            @break
                                         @default
                                             <flux:icon.bell class="size-5 text-zinc-400" />
                                     @endswitch

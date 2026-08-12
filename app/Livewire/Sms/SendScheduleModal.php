@@ -670,8 +670,19 @@ class SendScheduleModal extends Component
                         || $this->isConsultInviteTask($task)
                 )->values();
 
-            if ($pendingForSection->isNotEmpty()) {
-                $pendingLines = $pendingForSection->map(function (Task $task) use ($showProject) {
+            // Sub-contractor threads: a task whose homeowner already shared
+            // service-call times is not merely "Pending" — the ask is theirs.
+            // Call it out, and keep genuinely dateless work under Pending.
+            $requestedForSection = collect();
+            if ($showProject) {
+                [$requestedForSection, $pendingForSection] = $pendingForSection->partition(
+                    fn (Task $task): bool => $task->preferredTimeIndicator() === 'schedule'
+                );
+                $requestedForSection = $requestedForSection->values();
+                $pendingForSection = $pendingForSection->values();
+            }
+
+            $formatPendingLine = function (Task $task) use ($showProject) {
                 $taskTitle = trim($task->title ?? 'Task');
                 $projectName = trim((string) ($task->project?->project_name ?? ''));
                 if ($showProject && $projectName !== '') {
@@ -692,7 +703,26 @@ class SendScheduleModal extends Component
                     }
                 }
                 return $line;
-            })->implode("\n");
+            };
+
+            if ($requestedForSection->isNotEmpty()) {
+                $heading = match ($this->languageKey()) {
+                    'pl' => $requestedForSection->count() === 1
+                        ? 'Klient poprosil o termin serwisu dla tego zadania'
+                        : 'Klient poprosil o termin serwisu dla tych zadan',
+                    'es' => $requestedForSection->count() === 1
+                        ? 'El propietario ha solicitado una visita de servicio para esta tarea'
+                        : 'El propietario ha solicitado una visita de servicio para estas tareas',
+                    default => $requestedForSection->count() === 1
+                        ? 'Homeowner has requested a service call for this task'
+                        : 'Homeowner has requested a service call for these tasks',
+                };
+
+                $daySections[] = $heading . ":\n" . $requestedForSection->map($formatPendingLine)->implode("\n");
+            }
+
+            if ($pendingForSection->isNotEmpty()) {
+                $pendingLines = $pendingForSection->map($formatPendingLine)->implode("\n");
 
                 $daySections[] = $this->scheduleDayLabel('pending') . ":\n{$pendingLines}";
             }
@@ -731,7 +761,11 @@ class SendScheduleModal extends Component
             }
         }
 
-        $invite = trim(implode("\n\n", array_filter([$invite, $this->consultInviteLine()])));
+        // One availability ask per message: when the service-call invite is
+        // present, its Schedule link already opens the page where the
+        // homeowner shares times — stacking the consult invite under it
+        // doubled the ask with a second link to the same conversation.
+        $invite = trim($invite !== '' ? $invite : $this->consultInviteLine());
 
         // Blank line after the greeting: "Hi Amy & Andy," reads as its own
         // line, then the invite starts a fresh paragraph.
@@ -804,10 +838,22 @@ class SendScheduleModal extends Component
             ? 'for this service call'
             : 'for these service calls';
 
+        // The homeowner already gave times for every project here — this text
+        // is a nudge for fresh ones, not a first ask that ignores their reply.
+        $projects = $serviceCallTasks->pluck('project')->filter()->unique('id');
+        $alreadyShared = $projects->isNotEmpty()
+            && $projects->every(fn ($project) => ! empty(data_get($project->service_availability, 'slots')));
+
         $inviteText = match ($this->languageKey()) {
-            'pl' => "Podaj swoja dostepnosc dla {$contractor}:",
-            'es' => "Comparte tu disponibilidad para {$contractor}:",
-            default => "Share availability with {$contractor} {$serviceCallLabel}:",
+            'pl' => $alreadyShared
+                ? "Podaj nowa lub dodatkowa dostepnosc dla {$contractor}:"
+                : "Podaj swoja dostepnosc dla {$contractor}:",
+            'es' => $alreadyShared
+                ? "Comparte nueva o mas disponibilidad para {$contractor}:"
+                : "Comparte tu disponibilidad para {$contractor}:",
+            default => $alreadyShared
+                ? "Share new or more availability with {$contractor} {$serviceCallLabel}:"
+                : "Share availability with {$contractor} {$serviceCallLabel}:",
         };
 
         $scheduleLinkLine = $this->buildScheduleLink();

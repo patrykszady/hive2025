@@ -187,6 +187,17 @@ class SmsConversation extends Component
 
         unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap, $this->threadMedia, $this->threadImages);
         $this->repaintBubbles();
+
+        // A START reply flips the opt-in gate the composer renders ("Awaiting
+        // START reply", disabled send) — repaint that island too, or the
+        // banner outlives the reply until someone refreshes.
+        foreach ($this->getIslands() as $island) {
+            if ($island['name'] === 'sms-conversation-composer') {
+                $this->renderIsland('sms-conversation-composer');
+                break;
+            }
+        }
+
         $this->dispatch('sms-new-message-received');
     }
 

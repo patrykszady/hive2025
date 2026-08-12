@@ -11,6 +11,8 @@ use Livewire\Component;
 
 class UserTasks extends Component
 {
+    use \App\Livewire\Concerns\TogglesTaskChecklist;
+
     protected $listeners = ['refreshComponent' => 'refreshTasks'];
 
     public function refreshTasks(): void

@@ -10,13 +10,16 @@
 ])
 {{-- :content (bound) — a plain content="{{ ... }}" attribute double-escapes:
      once at this tag, once inside Flux's tooltip stub. --}}
+{{-- No Alpine state: morph/clone contexts (table rows, x-for) can re-init
+     the binding without its x-data ancestor, throwing "clipped is not
+     defined" on every render. Toggling the attribute imperatively keeps the
+     whole behavior on one element with nothing to inherit. --}}
 <flux:tooltip
     :content="$content"
     position="top"
+    disabled
     {{ $attributes->merge(['class' => 'block min-w-0']) }}
-    x-data="{ clipped: false }"
-    x-init="const el = $el.querySelector('.truncate'); if (el) { const check = () => { clipped = el.scrollWidth > el.clientWidth }; check(); new ResizeObserver(check).observe(el) }"
-    x-bind:disabled="!clipped"
+    x-init="const el = $el.querySelector('.truncate'); if (el) { const check = () => { $el.toggleAttribute('disabled', !(el.scrollWidth > el.clientWidth)) }; check(); new ResizeObserver(check).observe(el) }"
 >
     {{ $slot }}
 </flux:tooltip>

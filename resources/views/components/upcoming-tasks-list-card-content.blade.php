@@ -134,3 +134,14 @@
         @endif
     </div>
 @endif
+
+{{-- Checklist + notes sub-card (shared partial). Interactive for team
+     members; clicks inside never bubble into the card's edit-modal click. --}}
+@if(! ($hideDetails ?? false))
+    <div x-on:click.stop wire:click.stop>
+        <x-schedule.task-details
+            :task="$task"
+            :interactive="auth()->check() && ! (auth()->user()->is_browsing_as_client ?? false)"
+        />
+    </div>
+@endif

@@ -42,13 +42,13 @@
             <div class="space-y-6">
                 <flux:heading size="lg">Invite Vendor to Project</flux:heading>
 
-                <style>
-                    [data-vendor-listbox] [data-flux-option] > div:first-child,
-                    ui-options[data-flux-options] [data-flux-option] > div:first-child {
-                        display: none !important;
-                    }
-                </style>
-
+                {{-- NOTE: a <style> block here once hid `[data-flux-option] >
+                     div:first-child` to suppress the checkmark column — and
+                     its second selector leaked GLOBALLY, so when Flux 2.16
+                     moved an option's whole content into that first div, every
+                     select on every project page rendered empty. Options keep
+                     their standard indicator now; never blanket-hide Flux
+                     internals by structure again. --}}
                 <flux:select
                     wire:model="vendor_id"
                     variant="listbox"

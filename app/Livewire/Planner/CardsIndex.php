@@ -20,6 +20,8 @@ use Livewire\Attributes\Url;
 // #[Lazy]
 class CardsIndex extends Component
 {
+    use \App\Livewire\Concerns\TogglesTaskChecklist;
+
     public $vendors = [];
     public $employees = [];
     public $projects = [];

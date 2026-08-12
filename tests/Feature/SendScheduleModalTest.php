@@ -1834,3 +1834,74 @@ it('asks a lead-less client to pick times via the schedule page, creating no lea
     // The rule that started all this: never invent a lead for the link.
     expect(Lead::query()->count())->toBe(0);
 });
+
+it('sends ONE availability ask when both service-call and consult contexts exist, nudging for new times', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $vendor->short_name = 'GS Construction';
+    $vendor->save();
+
+    $user = User::query()->create([
+        'first_name' => 'Owner', 'last_name' => 'User',
+        'email' => 'owner.single-ask@example.com', 'cell_phone' => '2245550183',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $this->actingAs($user);
+
+    $contact = User::query()->create([
+        'first_name' => 'Amy', 'last_name' => 'Dusto',
+        'email' => 'amy.single-ask@example.com', 'cell_phone' => '2245550182',
+    ]);
+    $client = Client::factory()->create();
+    $client->users()->attach($contact->id);
+
+    // Complete project with pending work AND already-shared availability.
+    $complete = Project::query()->create([
+        'project_name' => 'Home Remodel', 'client_id' => $client->id,
+        'address' => '1 Main', 'city' => 'Cary', 'state' => 'IL', 'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+        'service_availability' => ['slots' => [['date' => '2026-08-14', 'time' => '7-9 AM']], 'submitted_at' => now()->toIso8601String()],
+    ]);
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $complete->id, 'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 7, 'start_date' => now(),
+    ]));
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Electrical Issues', 'type' => 'task', 'order' => 1,
+        'project_id' => $complete->id, 'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id, 'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
+    ]));
+
+    // Estimate project + lead: the consult context that used to double the ask.
+    $estimate = Project::query()->create([
+        'project_name' => 'Basement', 'client_id' => $client->id,
+        'address' => '1 Main', 'city' => 'Cary', 'state' => 'IL', 'zip_code' => 60013,
+        'belongs_to_vendor_id' => $vendor->id,
+    ]);
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $estimate->id, 'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 2, 'start_date' => now(),
+    ]));
+    Lead::create([
+        'date' => now(), 'origin' => 'gs.construction',
+        'user_id' => $contact->id, 'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $contact->id,
+        'lead_data' => ['name' => 'Amy Dusto', 'email' => 'amy.single-ask@example.com'],
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Single Ask Thread', 'from_number' => '+12245554444',
+        'participants' => ['+12245550182'], 'vendor_id' => $vendor->id,
+        'client_id' => $client->id, 'last_activity_at' => now(),
+    ]);
+
+    $preview = Livewire::test(SendScheduleModal::class)
+        ->call('open', $thread->id)
+        ->get('previewMessage');
+
+    expect($preview)
+        ->toContain('Share new or more availability with GS Construction')
+        ->toContain('- Electrical Issues')
+        ->not->toContain('Pick a consultation time')
+        // one link, not two
+        ->and(substr_count($preview, 'https://'))->toBe(1);
+});
