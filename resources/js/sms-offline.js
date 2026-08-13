@@ -36,6 +36,9 @@ const FRAGMENT_GAP_MS = 300;         // polite: sequential fragment fetches
 const SHELL_REFRESH_MIN_INTERVAL_MS = 5 * 60_000;
 const REWARM_DEBOUNCE_MS = 4_000;    // per-thread, for incoming-message bursts
 const RACE_PAINT_DELAY_MS = 400;     // slow-network: paint cached copy after this
+const PROBE_URL = '/up';             // Laravel health route — no auth, no session
+const PROBE_INTERVAL_MS = 5_000;     // recovery: re-check a suspect offline state
+const RACE_STUCK_MS = 8_000;         // "updating…" with no real load → force replay
 
 let ownerKey = null;    // '12-v' — from the hive-user-key meta
 let stopped = false;    // set when the session is known dead; no more fetching
@@ -44,6 +47,13 @@ let lastShellRefresh = 0;
 let overlayMode = null; // null | 'offline' | 'race' | 'reconnecting'
 let overlayThreadId = null;
 let raceTimer = null;
+let raceStuckTimer = null;
+let probeTimer = null;
+// Bumped whenever a real thread load lands or the page navigates. A race
+// paint carries the generation it started under and aborts if it changed —
+// without this, a thread landing DURING the async cached-copy read left the
+// overlay painted on top of live content with nothing left to dissolve it.
+let raceGeneration = 0;
 const rewarmTimers = new Map();
 
 const supported = () => 'caches' in window;
@@ -116,14 +126,44 @@ async function handleDeadSession() {
 
 /* ─── Offline state ──────────────────────────────────────────────── */
 
+/** One real request settles it — navigator.onLine and status 0 both lie. */
+async function probeConnectivity() {
+    try {
+        const res = await fetch(PROBE_URL, { cache: 'no-store', credentials: 'same-origin' });
+        return res.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Offline mode gates thread taps to cached copies, so no Livewire request
+ * runs and the "successful commit" recovery signal can never fire — without
+ * this probe loop a false positive (aborted request) locks offline forever.
+ */
+function startRecoveryProbe() {
+    if (probeTimer) return;
+    probeTimer = setInterval(async () => {
+        if (!navigator.onLine) return; // truly down — the 'online' event recovers
+        if (await probeConnectivity()) setOffline(false);
+    }, PROBE_INTERVAL_MS);
+}
+
+function stopRecoveryProbe() {
+    clearInterval(probeTimer);
+    probeTimer = null;
+}
+
 function setOffline(isOffline) {
     const store = smsStore();
     if (store) store.offline = isOffline;
+    if (isOffline) startRecoveryProbe(); else stopRecoveryProbe();
     if (!isOffline) {
         setBanner('');
         // Overlay showing cached content while we were offline → resync the
-        // real component now that requests can succeed again.
-        if (overlayMode === 'offline' && overlayThreadId) {
+        // real component now that requests can succeed again. A stuck 'race'
+        // overlay ("updating…" whose real load died) gets the same replay.
+        if ((overlayMode === 'offline' || overlayMode === 'race') && overlayThreadId) {
             reconnectReplay(overlayThreadId);
         }
     } else if (overlayMode === 'race') {
@@ -258,6 +298,7 @@ function hidePane() {
         el.classList.remove('flex');
         el.innerHTML = '';
     }
+    clearTimeout(raceStuckTimer);
     overlayMode = null;
     overlayThreadId = null;
     setBanner('');
@@ -276,15 +317,19 @@ const NOT_CACHED_HTML = `
  * offline tap gate and the slow-network race.
  * Returns true when a cached copy was painted.
  */
-async function paintCached(threadId, mode) {
+async function paintCached(threadId, mode, generation = null) {
     const el = pane();
     if (!el || !supported()) return false;
+
+    const stale = () => mode === 'race' && generation !== null && generation !== raceGeneration;
 
     let res = null;
     try {
         const cache = await caches.open(DATA_CACHE);
         res = await cache.match(fragmentUrl(threadId));
     } catch (e) { /* treat as miss */ }
+
+    if (stale()) return false; // real thread landed while we were reading
 
     if (!res) {
         if (mode === 'race') return false; // racing: no cached copy → let the skeleton ride
@@ -298,6 +343,7 @@ async function paintCached(threadId, mode) {
     }
 
     const html = await res.text();
+    if (stale()) return false;
     el.innerHTML = html;
     showPane(el);
     overlayMode = mode;
@@ -307,6 +353,18 @@ async function paintCached(threadId, mode) {
     setBanner(mode === 'race'
         ? `Slow connection — cached copy${age ? ' · ' + age : ''} · updating…`
         : `Offline — cached messages${age ? ' · ' + age : ''}`);
+
+    // "updating…" is a promise — if the real load died (aborted request,
+    // dropped response) no 'thread-ready' will ever dissolve this overlay.
+    // After a grace period, stop waiting and re-request the live thread.
+    if (mode === 'race') {
+        clearTimeout(raceStuckTimer);
+        raceStuckTimer = setTimeout(() => {
+            if (overlayMode === 'race' && overlayThreadId === threadId && navigator.onLine) {
+                reconnectReplay(threadId);
+            }
+        }, RACE_STUCK_MS);
+    }
 
     // Settle the live component's plumbing (switching-skeleton timer,
     // scroll-to-bottom reset) exactly like a real thread load would.
@@ -364,8 +422,9 @@ function wireEvents() {
         const threadId = event.detail?.threadId;
         clearTimeout(raceTimer);
         if (!threadId) return;
+        const generation = raceGeneration;
         raceTimer = setTimeout(() => {
-            if (navigator.onLine) paintCached(threadId, 'race');
+            if (navigator.onLine) paintCached(threadId, 'race', generation);
         }, RACE_PAINT_DELAY_MS);
     });
 
@@ -374,6 +433,7 @@ function wireEvents() {
         // Our own settle event (see dispatchSettle) — not a real thread load;
         // only a Livewire-dispatched thread-ready may dissolve the overlay.
         if (event.detail?.source === 'sms-offline') return;
+        raceGeneration++; // invalidates any race paint still in flight
         if (overlayMode === 'race' || overlayMode === 'reconnecting') {
             setTimeout(hidePane, 0); // next tick: real content is already painted
         }
@@ -397,6 +457,8 @@ function wireEvents() {
     // thread into a page that no longer shows conversations.
     document.addEventListener('livewire:navigated', () => {
         clearTimeout(raceTimer);
+        clearTimeout(raceStuckTimer);
+        raceGeneration++;
         overlayMode = null;
         overlayThreadId = null;
         setBanner('');
@@ -417,10 +479,16 @@ function wireEvents() {
         window.Livewire.hook('request', ({ fail }) => {
             fail(({ status, preventDefault }) => {
                 const networkFailure = !navigator.onLine || status === 0 || status === 503;
-                if (networkFailure) {
-                    setOffline(true);
-                    if (typeof preventDefault === 'function') preventDefault();
-                }
+                if (!networkFailure) return;
+                if (typeof preventDefault === 'function') preventDefault();
+                if (!navigator.onLine) return void setOffline(true);
+                // status 0 while the browser reports online is usually an
+                // ABORTED request (fast thread switches, mid-request
+                // navigation), not a dead network — flipping offline on it
+                // stranded online users on cached copies. Verify first.
+                probeConnectivity().then((ok) => {
+                    if (!ok) setOffline(true);
+                });
             });
         });
 

@@ -442,8 +442,11 @@ class SendScheduleModal extends Component
             return collect();
         }
 
-        $today = Carbon::today(browser_timezone());
-        $afterDate = $today->copy()->addDays($this->daysAhead)->format('Y-m-d');
+        // Anchored to the same (possibly after-hours-shifted) window start as
+        // the visible day sections — a different base here made "Next Up"
+        // re-list the window's own last day.
+        $start = $this->scheduleWindowStart();
+        $afterDate = $start->copy()->addDays($this->daysAhead)->format('Y-m-d');
 
         $vendorId = $this->thread?->subject_vendor_id;
 
@@ -495,8 +498,8 @@ class SendScheduleModal extends Component
             return null;
         }
 
-        $today = Carbon::today(browser_timezone());
-        $afterDate = $today->copy()->addDays($this->daysAhead)->format('Y-m-d');
+        $start = $this->scheduleWindowStart();
+        $afterDate = $start->copy()->addDays($this->daysAhead)->format('Y-m-d');
 
         return $this->firstFutureScheduledDate($tasks, $afterDate);
     }
@@ -525,8 +528,7 @@ class SendScheduleModal extends Component
      */
     protected function laterTasksWindowEnd(): string
     {
-        $today = Carbon::today(browser_timezone());
-        $windowEnd = $today->copy()->addDays($this->daysAhead - 1)->format('Y-m-d');
+        $windowEnd = $this->scheduleWindowStart()->copy()->addDays($this->daysAhead - 1)->format('Y-m-d');
 
         $nextDate = $this->nextUpcomingDate;
 

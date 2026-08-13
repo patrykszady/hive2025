@@ -450,3 +450,67 @@ it('sends consent and welcome messages in the recipient preferred language', fun
         ->and($welcomeMessage->text)->toContain('te da la bienvenida')
         ->and($welcomeMessage->text)->not->toContain('welcomes you');
 });
+
+it('never includes a vendor office line in a group thread', function (): void {
+    $vendor = Vendor::factory()->create([
+        'business_name' => 'HAUS Engineering',
+        'business_phone' => '3125557777',
+    ]);
+
+    $user = User::query()->create([
+        'first_name' => 'Michael',
+        'last_name' => 'Hausfeld',
+        'email' => 'michael.haus@example.com',
+        'cell_phone' => '6305558888',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+    $vendor->users()->attach($user->id, ['is_employed' => true, 'role_id' => 1]);
+
+    $thread = app(GroupSmsService::class)->sendNewGroup(
+        ['3125557777', '6305558888'],
+        'Hello',
+        null,
+        null,
+        null,
+        $vendor->id,
+        $vendor->id,
+    );
+
+    expect($thread->participants)->toBe(['+16305558888'])
+        ->and(SmsThreadParticipant::where('thread_id', $thread->id)->pluck('phone_number')->all())
+        ->toBe(['+16305558888']);
+});
+
+it('keeps a deliberate office-only thread and consents it automatically', function (): void {
+    Vendor::factory()->create([
+        'business_name' => 'HAUS Engineering',
+        'business_phone' => '3125557777',
+    ]);
+
+    $thread = app(GroupSmsService::class)->sendNewGroup(['3125557777'], 'Hello');
+
+    expect($thread->participants)->toBe(['+13125557777'])
+        ->and($thread->fresh()->hasPendingOptIn())->toBeFalse();
+});
+
+it('excludes the office line from the vendor group preset but keeps it as a solo option', function (): void {
+    $vendor = Vendor::factory()->create([
+        'business_name' => 'HAUS Engineering',
+        'business_phone' => '3125557777',
+    ]);
+
+    $mike = (new User())->forceFill(['first_name' => 'Mike', 'last_name' => 'H', 'cell_phone' => '6305558888']);
+    $lena = (new User())->forceFill(['first_name' => 'Lena', 'last_name' => 'H', 'cell_phone' => '6305559999']);
+    $vendor->setRelation('users', collect([$mike, $lena]));
+
+    $options = (new SmsNewThread())->buildVendorRecipientPresetOptions($vendor);
+
+    $group = collect($options)->first(fn ($o) => count($o['recipients']) > 1);
+    $solo = collect($options)->filter(fn ($o) => count($o['recipients']) === 1);
+
+    expect($group)->not->toBeNull()
+        ->and(collect($group['recipients'])->pluck('number')->all())
+        ->toBe(['+16305558888', '+16305559999'])
+        ->and($solo->pluck('recipients.0.number')->all())
+        ->toContain('+13125557777');
+});

@@ -116,8 +116,22 @@ class GroupSmsService
         $normalizedPhoneNumbers = collect($phoneNumbers)
             ->map(fn (string $phone): string => self::formatE164($phone))
             ->unique()
-            ->values()
-            ->all();
+            ->values();
+
+        // Office lines never ride along in group messages. A deliberate
+        // solo text to a business number stays possible — only drop them
+        // when actual people are on the thread.
+        if ($normalizedPhoneNumbers->count() > 1) {
+            $withoutBusinessLines = $normalizedPhoneNumbers
+                ->reject(fn (string $phone): bool => self::isBusinessLine($phone))
+                ->values();
+
+            if ($withoutBusinessLines->isNotEmpty()) {
+                $normalizedPhoneNumbers = $withoutBusinessLines;
+            }
+        }
+
+        $normalizedPhoneNumbers = $normalizedPhoneNumbers->all();
 
         $alreadyOptedInPhones = SmsThreadParticipant::query()
             ->whereIn('phone_number', $normalizedPhoneNumbers)
@@ -139,10 +153,13 @@ class GroupSmsService
         ]);
 
         foreach ($normalizedPhoneNumbers as $phoneNumber) {
+            $isBusinessLine = self::isBusinessLine($phoneNumber);
+
             SmsThreadParticipant::create([
                 'thread_id' => $thread->id,
                 'phone_number' => $phoneNumber,
-                'opted_in_at' => in_array($phoneNumber, $alreadyOptedInPhones, true) ? now() : null,
+                'opted_in_at' => ($isBusinessLine || in_array($phoneNumber, $alreadyOptedInPhones, true)) ? now() : null,
+                'manual_opt_in_reason' => $isBusinessLine ? 'Office line — consent not required' : null,
             ]);
         }
 
@@ -151,6 +168,25 @@ class GroupSmsService
         $thread->update(['opt_in_prompt_sent_at' => now()]);
 
         return $thread;
+    }
+
+    /**
+     * A company's own front-desk number can't reply START and doesn't need
+     * to — SMS consent applies to people's cell phones, not office lines.
+     * Matches any vendor's business_phone (compared on last 10 digits).
+     */
+    public static function isBusinessLine(string $phoneNumber): bool
+    {
+        $digits = substr(preg_replace('/\D/', '', $phoneNumber), -10);
+
+        if (strlen($digits) < 10) {
+            return false;
+        }
+
+        return \App\Models\Vendor::query()
+            ->whereNotNull('business_phone')
+            ->pluck('business_phone')
+            ->contains(fn ($phone) => substr(preg_replace('/\D/', '', (string) $phone), -10) === $digits);
     }
 
     public function markParticipantOptedInAndSendWelcomeIfReady(SmsGroupThread $thread, string $phoneNumber, ?int $sentByUserId = null): bool

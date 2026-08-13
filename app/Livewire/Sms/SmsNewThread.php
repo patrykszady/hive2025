@@ -192,11 +192,17 @@ class SmsNewThread extends Component
             ];
         }
 
-        if ($recipientEntries->count() > 1) {
-            $groupRecipients = $recipientEntries->all();
-            $groupPhones = $recipientEntries->pluck('number')->all();
+        // Office lines stay available as a deliberate solo option above, but
+        // never join the group preset — group messages are for people.
+        $groupEntries = $recipientEntries
+            ->reject(fn (array $entry) => GroupSmsService::isBusinessLine($entry['number']))
+            ->values();
+
+        if ($groupEntries->count() > 1) {
+            $groupRecipients = $groupEntries->all();
+            $groupPhones = $groupEntries->pluck('number')->all();
             $groupSignature = $this->participantSignature($groupPhones);
-            $groupLabel = $recipientEntries
+            $groupLabel = $groupEntries
                 ->pluck('label')
                 ->filter()
                 ->join(', ', ' & ');
@@ -219,18 +225,7 @@ class SmsNewThread extends Component
     {
         $existingNumbers = collect($this->recipients)->pluck('number')->toArray();
 
-        $businessPhone = $vendor->getRawOriginal('business_phone');
-        if (is_string($businessPhone) && $businessPhone !== '') {
-            $e164 = GroupSmsService::formatE164($businessPhone);
-            if (! in_array($e164, $existingNumbers)) {
-                $this->recipients[] = [
-                    'number' => $e164,
-                    'display' => $this->formatDisplay($businessPhone),
-                    'label' => $vendor->short_name ?: $vendor->name,
-                ];
-                $existingNumbers[] = $e164;
-            }
-        }
+        $cellsAdded = false;
 
         foreach ($vendor->users as $user) {
             if ($user->getRawOriginal('cell_phone')) {
@@ -241,7 +236,23 @@ class SmsNewThread extends Component
                         'display' => $this->formatDisplay($user->getRawOriginal('cell_phone')),
                         'label' => $this->displayName($user),
                     ];
+                    $existingNumbers[] = $e164;
+                    $cellsAdded = true;
                 }
+            }
+        }
+
+        // The office line never joins a group thread with people on it —
+        // it's only the fallback when the vendor has no textable cells.
+        $businessPhone = $vendor->getRawOriginal('business_phone');
+        if (! $cellsAdded && is_string($businessPhone) && $businessPhone !== '') {
+            $e164 = GroupSmsService::formatE164($businessPhone);
+            if (! in_array($e164, $existingNumbers)) {
+                $this->recipients[] = [
+                    'number' => $e164,
+                    'display' => $this->formatDisplay($businessPhone),
+                    'label' => $vendor->short_name ?: $vendor->name,
+                ];
             }
         }
     }
