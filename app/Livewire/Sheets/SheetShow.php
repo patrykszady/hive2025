@@ -164,7 +164,7 @@ class SheetShow extends Component
         return Vendor::whereNot('business_type', 'Retail')->pluck('id');
     }
 
-    #[Computed(cache: false)]
+    #[Computed]
     public function costOfLaborVendors()
     {
         // Get checks for non-retail subcontractors
@@ -174,7 +174,11 @@ class SheetShow extends Component
                       ->where('id', '!=', auth()->user()->vendor->id);
             });
 
+        // groupBy('vendor.business_name') dereferences the relation per row —
+        // without this eager load that was one vendor query per check (130 on
+        // a full-year sheet).
         $checkVendors = $checksQuery
+            ->with('vendor:id,business_name')
             ->get()
             ->groupBy('vendor.business_name')
             ->toBase();
@@ -191,52 +195,99 @@ class SheetShow extends Component
             // Group by user_id first to avoid duplicates when users have multiple via_vendor relationships
             $userIds = $viaVendorUsers->pluck('user_id')->unique()->toArray();
             
+            // One query each instead of a find() per user inside the loop.
+            $viaVendorsById = \App\Models\Vendor::whereIn('id', $viaVendorUsers->pluck('via_vendor_id')->unique()->filter())
+                ->get()
+                ->keyBy('id');
+            $usersById = \App\Models\User::with('distributions')
+                ->whereIn('id', $userIds)
+                ->get()
+                ->keyBy('id');
+
+            // The seven aggregates below used to run PER USER inside this loop.
+            // Same filters, one grouped query each, keyed for lookup.
+            $vendorIdForSums = auth()->user()->vendor->id;
+            $periodStart = $this->start_date;
+            $periodEnd = $this->end_date;
+            $userIdStrings = array_map('strval', $userIds);
+            $distributionIds = $usersById
+                ->map(fn ($u) => $u->distributions->first()->id ?? null)
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            $inCheckWindow = fn ($query) => $query->whereBetween('date', [$periodStart, $periodEnd]);
+
+            $timesheetsPaidByUser = Timesheet::whereIn('user_id', $userIds)
+                ->where('vendor_id', $vendorIdForSums)
+                ->whereNull('paid_by')
+                ->whereHas('check', $inCheckWindow)
+                ->groupBy('user_id')
+                ->selectRaw('user_id, SUM(amount) as total')
+                ->pluck('total', 'user_id');
+
+            $timesheetsPaidByOtherByUser = Timesheet::withoutGlobalScopes()
+                ->whereIn('user_id', $userIds)
+                ->where('vendor_id', $vendorIdForSums)
+                ->whereNotNull('paid_by')
+                ->whereHas('check', fn ($query) => $query->withoutGlobalScopes()->whereBetween('date', [$periodStart, $periodEnd]))
+                ->groupBy('user_id')
+                ->selectRaw('user_id, SUM(amount) as total')
+                ->pluck('total', 'user_id');
+
+            $reimbursementsByUser = Expense::whereNull('paid_by')
+                ->whereIn('reimbursment', $userIdStrings)
+                ->whereHas('check', $inCheckWindow)
+                ->groupBy('reimbursment')
+                ->selectRaw('reimbursment, SUM(amount) as total')
+                ->pluck('total', 'reimbursment');
+
+            $reimbursementsPaidByOtherByUser = Expense::whereNotNull('paid_by')
+                ->whereIn('reimbursment', $userIdStrings)
+                ->whereHas('check', $inCheckWindow)
+                ->groupBy('reimbursment')
+                ->selectRaw('reimbursment, SUM(amount) as total')
+                ->pluck('total', 'reimbursment');
+
+            $expensesPaidByUser = Expense::whereIn('paid_by', $userIds)
+                ->whereHas('check', $inCheckWindow)
+                ->groupBy('paid_by')
+                ->selectRaw('paid_by, SUM(amount) as total')
+                ->pluck('total', 'paid_by');
+
+            $distributionChecksById = empty($distributionIds) ? collect() : Expense::whereIn('distribution_id', $distributionIds)
+                ->whereHas('check', $inCheckWindow)
+                ->groupBy('distribution_id')
+                ->selectRaw('distribution_id, SUM(amount) as total')
+                ->pluck('total', 'distribution_id');
+
+            $distributionExpensesById = empty($distributionIds) ? collect() : Expense::whereIn('distribution_id', $distributionIds)
+                ->whereNull('check_id')
+                ->whereBetween('date', [$periodStart, $periodEnd])
+                ->groupBy('distribution_id')
+                ->selectRaw('distribution_id, SUM(amount) as total')
+                ->pluck('total', 'distribution_id');
+
             // Calculate net amounts per user using exact UserFinances logic
             foreach ($userIds as $userId) {
                 $userVendorRel = $viaVendorUsers->where('user_id', $userId)->first();
                 if ($userVendorRel) {
-                    $viaVendor = \App\Models\Vendor::find($userVendorRel->via_vendor_id);
+                    $viaVendor = $viaVendorsById->get($userVendorRel->via_vendor_id);
                     if ($viaVendor) {
                         // Use exact UserFinances "TOTAL CHECKS FOR USER" logic
-                        $timesheetsPaid = Timesheet::where('user_id', $userId)
-                            ->where('vendor_id', auth()->user()->vendor->id)
-                            ->whereNull('paid_by')
-                            ->whereHas('check', function ($query) {
-                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
-                            })
-                            ->sum('amount');
+                        $timesheetsPaid = (float) ($timesheetsPaidByUser[$userId] ?? 0);
                         
-                        $timesheetsPaidBy = Timesheet::withoutGlobalScopes()
-                            ->where('user_id', $userId)
-                            ->where('vendor_id', auth()->user()->vendor->id)
-                            ->whereNotNull('paid_by')
-                            ->whereHas('check', function ($query) {
-                                $query->withoutGlobalScopes()->whereBetween('date', [$this->start_date, $this->end_date]);
-                            })
-                            ->sum('amount');
+                        $timesheetsPaidBy = (float) ($timesheetsPaidByOtherByUser[$userId] ?? 0);
                         
-                        $userReimbursementExpenses = Expense::whereNull('paid_by')
-                            ->where('reimbursment', $userId)
-                            ->whereHas('check', function ($query) {
-                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
-                            })
-                            ->sum('amount');
+                        $userReimbursementExpenses = (float) ($reimbursementsByUser[(string) $userId] ?? 0);
                         
-                        $userReimbursementPaidBy = Expense::whereNotNull('paid_by')
-                            ->where('reimbursment', $userId)
-                            ->whereHas('check', function ($query) {
-                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
-                            })
-                            ->sum('amount');
+                        $userReimbursementPaidBy = (float) ($reimbursementsPaidByOtherByUser[(string) $userId] ?? 0);
                         
-                        $user = \App\Models\User::find($userId);
-                        $userDistribution = $user->distributions->first()->id ?? null;
+                        $user = $usersById->get($userId);
+                        $userDistribution = $user?->distributions->first()->id ?? null;
                         $distributionChecks = $userDistribution
-                            ? Expense::where('distribution_id', $userDistribution)
-                                ->whereHas('check', function ($query) {
-                                    $query->whereBetween('date', [$this->start_date, $this->end_date]);
-                                })
-                                ->sum('amount')
+                            ? (float) ($distributionChecksById[$userDistribution] ?? 0)
                             : 0;
                         
                         // Calculate "TOTAL CHECKS FOR USER" using exact UserFinances formula
@@ -247,21 +298,14 @@ class SheetShow extends Component
                             - $userReimbursementPaidBy;
                         
                         // Check if user has expenses paid
-                        $expensesPaid = Expense::where('paid_by', $userId)
-                            ->whereHas('check', function ($query) {
-                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
-                            })
-                            ->sum('amount');
+                        $expensesPaid = (float) ($expensesPaidByUser[$userId] ?? 0);
                         
                         // If user has expenses paid, use "TOTAL FOR USER" calculation
                         // Otherwise use "TOTAL CHECKS FOR USER" calculation
                         if ($expensesPaid > 0) {
                             // Use "TOTAL FOR USER" calculation (like Cezary)
                             $distributionExpenses = $userDistribution
-                                ? Expense::where('distribution_id', $userDistribution)
-                                    ->whereNull('check_id')
-                                    ->whereBetween('date', [$this->start_date, $this->end_date])
-                                    ->sum('amount')
+                                ? (float) ($distributionExpensesById[$userDistribution] ?? 0)
                                 : 0;
                             
                             $finalAmount = $timesheetsPaid
@@ -531,8 +575,8 @@ class SheetShow extends Component
 
             // ── INCOME ──
             $writer->addRow(Row::fromValues(['Income'], $boldStyle));
-            $writer->addRow(Row::fromValues([$indent('Revenue', 1), $fmt($this->revenue())]));
-            $writer->addRow(Row::fromValues([$indent('Total Income', 0), $fmt($this->revenue())], $totalStyle));
+            $writer->addRow(Row::fromValues([$indent('Revenue', 1), $fmt($this->revenue)]));
+            $writer->addRow(Row::fromValues([$indent('Total Income', 0), $fmt($this->revenue)], $totalStyle));
             $writer->addRow(Row::fromValues([''])); // spacer
 
             // ── COST OF GOODS SOLD ──
@@ -545,7 +589,7 @@ class SheetShow extends Component
                 if ($isZero($vendorSum)) { continue; }
                 $writer->addRow(Row::fromValues([$indent($vendorName, 2), $fmt($vendorSum)]));
             }
-            $writer->addRow(Row::fromValues([$indent('Total Cost of Materials', 1), $fmt($this->costOfMaterialsSum())], $categoryTotalStyle));
+            $writer->addRow(Row::fromValues([$indent('Total Cost of Materials', 1), $fmt($this->costOfMaterialsSum)], $categoryTotalStyle));
             $writer->addRow($emptyRow);
 
             // Labor
@@ -555,15 +599,15 @@ class SheetShow extends Component
                 if ($isZero($vendorSum)) { continue; }
                 $writer->addRow(Row::fromValues([$indent($vendorName, 2), $fmt($vendorSum)]));
             }
-            $writer->addRow(Row::fromValues([$indent('Total Cost of Labor', 1), $fmt($this->costOfLaborSum())], $categoryTotalStyle));
+            $writer->addRow(Row::fromValues([$indent('Total Cost of Labor', 1), $fmt($this->costOfLaborSum)], $categoryTotalStyle));
             $writer->addRow($emptyRow);
 
-            $cogsTotal = $this->costOfMaterialsSum() + $this->costOfLaborSum();
+            $cogsTotal = $this->costOfMaterialsSum + $this->costOfLaborSum;
             $writer->addRow(Row::fromValues([$indent('Total Cost of Goods Sold', 0), $fmt($cogsTotal)], $grandTotalStyle));
             $writer->addRow($emptyRow); // spacer
 
             // ── GROSS PROFIT ──
-            $grossProfit = $this->revenue() - $cogsTotal;
+            $grossProfit = $this->revenue - $cogsTotal;
             $writer->addRow(Row::fromValues(['Gross Profit', $fmt($grossProfit)], $grandTotalStyle));
             $writer->addRow(Row::fromValues([''])); // spacer
 
@@ -647,8 +691,8 @@ class SheetShow extends Component
         $endFormatted = date('F j, Y', strtotime($this->end_date));
         $dateRange = $startFormatted . ' - ' . $endFormatted;
 
-        $cogsTotal = $this->costOfMaterialsSum() + $this->costOfLaborSum();
-        $grossProfit = $this->revenue() - $cogsTotal;
+        $cogsTotal = $this->costOfMaterialsSum + $this->costOfLaborSum;
+        $grossProfit = $this->revenue - $cogsTotal;
         $uncatSum = $this->uncategorizedTransactionsSum();
         $totalExpenses = $this->generalExpenses() + $uncatSum;
         $netOperatingIncome = $grossProfit - $totalExpenses;
@@ -657,11 +701,11 @@ class SheetShow extends Component
             'companyName' => $companyName,
             'dateRange' => $dateRange,
             'basisLabel' => $this->basis === 'cash' ? 'Cash' : 'Accrual',
-            'revenue' => $this->revenue(),
+            'revenue' => $this->revenue,
             'materialsVendors' => $this->costOfMaterialsVendors(),
-            'materialsTotal' => $this->costOfMaterialsSum(),
+            'materialsTotal' => $this->costOfMaterialsSum,
             'laborVendors' => $this->costOfLaborVendors(),
-            'laborTotal' => $this->costOfLaborSum(),
+            'laborTotal' => $this->costOfLaborSum,
             'cogsTotal' => $cogsTotal,
             'grossProfit' => $grossProfit,
             'expenseCategories' => $this->sortedExpenseCategories(),

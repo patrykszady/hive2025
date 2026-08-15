@@ -88,6 +88,8 @@ class VendorTasks extends Component
             $task->setRelation('users', $assignedUsers);
         }
 
+        Task::primeUpdateActivities($tasks->pluck('id'));
+
         $grouped = collect();
 
         foreach ($tasks as $task) {
@@ -196,13 +198,18 @@ class VendorTasks extends Component
             return collect();
         }
 
-        return Task::withTrashed()
+        $tasks = Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->where(fn ($q) => $q->whereJsonContains('user_ids', (string) auth()->id())->orWhereJsonContains('user_ids', (int) auth()->id()))
             ->whereNull('start_date')
             ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->orderBy('created_at')
             ->get();
+
+        Task::primeAssignedUsers($tasks);
+        Task::primeUpdateActivities($tasks->pluck('id'));
+
+        return $tasks;
     }
 
     /**

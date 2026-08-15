@@ -56,7 +56,7 @@ class DistributionProjectsTable extends Component
 
     public function render()
     {
-        $projects = Project::with(['distributions', 'statuses' => function ($query) {
+        $projects = Project::with(['client.users', 'distributions', 'statuses' => function ($query) {
             $query->where('status_code', 7) // Fetch only "Complete" statuses
                   ->orderBy('start_date', 'asc'); // Sort to get first "Complete" date
         }])

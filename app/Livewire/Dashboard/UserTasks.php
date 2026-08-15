@@ -66,6 +66,8 @@ class UserTasks extends Component
             $task->setRelation('users', $assignedUsers);
         }
 
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
+
         // Group tasks by their selected dates
         $grouped = collect();
 

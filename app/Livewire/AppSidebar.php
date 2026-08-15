@@ -110,6 +110,19 @@ class AppSidebar extends Component
      */
     public static function bustCache(int $userId): void
     {
-        Cache::forget('sidebar:nav:' . $userId);
+        // render() keys by user AND primary vendor (see $cacheKey above), so
+        // forgetting the bare user key cleared nothing. Clear every vendor
+        // variant this user could have, plus the client one.
+        $user = \App\Models\User::find($userId);
+
+        $vendorIds = $user
+            ? $user->vendors()->pluck('vendors.id')->push($user->primary_vendor_id)
+            : collect();
+
+        foreach ($vendorIds->filter()->unique() as $vendorId) {
+            Cache::forget('sidebar:nav:' . $userId . ':' . $vendorId);
+        }
+
+        Cache::forget('sidebar:nav:' . $userId . ':client');
     }
 }

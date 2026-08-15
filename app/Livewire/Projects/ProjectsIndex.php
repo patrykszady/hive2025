@@ -140,7 +140,7 @@ class ProjectsIndex extends Component
             return auth()->user()->clients()->get();
         }
 
-        return Client::orderBy('created_at', 'DESC')->get();
+        return Client::cachedDropdownList();
     }
 
     #[Title('Projects')]

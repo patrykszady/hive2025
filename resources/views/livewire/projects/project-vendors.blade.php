@@ -88,7 +88,7 @@
                     <flux:button 
                         type="submit" 
                         variant="primary"
-                        :disabled="$this->vendor_id && $this->isVendorInvited(\App\Models\Vendor::find($this->vendor_id))"
+                        :disabled="$this->selectedVendor && $this->isVendorInvited($this->selectedVendor)"
                     >
                         Invite
                     </flux:button>

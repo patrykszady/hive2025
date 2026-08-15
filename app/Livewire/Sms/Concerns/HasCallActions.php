@@ -155,9 +155,97 @@ trait HasCallActions
         Flux::toast(variant: 'success', heading: 'Unblocked', text: $this->formatPhone($phone) . ' has been removed from the blocked list.', duration: 5000, position: 'top right');
     }
 
+    /**
+     * Shared per-process caches for phone -> display name / known-contact.
+     * Filled row-by-row on demand, or in bulk by warmPhoneContacts().
+     *
+     * @var array<string, string>
+     */
+    protected static array $phoneDisplayCache = [];
+
+    /** @var array<string, bool> */
+    protected static array $phoneKnownCache = [];
+
+    /** Split a phone into the digit variants stored across the DB. */
+    protected static function phoneVariants(string $e164): array
+    {
+        $digits = preg_replace('/[^0-9]/', '', $e164);
+        $normalized = (strlen($digits) === 11 && str_starts_with($digits, '1')) ? substr($digits, 1) : $digits;
+        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+
+        return array_values(array_unique([$normalized, '1'.$normalized, $digits, $last10]));
+    }
+
+    /**
+     * Resolve many numbers in 3 queries instead of 2-5 per number. Call this
+     * once with every phone a page will render, before the rows are drawn.
+     */
+    public function warmPhoneContacts(iterable $phones): void
+    {
+        $pending = [];
+
+        foreach ($phones as $phone) {
+            if (! is_string($phone) || $phone === '') {
+                continue;
+            }
+            if (isset(static::$phoneDisplayCache[$phone]) && isset(static::$phoneKnownCache[$phone])) {
+                continue;
+            }
+            $pending[$phone] = static::phoneVariants($phone);
+        }
+
+        if (empty($pending)) {
+            return;
+        }
+
+        $needles = collect($pending)->flatten()->unique()->values()->all();
+
+        $usersByDigits = User::whereIn('cell_phone', $needles)
+            ->get(['id', 'first_name', 'last_name', 'cell_phone'])
+            ->keyBy(fn ($u) => preg_replace('/[^0-9]/', '', (string) $u->cell_phone));
+
+        $vendorsByDigits = Vendor::whereIn('business_phone', $needles)
+            ->get(['id', 'business_name', 'business_phone', 'options'])
+            ->keyBy(fn ($v) => preg_replace('/[^0-9]/', '', (string) $v->business_phone));
+
+        $cnamByNumber = CallLog::where(function ($q) use ($pending) {
+                foreach (array_keys($pending) as $phone) {
+                    $q->orWhere('from_number', $phone)->orWhere('to_number', $phone);
+                }
+            })
+            ->whereNotNull('caller_name')
+            ->whereNotIn('caller_name', ['Incoming Call', 'Outgoing Call'])
+            ->latest()
+            ->get(['from_number', 'to_number', 'caller_name']);
+
+        foreach ($pending as $phone => $variants) {
+            $user = collect($variants)->map(fn ($v) => $usersByDigits->get($v))->filter()->first();
+            $vendor = collect($variants)->map(fn ($v) => $vendorsByDigits->get($v))->filter()->first();
+
+            static::$phoneKnownCache[$phone] = (bool) ($user || $vendor);
+
+            if ($user && trim($user->first_name.' '.$user->last_name) !== '') {
+                static::$phoneDisplayCache[$phone] = trim($user->first_name.' '.$user->last_name);
+                continue;
+            }
+
+            if ($vendor && $vendor->short_name) {
+                static::$phoneDisplayCache[$phone] = $vendor->short_name;
+                continue;
+            }
+
+            $cnam = $cnamByNumber
+                ->first(fn ($log) => $log->from_number === $phone || $log->to_number === $phone)?->caller_name;
+
+            static::$phoneDisplayCache[$phone] = $cnam
+                ? CallLog::formatCallerNameForDisplay($cnam)
+                : $this->formatPhone($phone);
+        }
+    }
+
     public function isKnownContact(string $e164): bool
     {
-        static $cache = [];
+        $cache = &static::$phoneKnownCache;
 
         if (isset($cache[$e164])) {
             return $cache[$e164];
@@ -190,7 +278,7 @@ trait HasCallActions
 
     public function resolvePhoneDisplay(string $e164): string
     {
-        static $cache = [];
+        $cache = &static::$phoneDisplayCache;
 
         if (isset($cache[$e164])) {
             return $cache[$e164];

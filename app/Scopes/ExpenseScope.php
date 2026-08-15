@@ -19,12 +19,9 @@ class ExpenseScope implements Scope
                 return;
             }
 
-            // Get the user's via_vendor_id from pivot
-            $userVendorPivot = $user->vendors()
-                ->where('vendors.id', $user->vendor->id)
-                ->first();
-            
-            $viaVendorId = $userVendorPivot ? $userVendorPivot->pivot->via_vendor_id : null;
+            // Read via the cached accessor — this scope runs on EVERY expense
+            // query, and the raw pivot lookup re-ran each time.
+            $viaVendorId = $user->vendor_pivot?->via_vendor_id;
             
             // if Admin: all vendor expenses
             if ($user->vendor_role == 'Admin') {

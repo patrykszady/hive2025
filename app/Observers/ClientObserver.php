@@ -16,6 +16,7 @@ class ClientObserver
      */
     public function created(Client $client): void
     {
+        Client::bustDropdownCache();
         $this->smsThreadLinker->linkThreadsForClient($client);
     }
 
@@ -26,6 +27,7 @@ class ClientObserver
      */
     public function updated(Client $client): void
     {
+        Client::bustDropdownCache();
         if ($client->wasChanged('home_phone')) {
             $this->smsThreadLinker->linkThreadsForClient($client);
         }
@@ -36,6 +38,7 @@ class ClientObserver
      */
     public function deleted(Client $client): void
     {
+        Client::bustDropdownCache();
         //
     }
 

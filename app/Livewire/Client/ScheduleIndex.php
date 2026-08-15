@@ -308,6 +308,9 @@ class ScheduleIndex extends Component
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
+            // Card bodies read project address, owner (ICS), vendor and the
+            // preferred-time indicator (latestStatus) per task.
+            ->with(['project.latestStatus', 'owner', 'vendor'])
             ->where(function ($query) use ($startDateStr, $endDateStr) {
                 // Task overlaps with the display range
                 $query->whereDate('start_date', '<=', $endDateStr)
@@ -316,6 +319,9 @@ class ScheduleIndex extends Component
             ->orderBy('start_date')
             ->orderBy('end_date')
             ->get();
+
+        Task::primeAssignedUsers($tasks);
+        Task::primeUpdateActivities($tasks->pluck('id'));
 
         // Create all days in the range
         $currentDate = $startDate->copy();
@@ -351,6 +357,7 @@ class ScheduleIndex extends Component
     {
         return Task::withTrashed()
             ->whereIn('project_id', $this->clientProjectIds)
+            ->with(['project.latestStatus', 'owner'])
             ->whereNotNull('start_date')
             ->whereNotNull('end_date');
     }

@@ -721,22 +721,16 @@
                                     </td>
                                 @else
                                     @php $cell = $entry->cell; @endphp
+                                    {{-- Hover affordance is pure CSS (group-hover): an Alpine
+                                         component per empty cell meant ~1,700 of them on this grid. --}}
                                     <td
                                         wire:key="table-cell-{{ $row->id }}-{{ $laneIdx }}-{{ $cell->dayFormat }}"
-                                        x-data="{ hover: false }"
-                                        x-on:mouseenter="hover = true"
-                                        x-on:mouseleave="hover = false"
-                                        class="px-2 py-1.5 border-b border-r {{ $dayBorderClass }} align-top cursor-pointer
+                                        class="group px-2 py-1.5 border-b border-r {{ $dayBorderClass }} align-top cursor-pointer
                                             {{ $cell->isWeekend ? $dayWeekendBgClass : '' }}
                                             {{ $cell->isToday ? $dayTodayBgClass : '' }}"
                                         wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $row->id }}, date: '{{ $cell->dayFormat }}' })"
                                     >
-                                        <div
-                                            x-show="hover"
-                                            x-cloak
-                                            x-transition.opacity.duration.150ms
-                                            class="flex justify-center pt-1"
-                                        >
+                                        <div class="flex justify-center pt-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                                             <flux:icon.plus class="size-4 text-zinc-300 dark:text-zinc-600" />
                                         </div>
                                     </td>

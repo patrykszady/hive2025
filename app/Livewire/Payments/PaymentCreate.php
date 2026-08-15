@@ -138,9 +138,12 @@ class PaymentCreate extends Component
     #[Computed]
     public function clients()
     {
+        // The dropdown renders $client->name, which reads client->users —
+        // without this eager load that was one query per option.
         return Client::withWhereHas('projects', function ($query) {
             $query->status([6, 7, 8]); // Active, Complete, Service Call
-        })->orderBy('created_at', 'DESC') // Order clients by their own created_at date
+        })->with('users:id,first_name,last_name,nickname')
+        ->orderBy('created_at', 'DESC') // Order clients by their own created_at date
         ->get();
     }
 

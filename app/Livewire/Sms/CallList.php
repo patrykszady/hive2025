@@ -270,7 +270,73 @@ class CallList extends Component
             $prevKey = $key;
         }
 
+        $this->primeCallRowLookups($grouped);
+
         return $grouped;
+    }
+
+    /**
+     * Phantom-leg origins for the rows on screen, keyed by call_session_id.
+     *
+     * @var array<string, string>
+     */
+    protected array $phantomLegOrigins = [];
+
+    /**
+     * One pass over the page's rows: resolve every phantom leg with a single
+     * query and warm the phone-name cache in bulk. Without this the blade ran
+     * 2-5 queries per row.
+     *
+     * @param  \Illuminate\Support\Collection<int, array{call: CallLog, count: int}>  $grouped
+     */
+    protected function primeCallRowLookups($grouped): void
+    {
+        $ourNumbers = config('services.telnyx.numbers', []);
+        $sessionIds = [];
+        $phones = [];
+
+        foreach ($grouped as $entry) {
+            $call = $entry['call'];
+            $otherNumber = $call->direction === 'outgoing' ? $call->to_number : $call->from_number;
+
+            if ($otherNumber && GroupSmsService::isOurNumber($otherNumber) && $call->call_session_id) {
+                $sessionIds[] = $call->call_session_id;
+                continue;
+            }
+
+            if ($otherNumber) {
+                $phones[] = $otherNumber;
+            }
+        }
+
+        if (! empty($sessionIds)) {
+            $this->phantomLegOrigins = CallLog::whereIn('call_session_id', array_unique($sessionIds))
+                ->where('direction', 'incoming')
+                ->whereNotIn('from_number', $ourNumbers)
+                ->get(['call_session_id', 'from_number'])
+                ->keyBy('call_session_id')
+                ->map(fn ($log) => $log->from_number)
+                ->all();
+
+            $phones = array_merge($phones, array_values($this->phantomLegOrigins));
+        }
+
+        $this->warmPhoneContacts(array_unique($phones));
+    }
+
+    /**
+     * The real other-party number for a row: the phantom leg's origin when the
+     * stored number is one of ours, otherwise the number itself.
+     */
+    public function otherPartyNumber(CallLog $call): ?string
+    {
+        $otherNumber = $call->direction === 'outgoing' ? $call->to_number : $call->from_number;
+
+        if ($otherNumber && GroupSmsService::isOurNumber($otherNumber) && $call->call_session_id) {
+            return $this->phantomLegOrigins[$call->call_session_id] ?? $otherNumber;
+        }
+
+        return $otherNumber;
     }
 
     /**

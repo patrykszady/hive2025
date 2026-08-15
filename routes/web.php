@@ -178,7 +178,9 @@ $localePattern = implode('|', array_keys(config('locales.supported', ['en' => []
 
 Route::prefix('{locale}')
     ->where(['locale' => $localePattern])
-    ->middleware(\App\Http\Middleware\SetLocale::class)
+    // CachePublicPage: these are static marketing views (~200ms of Blade) —
+    // guests get the cached HTML, authenticated visits always render fresh.
+    ->middleware([\App\Http\Middleware\SetLocale::class, \App\Http\Middleware\CachePublicPage::class])
     ->group(function () {
         Route::view('welcome', 'welcome')->name('welcome');
 

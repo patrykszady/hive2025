@@ -1,7 +1,10 @@
 <x-form-modal name="expense_splits_form_modal" title="Expense Splits">
     <form id="expense_splits_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         @foreach ($expense_splits as $index => $split)
-            <flux:card class="space-y-6">
+            {{-- Keyed by the persisted id where there is one: removeSplit()
+                 reindexes the array, so position alone let the morph carry
+                 input state onto the wrong split card. --}}
+            <flux:card wire:key="split-{{ $split['id'] ?? 'new-'.$index }}" class="space-y-6">
                 <div class="flex justify-between">
                     <flux:heading size="lg">Split {{$index + 1}}</flux:heading>
                     {{-- action button to the right --}}
@@ -62,7 +65,7 @@
 
                 {{-- SPLIT AMOUNT --}}
                 <flux:input
-                    wire:model.live="expense_splits.{{ $index }}.amount"
+                    wire:model.live.debounce.500ms="expense_splits.{{ $index }}.amount"
                     {{-- x-bind:disabled="{{$expense_line_items ? TRUE : FALSE}}" --}}
                     inputmode="decimal"
                     pattern="[0-9]*"

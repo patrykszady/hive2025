@@ -625,16 +625,35 @@ class Project extends Model
                 $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
                 $finances['reimbursments'] = $splits_sum + $expenses_sum;
                 $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
-                $finances['expenses'] = $this->expenses->sum('amount') + $this->expenseSplits->sum('amount');
-                $finances['timesheets'] = $this->timesheets->sum('amount');
+                // Sum in SQL unless the relation is already loaded — the
+                // collection sums hydrated every expense/timesheet/payment
+                // model just to add up one column.
+                $sumAmount = function (string $relation): float {
+                    // Prefer a withSum() aggregate the caller already selected
+                    // (list views can add ->withSum('expenses', 'amount') and
+                    // pay zero extra queries per row), then a loaded relation,
+                    // then a scalar aggregate query.
+                    $withSumAttribute = \Illuminate\Support\Str::snake($relation).'_sum_amount';
+
+                    if (array_key_exists($withSumAttribute, $this->attributes)) {
+                        return (float) $this->attributes[$withSumAttribute];
+                    }
+
+                    return $this->relationLoaded($relation)
+                        ? (float) $this->getRelation($relation)->sum('amount')
+                        : (float) $this->{$relation}()->sum('amount');
+                };
+
+                $finances['expenses'] = $sumAmount('expenses') + $sumAmount('expenseSplits');
+                $finances['timesheets'] = $sumAmount('timesheets');
                 $finances['total_cost'] = $finances['timesheets'] + $finances['expenses'];
-                $finances['payments'] = round($this->payments->sum('amount'), 2);
+                $finances['payments'] = round($sumAmount('payments'), 2);
                 $finances['profit'] = $finances['payments'] - $finances['total_cost'];
                 $finances['balance'] = $finances['total_project'] - $finances['payments'];
 
                 return $finances;
             }
-        );
+        )->shouldCache();
     }
 
     /**

@@ -104,11 +104,15 @@
                                     }
                                 @endphp
                                 <x-schedule.task-card wire:key="scheduled-task-{{ $date }}-{{ $task->id }}">
-                                    <x-schedule.task-card-body :task="$task" :date="$date" :show-project="true" />
-                                    {{-- Checklist + notes; the sub can tick items off as they work. --}}
-                                    <div class="px-3 pb-3">
-                                        <x-schedule.task-details :task="$task" :interactive="true" />
-                                    </div>
+                                    {{-- Same card content as hub/planner (title, arrival,
+                                         avatars, checklist/notes) + vendor meta rows
+                                         (map address, .ics time). --}}
+                                    @include('components.upcoming-tasks-list-card-content', [
+                                        'task' => $task,
+                                        'date' => $date,
+                                        'detailsInteractive' => true,
+                                    ])
+                                    <x-schedule.task-meta :task="$task" />
 
                                     @if($footerType)
                                         <x-slot:footer>
@@ -189,70 +193,26 @@
                                 @foreach($pendingTasks as $task)
                                     <div wire:key="pending-task-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
                                         <div class="p-3">
-                                            <div class="flex items-start justify-between gap-2 min-w-0">
-                                                <div class="flex items-center gap-2 min-w-0">
-                                                    <flux:heading size="sm" class="min-w-0 truncate">
-                                                        {{ $task->title }}
-                                                    </flux:heading>
-                                                    <flux:badge size="sm" :color="data_get($task->type_ui, 'flux', 'sky')" inset="top bottom">
-                                                        {{ $task->type ?? 'Task' }}
-                                                    </flux:badge>
-                                                    @php
-                                                        $pendingStatusCode = (int) ($task->project?->latestStatus?->status_code ?? 0);
-                                                    @endphp
-                                                    @if(in_array($pendingStatusCode, [7, 8], true))
-                                                        {{-- Service Call status — or leftover work on a
-                                                             Complete project, a service call in practice.
-                                                             Same orange the project status badge uses. --}}
-                                                        <flux:badge size="sm" color="orange" inset="top bottom">Service Call</flux:badge>
-                                                    @endif
-                                                </div>
-                                                {{-- Homeowner-times state beats a bare "No Date": red
-                                                     "Schedule" says times are waiting to be picked. --}}
-                                                @if($task->preferredTimeIndicator())
-                                                    <x-task-preferred-indicator :task="$task" />
-                                                @else
-                                                    <flux:badge color="red" size="sm">No Date</flux:badge>
-                                                @endif
-                                            </div>
-
-                                            {{-- Address --}}
-                                            @if($task->project?->address)
-                                                @php
-                                                    $pendingCityStateZip = trim(implode(' ', array_filter([
-                                                        collect([$task->project?->city, $task->project?->state])->filter()->implode(', '),
-                                                        $task->project?->zip_code,
-                                                    ])));
-                                                @endphp
-                                                <div class="mt-2 flex items-start gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-                                                    <flux:icon.map-pin class="size-4 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <div class="truncate">{{ $task->project->address }}</div>
-                                                        @if($pendingCityStateZip)
-                                                            <div>{{ $pendingCityStateZip }}</div>
-                                                        @endif
-                                                    </div>
+                                            @php
+                                                $pendingStatusCode = (int) ($task->project?->latestStatus?->status_code ?? 0);
+                                            @endphp
+                                            @if(in_array($pendingStatusCode, [7, 8], true))
+                                                {{-- Service Call status — or leftover work on a
+                                                     Complete project, a service call in practice.
+                                                     Same orange the project status badge uses. --}}
+                                                <div class="mb-1.5">
+                                                    <flux:badge size="sm" color="orange" inset="top bottom">Service Call</flux:badge>
                                                 </div>
                                             @endif
 
-                                            {{-- Checklist + notes; the sub can tick items off as they work. --}}
-                                            <x-schedule.task-details :task="$task" :interactive="true" />
-
-                                            {{-- Owner --}}
-                                            @if($task->owner)
-                                                <div class="flex items-center gap-2 mt-3 min-w-0">
-                                                    <flux:avatar
-                                                        circle
-                                                        size="xs"
-                                                        name="{{ $task->owner->full_name ?? $task->owner->name }}"
-                                                        color="auto"
-                                                        color:seed="{{ $task->owner->id }}"
-                                                    />
-                                                    <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">
-                                                        {{ $task->owner->short_name ?? $task->owner->name }}
-                                                    </span>
-                                                </div>
-                                            @endif
+                                            {{-- Same card content as hub/planner; no date, so
+                                                 the preferred-time indicator carries the state
+                                                 (red "Schedule" when homeowner times wait). --}}
+                                            @include('components.upcoming-tasks-list-card-content', [
+                                                'task' => $task,
+                                                'detailsInteractive' => true,
+                                            ])
+                                            <x-schedule.task-meta :task="$task" />
                                         </div>
 
                                         {{-- Footer action --}}

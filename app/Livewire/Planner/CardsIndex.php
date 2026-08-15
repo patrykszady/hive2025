@@ -56,10 +56,14 @@ class CardsIndex extends Component
 
     public bool $showMobileFilters = false;
 
-    public int $previousDaysLoaded = 30;
-    public int $futureDaysLoaded = 60;
+    // Initial window: 14 days (a week back, a week out). The grid renders
+    // days x projects x tasks, so the first paint cost scales directly with
+    // this — infinite scroll (loadPreviousDays/loadFutureDays) extends the
+    // window in 14-day chunks as the user actually goes there.
+    public int $previousDaysLoaded = 7;
+    public int $futureDaysLoaded = 7;
 
-    private const DAYS_PER_LOAD = 30;
+    private const DAYS_PER_LOAD = 14;
 
     public function toggleMobileFilters(): void
     {
@@ -450,7 +454,24 @@ class CardsIndex extends Component
             });
         }
         
-        return $query->get()
+        $projects = $query->get()
+            // Back-fill the inverse relation: card accessors reach for
+            // $task->project (preferred-time indicator etc.), and without
+            // this each eager-loaded task lazy-loads its project again.
+            ->each(fn (Project $project) => $project->tasks->each(
+                fn (Task $task) => $task->setRelation('project', $project)
+            ));
+
+        // One activity-log query for every visible card's previous-arrival
+        // lookup instead of one per card.
+        $allTasks = $projects->flatMap(fn (Project $p) => $p->tasks);
+
+        Task::primeUpdateActivities($allTasks->pluck('id'));
+        // Cards render assigned avatars — unprimed that was one User query per
+        // card (plus a wasted `where 0 = 1` for every unassigned task).
+        Task::primeAssignedUsers($allTasks);
+
+        return $projects
             ->sortBy(function (Project $project): string {
                 $priority = self::PLANNER_STATUS_PRIORITY[$project->latestStatus->status_code ?? 0] ?? 999;
                 $startDate = ($project->latestStatus?->start_date?->format('Y-m-d')) ?: '9999-12-31';
@@ -472,68 +493,73 @@ class CardsIndex extends Component
 
         $tomorrow = $today->copy()->addDay();
 
-        return $this->days->map(function ($day, $dayIndex) use ($today, $tomorrow) {
+        // Per-project facts that don't vary by day, computed once instead of
+        // once per project PER DAY COLUMN (the grid is days x projects, so
+        // this ran 7-14x more often than it needed to).
+        $undatedCounts = $this->activeProjects->mapWithKeys(fn (Project $project) => [
+            $project->id => $project->tasks->filter(function ($task) {
+                $selectedDates = $task->options->dates ?? [];
+
+                return empty($selectedDates) && !$task->start_date && !$task->end_date;
+            })->count(),
+        ]);
+
+        $taskDates = $this->taskDateFacts();
+
+        return $this->days->map(function ($day, $dayIndex) use ($today, $tomorrow, $undatedCounts, $taskDates) {
             $dayFormat = $day->format('Y-m-d');
 
             // Show ALL active projects in each day column
-            $projectColumns = $this->activeProjects->map(function ($project) use ($day, $dayFormat, $dayIndex, $today) {
-                $undatedTasksCount = $project->tasks
-                    ->filter(function ($task) {
-                        $selectedDates = $task->options->dates ?? [];
-
-                        return empty($selectedDates) && !$task->start_date && !$task->end_date;
-                    })
-                    ->count();
+            $projectColumns = $this->activeProjects->map(function ($project) use ($day, $dayFormat, $dayIndex, $today, $undatedCounts, $taskDates) {
+                $undatedTasksCount = $undatedCounts[$project->id] ?? 0;
 
                 // Filter tasks that fall on this specific day
-                $dayTasks = $project->tasks->filter(function ($task) use ($dayFormat, $day) {
-                    // Check if this specific date is in the selected dates array
-                    $selectedDates = $task->options->dates ?? [];
-                    
-                    if (!empty($selectedDates)) {
-                        // New way: check if day is in selected dates
-                        return in_array($dayFormat, $selectedDates);
-                    } else {
-                        // If task has no dates at all, don't show in any day column
-                        if (!$task->start_date && !$task->end_date) {
-                            return false;
-                        }
+                $isSaturday = $day->isSaturday();
+                $isSunday = $day->isSunday();
 
-                        // If only one legacy date is present, treat it as a single-day task.
-                        if ($task->start_date && !$task->end_date) {
-                            return Carbon::parse($task->start_date)->format('Y-m-d') === $dayFormat;
-                        }
+                $dayTasks = $project->tasks->filter(function ($task) use ($dayFormat, $isSaturday, $isSunday, $taskDates) {
+                    $facts = $taskDates[$task->id] ?? null;
 
-                        if (!$task->start_date && $task->end_date) {
-                            return Carbon::parse($task->end_date)->format('Y-m-d') === $dayFormat;
-                        }
-
-                        // Legacy fallback: use start/end date range with weekend checks
-                        $taskStart = Carbon::parse($task->start_date)->format('Y-m-d');
-                        $taskEnd = Carbon::parse($task->end_date)->format('Y-m-d');
-
-                        // Task should show if the day falls between start and end (inclusive)
-                        $taskSpansDay = $dayFormat >= $taskStart && $dayFormat <= $taskEnd;
-
-                        if (!$taskSpansDay) {
-                            return false;
-                        }
-
-                        // Check weekend settings
-                        if ($day->isWeekend()) {
-                            $taskOptions = $task->options ?? (object)[];
-
-                            if ($day->isSaturday() && !($taskOptions->saturday ?? false)) {
-                                return false;
-                            }
-
-                            if ($day->isSunday() && !($taskOptions->sunday ?? false)) {
-                                return false;
-                            }
-                        }
-
-                        return true;
+                    if (! $facts) {
+                        return false;
                     }
+
+                    // Check if this specific date is in the selected dates array
+                    if (!empty($facts['selected'])) {
+                        // New way: check if day is in selected dates
+                        return in_array($dayFormat, $facts['selected']);
+                    }
+
+                    // If task has no dates at all, don't show in any day column
+                    if (!$facts['start'] && !$facts['end']) {
+                        return false;
+                    }
+
+                    // If only one legacy date is present, treat it as a single-day task.
+                    if ($facts['start'] && !$facts['end']) {
+                        return $facts['start'] === $dayFormat;
+                    }
+
+                    if (!$facts['start'] && $facts['end']) {
+                        return $facts['end'] === $dayFormat;
+                    }
+
+                    // Legacy fallback: use start/end date range with weekend checks
+                    // Task should show if the day falls between start and end (inclusive)
+                    if ($dayFormat < $facts['start'] || $dayFormat > $facts['end']) {
+                        return false;
+                    }
+
+                    // Check weekend settings
+                    if ($isSaturday && ! $facts['saturday']) {
+                        return false;
+                    }
+
+                    if ($isSunday && ! $facts['sunday']) {
+                        return false;
+                    }
+
+                    return true;
                 })->values();
 
                 // Sort tasks by start_time: tasks with time first (earliest to latest), then tasks without
@@ -710,7 +736,9 @@ class CardsIndex extends Component
         $today = browser_today();
         $tomorrow = $today->copy()->addDay();
 
-        return $this->activeProjects->map(function ($project) use ($today, $tomorrow) {
+        $taskDates = $this->taskDateFacts();
+
+        return $this->activeProjects->map(function ($project) use ($today, $tomorrow, $taskDates) {
             $projectTasks = $project->tasks;
 
             // Get undated tasks count for this project
@@ -720,32 +748,38 @@ class CardsIndex extends Component
             })->count();
 
             // Map each day to a cell for this project
-            $dayCells = $this->days->map(function ($day, $dayIndex) use ($project, $projectTasks, $today, $tomorrow, $undatedTasksCount) {
+            $dayCells = $this->days->map(function ($day, $dayIndex) use ($project, $projectTasks, $today, $tomorrow, $undatedTasksCount, $taskDates) {
                 $dayFormat = $day->format('Y-m-d');
 
-                // Filter tasks for this day
-                $dayTasks = $projectTasks->filter(function ($task) use ($day, $dayFormat) {
-                    $selectedDates = $task->options->dates ?? [];
+                // Filter tasks for this day. Date facts come from $taskDates —
+                // this closure runs projects x days x tasks times, so re-reading
+                // the options cast and re-parsing Carbon here was pure waste.
+                $isSaturday = $day->isSaturday();
+                $isSunday = $day->isSunday();
+
+                $dayTasks = $projectTasks->filter(function ($task) use ($dayFormat, $isSaturday, $isSunday, $taskDates) {
+                    $facts = $taskDates[$task->id] ?? null;
+
+                    if (! $facts) {
+                        return false;
+                    }
 
                     // If task has specific selected dates, check if this day is one of them
-                    if (!empty($selectedDates)) {
-                        return in_array($dayFormat, $selectedDates);
+                    if (!empty($facts['selected'])) {
+                        return in_array($dayFormat, $facts['selected']);
                     }
 
                     // If task has a start_date, check if it matches this day
-                    if ($task->start_date) {
-                        $taskStartDate = Carbon::parse($task->start_date);
-                        $taskOptions = $task->options;
-
-                        if (!$taskStartDate->isSameDay($day)) {
+                    if ($facts['start']) {
+                        if ($facts['start'] !== $dayFormat) {
                             return false;
                         }
 
-                        if ($day->isSaturday() && !($taskOptions->saturday ?? false)) {
+                        if ($isSaturday && ! $facts['saturday']) {
                             return false;
                         }
 
-                        if ($day->isSunday() && !($taskOptions->sunday ?? false)) {
+                        if ($isSunday && ! $facts['sunday']) {
                             return false;
                         }
 
@@ -840,32 +874,80 @@ class CardsIndex extends Component
      * Calculate task gap info for a project on a given day
      * Returns info about next upcoming task or last past task
      */
+    /**
+     * All task dates per project, memoized for the request. Gap info is
+     * computed for EVERY empty day cell — without this memo each cell
+     * re-fetched the project's full task list (1,600+ queries per render).
+     *
+     * @var array<int, \Illuminate\Support\Collection>
+     */
+    protected array $gapTaskDatesByProject = [];
+
+    /**
+     * Per-task date facts for the visible projects, resolved once per request.
+     * The grid filters run projects x days x tasks times; without this they
+     * re-read the JSON options cast and re-parsed Carbon on every pass.
+     *
+     * @return array<int, array{selected: array, start: ?string, end: ?string, saturday: bool, sunday: bool}>
+     */
+    protected function taskDateFacts(): array
+    {
+        if ($this->taskDateFactsMemo !== null) {
+            return $this->taskDateFactsMemo;
+        }
+
+        $facts = [];
+
+        foreach ($this->activeProjects as $project) {
+            foreach ($project->tasks as $task) {
+                $facts[$task->id] = [
+                    'selected' => (array) ($task->options->dates ?? []),
+                    'start' => $task->start_date ? Carbon::parse($task->start_date)->format('Y-m-d') : null,
+                    'end' => $task->end_date ? Carbon::parse($task->end_date)->format('Y-m-d') : null,
+                    'saturday' => (bool) ($task->options->saturday ?? false),
+                    'sunday' => (bool) ($task->options->sunday ?? false),
+                ];
+            }
+        }
+
+        return $this->taskDateFactsMemo = $facts;
+    }
+
+    protected ?array $taskDateFactsMemo = null;
+
+    private function allTaskDatesForProject(int $projectId): \Illuminate\Support\Collection
+    {
+        return $this->gapTaskDatesByProject[$projectId] ??= (function () use ($projectId) {
+            // Unfiltered on purpose — the eager-loaded $project->tasks may be
+            // vendor/user-filtered, and gaps must consider ALL tasks.
+            $allTasks = \App\Models\Task::withTrashed()
+                ->where('project_id', $projectId)
+                ->get(['id', 'options', 'start_date']);
+
+            $allTaskDates = collect();
+
+            foreach ($allTasks as $task) {
+                $selectedDates = $task->options->dates ?? [];
+
+                if (!empty($selectedDates)) {
+                    foreach ($selectedDates as $date) {
+                        $allTaskDates->push($date);
+                    }
+                } elseif ($task->start_date) {
+                    $allTaskDates->push(Carbon::parse($task->start_date)->format('Y-m-d'));
+                }
+            }
+
+            return $allTaskDates->unique()->sort()->values();
+        })();
+    }
+
     private function calculateTaskGapInfo($project, Carbon $currentDay): ?object
     {
         $currentDayFormat = $currentDay->copy()->startOfDay()->format('Y-m-d');
-        
-        // Get all tasks for this project (unfiltered - we need ALL tasks to calculate gaps correctly)
-        // The $project->tasks relationship may be filtered by vendor/user, so we query directly
-        $allTasks = \App\Models\Task::withTrashed()->where('project_id', $project->id)->get();
-        
-        // Collect all task dates from all tasks
-        $allTaskDates = collect();
-        
-        foreach ($allTasks as $task) {
-            $selectedDates = $task->options->dates ?? [];
-            
-            if (!empty($selectedDates)) {
-                foreach ($selectedDates as $date) {
-                    $allTaskDates->push($date);
-                }
-            } elseif ($task->start_date) {
-                // Fallback to start_date if no selected dates
-                $allTaskDates->push(Carbon::parse($task->start_date)->format('Y-m-d'));
-            }
-        }
-        
-        $allTaskDates = $allTaskDates->unique()->sort()->values();
-        
+
+        $allTaskDates = $this->allTaskDatesForProject($project->id);
+
         if ($allTaskDates->isEmpty()) {
             return null;
         }

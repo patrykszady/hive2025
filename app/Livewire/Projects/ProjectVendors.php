@@ -7,6 +7,7 @@ use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Models\Vendor;
 use Illuminate\Support\Facades\Mail;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class ProjectVendors extends Component
@@ -76,7 +77,20 @@ class ProjectVendors extends Component
         $this->dispatch('refreshComponent');
     }
 
-    public function getAvailableVendorsProperty()
+    /** The vendor currently picked in the invite select (blade queried this every render). */
+    #[Computed]
+    public function selectedVendor(): ?Vendor
+    {
+        return $this->vendor_id ? Vendor::find($this->vendor_id) : null;
+    }
+
+    /**
+     * #[Computed] memoizes per request; the legacy getXProperty style re-ran
+     * this year-of-expenses withSum query on every access and every render
+     * (the component also listens to the global refreshComponent event).
+     */
+    #[Computed]
+    public function availableVendors()
     {
         $vendors = auth()->user()->vendor
             ->vendors()

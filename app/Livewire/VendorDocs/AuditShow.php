@@ -110,7 +110,10 @@ class AuditShow extends Component
             // ->whereHas('user', function ($q) use ($authVendorId) {
             //     $q->where('vendor_id', $authVendorId);
             // })
-            ->with('user')
+            // user.vendors carries the pivot both the role check and the
+            // via-vendor lookup below need — otherwise each employee costs
+            // 2-3 pivot queries per render.
+            ->with('user.vendors')
             ->orderBy('date')
             ->get()
             ->groupBy('user_id');
@@ -121,15 +124,7 @@ class AuditShow extends Component
             $user = $checks->first()->user;
             if (! $user) return false;
             $role = method_exists($user, 'getRoleForVendor') ? $user->getRoleForVendor($authVendorId) : null;
-            $viaVendorId = null;
-            if (method_exists($user, 'vendors')) {
-                try {
-                    $pivot = $user->vendors()->where('vendors.id', $authVendorId)->first()?->pivot;
-                    $viaVendorId = $pivot->via_vendor_id ?? null;
-                } catch (\Throwable $e) {
-                    $viaVendorId = null;
-                }
-            }
+            $viaVendorId = $user->vendors->firstWhere('id', $authVendorId)?->pivot?->via_vendor_id;
             return $role === 'Member' && !is_null($viaVendorId);
         });
 
@@ -170,13 +165,7 @@ class AuditShow extends Component
         $viaVendorBuckets = [];
         foreach ($viaVendorEmployees as $checks) {
             $user = $checks->first()->user;
-            $viaVendorId = null;
-            try {
-                $pivot = $user?->vendors()->where('vendors.id', $authVendorId)->first()?->pivot;
-                $viaVendorId = $pivot->via_vendor_id ?? null;
-            } catch (\Throwable $e) {
-                $viaVendorId = null;
-            }
+            $viaVendorId = $user?->vendors->firstWhere('id', $authVendorId)?->pivot?->via_vendor_id;
             if (!$viaVendorId) {
                 continue;
             }
@@ -245,15 +234,33 @@ class AuditShow extends Component
     $startDateStr = $start; // reuse start/end for queries below
     $endDateStr = $end;
 
-    return $mergedGroups->map(function ($group) use ($auditEnd, $startDateStr, $endDateStr) {
+    // All docs for all groups in ONE query — this used to be 3 queries per
+    // vendor group (professional, audit-type, applicable).
+    $groupVendorIds = $mergedGroups
+        ->map(fn ($group) => $group['vendor'] instanceof Vendor ? $group['vendor']->id : null)
+        ->filter()
+        ->unique()
+        ->values();
+
+    $docsByVendor = $groupVendorIds->isNotEmpty()
+        ? \App\Models\VendorDoc::whereIn('vendor_id', $groupVendorIds)
+            ->whereIn('type', array_values(array_filter(['professional', $this->audit_type])))
+            ->with('agent')
+            ->get()
+            ->groupBy('vendor_id')
+        : collect();
+
+    return $mergedGroups->map(function ($group) use ($auditEnd, $startDateStr, $endDateStr, $docsByVendor) {
             $vendor = $group['vendor'];
 
             // Only real vendors have docs; pseudo vendors (employees) skip this block
             if ($vendor instanceof Vendor) {
+                $vendorDocs = collect($docsByVendor->get($vendor->id) ?? []);
+
                 // Attach active Professional policy (if any)
-                $professional = $vendor->vendor_docs()
+                $professional = $vendorDocs
                     ->where('type', 'professional')
-                    ->orderByDesc('effective_date')
+                    ->sortByDesc('effective_date')
                     ->first();
                 if ($professional) {
                     $effective = $professional->effective_date;
@@ -265,7 +272,7 @@ class AuditShow extends Component
 
                 // Mark covered checks for the selected audit type documents
                 if ($this->audit_type) {
-                    $vendor_docs = $vendor->vendor_docs()->where('type', $this->audit_type)->get();
+                    $vendor_docs = $vendorDocs->where('type', $this->audit_type);
                     foreach ($vendor_docs as $vendor_doc) {
                         $doc_checks = $group['checks']->whereBetween('date', [$vendor_doc->effective_date, $vendor_doc->expiration_date]);
                         foreach ($doc_checks as $vendor_check) {
@@ -274,13 +281,11 @@ class AuditShow extends Component
                     }
 
                     // Collect policies applicable to this audit window
-                    $applicable = $vendor->vendor_docs()
+                    $applicable = $vendorDocs
                         ->where('type', $this->audit_type)
-                        ->whereDate('effective_date', '<=', $endDateStr)
-                        ->whereDate('expiration_date', '>=', $startDateStr)
-                        ->with('agent')
-                        ->orderByDesc('expiration_date')
-                        ->get();
+                        ->filter(fn ($doc) => $doc->effective_date?->format('Y-m-d') <= $endDateStr
+                            && $doc->expiration_date?->format('Y-m-d') >= $startDateStr)
+                        ->sortByDesc('expiration_date');
                     if ($applicable->isNotEmpty()) {
                         $group['applicable_docs'] = $applicable->values();
                     }

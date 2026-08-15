@@ -669,7 +669,7 @@ class SmsNewThread extends Component
     #[Computed]
     public function clients()
     {
-        return Client::orderBy('created_at', 'DESC')->get();
+        return Client::cachedDropdownList();
     }
 
     #[Computed]

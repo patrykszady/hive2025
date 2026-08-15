@@ -1,4 +1,4 @@
-@props(['task'])
+@props(['task', 'indicator' => null])
 
 {{--
     Shared homeowner preferred-time indicator used across every task card
@@ -8,7 +8,7 @@
     - Homeowner submitted times covering this task, still unscheduled → red "Schedule"
     - Homeowner has not chosen times for this task yet → orange "Awaiting Client"
 --}}
-@php($indicator = $task->preferredTimeIndicator())
+@php($indicator = $indicator ?? $task->preferredTimeIndicator())
 
 @if($indicator === 'scheduled')
     <span {{ $attributes->class('inline-flex items-center gap-1 shrink-0 whitespace-nowrap text-xs text-green-700 dark:text-green-300') }} title="This task has been scheduled for a project with client submitted preferred times">

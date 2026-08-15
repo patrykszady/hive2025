@@ -240,6 +240,78 @@ class Task extends Model
     }
 
     /**
+     * Request-scoped cache of recent 'updated' activities per task id.
+     * Container-bound (not static) so each request — and each test — starts
+     * clean. List views prime it in one query; ad-hoc callers fall back to a
+     * per-task query whose result is memoized here too.
+     */
+    protected static function updateActivityCache(): \ArrayObject
+    {
+        if (! app()->bound('tasks.update-activity-cache')) {
+            app()->instance('tasks.update-activity-cache', new \ArrayObject);
+        }
+
+        return app('tasks.update-activity-cache');
+    }
+
+    /**
+     * Fetch recent update activities for many tasks in ONE query. Card lists
+     * call getPreviousArrivalTimeLabel() per task — unprimed, that was one
+     * activity-log query per card.
+     */
+    public static function primeUpdateActivities(iterable $taskIds): void
+    {
+        $cache = self::updateActivityCache();
+
+        $missing = collect($taskIds)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->reject(fn (int $id) => $cache->offsetExists($id))
+            ->values();
+
+        if ($missing->isEmpty()) {
+            return;
+        }
+
+        $grouped = Activity::query()
+            ->where('subject_type', self::class)
+            ->whereIn('subject_id', $missing)
+            ->where('event', 'updated')
+            ->latest()
+            ->get()
+            ->groupBy('subject_id');
+
+        foreach ($missing as $id) {
+            $cache[$id] = ($grouped[$id] ?? collect())->take(50)->values();
+        }
+    }
+
+    /**
+     * Hydrate the assigned-users relation for a whole list of tasks with ONE
+     * query. Card lists read $task->users per card — unprimed, that is one
+     * User::whereIn query per task (Task::getUsersAttribute).
+     *
+     * @param  \Illuminate\Support\Collection<int, self>  $tasks
+     */
+    public static function primeAssignedUsers($tasks): void
+    {
+        $tasks = collect($tasks)->reject(fn (self $task) => $task->relationLoaded('users'));
+
+        $allUserIds = $tasks->pluck('user_ids')->flatten()->filter()->unique()->values();
+
+        $usersById = $allUserIds->isNotEmpty()
+            ? User::query()->whereIn('id', $allUserIds)->get()->keyBy('id')
+            : collect();
+
+        foreach ($tasks as $task) {
+            $task->setRelation('users', collect($task->user_ids ?? [])
+                ->map(fn ($userId) => $usersById->get($userId))
+                ->filter()
+                ->values());
+        }
+    }
+
+    /**
      * Get the previous arrival time label before the most recent change.
      *
      * Queries the activity log for the most recent time_settings change
@@ -247,13 +319,19 @@ class Task extends Model
      */
     public function getPreviousArrivalTimeLabel(string $date): ?string
     {
-        $activities = Activity::query()
-            ->where('subject_type', self::class)
-            ->where('subject_id', $this->id)
-            ->where('event', 'updated')
-            ->latest()
-            ->limit(50)
-            ->get();
+        $cache = self::updateActivityCache();
+
+        if (! $cache->offsetExists((int) $this->id)) {
+            $cache[(int) $this->id] = Activity::query()
+                ->where('subject_type', self::class)
+                ->where('subject_id', $this->id)
+                ->where('event', 'updated')
+                ->latest()
+                ->limit(50)
+                ->get();
+        }
+
+        $activities = $cache[(int) $this->id];
 
         foreach ($activities as $activity) {
             $oldOptions = data_get($activity->properties, 'old.options');

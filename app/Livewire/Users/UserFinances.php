@@ -221,7 +221,7 @@ class UserFinances extends Component
 
         // User Reimbursement Expenses Paid
         $user_reimbursement_expenses = Expense::whereNull('paid_by')
-            ->where('reimbursment', $this->user->id)
+            ->where('reimbursment', (string) $this->user->id)
             ->whereHas('check', function ($query) use ($year) {
                 return $query->whereYear('date', $year);
             })
@@ -230,7 +230,7 @@ class UserFinances extends Component
         // User Reimbursement Expenses Paid By Others
         $user_reimbursement_paid_by = Expense::whereNotNull('paid_by')
             ->with('check')
-            ->where('reimbursment', $this->user->id)
+            ->where('reimbursment', (string) $this->user->id)
             ->whereHas('check', function ($query) use ($year) {
                 return $query->whereYear('date', $year);
             })

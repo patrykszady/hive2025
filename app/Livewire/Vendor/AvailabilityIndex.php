@@ -91,7 +91,7 @@ class AvailabilityIndex extends Component
                     Task::VENDOR_STATUS_PROPOSED,
                 ])->orWhereNull('vendor_status');
             })
-            ->with(['project', 'owner']);
+            ->with(['project.latestStatus', 'owner', 'vendor']);
     }
 
     /**
@@ -103,12 +103,16 @@ class AvailabilityIndex extends Component
             return collect();
         }
 
-        return $this->baseTaskQuery()
+        $tasks = $this->baseTaskQuery()
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('end_date', '>=', Carbon::today())
             ->orderBy('start_date')
             ->get();
+        \App\Models\Task::primeAssignedUsers($tasks);
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
+
+        return $tasks;
     }
 
     /**
@@ -164,12 +168,16 @@ class AvailabilityIndex extends Component
             return collect();
         }
 
-        return $this->baseTaskQuery()
+        $tasks = $this->baseTaskQuery()
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('end_date', '<', Carbon::today())
             ->orderByDesc('start_date')
             ->get();
+        \App\Models\Task::primeAssignedUsers($tasks);
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
+
+        return $tasks;
     }
 
     /**
@@ -181,10 +189,14 @@ class AvailabilityIndex extends Component
             return collect();
         }
 
-        return $this->baseTaskQuery()
+        $tasks = $this->baseTaskQuery()
             ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
             ->orderBy('id')
             ->get();
+        \App\Models\Task::primeAssignedUsers($tasks);
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
+
+        return $tasks;
     }
 
     public function getVendor()

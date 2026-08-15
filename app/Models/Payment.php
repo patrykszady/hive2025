@@ -110,7 +110,7 @@ class Payment extends Model
         }
         
         // Eager load the client relationship for all projects
-        // $payments->load('project.client');
+        $payments->load('project.client');
         
         return $payments
             ->groupBy(function($payment) {

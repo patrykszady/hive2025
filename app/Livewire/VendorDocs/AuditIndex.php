@@ -77,12 +77,12 @@ class AuditIndex extends Component
             ->values()
             ->all();
 
-        return redirect()->route('vendor_docs.audit', [
+        return $this->redirectRoute('vendor_docs.audit', [
             'start_date' => $this->start_date,
             'end_date' => $this->end_date,
             'bank_account_ids' => $bank_account_ids,
             'audit_type' => $this->type,
-        ]);
+        ], navigate: true);
     }
 
     public function render()

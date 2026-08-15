@@ -155,6 +155,28 @@ class Client extends Model
     /**
      * Get the name attribute based on business name or users
      */
+    /**
+     * The "every client" list the create/duplicate/new-thread dropdowns
+     * render (~300 clients + their users on each of those page mounts).
+     * Cached per vendor context; ClientObserver busts on any client change.
+     */
+    public static function cachedDropdownList()
+    {
+        $vendorId = auth()->user()?->vendor?->id ?? 0;
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            "clients:dropdown:v{$vendorId}",
+            now()->addMinutes(10),
+            fn () => static::with('users')->orderBy('created_at', 'DESC')->get()
+        );
+    }
+
+    public static function bustDropdownCache(): void
+    {
+        $vendorId = auth()->user()?->vendor?->id ?? 0;
+        \Illuminate\Support\Facades\Cache::forget("clients:dropdown:v{$vendorId}");
+    }
+
     protected function name(): Attribute
     {
         return Attribute::make(
@@ -199,7 +221,7 @@ class Client extends Model
                     return trim($nameParts[0]);
                 }
             }
-        );
+        )->shouldCache();
     }
 
     /**
@@ -261,7 +283,7 @@ class Client extends Model
                 $lastNames = $users->pluck('last_name')->unique()->toArray();
                 return $this->oxfordJoin($lastNames);
             }
-        );
+        )->shouldCache();
     }
 
     /**
@@ -279,7 +301,7 @@ class Client extends Model
 
                 return $this->vendors()->wherePivot('vendor_id', $vendorId)->first()?->pivot->source;
             }
-        );
+        )->shouldCache();
     }
 
     /**

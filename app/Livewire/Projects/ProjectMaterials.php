@@ -236,6 +236,20 @@ class ProjectMaterials extends Component
     {
         $allItems = [];
 
+        // One query for every line-item description on the page — this was a
+        // query per item (a project with 10 orders x 20 items = 200 queries).
+        $receiptIds = $this->materialExpenses
+            ->map(fn ($expense) => $expense->orderedReceipts->first(fn ($r) => $r->is_material_order)?->id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $descsByKey = $receiptIds->isNotEmpty()
+            ? ReceiptLineItemDesc::whereIn('expense_receipt_id', $receiptIds)
+                ->get()
+                ->keyBy(fn ($d) => $d->expense_receipt_id.'|'.$d->item_index)
+            : collect();
+
         foreach ($this->materialExpenses as $expense) {
             $receipt = $expense->orderedReceipts->first(fn ($r) => $r->is_material_order);
 
@@ -246,10 +260,8 @@ class ProjectMaterials extends Component
             $items = $receipt->receipt_items['items'] ?? [];
 
             foreach ($items as $index => $item) {
-                // Enrich with receipt_line_item_descs
-                $desc = ReceiptLineItemDesc::where('expense_receipt_id', $receipt->id)
-                    ->where('item_index', $index)
-                    ->first();
+                // Enrich with receipt_line_item_descs (batch-loaded above)
+                $desc = $descsByKey->get($receipt->id.'|'.$index);
 
                 if ($desc) {
                     if (empty($item['image_url']) && ! empty($desc->product_image_url)) {

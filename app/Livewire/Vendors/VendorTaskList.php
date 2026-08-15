@@ -65,6 +65,7 @@ class VendorTaskList extends Component
             ->get();
 
         $this->hydrateAssignedUsers($tasks);
+        Task::primeUpdateActivities($tasks->pluck('id'));
 
         $grouped = collect();
 
@@ -150,6 +151,7 @@ class VendorTaskList extends Component
             ->get();
 
         $this->hydrateAssignedUsers($tasks);
+        Task::primeUpdateActivities($tasks->pluck('id'));
 
         return $tasks;
     }

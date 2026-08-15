@@ -374,11 +374,15 @@
                 <flux:heading size="lg">Delete Expense?</flux:heading>
                 <flux:text class="mt-2">
                     <p>You're about to delete this expense.</p>
-                    @if($expense->transactions()->exists())
-                        <p class="mt-2">This expense has {{ $expense->transactions()->count() }} matched {{ \Illuminate\Support\Str::plural('transaction', $expense->transactions()->count()) }}. They will be unlinked from this expense (transactions themselves will not be deleted).</p>
+                    @php
+                        $deleteTransactionCount = $expense->transactions()->count();
+                        $deleteReceiptCount = $expense->receipts()->count();
+                    @endphp
+                    @if($deleteTransactionCount > 0)
+                        <p class="mt-2">This expense has {{ $deleteTransactionCount }} matched {{ \Illuminate\Support\Str::plural('transaction', $deleteTransactionCount) }}. They will be unlinked from this expense (transactions themselves will not be deleted).</p>
                     @endif
-                    @if($expense->receipts()->exists())
-                        <p class="mt-2">{{ $expense->receipts()->count() }} {{ \Illuminate\Support\Str::plural('receipt', $expense->receipts()->count()) }} attached to this expense will also be deleted.</p>
+                    @if($deleteReceiptCount > 0)
+                        <p class="mt-2">{{ $deleteReceiptCount }} {{ \Illuminate\Support\Str::plural('receipt', $deleteReceiptCount) }} attached to this expense will also be deleted.</p>
                     @endif
                 </flux:text>
             </div>

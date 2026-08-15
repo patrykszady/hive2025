@@ -59,14 +59,14 @@
     {{-- INCOME --}}
     <x-details.card title="Income">
         <x-slot:header_buttons>
-            <flux:badge color="blue" size="sm">{{ money($this->revenue()) }}</flux:badge>
+            <flux:badge color="blue" size="sm">{{ money($this->revenue) }}</flux:badge>
         </x-slot:header_buttons>
     </x-details.card>
 
     {{-- COST OF GOODS SOLD --}}
     <x-details.card title="Cost of Goods Sold" :expanded="true" :details_text="false" :separator="false">
         <x-slot:header_buttons>
-            <flux:badge color="red" size="sm">{{ money($this->costOfLaborSum() + $this->costOfMaterialsSum()) }}</flux:badge>
+            <flux:badge color="red" size="sm">{{ money($this->costOfLaborSum + $this->costOfMaterialsSum) }}</flux:badge>
         </x-slot:header_buttons>
 
         <x-slot:details>
@@ -74,7 +74,7 @@
                 {{-- COST OF LABOR --}}
                 <x-details.card title="Cost of Labor" :expanded="false" :details_text="false" :separator="false">
                     <x-slot:header_buttons>
-                        <flux:badge size="sm">{{ money($this->costOfLaborSum()) }}</flux:badge>
+                        <flux:badge size="sm">{{ money($this->costOfLaborSum) }}</flux:badge>
                     </x-slot:header_buttons>
                     <x-slot:details>
                         <div class="-mx-2">
@@ -101,7 +101,7 @@
                 {{-- COST OF MATERIALS --}}
                 <x-details.card title="Cost of Materials" :expanded="false" :details_text="false" :separator="false">
                     <x-slot:header_buttons>
-                        <flux:badge size="sm">{{ money($this->costOfMaterialsSum()) }}</flux:badge>
+                        <flux:badge size="sm">{{ money($this->costOfMaterialsSum) }}</flux:badge>
                     </x-slot:header_buttons>
                     <x-slot:details>
                         <div class="-mx-2">
@@ -129,7 +129,7 @@
     </x-details.card>
 
     {{-- GROSS PROFIT --}}
-    @php $grossProfit = $this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum(); @endphp
+    @php $grossProfit = $this->revenue - $this->costOfLaborSum - $this->costOfMaterialsSum; @endphp
     <x-details.card title="Gross Profit" :expanded="true" :details_text="false" :separator="false">
         <x-slot:header_buttons>
             <flux:badge color="blue" size="sm">{{ money($grossProfit) }}</flux:badge>
@@ -140,11 +140,11 @@
                     <flux:table.rows>
                         <flux:table.row>
                             <flux:table.cell>Total Income</flux:table.cell>
-                            <flux:table.cell variant="strong" class="text-right">{{ money($this->revenue()) }}</flux:table.cell>
+                            <flux:table.cell variant="strong" class="text-right">{{ money($this->revenue) }}</flux:table.cell>
                         </flux:table.row>
                         <flux:table.row>
                             <flux:table.cell>Total Cost of Goods Sold</flux:table.cell>
-                            <flux:table.cell variant="strong" class="text-right">-{{ money($this->costOfLaborSum() + $this->costOfMaterialsSum()) }}</flux:table.cell>
+                            <flux:table.cell variant="strong" class="text-right">-{{ money($this->costOfLaborSum + $this->costOfMaterialsSum) }}</flux:table.cell>
                         </flux:table.row>
                     </flux:table.rows>
                 </flux:table>
@@ -153,7 +153,7 @@
     </x-details.card>
 
     {{-- EXPENSES --}}
-    @php $totalExpenses = $this->generalExpenses() + $this->uncategorizedTransactionsSum(); @endphp
+    @php $totalExpenses = $this->generalExpenses() + $this->uncategorizedTransactionsSum; @endphp
     <x-details.card title="Expenses" :expanded="true" :details_text="false" :separator="false">
         <x-slot:header_buttons>
             <flux:badge color="red" size="sm">{{ money($totalExpenses) }}</flux:badge>
@@ -209,7 +209,7 @@
                 @endforeach
 
                 {{-- UNCATEGORIZED TRANSACTIONS --}}
-                @php $uncatTransSum = $this->uncategorizedTransactionsSum(); @endphp
+                @php $uncatTransSum = $this->uncategorizedTransactionsSum; @endphp
                 @if($uncatTransSum != 0)
                     <x-details.card title="Uncategorized" :expanded="false" :details_text="false" :separator="false">
                         <x-slot:header_buttons>
@@ -241,7 +241,7 @@
     </x-details.card>
 
     {{-- NET INCOME --}}
-    @php $netIncome = $this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $totalExpenses; @endphp
+    @php $netIncome = $this->revenue - $this->costOfLaborSum - $this->costOfMaterialsSum - $totalExpenses; @endphp
     <x-details.card title="Net Income">
         <x-slot:header_buttons>
             <flux:badge color="{{ $netIncome >= 0 ? 'green' : 'red' }}">

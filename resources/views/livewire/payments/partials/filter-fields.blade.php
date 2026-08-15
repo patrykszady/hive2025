@@ -38,7 +38,7 @@
                     <flux:select.search placeholder="Search..." />
                 </x-slot>
                 @foreach ($clients as $client)
-                    <flux:select.option value="{{ $client->id }}">{{ $client->name }}</flux:select.option>
+                    <flux:select.option value="{{ $client['id'] }}">{{ $client['name'] }}</flux:select.option>
                 @endforeach
             </flux:select>
         </flux:field>

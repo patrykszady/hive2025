@@ -78,8 +78,9 @@
             </span>
         @endif
         @if($showStatus)
-            @if($task->preferredTimeIndicator())
-                <x-task-preferred-indicator :task="$task" />
+            @php($preferredIndicator = $task->preferredTimeIndicator())
+            @if($preferredIndicator)
+                <x-task-preferred-indicator :task="$task" :indicator="$preferredIndicator" />
             @else
                 <x-task-status-badge :status="$task->vendor_status" />
             @endif

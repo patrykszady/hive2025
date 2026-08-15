@@ -82,6 +82,13 @@ class ConversationPresenter
             }
         }
 
+        // Resolve every participant name in one batch — the blade asks for
+        // these per participant and per sender while rendering the thread.
+        static::warmPhoneDisplays(collect($thread->participants ?? [])
+            ->merge($thread->threadParticipants->pluck('phone_number'))
+            ->filter()
+            ->unique());
+
         return $thread;
     }
 
@@ -625,9 +632,63 @@ class ConversationPresenter
     /**
      * Resolve a display name for an E.164 phone number.
      */
+    /** @var array<string, string> Shared with warmPhoneDisplays(). */
+    protected static array $phoneDisplayCache = [];
+
+    /**
+     * Resolve many numbers up front with 3 queries. A thread's participants
+     * and senders each cost up to 3 queries otherwise.
+     */
+    public static function warmPhoneDisplays(iterable $phones): void
+    {
+        $pending = [];
+
+        foreach ($phones as $phone) {
+            if (! is_string($phone) || $phone === '' || isset(static::$phoneDisplayCache[$phone])) {
+                continue;
+            }
+
+            $digits = preg_replace('/[^0-9]/', '', $phone);
+            $normalized = (strlen($digits) === 11 && str_starts_with($digits, '1')) ? substr($digits, 1) : $digits;
+            $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+            $pending[$phone] = array_values(array_unique([$normalized, '1'.$normalized, $digits, $last10]));
+        }
+
+        if (empty($pending)) {
+            return;
+        }
+
+        $needles = collect($pending)->flatten()->unique()->values()->all();
+
+        $usersByDigits = User::whereIn('cell_phone', $needles)
+            ->get()
+            ->keyBy(fn ($u) => preg_replace('/[^0-9]/', '', (string) $u->cell_phone));
+
+        $vendorsByDigits = Vendor::whereIn('business_phone', $needles)
+            ->get()
+            ->keyBy(fn ($v) => preg_replace('/[^0-9]/', '', (string) $v->business_phone));
+
+        foreach ($pending as $phone => $variants) {
+            $user = collect($variants)->map(fn ($v) => $usersByDigits->get($v))->filter()->first();
+
+            if ($user && trim(static::preferredUserDisplayName($user, true)) !== '') {
+                static::$phoneDisplayCache[$phone] = static::preferredUserDisplayName($user, true);
+                continue;
+            }
+
+            $vendor = collect($variants)->map(fn ($v) => $vendorsByDigits->get($v))->filter()->first();
+
+            if ($vendor && $vendor->short_name) {
+                static::$phoneDisplayCache[$phone] = $vendor->short_name;
+            }
+            // Anything unresolved falls through to resolvePhoneDisplay(), which
+            // still does the CNAM lookup for that single number.
+        }
+    }
+
     public static function resolvePhoneDisplay(string $e164): string
     {
-        static $cache = [];
+        $cache = &static::$phoneDisplayCache;
 
         if (isset($cache[$e164])) {
             return $cache[$e164];

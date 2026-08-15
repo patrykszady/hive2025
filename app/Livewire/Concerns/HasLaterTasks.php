@@ -34,10 +34,14 @@ trait HasLaterTasks
 
         $tasks = $this->laterTasksBaseQuery()
             ->whereDate('start_date', '>', $windowEndStr)
-            ->with('vendor')
+            // The Later accordion's cards read project info and the
+            // preferred-time indicator (project + latestStatus) per task.
+            ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->orderBy('start_date')
             ->orderBy('end_date')
             ->get();
+
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
 
         // Eager load users
         $allUserIds = $tasks

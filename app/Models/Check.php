@@ -181,12 +181,26 @@ class Check extends Model
      * a via-vendor (the label shows that company), then the user, then the
      * vendor. Null when the check has neither.
      */
+    /** Memoized — the checks table calls this several times per row. */
+    protected ?array $payeeUrlMemo = null;
+
     public function payeeUrl(): ?string
     {
+        if ($this->payeeUrlMemo !== null) {
+            return $this->payeeUrlMemo[0];
+        }
+
+        return ($this->payeeUrlMemo = [$this->resolvePayeeUrl()])[0];
+    }
+
+    protected function resolvePayeeUrl(): ?string
+    {
         if ($this->user_id && $this->user) {
-            $userVendorPivot = $this->user->vendors()
-                ->where('vendors.id', auth()->user()?->vendor?->id)
-                ->first();
+            $userVendorPivot = $this->user->relationLoaded('vendors')
+                ? $this->user->vendors->firstWhere('id', auth()->user()?->vendor?->id)
+                : $this->user->vendors()
+                    ->where('vendors.id', auth()->user()?->vendor?->id)
+                    ->first();
 
             $viaVendorId = $userVendorPivot?->pivot?->via_vendor_id;
 
@@ -212,9 +226,11 @@ class Check extends Model
                 // If check has a user, check for via_vendor relationship
                 if ($this->user_id) {
                     // Get user's relationship with the current vendor context
-                    $userVendorPivot = $this->user->vendors()
-                        ->where('vendors.id', auth()->user()->vendor->id)
-                        ->first();
+                    $userVendorPivot = $this->user->relationLoaded('vendors')
+                        ? $this->user->vendors->firstWhere('id', auth()->user()->vendor->id)
+                        : $this->user->vendors()
+                            ->where('vendors.id', auth()->user()->vendor->id)
+                            ->first();
                     
                     // If user has a via_vendor_id, get the vendor directly through the relationship
                     if ($userVendorPivot && $userVendorPivot->pivot->via_vendor_id) {
@@ -239,7 +255,7 @@ class Check extends Model
                 // Fallback if neither user nor vendor are valid
                 return null;
             }
-        );
+        )->shouldCache();
     }
 
     protected function status(): Attribute

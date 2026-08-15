@@ -131,6 +131,23 @@ class ExpenseShow extends Component
         $this->showItemModal = true;
     }
 
+    /** The owning client/vendor shown in the details rail (blade used to query these per render). */
+    #[Computed]
+    public function belongsToClient()
+    {
+        return $this->expense->belongs_to_client_id
+            ? \App\Models\Client::find($this->expense->belongs_to_client_id)
+            : null;
+    }
+
+    #[Computed]
+    public function belongsToVendor()
+    {
+        return $this->expense->belongs_to_vendor_id
+            ? \App\Models\Vendor::find($this->expense->belongs_to_vendor_id)
+            : null;
+    }
+
     // Get the currently selected split
     #[Computed]
     public function selectedSplit()

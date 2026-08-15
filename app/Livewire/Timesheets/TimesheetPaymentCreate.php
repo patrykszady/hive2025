@@ -125,7 +125,7 @@ class TimesheetPaymentCreate extends Component
         $this->selectedUserPaidExpenses = $this->user_paid_expenses->pluck('id')->mapWithKeys(fn ($id) => [$id => false])->toArray();
 
         $this->user_reimbursement_expenses =
-            Expense::where('reimbursment', $this->user->id)
+            Expense::where('reimbursment', (string) $this->user->id)
                 ->whereNull('paid_by')
                 ->whereNull('check_id')
                 ->orderBy('date', 'DESC')

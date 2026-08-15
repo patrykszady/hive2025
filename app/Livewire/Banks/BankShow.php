@@ -44,7 +44,11 @@ class BankShow extends Component
                     $result = [
                         'account' => $latestAccount, // Use the latest account as THE account
                         'checks' => $accountsByType->flatMap(function ($account) {
+                            // Check::owner reads user + the user's vendor pivot
+                            // per row — eager load both so the card doesn't
+                            // fire 2 queries per check.
                             return $account->checks()
+                                ->with(['user.vendors', 'vendor'])
                                 ->whereIn('check_type', ['Transfer', 'Check'])
                                 ->whereYear('date', '>=', 2024)
                                 ->whereDoesntHave('transactions')

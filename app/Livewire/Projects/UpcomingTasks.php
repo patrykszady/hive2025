@@ -111,7 +111,12 @@ class UpcomingTasks extends Component
                 ->values();
 
             $task->setRelation('users', $assignedUsers);
+            // All tasks here belong to $this->project — reuse it instead of
+            // one lazy Project (+latestStatus) query per card indicator.
+            $task->setRelation('project', $this->project);
         }
+
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
 
         // Group tasks by their selected dates
         $grouped = collect();
@@ -234,8 +239,11 @@ class UpcomingTasks extends Component
                     ->values();
 
                 $task->setRelation('users', $assignedUsers);
+                $task->setRelation('project', $this->project);
             }
         }
+
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
 
         return $tasks;
     }

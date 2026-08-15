@@ -370,14 +370,24 @@ class Expense extends Model
             $results = $results->merge($sharedExpenses);
         }
 
-        return $results->isNotEmpty() ? $results->unique('id') : null;
+        // Return a collection (never null) so Eloquent's accessor cache applies —
+        // a null result re-ran all four queries on every access.
+        return $results->unique('id');
     }
     /**
      * Unified accessor for "all" transactions relevant to this expense.
      * Returns this expense's own transactions if present; otherwise falls back
      * to shared transactions (multi-expense), then check transactions; empty collection if none.
      */
+    /** Per-instance memo — the show page asks for these several times per row. */
+    protected $allTransactionsMemo = null;
+
     public function allTransactions()
+    {
+        return $this->allTransactionsMemo ??= $this->resolveAllTransactions();
+    }
+
+    protected function resolveAllTransactions()
     {
         // First check legacy 1:1 expense_id link
         $own = $this->transactions()->get();

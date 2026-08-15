@@ -163,7 +163,7 @@ class VendorCreate extends Component
         //add $vendor to currently logged in vendor (company)
         auth()->user()->vendor->vendors()->syncWithoutDetaching([$vendor_id]);
 
-        $this->redirectRoute('vendors.show', ['vendor' => $vendor_id]);
+        $this->redirectRoute('vendors.show', ['vendor' => $vendor_id], navigate: true);
         // $this->dispatch('refreshComponent')->to('vendors.vendors-index');
         // $this->modal('vendors_form_modal')->close();
 

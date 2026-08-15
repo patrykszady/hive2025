@@ -47,10 +47,12 @@ it('shows unscheduled null-status tasks in pending section', function () {
         'vendor_status' => null,
     ]));
 
+    // The pending card renders through the shared task-card partial now —
+    // no "No Date" badge; the Pending section header + CTA carry that meaning.
     Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
         ->assertSee('Pending Tasks')
         ->assertSee('Fix Electrical')
-        ->assertSee('No Date');
+        ->assertSee('Set Dates / Schedule');
 });
 
 it('opens and saves dates for an unscheduled null-status task', function () {

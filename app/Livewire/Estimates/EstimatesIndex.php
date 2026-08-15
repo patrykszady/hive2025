@@ -68,6 +68,9 @@ class EstimatesIndex extends Component
         $project_id = isset($this->project) ? $this->project->id : null;
 
         return Estimate::withTrashed()
+            // The rows partial sums estimate_sections and walks project->client
+            // (whose name accessor reads client->users) for every row.
+            ->with(['estimate_sections:id,estimate_id,total', 'project.client.users:id,first_name,last_name,nickname'])
             ->when($project_id, function ($query) use ($project_id) {
                 $query->where('project_id', $project_id);
             })

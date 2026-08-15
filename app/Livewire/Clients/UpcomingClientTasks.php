@@ -109,6 +109,8 @@ class UpcomingClientTasks extends Component
             $task->setRelation('users', $assignedUsers);
         }
 
+        \App\Models\Task::primeUpdateActivities($tasks->pluck('id'));
+
         $grouped = collect();
 
         $todayStr = $today->format('Y-m-d');

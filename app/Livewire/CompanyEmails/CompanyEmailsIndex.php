@@ -27,12 +27,32 @@ class CompanyEmailsIndex extends Component
      *
      * @return \Illuminate\Support\Collection<int, CompanyEmail>
      */
+    /** Set by the follow-up request (wire:init) that is allowed to hit Nylas. */
+    public bool $healthProbed = false;
+
     #[Computed]
     public function accounts()
     {
         return CompanyEmail::all()->each(function (CompanyEmail $email) {
             $email->health = $this->grantHealth($email);
         });
+    }
+
+    /**
+     * Probing Nylas takes 2 HTTP round trips per mailbox; doing that inside
+     * the first render blocked the page for ~3s on a cold cache. First paint
+     * now shows whatever is cached (or "checking"), and this runs immediately
+     * after via wire:init to fill it in.
+     */
+    public function probeHealth(): void
+    {
+        $this->healthProbed = true;
+
+        foreach (CompanyEmail::whereNotNull('grant_id')->get() as $email) {
+            $this->grantHealth($email, allowProbe: true);
+        }
+
+        unset($this->accounts);
     }
 
     /**
@@ -44,7 +64,7 @@ class CompanyEmailsIndex extends Component
      *
      * @return array{state: string, reason: ?string, provider: ?string, grant_email: ?string, checked_at: string}
      */
-    protected function grantHealth(CompanyEmail $email): array
+    protected function grantHealth(CompanyEmail $email, bool $allowProbe = false): array
     {
         if (! $email->grant_id) {
             return [
@@ -56,8 +76,22 @@ class CompanyEmailsIndex extends Component
             ];
         }
 
+        $cacheKey = "company_email_health:{$email->grant_id}";
+
+        // Render path: never call Nylas. Show the cached verdict, or a
+        // "checking" placeholder that probeHealth() replaces a moment later.
+        if (! $allowProbe) {
+            return Cache::get($cacheKey) ?? [
+                'state' => 'checking',
+                'reason' => null,
+                'provider' => null,
+                'grant_email' => null,
+                'checked_at' => now()->toDateTimeString(),
+            ];
+        }
+
         return Cache::remember(
-            "company_email_health:{$email->grant_id}",
+            $cacheKey,
             now()->addMinutes(self::HEALTH_CACHE_MINUTES),
             function () use ($email) {
                 $base = rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/');
@@ -116,7 +150,7 @@ class CompanyEmailsIndex extends Component
             Cache::forget("company_email_health:{$grantId}");
         }
 
-        unset($this->accounts);
+        $this->probeHealth();
     }
 
     #[Title('Email Accounts')]

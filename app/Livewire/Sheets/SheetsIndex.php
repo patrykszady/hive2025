@@ -107,13 +107,13 @@ class SheetsIndex extends Component
         $bank_account_ids = BankAccount::all()->pluck('id')->toArray();
 
         //dispatch to SheetShow w/ dates and bank_accounts
-        return redirect()->route('sheets.show', [
+        return $this->redirectRoute('sheets.show', [
             'bank_account_ids' => $bank_account_ids,
             'start_date' => $this->start_date,
             'end_date' => $this->end_date,
             'cash' => $this->cash,
             'basis' => $this->basis,
-        ]);
+        ], navigate: true);
 
         // $this->dispatch('sheet_info')->to(SheetShow::class);
     }

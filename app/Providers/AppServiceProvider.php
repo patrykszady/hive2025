@@ -32,7 +32,9 @@ use Illuminate\Http\Request;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
@@ -68,6 +70,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Dev guardrail: a relation accessed without being eager-loaded throws
+        // here instead of quietly becoming an N+1 in production. Logs rather
+        // than throws so an unlucky path can't break local work outright —
+        // watch storage/logs for "lazy loading" entries.
+        Model::preventLazyLoading(! app()->isProduction());
+
+        Model::handleLazyLoadingViolationUsing(function (Model $model, string $relation): void {
+            Log::warning('N+1 risk: lazy-loaded relation', [
+                'model' => $model::class,
+                'relation' => $relation,
+            ]);
+        });
+
         // Guard against Blade compiler state leaking across view compilations.
         // If the internal @forelse counter becomes negative, Blade will generate invalid
         // variables like "$__empty_-1" which causes a syntax error when rendering views.

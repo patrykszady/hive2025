@@ -31,12 +31,7 @@ class CheckScope implements Scope
                 // Read the pivot directly: the `vendors` relation carries
                 // VendorScope, which can hide the member's own company and
                 // would silently drop their checks from this list.
-                $ownVendorIds = \Illuminate\Support\Facades\DB::table('user_vendor')
-                    ->where('user_id', $user->id)
-                    ->where('vendor_id', '!=', $user->vendor->id)
-                    ->pluck('vendor_id')
-                    ->map(fn ($id) => (int) $id)
-                    ->values();
+                $ownVendorIds = $user->otherVendorIds($user->vendor->id);
 
                 $builder->where('belongs_to_vendor_id', $user->vendor->id)
                     ->where(function ($query) use ($user, $ownVendorIds) {

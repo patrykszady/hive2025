@@ -125,7 +125,7 @@ class ChecksIndex extends Component
         $checks =
             Check::orderBy('date', 'DESC')
                 //distributions
-                ->with(['expenses', 'bank_account', 'transactions'])
+                ->with(['expenses', 'bank_account.bank', 'transactions', 'user.vendors', 'vendor'])
                 ->where(function ($query) use ($bank_accounts) {
                     $query->whereIn('bank_account_id', $bank_accounts)
                         ->orWhereNull('bank_account_id');

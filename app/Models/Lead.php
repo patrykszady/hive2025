@@ -106,8 +106,34 @@ class Lead extends Model
      * Runs unscoped so queue jobs and console commands resolve the same way a
      * logged-in request does.
      */
+    /** Per-instance memo — index tables resolve the same lead each render. */
+    protected bool $resolvedClientMemoSet = false;
+
+    protected ?Client $resolvedClientMemo = null;
+
     public function resolveClient(): ?Client
     {
+        if ($this->resolvedClientMemoSet) {
+            return $this->resolvedClientMemo;
+        }
+
+        $this->resolvedClientMemoSet = true;
+
+        return $this->resolvedClientMemo = $this->resolveClientUncached();
+    }
+
+    protected function resolveClientUncached(): ?Client
+    {
+        // Prefer an already eager-loaded clients relation (LeadsIndex loads
+        // user.clients) over a fresh unscoped query per row.
+        if ($this->relationLoaded('user') && $this->user?->relationLoaded('clients')) {
+            $loaded = $this->user->clients->first();
+
+            if ($loaded) {
+                return $loaded;
+            }
+        }
+
         $client = $this->user?->clients()->withoutGlobalScopes()->first();
 
         if ($client) {

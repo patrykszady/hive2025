@@ -166,7 +166,7 @@ class CheckShow extends Component
 
         $user_reimbursement_expenses = $this->check->user_id
             ? Expense::whereIn('id', $allExpenseIds)
-                ->where('reimbursment', $this->check->user_id)
+                ->where('reimbursment', (string) $this->check->user_id)
                 ->whereNull('paid_by')
                 ->orderBy('date', 'DESC')
                 ->get()

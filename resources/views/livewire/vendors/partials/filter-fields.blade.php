@@ -6,7 +6,7 @@
 
 <div class="{{ $layout === 'inline' ? 'flex flex-col sm:flex-row items-end gap-4' : 'flex flex-col gap-4' }}">
     <div class="{{ $fieldWrap }}">
-        <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
+        <flux:input wire:model.live.debounce.300ms="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
     </div>
 
     <div class="{{ $fieldWrap }}">

@@ -152,19 +152,9 @@
             $effectiveStatus = $this->effectiveStatus($call);
 
             // Resolve the "other party" phone to a contact name
-            $otherNumber = $isOutgoing ? $call->to_number : $call->from_number;
-
-            // If otherNumber is our own Telnyx number (phantom leg), try finding the
-            // original caller from a sibling call log in the same session.
-            if ($otherNumber && \App\Services\GroupSmsService::isOurNumber($otherNumber) && $call->call_session_id) {
-                $originalLeg = \App\Models\CallLog::where('call_session_id', $call->call_session_id)
-                    ->where('direction', 'incoming')
-                    ->where(fn ($q) => $q->whereNotIn('from_number', config('services.telnyx.numbers', [])))
-                    ->first();
-                if ($originalLeg) {
-                    $otherNumber = $originalLeg->from_number;
-                }
-            }
+            // Phantom legs (our own Telnyx number on the row) were resolved in
+            // one batch query by CallList::primeCallRowLookups().
+            $otherNumber = $this->otherPartyNumber($call);
 
             $resolvedName = $otherNumber ? $this->resolvePhoneDisplay($otherNumber) : null;
             $formattedOther = $otherNumber ? $this->formatPhone($otherNumber) : null;

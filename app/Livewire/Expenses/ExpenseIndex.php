@@ -159,14 +159,18 @@ class ExpenseIndex extends Component
 
         $isAdmin = auth()->user()?->vendor_role === 'Admin';
 
-        $expenses = Expense::whereIn('id', $this->selected)->get();
+        // Load what the guard and cascadeDeleteExpense() both need — the loop
+        // used to fire a fresh exists() plus lazy loads per selected expense.
+        $expenses = Expense::whereIn('id', $this->selected)
+            ->with(['transactions', 'splits', 'receipts'])
+            ->get();
         $deletedIds = [];
         $skipped = 0;
 
         foreach ($expenses as $expense) {
             // Mirror single-delete rule from ExpenseCreate::remove():
             // non-admins cannot delete an expense that has matched transactions.
-            if (! $isAdmin && $expense->transactions()->exists()) {
+            if (! $isAdmin && $expense->transactions->isNotEmpty()) {
                 $skipped++;
                 continue;
             }

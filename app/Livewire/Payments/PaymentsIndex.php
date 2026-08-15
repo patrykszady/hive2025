@@ -110,14 +110,20 @@ class PaymentsIndex extends Component
                 ->get(['id', 'project_name', 'address', 'client_id']);
         });
 
-        $this->clients = Cache::remember("filters:v{$vendorId}:payment-clients", 600, function () use ($vendorId) {
+        // Plain arrays, label already resolved: these live in a public
+        // property, so Livewire dehydrates them into the payload and rehydrates
+        // WITHOUT relations — $client->name then re-queried client->users for
+        // every option on every filter keystroke, sort and page change.
+        $this->clients = Cache::remember("filters:v{$vendorId}:payment-clients:v2", 600, function () use ($vendorId) {
             return Client::whereHas('projects.payments', function ($query) use ($vendorId) {
                 $query->where('belongs_to_vendor_id', $vendorId);
             })
-                ->with('users:id,first_name,last_name')
+                ->with('users:id,first_name,last_name,nickname')
                 ->orderBy('business_name')
                 ->orderBy('id')
-                ->get(['id', 'business_name']);
+                ->get(['id', 'business_name'])
+                ->map(fn (Client $client) => ['id' => $client->id, 'name' => $client->name])
+                ->all();
         });
     }
 
@@ -179,7 +185,7 @@ class PaymentsIndex extends Component
             $query->whereNull('transaction_id');
         }
 
-        $query->with(['project.client']);
+        $query->with(['project.client.users:id,first_name,last_name,nickname']);
 
         // Apply sorting if specified
         if ($this->sortBy) {

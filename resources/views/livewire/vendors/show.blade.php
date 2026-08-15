@@ -32,7 +32,7 @@
                 <livewire:users.users-index :vendor="$vendor" :view="'vendors.show'"/>
 
                 {{-- VENDOR CHECKS --}}
-                @if($vendor->checks()->count() > 0 )
+                @if($vendor->checks()->exists())
                     <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" />
                 @endif
 

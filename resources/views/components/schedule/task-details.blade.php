@@ -16,6 +16,12 @@
         ]);
     $detailNotes = trim((string) ($task->notes ?? ''));
 
+    // System-written provenance notes ("Booked from lead email reply — …")
+    // are bookkeeping, not instructions for whoever reads the card.
+    if (\Illuminate\Support\Str::startsWith($detailNotes, 'Booked from lead email reply')) {
+        $detailNotes = '';
+    }
+
     // Checking work off before anyone is on site invites premature ticks —
     // the boxes go live on the task's scheduled day, not before.
     $interactive = $interactive

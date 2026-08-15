@@ -141,7 +141,7 @@
     <div x-on:click.stop wire:click.stop>
         <x-schedule.task-details
             :task="$task"
-            :interactive="auth()->check() && ! (auth()->user()->is_browsing_as_client ?? false)"
+            :interactive="$detailsInteractive ?? (auth()->check() && ! (auth()->user()->is_browsing_as_client ?? false))"
         />
     </div>
 @endif

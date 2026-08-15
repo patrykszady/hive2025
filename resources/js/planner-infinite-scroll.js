@@ -25,9 +25,10 @@ window.plannerInfiniteScroll = function (refName) {
     return {
         _infRef: refName,
         // Distance (px) from either edge at which we kick off the next load.
-        // Set generously so the new chunk has already arrived by the time the
-        // user actually scrolls there — preload, not just-in-time load.
-        _infThreshold: 1500,
+        // ~3 day-columns of buffer: enough that the chunk usually lands before
+        // the user reaches the edge, small enough that a 14-day initial window
+        // doesn't auto-inflate right back to the old 90-day cost.
+        _infThreshold: 600,
         _infMinLoadIntervalMs: 600,
         isLoadingPrevious: false,
         isLoadingFuture: false,

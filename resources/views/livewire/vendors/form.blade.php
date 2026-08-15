@@ -154,7 +154,7 @@
                             >
                             
                             <flux:input
-                                wire:model.live="form.business_name"
+                                wire:model.live.debounce.400ms="form.business_name"
                                 label="Business Name"
                                 type="text"
                                 x-bind:disabled="$wire.form.business_name"

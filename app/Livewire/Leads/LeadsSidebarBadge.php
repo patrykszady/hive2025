@@ -12,15 +12,28 @@ class LeadsSidebarBadge extends Component
     #[On('lead-status-updated')]
     public function refreshBadge(): void
     {
-        // Handling the event is enough — Livewire re-renders after.
+        // Bust so the re-render Livewire performs sees the fresh count.
+        \Illuminate\Support\Facades\Cache::forget(static::countCacheKey());
+    }
+
+    protected static function countCacheKey(): string
+    {
+        return 'leads:badge:v'.(auth()->user()?->vendor?->id ?? 0);
     }
 
     /**
      * Leads still awaiting a reply: latest status is "New" (or none yet).
+     * Renders on every page (sidebar) — cached briefly, busted by the same
+     * events that change it. Lead statuses also change via console commands
+     * (crew:ingest-leads), so the short TTL is the safety net there.
      */
     public static function newLeadCount(): int
     {
-        return Lead::whereLatestStatus('New')->count();
+        return (int) \Illuminate\Support\Facades\Cache::remember(
+            static::countCacheKey(),
+            60,
+            fn () => Lead::whereLatestStatus('New')->count()
+        );
     }
 
     public function render()

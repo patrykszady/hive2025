@@ -10,6 +10,7 @@ use App\Models\SwornStatement;
 use App\Models\Project;
 use Flux;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Placeholder;
 use Livewire\Attributes\Title;
@@ -936,6 +937,7 @@ class Index extends Component
     }
 
     /** Draw pending delete confirmation (drives the confirm modal). */
+    #[Locked]
     public ?int $deletingDrawId = null;
 
     public bool $showDrawDelete = false;

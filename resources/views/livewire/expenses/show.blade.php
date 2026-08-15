@@ -60,7 +60,7 @@
                     />
 
                     @if($expense->belongs_to_client_id)
-                        @php $belongsToClient = \App\Models\Client::find($expense->belongs_to_client_id); @endphp
+                        @php $belongsToClient = $this->belongsToClient; @endphp
                         @if($belongsToClient)
                             <x-details.row 
                                 title="Belongs To" 
@@ -69,7 +69,7 @@
                             />
                         @endif
                     @elseif($expense->belongs_to_vendor_id && $expense->belongs_to_vendor_id !== auth()->user()->vendor->id)
-                        @php $belongsToVendor = \App\Models\Vendor::find($expense->belongs_to_vendor_id); @endphp
+                        @php $belongsToVendor = $this->belongsToVendor; @endphp
                         @if($belongsToVendor)
                             <x-details.row 
                                 title="Belongs To" 
@@ -152,7 +152,7 @@
 
     <x-page.column :span="2">
             {{-- ASSOCIATED EXPENSES --}}
-            @if(!is_null($expense->associated_expenses))
+            @if($expense->associated_expenses->isNotEmpty())
                 <x-island-card heading="Linked Expenses" :separator="true" subheading="Associated Expenses are expenses that are linked to this Expense. For example, a debit from one account and a credit to another. Or a purchase and return expenses that belong together.">
 
                     <div class="card-flush-bottom space-y-6">
@@ -173,8 +173,9 @@
                                             </a>
                                         </flux:table.cell>
                                         <flux:table.cell>{{ $associated_expense->date->format('m/d/Y') }}</flux:table.cell>
-                                        <flux:table.cell>{{ $associated_expense->allTransactions()->isNotEmpty() ? $associated_expense->allTransactions()->first()->bank_account->bank->name : '' }}</flux:table.cell>
-                                        <flux:table.cell>{{ $associated_expense->allTransactions()->isNotEmpty() ? $associated_expense->allTransactions()->first()->bank_account->account_number : '' }}</flux:table.cell>
+                                        @php $associatedTransaction = $associated_expense->allTransactions()->first(); @endphp
+                                        <flux:table.cell>{{ $associatedTransaction?->bank_account?->bank?->name }}</flux:table.cell>
+                                        <flux:table.cell>{{ $associatedTransaction?->bank_account?->account_number }}</flux:table.cell>
                                     </flux:table.row>
                                 @endforeach
                             </flux:table.rows>

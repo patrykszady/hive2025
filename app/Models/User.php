@@ -196,7 +196,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
                     ->first()
                     ?->pivot;
             }
-        );
+        )->shouldCache();
     }
 
     public function leads(): HasMany
@@ -297,6 +297,8 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     */
     protected function vendorRole(): Attribute
     {
+        // shouldCache: every policy check reads this, and without caching each
+        // one re-ran the pivot query (12x on a single project page).
         return Attribute::make(
             get: function () {
                 if (!$this->vendor || !$this->vendor->id) {
@@ -306,14 +308,46 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
                 // Use getRoleForVendor which is already optimized
                 return $this->getRoleForVendor($this->vendor->id);
             }
-        );
+        )->shouldCache();
     }
 
     /**
      * Get user's role for any vendor
     */
+    /** Per-instance memo, keyed by vendor id — roles can't change mid-request. */
+    protected array $roleForVendorMemo = [];
+
+    /** @var array<string, \Illuminate\Support\Collection<int, int>> */
+    protected array $otherVendorIdsMemo = [];
+
+    /**
+     * Vendor ids this user belongs to, excluding the given one. Read straight
+     * from the pivot (the `vendors` relation carries VendorScope, which can
+     * hide the user's own company). Memoized: CheckScope calls this on every
+     * check query.
+     *
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    public function otherVendorIds($excludeVendorId): \Illuminate\Support\Collection
+    {
+        $key = (string) $excludeVendorId;
+
+        return $this->otherVendorIdsMemo[$key] ??= \Illuminate\Support\Facades\DB::table('user_vendor')
+            ->where('user_id', $this->id)
+            ->where('vendor_id', '!=', $excludeVendorId)
+            ->pluck('vendor_id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+    }
+
     public function getRoleForVendor($vendorId): string
     {
+        $memoKey = (string) $vendorId;
+
+        if (isset($this->roleForVendorMemo[$memoKey])) {
+            return $this->roleForVendorMemo[$memoKey];
+        }
+
         // Check if vendors are already loaded to prevent extra query
         if ($this->relationLoaded('vendors')) {
             $vendor = $this->vendors->firstWhere('id', $vendorId);
@@ -322,11 +356,11 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
         }
         
         if (!$vendor) {
-            return 'No Role';
+            return $this->roleForVendorMemo[$memoKey] = 'No Role';
         }
         
         $roleId = $vendor->pivot->role_id ?? null;
-        return $this->roleNames()[$roleId] ?? 'No Role';
+        return $this->roleForVendorMemo[$memoKey] = ($this->roleNames()[$roleId] ?? 'No Role');
     }
     
     /**
@@ -516,7 +550,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
                 // Fetch the via vendor model
                 return Vendor::find($userVendorPivot->pivot->via_vendor_id);
             }
-        );
+        )->shouldCache();
     }
 
     /**
@@ -524,9 +558,12 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
      */
     protected function isClientUser(): Attribute
     {
+        // shouldCache: membership can't change mid-request, and per-card
+        // blade checks were re-running these COUNT queries hundreds of
+        // times per planner render.
         return Attribute::make(
             get: fn () => $this->vendors()->count() === 0 && $this->clients()->count() > 0
-        );
+        )->shouldCache();
     }
 
     /**
@@ -537,7 +574,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     {
         return Attribute::make(
             get: fn () => $this->is_client_user || (!$this->primary_vendor_id && $this->clients()->exists())
-        );
+        )->shouldCache();
     }
 
     /**
@@ -545,9 +582,10 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
      */
     protected function isVendorUser(): Attribute
     {
+        // shouldCache: membership can't change mid-request (see isClientUser).
         return Attribute::make(
             get: fn () => $this->vendors()->count() > 0
-        );
+        )->shouldCache();
     }
 
     /**
@@ -555,8 +593,9 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
      */
     protected function primaryClient(): Attribute
     {
+        // shouldCache: without it a null result re-queries on every access.
         return Attribute::make(
             get: fn () => $this->clients()->first()
-        );
+        )->shouldCache();
     }
 }

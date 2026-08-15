@@ -302,6 +302,8 @@
                                                         'date'           => $bar['start_date'],
                                                         'isWeekend'      => false,
                                                         'hideDayCounter' => $bar['start_date'] !== $bar['end_date'],
+                                                        {{-- Gantt bars are a timeline, not a worksheet — details stay in cards/table views. --}}
+                                                        'hideDetails'    => true,
                                                     ])
                                                 </div>
                                             </div>
@@ -888,7 +890,6 @@
                 barEl.style.width = this._ghostWidth + 'px';
             }
 
-            console.log('[gantt] updateTaskDates', { taskId: this._taskId, mode, dayDelta, newStart, newEnd, oldStart, oldEnd });
 
             this.saving = true;
             this.$wire.updateTaskDates(this._taskId, newStart, newEnd, oldStart, oldEnd)
