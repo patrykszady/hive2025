@@ -134,7 +134,11 @@ class ReprocessTimelapses extends Command
                 }
                 $this->newLine();
             } else {
-                Bus::chain($jobs)->dispatch();
+                // Bus::chain() OVERWRITES each job's own queue with the chain's,
+                // so it must be named here — otherwise the whole chain lands on
+                // the default 10-worker queue and the concurrent OpenCV
+                // processes OOM the box.
+                Bus::chain($jobs)->onQueue('timelapse')->dispatch();
             }
 
             $totalFrames += $queue->count();

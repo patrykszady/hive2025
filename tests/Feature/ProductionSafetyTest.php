@@ -51,3 +51,45 @@ it('keeps the app name in page titles even when config is cached', function () {
 
     expect($rendered)->toContain('<title>Projects | Hive</title>');
 });
+
+it('keeps every OpenCV job on the single-process timelapse queue', function () {
+    // Each alignment spawns a python process peaking near 1.7GB. On the
+    // default supervisor (10 workers) that asked ~17GB of an 8GB box and the
+    // kernel SIGKILLed them mid-frame. Two things must hold, and BOTH are
+    // easy to lose: the jobs name the queue, and every Bus::chain() names it
+    // too — chaining OVERWRITES a job's own queue with the chain's.
+    $jobs = [
+        new App\Jobs\AlignTimelapseFrame(1),
+        new App\Jobs\HarmonizeTimelapseFrameColor(1, 2),
+        new App\Jobs\ProcessTimelapseFrame(1),
+    ];
+
+    foreach ($jobs as $job) {
+        expect($job->queue)->toBe('timelapse', class_basename($job).' must run on the timelapse queue');
+    }
+
+    $chained = [];
+    foreach (['app/Livewire/Projects/TimelapseStudio.php',
+        'app/Console/Commands/ReprocessTimelapses.php',
+        'app/Jobs/HarmonizeTimelapseColors.php'] as $file) {
+        $body = file_get_contents(base_path($file));
+        preg_match_all('/Bus::chain\(.*?\)\s*(->[a-zA-Z]+\([^)]*\)\s*)*->dispatch\(\)/s', $body, $m);
+        foreach ($m[0] as $call) {
+            if (! str_contains($call, "onQueue('timelapse')")) {
+                $chained[] = $file;
+            }
+        }
+    }
+
+    expect($chained)->toBe([], 'Bus::chain() without ->onQueue(\'timelapse\') in: '.implode(', ', $chained));
+
+    // And the supervisor that drains it must exist, in every environment,
+    // with exactly one process — a queue nothing listens to is silent death.
+    foreach (['production', 'local'] as $env) {
+        $supervisor = config("horizon.environments.{$env}.timelapse");
+        expect($supervisor)->not->toBeNull("horizon.{$env} needs a timelapse supervisor")
+            ->and($supervisor['maxProcesses'])->toBe(1);
+    }
+
+    expect(config('horizon.defaults.timelapse.queue'))->toBe(['timelapse']);
+});

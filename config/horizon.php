@@ -234,6 +234,29 @@ return [
             'timeout' => 1800,
             'nice' => 10,
         ],
+
+        // Image work that shells out to OpenCV. Each alignment spawns a
+        // python process that peaks around 1.7GB on a full-resolution
+        // original, so these jobs MUST NOT fan out: ten of them on the
+        // default supervisor asked ~17GB of an 8GB box and the kernel
+        // SIGKILLed them mid-frame (signal 9 in the logs, frames left
+        // unaligned). One at a time is also plenty — a frame takes ~6s.
+        'timelapse' => [
+            'connection' => 'redis',
+            'queue' => ['timelapse'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            // Generous: a HEIC import or a big re-frame can take a while,
+            // and being killed halfway just leaves the frame unaligned.
+            'timeout' => 600,
+            // Never starve PHP-FPM serving the site on the same 2 cores.
+            'nice' => 10,
+        ],
     ],
 
     'environments' => [
@@ -256,6 +279,10 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            // Strictly one at a time — see the note on the supervisor above.
+            'timelapse' => [
+                'maxProcesses' => 1,
+            ],
         ],
 
         'local' => [
@@ -269,6 +296,9 @@ return [
                 'maxProcesses' => 1,
             ],
             'auto-receipts' => [
+                'maxProcesses' => 1,
+            ],
+            'timelapse' => [
                 'maxProcesses' => 1,
             ],
         ],

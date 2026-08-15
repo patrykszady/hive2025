@@ -68,6 +68,6 @@ class HarmonizeTimelapseColors implements ShouldQueue
 
         Bus::chain(
             $frames->map(fn (ProjectTimelapseFrame $f) => new HarmonizeTimelapseFrameColor($f->id, $anchor->id))->all()
-        )->dispatch();
+        )->onQueue('timelapse')->dispatch();
     }
 }

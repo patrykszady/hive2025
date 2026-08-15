@@ -283,11 +283,12 @@ class TimelapseStudio extends Component
         // chain runs in order so each frame has its predecessor to match.
         $timelapse->forceFill(['anchor_frame_id' => $copied[0]->id])->save();
 
+        // onQueue: see the note in setAlignmentAnchor().
         \Illuminate\Support\Facades\Bus::chain(
             collect($copied)->skip(1)
                 ->map(fn (ProjectTimelapseFrame $f) => new \App\Jobs\AlignTimelapseFrame($f->id, reframe: true))
                 ->all()
-        )->dispatch();
+        )->onQueue('timelapse')->dispatch();
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
         $this->collectionId = $timelapse->id;
@@ -1245,9 +1246,11 @@ class TimelapseStudio extends Component
         // and get the missing band from their neighbour; frames shot farther
         // away zoom in, sampled from the full-resolution original so the
         // crop stays sharp.
+        // onQueue: Bus::chain() overwrites each job's own queue, so the heavy
+        // OpenCV work would otherwise fan out on the default queue and OOM.
         \Illuminate\Support\Facades\Bus::chain(
             $ordered->map(fn (ProjectTimelapseFrame $f) => new \App\Jobs\AlignTimelapseFrame($f->id, reframe: true))->all()
-        )->dispatch();
+        )->onQueue('timelapse')->dispatch();
 
         // The aligner was open on this frame to choose it; it is the anchor
         // now, so there is nothing left to align it to.

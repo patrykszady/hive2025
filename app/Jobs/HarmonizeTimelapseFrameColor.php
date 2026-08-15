@@ -35,6 +35,9 @@ class HarmonizeTimelapseFrameColor implements ShouldQueue
 
     public function __construct(public int $frameId, public int $anchorFrameId)
     {
+        // Same single-process 'timelapse' queue as alignment: this also
+        // shells out to OpenCV, so it must not fan out either.
+        $this->onQueue('timelapse');
     }
 
     public function handle(): void

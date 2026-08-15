@@ -35,8 +35,9 @@ class AlignTimelapseFrame implements ShouldQueue
 
     public int $backoff = 30;
 
-    /** Horizon runs 60s workers — stay inside that, don't get SIGKILLed. */
-    public int $timeout = 55;
+    /** Runs on the 600s 'timelapse' supervisor, so a big HEIC re-frame has
+     *  room instead of being SIGKILLed halfway through. */
+    public int $timeout = 300;
 
 
     /**
@@ -51,6 +52,9 @@ class AlignTimelapseFrame implements ShouldQueue
      */
     public function __construct(public int $frameId, public bool $reframe = false)
     {
+        // OpenCV work peaks ~1.7GB per process; the 'timelapse' supervisor runs
+        // exactly one at a time so concurrent frames can't OOM the box.
+        $this->onQueue('timelapse');
     }
 
     public function handle(): void
@@ -147,7 +151,7 @@ class AlignTimelapseFrame implements ShouldQueue
             // Strict filter — bare array_filter eats the '0' string and would
             // silently turn photo-only back into full geometry.
         ], fn ($v) => $v !== null) + $this->reframeEnv());
-        $process->setTimeout(50);
+        $process->setTimeout(240);
         $process->run();
 
         $diagnostics = json_decode(trim($process->getOutput()), true) ?: [];
@@ -179,7 +183,7 @@ class AlignTimelapseFrame implements ShouldQueue
                 // as the reference).
                 'ALIGN_JUDGE' => $disk->path($neighbor->aligned_path),
             ] + $this->reframeEnv());
-            $retry->setTimeout(50);
+            $retry->setTimeout(240);
             $retry->run();
 
             $retryDiag = json_decode(trim($retry->getOutput()), true) ?: [];
