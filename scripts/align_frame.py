@@ -97,6 +97,13 @@ MAX_OFFSET_FRAC = float(os.environ.get("ALIGN_MAX_OFFSET", "0.06"))
 # terms ("it's ok if the perspective changes, it should be matched with
 # the previous frame"). A homography keeps straight lines straight.
 MAX_KEYSTONE_PX = float(os.environ.get("ALIGN_MAX_KEYSTONE", "12"))
+# Longest edge the keypoint detector may work at. SIFT memory grows with the
+# PIXEL COUNT (~215MB per megapixel here), and a 24MP original needed 5.3GB —
+# the kernel SIGKILLed it. Set ABOVE the common phone original (3024-4032 on
+# the long edge is untouched): shrinking a normal frame measurably costs
+# matches (2400px lost 10 inliers on a hard frame and swung the rotation
+# nearly 4 degrees). Only genuinely oversized shots are reduced.
+WORK_MAX_PX = int(os.environ.get("ALIGN_WORK_MAX_PX", "3400"))
 
 
 def lab_stats(image):
@@ -574,13 +581,37 @@ def main():
     ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
     target_gray = cv2.cvtColor(target, cv2.COLOR_BGR2GRAY)
 
-    ref_kp, target_kp, matches, engine = detect_and_match(ref_gray, target_gray)
+    # Detect on a size-capped copy. SIFT's scale-space pyramid is what costs
+    # the memory, and it grows with the PIXELS, not with the useful detail: a
+    # 24MP phone original (5712x4284) peaked near 6GB and the kernel SIGKILLed
+    # the process mid-frame, while the same shot at 2400px matches just as
+    # well against a 1920px canvas. Only the KEYPOINTS come from the small
+    # copy — their coordinates are scaled straight back to full resolution
+    # below, so every fit, warp and gap measurement downstream still happens
+    # in full-resolution target space and nothing is sampled at lower quality.
+    work_scale = 1.0
+    detect_gray = target_gray
+
+    if WORK_MAX_PX > 0 and max(target_gray.shape[:2]) > WORK_MAX_PX:
+        work_scale = WORK_MAX_PX / float(max(target_gray.shape[:2]))
+        detect_gray = cv2.resize(target_gray, None, fx=work_scale, fy=work_scale,
+                                 interpolation=cv2.INTER_AREA)
+
+    ref_kp, target_kp, matches, engine = detect_and_match(ref_gray, detect_gray)
+
+    if detect_gray is not target_gray:
+        del detect_gray
 
     if len(matches) < min_inliers:
         fail("too few matches", matches=len(matches), engine=engine)
 
     src = np.float32([target_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
     dst = np.float32([ref_kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+
+    # Back to full-resolution target coordinates; everything downstream is
+    # unchanged by the detection cap.
+    if work_scale != 1.0:
+        src /= work_scale
 
     height, width = ref.shape[:2]
 
@@ -919,6 +950,7 @@ def main():
         "rotation_deg": round(rotation_deg, 2),
         "center_offset_px": round(offset_px, 1),
         "cover_scale": round(cover_scale, 4),
+        "work_scale": round(work_scale, 4),
         "ecc_cc": round(ecc_cc, 4),
         "fabricated": round(fabricated, 4),
         "filled_from": filled_from,

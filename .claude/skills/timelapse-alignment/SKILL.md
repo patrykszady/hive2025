@@ -329,3 +329,16 @@ close/oblique/tilted viewpoint). Escalation order:
   anchor's canvas, always.
 - ECC as a second warp AFTER cover-fit re-opens the gap it closed — compose
   ECC into the matrix, run cover-fit LAST, warp once.
+- **SIFT memory scales with PIXELS (~215MB/megapixel).** A 24MP original
+  (5712x4284) peaked at 5.3GB and the kernel SIGKILLed it — "signal 9" in
+  the failed job, no PHP error, frame silently unaligned. `ALIGN_WORK_MAX_PX`
+  (default 3400) caps the DETECTION copy only; keypoints are scaled back to
+  full-res coordinates so every fit/warp/gap measurement is unchanged.
+  Set it ABOVE the usual phone original: at 2400 a 3024px frame lost 10
+  inliers and its rotation swung ~4 degrees. Verified: 3024px frames come
+  out identical (work_scale 1.0), the 24MP one drops 5.3GB -> 2.2GB.
+- **The OpenCV jobs must own a single-process queue.** Each alignment is a
+  ~1.7GB python process; Horizon's default supervisor runs 10, which asked
+  ~17GB of an 8GB box. They ride the `timelapse` supervisor (maxProcesses 1,
+  600s, nice 10) — and every `Bus::chain()` must repeat `->onQueue('timelapse')`,
+  because chaining OVERWRITES each job's own queue with the chain's.
