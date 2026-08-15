@@ -2,7 +2,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>{{ isset($title) ? $title . ' | ' . env('APP_NAME') : env('APP_NAME') }}</title>
+    {{-- config(), never env() — see the note in head.blade.php. --}}
+    <title>{{ isset($title) ? $title.' | '.config('app.name') : config('app.name') }}</title>
 
     @php
         // Browsershot loads the HTML from a local file (file:///tmp/.../index.html).

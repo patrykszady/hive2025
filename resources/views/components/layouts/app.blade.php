@@ -7,7 +7,7 @@
     {{-- $fullscreenClasses prop in render of Planner/Board --}}
     <body 
         class="{{isset($fullscreenClasses) ? 'h-screen overflow-hidden ' : 'min-h-screen '}} bg-zinc-100 dark:bg-zinc-800"
-        @if(env('FAKE_BROWSER_DATE')) data-fake-today="{{ browser_today()->format('Y-m-d') }}" @endif
+        @if(config('app.fake_browser_date')) data-fake-today="{{ browser_today()->format('Y-m-d') }}" @endif
     >
         <livewire:browser-timezone />
 

@@ -46,6 +46,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fake "today" for the browser
+    |--------------------------------------------------------------------------
+    |
+    | Testing aid: "-1 day", "2026-12-26", etc. Read through config (never
+    | env() at runtime) so it behaves identically whether or not the deploy
+    | has cached the configuration.
+    |
+    */
+
+    'fake_browser_date' => env('FAKE_BROWSER_DATE'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Physical Business Address
     |--------------------------------------------------------------------------
     |

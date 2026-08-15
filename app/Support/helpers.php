@@ -94,7 +94,7 @@ if (! function_exists('browser_today')) {
     function browser_today(): \Illuminate\Support\Carbon
     {
         // Allow faking the browser date for testing (e.g., FAKE_BROWSER_DATE="-1 day" or "2025-12-26")
-        $fakeDate = config('app.fake_browser_date') ?: env('FAKE_BROWSER_DATE');
+        $fakeDate = config('app.fake_browser_date');
         if ($fakeDate) {
             if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $fakeDate)) {
                 return \Illuminate\Support\Carbon::createFromFormat('Y-m-d', $fakeDate, browser_timezone())->startOfDay();

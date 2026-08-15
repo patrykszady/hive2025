@@ -42,15 +42,15 @@
         }
     </style>
 
-    @if(env('APP_ENV') == 'production')
+    @if(app()->isProduction())
         <!-- Google tag (gtag.js) -->
-        <script async src="https://www.googletagmanager.com/gtag/js?id={{env('GOOGLE_ANALYTICS_GTAG')}}"></script>
+        <script async src="https://www.googletagmanager.com/gtag/js?id={{ config('services.google_analytics.gtag') }}"></script>
         <script>
             window.dataLayer = window.dataLayer || [];
                 function gtag(){dataLayer.push(arguments);}
                 gtag('js', new Date());
 
-                gtag('config', '{{env('GOOGLE_ANALYTICS_GTAG')}}', {
+                gtag('config', '{{ config('services.google_analytics.gtag') }}', {
                     'user_id': '{{auth()->guest() ? "GUEST" : auth()->user()->id}}'
                 });
         </script>
@@ -81,7 +81,11 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="{{ config('app.name') }}">
 
-    <title>{{ isset($title) ? $title . ' | ' . env('APP_NAME') : env('APP_NAME')}}</title>
+    {{-- config(), never env(): once `php artisan config:cache` has run (any
+         production deploy may), Laravel stops loading .env at runtime and
+         every env() call outside config/ returns null — which silently
+         emptied the app name out of every browser tab title. --}}
+    <title>{{ isset($title) ? $title.' | '.config('app.name') : config('app.name') }}</title>
 
     {{-- hreflang alternates for the public marketing site: tells search engines
          this page exists in each language and how to reach it. Only emitted on

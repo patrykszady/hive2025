@@ -18,6 +18,12 @@ return [
         'enabled' => env('URL_SHORTENER_ENABLED', true),
     ],
 
+    // Read through config, never env() in a view: a cached config makes
+    // runtime env() null, which silently stopped analytics loading at all.
+    'google_analytics' => [
+        'gtag' => env('GOOGLE_ANALYTICS_GTAG'),
+    ],
+
     'plaid' => [
         'env' => env('PLAID_ENV'),
         'client_id' => env('PLAID_CLIENT_ID'),
