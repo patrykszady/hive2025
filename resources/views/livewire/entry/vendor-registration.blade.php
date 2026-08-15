@@ -156,7 +156,7 @@
         class="fixed inset-0 z-40 bg-zinc-950/20 backdrop-blur-md"
     ></div>
 
-    <flux:modal name="finalizing-registration" :closable="false" :dismissible="false" class="max-w-md z-50" wire:poll.250ms="refreshMatchingStatus">
+    <flux:modal name="finalizing-registration" :closable="false" :dismissible="false" class="max-w-md z-50" wire:poll.1500ms="refreshMatchingStatus">
         @if($matchingStatus === 'failed')
             <div class="space-y-4">
                 <div class="flex items-center gap-3">

@@ -140,13 +140,14 @@ class ScrapeMenardsReceipts extends Command
             }
 
             if (! $result->successful()) {
-                // EX_TEMPFAIL (75): anti-captcha had no idle workers — a transient
-                // capacity outage, not a real failure. Skip quietly; the next
-                // scheduled run will try again.
+                // EX_TEMPFAIL (75): a transient outage — anti-captcha had no
+                // idle workers, or menards.com/Imperva navigation timed out.
+                // Skip quietly; the next scheduled run will try again.
                 if ($result->exitCode() === 75) {
-                    $this->warn('Skipped: anti-captcha has no idle workers right now — will retry on the next scheduled run.');
-                    Log::info('Menards scraper skipped — no anti-captcha workers available', [
+                    $this->warn('Skipped: transient outage (anti-captcha capacity or site timeout) — will retry on the next scheduled run.');
+                    Log::info('Menards scraper skipped — transient outage', [
                         'output_dir' => $outputDir,
+                        'stderr_tail' => substr($result->errorOutput(), -500),
                     ]);
 
                     return self::SUCCESS;

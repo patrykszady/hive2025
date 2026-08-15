@@ -80,7 +80,7 @@
             placeholder="Subject"
         />
 
-        <flux:editor wire:model.live="body" />
+        <flux:editor wire:model.live.debounce.750ms="body" />
 
         <div class="space-y-2">
             <flux:heading size="sm">Attachments</flux:heading>
@@ -102,7 +102,7 @@
             @if(count($additionalAttachments) > 0)
                 <div class="flex flex-col gap-2">
                     @foreach($additionalAttachments as $index => $file)
-                        <flux:file-item
+                        <flux:file-item wire:key="attachment-{{ $index }}-{{ $file->getFilename() }}"
                             :heading="$file->getClientOriginalName()"
                             :size="$file->getSize()"
                         >

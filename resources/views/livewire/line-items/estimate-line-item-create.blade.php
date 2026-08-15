@@ -144,7 +144,7 @@
                     >
                         <div class="flex-1 min-w-0">
                             <flux:autocomplete
-                                wire:model.live="form.allowances.{{ $aIndex }}.description"
+                                wire:model.live.debounce.500ms="form.allowances.{{ $aIndex }}.description"
                                 x-on:input="desc = $event.target.value; syncAllowance()"
                                 placeholder="Allowance description"
                                 size="sm"

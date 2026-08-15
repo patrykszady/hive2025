@@ -38,21 +38,40 @@ class IngestCrewLeadEmails extends Command
             $this->warn('DRY RUN — nothing will be written.');
         }
 
-        $result = $service->ingest(
-            dryRun: $dryRun,
-            limit: $this->option('limit') !== null ? (int) $this->option('limit') : null,
-            since: $since,
-        );
+        // A Nylas outage or slow spell is transient — the watermark holds and
+        // the next scheduled run catches up. Log and exit clean rather than
+        // failing the scheduler every time Nylas has a bad minute.
+        try {
+            $result = $service->ingest(
+                dryRun: $dryRun,
+                limit: $this->option('limit') !== null ? (int) $this->option('limit') : null,
+                since: $since,
+            );
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            \Illuminate\Support\Facades\Log::channel('nylas')->warning('Crew leads: ingest skipped — Nylas unreachable', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->warn('Nylas unreachable — ingest skipped this run.');
+
+            return self::SUCCESS;
+        }
 
         // Leads reply to whichever address last emailed them — sweep the
         // team's own inboxes for those replies too (capture-only; never
         // creates leads).
         if (! $dryRun) {
-            $sweep = $service->sweepPersonalInboxes(since: $since);
-            $this->line(sprintf(
-                '  personal sweep: %d mailbox(es) · %d message(s) · %d reply(ies) filed',
-                $sweep['mailboxes'], $sweep['fetched'], $sweep['replies'],
-            ));
+            try {
+                $sweep = $service->sweepPersonalInboxes(since: $since);
+                $this->line(sprintf(
+                    '  personal sweep: %d mailbox(es) · %d message(s) · %d reply(ies) filed',
+                    $sweep['mailboxes'], $sweep['fetched'], $sweep['replies'],
+                ));
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                \Illuminate\Support\Facades\Log::channel('nylas')->warning('Crew leads: personal sweep skipped — Nylas unreachable', [
+                    'error' => $e->getMessage(),
+                ]);
+                $this->warn('Nylas unreachable — personal sweep skipped this run.');
+            }
         }
 
         if ($result['fetched'] === 0) {

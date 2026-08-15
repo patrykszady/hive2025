@@ -87,12 +87,19 @@
 <script>
 let lastFocusedElement = null;
 
-// Track which field was last focused
-document.addEventListener('focusin', (e) => {
+// Track which field was last focused. @script re-runs on every component
+// init, so the listener is removed on navigate instead of stacking up.
+const trackFocus = (e) => {
     if (e.target.matches('input[type="text"], .tiptap.ProseMirror')) {
         lastFocusedElement = e.target;
     }
-});
+};
+
+document.addEventListener('focusin', trackFocus);
+
+document.addEventListener('livewire:navigating', () => {
+    document.removeEventListener('focusin', trackFocus);
+}, { once: true });
 
 $wire.on('insertPageBreakAtCursor', () => {
     // Use a horizontal rule with a data attribute that we'll convert to page-break in PDF

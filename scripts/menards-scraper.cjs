@@ -939,7 +939,11 @@ async function processCard(page, cardOption, cardIndex, downloadDir) {
             log(`  (could not capture debug state: ${debugErr.message})`);
         }
         console.log(JSON.stringify({ error: err.message }));
-        process.exit(1);
+        // Navigation/network timeouts are menards.com or Imperva having a slow
+        // moment — same "transient, retry next scheduled run" class as
+        // anti-captcha capacity (75), not a real scraper failure.
+        const transient = /Navigation timeout|net::ERR_TIMED_OUT|net::ERR_CONNECTION|net::ERR_NETWORK_CHANGED/i.test(err.message);
+        process.exit(transient ? 75 : 1);
     } finally {
         await browser.close();
     }

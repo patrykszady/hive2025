@@ -71,18 +71,22 @@
 
                         <div class="space-y-4">
                             <flux:button variant="primary" type="submit" class="w-full">Verify</flux:button>
-                            <flux:button 
-                                wire:click="resendPhoneCode" 
-                                class="w-full"
-                                :disabled="!$this->canResendPhone()"
-                                wire:poll.1s
+                            {-- The cooldown ticks client-side; polling the server once a
+                                 second just to redraw a number is a round trip per second.
+                                 resendPhoneCode() re-validates the cooldown server-side. --}
+                            <div
+                                x-data="{ left: {{ $this->phoneResendCountdown() }} }"
+                                x-init="const t = setInterval(() => left > 0 ? left-- : clearInterval(t), 1000)"
                             >
-                                @if($this->canResendPhone())
-                                    Resend code
-                                @else
-                                    Resend code ({{ $this->phoneResendCountdown() }}s)
-                                @endif
-                            </flux:button>
+                                <flux:button
+                                    wire:click="resendPhoneCode"
+                                    class="w-full"
+                                    x-bind:disabled="left > 0"
+                                >
+                                    <span x-show="left <= 0">Resend code</span>
+                                    <span x-show="left > 0" x-cloak>Resend code (<span x-text="left"></span>s)</span>
+                                </flux:button>
+                            </div>
                         </div>
                     </form>
                 </flux:card>
@@ -145,18 +149,22 @@
 
                         <div class="space-y-4">
                             <flux:button variant="primary" type="submit" class="w-full">Verify</flux:button>
-                            <flux:button 
-                                wire:click="resendEmailCode" 
-                                class="w-full"
-                                :disabled="!$this->canResendEmail()"
-                                wire:poll.1s
+                            {-- The cooldown ticks client-side; polling the server once a
+                                 second just to redraw a number is a round trip per second.
+                                 resendEmailCode() re-validates the cooldown server-side. --}
+                            <div
+                                x-data="{ left: {{ $this->emailResendCountdown() }} }"
+                                x-init="const t = setInterval(() => left > 0 ? left-- : clearInterval(t), 1000)"
                             >
-                                @if($this->canResendEmail())
-                                    Resend code
-                                @else
-                                    Resend code ({{ $this->emailResendCountdown() }}s)
-                                @endif
-                            </flux:button>
+                                <flux:button
+                                    wire:click="resendEmailCode"
+                                    class="w-full"
+                                    x-bind:disabled="left > 0"
+                                >
+                                    <span x-show="left <= 0">Resend code</span>
+                                    <span x-show="left > 0" x-cloak>Resend code (<span x-text="left"></span>s)</span>
+                                </flux:button>
+                            </div>
                         </div>
                     </form>
                 </flux:card>

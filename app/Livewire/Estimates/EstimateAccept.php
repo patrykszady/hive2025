@@ -124,13 +124,15 @@ class EstimateAccept extends Component
             return (object) $sectionArray;
         });
         if ($this->estimate->payments) {
-            $this->payments = collect($this->estimate->payments)->map(fn ($p) => [
+            $this->payments = collect($this->estimate->payments)->values()->map(fn ($p, $i) => [
+                'uid' => $p['uid'] ?? ('p'.$i),
                 'amount' => $p['amount'] ?? '',
                 'description' => $p['description'] ?? '',
             ]);
         } else {
             $this->payments = [
                 0 => [
+                    'uid' => 'p0',
                     'amount' => '',
                     'description' => '',
                 ],
@@ -344,6 +346,8 @@ class EstimateAccept extends Component
     public function addPayment()
     {
         $payment = [
+            // Stable across the reindex in removePayment().
+            'uid' => 'p'.str()->random(8),
             'amount' => '',
             'description' => '',
         ];
@@ -384,7 +388,12 @@ class EstimateAccept extends Component
             }
 
             if ($this->payments->where('amount', '!=', '')->sum('amount') != 0) {
-                $estimate_options['payments'] = $this->payments->toArray();
+                // uid is view-only (stable wire:key across reindexing) — keep it
+                // out of the stored estimate options.
+                $estimate_options['payments'] = $this->payments
+                    ->map(fn ($payment) => collect($payment)->except('uid')->all())
+                    ->values()
+                    ->all();
             }
 
             $estimate_options['start_date'] = $this->start_date;

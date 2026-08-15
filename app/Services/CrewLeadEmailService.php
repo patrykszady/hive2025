@@ -136,6 +136,7 @@ class CrewLeadEmailService
             function () use ($grantId, $mailbox): ?string {
                 $response = Http::withToken(config('nylas.api_key'))
                     ->timeout(45)
+                    ->retry(2, 2000, throw: false)
                     ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/') . "/v3/grants/{$grantId}/folders", [
                         'shared_from' => $mailbox,
                     ]);
@@ -203,7 +204,8 @@ class CrewLeadEmailService
 
             $out['mailboxes']++;
             $mailbox = strtolower((string) (Http::withToken(config('nylas.api_key'))
-                ->timeout(15)->get("$base/v3/grants/{$grantId}")->json('data.email') ?? $grantId));
+                ->timeout(15)->retry(2, 2000, throw: false)
+                ->get("$base/v3/grants/{$grantId}")->json('data.email') ?? $grantId));
 
             foreach ((array) $response->json('data') as $message) {
                 $out['fetched']++;
@@ -281,6 +283,7 @@ class CrewLeadEmailService
             function () use ($grantId): ?string {
                 $response = Http::withToken(config('nylas.api_key'))
                     ->timeout(45)
+                    ->retry(2, 2000, throw: false)
                     ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/')."/v3/grants/{$grantId}/folders");
 
                 if (! $response->successful()) {

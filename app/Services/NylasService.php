@@ -1243,10 +1243,15 @@ class NylasService
             if ($sentMessageId && $receiptsGrantId) {
                 $deletedFolderId = config('nylas.receipts_deleted_folder_id');
                 $success = $this->moveOrDeleteMessage($sentMessageId, $receiptsGrantId, $companyEmailId, $deletedFolderId);
-                
-                // Only log if it actually failed (not 404 which means already gone)
+
                 if (!$success) {
-                    Log::channel('nylas')->warning('Could not move forwarded sent copy to deleted folder', [
+                    // Exchange often locks a just-sent item (ErrorMoveCopyFailed
+                    // via a 504 the inline retry skips) — retry on a delay
+                    // instead of leaving the stray copy behind.
+                    \App\Jobs\RetryReceiptsSentCopyCleanup::dispatch($sentMessageId, $receiptsGrantId, $companyEmailId, $deletedFolderId)
+                        ->delay(now()->addMinutes(2));
+
+                    Log::channel('nylas')->info('Sent-copy cleanup deferred to delayed retry', [
                         'sent_message_id' => $sentMessageId,
                         'receipts_grant_id' => $receiptsGrantId,
                         'deleted_folder_id' => $deletedFolderId,

@@ -17,7 +17,7 @@
 
                 <flux:table.rows>
                     @foreach($sections as $index => $section)
-                        <flux:table.row :key="$index">
+                        <flux:table.row wire:key="payment-{{ $payment['uid'] ?? $index }}">
                             <flux:table.cell class="text-bold">{{$section->name}}</flux:table.cell>
                             <flux:table.cell>
                                 <flux:field size="sm">
@@ -57,7 +57,7 @@
 
                 <flux:table.rows>
                     @foreach($payments as $index => $payment)
-                        <flux:table.row :key="$index">
+                        <flux:table.row wire:key="payment-{{ $payment['uid'] ?? $index }}">
                             <flux:table.cell class="text-bold">
                                 <div class="flex items-center justify-between gap-2">
                                     <span>Payment {{$index + 1}}</span>
@@ -76,7 +76,7 @@
                             <flux:table.cell>
                                 <flux:autocomplete
                                     size="sm"
-                                    wire:model.live="payments.{{$index}}.description"
+                                    wire:model.live.debounce.500ms="payments.{{$index}}.description"
                                     placeholder="Payment Description {{$index + 1}}"
                                 >
                                     @foreach($this->availableDescriptions($index) as $desc)
@@ -89,7 +89,7 @@
                                 <flux:input
                                     icon="currency-dollar"
                                     size="sm"
-                                    wire:model.live="payments.{{$index}}.amount"
+                                    wire:model.live.debounce.500ms="payments.{{$index}}.amount"
                                     placeholder="Amount"
                                     />
                             </flux:table.cell>

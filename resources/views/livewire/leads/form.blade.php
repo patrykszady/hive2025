@@ -153,7 +153,7 @@
                     </flux:field>
                 @endif
 
-                <flux:editor wire:model.live="emailBody" label="Body" />
+                <flux:editor wire:model.live.debounce.750ms="emailBody" label="Body" />
             </form>
 
         </flux:tab.panel>
