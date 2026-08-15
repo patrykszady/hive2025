@@ -1284,3 +1284,188 @@ it('requires the draw amount before generating', function () {
         ->assertSee('Enter the amount the owner is paying with this draw.')
         ->assertSee('Select the type of work.');
 });
+
+/*
+ * Second-draw waiver reuse: a sub whose paid-to-date hasn't moved since their
+ * last SIGNED waiver shouldn't be chased for a fresh signature — the signed
+ * waiver carries into the new draw. When the figure HAS moved, the row's
+ * checkbox lets the GC deliberately carry the prior sworn amount instead.
+ */
+
+function signedWaiverFor($gc, $sub, $project, User $user, float $amount): LienWaiver
+{
+    return LienWaiver::withoutGlobalScopes()->create([
+        'belongs_to_vendor_id' => $gc->id, 'vendor_id' => $sub->id, 'project_id' => $project->id,
+        'type' => LienWaiverType::ConditionalProgress, 'status' => LienWaiverStatus::Signed,
+        'amount' => $amount, 'exceptions_amount' => 0, 'through_date' => now()->subDays(20)->toDateString(),
+        'jurisdiction' => 'US-IL', 'created_by_user_id' => $user->id,
+        'signed_path' => "lien-waivers/{$project->id}/prior/scan-signed.pdf",
+        'signed_at' => now()->subDays(18),
+    ]);
+}
+
+it('auto-reuses the last signed waiver when paid-to-date is unchanged', function () {
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+
+    // PMG already signed for exactly the money they have received ($30k).
+    $prior = signedWaiverFor($gc, $sub, $project, $user, 30000);
+
+    $component = Livewire::actingAs($user)
+        ->test(Index::class, ['project' => $project])
+        ->call('openSwornStatement');
+
+    $rows = collect($component->get('ssRows'));
+    $pmgIndex = $rows->search(fn ($r) => $r['vendor_id'] === $sub->id);
+
+    // The row arrives pre-checked: unchanged figure -> reuse by default.
+    expect($rows[$pmgIndex]['prior_signed_id'])->toBe($prior->id)
+        ->and($rows[$pmgIndex]['reuse_signed'])->toBeTrue();
+
+    $component->set("ssRows.{$pmgIndex}.kind", 'Carpentry')
+        ->set('ssThisPayment', '60,000')
+        ->call('generateSwornStatement')
+        ->assertHasNoErrors();
+
+    $pmgWaivers = LienWaiver::withoutGlobalScopes()
+        ->where('project_id', $project->id)
+        ->where('vendor_id', $sub->id)
+        ->orderBy('id')->get();
+
+    // Prior signed row untouched; the new draw got a SIGNED copy of it —
+    // same amount, same signed document, provenance recorded — not a Draft.
+    expect($pmgWaivers)->toHaveCount(2)
+        ->and($pmgWaivers[0]->id)->toBe($prior->id)
+        ->and($pmgWaivers[1]->status)->toBe(LienWaiverStatus::Signed)
+        ->and((float) $pmgWaivers[1]->amount)->toBe(30000.0)
+        ->and($pmgWaivers[1]->signed_path)->toBe($prior->signed_path)
+        ->and($pmgWaivers[1]->sworn_statement_id)->not->toBeNull()
+        ->and(json_decode($pmgWaivers[1]->notes, true)['reused_from'])->toBe($prior->id);
+});
+
+it('requests a fresh waiver by default when paid-to-date moved past the signed amount', function () {
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+
+    // Signed for less than they have now been paid (the National case).
+    $prior = signedWaiverFor($gc, $sub, $project, $user, 2615.82);
+
+    $component = Livewire::actingAs($user)
+        ->test(Index::class, ['project' => $project])
+        ->call('openSwornStatement');
+
+    $rows = collect($component->get('ssRows'));
+    $subIndex = $rows->search(fn ($r) => $r['vendor_id'] === $sub->id);
+
+    // Offered, but NOT pre-checked — amounts differ.
+    expect($rows[$subIndex]['prior_signed_id'])->toBe($prior->id)
+        ->and($rows[$subIndex]['reuse_signed'])->toBeFalse();
+
+    $component->set("ssRows.{$subIndex}.kind", 'Carpentry')
+        ->set('ssThisPayment', '60,000')
+        ->call('generateSwornStatement')
+        ->assertHasNoErrors();
+
+    $latest = LienWaiver::withoutGlobalScopes()
+        ->where('project_id', $project->id)->where('vendor_id', $sub->id)
+        ->orderByDesc('id')->first();
+
+    // Normal path: a new Draft at the CURRENT paid-to-date goes out.
+    expect($latest->status)->toBe(LienWaiverStatus::Draft)
+        ->and((float) $latest->amount)->toBe(30000.0);
+});
+
+it('carries the prior sworn amount when the checkbox is ticked despite a changed figure', function () {
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+
+    $prior = signedWaiverFor($gc, $sub, $project, $user, 2615.82);
+
+    $component = Livewire::actingAs($user)
+        ->test(Index::class, ['project' => $project])
+        ->call('openSwornStatement');
+
+    $rows = collect($component->get('ssRows'));
+    $subIndex = $rows->search(fn ($r) => $r['vendor_id'] === $sub->id);
+
+    $component->set("ssRows.{$subIndex}.reuse_signed", true)
+        ->set("ssRows.{$subIndex}.kind", 'Carpentry')
+        ->set('ssThisPayment', '60,000')
+        ->call('generateSwornStatement')
+        ->assertHasNoErrors();
+
+    $latest = LienWaiver::withoutGlobalScopes()
+        ->where('project_id', $project->id)->where('vendor_id', $sub->id)
+        ->orderByDesc('id')->first();
+
+    // The GC chose to pass the last draw's amount: signed copy at $2,615.82,
+    // no new signature chased for the $131 delta.
+    expect($latest->status)->toBe(LienWaiverStatus::Signed)
+        ->and((float) $latest->amount)->toBe(2615.82)
+        ->and($latest->signed_path)->toBe($prior->signed_path)
+        ->and(json_decode($latest->notes, true)['reused_from'])->toBe($prior->id);
+});
+
+it('holds sub signature requests until business hours when the draw is made at night', function () {
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+
+    // Wednesday 9:30 PM in the GC's timezone (fixtures leave it null → Chicago).
+    Illuminate\Support\Carbon::setTestNow(
+        Illuminate\Support\Carbon::parse('2026-08-12 21:30', 'America/Chicago')
+    );
+
+    $component = Livewire::actingAs($user)
+        ->test(Index::class, ['project' => $project])
+        ->call('openSwornStatement');
+
+    $rows = collect($component->get('ssRows'));
+    $pmgIndex = $rows->search(fn ($r) => $r['vendor_id'] === $sub->id);
+
+    $component->set("ssRows.{$pmgIndex}.kind", 'Carpentry')
+        ->set('ssThisPayment', '60,000')
+        ->call('generateSwornStatement')
+        ->assertHasNoErrors();
+
+    // swornStatementFixtures() Bus::fake()s this job, so assert there.
+    Illuminate\Support\Facades\Bus::assertDispatched(
+        App\Jobs\SendLienWaiverSigningRequestJob::class,
+        fn ($job) => $job->delay !== null
+            && Illuminate\Support\Carbon::instance($job->delay)->setTimezone('America/Chicago')
+                ->toDateTimeString() === '2026-08-13 07:00:00'
+    );
+
+    Illuminate\Support\Carbon::setTestNow();
+});
+
+it('sends sub signature requests immediately during business hours', function () {
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+
+    Illuminate\Support\Carbon::setTestNow(
+        Illuminate\Support\Carbon::parse('2026-08-12 10:00', 'America/Chicago')
+    );
+
+    $component = Livewire::actingAs($user)
+        ->test(Index::class, ['project' => $project])
+        ->call('openSwornStatement');
+
+    $rows = collect($component->get('ssRows'));
+    $pmgIndex = $rows->search(fn ($r) => $r['vendor_id'] === $sub->id);
+
+    $component->set("ssRows.{$pmgIndex}.kind", 'Carpentry')
+        ->set('ssThisPayment', '60,000')
+        ->call('generateSwornStatement')
+        ->assertHasNoErrors();
+
+    // Mid-morning: the delay resolves to "now", nothing is held back.
+    Illuminate\Support\Facades\Bus::assertDispatched(
+        App\Jobs\SendLienWaiverSigningRequestJob::class,
+        fn ($job) => $job->delay === null
+            || Illuminate\Support\Carbon::instance($job->delay)
+                ->lessThanOrEqualTo(Illuminate\Support\Carbon::now()->addSecond())
+    );
+
+    Illuminate\Support\Carbon::setTestNow();
+});
+

@@ -69,6 +69,10 @@ class ProcessTimelapseFrame implements ShouldQueue
 
             $disk->put($frame->path, (string) $image->encode('jpg', 88));
             $image->destroy();
+
+            // Privacy: the copy viewers see gets faces blurred. The archive
+            // keeps them — it is the record.
+            \App\Services\FaceBlur::blur($disk->path($frame->path));
         }
 
         Log::channel('timelapse')->info('Frame processed', [

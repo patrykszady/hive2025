@@ -71,6 +71,9 @@ class TaskForm extends Form
     #[Validate('nullable|array')]
     public $checklist = [];
 
+    /** The checklist exactly as this form loaded it — the base for merging. */
+    public $checklistOriginal = [];
+
     #[Validate('nullable|in:virtual,in_person')]
     public $meeting_location_type = 'in_person';
 
@@ -108,7 +111,10 @@ class TaskForm extends Form
                 return is_object($item) ? (array) $item : $item;
             }, (array) $checklist);
         }
-        $this->checklist = is_array($checklist) ? $checklist : [];
+        // Normalized (every item gets a stable uid) so a save can be merged
+        // against concurrent card-side ticks rather than overwriting them.
+        $this->checklist = \App\Models\Task::normalizeChecklist($checklist);
+        $this->checklistOriginal = $this->checklist;
         
         $this->parent_task_id = $task->parent_task_id;
         $this->order = $task->order;
@@ -180,7 +186,11 @@ class TaskForm extends Form
         // Prepare options array - preserve existing options and update dates
         $options = (array) ($this->task->options ?? []);
         $options['dates'] = $this->dates;
-        $options['checklist'] = $this->checklist;
+        $options['checklist'] = \App\Models\Task::mergeChecklist(
+            data_get($this->task->fresh()?->options, 'checklist', []),
+            $this->checklistOriginal,
+            $this->checklist,
+        );
         $options['time_settings'] = $this->time_settings;
         $options['meeting_location_type'] = $this->type === 'Meet' ? $this->meeting_location_type : null;
         $options['meeting_participants'] = $this->type === 'Meet' ? array_values(array_filter($this->meeting_participants)) : [];

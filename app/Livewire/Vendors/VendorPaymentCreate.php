@@ -351,7 +351,24 @@ class VendorPaymentCreate extends Component
             //queue email job
             $auth_user = auth()->user();
             $vendor = $this->vendor;
-            SendVendorPaymentEmailJob::dispatch($auth_user, $vendor, $check);
+
+            // A payment made in the evening shouldn't email the sub at 9 PM —
+            // outside the paying company's business hours, hold the email
+            // until they next open (e.g. 7:00 AM next working day).
+            $sendAt = $auth_user->vendor->nextBusinessHoursOpening();
+
+            SendVendorPaymentEmailJob::dispatch($auth_user, $vendor, $check)
+                ->delay($sendAt);
+
+            if ($sendAt->isFuture()) {
+                \Flux\Flux::toast(
+                    heading: 'Payment saved',
+                    text: 'The payment email to '.($vendor->short_name ?: $vendor->name).' will send '.$sendAt->diffForHumans().' ('.$sendAt->format('D g:i A').'), during business hours.',
+                    variant: 'success',
+                    duration: 6000,
+                    position: 'top right',
+                );
+            }
 
             return $this->redirect(route('checks.show', $check->id), navigate: true);
         } else {

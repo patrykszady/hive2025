@@ -46,6 +46,28 @@ class ProjectPolicy
     }
 
     /**
+     * Curating a project's images: reordering frames, deleting them or a
+     * whole timelapse, choosing the alignment anchor, aligning by hand.
+     *
+     * VIEWING stays open to anyone who can see the project (view() above) —
+     * crews and clients look at progress photos all day. Changing what the
+     * record shows is narrower than the app's usual "any Admin": it belongs
+     * to Admins of the vendor that OWNS the project, so an admin at a
+     * collaborating vendor can shoot and browse but never rewrite someone
+     * else's history. Note this reads the role at the owning vendor, not the
+     * user's primary one — multi-vendor users are judged where it matters.
+     */
+    public function manageImages(User $user, Project $project): bool
+    {
+        if ($user->is_browsing_as_client) {
+            return false;
+        }
+
+        return $project->belongs_to_vendor_id !== null
+            && $user->getRoleForVendor($project->belongs_to_vendor_id) === 'Admin';
+    }
+
+    /**
      * Determine whether the user can update the model.
      *
      * @return \Illuminate\Auth\Access\Response|bool

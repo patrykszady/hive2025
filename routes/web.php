@@ -611,6 +611,13 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // Old name kept working — links and bookmarks predate the rename.
     Route::redirect('/projects/{project}/timelapse', '/projects/{project}/images')->name('projects.timelapse');
     Route::get('/timelapse/frames/{frame}', [\App\Http\Controllers\TimelapseController::class, 'frame'])->name('projects.timelapse.frame');
+    // The ARCHIVE original — unblurred, full resolution, EXIF intact — lives
+    // at its own unguessable address rather than behind a flag on the
+    // sequential frame id, and is gated to the taker plus the owning
+    // vendor's Admins.
+    Route::get('/timelapse/originals/{token}', [\App\Http\Controllers\TimelapseController::class, 'original'])
+        ->where('token', '[A-Za-z0-9]{48}')
+        ->name('projects.timelapse.original');
     // The camera's direct frame upload — one authed POST, no Livewire
     // handshake (which stalled silently on iPhones).
     Route::post('/projects/{project}/timelapse/frames', [\App\Http\Controllers\TimelapseController::class, 'store'])->name('projects.timelapse.frame.store');

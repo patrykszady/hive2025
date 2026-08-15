@@ -96,13 +96,16 @@ class TimelapseController extends Controller
         $disk = Storage::disk($frame->disk);
 
         // The registered (aligned) copy when one exists — the sequence is
-        // meant to be watched aligned. ?original=1 asks for the ARCHIVE copy:
-        // the file the camera produced, full resolution, never re-encoded.
-        // Frames shot before archive copies existed fall back to the sequence
-        // copy, which is the most original thing they have.
-        $path = request()->boolean('original')
-            ? ($frame->original_path ?: $frame->path)
-            : $frame->display_path;
+        // meant to be watched aligned. ?raw=1 asks for the UN-ALIGNED
+        // sequence copy — the studio's manual aligner edits that image, and
+        // showing the already-warped one would compound the transform on
+        // save. Both are FACE-BLURRED display copies.
+        //
+        // The archive original is deliberately NOT reachable from here: it
+        // is unblurred and carries EXIF, so it lives at its own unguessable
+        // address behind a narrower gate — see original() below. A stale
+        // ?original=1 link now simply serves the display copy.
+        $path = request()->boolean('raw') ? $frame->path : $frame->display_path;
 
         // A just-uploaded frame's sequence copy is written by a queued job
         // (ProcessTimelapseFrame) — until it lands, the archive copy stands
@@ -136,12 +139,65 @@ class TimelapseController extends Controller
 
         if (request()->boolean('download')) {
             $name = sprintf(
-                'timelapse-%d-frame-%03d%s.jpg',
+                'timelapse-%d-frame-%03d.jpg',
                 $frame->timelapse->project_id,
                 $frame->sort_order,
-                request()->boolean('original') ? '-original' : '',
             );
             $headers['Content-Disposition'] = 'attachment; filename="'.$name.'"';
+        }
+
+        return response($disk->get($path), 200, $headers);
+    }
+
+    /**
+     * The ARCHIVE original: the file the camera produced — full resolution,
+     * never re-encoded, EXIF intact, and NOT face-blurred.
+     *
+     * Addressed by a 48-char random token rather than the frame's id, so the
+     * set of archives is not enumerable by counting, and gated to the person
+     * who took the photo plus Admins of the vendor that owns the project.
+     * Everyone else who can see the project still gets the blurred display
+     * copy through frame() — they simply never see this link.
+     */
+    public function original(string $token)
+    {
+        $frame = ProjectTimelapseFrame::where('archive_token', $token)->firstOrFail();
+
+        // Same row-level security as frame(): resolve THROUGH ProjectScope so
+        // an out-of-scope project 404s rather than leaking existence.
+        $project = \App\Models\Project::query()
+            ->whereKey($frame->timelapse?->project_id)
+            ->firstOrFail();
+
+        Gate::authorize('view', $project);
+
+        // 404, not 403: a wrong-hands token should not confirm that it names
+        // a real file.
+        abort_unless($frame->archiveVisibleTo(auth()->user()), 404);
+
+        $disk = Storage::disk($frame->disk);
+        // Frames shot before archive copies existed fall back to the sequence
+        // copy — the most original thing they have.
+        $path = $frame->original_path && $disk->exists($frame->original_path)
+            ? $frame->original_path
+            : $frame->path;
+
+        abort_unless($disk->exists($path), 404);
+
+        $headers = [
+            'Content-Type' => 'image/jpeg',
+            'Content-Length' => (string) $disk->size($path),
+            // Private and never revalidated by shared caches: this body is
+            // the unblurred original.
+            'Cache-Control' => 'private, no-store',
+        ];
+
+        if (request()->boolean('download')) {
+            $headers['Content-Disposition'] = 'attachment; filename="'.sprintf(
+                'timelapse-%d-frame-%03d-original.jpg',
+                $frame->timelapse->project_id,
+                $frame->sort_order,
+            ).'"';
         }
 
         return response($disk->get($path), 200, $headers);

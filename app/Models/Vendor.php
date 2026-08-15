@@ -90,6 +90,42 @@ class Vendor extends Model
     }
 
     /**
+     * The next moment this vendor's business hours are open, in the vendor's
+     * timezone. Returns $from unchanged when already inside hours — so
+     * `dispatch(...)->delay($vendor->nextBusinessHoursOpening())` sends
+     * immediately during the day and waits for morning otherwise.
+     */
+    public function nextBusinessHoursOpening(?Carbon $from = null): Carbon
+    {
+        $tz = $this->timezone ?: 'America/Chicago';
+        $at = ($from ?: now())->copy()->setTimezone($tz);
+
+        if ($this->isWithinBusinessHours($at)) {
+            return $at;
+        }
+
+        $hours = $this->businessHours();
+
+        // Walk forward day by day (bounded — days list is never empty) to the
+        // first working day whose opening time is still ahead of us.
+        $candidate = $at->copy();
+
+        for ($i = 0; $i <= 7; $i++) {
+            $opening = Carbon::parse($hours['start'], $tz)
+                ->setDate($candidate->year, $candidate->month, $candidate->day);
+
+            if (in_array($candidate->dayOfWeekIso, $hours['days'], true) && $opening->greaterThan($at)) {
+                return $opening;
+            }
+
+            $candidate->addDay()->startOfDay();
+        }
+
+        // Unreachable with a sane config; fail open rather than never-send.
+        return $at;
+    }
+
+    /**
      * A vendor with a street address and zip is one specific physical place
      * (e.g. one "Smoke N Vape" among many with the same name) — transaction
      * matching hard-gates on location agreement for these. City/state alone

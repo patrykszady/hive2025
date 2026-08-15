@@ -69,6 +69,10 @@ class ProjectImageImporter
             }
 
             Storage::disk('files')->put($path, (string) $image->encode('jpg', 88));
+
+            // Privacy: the copy viewers see gets faces blurred. The archive
+            // above keeps them — it is the record.
+            FaceBlur::blur(Storage::disk('files')->path($path));
         }
 
         $frame = ProjectTimelapseFrame::create([

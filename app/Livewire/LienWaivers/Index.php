@@ -563,6 +563,7 @@ class Index extends Component
         $this->resetValidation();
         $this->ssThisPayment = null;
         $this->ssRows = \App\Support\SwornStatementGenerator::buildRows($this->project, $this->contractorVendor);
+        $this->attachPriorSignedWaivers();
         unset($this->kindOfWorkOptions);
         $this->showSwornStatement = true;
     }
@@ -794,11 +795,21 @@ class Index extends Component
         if ($subWaivers['printed'] > 0) {
             $parts[] = $subWaivers['printed'] . ' waiver' . ($subWaivers['printed'] === 1 ? '' : 's') . ' emailed to you to forward (no vendor email on file)';
         }
+        if (($subWaivers['reused'] ?? 0) > 0) {
+            $parts[] = $subWaivers['reused'] . ' signed waiver' . ($subWaivers['reused'] === 1 ? '' : 's') . ' carried over from the last draw';
+        }
         if ($savedBids > 0) {
             $parts[] = $savedBids . ' contract amount' . ($savedBids === 1 ? '' : 's') . ' saved as bids';
         }
         if ($emailedProducer) {
             $parts[] = 'package emailed to you';
+        }
+
+        // Waiver requests to subs wait for the GC's business hours; say so,
+        // otherwise "sent for signature" reads as already-in-their-inbox.
+        $waiverSendAt = $this->waiverSendAt();
+        if ($waiverSendAt->isFuture() && (($subWaivers['sent'] ?? 0) + ($subWaivers['printed'] ?? 0)) > 0) {
+            $parts[] = 'signature requests send ' . $waiverSendAt->diffForHumans() . ' (' . $waiverSendAt->format('D g:i A') . '), during business hours';
         }
 
         Flux::toast(
@@ -1136,12 +1147,68 @@ class Index extends Component
      *
      * @return array{sent:int, printed:int}
      */
+    /**
+     * Stamp each statement row with the sub's latest SIGNED waiver on this
+     * project (id + amount). When the paid-to-date hasn't moved since that
+     * signature, the row defaults to reusing it — a second draw with an
+     * unchanged sub shouldn't chase a fresh signature for the same figure.
+     * When the figure HAS moved, the checkbox lets the GC deliberately carry
+     * the prior sworn amount for this draw instead of requiring a new waiver.
+     */
+    protected function attachPriorSignedWaivers(): void
+    {
+        $contractorId = (int) ($this->contractorVendor?->id ?? 0);
+        $vendorIds = collect($this->ssRows)
+            ->pluck('vendor_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->reject(fn (int $id) => $id === $contractorId);
+
+        $signedByVendor = $vendorIds->isEmpty() ? collect() : LienWaiver::withoutGlobalScopes()
+            ->where('project_id', $this->project->id)
+            ->where('belongs_to_vendor_id', $contractorId)
+            ->whereIn('vendor_id', $vendorIds)
+            ->whereNull('deleted_at')
+            ->where('status', LienWaiverStatus::Signed)
+            ->whereNotNull('signed_path')
+            ->orderBy('id') // keyBy keeps the LAST row per vendor = newest
+            ->get()
+            ->keyBy('vendor_id');
+
+        foreach ($this->ssRows as $i => $row) {
+            $prior = $signedByVendor->get((int) ($row['vendor_id'] ?? 0));
+            $paid = (float) ($row['paid'] ?? 0);
+
+            $this->ssRows[$i]['prior_signed_id'] = $prior?->id;
+            $this->ssRows[$i]['prior_signed_amount'] = $prior ? (string) $prior->amount : null;
+            // Unchanged figure → reuse by default; changed figure → opt-in.
+            $this->ssRows[$i]['reuse_signed'] = $prior !== null && abs((float) $prior->amount - $paid) < 0.01;
+        }
+    }
+
+    /**
+     * When a waiver email should actually leave. Subs get lien waiver requests
+     * during the GC's working day — a draw generated at 9 PM shouldn't put a
+     * signature request in a sub's inbox overnight. Inside business hours this
+     * is "now", so the normal path is unchanged.
+     */
+    protected function waiverSendAt($contractor = null): \Carbon\Carbon
+    {
+        $vendor = $contractor ?: $this->contractorVendor ?: auth()->user()?->vendor;
+
+        return $vendor
+            ? $vendor->nextBusinessHoursOpening()
+            : now();
+    }
+
     protected function createSubWaiversForStatement($contractor, int $statementId): array
     {
         $jurisdiction = $this->projectJurisdiction();
         $throughDate = now()->toDateString();
+        $sendAt = $this->waiverSendAt($contractor);
         $sent = 0;
         $printed = 0;
+        $reused = 0;
 
         // Which row vendors have a deliverable email: a business email, or an
         // employed user with one (mirrors the send job's resolution).
@@ -1233,6 +1300,54 @@ class Index extends Component
             $typedContract = ($row['contract'] ?? '') !== '' ? (float) $row['contract'] : null;
             $isFinal = $typedContract !== null && $amount + 0.009 >= $typedContract;
 
+
+            // Reuse a previously SIGNED waiver instead of chasing a fresh
+            // signature: automatic when the paid-to-date equals the signed
+            // amount, or deliberately via the row's checkbox when the figure
+            // moved and the GC chooses to carry the prior sworn amount into
+            // this draw. The signed PDF is referenced, not re-generated — the
+            // new row keeps its own copy of the metadata so each draw's
+            // package stands alone (deletes are soft; the file is shared).
+            if (! empty($row['reuse_signed']) && ! empty($row['prior_signed_id'])) {
+                $prior = LienWaiver::withoutGlobalScopes()
+                    ->whereKey((int) $row['prior_signed_id'])
+                    ->where('project_id', $this->project->id)
+                    ->where('belongs_to_vendor_id', $contractor->id)
+                    ->where('vendor_id', $vendorId)
+                    ->whereNull('deleted_at')
+                    ->where('status', LienWaiverStatus::Signed)
+                    ->whereNotNull('signed_path')
+                    ->first();
+
+                if ($prior) {
+                    LienWaiver::create([
+                        'belongs_to_vendor_id' => $contractor->id,
+                        'vendor_id' => $vendorId,
+                        'project_id' => $this->project->id,
+                        'sworn_statement_id' => $statementId,
+                        'check_id' => null,
+                        'payment_id' => null,
+                        'type' => $prior->type,
+                        'status' => LienWaiverStatus::Signed,
+                        'amount' => $prior->amount,
+                        'exceptions_amount' => $prior->exceptions_amount,
+                        'through_date' => $prior->through_date,
+                        'jurisdiction' => $prior->jurisdiction,
+                        'document_hash' => $prior->document_hash,
+                        'draft_path' => $prior->draft_path,
+                        'signed_path' => $prior->signed_path,
+                        'sent_at' => $prior->sent_at,
+                        'signed_at' => $prior->signed_at,
+                        'notes' => json_encode(array_merge($notes, ['reused_from' => $prior->id])),
+                        'created_by_user_id' => auth()->id(),
+                    ]);
+
+                    $reused++;
+
+                    continue;
+                }
+            }
+
             if ($openWaiver) {
                 if ($openWaiver->status === LienWaiverStatus::Draft) {
                     // Sync this run's row data (amount, kind, type) onto the
@@ -1251,7 +1366,7 @@ class Index extends Component
 
                     // No vendor email → the job mails the draw's creator with
                     // a "please forward" banner instead of skipping.
-                    SendLienWaiverSigningRequestJob::dispatch($openWaiver->id);
+                    SendLienWaiverSigningRequestJob::dispatch($openWaiver->id)->delay($sendAt);
                     if ($canEmail) {
                         $sent++;
                     } else {
@@ -1284,7 +1399,7 @@ class Index extends Component
             // inbox by Mail::alwaysTo), otherwise to the GC user creating the
             // draw with a "please forward to {vendor}" banner — typical for
             // material suppliers like Home Depot.
-            SendLienWaiverSigningRequestJob::dispatch($waiver->id);
+            SendLienWaiverSigningRequestJob::dispatch($waiver->id)->delay($sendAt);
             if ($canEmail) {
                 $sent++;
             } else {
@@ -1292,7 +1407,7 @@ class Index extends Component
             }
         }
 
-        return ['sent' => $sent, 'printed' => $printed];
+        return ['sent' => $sent, 'printed' => $printed, 'reused' => $reused];
     }
 
     public function sendForSignature(int $waiverId): void
@@ -1305,10 +1420,13 @@ class Index extends Component
             return;
         }
 
-        SendLienWaiverSigningRequestJob::dispatch($waiver->id);
+        $sendAt = $this->waiverSendAt();
+        SendLienWaiverSigningRequestJob::dispatch($waiver->id)->delay($sendAt);
 
         Flux::toast(
-            text: 'Lien waiver queued for delivery to ' . ($waiver->vendor?->business_name ?? 'vendor') . '.',
+            text: $sendAt->isFuture()
+                ? 'Lien waiver queued for ' . ($waiver->vendor?->business_name ?? 'vendor') . ' — sending ' . $sendAt->diffForHumans() . ' (' . $sendAt->format('D g:i A') . '), during business hours.'
+                : 'Lien waiver queued for delivery to ' . ($waiver->vendor?->business_name ?? 'vendor') . '.',
             variant: 'success',
         );
 

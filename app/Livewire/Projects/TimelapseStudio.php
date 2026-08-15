@@ -23,8 +23,10 @@ use Livewire\WithFileUploads;
  * onion skin and alignment guide follow that choice, so switching rooms
  * never means switching pages.
  *
- * Anyone who can view the project can shoot; capturing progress photos is
- * crew work. Deleting a frame is the taker or an Admin.
+ * Anyone who can view the project can look and shoot — capturing progress
+ * photos is crew work. CURATING them (reorder, delete, anchor, align) is
+ * gated on ProjectPolicy::manageImages: Admins of the vendor that owns the
+ * project, and nobody else.
  */
 class TimelapseStudio extends Component
 {
@@ -72,10 +74,22 @@ class TimelapseStudio extends Component
     public $file = null;
 
     /**
-     * Slot the next upload BEFORE every existing frame — for replacing a
-     * timelapse's opening shot rather than appending to the end.
+     * The timelapse whose frames are being MANAGED (reorder, soft-delete,
+     * anchor, manual align). Frame thumbnails stay clean chrome-free photos
+     * until a card enters edit mode — one card at a time.
      */
-    public bool $uploadAsFirst = false;
+    public ?int $editingCollectionId = null;
+
+    /**
+     * May this user curate the project's images? Drives every management
+     * control's visibility; each mutating method re-checks server-side, so
+     * this is presentation only.
+     */
+    #[Computed]
+    public function canManageImages(): bool
+    {
+        return auth()->user()?->can('manageImages', $this->project) ?? false;
+    }
 
     /**
      * New-collection form. Only timelapses are created here — every static
@@ -182,6 +196,131 @@ class TimelapseStudio extends Component
         $this->showNewCollection = false;
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
         $this->collectionId = $collection->id;
+    }
+
+    /**
+     * Build a new timelapse from photos picked in select mode.
+     *
+     * The picked frames are COPIED, never moved: a photo album is a record of
+     * what was shot and stays intact, while the new sequence gets its own
+     * frames to align, re-grade and re-order without touching the album. The
+     * copies point at the same archive originals (one file, many sequences) —
+     * so alignment, which samples `original_path`, has full resolution, and
+     * deleting the sequence can never orphan the album's pixels.
+     *
+     * Order is by when the photos were SHOT, not the order they were tapped —
+     * a timelapse that plays out of chronological order is never what someone
+     * meant, and re-ordering by hand lives in edit mode anyway.
+     *
+     * @param  array<int, int|string>  $frameIds
+     */
+    public function createTimelapseFromSelection(array $frameIds): void
+    {
+        $this->authorize('manageImages', $this->project);
+
+        $frames = ProjectTimelapseFrame::query()
+            ->whereIn('id', array_map('intval', $frameIds))
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->get()
+            ->sortBy(fn (ProjectTimelapseFrame $f) => [$f->shot_at?->timestamp ?? 0, $f->id])
+            ->values();
+
+        if ($frames->count() < 2) {
+            \Flux\Flux::toast(variant: 'warning', text: 'Pick at least two photos to build a timelapse.', duration: 4000, position: 'top right');
+
+            return;
+        }
+
+        $title = $this->uniqueCollectionTitle('Timelapse');
+
+        $timelapse = ProjectTimelapse::create([
+            'project_id' => $this->project->id,
+            'title' => $title,
+            'kind' => ProjectTimelapse::KIND_TIMELAPSE,
+            'display_mode' => 'slider',
+            'sort_order' => ((int) ProjectTimelapse::where('project_id', $this->project->id)->max('sort_order')) + 1,
+        ]);
+
+        $disk = Storage::disk('files');
+        $copied = [];
+
+        foreach ($frames as $position => $source) {
+            $filename = \Illuminate\Support\Str::uuid().'.jpg';
+            $directory = sprintf('timelapse/%d', $this->project->id);
+            $path = sprintf('%s/%s', $directory, $filename);
+
+            // The sequence copy is duplicated (alignment rewrites it); the
+            // archive original is SHARED — it is immutable by contract.
+            if (! $disk->exists($source->path) || ! $disk->copy($source->path, $path)) {
+                continue;
+            }
+
+            $copied[] = ProjectTimelapseFrame::create([
+                'project_timelapse_id' => $timelapse->id,
+                'taken_by_user_id' => $source->taken_by_user_id,
+                'taken_by_name' => $source->taken_by_name,
+                'filename' => $filename,
+                'original_filename' => $source->original_filename,
+                'path' => $path,
+                'original_path' => $source->original_path,
+                'disk' => 'files',
+                'shot_at' => $source->shot_at,
+                'latitude' => $source->latitude,
+                'longitude' => $source->longitude,
+                'location_accuracy' => $source->location_accuracy,
+                'sort_order' => $position + 1,
+            ]);
+        }
+
+        if (count($copied) < 2) {
+            $timelapse->forceDelete();
+            \Flux\Flux::toast(variant: 'danger', text: 'Those photos could not be copied — nothing was created.', duration: 5000, position: 'top right');
+
+            return;
+        }
+
+        // Frame #1 is the anchor every other frame registers onto, and the
+        // chain runs in order so each frame has its predecessor to match.
+        $timelapse->forceFill(['anchor_frame_id' => $copied[0]->id])->save();
+
+        \Illuminate\Support\Facades\Bus::chain(
+            collect($copied)->skip(1)
+                ->map(fn (ProjectTimelapseFrame $f) => new \App\Jobs\AlignTimelapseFrame($f->id, reframe: true))
+                ->all()
+        )->dispatch();
+
+        unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
+        $this->collectionId = $timelapse->id;
+        $this->dispatch('selection-consumed');
+
+        \Flux\Flux::toast(
+            heading: $title.' created',
+            text: count($copied).' photos copied in shot order and now aligning — give it a minute, then refresh.',
+            variant: 'success',
+            duration: 6000,
+            position: 'top right',
+        );
+    }
+
+    /** "Timelapse", "Timelapse 2", … — whatever this project doesn't have yet. */
+    protected function uniqueCollectionTitle(string $base): string
+    {
+        $taken = ProjectTimelapse::withTrashed()
+            ->where('project_id', $this->project->id)
+            ->pluck('title')
+            ->all();
+
+        if (! in_array($base, $taken, true)) {
+            return $base;
+        }
+
+        for ($n = 2; $n < 200; $n++) {
+            if (! in_array("{$base} {$n}", $taken, true)) {
+                return "{$base} {$n}";
+            }
+        }
+
+        return $base.' '.now()->format('M j H:i');
     }
 
     /**
@@ -550,10 +689,17 @@ class TimelapseStudio extends Component
     {
         $takers = $this->frameTakers($collection);
 
+        $viewer = auth()->user();
+
         return $collection->frames->map(fn (ProjectTimelapseFrame $frame) => [
             'id' => $frame->id,
             'url' => route('projects.timelapse.frame', [$frame, 'v' => $frame->version]),
-            'original' => route('projects.timelapse.frame', ['frame' => $frame, 'original' => 1]),
+            // Null for everyone but the taker and the owning vendor's Admins
+            // — the lightbox hides "Show original" when there is no link, so
+            // the unblurred archive is never even advertised.
+            'original' => $frame->archiveVisibleTo($viewer)
+                ? route('projects.timelapse.original', ['token' => $frame->archive_token])
+                : null,
             'label' => ($frame->shot_at ?? $frame->created_at)->copy()->timezone($this->vendorTimezone())->format('n/j/y g:iA').' · '
                 .($takers[$frame->id] ?? ''),
             // Where it was taken, when we know — camera GPS or upload EXIF.
@@ -750,7 +896,7 @@ class TimelapseStudio extends Component
 
     public function deleteCollection(int $collectionId): void
     {
-        abort_unless(auth()->user()->vendor_role === 'Admin', 403);
+        $this->authorize('manageImages', $this->project);
 
         $collection = ProjectTimelapse::query()
             ->where('project_id', $this->project->id)
@@ -760,12 +906,13 @@ class TimelapseStudio extends Component
         // would leave those photos nowhere to go.
         abort_if($collection->title === 'Project Images', 403);
 
-        // Frames (and their files) go with it.
-        foreach ($collection->frames as $frame) {
-            $frame->delete();
-        }
-
+        // SOFT delete of the collection only: frames keep their rows and
+        // files untouched, so restoring the timelapse is one row.
         $collection->delete();
+
+        if ($this->editingCollectionId === $collection->id) {
+            $this->editingCollectionId = null;
+        }
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
         $this->collectionId = $this->collections->first()?->id;
@@ -894,11 +1041,92 @@ class TimelapseStudio extends Component
     /** Plain file-upload fallback (camera denied / desktop). */
     public function uploadFile(): void
     {
-        $this->validate(['file' => 'required|mimes:jpg,jpeg,png|max:20480'], [
-            'file.mimes' => 'Frames must be JPG or PNG images.',
+        $this->validate(['file' => 'required|mimes:jpg,jpeg,png,heic,heif|max:20480'], [
+            'file.mimes' => 'Frames must be JPG, PNG or HEIC images.',
         ]);
-        $this->storeFrame($this->file, $this->file->getClientOriginalName());
+
+        $upload = $this->file;
+        $name = $upload->getClientOriginalName();
+        $converted = null;
+
+        // iPhone "before" shots arrive as HEIC, and nothing downstream reads
+        // it — GD, OpenCV and browsers are all JPEG-world. Convert at the
+        // door (full resolution, EXIF carried over, so the shot date and GPS
+        // survive) and archive THAT: one format everywhere after this line.
+        if (in_array(strtolower((string) $upload->getClientOriginalExtension()), ['heic', 'heif'], true)) {
+            $converted = $this->convertHeicToJpeg($upload->getRealPath());
+
+            if ($converted === null) {
+                $this->addError('file', 'This HEIC could not be converted — try exporting it as JPG and uploading that.');
+
+                return;
+            }
+
+            $upload = new \Illuminate\Http\File($converted);
+            $name = preg_replace('/\.(heic|heif)$/i', '.jpg', $name);
+        }
+
+        $this->storeFrame($upload, $name);
+
+        // storeImage() copied the bytes synchronously — the temp JPEG is done.
+        if ($converted !== null) {
+            @unlink($converted);
+        }
+
         $this->file = null;
+    }
+
+    /**
+     * HEIC/HEIF → full-quality JPEG. PHP here has only GD, which can't read
+     * HEIC, so this shells out — preferring the aligner venv's python
+     * (scripts/heic_convert.py, which carries the EXIF over: the importer
+     * reads the shot date and GPS off the converted file, and captions show
+     * that date), falling back to ImageMagick's libheif delegate, which
+     * converts the pixels but drops the metadata.
+     */
+    protected function convertHeicToJpeg(string $sourcePath): ?string
+    {
+        $base = tempnam(sys_get_temp_dir(), 'heic-frame-');
+
+        if ($base === false) {
+            return null;
+        }
+
+        $jpeg = $base.'.jpg';
+
+        $python = (string) config('services.timelapse_align.python');
+        $attempts = array_filter([
+            is_executable($python)
+                ? [$python, base_path('scripts/heic_convert.py'), $sourcePath, $jpeg]
+                : null,
+            // `[0]` picks the container's primary image — iPhone HEICs can
+            // carry auxiliary frames, and without the index every one would
+            // land as its own numbered JPEG.
+            ['convert', $sourcePath.'[0]', '-auto-orient', '-quality', '92', $jpeg],
+        ]);
+
+        foreach ($attempts as $command) {
+            $process = new \Symfony\Component\Process\Process($command);
+            $process->setTimeout(30);
+            $process->run();
+
+            if ($process->isSuccessful() && is_file($jpeg) && filesize($jpeg) > 0) {
+                @unlink($base);
+
+                return $jpeg;
+            }
+
+            \Illuminate\Support\Facades\Log::channel('timelapse')->warning('HEIC conversion attempt failed', [
+                'tool' => basename($command[0]),
+                'exit' => $process->getExitCode(),
+                'stderr' => mb_substr($process->getErrorOutput(), 0, 500),
+            ]);
+        }
+
+        @unlink($base);
+        @unlink($jpeg);
+
+        return null;
     }
 
     protected function storeFrame($upload, ?string $originalName = null, ?array $meta = null, ?ProjectTimelapse $target = null): void
@@ -906,13 +1134,6 @@ class TimelapseStudio extends Component
         $this->authorize('view', $this->project);
 
         $timelapse = $target ?? $this->collection ?? ProjectTimelapse::generalFor($this->project);
-
-        // "Make first": everything currently in the sequence comes after it.
-        $sortOrder = null;
-        if ($this->uploadAsFirst) {
-            $sortOrder = ((int) $timelapse->frames()->min('sort_order')) - 1;
-            $this->uploadAsFirst = false;
-        }
 
         app(\App\Services\ProjectImageImporter::class)->storeImage(
             $timelapse,
@@ -929,10 +1150,483 @@ class TimelapseStudio extends Component
             // The crew is standing there watching "Saving…" — write the bytes,
             // answer, and let the queue do the pixel work.
             deferProcessing: true,
-            sortOrder: $sortOrder,
         );
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
+    }
+
+    /**
+     * Re-anchor a sequence's alignment on the chosen frame. For when the
+     * FIRST shot was framed differently (too far away, wrong stance) — the
+     * default anchor-on-frame-1 then warps nothing and fails everything.
+     *
+     * Clears every frame's aligned copy and re-runs the aligner as a CHAIN:
+     * the anchor first (its photo-only aligned copy is the gap-fill
+     * fallback), then the rest in sequence order so each frame can fall back
+     * to its predecessor's canvas — same ordering a fresh upload gets.
+     */
+    public function setAlignmentAnchor(
+        int $frameId,
+        float $scale = 1.0,
+        float $tx = 0.0,
+        float $ty = 0.0,
+        float $rotation = 0.0,
+    ): void {
+        $this->authorize('manageImages', $this->project);
+
+        $frame = ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->findOrFail($frameId);
+
+        $timelapse = $frame->timelapse;
+
+        if ($timelapse->kind !== 'timelapse') {
+            return;
+        }
+
+        $timelapse->forceFill(['anchor_frame_id' => $frame->id])->save();
+
+        $frames = ProjectTimelapseFrame::query()
+            ->where('project_timelapse_id', $timelapse->id)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        // The anchor may be COMPOSED: the human resets the zoom to get the
+        // original back, levels or crops it, and that composition becomes the
+        // sequence's canvas. An untouched anchor (all defaults) simply keeps
+        // its own framing as shot.
+        $composed = abs($scale - 1.0) > 0.001
+            || abs($rotation) > 0.001
+            || abs($tx) > 0.5
+            || abs($ty) > 0.5;
+
+        abort_unless(
+            $scale >= 0.2 && $scale <= 8.0
+                && abs($tx) <= 6000.0 && abs($ty) <= 6000.0
+                && abs($rotation) <= 45.0,
+            422,
+        );
+
+        // Everything derived goes, the new anchor included: every stored fit
+        // belongs to the old anchor.
+        foreach ($frames as $sequenceFrame) {
+            if ($sequenceFrame->aligned_path) {
+                Storage::disk($sequenceFrame->disk)->delete($sequenceFrame->aligned_path);
+            }
+
+            $sequenceFrame->forceFill([
+                'aligned_path' => null,
+                'align_transform' => null,
+            ])->save();
+        }
+
+        // A composed anchor is rendered here and then LEFT ALONE — it is the
+        // canvas, so it must not be re-derived by the chain that follows.
+        if ($composed && ! $this->composeAnchor($frame, $scale, $tx, $ty, $rotation)) {
+            \Flux\Flux::toast(variant: 'danger', text: 'Could not build the anchor from that adjustment — nothing was changed.', duration: 5000, position: 'top right');
+
+            return;
+        }
+
+        // Nearest-to-the-anchor first, spreading outward: each frame then has
+        // an already-registered neighbour on its anchor side to retry against
+        // and to patch gaps from — processing in playback order would leave
+        // the sequence's FIRST frame (usually the one farthest from the
+        // anchor in content) matching the anchor cold.
+        $ordered = $frames
+            ->when($composed, fn ($all) => $all->reject(fn (ProjectTimelapseFrame $f) => $f->id === $frame->id))
+            ->sortBy(fn (ProjectTimelapseFrame $f) => $f->id === $frame->id ? -1 : abs($f->sort_order - $frame->sort_order))
+            ->values();
+
+        // reframe: TRUE — picking a new anchor is a deliberate change of
+        // framing, so every frame re-registers onto it however far it has to
+        // travel. Frames shot closer than the anchor cannot fill its canvas
+        // and get the missing band from their neighbour; frames shot farther
+        // away zoom in, sampled from the full-resolution original so the
+        // crop stays sharp.
+        \Illuminate\Support\Facades\Bus::chain(
+            $ordered->map(fn (ProjectTimelapseFrame $f) => new \App\Jobs\AlignTimelapseFrame($f->id, reframe: true))->all()
+        )->dispatch();
+
+        // The aligner was open on this frame to choose it; it is the anchor
+        // now, so there is nothing left to align it to.
+        $this->showAlignModal = false;
+        $this->alignFrameId = 0;
+        \Flux\Flux::modal('align-frame')->close();
+
+        \Flux\Flux::toast(
+            heading: 'New anchor set',
+            text: ($composed ? 'Your adjusted frame is the new anchor' : 'This frame is back to its original')
+                .' and the other '.max(0, $frames->count() - 1).' frames are re-processing onto it — give it a minute, then refresh.',
+            variant: 'success',
+            duration: 6000,
+            position: 'top right',
+        );
+
+        unset($this->collections, $this->collection, $this->frames, $this->latestFrame, $this->alignerFrame);
+    }
+
+    /**
+     * Enter/leave a timelapse's edit mode — the one place frames can be
+     * reordered, soft-deleted, re-anchored or manually aligned. Off by
+     * default so thumbnails stay clean photos.
+     */
+    public function toggleEditCollection(int $collectionId): void
+    {
+        $this->authorize('manageImages', $this->project);
+
+        $timelapse = ProjectTimelapse::query()
+            ->where('project_id', $this->project->id)
+            ->findOrFail($collectionId);
+
+        if ($timelapse->kind !== ProjectTimelapse::KIND_TIMELAPSE) {
+            return;
+        }
+
+        $this->editingCollectionId = $this->editingCollectionId === $timelapse->id ? null : $timelapse->id;
+    }
+
+    /**
+     * Move a frame one slot earlier (-1) or later (+1) in its sequence.
+     * Sort orders are renumbered 1..n on the way — imports and deletions
+     * leave gaps and duplicates that a bare swap would trip over.
+     */
+    public function moveFrame(int $frameId, int $direction): void
+    {
+        $this->authorize('manageImages', $this->project);
+        abort_unless(in_array($direction, [-1, 1], true), 422);
+
+        $frame = ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->findOrFail($frameId);
+
+        $ordered = ProjectTimelapseFrame::query()
+            ->where('project_timelapse_id', $frame->project_timelapse_id)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->values();
+
+        $index = $ordered->search(fn ($f) => $f->id === $frame->id);
+        $target = $index + $direction;
+
+        if ($target < 0 || $target >= $ordered->count()) {
+            return;
+        }
+
+        $list = $ordered->all();
+        [$list[$index], $list[$target]] = [$list[$target], $list[$index]];
+
+        foreach ($list as $position => $sibling) {
+            if ($sibling->sort_order !== $position + 1) {
+                $sibling->forceFill(['sort_order' => $position + 1])->save();
+            }
+        }
+
+        unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
+    }
+
+    /** The frame open in the manual-align modal (0 = none). */
+    public int $alignFrameId = 0;
+
+    public bool $showAlignModal = false;
+
+    /**
+     * Open the manual aligner: the frame over the anchor as an onion skin,
+     * panned/zoomed by hand. This exists for the frames the automatic pass
+     * rightly refuses — it only removes handheld wobble, and a real
+     * re-framing is a human's call, never the aligner's.
+     */
+    public function openFrameAligner(int $frameId): void
+    {
+        $this->authorize('manageImages', $this->project);
+
+        $frame = ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->findOrFail($frameId);
+
+        if ($frame->timelapse->kind !== ProjectTimelapse::KIND_TIMELAPSE) {
+            return;
+        }
+
+        $anchor = $frame->timelapse->anchorFrame();
+
+        if (! $anchor || $anchor->id === $frame->id) {
+            \Flux\Flux::toast(
+                variant: 'warning',
+                text: 'This frame IS the anchor — every other frame aligns to it. Pick a different anchor first to adjust this one.',
+                duration: 5000,
+                position: 'top right',
+            );
+
+            return;
+        }
+
+        $this->alignFrameId = $frame->id;
+        $this->showAlignModal = true;
+        \Flux\Flux::modal('align-frame')->show();
+    }
+
+    /** Everything the aligner modal shows: the frame, its anchor, both URLs. */
+    #[Computed]
+    public function alignerFrame(): ?array
+    {
+        if (! $this->showAlignModal || ! $this->alignFrameId) {
+            return null;
+        }
+
+        $frame = ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->find($this->alignFrameId);
+
+        $anchor = $frame?->timelapse->anchorFrame();
+
+        if (! $frame || ! $anchor || $anchor->id === $frame->id) {
+            return null;
+        }
+
+        return [
+            'frame' => $frame,
+            'anchor' => $anchor,
+            // The anchor as the sequence shows it (registered copy when one
+            // exists) — that IS the canvas being aligned onto.
+            'refUrl' => route('projects.timelapse.frame', [$anchor, 'v' => $anchor->version]),
+            // The frame's RAW sequence copy: the manual transform is applied
+            // to these pixels, so the editor must show exactly them — showing
+            // an already-warped copy would compound the transform on save.
+            'targetUrl' => route('projects.timelapse.frame', [$frame, 'raw' => 1, 'v' => $frame->version]),
+            // Where the sequence currently has this frame. The modal opens
+            // on it (not at 1:1), so the human adjusts what they actually
+            // see — and a frame the pipeline zoomed in already has overflow
+            // beyond the canvas for a turn to reveal.
+            'transform' => $frame->align_transform,
+        ];
+    }
+
+    /**
+     * Apply the pan/zoom/turn the human set in the onion-skin modal:
+     * output px = scale * R(rotation) * input px + t on the anchor's canvas.
+     * align_frame.py --apply warps exactly that — the only automatic touches are the sequence's
+     * photometric easing and the gap fill every frame gets.
+     */
+    public function applyManualAlignment(int $frameId, float $scale, float $tx, float $ty, float $rotation = 0.0): void
+    {
+        $this->authorize('manageImages', $this->project);
+
+        $frame = ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->findOrFail($frameId);
+
+        if ($frame->timelapse->kind !== ProjectTimelapse::KIND_TIMELAPSE) {
+            return;
+        }
+
+        $anchor = $frame->timelapse->anchorFrame();
+
+        if (! $anchor || $anchor->id === $frame->id) {
+            return;
+        }
+
+        // Generous bounds — the human frames by eye; this rejects garbage
+        // payloads, not judgment calls. The range spans a real re-frame:
+        // matching a close anchor from a wide shot runs past 2x.
+        abort_unless(
+            $scale >= 0.2 && $scale <= 8.0
+                && abs($tx) <= 6000.0 && abs($ty) <= 6000.0
+                && abs($rotation) <= 45.0,
+            422,
+        );
+
+        $python = (string) config('services.timelapse_align.python');
+        $disk = Storage::disk($frame->disk);
+        $referencePath = $disk->path($anchor->path);
+
+        // The modal previews the 1920px sequence copy, but the warp samples
+        // the full-resolution ORIGINAL when there is one: a zoomed-in crop
+        // stays sharp and a turn has real overflow to fill its corners with.
+        // previewWidth below tells the script how to map the human's numbers
+        // onto those extra pixels.
+        $previewPath = $disk->path($frame->path);
+        $targetPath = $frame->original_path && $disk->exists($frame->original_path)
+            ? $disk->path($frame->original_path)
+            : $previewPath;
+        $previewWidth = (int) (@getimagesize($previewPath)[0] ?? 0);
+
+        if (! is_executable($python) || ! is_file($referencePath) || ! is_file($targetPath)) {
+            \Flux\Flux::toast(variant: 'danger', text: 'The aligner is not available right now — nothing was changed.', duration: 5000, position: 'top right');
+
+            return;
+        }
+
+        $alignedRelative = preg_replace('/([^\/]+)$/', 'aligned-$1', $frame->path);
+        $alignedAbsolute = $disk->path($alignedRelative);
+
+        // Same gap-fill sourcing as the automatic pass: the anchor's canvas —
+        // clean by human choice, and identical across every patched frame.
+        $fillPath = $disk->path($anchor->display_path);
+
+        $process = new \Symfony\Component\Process\Process([
+            $python,
+            base_path('scripts/align_frame.py'),
+            '--apply',
+            $referencePath,
+            $targetPath,
+            $alignedAbsolute,
+            (string) round($scale, 4),
+            (string) round($tx, 1),
+            (string) round($ty, 1),
+            (string) round($rotation, 2),
+            (string) $previewWidth,
+        ], null, array_filter([
+            'ALIGN_TARGET' => \App\Jobs\AlignTimelapseFrame::sequenceTargetFor($frame),
+            'ALIGN_FILL' => $fillPath && is_file($fillPath) ? $fillPath : null,
+        ], fn ($v) => $v !== null));
+        $process->setTimeout(30);
+        $process->run();
+
+        if ($process->getExitCode() !== 0 || ! is_file($alignedAbsolute)) {
+            \Illuminate\Support\Facades\Log::channel('timelapse')->error('Manual align failed', [
+                'frame_id' => $frame->id,
+                'exit' => $process->getExitCode(),
+                'output' => mb_substr(trim($process->getOutput().' '.$process->getErrorOutput()), 0, 1000),
+            ]);
+            \Flux\Flux::toast(variant: 'danger', text: 'Could not apply the alignment — nothing was changed.', duration: 5000, position: 'top right');
+
+            return;
+        }
+
+        // Privacy: the warp sampled the unblurred archive original — re-blur
+        // faces on the display copy before anything serves it.
+        \App\Services\FaceBlur::blur($alignedAbsolute);
+
+        $applied = json_decode(trim($process->getOutput()), true) ?: [];
+        $frame->forceFill([
+            'aligned_path' => $alignedRelative,
+            // Reopening the modal starts from exactly this.
+            'align_transform' => $applied['preview_transform'] ?? [
+                'scale' => round($scale, 6),
+                'rotation' => round($rotation, 4),
+                'tx' => round($tx, 3),
+                'ty' => round($ty, 3),
+                'preview_width' => $previewWidth,
+            ],
+        ])->save();
+        // save() skips updated_at when the path string didn't change
+        // (re-editing an already-aligned frame) — and updated_at is the
+        // cache-buster behind the frame's immutable URLs.
+        $frame->touch();
+
+        // The frame just changed shape, so its colours are re-graded toward
+        // the anchor exactly as the automatic path does — a hand-aligned
+        // frame must not be the one that stands out tonally.
+        \App\Jobs\HarmonizeTimelapseFrameColor::dispatch($frame->id, $anchor->id);
+
+        \Illuminate\Support\Facades\Log::channel('timelapse')->info('Frame aligned manually', [
+            'frame_id' => $frame->id,
+            'by_user_id' => auth()->id(),
+        ] + (json_decode(trim($process->getOutput()), true) ?: []));
+
+        $this->showAlignModal = false;
+        \Flux\Flux::modal('align-frame')->close();
+        \Flux\Flux::toast(variant: 'success', text: 'Frame aligned.', duration: 4000, position: 'top right');
+
+        unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
+    }
+
+    /** Drop the aligned copy — the frame shows exactly as shot again. */
+    public function clearAlignment(int $frameId): void
+    {
+        $this->authorize('manageImages', $this->project);
+
+        $frame = ProjectTimelapseFrame::query()
+            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
+            ->findOrFail($frameId);
+
+        if ($frame->aligned_path) {
+            Storage::disk($frame->disk)->delete($frame->aligned_path);
+        }
+
+        $frame->forceFill(['aligned_path' => null, 'align_transform' => null])->save();
+        $frame->touch();
+
+        // The aligner STAYS OPEN: restoring the original is the starting
+        // point for a fresh adjustment, not the end of one. The editor is
+        // told to drop back to 1:1 so it shows what the frame now is.
+        $this->dispatch('alignment-cleared', frameId: $frame->id);
+
+        \Flux\Flux::toast(variant: 'success', text: 'Original restored — adjust it and save, or use it as the anchor.', duration: 4000, position: 'top right');
+
+        unset($this->collections, $this->collection, $this->frames, $this->latestFrame, $this->alignerFrame);
+    }
+
+    /**
+     * Render the anchor's own composition: the human's pan/zoom/turn applied
+     * to its full-resolution original, on the sequence canvas. This becomes
+     * the reference every other frame registers onto, so it is built from
+     * the original (not the 1920px copy) and never re-derived afterwards.
+     */
+    protected function composeAnchor(
+        ProjectTimelapseFrame $frame,
+        float $scale,
+        float $tx,
+        float $ty,
+        float $rotation,
+    ): bool {
+        $python = (string) config('services.timelapse_align.python');
+        $disk = Storage::disk($frame->disk);
+        // Its own sequence copy defines the canvas size and framing.
+        $canvasPath = $disk->path($frame->path);
+        $sourcePath = $frame->original_path && $disk->exists($frame->original_path)
+            ? $disk->path($frame->original_path)
+            : $canvasPath;
+
+        if (! is_executable($python) || ! is_file($canvasPath)) {
+            return false;
+        }
+
+        $alignedRelative = preg_replace('/([^\/]+)$/', 'aligned-$1', $frame->path);
+        $alignedAbsolute = $disk->path($alignedRelative);
+
+        $process = new \Symfony\Component\Process\Process([
+            $python,
+            base_path('scripts/align_frame.py'),
+            '--apply',
+            $canvasPath,
+            $sourcePath,
+            $alignedAbsolute,
+            (string) round($scale, 4),
+            (string) round($tx, 1),
+            (string) round($ty, 1),
+            (string) round($rotation, 2),
+            (string) (int) (@getimagesize($canvasPath)[0] ?? 0),
+        ]);
+        $process->setTimeout(30);
+        $process->run();
+
+        if ($process->getExitCode() !== 0 || ! is_file($alignedAbsolute)) {
+            \Illuminate\Support\Facades\Log::channel('timelapse')->error('Anchor composition failed', [
+                'frame_id' => $frame->id,
+                'exit' => $process->getExitCode(),
+                'output' => mb_substr(trim($process->getOutput().' '.$process->getErrorOutput()), 0, 500),
+            ]);
+
+            return false;
+        }
+
+        // Privacy: composed from the unblurred archive original — re-blur
+        // faces on the display copy before anything serves it.
+        \App\Services\FaceBlur::blur($alignedAbsolute);
+
+        $applied = json_decode(trim($process->getOutput()), true) ?: [];
+
+        $frame->forceFill([
+            'aligned_path' => $alignedRelative,
+            'align_transform' => $applied['preview_transform'] ?? null,
+        ])->save();
+        $frame->touch();
+
+        return true;
     }
 
     /** The taker can remove their own bad frame; Admins can remove any. */
@@ -942,9 +1636,7 @@ class TimelapseStudio extends Component
             ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
             ->findOrFail($frameId);
 
-        $isAdmin = auth()->user()->vendor_role === 'Admin';
-
-        abort_unless($isAdmin || $frame->taken_by_user_id === auth()->id(), 403);
+        $this->authorize('manageImages', $this->project);
 
         $frame->delete();
 

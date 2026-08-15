@@ -51,9 +51,18 @@
         {{-- VENDOR --}}
         <flux:field>
             <flux:select label="Vendor" wire:model.live="form.vendor_id" variant="listbox" placeholder="Choose vendor..." searchable>
+                <x-slot name="search">
+                    <flux:select.search wire:model.live.debounce.300ms="vendorSearch" placeholder="Search vendors..." />
+                </x-slot>
                 @foreach($this->vendors as $vendor)
                     <flux:select.option value="{{$vendor->id}}">{{$vendor->name}}</flux:select.option>
                 @endforeach
+                @if ($this->hasMoreVendors())
+                    <div wire:intersect="loadMoreVendors" class="px-3 py-2 text-xs text-zinc-400" wire:key="ec-vendor-more-{{ $this->vendorLimit }}">
+                        <span wire:loading.remove wire:target="loadMoreVendors">Scroll for more…</span>
+                        <span wire:loading wire:target="loadMoreVendors">Loading…</span>
+                    </div>
+                @endif
             </flux:select>
             
             @if($this->shouldShowMerchantName)
@@ -285,6 +294,9 @@
 
             <div x-data="{ isMaterialOrder: @entangle('form.is_material_order') }" x-show="isMaterialOrder" x-transition class="mt-2">
                 <flux:select wire:model="form.belongs_to_vendor_id" variant="listbox" placeholder="Belongs to vendor..." searchable label="Belongs To Vendor">
+                    <x-slot name="search">
+                        <flux:select.search wire:model.live.debounce.300ms="vendorSearch" placeholder="Search vendors..." />
+                    </x-slot>
                     @foreach($this->vendors as $vendor)
                         <flux:select.option value="{{ $vendor->id }}">{{ $vendor->name }}</flux:select.option>
                     @endforeach

@@ -16,7 +16,31 @@ class ProjectTimelapseFrame extends Model
 {
     use SoftDeletes;
 
+    /**
+     * Who may fetch the UNBLURRED, full-resolution, EXIF-bearing archive
+     * copy: the person who took the photo, and Admins of the vendor that
+     * owns the project it was taken on. Everyone else — including other
+     * vendors' admins collaborating on the job — gets the blurred display
+     * copy like every other viewer.
+     */
+    public function archiveVisibleTo(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if ($this->taken_by_user_id && $this->taken_by_user_id === $user->id) {
+            return true;
+        }
+
+        $project = $this->timelapse?->project;
+
+        return $project
+            && $user->getRoleForVendor($project->belongs_to_vendor_id) === 'Admin';
+    }
+
     protected $casts = [
+        'align_transform' => 'array',
         'shot_at' => 'datetime',
         'latitude' => 'float',
         'longitude' => 'float',
@@ -31,6 +55,7 @@ class ProjectTimelapseFrame extends Model
         'path',
         'original_path',
         'aligned_path',
+        'align_transform',
         'disk',
         'shot_at',
         'latitude',
@@ -80,6 +105,12 @@ class ProjectTimelapseFrame extends Model
 
     protected static function booted(): void
     {
+        // The archive original's address is a secret, not an id — every frame
+        // gets one at birth so no code path can forget.
+        static::creating(function (self $frame) {
+            $frame->archive_token ??= \Illuminate\Support\Str::random(48);
+        });
+
         // All three copies go together — the archive original, the sequence
         // copy and the registered one. Leaving the original behind would
         // orphan a full-resolution file nothing can reach. A SOFT delete

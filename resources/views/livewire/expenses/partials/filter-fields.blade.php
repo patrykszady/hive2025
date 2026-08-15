@@ -11,20 +11,27 @@
         <div class="flex-1 min-w-0 w-full">
             <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
                 <x-slot name="search">
-                    <flux:select.search placeholder="Search..." />
+                    <flux:select.search wire:model.live.debounce.300ms="vendorSearch" placeholder="Search vendors..." />
                 </x-slot>
                 <flux:select.option value="0">NO VENDOR</flux:select.option>
                 <flux:select.option disabled>---------</flux:select.option>
-                @foreach ($vendors as $vendor)
+                @foreach ($this->vendorOptions as $vendor)
                     <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
                 @endforeach
+                @if ($this->hasMoreVendorOptions())
+                    {{-- Scrolling this into view inside the open dropdown loads the next page. --}}
+                    <div wire:intersect="loadMoreVendorOptions" class="px-3 py-2 text-xs text-zinc-400" wire:key="vendor-more-{{ $this->vendorLimit }}">
+                        <span wire:loading.remove wire:target="loadMoreVendorOptions">Scroll for more…</span>
+                        <span wire:loading wire:target="loadMoreVendorOptions">Loading…</span>
+                    </div>
+                @endif
             </flux:select>
         </div>
 
         <div class="flex-1 min-w-0 w-full">
             <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable clearable placeholder="Choose Project...">
                 <x-slot name="search">
-                    <flux:select.search placeholder="Search..." />
+                    <flux:select.search wire:model.live.debounce.300ms="projectSearch" placeholder="Search projects..." />
                 </x-slot>
                 <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
                 <flux:select.option value="SPLIT">SPLIT</flux:select.option>
@@ -33,9 +40,15 @@
                     <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
                 @endforeach
                 <flux:select.option disabled>---------</flux:select.option>
-                @foreach ($projects as $project)
+                @foreach ($this->projectOptions as $project)
                     <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                 @endforeach
+                @if ($this->hasMoreProjectOptions())
+                    <div wire:intersect="loadMoreProjectOptions" class="px-3 py-2 text-xs text-zinc-400" wire:key="project-more-{{ $this->projectLimit }}">
+                        <span wire:loading.remove wire:target="loadMoreProjectOptions">Scroll for more…</span>
+                        <span wire:loading wire:target="loadMoreProjectOptions">Loading…</span>
+                    </div>
+                @endif
             </flux:select>
         </div>
 
@@ -96,13 +109,13 @@
             <div class="min-w-0 w-full">
                 <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
                     <x-slot name="search">
-                        <flux:select.search placeholder="Search..." />
+                        <flux:select.search wire:model.live.debounce.300ms="vendorSearch" placeholder="Search vendors..." />
                     </x-slot>
                     @if($view !== 'projects.show')
                         <flux:select.option value="0">NO VENDOR</flux:select.option>
                         <flux:select.option disabled>---------</flux:select.option>
                     @endif
-                    @foreach ($vendors as $vendor)
+                    @foreach ($this->vendorOptions as $vendor)
                         <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
                     @endforeach
                 </flux:select>
@@ -114,7 +127,7 @@
             <div class="min-w-0 w-full">
                 <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable clearable placeholder="Choose Project...">
                     <x-slot name="search">
-                        <flux:select.search placeholder="Search..." />
+                        <flux:select.search wire:model.live.debounce.300ms="projectSearch" placeholder="Search projects..." />
                     </x-slot>
                     <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
                     <flux:select.option value="SPLIT">SPLIT</flux:select.option>
@@ -123,7 +136,7 @@
                         <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
                     @endforeach
                     <flux:select.option disabled>---------</flux:select.option>
-                    @foreach ($projects as $project)
+                    @foreach ($this->projectOptions as $project)
                         <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                     @endforeach
                 </flux:select>

@@ -942,7 +942,16 @@ it('creates the task and opens the full editor in edit mode from an sms extracti
         ->assertSet('form.type', 'Task')
         ->assertSet('form.project_id', $project->id)
         ->assertSet('view_text.form_submit', 'edit')
-        ->assertSet('form.checklist', fn ($value) => json_decode(json_encode($value), true) === [['text' => 'Adjust Ring cameras', 'completed' => false]])
+        // Checklist items carry a generated uid now (Task::normalizeChecklist),
+        // so assert the meaningful fields rather than exact array shape.
+        ->assertSet('form.checklist', function ($value) {
+            $items = json_decode(json_encode($value), true);
+
+            return count($items) === 1
+                && $items[0]['text'] === 'Adjust Ring cameras'
+                && $items[0]['completed'] === false
+                && ! empty($items[0]['uid']);
+        })
         ->assertSet('form.dates', ['2026-06-30'])
         ->assertSet('form.time_settings', [
             '2026-06-30' => [

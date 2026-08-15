@@ -113,9 +113,55 @@ class ExpenseIndex extends Component
     public $check = '';
     public $bank_plaid_ins_id = '';
     public $banks = [];
-    public $vendors = [];
-    public $projects = [];
     public $distributions = [];
+
+    /**
+     * Search terms for the vendor/project filters. The option lists used to be
+     * public properties holding every vendor (831) and project (413) — that is
+     * ~1.1k <ui-option> elements rendered server-side AND dehydrated into the
+     * wire payload on every request. They are computed + search-limited now,
+     * backed by Meilisearch (both models are Scout Searchable).
+     */
+    public string $vendorSearch = '';
+
+    public string $projectSearch = '';
+
+    /** Grows as the user scrolls the open dropdown (wire:intersect sentinel). */
+    public int $vendorLimit = self::FILTER_OPTION_LIMIT;
+
+    public int $projectLimit = self::FILTER_OPTION_LIMIT;
+
+    /** Typing a new term restarts paging from the top. */
+    public function updatedVendorSearch(): void
+    {
+        $this->vendorLimit = self::FILTER_OPTION_LIMIT;
+    }
+
+    public function updatedProjectSearch(): void
+    {
+        $this->projectLimit = self::FILTER_OPTION_LIMIT;
+    }
+
+    public function loadMoreVendorOptions(): void
+    {
+        $this->vendorLimit += self::FILTER_OPTION_LIMIT;
+    }
+
+    public function loadMoreProjectOptions(): void
+    {
+        $this->projectLimit += self::FILTER_OPTION_LIMIT;
+    }
+
+    /** True while more rows exist beyond the current limit. */
+    public function hasMoreVendorOptions(): bool
+    {
+        return count($this->vendorOptions) >= $this->vendorLimit;
+    }
+
+    public function hasMoreProjectOptions(): bool
+    {
+        return count($this->projectOptions) >= $this->projectLimit;
+    }
     public $bank_account_ids = [];
     public $view = null;
     public $paginate_number = 8;
@@ -275,34 +321,93 @@ class ExpenseIndex extends Component
 
         $vendorId = auth()->user()->vendor->id;
 
-        $this->vendors = Cache::remember("filters:v{$vendorId}:vendors", 600, function () {
-            return Vendor::whereHas('expenses')
-                ->orWhereHas('transactions')
-                ->orderBy('business_name')
-                ->get(['id', 'business_name', 'business_type']);
-        });
-
-        if ($this->view === 'projects.show' && $this->project_id) {
-            $this->vendors = Vendor::whereHas('expenses', function ($q) {
-                $q->where('project_id', $this->project_id);
-            })->orderBy('business_name')->get(['id', 'business_name', 'business_type']);
-        }
-
-        $this->projects = Cache::remember("filters:v{$vendorId}:projects", 600, function () {
-            return Project::whereHas('expenses')
-                ->orderBy('created_at', 'DESC')
-                ->get(['id', 'project_name', 'address']);
-        });
-
-        if ($this->view === 'vendors.show' && $this->expense_vendor) {
-            $this->projects = Project::whereHas('expenses', function ($q) {
-                $q->where('vendor_id', $this->expense_vendor);
-            })->orderBy('created_at', 'DESC')->get(['id', 'project_name', 'address']);
-        }
-
         $this->distributions = Cache::remember("filters:v{$vendorId}:distributions", 600, function () {
             return Distribution::all(['id', 'name']);
         });
+    }
+
+    /** How many options a filter dropdown renders at once. */
+    private const FILTER_OPTION_LIMIT = 25;
+
+    /**
+     * Vendors for the filter dropdown: the search hits when the user types,
+     * otherwise the most-used ones — plus whatever is currently selected, so
+     * an active filter always shows its own label.
+     */
+    #[Computed]
+    public function vendorOptions()
+    {
+        $term = trim($this->vendorSearch);
+        $columns = ['id', 'business_name', 'business_type'];
+
+        // Embedded on a project page: only vendors billed to that project.
+        if ($this->view === 'projects.show' && $this->project_id) {
+            return Vendor::whereHas('expenses', fn ($q) => $q->where('project_id', $this->project_id))
+                ->when($term !== '', fn ($q) => $q->where('business_name', 'like', "%{$term}%"))
+                ->orderBy('business_name')
+                ->limit($this->vendorLimit)
+                ->get($columns);
+        }
+
+        $options = $term !== ''
+            ? Vendor::search($term)->take($this->vendorLimit)->get()
+            : Vendor::whereHas('expenses')
+                ->orWhereHas('transactions')
+                ->orderBy('business_name')
+                ->limit($this->vendorLimit)
+                ->get($columns);
+
+        return $this->withSelectedOption($options, $this->expense_vendor, Vendor::class);
+    }
+
+    /**
+     * Projects for the filter dropdown — same shape as vendorOptions().
+     */
+    #[Computed]
+    public function projectOptions()
+    {
+        $term = trim($this->projectSearch);
+        $columns = ['id', 'project_name', 'address'];
+
+        // Embedded on a vendor page: only projects that vendor billed to.
+        if ($this->view === 'vendors.show' && $this->expense_vendor) {
+            return Project::whereHas('expenses', fn ($q) => $q->where('vendor_id', $this->expense_vendor))
+                ->when($term !== '', fn ($q) => $q->where('project_name', 'like', "%{$term}%"))
+                ->orderByDesc('created_at')
+                ->limit($this->projectLimit)
+                ->get($columns);
+        }
+
+        $options = $term !== ''
+            ? Project::search($term)->take($this->projectLimit)->get()
+            : Project::whereHas('expenses')
+                ->orderByDesc('created_at')
+                ->limit($this->projectLimit)
+                ->get($columns);
+
+        return $this->withSelectedOption($options, $this->project_id, Project::class);
+    }
+
+    /**
+     * Keep the active filter's own option in the list. Without this a selected
+     * value outside the current page of results renders as a blank control.
+     */
+    private function withSelectedOption($options, $selectedId, string $model)
+    {
+        $selectedId = is_string($selectedId) || is_int($selectedId) ? trim((string) $selectedId) : '';
+
+        // '0', 'NO_PROJECT', 'SPLIT', 'D:3' are static options in the blade.
+        if ($selectedId === '' || ! ctype_digit($selectedId) || (int) $selectedId === 0) {
+            return $options;
+        }
+
+        if ($options->contains('id', (int) $selectedId)) {
+            return $options;
+        }
+
+        $selected = $model::find((int) $selectedId);
+
+        return $selected ? $options->prepend($selected) : $options;
     }
 
     public function sort($column)

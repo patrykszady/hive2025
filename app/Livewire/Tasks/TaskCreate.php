@@ -2099,6 +2099,7 @@ class TaskCreate extends Component
     public function addChecklistItem($text = '')
     {
         $this->form->checklist[] = [
+            'uid' => 'c'.substr(md5(uniqid('', true)), 0, 10),
             'text' => $text,
             'completed' => false,
         ];
@@ -2184,13 +2185,27 @@ class TaskCreate extends Component
             return;
         }
 
-        // Checklist is stored in options JSON column
-        $options = (array) ($task->options ?? []);
-        $options['checklist'] = $this->form->checklist;
+        // Checklist is stored in options JSON column. Re-read it and merge:
+        // boxes ticked from a task card (possibly on another device) while this
+        // modal sat open must not be reverted by this save.
+        $fresh = $task->fresh();
+        $options = json_decode(json_encode($fresh?->options ?? $task->options ?? []), true) ?: [];
+
+        $merged = \App\Models\Task::mergeChecklist(
+            $options['checklist'] ?? [],
+            $this->form->checklistOriginal,
+            $this->form->checklist,
+        );
+
+        $options['checklist'] = $merged;
 
         $task->update([
             'options' => $options,
         ]);
+
+        // The merge result becomes the new base for the next save in this session.
+        $this->form->checklist = $merged;
+        $this->form->checklistOriginal = $merged;
     }
 
     /**

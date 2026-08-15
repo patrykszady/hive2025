@@ -40,68 +40,68 @@
                                     $showProjectInfo = count($this->clientProjectIds) > 1;
                                 @endphp
 
+                                {{-- Imperative day styling: binding children to a parent
+                                     x-data scope threw "badge is not defined" during morphs
+                                     (see components/upcoming-tasks-list-day.blade.php). --}}
                                 <div
                                     wire:key="day-{{ $date }}"
                                     class="space-y-2"
-                                    x-data="{
-                                        date: '{{ $date }}',
-                                        isWeekend: {{ $isWeekend ? 'true' : 'false' }},
-                                        hasTasks: {{ $hasTasks ? 'true' : 'false' }},
-                                        badge: '',
-                                        isPast: false,
-                                        opacityClass: '',
-                                        textColorClass: 'text-zinc-700 dark:text-zinc-300',
-                                        init() {
-                                            const parts = this.date.split('-');
-                                            const d = new Date(parts[0], parts[1] - 1, parts[2]);
-                                            d.setHours(0, 0, 0, 0);
+                                    data-day-wrapper
+                                    x-init="(() => {
+                                        const parts = '{{ $date }}'.split('-');
+                                        const d = new Date(parts[0], parts[1] - 1, parts[2]);
+                                        d.setHours(0, 0, 0, 0);
 
-                                            const now = new Date();
-                                            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                                            const tomorrow = new Date(today);
-                                            tomorrow.setDate(tomorrow.getDate() + 1);
+                                        const now = new Date();
+                                        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                                        const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+                                        const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
-                                            const yesterday = new Date(today);
-                                            yesterday.setDate(yesterday.getDate() - 1);
+                                        const isWeekend = {{ $isWeekend ? 'true' : 'false' }};
+                                        const hasTasks = {{ $hasTasks ? 'true' : 'false' }};
+                                        const isPast = d.getTime() < today.getTime();
+                                        const badge = d.getTime() === today.getTime() ? 'today'
+                                            : (d.getTime() === tomorrow.getTime() ? 'tomorrow'
+                                            : (d.getTime() === yesterday.getTime() ? 'yesterday' : ''));
 
-                                            this.isPast = d.getTime() < today.getTime();
-                                            this.badge = d.getTime() === today.getTime() ? 'today'
-                                                : (d.getTime() === tomorrow.getTime() ? 'tomorrow'
-                                                : (d.getTime() === yesterday.getTime() ? 'yesterday' : ''));
+                                        const opacity = (isPast && !hasTasks) ? (isWeekend ? 'opacity-30' : 'opacity-40')
+                                            : ((isPast && hasTasks) || (isWeekend && !hasTasks)) ? 'opacity-50' : '';
 
-                                            if (this.isPast && !this.hasTasks) {
-                                                this.opacityClass = this.isWeekend ? 'opacity-30' : 'opacity-40';
-                                            } else if (this.isPast && this.hasTasks) {
-                                                this.opacityClass = 'opacity-50';
-                                            } else if (this.isWeekend && !this.hasTasks) {
-                                                this.opacityClass = 'opacity-50';
-                                            }
+                                        $el.classList.remove('opacity-30', 'opacity-40', 'opacity-50');
+                                        if (opacity) $el.classList.add(opacity);
 
-                                            if (this.badge === 'today') {
-                                                this.textColorClass = 'text-indigo-600 dark:text-indigo-400';
-                                            } else if (this.isPast || this.isWeekend) {
-                                                this.textColorClass = 'text-zinc-400 dark:text-zinc-500';
-                                            } else {
-                                                this.textColorClass = 'text-zinc-700 dark:text-zinc-300';
-                                            }
+                                        const heading = $el.querySelector('[data-day-heading]');
+                                        if (heading) {
+                                            heading.classList.remove(
+                                                'text-indigo-600', 'dark:text-indigo-400',
+                                                'text-zinc-400', 'dark:text-zinc-500',
+                                                'text-zinc-700', 'dark:text-zinc-300',
+                                            );
+                                            const color = badge === 'today' ? ['text-indigo-600', 'dark:text-indigo-400']
+                                                : (isPast || isWeekend) ? ['text-zinc-400', 'dark:text-zinc-500']
+                                                : ['text-zinc-700', 'dark:text-zinc-300'];
+                                            heading.classList.add(...color);
                                         }
-                                    }"
-                                    :class="opacityClass"
+
+                                        $el.querySelectorAll('[data-day-badge]').forEach(el => {
+                                            el.style.display = el.dataset.dayBadge === badge ? '' : 'none';
+                                        });
+                                    })()"
                                 >
                                     {{-- Date Header --}}
                                     <div class="flex items-center gap-2 min-h-6">
-                                        <flux:heading size="sm" ::class="textColorClass">
+                                        <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300" data-day-heading>
                                             {{ $carbonDate->format('D, M j, Y') }}
                                         </flux:heading>
-                                        <template x-if="badge === 'today'">
+                                        <span data-day-badge="today" style="display:none">
                                             <flux:badge color="indigo" size="sm">Today</flux:badge>
-                                        </template>
-                                        <template x-if="badge === 'tomorrow'">
+                                        </span>
+                                        <span data-day-badge="tomorrow" style="display:none">
                                             <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
-                                        </template>
-                                        <template x-if="badge === 'yesterday'">
+                                        </span>
+                                        <span data-day-badge="yesterday" style="display:none">
                                             <flux:badge color="zinc" size="sm">Yesterday</flux:badge>
-                                        </template>
+                                        </span>
                                         @if($tasks->isEmpty())
                                             <flux:badge color="zinc" size="sm">No Tasks</flux:badge>
                                         @endif

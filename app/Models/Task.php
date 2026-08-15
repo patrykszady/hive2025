@@ -287,6 +287,116 @@ class Task extends Model
     }
 
     /**
+     * Normalize a stored checklist into a list of arrays, giving every item a
+     * stable uid so edits can be matched across concurrent writers.
+     *
+     * @return array<int, array{uid: string, text: string, completed: bool}>
+     */
+    public static function normalizeChecklist($checklist, bool $assignUids = true): array
+    {
+        $items = json_decode(json_encode($checklist ?? []), true);
+        $items = is_array($items) ? $items : [];
+
+        $out = [];
+
+        foreach (array_values($items) as $index => $item) {
+            $item = is_array($item) ? $item : ['text' => (string) $item];
+            $uid = trim((string) ($item['uid'] ?? ''));
+
+            // Minting a uid must never happen while MATCHING two copies of the
+            // same list — a fresh random id on each side would make legacy
+            // (uid-less) items look like different items. mergeChecklist()
+            // passes false and assigns uids only to its final result.
+            if ($uid === '' && $assignUids) {
+                $uid = 'c'.substr(md5(($item['text'] ?? '').'|'.$index.'|'.uniqid('', true)), 0, 10);
+            }
+
+            $out[] = [
+                'uid' => $uid,
+                'text' => (string) ($item['text'] ?? ''),
+                'completed' => (bool) ($item['completed'] ?? false),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Three-way merge for a checklist being saved from a form that was loaded
+     * a while ago.
+     *
+     * Ticking a box from a task CARD writes straight to the task, while the
+     * task modal holds its own copy from when it opened. Saving the modal used
+     * to overwrite the whole array, silently reverting anything ticked
+     * elsewhere in the meantime (a crew member on site vs. the office desktop).
+     *
+     * Rules, per item, keyed by uid (falling back to text for legacy rows):
+     *  - the modal is authoritative for text, order, additions and removals;
+     *  - `completed` only follows the modal when the modal actually CHANGED it
+     *    relative to what it loaded; otherwise the stored value wins;
+     *  - items added elsewhere since the modal opened are kept.
+     *
+     * @param  array<int, mixed>  $stored    checklist as it is in the database now
+     * @param  array<int, mixed>  $original  checklist as the form loaded it
+     * @param  array<int, mixed>  $incoming  checklist the form is submitting
+     * @return array<int, array{uid: string, text: string, completed: bool}>
+     */
+    public static function mergeChecklist($stored, $original, $incoming): array
+    {
+        // Match on the ids as they actually are (no minting), so legacy rows
+        // fall back to text matching instead of getting fresh random uids.
+        $stored = self::normalizeChecklist($stored, assignUids: false);
+        $original = self::normalizeChecklist($original, assignUids: false);
+        $incoming = self::normalizeChecklist($incoming, assignUids: false);
+
+        $key = fn (array $item): string => $item['uid'] !== ''
+            ? 'u:'.$item['uid']
+            : 't:'.mb_strtolower(trim($item['text']));
+
+        $storedByKey = [];
+        foreach ($stored as $item) {
+            $storedByKey[$key($item)] = $item;
+        }
+
+        $originalByKey = [];
+        foreach ($original as $item) {
+            $originalByKey[$key($item)] = $item;
+        }
+
+        $merged = [];
+        $seen = [];
+
+        foreach ($incoming as $item) {
+            $k = $key($item);
+            $seen[$k] = true;
+
+            $storedItem = $storedByKey[$k] ?? null;
+            $originalItem = $originalByKey[$k] ?? null;
+
+            // The form left this box alone — keep whatever the stored copy says.
+            if ($storedItem !== null && $originalItem !== null
+                && $item['completed'] === $originalItem['completed']) {
+                $item['completed'] = $storedItem['completed'];
+            }
+
+            $merged[] = $item;
+        }
+
+        // Added by someone else after the form loaded: not in the submission,
+        // and not something the form could have deliberately removed.
+        foreach ($stored as $item) {
+            $k = $key($item);
+
+            if (! isset($seen[$k]) && ! isset($originalByKey[$k])) {
+                $merged[] = $item;
+            }
+        }
+
+        // Stamp uids on the way out so subsequent merges have stable ids.
+        return self::normalizeChecklist($merged);
+    }
+
+    /**
      * Hydrate the assigned-users relation for a whole list of tasks with ONE
      * query. Card lists read $task->users per card — unprimed, that is one
      * User::whereIn query per task (Task::getUsersAttribute).

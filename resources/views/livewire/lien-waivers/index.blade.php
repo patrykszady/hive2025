@@ -210,7 +210,10 @@
                         </flux:description>
 
                         @foreach($ssRows as $i => $row)
-                            <div class="space-y-2 rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-700 {{ empty($row['include']) ? 'opacity-50' : '' }}">
+                            {{-- Keyed by vendor: without this, a wire:model.live
+                                 change in one row lets the morph carry checkbox
+                                 state onto a different vendor's row. --}}
+                            <div wire:key="ss-row-{{ $row['vendor_id'] ?? $i }}" class="space-y-2 rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-700 {{ empty($row['include']) ? 'opacity-50' : '' }}">
                                 <div class="flex min-w-0 items-center gap-2">
                                     <flux:checkbox wire:model.live="ssRows.{{ $i }}.include" />
                                     <div class="min-w-0">
@@ -219,6 +222,17 @@
                                         </div>
                                         <div class="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
                                             <span>Paid to date: ${{ number_format((float) $row['paid'], 2) }}</span>
+                                            @if(!empty($row['prior_signed_id']))
+                                                @php($priorMatches = abs((float) ($row['prior_signed_amount'] ?? 0) - (float) $row['paid']) < 0.01)
+                                                <flux:tooltip position="top" content="{{ $priorMatches
+                                                    ? 'Unchanged since the last signed waiver — it will be carried into this draw instead of requesting a new signature.'
+                                                    : 'Paid-to-date has moved since the last signed waiver ($'.number_format((float) $row['prior_signed_amount'], 2).'). Check to carry that signed waiver into this draw instead of requesting a new one.' }}">
+                                                    <label class="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-0.5 {{ !empty($row['reuse_signed']) ? 'border-green-300 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300' : 'border-zinc-200 dark:border-zinc-700' }}">
+                                                        <flux:checkbox wire:model.live="ssRows.{{ $i }}.reuse_signed" />
+                                                        <span>Use signed ${{ number_format((float) $row['prior_signed_amount'], 2) }}</span>
+                                                    </label>
+                                                </flux:tooltip>
+                                            @endif
                                             {{-- Auto-decided outcome: real contract fully paid → FINAL waiver;
                                                  no contract on file → waiver to date marked OPEN. --}}
                                             @if(($row['contract'] ?? '') !== '' && (float) $row['paid'] + (float) str_replace(',', '', $row['this_payment'] !== '' ? $row['this_payment'] : '0') + 0.009 >= (float) str_replace(',', '', $row['contract']))

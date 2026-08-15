@@ -33,3 +33,7 @@ data.ms/
 mailtrap-mcp/
 .claude/settings.local.json
 /storage/blaze
+
+# Python bytecode from the CV scripts
+scripts/__pycache__/
+*.pyc

@@ -29,70 +29,73 @@
     };
 @endphp
 
-{{-- Server pre-computes badge/opacity/color; Alpine confirms using browser timezone --}}
+{{-- Server pre-computes badge/opacity/color from the browser-date cookie;
+     Alpine only CORRECTS them if the real browser timezone disagrees.
+
+     Deliberately imperative: the previous version kept state in x-data and
+     bound children with ::class / x-show, which threw "badge is not defined"
+     and "textColorClass is not defined" on every load — during the lazy-load
+     morph the children are evaluated before the parent scope exists. Writing
+     to the DOM from this element's own x-init has no cross-element scope to
+     lose. Same fix as components/truncate-tooltip.blade.php. --}}
 <div
     class="space-y-2 {{ $serverOpacity }}"
-    x-data="{
-        date: '{{ $date }}',
-        isWeekend: {{ $isWeekend ? 'true' : 'false' }},
-        hasTasks: {{ $hasTasks ? 'true' : 'false' }},
-        badge: '{{ $serverBadge }}',
-        isPast: {{ $serverIsPast ? 'true' : 'false' }},
-        opacityClass: '{{ $serverOpacity }}',
-        textColorClass: '{{ $serverTextColor }}',
-        init() {
-            const parts = this.date.split('-');
-            const d = new Date(parts[0], parts[1] - 1, parts[2]);
-            d.setHours(0, 0, 0, 0);
+    data-day-wrapper
+    x-init="(() => {
+        const parts = '{{ $date }}'.split('-');
+        const d = new Date(parts[0], parts[1] - 1, parts[2]);
+        d.setHours(0, 0, 0, 0);
 
-            const now = new Date();
-            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const tomorrow = new Date(today);
-            tomorrow.setDate(tomorrow.getDate() + 1);
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+        const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
-            const yesterday = new Date(today);
-            yesterday.setDate(yesterday.getDate() - 1);
+        const isWeekend = {{ $isWeekend ? 'true' : 'false' }};
+        const hasTasks = {{ $hasTasks ? 'true' : 'false' }};
+        const isPast = d.getTime() < today.getTime();
+        const badge = d.getTime() === today.getTime() ? 'today'
+            : (d.getTime() === tomorrow.getTime() ? 'tomorrow'
+            : (d.getTime() === yesterday.getTime() ? 'yesterday' : ''));
 
-            this.isPast = d.getTime() < today.getTime();
-            this.badge = d.getTime() === today.getTime() ? 'today'
-                : (d.getTime() === tomorrow.getTime() ? 'tomorrow'
-                : (d.getTime() === yesterday.getTime() ? 'yesterday' : ''));
+        const opacity = (isPast && !hasTasks) ? (isWeekend ? 'opacity-30' : 'opacity-40')
+            : ((isPast && hasTasks) || (isWeekend && !hasTasks)) ? 'opacity-50' : '';
 
-            if (this.isPast && !this.hasTasks) {
-                this.opacityClass = this.isWeekend ? 'opacity-30' : 'opacity-40';
-            } else if (this.isPast && this.hasTasks) {
-                this.opacityClass = 'opacity-50';
-            } else if (this.isWeekend && !this.hasTasks) {
-                this.opacityClass = 'opacity-50';
-            } else {
-                this.opacityClass = '';
-            }
+        $el.classList.remove('opacity-30', 'opacity-40', 'opacity-50');
+        if (opacity) $el.classList.add(opacity);
 
-            if (this.badge === 'today') {
-                this.textColorClass = 'text-indigo-600 dark:text-indigo-400';
-            } else if (this.isPast || this.isWeekend) {
-                this.textColorClass = 'text-zinc-400 dark:text-zinc-500';
-            } else {
-                this.textColorClass = 'text-zinc-700 dark:text-zinc-300';
-            }
+        const heading = $el.querySelector('[data-day-heading]');
+        if (heading) {
+            heading.classList.remove(
+                'text-indigo-600', 'dark:text-indigo-400',
+                'text-zinc-400', 'dark:text-zinc-500',
+                'text-zinc-700', 'dark:text-zinc-300',
+            );
+            const color = badge === 'today' ? ['text-indigo-600', 'dark:text-indigo-400']
+                : (isPast || isWeekend) ? ['text-zinc-400', 'dark:text-zinc-500']
+                : ['text-zinc-700', 'dark:text-zinc-300'];
+            heading.classList.add(...color);
         }
-    }"
-    :class="opacityClass"
+
+        $el.querySelectorAll('[data-day-badge]').forEach(el => {
+            el.style.display = el.dataset.dayBadge === badge ? '' : 'none';
+        });
+    })()"
 >
     {{-- Date Header - min-h-6 reserves space for badge to prevent layout shift --}}
     <div class="flex items-center gap-2 min-h-6">
-        <flux:heading size="sm" class="{{ $serverTextColor }}" ::class="textColorClass">
+        <flux:heading size="sm" class="{{ $serverTextColor }}" data-day-heading>
             {{ $carbonDate->format('D, M j') }}
         </flux:heading>
 
-        {{-- Badges: server-rendered visible immediately, Alpine hides/shows on init --}}
-        <span x-show="badge === 'today'" @if($serverBadge !== 'today') style="display:none" @endif>
+        {{-- Server-rendered visible immediately; x-init above hides the wrong ones. --}}
+        <span data-day-badge="today" @if($serverBadge !== 'today') style="display:none" @endif>
             <flux:badge color="indigo" size="sm">Today</flux:badge>
         </span>
-        <span x-show="badge === 'tomorrow'" @if($serverBadge !== 'tomorrow') style="display:none" @endif>
+        <span data-day-badge="tomorrow" @if($serverBadge !== 'tomorrow') style="display:none" @endif>
             <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
         </span>
-        <span x-show="badge === 'yesterday'" @if($serverBadge !== 'yesterday') style="display:none" @endif>
+        <span data-day-badge="yesterday" @if($serverBadge !== 'yesterday') style="display:none" @endif>
             <flux:badge color="zinc" size="sm">Yesterday</flux:badge>
         </span>
     </div>

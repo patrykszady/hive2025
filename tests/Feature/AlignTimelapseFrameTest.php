@@ -96,12 +96,21 @@ PY]);
     $anchor = alignFrameRow($fx['timelapse'], 'anchor.jpg', 1);
     $second = alignFrameRow($fx['timelapse'], 'second.jpg', 2);
 
+    // Color-grading toward the anchor chains automatically off alignment —
+    // there is no manual harmonize step.
+    \Illuminate\Support\Facades\Bus::fake([\App\Jobs\HarmonizeTimelapseFrameColor::class]);
+
     (new AlignTimelapseFrame($second->id))->handle();
 
     $second->refresh();
 
     expect($second->aligned_path)->toBe("timelapse/{$fx['project']->id}/aligned-second.jpg");
     expect($disk->exists($second->aligned_path))->toBeTrue();
+
+    \Illuminate\Support\Facades\Bus::assertDispatched(
+        \App\Jobs\HarmonizeTimelapseFrameColor::class,
+        fn ($job) => $job->frameId === $second->id && $job->anchorFrameId === $anchor->id,
+    );
 
     // The aligned copy must sit measurably closer to the anchor than the
     // shifted original does. Measured on the interior: the strip the warp
@@ -166,6 +175,8 @@ cv2.imwrite(r'{$dir}/drifted.jpg', drifted)
 PY]);
     $gen->mustRun();
 
+    // Isolate the aligner: the auto-chained color grade is tested on its own.
+    \Illuminate\Support\Facades\Bus::fake([\App\Jobs\HarmonizeTimelapseFrameColor::class]);
     alignFrameRow($fx['timelapse'], 'anchor.jpg', 1);
     $drifted = alignFrameRow($fx['timelapse'], 'drifted.jpg', 2);
 
@@ -177,7 +188,7 @@ PY]);
         ->and($disk->exists("timelapse/{$fx['project']->id}/aligned-drifted.jpg"))->toBeFalse();
 });
 
-it('fills what little border a kept alignment has with black, never smear', function () {
+it('fills what little border a kept alignment has from the anchor, never smear', function () {
     $python = cvPython();
 
     if ($python === null) {
@@ -205,6 +216,8 @@ cv2.imwrite(r'{$dir}/nudged.jpg', shifted)
 PY]);
     $gen->mustRun();
 
+    // Isolate the aligner: the auto-chained color grade is tested on its own.
+    \Illuminate\Support\Facades\Bus::fake([\App\Jobs\HarmonizeTimelapseFrameColor::class]);
     alignFrameRow($fx['timelapse'], 'anchor.jpg', 1);
     $nudged = alignFrameRow($fx['timelapse'], 'nudged.jpg', 2);
 
@@ -212,17 +225,67 @@ PY]);
 
     expect($nudged->fresh()->aligned_path)->not->toBeNull();
 
-    // The strip the warp couldn't fill is black, not a copy of the column
-    // beside it — the scene here is bright (235), so smear would be far from 0.
+    // The shot drifted up-left, so registering it back leaves a strip on the
+    // LEFT and TOP that the warp couldn't reach. It must hold the ANCHOR's
+    // pixels for that strip — real scene, correctly placed — not a smeared
+    // copy of the column beside it (the shifted pattern would measure wildly
+    // off) and not black (235-bright scene → diff ≈ 235). The other two
+    // edges are real photo and must stay bright.
     $measure = new Process([$python, '-c', <<<PY
 import cv2, numpy as np
-a = cv2.imread(r'{$dir}/aligned-nudged.jpg', cv2.IMREAD_GRAYSCALE)
-print(float(a[:, -1].mean()), float(a[-1, :].mean()))
+a = cv2.imread(r'{$dir}/aligned-nudged.jpg', cv2.IMREAD_GRAYSCALE).astype(np.float32)
+ref = cv2.imread(r'{$dir}/anchor.jpg', cv2.IMREAD_GRAYSCALE).astype(np.float32)
+strip = float(np.mean(np.abs(np.concatenate([(a - ref)[:, :14].ravel(), (a - ref)[:9, :].ravel()]))))
+print(strip, float(a[:, -1].mean()), float(a[-1, :].mean()))
 PY]);
     $measure->mustRun();
-    [$rightEdge, $bottomEdge] = array_map('floatval', explode(' ', trim($measure->getOutput())));
+    [$stripDiff, $rightEdge, $bottomEdge] = array_map('floatval', explode(' ', trim($measure->getOutput())));
 
-    expect(min($rightEdge, $bottomEdge))->toBeLessThan(20.0);
+    expect($stripDiff)->toBeLessThan(45.0)
+        ->and(min($rightEdge, $bottomEdge))->toBeGreaterThan(100.0);
+});
+
+it('refuses to re-frame automatically — the aligner removes wobble, not stance', function () {
+    $python = cvPython();
+
+    if ($python === null) {
+        $this->markTestSkipped('OpenCV venv not available on this machine.');
+    }
+
+    $fx = alignFixture();
+    $disk = Storage::disk('files');
+    $dir = $disk->path("timelapse/{$fx['project']->id}");
+    @mkdir($dir, 0777, true);
+
+    // The same scene shot from several steps back: registering it onto the
+    // anchor needs a 1.25× zoom. That is a RE-FRAMING — original pixels
+    // traded for crop — and a human's call in the studio's manual aligner,
+    // so the automatic pass must keep the original untouched.
+    $gen = new Process([$python, '-c', <<<PY
+import cv2, numpy as np
+rng = np.random.default_rng(17)
+ref = np.full((600, 800, 3), 235, np.uint8)
+for _ in range(160):
+    x, y = int(rng.integers(0, 740)), int(rng.integers(0, 540))
+    w, h = int(rng.integers(12, 60)), int(rng.integers(12, 60))
+    color = tuple(int(c) for c in rng.integers(0, 220, 3))
+    cv2.rectangle(ref, (x, y), (x + w, y + h), color, -1)
+far = cv2.warpAffine(ref, cv2.getRotationMatrix2D((400, 300), 0, 0.8), (800, 600),
+                     borderMode=cv2.BORDER_REPLICATE)
+cv2.imwrite(r'{$dir}/anchor.jpg', ref)
+cv2.imwrite(r'{$dir}/far.jpg', far)
+PY]);
+    $gen->mustRun();
+
+    // Isolate the aligner: the auto-chained color grade is tested on its own.
+    \Illuminate\Support\Facades\Bus::fake([\App\Jobs\HarmonizeTimelapseFrameColor::class]);
+    alignFrameRow($fx['timelapse'], 'anchor.jpg', 1);
+    $far = alignFrameRow($fx['timelapse'], 'far.jpg', 2);
+
+    (new AlignTimelapseFrame($far->id))->handle();
+
+    expect($far->fresh()->aligned_path)->toBeNull()
+        ->and($disk->exists("timelapse/{$fx['project']->id}/aligned-far.jpg"))->toBeFalse();
 });
 
 it('leaves the frame unaligned when python is not available', function () {
@@ -240,7 +303,7 @@ it('leaves the frame unaligned when python is not available', function () {
     expect($second->fresh()->aligned_path)->toBeNull();
 });
 
-it('serves the aligned copy once it exists and deletes it with the frame', function () {
+it('serves the aligned copy, keeps files through soft delete, purges on force delete', function () {
     $fx = alignFixture();
     $disk = Storage::disk('files');
     $disk->put("timelapse/{$fx['project']->id}/raw.jpg", 'original-bytes');
@@ -251,7 +314,14 @@ it('serves the aligned copy once it exists and deletes it with the frame', funct
 
     expect($frame->display_path)->toBe("timelapse/{$fx['project']->id}/aligned-raw.jpg");
 
+    // A soft delete keeps every file — the frame is recoverable.
     $frame->delete();
+
+    $disk->assertExists("timelapse/{$fx['project']->id}/raw.jpg");
+    $disk->assertExists("timelapse/{$fx['project']->id}/aligned-raw.jpg");
+
+    // Force delete purges all copies together.
+    $frame->forceDelete();
 
     $disk->assertMissing("timelapse/{$fx['project']->id}/raw.jpg");
     $disk->assertMissing("timelapse/{$fx['project']->id}/aligned-raw.jpg");

@@ -99,20 +99,12 @@ it('numbers frames sequentially so the gsc slider plays them in order', function
     expect(ProjectTimelapseFrame::orderBy('id')->pluck('sort_order')->all())->toBe([1, 2, 3]);
 });
 
-it('lets a member delete their own frame but not someone else\'s', function () {
+it('lets only owning-vendor admins delete frames — even the taker cannot', function () {
     $fx = timelapseFixture(role: 'Member');
 
     $timelapse = ProjectTimelapse::defaultFor($fx['project']);
 
-    $other = User::query()->create([
-        'first_name' => 'Other',
-        'last_name' => 'Crew',
-        'email' => 'other.'.uniqid().'@example.test',
-        'cell_phone' => fake()->unique()->numerify('224666####'),
-    ]);
-
     Storage::disk('files')->put("timelapse/{$fx['project']->id}/own.jpg", 'x');
-    Storage::disk('files')->put("timelapse/{$fx['project']->id}/theirs.jpg", 'x');
 
     $own = ProjectTimelapseFrame::create([
         'project_timelapse_id' => $timelapse->id,
@@ -122,26 +114,105 @@ it('lets a member delete their own frame but not someone else\'s', function () {
         'disk' => 'files',
         'sort_order' => 1,
     ]);
-    $theirs = ProjectTimelapseFrame::create([
-        'project_timelapse_id' => $timelapse->id,
-        'taken_by_user_id' => $other->id,
-        'filename' => 'theirs.jpg',
-        'path' => "timelapse/{$fx['project']->id}/theirs.jpg",
-        'disk' => 'files',
-        'sort_order' => 2,
+
+    // The crew member who SHOT it still can't remove it — curating the
+    // project's record belongs to the owning vendor's admins.
+    Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->call('deleteFrame', $own->id)
+        ->assertForbidden();
+
+    expect(ProjectTimelapseFrame::find($own->id))->not->toBeNull();
+
+    // An Admin at the vendor that owns the project can, and it is SOFT.
+    $admin = new User();
+    $admin->forceFill([
+        'first_name' => 'Owning',
+        'last_name' => 'Admin',
+        'email' => 'owning.admin.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224777####'),
+        'primary_vendor_id' => $fx['vendor']->id,
+        'registration' => ['registered' => true],
     ]);
+    $admin->save();
+    $fx['vendor']->users()->attach($admin->id, ['role_id' => 1]);
 
-    $component = Livewire::actingAs($fx['user'])
-        ->test(TimelapseStudio::class, ['project' => $fx['project']]);
+    Livewire::actingAs($admin)
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->call('deleteFrame', $own->id);
 
-    $component->call('deleteFrame', $own->id);
     expect(ProjectTimelapseFrame::find($own->id))->toBeNull()
         ->and(ProjectTimelapseFrame::withTrashed()->find($own->id)->trashed())->toBeTrue();
     // Soft delete keeps the file — only a force delete removes copies.
     Storage::disk('files')->assertExists("timelapse/{$fx['project']->id}/own.jpg");
+});
 
-    $component->call('deleteFrame', $theirs->id)->assertStatus(403);
-    expect(ProjectTimelapseFrame::find($theirs->id))->not->toBeNull();
+it('locks image curation to the owning vendor — an outside admin can look but not touch', function () {
+    $fx = timelapseFixture();
+
+    $timelapse = \App\Models\ProjectTimelapse::create([
+        'project_id' => $fx['project']->id,
+        'title' => 'Back Wall',
+        'kind' => 'timelapse',
+    ]);
+    Storage::disk('files')->put("timelapse/{$fx['project']->id}/a.jpg", 'a');
+    Storage::disk('files')->put("timelapse/{$fx['project']->id}/b.jpg", 'b');
+    $first = ProjectTimelapseFrame::create([
+        'project_timelapse_id' => $timelapse->id, 'filename' => 'a.jpg',
+        'path' => "timelapse/{$fx['project']->id}/a.jpg", 'disk' => 'files', 'sort_order' => 1,
+    ]);
+    $second = ProjectTimelapseFrame::create([
+        'project_timelapse_id' => $timelapse->id, 'filename' => 'b.jpg',
+        'path' => "timelapse/{$fx['project']->id}/b.jpg", 'disk' => 'files', 'sort_order' => 2,
+    ]);
+
+    // An Admin — but at ANOTHER vendor, collaborating on this project.
+    $otherVendor = Vendor::factory()->create();
+    $otherVendor->forceFill(['business_type' => 'LLC', 'registration' => ['registered' => true]])->save();
+    $outsider = new User();
+    $outsider->forceFill([
+        'first_name' => 'Sub',
+        'last_name' => 'Admin',
+        'email' => 'sub.admin.'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224888####'),
+        'primary_vendor_id' => $otherVendor->id,
+        'registration' => ['registered' => true],
+    ]);
+    $outsider->save();
+    $otherVendor->users()->attach($outsider->id, ['role_id' => 1]);
+    $fx['project']->vendors()->attach($otherVendor->id, ['client_id' => $fx['project']->client_id]);
+
+    expect($outsider->vendor_role)->toBe('Admin');
+
+    $component = Livewire::actingAs($outsider)
+        ->test(TimelapseStudio::class, ['project' => $fx['project']]);
+
+    // They can SEE the photos…
+    $component->assertSet('canManageImages', false)
+        ->assertOk()
+        // …but no management chrome is offered.
+        ->assertDontSee('Edit timelapse')
+        ->assertDontSee('Move frame earlier');
+
+    // And every mutating call is refused server-side.
+    foreach ([
+        ['toggleEditCollection', [$timelapse->id]],
+        ['deleteCollection', [$timelapse->id]],
+        ['moveFrame', [$second->id, -1]],
+        ['deleteFrame', [$first->id]],
+        ['setAlignmentAnchor', [$second->id]],
+        ['openFrameAligner', [$second->id]],
+        ['clearAlignment', [$second->id]],
+    ] as [$method, $args]) {
+        Livewire::actingAs($outsider)
+            ->test(TimelapseStudio::class, ['project' => $fx['project']])
+            ->call($method, ...$args)
+            ->assertForbidden();
+    }
+
+    expect($timelapse->fresh())->not->toBeNull()
+        ->and($first->fresh())->not->toBeNull()
+        ->and($timelapse->frames()->pluck('filename')->all())->toBe(['a.jpg', 'b.jpg']);
 });
 
 it('streams a frame only to someone who can view the project', function () {
@@ -223,9 +294,11 @@ it('serves the untouched original on request, with a download name', function ()
         ->assertSuccessful()
         ->assertSee('aligned-bytes', false);
 
-    // ?original=1 = the raw shot, and download names it clearly.
+    // The raw shot lives at its own unguessable address now, and download
+    // names it clearly. (?original=1 on the frame route is dead — see
+    // ArchiveOriginalAccessTest.)
     $this->actingAs($fx['user'])
-        ->get(route('projects.timelapse.frame', $frame).'?original=1&download=1')
+        ->get(route('projects.timelapse.original', ['token' => $frame->archive_token]).'?download=1')
         ->assertSuccessful()
         ->assertSee('original-bytes', false)
         ->assertHeader('Content-Disposition', 'attachment; filename="timelapse-'.$fx['project']->id.'-frame-003-original.jpg"');
@@ -363,7 +436,7 @@ it('keeps the camera original untouched alongside the sequence copy', function (
         ->and($sequenceW)->toBe(TimelapseStudio::MAX_EDGE);
 });
 
-it('serves the archive copy for ?original=1, and the aligned one otherwise', function () {
+it('serves the archive copy at its own token address, and the display copy otherwise', function () {
     $fx = timelapseFixture();
 
     Livewire::actingAs($fx['user'])
@@ -373,7 +446,7 @@ it('serves the archive copy for ?original=1, and the aligned one otherwise', fun
     $frame = ProjectTimelapseFrame::latest('id')->firstOrFail();
 
     $original = $this->actingAs($fx['user'])
-        ->get(route('projects.timelapse.frame', ['frame' => $frame, 'original' => 1]));
+        ->get(route('projects.timelapse.original', ['token' => $frame->archive_token]));
 
     $display = $this->actingAs($fx['user'])->get(route('projects.timelapse.frame', $frame));
 
@@ -471,25 +544,193 @@ it('soft-deletes a frame keeping every copy, and removes them only on force dele
     }
 });
 
-it('slots an upload before every existing frame when asked to lead the timelapse', function () {
+it('reorders frames in edit mode and renumbers sort orders cleanly', function () {
+    $fx = timelapseFixture();
+
+    $timelapse = \App\Models\ProjectTimelapse::create([
+        'project_id' => $fx['project']->id,
+        'title' => 'Back Wall',
+        'kind' => 'timelapse',
+    ]);
+
+    $frames = collect(['a', 'b', 'c'])->map(function ($name, $i) use ($fx, $timelapse) {
+        Storage::disk('files')->put("timelapse/{$fx['project']->id}/{$name}.jpg", $name);
+
+        return ProjectTimelapseFrame::create([
+            'project_timelapse_id' => $timelapse->id,
+            'filename' => "{$name}.jpg",
+            'path' => "timelapse/{$fx['project']->id}/{$name}.jpg",
+            'disk' => 'files',
+            // Deliberately gappy orders — imports leave 0s and holes.
+            'sort_order' => [0, 2, 5][$i],
+        ]);
+    });
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']]);
+
+    // Move the last frame one slot earlier: a, c, b — renumbered 1..3.
+    $component->call('moveFrame', $frames[2]->id, -1);
+
+    expect($timelapse->frames()->pluck('filename')->all())->toBe(['a.jpg', 'c.jpg', 'b.jpg'])
+        ->and($timelapse->frames()->pluck('sort_order')->all())->toBe([1, 2, 3]);
+
+    // Moving the first frame earlier is a quiet no-op.
+    $component->call('moveFrame', $frames[0]->id, -1);
+    expect($timelapse->frames()->pluck('filename')->all())->toBe(['a.jpg', 'c.jpg', 'b.jpg']);
+
+    // Members cannot reorder.
+    $member = timelapseFixture('Member');
+    Storage::disk('files')->put("timelapse/{$member['project']->id}/m.jpg", 'm');
+    $mt = \App\Models\ProjectTimelapse::create(['project_id' => $member['project']->id, 'title' => 'M', 'kind' => 'timelapse']);
+    $mf = ProjectTimelapseFrame::create([
+        'project_timelapse_id' => $mt->id, 'filename' => 'm.jpg',
+        'path' => "timelapse/{$member['project']->id}/m.jpg", 'disk' => 'files', 'sort_order' => 1,
+    ]);
+
+    Livewire::actingAs($member['user'])
+        ->test(TimelapseStudio::class, ['project' => $member['project']])
+        ->call('moveFrame', $mf->id, 1)
+        ->assertForbidden();
+});
+
+it('keeps frame thumbnails clean until a timelapse enters edit mode', function () {
+    $fx = timelapseFixture();
+
+    $timelapse = \App\Models\ProjectTimelapse::create([
+        'project_id' => $fx['project']->id,
+        'title' => 'Back Wall',
+        'kind' => 'timelapse',
+    ]);
+    foreach (['a', 'b'] as $i => $name) {
+        Storage::disk('files')->put("timelapse/{$fx['project']->id}/{$name}.jpg", $name);
+        ProjectTimelapseFrame::create([
+            'project_timelapse_id' => $timelapse->id, 'filename' => "{$name}.jpg",
+            'path' => "timelapse/{$fx['project']->id}/{$name}.jpg", 'disk' => 'files', 'sort_order' => $i + 1,
+        ]);
+    }
+
+    $component = Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']]);
+
+    // No management chrome by default — not on the thumbnails, and no
+    // delete / Select in the card header either.
+    $component->assertDontSee('Align frame manually')
+        ->assertDontSee('Move frame earlier')
+        ->assertDontSee('Delete “Back Wall”')
+        ->assertDontSee('Select photos in Back Wall');
+
+    // …until the card enters edit mode.
+    $component->call('toggleEditCollection', $timelapse->id)
+        ->assertSet('editingCollectionId', $timelapse->id)
+        ->assertSee('Align frame manually')
+        ->assertSee('Move frame earlier')
+        ->assertSee('Delete “Back Wall”')
+        ->assertSee('Select photos in Back Wall');
+
+    // Toggling again leaves edit mode.
+    $component->call('toggleEditCollection', $timelapse->id)
+        ->assertSet('editingCollectionId', null)
+        ->assertDontSee('Move frame earlier')
+        ->assertDontSee('Delete “Back Wall”');
+
+    // Members never get edit mode.
+    $member = timelapseFixture('Member');
+    $mt = \App\Models\ProjectTimelapse::create(['project_id' => $member['project']->id, 'title' => 'M', 'kind' => 'timelapse']);
+
+    Livewire::actingAs($member['user'])
+        ->test(TimelapseStudio::class, ['project' => $member['project']])
+        ->call('toggleEditCollection', $mt->id)
+        ->assertForbidden();
+});
+
+it('soft-deletes a timelapse so it can be restored with its frames intact', function () {
+    $fx = timelapseFixture();
+
+    $timelapse = \App\Models\ProjectTimelapse::create([
+        'project_id' => $fx['project']->id,
+        'title' => 'Back Wall',
+        'kind' => 'timelapse',
+    ]);
+    Storage::disk('files')->put("timelapse/{$fx['project']->id}/a.jpg", 'a');
+    $frame = ProjectTimelapseFrame::create([
+        'project_timelapse_id' => $timelapse->id, 'filename' => 'a.jpg',
+        'path' => "timelapse/{$fx['project']->id}/a.jpg", 'disk' => 'files', 'sort_order' => 1,
+    ]);
+
+    Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->call('deleteCollection', $timelapse->id);
+
+    // Hidden from the studio, but the row survives…
+    expect(\App\Models\ProjectTimelapse::find($timelapse->id))->toBeNull()
+        ->and(\App\Models\ProjectTimelapse::withTrashed()->find($timelapse->id)->trashed())->toBeTrue()
+        // …and the frames were left completely untouched, file included.
+        ->and($frame->fresh()->trashed())->toBeFalse();
+    Storage::disk('files')->assertExists("timelapse/{$fx['project']->id}/a.jpg");
+
+    // Restoring brings the whole timelapse back.
+    \App\Models\ProjectTimelapse::withTrashed()->find($timelapse->id)->restore();
+    expect(\App\Models\ProjectTimelapse::find($timelapse->id))->not->toBeNull();
+});
+
+it('converts a HEIC upload to JPEG, keeps its shot date, and can be moved to the front', function () {
+    // The converter is the aligner venv's python + pillow-heif; without it
+    // (CI without the venv) the ImageMagick fallback may still work, but the
+    // EXIF assertion would not hold — so this test needs the real thing.
+    $python = (string) config('services.timelapse_align.python');
+    $probe = is_executable($python)
+        ? new \Symfony\Component\Process\Process([$python, '-c', 'import pillow_heif, piexif'])
+        : null;
+    $probe?->run();
+
+    if (! $probe?->isSuccessful()) {
+        $this->markTestSkipped('HEIC-capable python venv not available on this machine.');
+    }
+
     $fx = timelapseFixture();
 
     $component = Livewire::actingAs($fx['user'])
         ->test(TimelapseStudio::class, ['project' => $fx['project']])
         ->set('newTitle', 'Back Wall')
         ->call('createCollection')
-        ->set('frame', UploadedFile::fake()->image('first-shot.jpg', 2400, 1800));
+        ->set('frame', UploadedFile::fake()->image('shot.jpg', 2400, 1800));
 
     $existing = ProjectTimelapseFrame::latest('id')->firstOrFail();
 
-    $component->set('uploadAsFirst', true)
-        ->set('file', UploadedFile::fake()->image('better-opening.jpg', 2400, 1800))
-        ->call('uploadFile');
+    $component->set('file', UploadedFile::fake()->createWithContent('before.heic', file_get_contents(base_path('tests/fixtures/frame.heic'))))
+        ->call('uploadFile')
+        ->assertHasNoErrors();
+
+    $imported = $existing->timelapse->frames()->where('original_filename', 'before.jpg')->firstOrFail();
+
+    // Uploads append; edit mode moves the "before" shot to the front.
+    $component->call('moveFrame', $imported->id, -1);
 
     $frames = $existing->timelapse->frames()->get();
+    $lead = $frames->first();
+
     expect($frames)->toHaveCount(2)
-        ->and($frames->first()->original_filename)->toBe('better-opening.jpg')
-        ->and($frames->first()->sort_order)->toBeLessThan($existing->sort_order);
+        ->and($lead->id)->toBe($imported->id)
+        ->and($lead->original_filename)->toBe('before.jpg')
+        // The archive copy is the converted full-frame JPEG.
+        ->and(getimagesizefromstring(Storage::disk('files')->get($lead->original_path))[2])->toBe(IMAGETYPE_JPEG)
+        // The HEIC's own EXIF date survived the conversion.
+        ->and(\Carbon\Carbon::parse($lead->shot_at)->format('Y-m-d H:i'))->toBe('2026-07-01 08:30');
+});
+
+it('rejects a HEIC that cannot be converted instead of storing garbage', function () {
+    $fx = timelapseFixture();
+
+    Livewire::actingAs($fx['user'])
+        ->test(TimelapseStudio::class, ['project' => $fx['project']])
+        ->set('newTitle', 'Back Wall')
+        ->call('createCollection')
+        ->set('file', UploadedFile::fake()->createWithContent('bad.heic', "\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"))
+        ->call('uploadFile')
+        ->assertHasErrors(['file']);
+
+    expect(ProjectTimelapseFrame::count())->toBe(0);
 });
 
 it('shows photos texted about the project alongside its own', function () {
