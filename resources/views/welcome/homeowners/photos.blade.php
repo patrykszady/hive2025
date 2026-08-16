@@ -34,21 +34,51 @@
                     </ul>
                 </div>
                 <div class="p-6 rounded-2xl bg-gray-50 dark:bg-zinc-900 ring-1 ring-gray-200 dark:ring-zinc-800">
+                    {{-- phase thumbnails in the site's line-art language: zinc
+                         structure, one indigo detail each — the same idiom as
+                         the timelapse drawing --}}
                     <div class="grid grid-cols-2 gap-3">
                         @foreach ([
-                            [__('Framing'), 'from-amber-200 to-amber-400'],
-                            [__('Drywall'), 'from-sky-200 to-sky-400'],
-                            [__('Cabinets'), 'from-emerald-200 to-emerald-400'],
-                            [__('Countertops'), 'from-violet-200 to-violet-400'],
-                        ] as $photo)
-                            <div class="overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-zinc-800">
-                                <div class="flex items-end h-28 p-3 bg-gradient-to-br {{ $photo[1] }}">
-                                    <span class="px-2 py-1 text-xs font-semibold text-gray-900 rounded bg-white/80">{{ $photo[0] }}</span>
-                                </div>
+                            [__('Framing'), 'M10 62 H110 M10 18 H110 M22 18 V62 M46 18 V62 M70 18 V62 M94 18 V62', 'M22 18 L46 62'],
+                            [__('Drywall'), 'M12 14 H108 V66 H12 Z M60 14 V66', 'M36 26 v.5 M36 54 v.5 M84 26 v.5 M84 54 v.5'],
+                            [__('Cabinets'), 'M14 22 H58 V64 H14 Z M62 22 H106 V64 H62 Z', 'M52 36 v12 M68 36 v12'],
+                            [__('Countertops'), 'M20 34 H58 V64 H20 Z M62 34 H100 V64 H62 Z', 'M12 28 H108'],
+                        ] as [$label, $lines, $accent])
+                            <div class="p-4 rounded-xl bg-white dark:bg-zinc-950 ring-1 ring-gray-200 dark:ring-zinc-800">
+                                <svg viewBox="0 0 120 80" class="w-full h-auto" aria-hidden="true">
+                                    <path d="{{ $lines }}" class="text-zinc-700 dark:text-zinc-300" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                                    <path d="{{ $accent }}" class="text-indigo-600 dark:text-indigo-400" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                                <p class="mt-3 text-xs font-semibold text-center text-gray-600 dark:text-gray-400">{{ $label }}</p>
                             </div>
                         @endforeach
                     </div>
                 </div>
+            </div>
+
+            {{-- Timelapse: the whole job in one loop. Illustration, not a
+                 real client's home — the public site never shows those. --}}
+            <div class="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center">
+                <div>
+                    <h2 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ __('Watch months pass in seconds') }}</h2>
+                    <p class="mt-4 text-lg leading-8 text-gray-600 dark:text-gray-300">
+                        {{ __('You and your contractor shoot each progress photo from the same spot, and Hive lines them up into a timelapse. Scrub through the whole build\'s story—foundation to finish—in one smooth sequence.') }}
+                    </p>
+                    <ul class="mt-8 space-y-4">
+                        @foreach ([
+                            __('Frames automatically aligned to the same viewpoint'),
+                            __('Lighting and color evened out across days and seasons'),
+                            __('Faces blurred automatically for everyone\'s privacy'),
+                            __('Play it start to finish, or jump to any day'),
+                        ] as $item)
+                            <li class="flex gap-3 text-base text-gray-700 dark:text-gray-300">
+                                <flux:icon name="check-circle" class="w-6 h-6 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                                <span>{{ $item }}</span>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+                <x-marketing.timelapse-demo />
             </div>
 
             <div class="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center">

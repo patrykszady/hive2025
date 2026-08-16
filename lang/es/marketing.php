@@ -28,6 +28,7 @@ return array (
       'planning' => 'Planificación',
       'team' => 'Equipo y tiempo',
       'communication' => 'Comunicación',
+      'photos' => 'Fotos y timelapses',
       'automation' => 'Automatización e IA',
     ),
   ),
@@ -5051,6 +5052,501 @@ return array (
           'cta' => array(
             'heading' => 'Mantén al cliente al día en piloto automático.',
             'sub' => 'Novedades de estado y agenda que se envían solas.',
+          ),
+        ),
+      ),
+    ),
+    'photos' => array(
+      'label' => 'Fotos y timelapses',
+      'eyebrow' => 'Fotos y timelapses de obra',
+      'grid_heading' => 'Todo el kit de la cámara de obra',
+      'cards' => array(
+        'progress-photos' => array(
+          'icon' => 'camera',
+          'title' => 'Fotos de avance',
+          'body' => 'Dispara desde el teléfono directo al proyecto correcto, organizado y con fecha.',
+          'hero' => 'Cada obra fotografiada, nada se pierde en el carrete',
+          'lead' => 'La cuadrilla dispara desde su teléfono directo al proyecto. Las fotos caen en la obra correcta, en orden, con la hora y quién las tomó—sin mandarlas por mensaje ni carpetas que ordenar después.',
+          'rows' => array(
+            array(
+              'heading' => 'Tomada en obra, archivada sola',
+              'text' => 'Abres el proyecto y disparas. La foto queda guardada en esa obra con la hora en que se tomó y el miembro de la cuadrilla que la tomó. Lo que era un teléfono lleno de fotos sueltas se vuelve un registro documentado mientras el trabajo avanza.',
+              'points' => array(
+                'Captura directo a un proyecto desde cualquier teléfono',
+                'Hora y autor registrados en cada toma',
+                'Varios álbumes por obra—por cuarto o por fase',
+                'Sube desde el escritorio cuando se usó cámara',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'list',
+                'title' => 'Remodelación de cocina · hoy',
+                'rows' => array(
+                  array(
+                    'icon' => 'camera',
+                    'label' => 'Entrega de gabinetes',
+                    'sub' => '22 fotos · Czarek',
+                  ),
+                  array(
+                    'icon' => 'photo',
+                    'label' => 'Fotos del proyecto',
+                    'sub' => '6 fotos',
+                  ),
+                  array(
+                    'icon' => 'clock',
+                    'label' => 'Última',
+                    'sub' => 'hoy 12:52 PM',
+                  ),
+                ),
+              ),
+            ),
+            array(
+              'heading' => 'Los originales se conservan intactos',
+              'text' => 'Hive guarda el archivo a resolución completa exactamente como salió de la cámara, y deriva todo lo demás de ahí. El registro nunca se degrada, y el original queda disponible para quien tomó la foto y la empresa dueña de la obra.',
+              'points' => array(
+                'Original a resolución completa archivado al subir',
+                'Ubicación y hora de captura preservadas',
+                'Originales solo para el fotógrafo y los administradores',
+                'Todo lo demás se rederiva, nunca se sobrescribe',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'Por qué importa',
+                'note' => 'Cuando surge una pregunta dos años después—qué había detrás de esa pared, cuándo se hizo—la foto original sigue ahí, a calidad completa.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'camera',
+              'title' => 'Desde el teléfono',
+              'body' => 'Directo a la obra.',
+            ),
+            array(
+              'icon' => 'folder',
+              'title' => 'Organizado',
+              'body' => 'Álbumes por cuarto.',
+            ),
+            array(
+              'icon' => 'clock',
+              'title' => 'Con fecha',
+              'body' => 'Cuándo y quién.',
+            ),
+            array(
+              'icon' => 'archive-box',
+              'title' => 'Originales guardados',
+              'body' => 'Resolución completa.',
+            ),
+            array(
+              'icon' => 'map-pin',
+              'title' => 'Con ubicación',
+              'body' => 'Dónde se tomó.',
+            ),
+            array(
+              'icon' => 'arrow-up-tray',
+              'title' => 'O sube',
+              'body' => 'También del escritorio.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Deja de perder fotos en el carrete.',
+            'sub' => 'Cada toma archivada en la obra, al momento de tomarla.',
+          ),
+        ),
+        'timelapses' => array(
+          'icon' => 'film',
+          'title' => 'Timelapses del proyecto',
+          'body' => 'Dispara la misma vista en cada visita y mira toda la obra en segundos.',
+          'hero' => 'Meses de trabajo, reproducidos en segundos',
+          'lead' => 'Apunta la cámara a la misma vista en cada visita y Hive arma un timelapse. De la cimentación al acabado en una sola secuencia fluida—la forma más clara de mostrarle a un cliente, o a un prospecto, lo que tu cuadrilla realmente hizo.',
+          'rows' => array(
+            array(
+              'heading' => 'El calco mantiene cada toma en la misma vista',
+              'text' => 'La última toma se transparenta sobre el visor, así que alinear la siguiente toma un segundo. Las tomas quedan consistentes desde el inicio, y eso es lo que hace que la secuencia final fluya en vez de saltar.',
+              'points' => array(
+                'La toma anterior se transparenta en el visor',
+                'La siguiente toma sale en segundos',
+                'Funciona con meses de distancia, con quien esté en obra',
+                'Reordena o quita una toma cuando quieras',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'stat',
+                'title' => 'Entrega de gabinetes',
+                'rows' => array(
+                  array(
+                    'label' => 'Tomas',
+                    'value' => '22',
+                  ),
+                  array(
+                    'label' => 'Lapso',
+                    'value' => '3 horas',
+                  ),
+                  array(
+                    'label' => 'Reproducción',
+                    'value' => '8 segundos',
+                  ),
+                ),
+              ),
+            ),
+            array(
+              'heading' => 'Ármalo con fotos que ya tomaste',
+              'text' => 'Elige tomas de un álbum de la obra y Hive las arma en secuencia en el orden en que se tomaron. Un timelapse puede empezar después, con las fotos que tu cuadrilla ya estaba tomando.',
+              'points' => array(
+                'Selecciona fotos y arma una secuencia',
+                'Ordenadas por cuándo se tomaron',
+                'El álbum queda exactamente como estaba',
+                'Reprodúcelo, o avanza cuadro por cuadro',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'Bueno saberlo',
+                'note' => 'Tu álbum de fotos nunca se modifica—el timelapse trabaja con sus propias copias.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'film',
+              'title' => 'Timelapse',
+              'body' => 'Toda la obra.',
+            ),
+            array(
+              'icon' => 'viewfinder-circle',
+              'title' => 'Calco',
+              'body' => 'La misma vista.',
+            ),
+            array(
+              'icon' => 'play',
+              'title' => 'Reproducción',
+              'body' => 'En el navegador.',
+            ),
+            array(
+              'icon' => 'squares-plus',
+              'title' => 'Desde fotos',
+              'body' => 'Ármalo después.',
+            ),
+            array(
+              'icon' => 'arrows-up-down',
+              'title' => 'Reordenar',
+              'body' => 'Cuando sea.',
+            ),
+            array(
+              'icon' => 'share',
+              'title' => 'Muéstralo',
+              'body' => 'A los clientes les encanta.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Muestra toda la obra en ocho segundos.',
+            'sub' => 'Lo más convincente que puedes ponerle enfrente a un cliente.',
+          ),
+        ),
+        'auto-alignment' => array(
+          'icon' => 'viewfinder-circle',
+          'title' => 'Alineación automática',
+          'body' => 'Las tomas a pulso se registran sobre una vista fija para que la reproducción no salte.',
+          'hero' => 'Tomas a pulso, reproducción firme',
+          'lead' => 'Nadie sostiene el teléfono exactamente en el mismo punto dos veces. Hive registra cada toma sobre la secuencia para que el edificio quede quieto y solo cambie el trabajo—la diferencia entre una presentación de fotos y un timelapse de verdad.',
+          'rows' => array(
+            array(
+              'heading' => 'Cada toma alineada a la misma vista',
+              'text' => 'Hive encuentra los mismos puntos entre dos fotos y alinea la nueva sobre ellos, corrigiendo los pequeños desplazamientos e inclinaciones que siempre tiene una toma a pulso. Las líneas rectas siguen rectas: paredes y gabinetes nunca se doblan para forzar el ajuste.',
+              'points' => array(
+                'Corrige desplazamiento, inclinación y zoom',
+                'Empata tomas con meses y estaciones de diferencia',
+                'Los bordes rectos siguen rectos—sin deformar',
+                'Una toma sin ajuste honesto se queda como salió',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'stat',
+                'title' => 'Registro',
+                'rows' => array(
+                  array(
+                    'label' => 'Alineadas automáticamente',
+                    'value' => '21 de 22',
+                  ),
+                  array(
+                    'label' => 'Dejadas como salieron',
+                    'value' => '1',
+                  ),
+                  array(
+                    'label' => 'Bordes doblados',
+                    'value' => '0',
+                  ),
+                ),
+              ),
+            ),
+            array(
+              'heading' => 'Elige la vista que sostiene la secuencia',
+              'text' => 'Elige qué toma define el encuadre y el resto se registra sobre ella—útil cuando una toma posterior encuadra mejor el cuarto. Cuando una toma necesita ojo humano, muévela, acércala y gírala a mano sobre la anterior.',
+              'points' => array(
+                'Cualquier toma puede definir la vista',
+                'Alinea a mano una toma difícil sobre el calco',
+                'Las tomas ajustadas a mano quedan protegidas',
+                'Los originales nunca se modifican—solo copias',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'Bajo el capó',
+                'note' => 'La alineación corre sobre un emparejador de imágenes aprendido—la misma tecnología detrás de la fotogrametría y el mapeo con drones—así que aguanta en estructura desnuda y tablaroca lisa donde los métodos viejos se rinden.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'viewfinder-circle',
+              'title' => 'Registrado',
+              'body' => 'Una vista firme.',
+            ),
+            array(
+              'icon' => 'sparkles',
+              'title' => 'Emparejado aprendido',
+              'body' => 'Encuentra el mismo punto.',
+            ),
+            array(
+              'icon' => 'lock-closed',
+              'title' => 'Sin deformar',
+              'body' => 'Líneas rectas.',
+            ),
+            array(
+              'icon' => 'hand-raised',
+              'title' => 'A mano',
+              'body' => 'Cuando quieras.',
+            ),
+            array(
+              'icon' => 'flag',
+              'title' => 'Fija la vista',
+              'body' => 'Cualquier toma.',
+            ),
+            array(
+              'icon' => 'shield-check',
+              'title' => 'No destructivo',
+              'body' => 'Originales a salvo.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Un timelapse que no salta.',
+            'sub' => 'Cada toma registrada sobre la misma vista, automáticamente.',
+          ),
+        ),
+        'color-matching' => array(
+          'icon' => 'swatch',
+          'title' => 'Color consistente',
+          'body' => 'La luz de la mañana, la tarde y el invierno se empareja para que la secuencia no parpadee.',
+          'hero' => 'Un solo look consistente en cada visita',
+          'lead' => 'Las fotos de las 7am, del mediodía y de diciembre no combinan solas. Hive empareja el tono en toda la secuencia para que los materiales se lean igual—dejando que el día siga pareciendo el día.',
+          'rows' => array(
+            array(
+              'heading' => 'Materiales que no cambian de color',
+              'text' => 'La protección del piso, la cinta, los acabados de gabinetes—lo que físicamente es el mismo objeto en cada toma debe verse igual. Hive los empareja de forma consistente y deja intactos los cambios naturales de luz, así la secuencia se lee fluida y no plana.',
+              'points' => array(
+                'Empareja exposición y dominante de color entre tomas',
+                'Conserva el carácter del día y la estación',
+                'Solo imagen completa—nada se repinta por zonas',
+                'Corre automáticamente, en cada toma',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'list',
+                'title' => 'En 22 tomas',
+                'rows' => array(
+                  array(
+                    'icon' => 'sun',
+                    'label' => 'Tomadas de',
+                    'sub' => '2:29 PM a 5:52 PM',
+                  ),
+                  array(
+                    'icon' => 'swatch',
+                    'label' => 'Color de materiales',
+                    'sub' => 'Emparejado en todas',
+                  ),
+                  array(
+                    'icon' => 'eye',
+                    'label' => 'Resultado',
+                    'sub' => 'Sin parpadeo al reproducir',
+                  ),
+                ),
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'swatch',
+              'title' => 'Tono parejo',
+              'body' => 'En toda la serie.',
+            ),
+            array(
+              'icon' => 'sun',
+              'title' => 'Cualquier hora',
+              'body' => 'Mañana o atardecer.',
+            ),
+            array(
+              'icon' => 'calendar',
+              'title' => 'Cualquier estación',
+              'body' => 'Meses de diferencia.',
+            ),
+            array(
+              'icon' => 'eye',
+              'title' => 'Sin parpadeo',
+              'body' => 'Reproducción fluida.',
+            ),
+            array(
+              'icon' => 'photo',
+              'title' => 'Honesto',
+              'body' => 'Solo imagen completa.',
+            ),
+            array(
+              'icon' => 'bolt',
+              'title' => 'Automático',
+              'body' => 'Nada que configurar.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Sin parpadeo entre tomas.',
+            'sub' => 'Color emparejado en cada visita, automáticamente.',
+          ),
+        ),
+        'face-blurring' => array(
+          'icon' => 'shield-check',
+          'title' => 'Caras difuminadas',
+          'body' => 'La cuadrilla y los transeúntes se difuminan automáticamente en toda foto visible.',
+          'hero' => 'La privacidad resuelta antes de que alguien vea la foto',
+          'lead' => 'Las fotos de obra atrapan gente—tu cuadrilla, un subcontratista, un dueño paseando. Hive encuentra las caras y las difumina automáticamente en cada copia que se ve o se comparte, para que compartir avance nunca sea compartir la cara de alguien.',
+          'rows' => array(
+            array(
+              'heading' => 'Automático, en cada copia compartida',
+              'text' => 'La detección corre al momento de guardar la foto, y de nuevo en cada copia que el sistema deriva después. Nadie tiene que acordarse, y no hay paso que saltarse cuando hay prisa por mostrarle algo a un cliente.',
+              'points' => array(
+                'Caras encontradas y difuminadas al subir',
+                'Aplica a fotos y a cada toma del timelapse',
+                'Atrapa gente al fondo del cuarto, no solo primeros planos',
+                'Nada que activar—así se guardan las fotos',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'El archivo es aparte',
+                'note' => 'El original intacto se conserva para el registro—accesible solo para quien tomó la foto y la empresa dueña de la obra.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'shield-check',
+              'title' => 'Automático',
+              'body' => 'En cada subida.',
+            ),
+            array(
+              'icon' => 'user-group',
+              'title' => 'Quien sea',
+              'body' => 'Cuadrilla o visita.',
+            ),
+            array(
+              'icon' => 'film',
+              'title' => 'Tomas también',
+              'body' => 'Todo el timelapse.',
+            ),
+            array(
+              'icon' => 'eye-slash',
+              'title' => 'Irreconocible',
+              'body' => 'Bien difuminado.',
+            ),
+            array(
+              'icon' => 'archive-box',
+              'title' => 'Original guardado',
+              'body' => 'Para el registro.',
+            ),
+            array(
+              'icon' => 'lock-closed',
+              'title' => 'Restringido',
+              'body' => 'Autor y administradores.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Comparte avance, no caras.',
+            'sub' => 'El difuminado ocurre antes de que alguien abra la foto.',
+          ),
+        ),
+        'sharing-photos' => array(
+          'icon' => 'share',
+          'title' => 'Comparte con clientes',
+          'body' => 'Manda fotos por mensaje al dueño o deja que siga el avance en su portal.',
+          'hero' => 'La actualización que tu cliente sí quiere',
+          'lead' => 'Elige unas fotos y mándalas por mensaje, o apunta al dueño a su portal, donde lo esperan las fotos y timelapses de su obra. La mayoría de las llamadas de «¿cómo va?» desaparecen cuando la gente puede verlo por sí misma.',
+          'rows' => array(
+            array(
+              'heading' => 'Enviadas en segundos, o siempre disponibles',
+              'text' => 'Selecciona las tomas que cuentan la historia y mándalas al cliente en el mismo hilo que ya usan. Todo está también en el portal del dueño, organizado por obra, para que lo revise cuando se le ocurra.',
+              'points' => array(
+                'Selecciona y manda fotos desde la obra',
+                'El portal del dueño muestra fotos y timelapses',
+                'Organizado por proyecto y fase',
+                'Menos llamadas de estatus y visitas de revisión',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'list',
+                'title' => 'Enviado al dueño',
+                'rows' => array(
+                  array(
+                    'icon' => 'chat-bubble-left-right',
+                    'label' => 'Mensaje',
+                    'sub' => '4 fotos · hoy',
+                  ),
+                  array(
+                    'icon' => 'film',
+                    'label' => 'Timelapse',
+                    'sub' => 'En su portal',
+                  ),
+                  array(
+                    'icon' => 'check-circle',
+                    'label' => 'Resultado',
+                    'sub' => 'Sin llamada de estatus',
+                  ),
+                ),
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'chat-bubble-left-right',
+              'title' => 'Mándalas',
+              'body' => 'Directo de la obra.',
+            ),
+            array(
+              'icon' => 'home',
+              'title' => 'Portal',
+              'body' => 'Siempre disponible.',
+            ),
+            array(
+              'icon' => 'film',
+              'title' => 'Timelapse',
+              'body' => 'Les encanta.',
+            ),
+            array(
+              'icon' => 'squares-2x2',
+              'title' => 'Organizado',
+              'body' => 'Por obra y fase.',
+            ),
+            array(
+              'icon' => 'phone-x-mark',
+              'title' => 'Menos llamadas',
+              'body' => 'Ellos lo ven.',
+            ),
+            array(
+              'icon' => 'sparkles',
+              'title' => 'Gana trabajos',
+              'body' => 'Prueba de que cumples.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Deja que lo vean pasar.',
+            'sub' => 'Fotos y timelapses, en sus manos.',
           ),
         ),
       ),

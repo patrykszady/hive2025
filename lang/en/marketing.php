@@ -34,6 +34,7 @@ return [
             'planning' => 'Planning',
             'team' => 'Team & Time',
             'communication' => 'Communication',
+            'photos' => 'Photos & Timelapses',
             'automation' => 'Automation & AI',
         ],
     ],

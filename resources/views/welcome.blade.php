@@ -307,6 +307,20 @@
                             ],
                         ],
                         [
+                            'icon' => 'camera',
+                            'title' => __('Photos &amp; timelapses'),
+                            'route' => 'welcome.photos',
+                            'tagline' => __('Every job documented, start to finish.'),
+                            'items' => [
+                                __('Jobsite photos filed straight to the project'),
+                                __('Timelapses built from repeat shots automatically'),
+                                __('Frames aligned and color-matched for smooth playback'),
+                                __('Faces blurred automatically for privacy'),
+                                __('Full-resolution originals archived untouched'),
+                                __('Photos &amp; timelapses shared with homeowners'),
+                            ],
+                        ],
+                        [
                             'icon' => 'sparkles',
                             'title' => __('Automation &amp; AI'),
                             'route' => 'welcome.automation',

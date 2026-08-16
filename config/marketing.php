@@ -1970,6 +1970,202 @@ return [
             ],
         ],
 
+        'photos' => [
+            'label' => 'Photos & Timelapses',
+            'eyebrow' => 'Jobsite photos & timelapses',
+            'grid_heading' => 'Everything in the jobsite camera',
+            'cards' => [
+
+                'progress-photos' => [
+                    'icon' => 'camera',
+                    'title' => 'Progress photos',
+                    'body' => 'Shoot from the phone straight into the right job, organized and time-stamped.',
+                    'hero' => 'Every job photographed, nothing lost in a camera roll',
+                    'lead' => 'Crews shoot straight into the project from their phone. Photos land in the right job, in order, stamped with when they were taken and who took them—no texting them around, no folder to organize later.',
+                    'rows' => [
+                        [
+                            'heading' => 'Shot on site, filed on its own',
+                            'text' => 'Open the project, tap the shutter. The photo is stored against that job with the time it was taken and the crew member who took it. What used to be a phone full of unsorted pictures becomes a documented record while the work happens.',
+                            'points' => ['Capture straight into a project from any phone', 'Time and photographer recorded on every shot', 'Several albums per job—one per room or phase', 'Upload from the desktop when a camera was used'],
+                            'panel' => ['style' => 'gray', 'type' => 'list', 'title' => 'Kitchen remodel · today', 'rows' => [
+                                ['icon' => 'camera', 'label' => 'Cabinet delivery', 'sub' => '22 photos · Czarek'],
+                                ['icon' => 'photo', 'label' => 'Project images', 'sub' => '6 photos'],
+                                ['icon' => 'clock', 'label' => 'Latest', 'sub' => '12:52 PM today'],
+                            ]],
+                        ],
+                        [
+                            'heading' => 'The originals are kept, untouched',
+                            'text' => 'Hive stores the full-resolution file exactly as the camera produced it, and derives everything else from that. The record never degrades, and the original is available to the person who took it and the company that owns the job.',
+                            'points' => ['Full-resolution original archived on upload', 'Location and capture time preserved', 'Originals restricted to the photographer and admins', 'Everything else is re-derived, never overwritten'],
+                            'panel' => ['style' => 'indigo', 'type' => 'note', 'label' => 'Why it matters', 'note' => 'When a question comes up two years later—what was behind that wall, when was it done—the original photo is still there at full quality.'],
+                        ],
+                    ],
+                    'features' => [
+                        ['icon' => 'camera', 'title' => 'From the phone', 'body' => 'Straight into the job.'],
+                        ['icon' => 'folder', 'title' => 'Organized', 'body' => 'Albums per room.'],
+                        ['icon' => 'clock', 'title' => 'Time-stamped', 'body' => 'When and by whom.'],
+                        ['icon' => 'archive-box', 'title' => 'Originals kept', 'body' => 'Full resolution.'],
+                        ['icon' => 'map-pin', 'title' => 'Located', 'body' => 'Where it was shot.'],
+                        ['icon' => 'arrow-up-tray', 'title' => 'Or upload', 'body' => 'Desktop too.'],
+                    ],
+                    'cta' => ['heading' => 'Stop losing photos in a camera roll.', 'sub' => 'Every shot filed to the job, the moment it is taken.'],
+                ],
+
+                'timelapses' => [
+                    'icon' => 'film',
+                    'title' => 'Project timelapses',
+                    'body' => 'Shoot the same view each visit and watch the whole job play back in seconds.',
+                    'hero' => 'Months of work, played back in seconds',
+                    'lead' => 'Point the camera at the same view each visit and Hive builds a timelapse out of it. Foundation to finish in one smooth sequence—the clearest way to show a client, or a prospect, what your crew actually did.',
+                    'rows' => [
+                        [
+                            'heading' => 'An onion skin keeps every shot on the same view',
+                            'text' => 'The last frame shows faintly over the live viewfinder, so lining up the next shot takes a second. Frames stay consistent from the start, which is what makes the finished sequence play smoothly instead of jumping around.',
+                            'points' => ['Previous frame ghosted over the viewfinder', 'Shoot the next frame in seconds', 'Works months apart, by whoever is on site', 'Reorder or drop a frame whenever you like'],
+                            'panel' => ['style' => 'gray', 'type' => 'stat', 'title' => 'Cabinet delivery', 'rows' => [
+                                ['label' => 'Frames', 'value' => '22'],
+                                ['label' => 'Span', 'value' => '3 hours'],
+                                ['label' => 'Playback', 'value' => '8 seconds'],
+                            ]],
+                        ],
+                        [
+                            'heading' => 'Build one from photos you already took',
+                            'text' => 'Pick shots out of a job album and Hive assembles them into a sequence in the order they were taken. A timelapse can start after the fact, from the photos your crew was already shooting.',
+                            'points' => ['Select photos and build a sequence from them', 'Ordered by when they were shot', 'The album stays exactly as it was', 'Play it, or step frame by frame'],
+                            'panel' => ['style' => 'indigo', 'type' => 'note', 'label' => 'Good to know', 'note' => 'Your photo album is never modified—the timelapse gets its own copies to work with.'],
+                        ],
+                    ],
+                    'features' => [
+                        ['icon' => 'film', 'title' => 'Timelapse', 'body' => 'The whole job.'],
+                        ['icon' => 'viewfinder-circle', 'title' => 'Onion skin', 'body' => 'Same view twice.'],
+                        ['icon' => 'play', 'title' => 'Playback', 'body' => 'In the browser.'],
+                        ['icon' => 'squares-plus', 'title' => 'From photos', 'body' => 'Build it after.'],
+                        ['icon' => 'arrows-up-down', 'title' => 'Reorder', 'body' => 'Any time.'],
+                        ['icon' => 'share', 'title' => 'Show it', 'body' => 'Clients love it.'],
+                    ],
+                    'cta' => ['heading' => 'Show the whole job in eight seconds.', 'sub' => 'The most convincing thing you can put in front of a client.'],
+                ],
+
+                'auto-alignment' => [
+                    'icon' => 'viewfinder-circle',
+                    'title' => 'Automatic alignment',
+                    'body' => 'Handheld shots are registered onto one steady viewpoint so playback does not jump.',
+                    'hero' => 'Handheld shots, rock-steady playback',
+                    'lead' => 'Nobody holds a phone in exactly the same spot twice. Hive registers each frame onto the sequence so the building stays put and only the work changes—the difference between a slideshow and a real timelapse.',
+                    'rows' => [
+                        [
+                            'heading' => 'Every frame lined up to the same view',
+                            'text' => 'Hive finds the same points across two photos and lines the new one up on them, correcting the small shifts and tilts a handheld shot always has. Straight lines stay straight: walls and cabinets are never bent to force a match.',
+                            'points' => ['Corrects handheld shift, tilt and zoom', 'Matches shots taken months and seasons apart', 'Straight edges stay straight—no warping', 'A frame it cannot place honestly is kept as shot'],
+                            'panel' => ['style' => 'gray', 'type' => 'stat', 'title' => 'Registration', 'rows' => [
+                                ['label' => 'Aligned automatically', 'value' => '21 of 22'],
+                                ['label' => 'Kept as shot', 'value' => '1'],
+                                ['label' => 'Edges bent', 'value' => '0'],
+                            ]],
+                        ],
+                        [
+                            'heading' => 'Choose the view the sequence holds',
+                            'text' => 'Pick which frame sets the framing and the rest re-register onto it—useful when a later shot frames the room better. When a frame needs a human eye, pan, zoom and rotate it by hand over the previous one.',
+                            'points' => ['Any frame can define the sequence view', 'Hand-align a stubborn frame over an onion skin', 'Hand-tuned frames are protected from re-runs', 'Originals are never modified—only copies'],
+                            'panel' => ['style' => 'indigo', 'type' => 'note', 'label' => 'Under the hood', 'note' => 'Alignment runs on a learned image matcher—the same technology behind photogrammetry and drone mapping—so it holds up on bare framing and blank drywall where older methods give up.'],
+                        ],
+                    ],
+                    'features' => [
+                        ['icon' => 'viewfinder-circle', 'title' => 'Registered', 'body' => 'One steady view.'],
+                        ['icon' => 'sparkles', 'title' => 'Learned matching', 'body' => 'Finds the same spot.'],
+                        ['icon' => 'lock-closed', 'title' => 'No warping', 'body' => 'Lines stay straight.'],
+                        ['icon' => 'hand-raised', 'title' => 'Hand-align', 'body' => 'When you want.'],
+                        ['icon' => 'flag', 'title' => 'Set the view', 'body' => 'Any frame.'],
+                        ['icon' => 'shield-check', 'title' => 'Non-destructive', 'body' => 'Originals safe.'],
+                    ],
+                    'cta' => ['heading' => 'A timelapse that does not jump around.', 'sub' => 'Every frame registered onto the same view, automatically.'],
+                ],
+
+                'color-matching' => [
+                    'icon' => 'swatch',
+                    'title' => 'Consistent color',
+                    'body' => 'Morning, afternoon and winter light evened out so the sequence does not flicker.',
+                    'hero' => 'One consistent look across every visit',
+                    'lead' => 'Photos taken at 7am, at noon, and in December do not match. Hive evens the tone across a sequence so materials read the same throughout—while still letting the day look like the day.',
+                    'rows' => [
+                        [
+                            'heading' => 'Materials that stay the same color',
+                            'text' => 'Floor protection, tape, cabinet finishes—anything that is physically the same object in every frame should look the same. Hive matches those consistently while leaving natural changes in daylight intact, so the sequence reads smooth rather than flat.',
+                            'points' => ['Evens exposure and color cast between frames', 'Keeps the character of the day and season', 'Whole-image only—nothing is selectively repainted', 'Runs automatically, every frame'],
+                            'panel' => ['style' => 'gray', 'type' => 'list', 'title' => 'Across 22 frames', 'rows' => [
+                                ['icon' => 'sun', 'label' => 'Shot from', 'sub' => '2:29 PM to 5:52 PM'],
+                                ['icon' => 'swatch', 'label' => 'Material color', 'sub' => 'Matched across all'],
+                                ['icon' => 'eye', 'label' => 'Result', 'sub' => 'No flicker on playback'],
+                            ]],
+                        ],
+                    ],
+                    'features' => [
+                        ['icon' => 'swatch', 'title' => 'Even tone', 'body' => 'Across the set.'],
+                        ['icon' => 'sun', 'title' => 'Any hour', 'body' => 'Morning or dusk.'],
+                        ['icon' => 'calendar', 'title' => 'Any season', 'body' => 'Months apart.'],
+                        ['icon' => 'eye', 'title' => 'No flicker', 'body' => 'Smooth playback.'],
+                        ['icon' => 'photo', 'title' => 'Honest', 'body' => 'Whole image only.'],
+                        ['icon' => 'bolt', 'title' => 'Automatic', 'body' => 'Nothing to set.'],
+                    ],
+                    'cta' => ['heading' => 'No flicker between frames.', 'sub' => 'Color evened across every visit, automatically.'],
+                ],
+
+                'face-blurring' => [
+                    'icon' => 'shield-check',
+                    'title' => 'Faces blurred',
+                    'body' => 'Crew and bystanders are automatically blurred in every photo people can see.',
+                    'hero' => 'Privacy handled before anyone sees the photo',
+                    'lead' => 'Jobsite photos catch people—your crew, a subcontractor, a homeowner walking through. Hive finds faces and blurs them automatically on every copy that gets viewed or shared, so sharing progress never means sharing someone\'s face.',
+                    'rows' => [
+                        [
+                            'heading' => 'Automatic, on every shared copy',
+                            'text' => 'Detection runs the moment a photo is stored, and again on any copy the system derives afterwards. Nobody has to remember to do it, and there is no step to skip when you are in a hurry to show a client something.',
+                            'points' => ['Faces found and blurred on upload', 'Applies to photos and every timelapse frame', 'Catches people across the room, not just close-ups', 'Nothing to enable—it is simply how photos are stored'],
+                            'panel' => ['style' => 'indigo', 'type' => 'note', 'label' => 'The archive is different', 'note' => 'The untouched original stays intact for the record—reachable only by the person who took it and the company that owns the job.'],
+                        ],
+                    ],
+                    'features' => [
+                        ['icon' => 'shield-check', 'title' => 'Automatic', 'body' => 'On every upload.'],
+                        ['icon' => 'user-group', 'title' => 'Anyone', 'body' => 'Crew or visitor.'],
+                        ['icon' => 'film', 'title' => 'Frames too', 'body' => 'Whole timelapse.'],
+                        ['icon' => 'eye-slash', 'title' => 'Unidentifiable', 'body' => 'Properly blurred.'],
+                        ['icon' => 'archive-box', 'title' => 'Original kept', 'body' => 'For the record.'],
+                        ['icon' => 'lock-closed', 'title' => 'Restricted', 'body' => 'Taker and admins.'],
+                    ],
+                    'cta' => ['heading' => 'Share progress, not faces.', 'sub' => 'Blurring happens before anyone opens the photo.'],
+                ],
+
+                'sharing-photos' => [
+                    'icon' => 'share',
+                    'title' => 'Share with clients',
+                    'body' => 'Text photos to a homeowner or let them watch progress in their portal.',
+                    'hero' => 'The update your client actually wants',
+                    'lead' => 'Pick a few photos and text them, or point the homeowner at their portal where the job\'s photos and timelapses are waiting. Most "how is it going?" calls stop happening once people can see for themselves.',
+                    'rows' => [
+                        [
+                            'heading' => 'Texted in seconds, or always available',
+                            'text' => 'Select the shots that tell the story and send them to the client on the same thread you already use. Everything is also in the homeowner portal, organized by job, so they can look whenever they think of it.',
+                            'points' => ['Select and text photos from the job', 'Homeowner portal shows photos and timelapses', 'Organized by project and phase', 'Fewer status calls and check-in visits'],
+                            'panel' => ['style' => 'gray', 'type' => 'list', 'title' => 'Sent to homeowner', 'rows' => [
+                                ['icon' => 'chat-bubble-left-right', 'label' => 'Text', 'sub' => '4 photos · today'],
+                                ['icon' => 'film', 'label' => 'Timelapse', 'sub' => 'In their portal'],
+                                ['icon' => 'check-circle', 'label' => 'Result', 'sub' => 'No status call'],
+                            ]],
+                        ],
+                    ],
+                    'features' => [
+                        ['icon' => 'chat-bubble-left-right', 'title' => 'Text them', 'body' => 'Straight from the job.'],
+                        ['icon' => 'home', 'title' => 'Portal', 'body' => 'Always available.'],
+                        ['icon' => 'film', 'title' => 'Timelapse', 'body' => 'Clients love it.'],
+                        ['icon' => 'squares-2x2', 'title' => 'Organized', 'body' => 'By job and phase.'],
+                        ['icon' => 'phone-x-mark', 'title' => 'Fewer calls', 'body' => 'They can see.'],
+                        ['icon' => 'sparkles', 'title' => 'Wins work', 'body' => 'Proof you deliver.'],
+                    ],
+                    'cta' => ['heading' => 'Let them watch it happen.', 'sub' => 'Photos and timelapses, in their hands.'],
+                ],
+            ],
+        ],
+
         'automation' => [
             'label' => 'Automation & AI',
             'eyebrow' => 'Automation & AI',

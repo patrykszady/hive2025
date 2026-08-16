@@ -192,6 +192,7 @@ Route::prefix('{locale}')
             Route::view('planning', 'welcome.planning')->name('planning');
             Route::view('team', 'welcome.team')->name('team');
             Route::view('communication', 'welcome.communication')->name('communication');
+            Route::view('photos', 'welcome.photos')->name('photos');
             Route::view('automation', 'welcome.automation')->name('automation');
             Route::view('homeowners', 'welcome.homeowners')->name('homeowners');
 

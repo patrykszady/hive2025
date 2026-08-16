@@ -28,6 +28,7 @@ return array (
       'planning' => 'Planowanie',
       'team' => 'Zespół i czas',
       'communication' => 'Komunikacja',
+      'photos' => 'Zdjęcia i timelapsy',
       'automation' => 'Automatyzacja i AI',
     ),
   ),
@@ -5051,6 +5052,501 @@ return array (
           'cta' => array(
             'heading' => 'Informuj klientów na autopilocie.',
             'sub' => 'Aktualizacje statusu i harmonogramu, które wysyłają się same.',
+          ),
+        ),
+      ),
+    ),
+    'photos' => array(
+      'label' => 'Zdjęcia i timelapsy',
+      'eyebrow' => 'Zdjęcia i timelapsy z budowy',
+      'grid_heading' => 'Cały zestaw do dokumentacji budowy',
+      'cards' => array(
+        'progress-photos' => array(
+          'icon' => 'camera',
+          'title' => 'Zdjęcia postępu',
+          'body' => 'Fotografuj telefonem prosto do właściwego projektu — uporządkowane i z datą.',
+          'hero' => 'Każda budowa sfotografowana, nic nie ginie w rolce aparatu',
+          'lead' => 'Ekipa fotografuje telefonem prosto do projektu. Zdjęcia trafiają do właściwej budowy, po kolei, z datą wykonania i autorem — bez rozsyłania SMS-ami i porządkowania folderów po fakcie.',
+          'rows' => array(
+            array(
+              'heading' => 'Zrobione na budowie, od razu na swoim miejscu',
+              'text' => 'Otwierasz projekt, naciskasz spust. Zdjęcie zapisuje się przy tej budowie z godziną wykonania i osobą, która je zrobiła. Telefon pełen przypadkowych zdjęć zamienia się w dokumentację powstającą w trakcie pracy.',
+              'points' => array(
+                'Fotografuj prosto do projektu z dowolnego telefonu',
+                'Każde ujęcie z datą i autorem',
+                'Kilka albumów na budowę — na pokój lub etap',
+                'Wgraj z komputera, gdy zdjęcia robił aparat',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'list',
+                'title' => 'Remont kuchni · dziś',
+                'rows' => array(
+                  array(
+                    'icon' => 'camera',
+                    'label' => 'Dostawa szafek',
+                    'sub' => '22 zdjęcia · Czarek',
+                  ),
+                  array(
+                    'icon' => 'photo',
+                    'label' => 'Zdjęcia projektu',
+                    'sub' => '6 zdjęć',
+                  ),
+                  array(
+                    'icon' => 'clock',
+                    'label' => 'Ostatnie',
+                    'sub' => 'dziś 12:52',
+                  ),
+                ),
+              ),
+            ),
+            array(
+              'heading' => 'Oryginały zostają nietknięte',
+              'text' => 'Hive przechowuje plik w pełnej rozdzielczości dokładnie taki, jaki wyszedł z aparatu, a wszystko inne wylicza z niego. Dokumentacja nigdy nie traci jakości, a oryginał widzi tylko autor zdjęcia i firma prowadząca budowę.',
+              'points' => array(
+                'Oryginał w pełnej rozdzielczości archiwizowany przy wgraniu',
+                'Zachowana lokalizacja i czas wykonania',
+                'Oryginały tylko dla autora i administratorów',
+                'Reszta jest wyliczana od nowa, nigdy nadpisywana',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'Dlaczego to ważne',
+                'note' => 'Gdy dwa lata później pojawi się pytanie — co było za tą ścianą, kiedy to zrobiono — oryginalne zdjęcie wciąż tam jest, w pełnej jakości.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'camera',
+              'title' => 'Z telefonu',
+              'body' => 'Prosto do projektu.',
+            ),
+            array(
+              'icon' => 'folder',
+              'title' => 'Uporządkowane',
+              'body' => 'Albumy na pokój.',
+            ),
+            array(
+              'icon' => 'clock',
+              'title' => 'Z datą',
+              'body' => 'Kiedy i kto.',
+            ),
+            array(
+              'icon' => 'archive-box',
+              'title' => 'Oryginały są',
+              'body' => 'Pełna rozdzielczość.',
+            ),
+            array(
+              'icon' => 'map-pin',
+              'title' => 'Z lokalizacją',
+              'body' => 'Gdzie zrobione.',
+            ),
+            array(
+              'icon' => 'arrow-up-tray',
+              'title' => 'Albo wgraj',
+              'body' => 'Także z komputera.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Koniec z gubieniem zdjęć w rolce aparatu.',
+            'sub' => 'Każde ujęcie przypięte do budowy w chwili wykonania.',
+          ),
+        ),
+        'timelapses' => array(
+          'icon' => 'film',
+          'title' => 'Timelapse budowy',
+          'body' => 'Fotografuj ten sam kadr przy każdej wizycie i oglądaj całą budowę w kilka sekund.',
+          'hero' => 'Miesiące pracy odtworzone w kilka sekund',
+          'lead' => 'Celujesz aparatem w ten sam kadr przy każdej wizycie, a Hive składa z tego timelapse. Od fundamentów po wykończenie w jednej płynnej sekwencji — najlepszy sposób, by pokazać klientowi albo potencjalnemu klientowi, co naprawdę zrobiła ekipa.',
+          'rows' => array(
+            array(
+              'heading' => 'Kalka w wizjerze trzyma każde ujęcie w tym samym kadrze',
+              'text' => 'Ostatnia klatka prześwituje delikatnie nad podglądem aparatu, więc wycelowanie kolejnego ujęcia zajmuje sekundę. Klatki od początku są spójne — dzięki temu gotowa sekwencja płynie, zamiast skakać.',
+              'points' => array(
+                'Poprzednia klatka widoczna w wizjerze jak kalka',
+                'Kolejne ujęcie robisz w kilka sekund',
+                'Działa po miesiącach, z każdym, kto jest na budowie',
+                'Klatki przestawisz i usuniesz, kiedy chcesz',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'stat',
+                'title' => 'Dostawa szafek',
+                'rows' => array(
+                  array(
+                    'label' => 'Klatki',
+                    'value' => '22',
+                  ),
+                  array(
+                    'label' => 'Rozpiętość',
+                    'value' => '3 godziny',
+                  ),
+                  array(
+                    'label' => 'Odtwarzanie',
+                    'value' => '8 sekund',
+                  ),
+                ),
+              ),
+            ),
+            array(
+              'heading' => 'Zbuduj timelapse ze zdjęć, które już masz',
+              'text' => 'Wybierz ujęcia z albumu budowy, a Hive złoży z nich sekwencję w kolejności wykonania. Timelapse może powstać po fakcie — ze zdjęć, które ekipa i tak robiła.',
+              'points' => array(
+                'Zaznacz zdjęcia i zbuduj z nich sekwencję',
+                'Ułożone według czasu wykonania',
+                'Album zostaje dokładnie taki, jaki był',
+                'Odtwarzaj całość albo przeglądaj klatka po klatce',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'Warto wiedzieć',
+                'note' => 'Album ze zdjęciami nigdy nie jest modyfikowany — timelapse dostaje własne kopie.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'film',
+              'title' => 'Timelapse',
+              'body' => 'Cała budowa.',
+            ),
+            array(
+              'icon' => 'viewfinder-circle',
+              'title' => 'Kalka w wizjerze',
+              'body' => 'Ten sam kadr.',
+            ),
+            array(
+              'icon' => 'play',
+              'title' => 'Odtwarzanie',
+              'body' => 'W przeglądarce.',
+            ),
+            array(
+              'icon' => 'squares-plus',
+              'title' => 'Ze zdjęć',
+              'body' => 'Także po fakcie.',
+            ),
+            array(
+              'icon' => 'arrows-up-down',
+              'title' => 'Zmiana kolejności',
+              'body' => 'W każdej chwili.',
+            ),
+            array(
+              'icon' => 'share',
+              'title' => 'Pokaż go',
+              'body' => 'Klienci to uwielbiają.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Pokaż całą budowę w osiem sekund.',
+            'sub' => 'Najbardziej przekonujący dowód, jaki możesz pokazać klientowi.',
+          ),
+        ),
+        'auto-alignment' => array(
+          'icon' => 'viewfinder-circle',
+          'title' => 'Automatyczne wyrównanie',
+          'body' => 'Ujęcia z ręki są nakładane na jeden stały kadr, więc odtwarzanie nie skacze.',
+          'hero' => 'Zdjęcia z ręki, obraz jak ze statywu',
+          'lead' => 'Nikt nie trzyma telefonu dwa razy w tym samym miejscu. Hive dopasowuje każdą klatkę do sekwencji, więc budynek stoi nieruchomo, a zmienia się tylko praca — to różnica między pokazem slajdów a prawdziwym timelapse.',
+          'rows' => array(
+            array(
+              'heading' => 'Każda klatka dopasowana do tego samego kadru',
+              'text' => 'Hive znajduje te same punkty na dwóch zdjęciach i nakłada nowe ujęcie na nie, korygując drobne przesunięcia i przechyły, które zawsze ma zdjęcie z ręki. Proste linie zostają proste: ściany i szafki nigdy nie są wyginane na siłę.',
+              'points' => array(
+                'Koryguje przesunięcie, przechył i przybliżenie',
+                'Dopasowuje ujęcia odległe o miesiące i pory roku',
+                'Proste krawędzie zostają proste — bez zniekształceń',
+                'Klatka bez uczciwego dopasowania zostaje, jak wyszła z aparatu',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'stat',
+                'title' => 'Dopasowanie',
+                'rows' => array(
+                  array(
+                    'label' => 'Wyrównane automatycznie',
+                    'value' => '21 z 22',
+                  ),
+                  array(
+                    'label' => 'Pozostawione jak wyszły',
+                    'value' => '1',
+                  ),
+                  array(
+                    'label' => 'Wygięte krawędzie',
+                    'value' => '0',
+                  ),
+                ),
+              ),
+            ),
+            array(
+              'heading' => 'Wybierz kadr, którego trzyma się sekwencja',
+              'text' => 'Wskaż klatkę, która ustala kadr, a reszta dopasuje się do niej — przydatne, gdy późniejsze ujęcie lepiej łapie pomieszczenie. Gdy klatka wymaga ludzkiego oka, przesuń ją, przybliż i obróć ręcznie nad poprzednią.',
+              'points' => array(
+                'Kadr sekwencji może ustalić dowolna klatka',
+                'Oporną klatkę wyrównasz ręcznie na kalce',
+                'Ręcznie dopasowane klatki są chronione przy ponownym przetwarzaniu',
+                'Oryginały nigdy nie są zmieniane — tylko kopie',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'Pod maską',
+                'note' => 'Wyrównanie działa na uczonym dopasowywaniu obrazów — tej samej technologii co fotogrametria i mapowanie dronem — więc radzi sobie z surową konstrukcją i gładkimi płytami, gdzie starsze metody się poddają.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'viewfinder-circle',
+              'title' => 'Dopasowane',
+              'body' => 'Jeden stały kadr.',
+            ),
+            array(
+              'icon' => 'sparkles',
+              'title' => 'Uczone dopasowanie',
+              'body' => 'Znajduje ten sam punkt.',
+            ),
+            array(
+              'icon' => 'lock-closed',
+              'title' => 'Bez zniekształceń',
+              'body' => 'Linie zostają proste.',
+            ),
+            array(
+              'icon' => 'hand-raised',
+              'title' => 'Ręczne wyrównanie',
+              'body' => 'Kiedy chcesz.',
+            ),
+            array(
+              'icon' => 'flag',
+              'title' => 'Ustaw kadr',
+              'body' => 'Dowolna klatka.',
+            ),
+            array(
+              'icon' => 'shield-check',
+              'title' => 'Bez ryzyka',
+              'body' => 'Oryginały bezpieczne.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Timelapse, który nie skacze.',
+            'sub' => 'Każda klatka automatycznie w tym samym kadrze.',
+          ),
+        ),
+        'color-matching' => array(
+          'icon' => 'swatch',
+          'title' => 'Spójne kolory',
+          'body' => 'Poranek, popołudnie i zima wyrównane, żeby sekwencja nie migotała.',
+          'hero' => 'Jeden spójny wygląd przy każdej wizycie',
+          'lead' => 'Zdjęcia o 7 rano, w południe i w grudniu do siebie nie pasują. Hive wyrównuje tonację w całej sekwencji, więc materiały wyglądają tak samo w każdej klatce — a dzień wciąż wygląda jak dzień.',
+          'rows' => array(
+            array(
+              'heading' => 'Materiały, które nie zmieniają koloru',
+              'text' => 'Folia na podłodze, taśma, fronty szafek — wszystko, co fizycznie jest tym samym obiektem na każdej klatce, powinno tak samo wyglądać. Hive dopasowuje je spójnie, zostawiając naturalne zmiany światła, więc sekwencja płynie, zamiast być płaska.',
+              'points' => array(
+                'Wyrównuje ekspozycję i zafarb między klatkami',
+                'Zachowuje charakter dnia i pory roku',
+                'Tylko cały obraz — nic nie jest wybiórczo przemalowywane',
+                'Działa automatycznie, na każdej klatce',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'list',
+                'title' => 'Na 22 klatkach',
+                'rows' => array(
+                  array(
+                    'icon' => 'sun',
+                    'label' => 'Zakres godzin',
+                    'sub' => '14:29 do 17:52',
+                  ),
+                  array(
+                    'icon' => 'swatch',
+                    'label' => 'Kolor materiałów',
+                    'sub' => 'Dopasowany na wszystkich',
+                  ),
+                  array(
+                    'icon' => 'eye',
+                    'label' => 'Efekt',
+                    'sub' => 'Brak migotania',
+                  ),
+                ),
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'swatch',
+              'title' => 'Równa tonacja',
+              'body' => 'W całej sekwencji.',
+            ),
+            array(
+              'icon' => 'sun',
+              'title' => 'Każda godzina',
+              'body' => 'Rano czy zmierzch.',
+            ),
+            array(
+              'icon' => 'calendar',
+              'title' => 'Każda pora roku',
+              'body' => 'Miesiące różnicy.',
+            ),
+            array(
+              'icon' => 'eye',
+              'title' => 'Bez migotania',
+              'body' => 'Płynne odtwarzanie.',
+            ),
+            array(
+              'icon' => 'photo',
+              'title' => 'Uczciwie',
+              'body' => 'Tylko cały obraz.',
+            ),
+            array(
+              'icon' => 'bolt',
+              'title' => 'Automatycznie',
+              'body' => 'Bez ustawień.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Żadnego migotania między klatkami.',
+            'sub' => 'Kolory wyrównane przy każdej wizycie, automatycznie.',
+          ),
+        ),
+        'face-blurring' => array(
+          'icon' => 'shield-check',
+          'title' => 'Rozmyte twarze',
+          'body' => 'Twarze ekipy i osób postronnych są automatycznie rozmywane na każdym widocznym zdjęciu.',
+          'hero' => 'Prywatność załatwiona, zanim ktokolwiek zobaczy zdjęcie',
+          'lead' => 'Na zdjęciach z budowy zawsze ktoś jest — ekipa, podwykonawca, właściciel przechodzący przez dom. Hive znajduje twarze i rozmywa je automatycznie na każdej kopii, którą ktoś ogląda lub udostępnia, więc pokazywanie postępu nigdy nie oznacza pokazywania czyjejś twarzy.',
+          'rows' => array(
+            array(
+              'heading' => 'Automatycznie, na każdej udostępnianej kopii',
+              'text' => 'Wykrywanie rusza w chwili zapisania zdjęcia i ponownie na każdej kopii, którą system później wyliczy. Nikt nie musi o tym pamiętać i nie ma kroku, który można pominąć w pośpiechu.',
+              'points' => array(
+                'Twarze znajdowane i rozmywane przy wgraniu',
+                'Dotyczy zdjęć i każdej klatki timelapse',
+                'Łapie osoby w głębi kadru, nie tylko zbliżenia',
+                'Niczego nie włączasz — tak po prostu działają zdjęcia',
+              ),
+              'panel' => array(
+                'style' => 'indigo',
+                'type' => 'note',
+                'label' => 'Archiwum to co innego',
+                'note' => 'Nietknięty oryginał zostaje w dokumentacji — dostępny tylko dla autora zdjęcia i firmy prowadzącej budowę.',
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'shield-check',
+              'title' => 'Automatycznie',
+              'body' => 'Przy każdym wgraniu.',
+            ),
+            array(
+              'icon' => 'user-group',
+              'title' => 'Każdy',
+              'body' => 'Ekipa czy gość.',
+            ),
+            array(
+              'icon' => 'film',
+              'title' => 'Klatki też',
+              'body' => 'Cały timelapse.',
+            ),
+            array(
+              'icon' => 'eye-slash',
+              'title' => 'Nie do poznania',
+              'body' => 'Porządnie rozmyte.',
+            ),
+            array(
+              'icon' => 'archive-box',
+              'title' => 'Oryginał zostaje',
+              'body' => 'Dla dokumentacji.',
+            ),
+            array(
+              'icon' => 'lock-closed',
+              'title' => 'Ograniczony dostęp',
+              'body' => 'Autor i administratorzy.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Pokazuj postęp, nie twarze.',
+            'sub' => 'Rozmycie dzieje się, zanim ktokolwiek otworzy zdjęcie.',
+          ),
+        ),
+        'sharing-photos' => array(
+          'icon' => 'share',
+          'title' => 'Udostępnianie klientom',
+          'body' => 'Wyślij zdjęcia właścicielowi SMS-em albo daj mu śledzić postęp w portalu.',
+          'hero' => 'Aktualizacja, na którą klient naprawdę czeka',
+          'lead' => 'Wybierz kilka zdjęć i wyślij SMS-em albo wskaż właścicielowi portal, gdzie czekają zdjęcia i timelapsy z jego budowy. Większość telefonów „jak idzie?” znika, gdy ludzie mogą zobaczyć sami.',
+          'rows' => array(
+            array(
+              'heading' => 'Wysłane w kilka sekund albo zawsze pod ręką',
+              'text' => 'Zaznacz ujęcia, które opowiadają historię, i wyślij klientowi w tym samym wątku, którego już używacie. Wszystko jest też w portalu właściciela, uporządkowane według budowy, więc może zaglądać, kiedy chce.',
+              'points' => array(
+                'Zaznacz i wyślij zdjęcia z budowy',
+                'Portal właściciela ze zdjęciami i timelapsami',
+                'Uporządkowane według projektu i etapu',
+                'Mniej telefonów o postęp i wizyt kontrolnych',
+              ),
+              'panel' => array(
+                'style' => 'gray',
+                'type' => 'list',
+                'title' => 'Wysłane do właściciela',
+                'rows' => array(
+                  array(
+                    'icon' => 'chat-bubble-left-right',
+                    'label' => 'SMS',
+                    'sub' => '4 zdjęcia · dziś',
+                  ),
+                  array(
+                    'icon' => 'film',
+                    'label' => 'Timelapse',
+                    'sub' => 'W jego portalu',
+                  ),
+                  array(
+                    'icon' => 'check-circle',
+                    'label' => 'Efekt',
+                    'sub' => 'Bez telefonu o postęp',
+                  ),
+                ),
+              ),
+            ),
+          ),
+          'features' => array(
+            array(
+              'icon' => 'chat-bubble-left-right',
+              'title' => 'Wyślij SMS-em',
+              'body' => 'Prosto z budowy.',
+            ),
+            array(
+              'icon' => 'home',
+              'title' => 'Portal',
+              'body' => 'Zawsze dostępny.',
+            ),
+            array(
+              'icon' => 'film',
+              'title' => 'Timelapse',
+              'body' => 'Klienci to uwielbiają.',
+            ),
+            array(
+              'icon' => 'squares-2x2',
+              'title' => 'Uporządkowane',
+              'body' => 'Budowa i etap.',
+            ),
+            array(
+              'icon' => 'phone-x-mark',
+              'title' => 'Mniej telefonów',
+              'body' => 'Sami widzą.',
+            ),
+            array(
+              'icon' => 'sparkles',
+              'title' => 'Zdobywa zlecenia',
+              'body' => 'Dowód, że dowozisz.',
+            ),
+          ),
+          'cta' => array(
+            'heading' => 'Pozwól im patrzeć, jak rośnie.',
+            'sub' => 'Zdjęcia i timelapsy w ich rękach.',
           ),
         ),
       ),

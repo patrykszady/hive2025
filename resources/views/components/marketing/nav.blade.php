@@ -9,6 +9,7 @@
         ['route' => 'welcome.planning', 'label' => __('marketing.nav.pages.planning'), 'icon' => 'calendar', 'key' => 'planning'],
         ['route' => 'welcome.team', 'label' => __('marketing.nav.pages.team'), 'icon' => 'clock', 'key' => 'team'],
         ['route' => 'welcome.communication', 'label' => __('marketing.nav.pages.communication'), 'icon' => 'chat-bubble-left-right', 'key' => 'communication'],
+        ['route' => 'welcome.photos', 'label' => __('marketing.nav.pages.photos'), 'icon' => 'camera', 'key' => 'photos'],
         ['route' => 'welcome.automation', 'label' => __('marketing.nav.pages.automation'), 'icon' => 'sparkles', 'key' => 'automation'],
     ];
     $contractorActive = collect($contractorPages)->contains('key', $active);

@@ -93,3 +93,23 @@ it('keeps every OpenCV job on the single-process timelapse queue', function () {
 
     expect(config('horizon.defaults.timelapse.queue'))->toBe(['timelapse']);
 });
+
+it('keeps Livewire assets in the cached public-page body', function () {
+    // CachePublicPage stores the response body from inside the middleware —
+    // BEFORE Livewire's post-request asset auto-injection runs. When the
+    // guest layout relied on auto-injection, every cache-hit visitor got a
+    // page with no livewire.js and therefore no Alpine: dead nav dropdown,
+    // dead language switcher, dead marketing interactions. The guest layout
+    // now renders @livewireScripts explicitly so the assets are part of the
+    // cached body; this pins that.
+    Illuminate\Support\Facades\Cache::flush();
+
+    $miss = $this->get('/en/welcome/photos');
+    $miss->assertOk();
+
+    $hit = $this->get('/en/welcome/photos');
+    $hit->assertOk();
+    $hit->assertHeader('X-Page-Cache', 'hit');
+
+    expect($hit->getContent())->toContain('/livewire');
+});
