@@ -149,6 +149,13 @@ class ReprocessTimelapses extends Command
                 $jobs[] = new AlignTimelapseFrame($frame->id, reframe: true);
             }
 
+            if ($jobs === []) {
+                // Everything in this sequence is curated (or it is just the
+                // anchor) — nothing to queue. Bus::chain([]) crashes on
+                // dispatch, which the --sync path never revealed.
+                continue;
+            }
+
             if ($this->option('sync')) {
                 foreach ($jobs as $job) {
                     dispatch_sync($job);

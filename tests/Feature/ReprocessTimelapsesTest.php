@@ -151,3 +151,18 @@ it('never re-derives hand-curated frames without --force', function () {
     $this->artisan('timelapse:reprocess', ['--timelapse' => $timelapse->id, '--force' => true])->assertSuccessful();
     expect($frames[2]->fresh()->aligned_path)->toBeNull();
 });
+
+it('queues nothing for a fully curated sequence instead of crashing', function () {
+    Bus::fake();
+    ['timelapse' => $timelapse, 'frames' => $frames] = reprocessFixture(3, 0);
+
+    foreach ($frames as $frame) {
+        $frame->forceFill(['align_transform' => ['scale' => 1.0, 'fabricated' => 0.0, 'curated' => true]])->save();
+    }
+
+    // QUEUED mode (no --sync): Bus::chain([]) used to throw here.
+    $this->artisan('timelapse:reprocess', ['--timelapse' => $timelapse->id])->assertSuccessful();
+
+    Bus::assertNotDispatched(AlignTimelapseFrame::class);
+    expect($frames[1]->fresh()->aligned_path)->not->toBeNull();
+});
