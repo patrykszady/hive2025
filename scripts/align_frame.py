@@ -131,8 +131,72 @@ def fail(reason, **extra):
     sys.exit(2)
 
 
+# Matcher choice. "auto" tries LoFTR — a learned, detector-free matcher (the
+# current gold standard family: LoFTR/SuperGlue/RoMa, used by modern
+# photogrammetry pipelines) — and falls back to SIFT when torch/kornia are
+# not installed. LoFTR is the difference between 1 usable match and 157 on
+# the April-vs-July exterior, and it does not starve on blank drywall the
+# way corner detectors do. SIFT stays for machines without the ML stack.
+MATCHER = os.environ.get("ALIGN_MATCHER", "auto")
+# LoFTR runs at a capped resolution (memory: transformer attention grows
+# fast with pixels); its coordinates are scaled back to full resolution.
+LOFTR_MAX_PX = int(os.environ.get("ALIGN_LOFTR_MAX_PX", "1024"))
+LOFTR_WEIGHTS = os.environ.get("ALIGN_LOFTR_WEIGHTS", "outdoor")
+
+
+def loftr_match(ref_gray, target_gray):
+    """Dense learned matching -> the same (kp, kp, DMatch) shape SIFT yields,
+    so every downstream stage (motion layers, candidate race, caps, judge)
+    is untouched. Returns None when the ML stack is unavailable."""
+    try:
+        import torch
+        import kornia.feature as KF
+    except Exception:
+        return None
+
+    try:
+        torch.set_num_threads(max(1, (os.cpu_count() or 2) - 0))
+
+        def prep(gray):
+            scale = min(1.0, LOFTR_MAX_PX / max(gray.shape))
+            small = cv2.resize(gray, None, fx=scale, fy=scale,
+                               interpolation=cv2.INTER_AREA) if scale < 1.0 else gray
+            tensor = torch.from_numpy(small)[None, None].float() / 255.0
+            return tensor, scale
+
+        t_ref, s_ref = prep(ref_gray)
+        t_tgt, s_tgt = prep(target_gray)
+
+        matcher = KF.LoFTR(pretrained=LOFTR_WEIGHTS)
+        with torch.inference_mode():
+            out = matcher({"image0": t_ref, "image1": t_tgt})
+
+        conf = out["confidence"].numpy()
+        keep = conf > 0.5
+        ref_pts = out["keypoints0"].numpy()[keep] / s_ref
+        tgt_pts = out["keypoints1"].numpy()[keep] / s_tgt
+    except Exception:
+        return None
+
+    if len(ref_pts) < 8:
+        return None
+
+    ref_kp = [cv2.KeyPoint(float(x), float(y), 1) for x, y in ref_pts]
+    target_kp = [cv2.KeyPoint(float(x), float(y), 1) for x, y in tgt_pts]
+    matches = [cv2.DMatch(i, i, float(1.0 - c)) for i, c in enumerate(conf[keep])]
+
+    return ref_kp, target_kp, matches, "loftr"
+
+
 def detect_and_match(ref_gray, target_gray):
-    """SIFT + ratio test when available (more accurate), else ORB + cross-check."""
+    """LoFTR when requested/available, else SIFT + ratio test, else ORB."""
+    if MATCHER in ("auto", "loftr"):
+        found = loftr_match(ref_gray, target_gray)
+        if found is not None:
+            return found
+        if MATCHER == "loftr":
+            fail("loftr unavailable")
+
     try:
         sift = cv2.SIFT_create(nfeatures=6000)
         ref_kp, ref_desc = sift.detectAndCompute(ref_gray, None)
@@ -419,11 +483,18 @@ def patch_gap(warped, gap):
     fill = (soft.astype(np.float32) * near_seam
             + fill.astype(np.float32) * (1.0 - near_seam)).astype(np.uint8)
 
-    # Alpha 1 deep inside the gap, easing to 0 over a wide (~100px) ramp
-    # inside the real photo. The fill comes from a different moment of the
-    # scene, so a thin feather reads as a hard seam line at the frame edge —
-    # a broad gradient reads as a soft vignette instead.
-    alpha = cv2.GaussianBlur(cv2.dilate(patch.astype(np.uint8), np.ones((41, 41), np.uint8)).astype(np.float32), (0, 0), 30.0)
+    # Alpha 1 deep inside the gap, easing to 0 over a ramp inside the real
+    # photo. WIDTH IS A JUDGMENT CALL, so it is tunable (ALIGN_FILL_FEATHER,
+    # px): cross-season exterior fills need the wide soft vignette (~100px —
+    # a thin feather reads as a hard seam line between seasons), but on
+    # same-day interior fills the seam is already phase-registered and
+    # ring-graded, and the wide ramp STACKS into a foggy band across the
+    # bottom of close-up frames ("horrible blending"). Tight (~12px) reads
+    # as a clean edge there.
+    feather = float(os.environ.get("ALIGN_FILL_FEATHER", "100"))
+    dil = max(3, int(feather * 0.4) | 1)
+    sig = max(2.0, feather * 0.3)
+    alpha = cv2.GaussianBlur(cv2.dilate(patch.astype(np.uint8), np.ones((dil, dil), np.uint8)).astype(np.float32), (0, 0), sig)
     alpha = np.maximum(alpha, patch.astype(np.float32))[:, :, None]
     warped = (fill.astype(np.float32) * alpha
               + warped.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
@@ -687,9 +758,16 @@ def main():
             approx = (affine_part @ corners)[:2]
             keystone = float(np.max(np.linalg.norm(projected - approx, axis=0)))
             det = float(np.linalg.det(h[:2, :2]))
-            if keystone <= MAX_KEYSTONE_PX and 0.5 < det < 2.0:
-                own = int(h_mask.sum()) if h_mask is not None else sim_inliers
-                candidates.append(("homography" + tag, h, True, own))
+            # The keystone cap guards against RANSAC hallucinating perspective
+            # from a handful of sparse matches. BROAD consensus is a different
+            # regime: a dense matcher putting 3x the confidence bar behind a
+            # strongly-keystoned homography is describing a real change of
+            # vantage (standing in the other corner of the yard IS 1800px of
+            # keystone), and the candidate still has to WIN the measured race.
+            own_now = int(h_mask.sum()) if h_mask is not None else 0
+            plaus_det = (MIN_PLAUSIBLE_SCALE ** 2) * 0.5 < abs(det) < (MAX_PLAUSIBLE_SCALE ** 2) * 2.0
+            if (keystone <= MAX_KEYSTONE_PX or own_now >= 75) and plaus_det:
+                candidates.append(("homography" + tag, h, True, own_now or sim_inliers))
 
         return sim_mask
 
@@ -734,6 +812,19 @@ def main():
     near_best = [row for row in scored if row[0] - scored[0][0] <= 0.5]
     near_best.sort(key=lambda row: (complexity[row[1].split("@")[0]], row[0]))
     winner_err, chosen, matrix, perspective, inliers = near_best[0]
+
+    # PIXELS CANNOT JUDGE a cross-season pair: April-vs-July trimmed error
+    # sits ~35 for every candidate — bare branches against canopy — and the
+    # 0.4-point spread between a wrong similarity and the right homography
+    # is pure noise, which the simplicity tie-break then resolves the wrong
+    # way. In that regime the verdict falls back to MATCH SUPPORT: the
+    # candidate the most correspondences agree with (a wide-baseline vantage
+    # change put 114 inliers behind the homography and 48 behind the
+    # similarity). Same-season frames (errors 3–15) never enter this branch.
+    if scored[0][0] > 25.0:
+        by_support = sorted(scored, key=lambda row: (-row[4], row[0]))
+        if by_support[0][4] >= inliers * 1.5:
+            winner_err, chosen, matrix, perspective, inliers = by_support[0]
 
     linear = np.array(matrix, dtype=np.float64)[:2, :2]
     scale = float(np.sqrt(abs(np.linalg.det(linear))))

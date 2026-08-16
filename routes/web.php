@@ -615,6 +615,10 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // at its own unguessable address rather than behind a flag on the
     // sequential frame id, and is gated to the taker plus the owning
     // vendor's Admins.
+    // The ARCHIVE original — unblurred, full resolution, EXIF intact — lives
+    // at its own unguessable address rather than behind a flag on the
+    // sequential frame id, and is gated to the taker plus the owning
+    // vendor's Admins.
     Route::get('/timelapse/originals/{token}', [\App\Http\Controllers\TimelapseController::class, 'original'])
         ->where('token', '[A-Za-z0-9]{48}')
         ->name('projects.timelapse.original');

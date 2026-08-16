@@ -131,3 +131,23 @@ it('skips galleries and single-frame sequences', function () {
 
     expect($gallery->frames()->first()->aligned_path)->not->toBeNull();
 });
+
+it('never re-derives hand-curated frames without --force', function () {
+    Bus::fake();
+    ['timelapse' => $timelapse, 'frames' => $frames] = reprocessFixture(4, 0);
+
+    // Frame 3 carries a hand-tuned fit (manual aligner / hard-frame restore).
+    $frames[2]->forceFill(['align_transform' => ['scale' => 1.1, 'fabricated' => 0.0, 'curated' => true]])->save();
+
+    $this->artisan('timelapse:reprocess', ['--timelapse' => $timelapse->id])->assertSuccessful();
+
+    // The curated frame keeps its aligned copy and its tuning...
+    expect($frames[2]->fresh()->aligned_path)->not->toBeNull()
+        ->and($frames[2]->fresh()->align_transform['curated'] ?? false)->toBeTrue()
+        // ...its auto-derived siblings do not.
+        ->and($frames[1]->fresh()->aligned_path)->toBeNull();
+
+    // --force is the explicit consent to lose the hand work.
+    $this->artisan('timelapse:reprocess', ['--timelapse' => $timelapse->id, '--force' => true])->assertSuccessful();
+    expect($frames[2]->fresh()->aligned_path)->toBeNull();
+});

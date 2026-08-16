@@ -150,7 +150,7 @@ class AlignTimelapseFrame implements ShouldQueue
             'ALIGN_JUDGE' => $neighbor ? $disk->path($neighbor->aligned_path) : null,
             // Strict filter — bare array_filter eats the '0' string and would
             // silently turn photo-only back into full geometry.
-        ], fn ($v) => $v !== null) + $this->reframeEnv());
+        ], fn ($v) => $v !== null) + $this->reframeEnv($disk->path($frame->path), $targetPath));
         $process->setTimeout(240);
         $process->run();
 
@@ -182,7 +182,7 @@ class AlignTimelapseFrame implements ShouldQueue
                 // Same transition judge as the first pass (here it doubles
                 // as the reference).
                 'ALIGN_JUDGE' => $disk->path($neighbor->aligned_path),
-            ] + $this->reframeEnv());
+            ] + $this->reframeEnv($disk->path($frame->path), $targetPath));
             $retry->setTimeout(240);
             $retry->run();
 
@@ -265,18 +265,41 @@ class AlignTimelapseFrame implements ShouldQueue
      *
      * @return array<string, string>
      */
-    protected function reframeEnv(): array
+    protected function reframeEnv(?string $canvasPath = null, ?string $sourcePath = null): array
     {
         if (! $this->reframe) {
             return [];
         }
 
+        // The plausible-scale band must be RELATIVE to the resolution ratio
+        // of this source against the canvas. Fixed 0.45–1.60 was calibrated
+        // for 3024px phone originals (nominal ratio 0.64); a 5712px original
+        // lands at nominal 0.34, where even a PERFECT fit sat below the
+        // floor and every candidate was "implausible". The band now means:
+        // the content's framing may differ from the anchor's by 0.5x–2.5x.
+        $nominal = 1.0;
+
+        if ($canvasPath && $sourcePath) {
+            $canvasW = @getimagesize($canvasPath)[0] ?? 0;
+            $sourceW = @getimagesize($sourcePath)[0] ?? 0;
+
+            if ($canvasW > 0 && $sourceW > 0) {
+                $nominal = $canvasW / $sourceW;
+            }
+        }
+
         return [
-            'ALIGN_MAX_SCALE_DELTA' => '0.60',
+            // Effectively off in reframe mode: "delta from 1.0" only means
+            // something when source and canvas share a resolution. The
+            // nominal-relative band below is the real plausibility guard.
+            'ALIGN_MAX_SCALE_DELTA' => '10',
             'ALIGN_MAX_ROTATION' => '5',
-            'ALIGN_MAX_OFFSET' => '0.45',
-            'ALIGN_MIN_SCALE' => '0.45',
-            'ALIGN_MAX_SCALE' => '1.60',
+            // A change of vantage legitimately moves the centre a long way;
+            // the border budget and the transition judge are the honest
+            // guards in reframe mode, not the offset.
+            'ALIGN_MAX_OFFSET' => '0.75',
+            'ALIGN_MIN_SCALE' => (string) round($nominal * 0.5, 4),
+            'ALIGN_MAX_SCALE' => (string) round($nominal * 2.5, 4),
             // A stance change between shots is a real perspective change;
             // matching the previous frame through it needs projective room.
             'ALIGN_MAX_KEYSTONE' => '60',

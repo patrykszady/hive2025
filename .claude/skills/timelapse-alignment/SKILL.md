@@ -17,7 +17,9 @@ cases automatically; this file is the playbook for the hard ones.
 ## What the pipeline already does (applies to every timelapse)
 
 - **Auto-align on upload** (`AlignTimelapseFrame` → `scripts/align_frame.py`):
-  SIFT + sequential motion-layer peeling (RANSAC's biggest consensus is often
+  **LoFTR matching** (kornia, outdoor weights, capped at 1024px with
+  coordinates scaled back — `ALIGN_MATCHER=auto|loftr|sift`, SIFT fallback
+  when torch/kornia are missing) + sequential motion-layer peeling (RANSAC's biggest consensus is often
   the far background — trees barely rescale; peel it away and refit), then
   similarity/affine/homography candidates raced by measured overlap error
   with a simplicity tie-break. The race metric is a **TRIMMED mean** (worst
@@ -316,6 +318,12 @@ close/oblique/tilted viewpoint). Escalation order:
   line up, restrict feature matching to it (keypoints below the window
   band, y>400 canvas / y>650 original worked on project 373) and chain
   frame-to-frame — the featureless window absorbs the drift invisibly.
+- **Fill recency beats crispness when the SUBJECT just arrived**: the last
+  frame's island got truncated into floor paper because the crisp-first rule
+  filled from a pre-island frame. Per-frame override, no rule change:
+  re-render via --apply with ALIGN_FILL=<immediate predecessor's aligned>
+  (one generation of its band is bounded compounding), re-harmonize, touch.
+  The frame's curated flag protects the fix.
 - A fill band is registered globally but judged locally at the seam: tape
   lines dead-ended at the joint until patch_gap phase-correlated the seam
   ring and shifted the fill (capped ±40px), and band paper stayed grayer
@@ -329,6 +337,42 @@ close/oblique/tilted viewpoint). Escalation order:
   anchor's canvas, always.
 - ECC as a second warp AFTER cover-fit re-opens the gap it closed — compose
   ECC into the matrix, run cover-fit LAST, warp once.
+- **SIFT starves exactly where these photos live** (blank drywall, cross-
+  season exteriors): April-vs-July gave 1 usable match under SIFT and 157
+  under LoFTR; a July pair went 68 -> 1089. The gold-standard family is
+  learned matchers (LoFTR/SuperGlue/RoMa); Azure Content Understanding is a
+  document/media DATA extractor and cannot register pixels.
+- **Every "plausibility" cap must be RELATIVE to the source-to-canvas
+  resolution ratio.** Fixed bands calibrated for 3024px originals rejected
+  a PERFECT fit from a 5712px original three separate ways (scale floor,
+  delta-from-1.0, centre offset) before it could even race. reframeEnv()
+  now computes the band from actual dimensions (nominal x 0.5..2.5).
+- **Pixels cannot judge a cross-season pair** — every candidate measures
+  ~35 and the simplicity tie-break picks the wrong rigid fit. Past trimmed
+  error 25 the verdict falls back to inlier support (114-inlier homography
+  beats 48-inlier similarity). Same-season frames never enter that branch.
+- A dense matcher putting >=75 inliers behind a heavily-keystoned
+  homography is describing a REAL vantage change (1800px of keystone = the
+  other corner of the yard) — the keystone cap only applies to sparse fits.
+- **Generative outpainting is DEAD for this pipeline — twice over**
+  (2026-08-15). v1 (band fill, real pixels composited back): seamless per
+  frame, but independent generations SHIMMER in playback and invent
+  details. v2 (deep-overlap masking from the patch tool, high quality,
+  auto-chained after harmonize): individually convincing, still shimmered,
+  verdict "horrible, lets stick without the AI". ALL generative code was
+  REMOVED (jobs, scripts, patch tool UI, presented_path migration) — do
+  not rebuild it on the next "is there an AI for this?"; the answer that
+  ships is the in-house fill (single consistent real source, seam
+  phase-correlated, seam-ring graded, feather via ALIGN_FILL_FEATHER) and
+  the manual --apply overrides. The AI that DID earn its place is LoFTR —
+  matching, not generating. Azure Content Understanding is a document-data
+  service, not a pixel tool.
+- **Prod rollout for LoFTR needs**: `pip install torch --index-url
+  https://download.pytorch.org/whl/cpu` + `kornia` in the CV venv, and the
+  ~52MB checkpoint at ~/.cache/torch/hub/checkpoints/loftr_outdoor.ckpt
+  (scp it; the box may not reach the download host). ~6s/frame local,
+  expect ~20-40s on the 2-CPU box; RSS peaks ~3.2GB on 24MP originals —
+  single-process timelapse queue only.
 - **SIFT memory scales with PIXELS (~215MB/megapixel).** A 24MP original
   (5712x4284) peaked at 5.3GB and the kernel SIGKILLed it — "signal 9" in
   the failed job, no PHP error, frame silently unaligned. `ALIGN_WORK_MAX_PX`

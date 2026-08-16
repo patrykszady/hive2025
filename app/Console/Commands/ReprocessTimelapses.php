@@ -36,6 +36,7 @@ class ReprocessTimelapses extends Command
         {--project= : only timelapses on this project id}
         {--timelapse= : only this collection id}
         {--sync : process inline now instead of queueing (needs a long-running shell)}
+        {--force : re-derive even hand-curated frames (their tuning is LOST)}
         {--dry-run : list what would happen and change nothing}';
 
     protected $description = 'Re-align and re-grade existing timelapse frames with the current pipeline';
@@ -84,9 +85,30 @@ class ReprocessTimelapses extends Command
                 $collection->forceFill(['anchor_frame_id' => $anchor->id])->save();
             }
 
+            // Hand-curated frames (manual aligner, hard-frame playbook
+            // restores) carry curated=true in their stored fit. Re-deriving
+            // them silently DISCARDS human work — a blanket reprocess once
+            // flattened a fully-tuned sequence back to auto fits. They are
+            // skipped unless --force says otherwise; skipped frames still
+            // serve as references and fill sources for the ones re-derived.
+            $curated = $frames->filter(
+                fn (ProjectTimelapseFrame $f) => (bool) ($f->align_transform['curated'] ?? false)
+            )->pluck('id')->all();
+
+            if ($curated !== [] && ! $this->option('force')) {
+                $this->warn(sprintf(
+                    'timelapse #%d: keeping %d hand-curated frame(s) (%s) — use --force to re-derive them',
+                    $collection->id,
+                    count($curated),
+                    implode(',', array_slice($curated, 0, 8)).(count($curated) > 8 ? ',…' : ''),
+                ));
+            }
+
             // Nearest-to-the-anchor first, spreading outward.
             $queue = $frames
                 ->reject(fn (ProjectTimelapseFrame $f) => $f->id === $anchor->id)
+                ->reject(fn (ProjectTimelapseFrame $f) => ! $this->option('force')
+                    && in_array($f->id, $curated, true))
                 ->sortBy(fn (ProjectTimelapseFrame $f) => abs($f->sort_order - $anchor->sort_order))
                 ->values();
 
