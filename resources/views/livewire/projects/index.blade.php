@@ -41,4 +41,11 @@
             lazy.bundle
         />
     @endif
+
+    {{-- Recovery for soft-deleted projects. Standalone /projects only, and
+         never for a client browsing their own view — this is internal. The
+         card renders nothing unless something is actually trashed. --}}
+    @if($view === NULL && ! auth()->user()->is_browsing_as_client)
+        <livewire:projects.deleted-projects-table />
+    @endif
 </div>

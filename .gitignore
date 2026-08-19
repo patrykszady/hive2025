@@ -37,3 +37,14 @@ mailtrap-mcp/
 # Python bytecode from the CV scripts
 scripts/__pycache__/
 *.pyc
+
+# EWCCV scraper debug screenshots. Written on every run, ~39MB and growing,
+# and public/ is web-served — the ones already committed are fetchable at
+# https://hive.contractors/EWCCV/*.png, including login-flow captures.
+# Debug artifacts, never deploy input.
+/public/EWCCV/
+
+# Debug render dump of the Projects table. public/ is web-served, and this
+# file contained real client names at https://hive.contractors/perf.html
+# with no auth. Never commit rendered app output into public/.
+/public/perf.html

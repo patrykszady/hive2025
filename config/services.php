@@ -152,12 +152,36 @@ return [
         'secret' => env('MAILGUN_SECRET'),
     ],
 
+    /*
+    | TrackMyVendor — COI / license / W-9 tracking for subcontractors.
+    |
+    | Webhook-only by design: there is no REST API and no API key. You register
+    | our endpoint under Settings → Integrations → Webhook Endpoints and it
+    | pushes compliance events to us, signed with X-TMV-Signature (HMAC-SHA256
+    | of the raw body). Free for the first 25 vendors, webhooks included on
+    | every plan.
+    */
+    'trackmyvendor' => [
+        'webhook_secret' => env('TRACKMYVENDOR_WEBHOOK_SECRET'),
+    ],
+
     'anticaptcha' => [
         'api_key' => env('ANTICAPTCHA_API_KEY'),
     ],
 
     'twocaptcha' => [
         'api_key' => env('TWOCAPTCHA_API_KEY'),
+    ],
+
+    // EWCCV — workers comp coverage verification (ewccv.com).
+    'ewccv' => [
+        // Issued by NCCI. Skips reCAPTCHA entirely via
+        // /recaptcha/verifybypasskey — the sanctioned automation path.
+        'bypass_key' => env('EWCCV_BYPASS_KEY'),
+        // Shared secret for the browser-extension session bridge
+        // (scripts/ewccv-session-bridge). The server cannot pass EWCCV's
+        // reCAPTCHA v3; a real browser can, so it hands the session over.
+        'bridge_token' => env('EWCCV_BRIDGE_TOKEN'),
     ],
 
     'geoapify' => [

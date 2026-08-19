@@ -56,7 +56,16 @@ puppeteer.use(StealthPlugin());
 // defaults to 'http' but can be 'socks5'. When unset, Chrome uses the host network.
 const proxyHost = process.env.EWCCV_PROXY_HOST || '';
 const proxyPort = process.env.EWCCV_PROXY_PORT || '';
-const proxyUser = process.env.EWCCV_PROXY_USER || '';
+// Bright Data rotates the residential exit IP per request unless the username
+// carries a -session-<id> segment. That rotation is fatal here: the sign-in
+// email is requested from one IP and the magic link opened from another, and
+// the token is rejected. EWCCV_PROXY_SESSION pins one exit IP across the whole
+// flow — the PHP command generates it and reuses it for both phases.
+const proxySession = process.env.EWCCV_PROXY_SESSION || '';
+const proxyUserBase = process.env.EWCCV_PROXY_USER || '';
+const proxyUser = (proxyUserBase && proxySession && ! proxyUserBase.includes('-session-'))
+    ? `${proxyUserBase}-session-${proxySession}`
+    : proxyUserBase;
 const proxyPass = process.env.EWCCV_PROXY_PASS || '';
 const proxyScheme = process.env.EWCCV_PROXY_SCHEME || 'http';
 const proxyServer = (proxyHost && proxyPort)
@@ -66,6 +75,62 @@ if (proxyServer) {
     process.stderr.write(`[ewccv] Routing Chrome through proxy: ${proxyScheme}://${proxyHost}:${proxyPort}` +
         (proxyUser ? ` (auth: ${proxyUser})` : '') + '\n');
 }
+// reCAPTCHA v3 scores a browser near zero when its User-Agent contradicts the
+// signals it cannot fake: navigator.userAgentData, the sec-ch-ua client hints,
+// platform, and the real Chrome build. This script used to claim "Windows,
+// Chrome 131" while running Chrome 146 on Linux — a mismatch that reads as an
+// obvious bot and made EWCCV reject every token, including ones minted by the
+// page's own grecaptcha. Presenting Chrome's genuine identity is the fix; a UA
+// override is only applied if it MATCHES the running build.
+// ── Official bypass key (no reCAPTCHA at all) ─────────────────────────────────
+// EWCCV's own app supports GET /cvs/endpoint/recaptcha/verifybypasskey/?key=…
+// which returns {canBypass, accessToken} and skips reCAPTCHA entirely — the
+// sanctioned path for automated/partner access. Set EWCCV_BYPASS_KEY once NCCI
+// issues one and every run becomes fully unattended: no captcha, no solver
+// spend, no score roulette.
+async function tryBypassKey(page, bypassKey) {
+    if (!bypassKey) return { ok: false, reason: 'no_key_configured' };
+
+    log('  Trying EWCCV bypass key…');
+    const result = await page.evaluate(async (key) => {
+        try {
+            const res = await fetch(`/cvs/endpoint/recaptcha/verifybypasskey/?key=${encodeURIComponent(key)}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const json = await res.json();
+            const data = json.data || {};
+            if (data.canBypass && data.accessToken) {
+                sessionStorage.setItem('accessToken', data.accessToken);
+                return { ok: true, tokenLength: data.accessToken.length };
+            }
+            return { ok: false, reason: 'canBypass_false', status: res.status, body: JSON.stringify(json).substring(0, 200) };
+        } catch (e) {
+            return { ok: false, reason: 'bypass_error: ' + e.message };
+        }
+    }, bypassKey);
+
+    if (result.ok) log(`  Bypass key accepted — accessToken obtained (${result.tokenLength} chars)`);
+    else log(`  Bypass key not usable: ${result.reason}${result.body ? ' — ' + result.body : ''}`);
+
+    return result;
+}
+
+async function applyConsistentUserAgent(page) {
+    try {
+        const real = await page.browser().userAgent();
+        // Keep Chrome's own UA (headless builds report "HeadlessChrome" — strip
+        // just that marker, which is the one signal worth hiding and which does
+        // not contradict any client hint).
+        const cleaned = real.replace('HeadlessChrome', 'Chrome');
+        if (cleaned !== real) {
+            await page.setUserAgent(cleaned);
+        }
+    } catch (e) {
+        process.stderr.write(`[ewccv] userAgent alignment skipped: ${e.message}\n`);
+    }
+}
+
 async function applyProxyAuth(page) {
     if (proxyServer && proxyUser) {
         try { await page.authenticate({ username: proxyUser, password: proxyPass }); }
@@ -256,6 +321,9 @@ async function launchChromeDirectly(headless, userDataDir) {
 
     if (proxyServer) {
         args.push(`--proxy-server=${proxyServer}`);
+        // Bright Data intercepts TLS with its own CA — without this flag every
+        // proxied HTTPS load dies with ERR_CERT_AUTHORITY_INVALID.
+        args.push('--ignore-certificate-errors');
     }
 
     // Load the reCAPTCHA-solving extension (runs WITHOUT CDP for clean scores)
@@ -1535,6 +1603,16 @@ async function obtainAccessToken(page) {
         }, v3Tok, stateTokenString);
     }
 
+    // ── Control probe (EWCCV_DEBUG_CONTROL=1) ────────────────────────────────
+    // Sends a deliberately invalid token first. If EWCCV answers identically to
+    // a real token, it is not judging the token at all — it is refusing this
+    // session (server-side bot scoring), and no captcha solver can ever help.
+    // If the answers differ, our real tokens ARE evaluated and merely score low.
+    if (process.env.EWCCV_DEBUG_CONTROL === '1') {
+        const control = await verifyV3Token('CONTROL_INVALID_TOKEN_0000000000');
+        log(`    [CONTROL] invalid-token verify → ${JSON.stringify(control).substring(0, 260)}`);
+    }
+
     // ── Attempt 1: Native browser reCAPTCHA execution ────────────────────────
     // The page already loads grecaptcha.enterprise.js — execute it directly in the browser
     log('    Trying native browser reCAPTCHA v3 execution…');
@@ -2090,12 +2168,12 @@ async function requestLoginEmail(page, email) {
             executablePath: findChromeBinary() || undefined,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
                    '--disable-blink-features=AutomationControlled', '--window-size=1366,900',
-                   ...(proxyServer ? [`--proxy-server=${proxyServer}`] : [])],
+                   ...(proxyServer ? [`--proxy-server=${proxyServer}`, '--ignore-certificate-errors'] : [])],
             defaultViewport: { width: 1366, height: 900 },
         });
         const page = await browser.newPage();
         await applyProxyAuth(page);
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+        await applyConsistentUserAgent(page);
 
         try {
             const sent = await requestLoginEmail(page, config.loginEmail);
@@ -2145,13 +2223,19 @@ async function requestLoginEmail(page, email) {
         });
         chromeProcess = directLaunch.chromeProcess;
         launchInfo = { debugPort: directLaunch.debugPort, type: 'direct' };
-        const pages = await browser.pages();
-        page = pages[0] || await browser.newPage();
+        // A page Chrome opened at startup was never routed through
+        // puppeteer-extra's onPageCreated hook, so the stealth evasions are
+        // NOT installed on it. Always create our own page (and discard the
+        // startup tab) so the fingerprint patches actually apply — this is
+        // what reCAPTCHA v3 scores.
+        const startupPages = await browser.pages();
+        page = await browser.newPage();
+        for (const p of startupPages) { if (!p.isClosed()) await p.close().catch(() => {}); }
     } else {
         log('  Direct Chrome launch failed — falling back to puppeteer.launch');
         const launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
                             '--disable-blink-features=AutomationControlled', '--window-size=1366,900'];
-        if (proxyServer) { launchArgs.push(`--proxy-server=${proxyServer}`); }
+        if (proxyServer) { launchArgs.push(`--proxy-server=${proxyServer}`, '--ignore-certificate-errors'); }
 
         // Load extension via puppeteer.launch args
         if (hasExtension) {
@@ -2174,7 +2258,22 @@ async function requestLoginEmail(page, email) {
     }
 
     await applyProxyAuth(page);
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+    await applyConsistentUserAgent(page);
+
+    // Prove the stealth evasions are live on THIS page. reCAPTCHA v3 scores the
+    // session, so a leak here (webdriver true, zero plugins, missing chrome
+    // object) is the difference between a passing and a failing token.
+    try {
+        const fp = await page.evaluate(() => ({
+            webdriver: navigator.webdriver,
+            plugins: navigator.plugins.length,
+            languages: (navigator.languages || []).join(','),
+            chrome: typeof window.chrome,
+            vendor: navigator.vendor,
+            platform: navigator.platform,
+        }));
+        log(`  Fingerprint: ${JSON.stringify(fp)}`);
+    } catch (e) { log(`  Fingerprint probe failed: ${e.message}`); }
 
     const results = { success: [], failed: [], skipped: [] };
 
@@ -2233,6 +2332,36 @@ async function requestLoginEmail(page, email) {
         // ── Fallback: Headless automated approaches ──────────────────────
         // EWCCV_SKIP_API_SEARCH=1 forces UI-driven search (let EWCCV's React app
         // handle the reCAPTCHA verify call itself — it knows the right headers).
+        // ── Bridged accessToken (browser extension) ──────────────────────
+        // The strongest path: a credential minted in a REAL browser, where
+        // Google's score is not the problem it is here. Inject it and every
+        // captcha attempt below is skipped.
+        if (!useApiSearch && config.bridgedAccessToken) {
+            if (!page.url().includes('/cvs/search')) {
+                await page.goto(`${BASE_URL}/cvs/search`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+                await sleep(1500);
+            }
+            await page.evaluate((tok) => { sessionStorage.setItem('accessToken', tok); }, config.bridgedAccessToken);
+            log(`  Using bridged accessToken from the browser extension (${config.bridgedAccessToken.length} chars) — no captcha needed.`);
+            useApiSearch = true;
+            await patchReduxStore(page);
+            await interceptRedirects(page);
+        }
+
+        // A configured bypass key short-circuits every captcha path below.
+        if (!useApiSearch && (config.bypassKey || process.env.EWCCV_BYPASS_KEY)) {
+            if (!page.url().includes('/cvs/search')) {
+                await page.goto(`${BASE_URL}/cvs/search`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+                await sleep(1500);
+            }
+            const bypass = await tryBypassKey(page, config.bypassKey || process.env.EWCCV_BYPASS_KEY);
+            if (bypass.ok) {
+                useApiSearch = true;
+                await patchReduxStore(page);
+                await interceptRedirects(page);
+            }
+        }
+
         const skipApiSearch = process.env.EWCCV_SKIP_API_SEARCH === '1';
         if (!useApiSearch && isHeadless && !skipApiSearch) {
             log('  Falling back to automated reCAPTCHA approach…');
@@ -2246,6 +2375,29 @@ async function requestLoginEmail(page, email) {
             }
         } else if (skipApiSearch) {
             log('  EWCCV_SKIP_API_SEARCH=1 → going straight to UI-driven search');
+        }
+
+        // ── Manual reCAPTCHA fallback (visible mode only) ────────────────
+        // EWCCV's reCAPTCHA v3 rejects every automated token from this
+        // environment ("verified":false) — the provider tokens are valid but
+        // Google scores the session too low. When a human is at the visible
+        // browser, one hand-run search mints a real accessToken that every
+        // subsequent vendor reuses via the API. Gated on visible mode so a
+        // headless/cron run still fails fast instead of hanging 5 minutes.
+        if (!useApiSearch && !isHeadless && process.env.EWCCV_MANUAL_RECAPTCHA !== '0') {
+            if (!page.url().includes('/cvs/search')) {
+                await page.goto(`${BASE_URL}/cvs/search`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+                await sleep(1500);
+            }
+            const manual = await waitForManualRecaptcha(page);
+            if (manual.ok) {
+                log('  Manual accessToken captured — switching to API search for all vendors.');
+                useApiSearch = true;
+                await patchReduxStore(page);
+                await interceptRedirects(page);
+            } else {
+                log(`  Manual reCAPTCHA fallback did not complete: ${manual.reason}`);
+            }
         }
 
         if (!useApiSearch) {
@@ -2430,7 +2582,7 @@ async function requestLoginEmail(page, email) {
                         log('    Page was closed — opening new tab');
                         page = await browser.newPage();
                         await applyProxyAuth(page);
-                        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+                        await applyConsistentUserAgent(page);
                     }
                     await page.goto(`${BASE_URL}/cvs/search`, { waitUntil: 'networkidle2', timeout: 30000 });
                     await sleep(1000);

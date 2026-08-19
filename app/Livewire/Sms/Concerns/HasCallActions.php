@@ -391,9 +391,16 @@ trait HasCallActions
             return;
         }
 
+        // Only someone actually ON this call may pull in another person — but
+        // that's the outbound initiator (user_id) OR an admin who joined an
+        // inbound conference (joined_admin_ids). The old owner-only check
+        // rejected every inbound invite, since user_id is the external caller.
         $callLog = CallLog::find($callLogId);
-        if (!$callLog || $callLog->user_id !== $user->id) {
-            Flux::toast(variant: 'danger', heading: 'Invalid Call', text: 'Call not found or does not belong to you.', duration: 5000, position: 'top right');
+        $joinedAdminIds = array_map('intval', ($callLog?->metadata['joined_admin_ids'] ?? []));
+        $isOwner = $callLog && $callLog->user_id === $user->id;
+        $isConferenceAdmin = in_array($user->id, $joinedAdminIds, true);
+        if (! $callLog || (! $isOwner && ! $isConferenceAdmin)) {
+            Flux::toast(variant: 'danger', heading: 'Invalid Call', text: 'Call not found or you are not on this call.', duration: 5000, position: 'top right');
             return;
         }
 

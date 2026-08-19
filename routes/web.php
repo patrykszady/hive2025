@@ -139,15 +139,33 @@ Route::get('telnyx-audio/{filename}', function (string $filename) {
     return response()->file($path, $headers);
 })->where('filename', '[a-zA-Z0-9_\-]+\.(wav|mp3|ogg)');
 
-// Passkey debug logging endpoint (temporary for debugging)
+/*
+ * Passkey ceremony logging, posted by the passkey-registration component.
+ *
+ * Writes to the dedicated `passkeys` channel rather than `single`: a failed
+ * enrolment is only readable as a sequence (click -> attest -> failure), and
+ * in the shared log those lines are interleaved with every other request.
+ *
+ * The client reports its own level, so honour it — a rejected ceremony was
+ * being written at info() alongside the successful steps, which is a large
+ * part of why "adding passkeys is not working" produced no findable error.
+ * Anything unrecognised falls back to info.
+ */
 Route::post('api/passkey-debug-log', function () {
     $data = request()->all();
-    Log::channel('single')->info('PasskeyJS: ' . ($data['message'] ?? 'No message'), [
-        'level' => $data['level'] ?? 'info',
-        'data' => $data['data'] ?? [],
-        'timestamp' => $data['timestamp'] ?? null,
-        'url' => $data['url'] ?? null,
-    ]);
+    $level = $data['level'] ?? 'info';
+
+    Log::channel('passkeys')->log(
+        in_array($level, ['debug', 'info', 'notice', 'warning', 'error', 'critical'], true) ? $level : 'info',
+        'PasskeyJS: '.($data['message'] ?? 'No message'),
+        [
+            'data' => $data['data'] ?? [],
+            'timestamp' => $data['timestamp'] ?? null,
+            'url' => $data['url'] ?? null,
+            'user_id' => auth()->id(),
+        ]
+    );
+
     return response()->json(['ok' => true]);
 })->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
 
@@ -396,6 +414,19 @@ Route::get('receipts/amazon_auth_response', [ReceiptController::class, 'amazon_a
 Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orders_api']);
 
 // Plaid webhooks (no auth required - Plaid sends these directly)
+// EWCCV search-session hand-off from the browser extension. ewccv.com's
+// reCAPTCHA v3 rejects every token this server can mint, so Patryk's own
+// browser earns the accessToken and posts it here. Bearer-authed, CSRF-exempt.
+Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::class)
+    ->name('ewccv.session');
+
+// TrackMyVendor compliance webhooks — COI/licence expiry and pass/fail
+// changes for subcontractors. Webhook-only product (no REST API, no key):
+// the endpoint below is registered in their Settings → Integrations, and
+// deliveries are signed with X-TMV-Signature.
+Route::post('webhooks/trackmyvendor', \App\Http\Controllers\TrackMyVendorWebhookController::class)
+    ->name('webhooks.trackmyvendor');
+
 Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('webhooks.plaid');
 
 // Telnyx webhooks (SMS delivery status, inbound messages)

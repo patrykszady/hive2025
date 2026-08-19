@@ -17,7 +17,6 @@ class CallStatusBadge extends Component
     public ?string $activeCallStatus = null;
     public ?string $otherNumber = null;
     public ?string $otherPartyDisplay = null;
-    public bool $showAddParticipantModal = false;
     public ?int $selectedParticipantId = null;
 
     #[On('call.answered')]
@@ -39,14 +38,21 @@ class CallStatusBadge extends Component
             return collect();
         }
 
-        $vendorId = $user->vendor?->id;
-        if (! $vendorId) {
-            return collect();
-        }
+        // The GS admin roster — the same list the phone "press 9" shortcut and
+        // the inbound simulring use (Vendor 1's call_recipients). Matching them
+        // keeps "who can I pull in" identical across the UI and the keypad, and
+        // works for admins who have no vendor of their own (the old
+        // same-vendor query returned an empty list and hid the button for them).
+        // withoutGlobalScopes: the canonical GS vendor (1) is a fixed config
+        // lookup, but this runs in an authenticated context where VendorScope
+        // filters vendors to the viewer's own — which would hide vendor 1 (and
+        // empty the picker) for any admin who has a vendor of their own. The
+        // webhook path reads it unauthenticated, so it never hit this.
+        $vendor = \App\Models\Vendor::withoutGlobalScopes()->find(1);
+        $recipientIds = array_map('intval', (array) data_get($vendor?->options ?? [], 'call_recipients', []));
 
-        // Get all team members assigned to the same vendor with phone numbers.
         return User::query()
-            ->whereHas('vendors', fn ($query) => $query->where('vendors.id', $vendorId))
+            ->whereIn('id', $recipientIds)
             ->where('id', '!=', $user->id)
             ->whereNotNull('cell_phone')
             ->where('cell_phone', '!=', '')
@@ -56,14 +62,17 @@ class CallStatusBadge extends Component
 
     public function openAddParticipantModal(): void
     {
-        $this->showAddParticipantModal = true;
         $this->selectedParticipantId = null;
+        // Actually open the Flux modal — the old bool was never read by Flux,
+        // so the button did nothing. Matches the codebase convention
+        // ($this->modal('name')->show()).
+        $this->modal('add-participant')->show();
     }
 
     public function closeAddParticipantModal(): void
     {
-        $this->showAddParticipantModal = false;
         $this->selectedParticipantId = null;
+        $this->modal('add-participant')->close();
     }
 
     public function inviteParticipant(): void
@@ -114,8 +123,16 @@ class CallStatusBadge extends Component
         // only "live" while it has no terminating timestamp and was started
         // recently — this guards against calls that never received a hangup
         // webhook and would otherwise keep the badge lit indefinitely.
+        // Match calls the user OWNS (outbound they placed) OR calls they've
+        // JOINED as an admin (inbound simulring). On inbound, user_id is the
+        // external caller, so the owner-only filter never lit the badge for the
+        // admin who actually answered — and the "add participant" button with
+        // it. joined_admin_ids holds the int user ids on the conference.
         $activeCall = CallLog::query()
-            ->where('user_id', $user->id)
+            ->where(function ($q) use ($user) {
+                $q->where('user_id', $user->id)
+                    ->orWhereJsonContains('metadata->joined_admin_ids', $user->id);
+            })
             ->whereIn('status', CallLog::ACTIVE_STATUSES)
             ->whereNull('ended_at')
             ->where('created_at', '>=', now()->subMinutes(CallLog::STALE_ACTIVE_MINUTES))

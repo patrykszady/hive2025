@@ -441,6 +441,8 @@ class GeoapifyService
      */
     public static function splitForGeocoding(string $address): ?array
     {
+        $address = self::normalizeSeparators($address);
+
         $segments = array_values(array_filter(array_map('trim', explode(',', $address))));
 
         if ($segments === []) {
@@ -573,6 +575,78 @@ class GeoapifyService
     private const SERVICE_RADIUS_METERS = 80000;
 
     /**
+     * Put the commas back into an address typed without them.
+     *
+     * Everything here keys off comma-delimited segments, so "166 Akenside rd
+     * Riverside Il" — a real lead that arrived from a partner site — looked
+     * like a bare street and was refused, even though a human reads the city
+     * and state right there in it. Leads take free text (no structured city /
+     * state fields the way Client and Vendor forms do), so this arrives
+     * regularly and cannot be validated away at the door.
+     *
+     * The repair only fires when there is no comma at all, and only when the
+     * string ends in a state code AND a street suffix appears far enough
+     * before it to leave a city in between. Both conditions matter, because a
+     * trailing two-letter token is usually NOT a state:
+     *
+     *   "960 Danielson Ct"   — Ct is the street's own suffix, not Connecticut
+     *   "123 Main St NE"     — NE is a directional, not Nebraska
+     *
+     * Neither has a city gap, so both stay untouched and stay refused. That
+     * is the whole point of the anchor check and this must not weaken it.
+     */
+    public static function normalizeSeparators(string $address): string
+    {
+        $address = trim((string) preg_replace('/\s+/', ' ', $address));
+
+        // A comma means the sender already said where the segments are.
+        // Second-guessing that would break addresses that never needed help.
+        if ($address === '' || str_contains($address, ',')) {
+            return $address;
+        }
+
+        $tokens = explode(' ', $address);
+        $stateIndex = count($tokens) - 1;
+
+        // A ZIP trails the state: "... Riverside IL 60546".
+        $zip = null;
+        if (preg_match('/^\d{5}(?:-\d{4})?$/', $tokens[$stateIndex]) === 1) {
+            $zip = $tokens[$stateIndex];
+            $stateIndex--;
+        }
+
+        if ($stateIndex < 0) {
+            return $address;
+        }
+
+        $state = strtoupper($tokens[$stateIndex]);
+
+        if (! in_array($state, self::US_STATE_CODES, true)) {
+            return $address;
+        }
+
+        // The last street suffix leaving at least one word before the state —
+        // that gap is the city. Start at $stateIndex - 2 so the gap exists by
+        // construction, and stop at 1 so the house number is never the suffix.
+        $suffixIndex = null;
+        for ($i = $stateIndex - 2; $i >= 1; $i--) {
+            if (in_array(strtoupper(rtrim($tokens[$i], '.')), self::STREET_SUFFIXES, true)) {
+                $suffixIndex = $i;
+                break;
+            }
+        }
+
+        if ($suffixIndex === null) {
+            return $address;
+        }
+
+        $street = implode(' ', array_slice($tokens, 0, $suffixIndex + 1));
+        $city = implode(' ', array_slice($tokens, $suffixIndex + 1, $stateIndex - $suffixIndex - 1));
+
+        return $street.', '.$city.', '.$state.($zip !== null ? ' '.$zip : '');
+    }
+
+    /**
      * What in this address pins it to a place: a ZIP, a state, or a trailing
      * city segment. Null when it is only a street.
      *
@@ -580,6 +654,8 @@ class GeoapifyService
      */
     public static function addressAnchor(string $address): ?array
     {
+        $address = self::normalizeSeparators($address);
+
         $segments = array_values(array_filter(array_map('trim', explode(',', $address))));
 
         // Scan for a state ONLY past the street: street suffixes are valid
@@ -655,6 +731,22 @@ class GeoapifyService
     {
         return strtolower((string) preg_replace('/[^a-z0-9]+/i', '', $value));
     }
+
+    /**
+     * Street suffixes, used only to find where a comma-less street ends and
+     * its city begins (normalizeSeparators). Deliberately spelled out rather
+     * than pattern-matched: the whole safety of that repair rests on this
+     * being a closed list.
+     *
+     * @var list<string>
+     */
+    private const STREET_SUFFIXES = [
+        'ST', 'STREET', 'RD', 'ROAD', 'AVE', 'AV', 'AVENUE', 'DR', 'DRIVE',
+        'LN', 'LANE', 'CT', 'COURT', 'BLVD', 'BOULEVARD', 'WAY', 'PL', 'PLACE',
+        'TER', 'TERR', 'TERRACE', 'CIR', 'CIRCLE', 'PKWY', 'PARKWAY', 'HWY',
+        'HIGHWAY', 'TRL', 'TRAIL', 'SQ', 'SQUARE', 'PLZ', 'PLAZA', 'LOOP',
+        'RUN', 'PATH', 'PIKE', 'ROW', 'WALK', 'XING', 'CROSSING',
+    ];
 
     /** @var list<string> */
     private const US_STATE_CODES = [

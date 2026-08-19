@@ -155,7 +155,24 @@
                     return;
                 }
 
-                passkeyLog('warn', 'Webpass.attest returned error', { errorName: error?.name, errorMessage: error?.message });
+                // Webpass wraps ofetch, so a rejected POST arrives as a
+                // FetchError carrying the parsed response body on .data.
+                // Logging only name/message threw that away and left every
+                // server-side rejection reading as an opaque "422" — the
+                // actual reason (Laragear returns errors.attestation, e.g.
+                // "Challenge does not exist" or "Relying Party ID not
+                // scoped") is in there.
+                passkeyLog('warn', 'Webpass.attest returned error', {
+                    errorName: error?.name,
+                    errorMessage: error?.message,
+                    status: error?.status ?? error?.response?.status,
+                    serverErrors: (() => {
+                        try {
+                            const d = error?.data ?? error?.response?._data;
+                            return d ? JSON.stringify(d).slice(0, 600) : null;
+                        } catch { return null; }
+                    })(),
+                });
                 if (error?.name === 'NotAllowedError' || error?.message?.includes('credentials creation was not completed')) {
                     passkeyLog('info', 'User cancelled or NotAllowedError');
                     showNotCompletedMessage();

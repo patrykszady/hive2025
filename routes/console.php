@@ -301,6 +301,35 @@ Schedule::job(new DispatchIncompleteReceiptImageScrapesJob)
     ->withoutOverlapping()
     ->onOneServer();
 
+// Weekly EWCCV refresh: re-verify every active workers comp policy and keep
+// coverage-cancellation tracking subscribed. New/changed policies are handled
+// immediately by VendorDocObserver → LookupEwccvForVendor; this catches
+// subscriptions EWCCV dropped and policies whose lookups previously failed.
+Schedule::command('ewccv:scrape-tracking --belongs-to-vendor-id=1')->runInBackground()
+    ->weeklyOn(1, '07:00')
+    ->timezone('America/Chicago')
+    ->name('ewccv-weekly-refresh')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
+
+// Daily confirmation of what EWCCV is actually tracking for us — this is the
+// half of the integration that runs unattended. Searching EWCCV is gated by
+// reCAPTCHA v3 Enterprise (a score no captcha service can supply), but its
+// subscription API answers to the ordinary login JWT, so reading our own
+// tracked policies needs no human and no captcha. Daily because a subscription
+// silently disappearing is exactly the failure we must notice: while a policy
+// is tracked, EWCCV emails us if it is cancelled or not renewed.
+Schedule::command('ewccv:sync-subscriptions --belongs-to-vendor-id=1')->runInBackground()
+    ->dailyAt('06:30')
+    ->timezone('America/Chicago')
+    ->name('ewccv-subscription-sync')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
+
 // System maintenance
 Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()

@@ -30,9 +30,11 @@ class VendorDocsCard extends Component
     public static function columnDefs(): array
     {
         return [
-            ['label' => 'Type', 'width' => 'w-[38%] min-w-0', 'skeletonWidth' => 'w-24'],
-            ['label' => 'Exp Date', 'width' => 'w-[30%]', 'skeleton' => 'badge'],
-            ['label' => 'Policy #', 'width' => 'w-[32%] min-w-0', 'skeletonWidth' => 'w-28'],
+            ['label' => 'Type', 'width' => 'w-[32%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Exp Date', 'width' => 'w-[24%]', 'skeleton' => 'badge'],
+            ['label' => 'Policy #', 'width' => 'w-[28%] min-w-0', 'skeletonWidth' => 'w-28'],
+            // EWCCV coverage verification date (workers comp only).
+            ['label' => 'Verified', 'width' => 'w-[16%]', 'skeletonWidth' => 'w-16'],
         ];
     }
 

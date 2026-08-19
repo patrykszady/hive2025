@@ -793,6 +793,16 @@ class TelnyxWebhookController extends Controller
             $metadata['joined_target_call_control_ids'] = $joinedTargetCallControlIds;
             $metadata['answered_target_call_control_id'] = $metadata['answered_target_call_control_id'] ?? $callControlId;
 
+            // The GS user's own leg is the "admin" leg on an outbound call — the
+            // one allowed to press 9 (or use the UI) to pull in a teammate. The
+            // dialed target is NEVER in this set, so the caller cannot summon
+            // the team. Keeps the DTMF lookup + leg-role gate uniform with the
+            // inbound path (admin_call_control_ids).
+            $metadata['admin_call_control_ids'] = array_values(array_unique(array_merge(
+                $metadata['admin_call_control_ids'] ?? [],
+                array_filter([$userCallControlId])
+            )));
+
             $callLog->update([
                 'status' => CallLog::STATUS_TRANSFERRED,
                 'metadata' => $metadata,
@@ -876,6 +886,26 @@ class TelnyxWebhookController extends Controller
                     'hangup_cause' => $hangupCause,
                     'call_log_id' => $callLogId,
                     'remaining_joined_target_call_control_ids' => $remainingJoinedTargetLegIds,
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
+
+            // The last dialed target left — but if the GS user pulled in another
+            // admin, the conference still has two GS legs talking. Don't tear the
+            // call down: keep it TRANSFERRED so those legs keep talking and the
+            // UI/DTMF invite paths still resolve it. admin_call_control_ids holds
+            // the initiating user's leg plus any invited admins; >1 means a
+            // teammate is on the line beyond the user alone.
+            $adminLegIds = array_values(array_filter($metadata['admin_call_control_ids'] ?? []));
+            if (count($adminLegIds) > 1) {
+                $metadata['joined_target_call_control_ids'] = [];
+                $callLog->update(['metadata' => $metadata]);
+
+                Log::channel('telnyx')->info('Click-to-call: target left but GS admins remain — keeping conference alive', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'remaining_admin_legs' => $adminLegIds,
                 ]);
 
                 return response()->json(['status' => 'ok']);
@@ -1516,6 +1546,17 @@ class TelnyxWebhookController extends Controller
             $joinedAdmins[] = $adminUserId;
         }
         $metadata['joined_admin_ids'] = array_values(array_unique($joinedAdmins));
+
+        // Authoritative roster of GS/admin call legs. The first admin was
+        // previously omitted here — only late/invited admins landed in this
+        // list (joinAdminToConference) — which left the DTMF "press 9" lookup
+        // and the leg-role gate blind to the very first answerer. Seed it now
+        // so every GS leg (and NEVER the external caller) is tracked uniformly.
+        $adminCcIds = $metadata['admin_call_control_ids'] ?? [];
+        if (! in_array($adminCallControlId, $adminCcIds, true)) {
+            $adminCcIds[] = $adminCallControlId;
+        }
+        $metadata['admin_call_control_ids'] = array_values(array_unique($adminCcIds));
 
         // Track timing for admin to join the call
         if (! empty($metadata['admin_dial_initiated_at'])) {
@@ -2795,6 +2836,21 @@ class TelnyxWebhookController extends Controller
         $metadata = $callLog->metadata ?? [];
         $conferenceId = $metadata['conference_id'] ?? null;
         if (! $conferenceId) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Leg-role gate: only a GS/admin leg may pull in teammates — never the
+        // external caller or the dialed target. The call_control_id fallback
+        // above can resolve to the caller's leg (on inbound, that IS
+        // callLog->call_control_id), so without this a caller pressing 9 could
+        // ring the whole team. admin_call_control_ids now contains every GS
+        // leg (first + late + outbound user) and never the far party.
+        $adminLegIds = array_map('strval', $metadata['admin_call_control_ids'] ?? []);
+        if (! in_array((string) $callControlId, $adminLegIds, true)) {
+            Log::channel('telnyx')->info('DTMF 9 ignored: pressing leg is not a GS/admin leg', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLog->id,
+            ]);
             return response()->json(['status' => 'ok']);
         }
 

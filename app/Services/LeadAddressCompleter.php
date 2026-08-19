@@ -67,11 +67,60 @@ class LeadAddressCompleter
 
         // Stated values win — a sender who wrote "60660" knows their own ZIP
         // better than a geocoder that returns 60642 for the same street.
-        return $leadData + array_filter([
+        //
+        // Assign rather than union: `$leadData + [...]` only fills keys that
+        // are MISSING, and the website form posts the blanks explicitly
+        // ("city": null). The key was already there, so the union kept the
+        // null and the lead stayed incomplete even when the geocoder had
+        // answered it correctly.
+        foreach ([
             'city' => $city ?? $resolved['city'],
             'state' => $state ?? $resolved['state'],
             'zip' => $zip ?? $resolved['zip_code'],
-        ]);
+        ] as $key => $value) {
+            if (filled($value)) {
+                $leadData[$key] = $value;
+            }
+        }
+
+        // An address typed without commas carries the city and state inside
+        // the street ("166 Akenside rd  Riverside Il") — and that whole string
+        // is what every screen then shows beside the city it already repeats.
+        // Once the city is known the tail is pure duplication, so keep just
+        // the street, in the sender's own words rather than the geocoder's
+        // ("166 Akenside Rd", not its "166 Akenside Road").
+        if (($onlyStreet = $this->streetOnly($street)) !== null) {
+            $leadData['address'] = $onlyStreet;
+        }
+
+        return $leadData;
+    }
+
+    /**
+     * The street on its own, when the sender ran it together with the city
+     * and state. Null when there was nothing to strip.
+     *
+     * Casing is only ever ADDED — a fully lower-case word gets capitalised
+     * ("rd" -> "Rd") while anything the sender already capitalised is left
+     * exactly as typed, so "McDonald" and "PO" survive intact.
+     */
+    private function streetOnly(string $street): ?string
+    {
+        $normalized = GeoapifyService::normalizeSeparators($street);
+
+        if (! str_contains($normalized, ',')) {
+            return null;
+        }
+
+        $words = explode(' ', explode(',', $normalized)[0]);
+
+        foreach ($words as $i => $word) {
+            if ($word !== '' && $word === mb_strtolower($word)) {
+                $words[$i] = mb_strtoupper(mb_substr($word, 0, 1)).mb_substr($word, 1);
+            }
+        }
+
+        return implode(' ', $words);
     }
 
     /**
@@ -85,7 +134,11 @@ class LeadAddressCompleter
             return $street;
         }
 
-        return str_contains(mb_strtolower($street), mb_strtolower((string) $city))
+        // Only skip the city when the street really does already name it.
+        // str_contains() reports an EMPTY needle as found, so a null city took
+        // this branch every time and dropped the comma that separates street
+        // from state — the separator everything downstream splits on.
+        return $city !== null && str_contains(mb_strtolower($street), mb_strtolower($city))
             ? $street.' '.collect([$state, $zip])->filter()->implode(' ')
             : $street.', '.$tail;
     }

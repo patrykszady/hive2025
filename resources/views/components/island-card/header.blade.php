@@ -18,11 +18,22 @@
                 <flux:heading size="lg" class="mb-0 truncate">
                     {{-- Two whole tags, not one with @if inside it: Blade
                          directives don't compile inside a component tag — they
-                         end up rendered as literal attributes. --}}
-                    @if($href && $navigate)
-                        <flux:link href="{{ $href }}" wire:navigate.hover variant="ghost" :accent="false" class="hover:underline">{{ html_entity_decode((string) $heading, ENT_QUOTES, 'UTF-8') }}</flux:link>
-                    @elseif($href)
-                        <flux:link href="{{ $href }}" external variant="ghost" :accent="false" class="hover:underline">{{ html_entity_decode((string) $heading, ENT_QUOTES, 'UTF-8') }}</flux:link>
+                         end up rendered as literal attributes. For the same
+                         reason @click.stop rides on a plain <span> wrapper
+                         rather than on <flux:link> itself.
+
+                         That stop matters on a clickable (collapsible) card:
+                         the link sits INSIDE the row's `open = !open` handler,
+                         so without it, following the link also toggles the
+                         accordion and the card collapses on the way out. --}}
+                    @if($href)
+                        <span @if($clickable) @click.stop @endif>
+                            @if($navigate)
+                                <flux:link href="{{ $href }}" wire:navigate.hover variant="ghost" :accent="false" class="no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400">{{ html_entity_decode((string) $heading, ENT_QUOTES, 'UTF-8') }}</flux:link>
+                            @else
+                                <flux:link href="{{ $href }}" external variant="ghost" :accent="false" class="no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400">{{ html_entity_decode((string) $heading, ENT_QUOTES, 'UTF-8') }}</flux:link>
+                            @endif
+                        </span>
                     @else
                         {{ $heading }}
                     @endif

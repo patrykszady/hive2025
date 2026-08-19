@@ -92,7 +92,7 @@ function waiverScanFixtures(): array
  * getMessages uses a raw Guzzle client (Http::fake can't reach it), so the
  * message listing is partial-mocked; download/move/CU ride Http::fake.
  */
-function fakeScanPipeline(array $cuContents, array $attachments = null, array $sequentialResults = null): void
+function fakeScanPipeline(array $cuContents, array $attachments = null, array $sequentialResults = null, ?string $downloadBinary = null): void
 {
     $message = [
         'id' => 'msg-1',
@@ -113,13 +113,18 @@ function fakeScanPipeline(array $cuContents, array $attachments = null, array $s
     // whose poll returns $sequentialResults[N-1] (or $cuContents for all).
     $submitCount = 0;
 
-    Http::fake(function ($request) use ($cuContents, $sequentialResults, &$submitCount) {
+    Http::fake(function ($request) use ($cuContents, $sequentialResults, &$submitCount, $downloadBinary) {
         $url = $request->url();
         $method = $request->method();
 
         // Testing env has no NYLAS_API_URI, so Nylas URLs are relative — match paths.
         if (str_contains($url, '/download')) {
-            return Http::response('%PDF-1.4 fake-scan-binary');
+            // Page-trimming needs a REAL, FPDI-parseable multi-page PDF to
+            // operate on — the plain fake string below isn't one, and that's
+            // deliberate: it keeps every OTHER test on the cheap fast path
+            // (PdfPageExtractor::pageCount() returns null for it, so
+            // trimToOwnPages() no-ops immediately).
+            return Http::response($downloadBinary ?? '%PDF-1.4 fake-scan-binary');
         }
 
         if ($method === 'PATCH' && str_contains($url, 'messages/')) {
@@ -719,4 +724,137 @@ it('re-rendering a waiver never clobbers an ingested scan', function () {
     $waiver->refresh();
     expect($waiver->signed_path)->toBe($scanPath)
         ->and(Storage::disk('files')->get($scanPath))->toBe($scanBytes);
+});
+
+/**
+ * A real, FPDI-parseable N-page PDF (plain FPDF, not FPDI — nothing to
+ * import). Page-trimming needs a genuine multi-page document to operate on;
+ * every other test in this file deliberately uses the non-parseable fake
+ * string so it stays on the untouched fast path.
+ */
+function buildMultiPagePdf(int $pages): string
+{
+    $pdf = new \FPDF();
+    for ($i = 1; $i <= $pages; $i++) {
+        $pdf->AddPage();
+        $pdf->SetFont('Arial', '', 12);
+        $pdf->Cell(0, 10, "Page {$i}");
+    }
+
+    return $pdf->Output('S');
+}
+
+it('excludes an unrelated attached page from the stored scan', function () {
+    [, , , $waiver] = waiverScanFixtures();
+    $code = 'HLW-' . $waiver->id;
+
+    // Page 1 = the real waiver (barcode + footer marker); page 2 = a vendor's
+    // own invoice glued on by their scanner — no barcode, no footer marker.
+    $content = cuContentFor($code);
+    $content['startPageNumber'] = 1;
+    $content['endPageNumber'] = 2;
+    $content['paragraphs'] = [
+        ['content' => 'Please email the signed copy back to waivers@hive.contractors ASAP.', 'source' => 'D(1,0,0,0,0,0,0,0,0)'],
+        ['content' => 'INVOICE', 'source' => 'D(2,0,0,0,0,0,0,0,0)'],
+    ];
+
+    fakeScanPipeline([$content], downloadBinary: buildMultiPagePdf(2));
+
+    $stats = app(WaiverScanIngest::class)->processInbox();
+
+    expect($stats['matched'])->toBe(1)->and($stats['errors'])->toBe(0);
+
+    $waiver->refresh();
+    $stored = Storage::disk('files')->get($waiver->signed_path);
+    expect(\App\Support\PdfPageExtractor::pageCount($stored))->toBe(1);
+});
+
+it('keeps every page of a genuine multi-page document even when one page barcode fails to scan', function () {
+    [$gc, , $project] = waiverScanFixtures();
+
+    $statement = SwornStatement::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $gc->id,
+        'this_payment' => 60000,
+        'status' => LienWaiverStatus::Sent,
+        'filename' => 'sworn-statement-gs.pdf',
+    ]);
+    $code = 'HSS-' . $statement->id;
+
+    // Both pages are genuinely part of the same GCSS: page 1's barcode
+    // decodes fine, page 2's does not (a crumpled corner) — but page 2 still
+    // carries the return-email footer, so it must be kept, not dropped.
+    $content = [
+        'markdown' => '<!-- PageFooter: ![Code128](barcodes/1.1 "' . $code . '") -->',
+        'startPageNumber' => 1,
+        'endPageNumber' => 2,
+        'paragraphs' => [
+            ['content' => 'Please email the signed copy back to waivers@hive.contractors ASAP.', 'source' => 'D(1,0,0,0,0,0,0,0,0)'],
+            ['content' => 'Please email the signed copy back to waivers@hive.contractors ASAP.', 'source' => 'D(2,0,0,0,0,0,0,0,0)'],
+        ],
+        'fields' => [
+            'DocumentType' => ['type' => 'string', 'valueString' => 'sworn_statement'],
+            'ClaimantCompanyName' => ['type' => 'string', 'valueString' => 'GS Construction & Remodeling, Inc'],
+            'PropertyAddress' => ['type' => 'string', 'valueString' => '3154 Violet Ln, Northbrook, IL 60062'],
+            'IsWetSigned' => ['type' => 'boolean', 'valueBoolean' => true],
+            'StatementSignatureText' => ['type' => 'string', 'valueString' => 'Patryk Szady'],
+            'NotaryDay' => ['type' => 'string', 'valueString' => '25'],
+            'NotaryMonth' => ['type' => 'string', 'valueString' => 'July'],
+            'NotaryYear' => ['type' => 'string', 'valueString' => '26'],
+            'NotarySignatureText' => ['type' => 'string', 'valueString' => 'Pinan Kll'],
+            'NotaryName' => ['type' => 'string', 'valueString' => 'Adriana Y Alvarez'],
+            'NotaryCommissionNumber' => ['type' => 'string', 'valueString' => '840218'],
+            'HasNotaryStamp' => ['type' => 'boolean', 'valueBoolean' => true],
+        ],
+    ];
+
+    fakeScanPipeline([$content], downloadBinary: buildMultiPagePdf(2));
+
+    $stats = app(WaiverScanIngest::class)->processInbox();
+
+    expect($stats['matched'])->toBe(1)->and($stats['errors'])->toBe(0);
+
+    $statement->refresh();
+    $stored = Storage::disk('files')->get($statement->signed_path);
+    expect(\App\Support\PdfPageExtractor::pageCount($stored))->toBe(2);
+});
+
+it('does not trim when there is no page-level evidence to decide safely (matched via footer filename, real multi-page attachment)', function () {
+    [, , , $waiver] = waiverScanFixtures();
+
+    // No barcode anywhere in the markdown — matched purely via the footer
+    // filename fallback, exactly like the "falls back to the footer
+    // filename" test above, but this time backed by a REAL 2-page PDF. With
+    // zero barcode-page evidence, selectPagesToKeep() must return null and
+    // trimToOwnPages() must leave the attachment untouched.
+    $content = cuContentFor('IGNORED', [
+        'FooterFilename' => ['type' => 'string', 'valueString' => "lien-waiver-{$waiver->id}-accomplished-j-plumbing-inc-3154-violet-ln.pdf"],
+    ]);
+    $content['markdown'] = '<!-- PageFooter: no barcode readable -->';
+
+    fakeScanPipeline([$content], downloadBinary: buildMultiPagePdf(2));
+
+    $stats = app(WaiverScanIngest::class)->processInbox();
+
+    expect($stats['matched'])->toBe(1);
+
+    $waiver->refresh();
+    $stored = Storage::disk('files')->get($waiver->signed_path);
+    expect(\App\Support\PdfPageExtractor::pageCount($stored))->toBe(2);
+});
+
+it('PdfPageExtractor keeps only the requested pages, in the order given', function () {
+    $binary = buildMultiPagePdf(3);
+
+    expect(\App\Support\PdfPageExtractor::pageCount($binary))->toBe(3);
+
+    $onlyFirst = \App\Support\PdfPageExtractor::extractPages($binary, [1]);
+    expect(\App\Support\PdfPageExtractor::pageCount($onlyFirst))->toBe(1);
+
+    $reordered = \App\Support\PdfPageExtractor::extractPages($binary, [3, 1]);
+    expect(\App\Support\PdfPageExtractor::pageCount($reordered))->toBe(2);
+
+    expect(\App\Support\PdfPageExtractor::extractPages($binary, [99]))->toBeNull()
+        ->and(\App\Support\PdfPageExtractor::extractPages('not a pdf', [1]))->toBeNull()
+        ->and(\App\Support\PdfPageExtractor::pageCount('not a pdf'))->toBeNull();
 });

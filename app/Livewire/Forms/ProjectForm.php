@@ -66,9 +66,19 @@ class ProjectForm extends Form
         return $this->project;
     }
 
+    /**
+     * Soft delete — NEVER forceDelete here. A hard delete took project 427 and
+     * its client with it in Aug 2026, unrecoverably: the row was gone from
+     * every backup and left an estimate pointing at nothing. The project keeps
+     * its statuses, images, and history while trashed; ProjectObserver
+     * cascades the estimates so they stop showing on /estimates, and restores
+     * them if the project comes back. Permanent removal stays available via
+     * forceDelete() in tinker for a deliberate purge.
+     */
     public function delete()
     {
-        $this->project->forceDelete();
+        $this->project->delete();
+
         return $this->project;
     }
 

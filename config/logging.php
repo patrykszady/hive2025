@@ -115,6 +115,25 @@ return [
             'days' => 30,
         ],
 
+        /*
+         * Passkey (WebAuthn) ceremonies, both halves in one place: the
+         * browser steps posted back by the passkey-registration component,
+         * and any server-side rejection.
+         *
+         * Its own channel because the useful signal is a SEQUENCE — button
+         * click, attest start, then the failure — and in the shared `single`
+         * log those lines sit scattered among every other request, which is
+         * how a registration failing with a 422 stayed unreadable. Kept 30
+         * days: long enough to compare a failure against the last time the
+         * same device enrolled successfully.
+         */
+        'passkeys' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/passkeys.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'team_sms' => [
             'driver' => 'daily',
             'path' => storage_path('logs/team_sms.log'),

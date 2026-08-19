@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+ body{font:14px/1.6 system-ui,sans-serif;max-width:520px;margin:32px auto;padding:0 18px;color:#18181b}
+ label{display:block;margin:16px 0 5px;font-weight:600;font-size:13px}
+ input{width:100%;padding:8px;border:1px solid #d4d4d8;border-radius:6px;font:13px monospace}
+ button{margin-top:18px;padding:9px 18px;border:0;border-radius:7px;background:#4f46e5;color:#fff;font-weight:600;cursor:pointer}
+ .hint{color:#71717a;font-size:12px;margin-top:4px}
+ #saved{color:#16a34a;font-weight:600;margin-left:10px}
+</style></head>
+<body>
+ <h1>EWCCV Session Bridge</h1>
+ <p class="hint">Hive verifies workers comp policies on ewccv.com. Its server cannot pass that site's reCAPTCHA, but your browser already does — this sends Hive the session your browser earned.</p>
+ <label>Hive server URL</label>
+ <input id="serverUrl" placeholder="https://hive.contractors">
+ <label>Bridge token</label>
+ <input id="token" placeholder="paste the EWCCV_BRIDGE_TOKEN value">
+ <div class="hint">From the server's .env — <code>EWCCV_BRIDGE_TOKEN</code>.</div>
+ <label>Refresh every (minutes)</label>
+ <input id="intervalMinutes" type="number" min="5" max="720">
+ <button id="save">Save</button><span id="saved"></span>
+ <script src="options.js"></script>
+</body></html>

@@ -14,7 +14,7 @@ class ScrapeEwccvTracking extends Command
 {
     protected $signature = 'ewccv:scrape-tracking
         {--login-url= : JWT magic link URL (auto-fetched from email if omitted)}
-        {--login-email=patryk.szady@live.com : Email address to type into EWCCV (forwarded to a Nylas-monitored mailbox)}
+        {--login-email=patryk.szady@live.com : EWCCV account email; a live.com rule forwards its mail to the Nylas-monitored certificates@hive.contractors}
         {--belongs-to-vendor-id= : The belongs_to_vendor_id to scope vendor docs}
         {--vendor-id=* : Specific vendor ID(s) to process (default: all with active WC policies)}
         {--visible : Run browser in visible (non-headless) mode}
@@ -24,8 +24,16 @@ class ScrapeEwccvTracking extends Command
 
     protected $description = 'Search EWCCV for active workers comp policies and enable email tracking notifications';
 
+    /**
+     * Bright Data sticky-session id for this run. Without it the residential
+     * exit IP rotates between the email request and the magic-link click, and
+     * EWCCV rejects the token.
+     */
+    private string $proxySession = '';
+
     public function handle(NylasService $nylasService): int
     {
+        $this->proxySession = $this->resolveProxySession();
         $this->line(str_repeat('═', 60));
         $this->info('ewccv:scrape-tracking — ' . now()->format('Y-m-d H:i:s T'));
         $this->line(str_repeat('═', 60));
@@ -165,6 +173,10 @@ class ScrapeEwccvTracking extends Command
             'vendors'         => $searchable->values()->toArray(),
             'outputDir'       => $outputDir,
             'screenshotDir'   => public_path('EWCCV'),
+            'bypassKey'       => config('services.ewccv.bypass_key') ?: env('EWCCV_BYPASS_KEY', ''),
+            // Handed over by the browser extension (EwccvSessionController):
+            // a real browser's accessToken, which skips reCAPTCHA entirely.
+            'bridgedAccessToken' => $this->bridgedAccessToken(),
             'headless'        => $headless,
             'delayMs'         => $delay,
         ];
@@ -182,6 +194,7 @@ class ScrapeEwccvTracking extends Command
         $this->newLine();
 
         $result = Process::timeout(3600) // 1 hour max
+            ->env(['EWCCV_PROXY_SESSION' => $this->proxySession])
             ->run("{$nodePath} {$scriptPath} {$configFile}", function (string $type, string $output): void {
                 // Stream stderr (scraper logs) in real-time so the user can see
                 // prompts like the manual reCAPTCHA request immediately
@@ -217,6 +230,7 @@ class ScrapeEwccvTracking extends Command
             $this->info('Retrying scraper with fresh token…');
 
             $result = Process::timeout(3600)
+                ->env(['EWCCV_PROXY_SESSION' => $this->proxySession])
                 ->run("{$nodePath} {$scriptPath} {$configFile}", function (string $type, string $output): void {
                     if ($type === 'err') {
                         $this->output->write($output);
@@ -277,6 +291,43 @@ class ScrapeEwccvTracking extends Command
             }
         }
 
+        // ── Persist per-doc state so /vendor_docs can show it ─────────────
+        // Results are keyed by vendor; stamp every active workers doc for that
+        // vendor. saveQuietly: the VendorDocObserver re-queues a lookup when a
+        // doc changes, and stamping the lookup's own result must not loop it.
+        $stamped = 0;
+        $stamp = function (int $vendorId, array $state) use ($vendorDocs, &$stamped): void {
+            foreach ($vendorDocs->where('vendor_id', $vendorId) as $doc) {
+                $options = $doc->options ?? [];
+                $options['ewccv'] = $state + ['checked_at' => now()->toIso8601String()];
+                $doc->options = $options;
+                $doc->saveQuietly();
+                $stamped++;
+            }
+        };
+
+        foreach ($results['success'] ?? [] as $s) {
+            $stamp((int) $s['vendorId'], [
+                'status'           => 'tracking',
+                'match_type'       => $s['matchType'] ?? null,
+                'already_tracking' => (bool) ($s['alreadyTracking'] ?? false),
+            ]);
+        }
+        foreach ($results['failed'] ?? [] as $f) {
+            $stamp((int) $f['vendorId'], [
+                'status' => 'failed',
+                'reason' => $f['reason'] ?? 'unknown',
+            ]);
+        }
+        foreach ($results['skipped'] ?? [] as $sk) {
+            $stamp((int) $sk['vendorId'], [
+                'status' => 'skipped',
+                'reason' => $sk['reason'] ?? 'unknown',
+            ]);
+        }
+
+        $this->info("Persisted EWCCV state onto {$stamped} vendor doc(s).");
+
         $successCount = count($results['success'] ?? []);
         $totalCount = $searchable->count();
         $this->newLine();
@@ -318,7 +369,9 @@ class ScrapeEwccvTracking extends Command
         $scriptPath = base_path('scripts/ewccv-scraper.cjs');
         $nodePath = trim(shell_exec('which node') ?: 'node');
 
-        $result = Process::timeout(120)->run("{$nodePath} {$scriptPath} {$configFile}");
+        $result = Process::timeout(120)
+            ->env(['EWCCV_PROXY_SESSION' => $this->proxySession])
+            ->run("{$nodePath} {$scriptPath} {$configFile}");
         @unlink($configFile);
 
         if ($result->errorOutput()) {
@@ -345,9 +398,8 @@ class ScrapeEwccvTracking extends Command
 
         // Step 2: Poll Nylas for the email with the magic link
         $grantId = config('nylas.certificates_grant_id');
-        $folderId = config('nylas.certificates_inbox_folder_id');
-        $maxAttempts = 20;
-        $pollInterval = 10; // seconds
+        $maxAttempts = 30;
+        $pollInterval = 15; // seconds — the live.com forward adds minutes of latency
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             $this->line("    Polling attempt {$attempt}/{$maxAttempts}…");
@@ -355,8 +407,9 @@ class ScrapeEwccvTracking extends Command
             sleep($pollInterval);
 
             try {
+                // No folder filter: Outlook rotates folder IDs and the cached
+                // one went stale — the subject match below is selective enough.
                 $messages = $nylasService->getMessages($grantId, [
-                    'in'      => $folderId,
                     'limit'   => 20,
                     'received_after' => $timestampBefore->timestamp,
                 ]);
@@ -380,6 +433,8 @@ class ScrapeEwccvTracking extends Command
                     if (preg_match('#https://www\.ewccv\.com/cvs/login/\?t=[A-Za-z0-9._-]+#', $body, $matches)) {
                         $this->info("    Found magic link in email (message ID: " . ($message['id'] ?? 'unknown') . ')');
 
+                        $this->fileIntoWorkersCompFolder($nylasService, $grantId, $message['id'] ?? null);
+
                         return $matches[0];
                     }
                 }
@@ -393,6 +448,89 @@ class ScrapeEwccvTracking extends Command
         $this->error("  Timed out waiting for EWCCV login email after " . ($maxAttempts * $pollInterval) . ' seconds.');
 
         return null;
+    }
+
+    /**
+     * File a processed EWCCV sign-in email into the "Workers Comp" folder on
+     * the certificates mailbox. Resolved by NAME (created if missing) — folder
+     * IDs on this mailbox have rotated before. Best-effort: a filing failure
+     * must never fail the scrape.
+     */
+    private function fileIntoWorkersCompFolder(NylasService $nylasService, string $grantId, ?string $messageId): void
+    {
+        if (! $messageId) {
+            return;
+        }
+
+        try {
+            $folders = $nylasService->getFolders($grantId);
+            $list = $folders['data']['data'] ?? [];
+            $folder = collect($list)->first(fn ($f) => strcasecmp($f['name'] ?? '', 'Workers Comp') === 0);
+
+            if (! $folder) {
+                $created = $nylasService->createFolder($grantId, 'Workers Comp');
+                $folder = $created['data']['data'] ?? null;
+            }
+
+            if (! empty($folder['id'])) {
+                $nylasService->moveEmailToFolder($messageId, $folder['id'], $grantId);
+                $this->line('    Filed sign-in email into "Workers Comp".');
+            }
+        } catch (\Throwable $e) {
+            $this->warn("    Could not file email into Workers Comp folder: {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * One sticky proxy session per run, cached for 20 minutes so a retry keeps
+     * the same exit IP as the email request that preceded it.
+     */
+    /**
+     * The EWCCV search credential most recently pushed by the browser
+     * extension, if it is still fresh. Short window on purpose: EWCCV's
+     * accessToken is session-scoped, and a stale one just fails the searches
+     * that a fresh one would have completed.
+     */
+    private function bridgedAccessToken(): string
+    {
+        $session = \Illuminate\Support\Facades\Cache::get(
+            \App\Http\Controllers\EwccvSessionController::CACHE_KEY
+        );
+
+        if (! is_array($session) || empty($session['access_token'])) {
+            return '';
+        }
+
+        $age = Carbon::parse($session['received_at'])->diffInMinutes(now());
+
+        if ($age > 45) {
+            $this->warn("  Bridged EWCCV session is {$age} min old — ignoring it; open ewccv.com so the extension refreshes it.");
+
+            return '';
+        }
+
+        $this->info("  Using EWCCV session from the browser extension ({$age} min old).");
+
+        return (string) $session['access_token'];
+    }
+
+    private function resolveProxySession(): string
+    {
+        $file = ($this->option('output-dir') ?: storage_path('files/_temp_ewccv')).'/.proxy_session.json';
+
+        if (file_exists($file)) {
+            $data = json_decode((string) file_get_contents($file), true);
+            if (! empty($data['session']) && ! empty($data['at'])
+                && Carbon::parse($data['at'])->diffInMinutes(now()) < 20) {
+                return (string) $data['session'];
+            }
+        }
+
+        $session = 'hive'.bin2hex(random_bytes(4));
+        @mkdir(dirname($file), 0755, true);
+        file_put_contents($file, json_encode(['session' => $session, 'at' => now()->toIso8601String()]));
+
+        return $session;
     }
 
     private function getCachedLoginUrl(string $outputDir): ?string

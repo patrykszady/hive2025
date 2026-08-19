@@ -10,9 +10,12 @@
             @endif
         </flux:badge>
         
-        @if ($this->availableParticipants->isNotEmpty())
-            <flux:button 
-                size="sm" 
+        {{-- Only offer "add" once the conference is live (status transferred):
+             inviteParticipantToCall hard-requires a conference_id, so showing
+             it during initiated/answered just produces a "No Conference" toast. --}}
+        @if ($activeCallStatus === 'transferred' && $this->availableParticipants->isNotEmpty())
+            <flux:button
+                size="sm"
                 variant="ghost"
                 icon="user-plus"
                 wire:click="openAddParticipantModal"

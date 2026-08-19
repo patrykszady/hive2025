@@ -7,6 +7,8 @@ use App\Models\LienWaiver;
 use App\Models\Project;
 use App\Models\SwornStatement;
 use App\Support\PdfMerger;
+use App\Support\PdfPageExtractor;
+use App\Support\ScanStraightener;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -213,9 +215,18 @@ class WaiverScanIngest
             }
 
             foreach ($codes as $code => $context) {
+                // A vendor's scanner routinely glues an unrelated page onto the
+                // returned scan — their own invoice, a cover sheet from the
+                // scan app. Keep only the pages that are actually part of
+                // THIS code's document; a page whose barcode we can't attach
+                // to anything is left alone (see selectPagesToKeep).
+                $trimmedBinary = $this->trimToOwnPages($code, $raw, $binary, [
+                    'message_id' => $messageId, 'attachment_id' => $attachmentId,
+                ]);
+
                 $documents[$code] = [
                     'context' => $this->mergeContexts($documents[$code]['context'] ?? null, $context),
-                    'binaries' => ($documents[$code]['binaries'] ?? []) + [$attachmentId => $binary],
+                    'binaries' => ($documents[$code]['binaries'] ?? []) + [$attachmentId => $trimmedBinary],
                 ];
             }
         }
@@ -378,6 +389,186 @@ class WaiverScanIngest
     }
 
     /**
+     * Drop any page of $binary that isn't actually part of $code's document —
+     * an unrelated page a vendor's scanner attached (their own invoice, a
+     * scan-app cover sheet) must never end up in the stored legal scan.
+     *
+     * Every page we generate carries the barcode footer (PdfDocumentFooter),
+     * so a genuine multi-page document decodes the SAME code's barcode on
+     * every one of its own pages. A page is kept when either its barcode
+     * decoded to $code, or — a barcode scan can fail on an otherwise-genuine
+     * page — its OCR text carries the return-email footer phrase and no OTHER
+     * code's barcode claims it. Anything else is foreign and dropped.
+     *
+     * Fails safe: any uncertainty (can't parse the PDF, no page-level
+     * evidence, nothing would actually be excluded) returns the original
+     * binary untouched rather than risk cutting a legitimate page.
+     */
+    protected function trimToOwnPages(string $code, array $raw, string $binary, array $logContext): string
+    {
+        $totalPages = PdfPageExtractor::pageCount($binary);
+
+        if ($totalPages === null || $totalPages <= 1) {
+            return $binary;
+        }
+
+        $keep = $this->selectPagesToKeep($code, $raw, $totalPages);
+
+        if ($keep === null || count($keep) === $totalPages) {
+            return $binary;
+        }
+
+        $trimmed = PdfPageExtractor::extractPages($binary, $keep);
+
+        if ($trimmed === null) {
+            Log::channel(self::LOG)->warning('Waiver scan: page trim failed — keeping the full attachment.', [
+                ...$logContext, 'code' => $code, 'total_pages' => $totalPages, 'wanted_pages' => $keep,
+            ]);
+
+            return $binary;
+        }
+
+        Log::channel(self::LOG)->info('Waiver scan: excluded unrelated page(s) from the stored scan.', [
+            ...$logContext, 'code' => $code, 'total_pages' => $totalPages,
+            'kept_pages' => $keep, 'excluded_pages' => array_values(array_diff(range(1, $totalPages), $keep)),
+        ]);
+
+        return $trimmed;
+    }
+
+    /**
+     * Which of a document's $totalPages pages actually belong to $code, or
+     * null when there isn't enough page-level evidence to decide safely.
+     *
+     * @return array<int, int>|null
+     */
+    protected function selectPagesToKeep(string $code, array $raw, int $totalPages): ?array
+    {
+        $barcodePagesByCode = $this->barcodePagesByCode($raw);
+        $oursBarcodePages = $barcodePagesByCode[$code] ?? [];
+
+        // No direct evidence of which page(s) this code is even on (it was
+        // matched via the footer-filename OCR fallback, not a barcode decode)
+        // — too little to safely single out pages.
+        if ($oursBarcodePages === []) {
+            return null;
+        }
+
+        $othersBarcodePages = [];
+        foreach ($barcodePagesByCode as $otherCode => $pages) {
+            if ($otherCode !== $code) {
+                array_push($othersBarcodePages, ...$pages);
+            }
+        }
+
+        $footerMarkerPages = $this->pagesWithFooterMarker($raw);
+
+        $keep = [];
+        foreach (range(1, $totalPages) as $page) {
+            if (in_array($page, $oursBarcodePages, true)) {
+                $keep[] = $page;
+            } elseif (in_array($page, $othersBarcodePages, true)) {
+                // Claimed by a different code's document — never ours.
+                continue;
+            } elseif (in_array($page, $footerMarkerPages, true)) {
+                // No barcode decoded here, but it carries our return-email
+                // footer and nobody else's barcode claims it — most likely
+                // a page of THIS same document whose barcode symbol simply
+                // failed to scan.
+                $keep[] = $page;
+            }
+        }
+
+        return $keep === [] ? null : $keep;
+    }
+
+    /**
+     * Per code, the page numbers (1-indexed) where THAT code's barcode
+     * decoded. Mirrors the barcode-matching in resolveCodes() but captures
+     * the page number too — kept as a separate pass rather than folded into
+     * resolveCodes() so a change here can never regress that method's
+     * existing coverage.
+     *
+     * The path Azure emits for a decoded symbol is "{folder}/{page}.{n}"
+     * (confirmed against a live Code128 waiver AND a live QR test — both
+     * "barcodes/{page}.{n}"); the folder name isn't hardcoded here in case a
+     * future analyzer version renames it.
+     *
+     * @return array<string, array<int, int>>
+     */
+    protected function barcodePagesByCode(array $raw): array
+    {
+        $pages = [];
+
+        foreach (($raw['result']['contents'] ?? []) as $content) {
+            $markdown = (string) ($content['markdown'] ?? $content['content'] ?? '');
+
+            if (preg_match_all(
+                '/!\[[^\]]*Code[^\]]*\]\([^)"]*?(\d+)\.\d+[^)"]*"\s*(H(?:LW|SS)-\d{1,10})\s*"\s*\)/i',
+                $markdown,
+                $matches,
+                PREG_SET_ORDER,
+            )) {
+                foreach ($matches as $match) {
+                    if (! preg_match('/^H(LW|SS)-(\d+)$/i', trim($match[2]), $parts)) {
+                        continue;
+                    }
+
+                    $code = 'H' . strtoupper($parts[1]) . '-' . (int) $parts[2];
+                    $page = (int) $match[1];
+
+                    $pages[$code] = $pages[$code] ?? [];
+                    if (! in_array($page, $pages[$code], true)) {
+                        $pages[$code][] = $page;
+                    }
+                }
+            }
+        }
+
+        return $pages;
+    }
+
+    /**
+     * Page numbers whose OCR text carries the "email the signed copy back"
+     * footer phrase — the always-printed instruction line next to the
+     * barcode, present on every page we generate regardless of whether the
+     * barcode symbol itself happened to scan.
+     *
+     * Read from `paragraphs[].source`, which Azure prefixes "D(<page>,...)"
+     * per paragraph (confirmed against a live response) — far more reliable
+     * than trying to locate a page break inside the flattened markdown
+     * string, which isn't guaranteed to exist at all.
+     *
+     * @return array<int, int>
+     */
+    protected function pagesWithFooterMarker(array $raw): array
+    {
+        $pages = [];
+
+        foreach (($raw['result']['contents'] ?? []) as $content) {
+            foreach (($content['paragraphs'] ?? []) as $paragraph) {
+                $text = (string) ($paragraph['content'] ?? '');
+                if (stripos($text, 'waivers@hive.contractors') === false
+                    && stripos($text, 'email the signed copy back') === false) {
+                    continue;
+                }
+
+                $source = (string) ($paragraph['source'] ?? '');
+                if (! preg_match('/^D\((\d+),/', $source, $m)) {
+                    continue;
+                }
+
+                $page = (int) $m[1];
+                if (! in_array($page, $pages, true)) {
+                    $pages[] = $page;
+                }
+            }
+        }
+
+        return $pages;
+    }
+
+    /**
      * The waiver id out of the footer card's filename ("lien-waiver-{id}-...").
      *
      * This is the ONLY route left when the barcode doesn't decode, which is
@@ -469,6 +660,12 @@ class WaiverScanIngest
 
         $path = sprintf('lien-waivers/%d/%d/scan-%s', $waiver->project_id, $waiver->id, \App\Support\LienWaiverDocumentGenerator::filenameFor($waiver));
 
+        // A crooked photo of a wet-signed page is the norm, not the
+        // exception — straighten before archiving. Pages that are already
+        // square come back byte-identical (see ScanStraightener), and any
+        // missing tool or mid-pipeline failure returns $binary untouched.
+        $binary = ScanStraightener::straighten($binary);
+
         if (! Storage::disk('files')->put($path, $binary)) {
             Log::channel(self::LOG)->error('Waiver scan: failed to store scan file — not flipping status.', ['lien_waiver_id' => $waiverId, 'path' => $path]);
 
@@ -540,6 +737,8 @@ class WaiverScanIngest
         }
 
         $path = sprintf('sworn-statements/%d/%d/scan-%s', $statement->project_id, $statement->id, $statement->filename ?: 'sworn-statement.pdf');
+
+        $binary = ScanStraightener::straighten($binary);
 
         if (! Storage::disk('files')->put($path, $binary)) {
             Log::channel(self::LOG)->error('Waiver scan: failed to store GCSS scan file — not flipping status.', ['sworn_statement_id' => $statementId, 'path' => $path]);

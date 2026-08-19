@@ -17,5 +17,8 @@ class VerifyCsrfToken extends Middleware
         'webhooks/telnyx/*',
         'webauthn/*',
         'push/*',
+        'api/ewccv/session',
+        // Signed with X-TMV-Signature instead.
+        'webhooks/trackmyvendor',
     ];
 }

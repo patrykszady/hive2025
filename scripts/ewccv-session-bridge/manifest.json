@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Hive — EWCCV Session Bridge",
+  "version": "1.0.0",
+  "description": "Lets hive.contractors verify workers comp policies by sharing the EWCCV search session your browser already earned.",
+  "permissions": [
+    "cookies",
+    "alarms",
+    "storage",
+    "notifications",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.ewccv.com/*",
+    "https://hive.contractors/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Send EWCCV session to Hive",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.ewccv.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["minter.js"],
+      "matches": ["https://www.ewccv.com/*"]
+    }
+  ]
+}
