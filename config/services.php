@@ -196,4 +196,16 @@ return [
         'public_key' => env('VAPID_PUBLIC_KEY'),
         'private_key' => env('VAPID_PRIVATE_KEY'),
     ],
+
+    /*
+    | Cloudflare — edge cache purging (see CloudflarePurgeCache).
+    |
+    | The token must carry an "All Domains" (zone) policy. An account-scoped
+    | policy cannot purge or touch DNS even with every permission ticked —
+    | that cost an hour on 2026-08-19.
+    */
+    'cloudflare' => [
+        'token' => env('CLOUDFLARE_API_TOKEN'),
+        'zone_id' => env('CLOUDFLARE_ZONE_ID'),
+    ],
 ];
