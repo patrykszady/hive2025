@@ -121,6 +121,19 @@
         $originalTextForUi = (string) ($msg->original_display_text ?? $msg->display_text ?? '');
         $languageBadge = $msg->language_badge ?? null;
         $canToggleOriginal = (bool) ($msg->show_original_toggle ?? false);
+
+        // On-demand translation of THIS message into the reader's own
+        // language. The thread body is always English; a non-English reader
+        // presses the badge and only that message is translated, server-side.
+        $viewerTranslation = ($viewerTranslations ?? [])[$msg->id] ?? null;
+        // Offered on every message for a non-English reader — including ones
+        // written in English, which is most of the thread and exactly what the
+        // old original-only toggle could never show them.
+        $canTranslateForViewer = $interactive && ($viewerCanTranslate ?? false) && ($translatedTextForUi !== '');
+
+        if ($viewerTranslation !== null) {
+            $translatedTextForUi = $viewerTranslation;
+        }
     @endphp
     <div @if ($interactive)wire:key="msg-{{ $msg->id }}"@endif data-msg-id="{{ $msg->id }}" class="flex items-center group"
         x-data="{ showOriginal: false, showActions: false, isTouch: window.matchMedia('(hover: none)').matches }"
@@ -155,32 +168,58 @@
                     @if ($msg->was_edited ?? false)
                         <span class="italic">(Edited)</span>
                     @endif
-                    @if ($languageBadge && $canToggleOriginal)
-                        <button
-                            type="button"
-                            class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
-                            x-bind:class="showOriginal
-                                ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
-                                : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
-                            x-on:click.stop="showOriginal = !showOriginal"
-                            x-text="@js($languageBadge)"
-                            :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
-                        ></button>
+                    @if ($languageBadge && ($canToggleOriginal || $canTranslateForViewer))
+                        @if ($canTranslateForViewer)
+                            <button
+                                type="button"
+                                wire:click.stop="toggleMessageTranslation({{ $msg->id }})"
+                                wire:loading.attr="disabled"
+                                wire:target="toggleMessageTranslation({{ $msg->id }})"
+                                class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors {{ $viewerTranslation !== null
+                                    ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
+                                    : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800' }}"
+                                aria-label="{{ $viewerTranslation !== null ? 'Show this message in English' : 'Translate this message' }}"
+                            >{{ $languageBadge }}</button>
+                        @else
+                            <button
+                                type="button"
+                                class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
+                                x-bind:class="showOriginal
+                                    ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
+                                    : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
+                                x-on:click.stop="showOriginal = !showOriginal"
+                                x-text="@js($languageBadge)"
+                                :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
+                            ></button>
+                        @endif
                     @endif
                 </p>
             @elseif ($msg->isOutbound())
                 <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right flex items-center justify-end gap-1">
-                    @if ($languageBadge && $canToggleOriginal)
-                        <button
-                            type="button"
-                            class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
-                            x-bind:class="showOriginal
-                                ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
-                                : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
-                            x-on:click.stop="showOriginal = !showOriginal"
-                            x-text="@js($languageBadge)"
-                            :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
-                        ></button>
+                    @if ($languageBadge && ($canToggleOriginal || $canTranslateForViewer))
+                        @if ($canTranslateForViewer)
+                            <button
+                                type="button"
+                                wire:click.stop="toggleMessageTranslation({{ $msg->id }})"
+                                wire:loading.attr="disabled"
+                                wire:target="toggleMessageTranslation({{ $msg->id }})"
+                                class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors {{ $viewerTranslation !== null
+                                    ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
+                                    : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800' }}"
+                                aria-label="{{ $viewerTranslation !== null ? 'Show this message in English' : 'Translate this message' }}"
+                            >{{ $languageBadge }}</button>
+                        @else
+                            <button
+                                type="button"
+                                class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium tracking-wide transition-colors"
+                                x-bind:class="showOriginal
+                                    ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:text-white dark:border-indigo-500'
+                                    : 'bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
+                                x-on:click.stop="showOriginal = !showOriginal"
+                                x-text="@js($languageBadge)"
+                                :aria-label="showOriginal ? 'Show translated message' : 'Show original message'"
+                            ></button>
+                        @endif
                     @endif
                     @if ($msg->was_edited ?? false)
                         <span class="italic">(Edited)</span>

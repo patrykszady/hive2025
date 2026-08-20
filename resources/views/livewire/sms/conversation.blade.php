@@ -408,6 +408,11 @@
             // @php block on purpose: never define them in @php(...) directly
             // after an @if (Blaze compile bug).
             $interactive = true;
+            // Per-message translations the reader asked for, and whether the
+            // badge should be offered at all (English readers have nothing to
+            // translate to). The thread body itself is always English.
+            $viewerTranslations = $this->viewerTranslations;
+            $viewerCanTranslate = strcasecmp($this->presenter()->viewerPreferredLanguage(), 'English') !== 0;
             $threadHasMixedNumbers = $this->threadHasMixedNumbers;
             $hasMoreMessages = $this->smsMessages->count() >= $this->messageLimit;
             $resolveMediaUrl = fn (string $url): string => $this->mediaUrl($url);

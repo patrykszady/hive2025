@@ -41,6 +41,10 @@
     <div class="relative flex-1 min-h-0">
         <div class="sms-fade-overlay top"></div>
         <div class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6">
+            {{-- Offline fragment is a static snapshot: no Livewire round-trip,
+                 so per-message translation is unavailable here. --}}
+            @php($viewerTranslations = [])
+            @php($viewerCanTranslate = false)
             @include('livewire.sms.partials.message-bubbles')
         </div>
         <div class="sms-fade-overlay bottom"></div>

@@ -86,6 +86,16 @@ class SmsConversation extends Component
 
     public bool $selectionMode = false;
 
+    /**
+     * Per-message translations a non-English reader asked for, keyed by
+     * message id. The thread itself always renders in English; this holds
+     * only the individual messages someone pressed the language badge on,
+     * and is deliberately not persisted — it lasts as long as the component.
+     *
+     * @var array<int, string>
+     */
+    public array $viewerTranslations = [];
+
     /** @var array<int, int> */
     public array $selectedMessageIds = [];
 
@@ -2030,6 +2040,51 @@ class SmsConversation extends Component
         return SmsThreadParticipant::where('thread_id', $this->threadId)
             ->whereNull('opted_in_at')
             ->get();
+    }
+
+    /**
+     * Put one message into the reader's own language, or take it back to
+     * English if it is already translated.
+     *
+     * On demand, one message at a time, and never persisted. The thread is
+     * rendered in English for everyone so a message says the same thing to
+     * every colleague who reads it; this is the escape hatch for a reader
+     * whose own language is not English, without paying for a translation of
+     * the whole thread on every render.
+     */
+    public function toggleMessageTranslation(int $messageId): void
+    {
+        // Already translated: pressing again returns it to English.
+        if (array_key_exists($messageId, $this->viewerTranslations)) {
+            unset($this->viewerTranslations[$messageId]);
+
+            return;
+        }
+
+        $language = $this->presenter()->viewerPreferredLanguage();
+
+        // English readers have nothing to translate to.
+        if (strcasecmp($language, 'English') === 0) {
+            return;
+        }
+
+        // Scoped to this thread: a message id from elsewhere must not be
+        // translatable through a thread the viewer happens to have open.
+        $message = $this->presenter()->processedMessages()['visible']
+            ->firstWhere('id', $messageId);
+
+        if (! $message) {
+            return;
+        }
+
+        $text = trim((string) ($message->translated_display_text ?? $message->display_text ?? ''));
+
+        if ($text === '') {
+            return;
+        }
+
+        $this->viewerTranslations[$messageId] = app(SmsTranslationService::class)
+            ->translate($text, $language, 'English');
     }
 
     /**

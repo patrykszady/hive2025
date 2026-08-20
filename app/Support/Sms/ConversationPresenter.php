@@ -771,41 +771,42 @@ class ConversationPresenter
         $senderLanguage = $this->normalizeLanguage((string) ($rawPayload['sender_language'] ?? ''));
         $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
 
+        // A stored body that is really a leaked translation prompt: fall back
+        // to the original and put THAT into English.
         if ($originalText !== '' && $this->looksLikeTranslationPromptArtifact($displayText)) {
-            if ($senderLanguage !== '' && strcasecmp($senderLanguage, $viewerLanguage) === 0) {
+            if ($senderLanguage !== '' && strcasecmp($senderLanguage, 'English') === 0) {
                 return $originalText;
             }
 
-            return $translator->translate($originalText, $viewerLanguage, $senderLanguage !== '' ? $senderLanguage : null);
+            return $translator->translate($originalText, 'English', $senderLanguage !== '' ? $senderLanguage : null);
         }
 
+        // Your own outbound message, composed in English and sent translated:
+        // show what you actually typed rather than a round-trip back.
         if (
             $message->isOutbound()
             && (int) ($message->sent_by_user_id ?? 0) === (int) $this->viewer?->id
             && $originalText !== ''
             && $senderLanguage !== ''
-            && strcasecmp($senderLanguage, $viewerLanguage) === 0
+            && strcasecmp($senderLanguage, 'English') === 0
         ) {
             return $originalText;
         }
 
-        if ($viewerLanguage === 'English') {
-            if ($this->viewerAlreadySpeaksMessageLanguage($message, 'English', $displayText)) {
-                return $displayText;
-            }
-
-            return $translator->translate($displayText, 'English');
-        }
-
-        if ($senderLanguage !== '' && strcasecmp($senderLanguage, $viewerLanguage) === 0 && $originalText !== '') {
-            return $originalText;
-        }
-
-        if ($this->viewerAlreadySpeaksMessageLanguage($message, $viewerLanguage, $displayText)) {
+        // Hive reads in English, full stop. This used to render every message
+        // in the VIEWER's preferred language, which meant the same thread said
+        // different things to different colleagues — you could not quote a
+        // message to someone else and be sure they saw those words. It also
+        // paid for a translation round-trip per message per render.
+        //
+        // Inbound text in another language is translated INTO English here;
+        // a viewer whose own language is not English gets a per-message badge
+        // to translate that one message on demand (see the language meta).
+        if ($this->viewerAlreadySpeaksMessageLanguage($message, 'English', $displayText)) {
             return $displayText;
         }
 
-        return $translator->translate($displayText, $viewerLanguage);
+        return $translator->translate($displayText, 'English');
     }
 
     /**
@@ -861,22 +862,35 @@ class ConversationPresenter
         }
 
         $sourceLanguage = $this->messageSourceLanguage($message, $originalText);
-        $badge = $this->languageBadgeForLanguage($sourceLanguage);
 
-        if ($badge === null || $sourceLanguage === null) {
-            return ['badge' => null, 'show_original_toggle' => false];
-        }
-
-        if (strcasecmp($sourceLanguage, $viewerLanguage) === 0) {
-            return ['badge' => null, 'show_original_toggle' => false];
-        }
+        // The body is always English now, so the badge answers a different
+        // question than it used to. It no longer labels the source language —
+        // it is the control a non-English reader uses to put THIS message into
+        // their own language, and it carries their language code because that
+        // is what pressing it produces.
+        $viewerBadge = $this->languageBadgeForLanguage($viewerLanguage);
 
         $showToggle = trim($translatedText) !== ''
             && trim($originalText) !== ''
             && strcmp(trim($translatedText), trim($originalText)) !== 0;
 
+        if ($viewerBadge !== null && strcasecmp($viewerLanguage, 'English') !== 0) {
+            return [
+                'badge' => $viewerBadge,
+                'show_original_toggle' => $showToggle,
+            ];
+        }
+
+        // English readers keep the old affordance: when a message arrived in
+        // another language, the badge reveals what was actually sent.
+        $sourceBadge = $this->languageBadgeForLanguage($sourceLanguage);
+
+        if ($sourceBadge === null || $sourceLanguage === null || strcasecmp($sourceLanguage, 'English') === 0) {
+            return ['badge' => null, 'show_original_toggle' => false];
+        }
+
         return [
-            'badge' => $badge,
+            'badge' => $sourceBadge,
             'show_original_toggle' => $showToggle,
         ];
     }
@@ -977,6 +991,16 @@ class ConversationPresenter
 
         return str_contains($normalized, 'please provide')
             && str_contains($normalized, 'translated');
+    }
+
+    /**
+     * The language THIS viewer reads in. The thread body no longer depends on
+     * it (everything renders in English) — it decides whether the per-message
+     * translate badge is offered at all, and what pressing it produces.
+     */
+    public function viewerPreferredLanguage(): string
+    {
+        return $this->preferredLanguageForUser($this->viewer);
     }
 
     protected function preferredLanguageForUser(?User $user): string

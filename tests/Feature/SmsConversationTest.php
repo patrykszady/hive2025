@@ -482,6 +482,129 @@ describe('forwarding messages', function (): void {
         Http::assertSent(fn ($request) => str_contains($request->url(), 'api.openai.com'));
     });
 
+    /*
+     * Hive reads in English. Previously each viewer saw the thread rendered
+     * into their OWN preferred language, so the same message said different
+     * things to different colleagues and cost a translation per render.
+     */
+    it('shows a foreign message in English even when the viewer prefers Polish', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $user->update(['preferred_language' => 'Polish']);
+
+        config(['services.openai.api_key' => 'test-key']);
+        Http::fake([
+            'api.openai.com/*' => Http::response([
+                'choices' => [['message' => ['content' => 'Good morning, see you tomorrow']]],
+            ]),
+        ]);
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'Dzień dobry, do zobaczenia jutro',
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user->fresh());
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        // English, NOT the viewer's Polish.
+        expect($rendered->translated_display_text)->toBe('Good morning, see you tomorrow');
+        // ...and the badge is their own language, i.e. the control that puts
+        // this one message into Polish.
+        expect($rendered->language_badge)->toBe('PL');
+    });
+
+    it('gives an English viewer no badge on an English message', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'See you tomorrow',
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
+
+        expect($rendered)->not->toBeNull();
+        expect($rendered->language_badge)->toBeNull();
+    });
+
+    it('translates one message on demand for a non-English reader, and back again', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        $user->update(['preferred_language' => 'Polish']);
+
+        config(['services.openai.api_key' => 'test-key']);
+        Http::fake([
+            'api.openai.com/*' => Http::response([
+                'choices' => [['message' => ['content' => 'Do zobaczenia jutro']]],
+            ]),
+        ]);
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'See you tomorrow',
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user->fresh());
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+
+        // The badge renders on an ENGLISH message for this reader — the case
+        // the old original-only toggle could never offer them.
+        $component->assertSeeHtml('toggleMessageTranslation('.$message->id.')');
+
+        // Nothing is translated until asked — that is the point of sunsetting
+        // the automatic pass.
+        expect($component->instance()->viewerTranslations)->toBe([]);
+
+        $component->call('toggleMessageTranslation', $message->id);
+        expect($component->instance()->viewerTranslations[$message->id])->toBe('Do zobaczenia jutro');
+
+        // Pressing again returns the message to English.
+        $component->call('toggleMessageTranslation', $message->id);
+        expect($component->instance()->viewerTranslations)->toBe([]);
+    });
+
+    it('does not translate on demand for an English reader', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        Http::fake();
+
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'See you tomorrow',
+            'status' => 'received',
+        ]);
+
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $source->id])
+            ->call('toggleMessageTranslation', $message->id);
+
+        Http::assertNothingSent();
+    });
+
     it('shows the 3-dot actions menu for image-only messages', function (): void {
         ['user' => $user, 'source' => $source] = makeForwardingFixture();
 
