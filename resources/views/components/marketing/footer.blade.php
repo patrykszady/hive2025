@@ -105,6 +105,13 @@
             <div class="flex flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-6">
                 <span>&copy; {{ date('Y') }} {{ config('app.name') }}. {{ __('All rights reserved.') }}</span>
                 <span>{{ __('Made by Contractors. For Contractors.') }}</span>
+                {{-- Build credit. rel="noopener" because of target=_blank;
+                     no "nofollow" — this is a genuine attribution link. --}}
+                <span>
+                    Built by
+                    <a href="https://www.ss.systems" target="_blank" rel="noopener"
+                       class="font-medium underline underline-offset-2 hover:text-gray-900 dark:hover:text-white">www.ss.systems</a>
+                </span>
             </div>
         </div>
     </div>
