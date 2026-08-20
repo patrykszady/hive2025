@@ -83,7 +83,9 @@
                             <flux:table.column>Created</flux:table.column>
                             <flux:table.column>Status</flux:table.column>
                             @if($this->canManage)
-                                <flux:table.column>Actions</flux:table.column>
+                                {{-- Icon-only 3-dot menu per row; a header label
+                                     over it just restates the obvious. --}}
+                                <flux:table.column></flux:table.column>
                             @endif
                         </flux:table.columns>
 
@@ -144,8 +146,8 @@
                                     <flux:table.cell>
                                         <div class="flex flex-col">
                                             <span class="whitespace-nowrap">{{ $passkey->created_at?->format('M j, Y') ?? '—' }}</span>
-                                            @if($passkey->updated_at && ! $passkey->updated_at->equalTo($passkey->created_at))
-                                                <span class="text-xs text-zinc-500 whitespace-nowrap">Updated {{ $passkey->updated_at->diffForHumans() }}</span>
+                                            @if($passkey->updated_at)
+                                                <span class="text-xs text-zinc-500 whitespace-nowrap">Edited {{ $passkey->updated_at->diffForHumans() }}</span>
                                             @endif
                                         </div>
                                     </flux:table.cell>
@@ -162,9 +164,7 @@
                                         <flux:table.cell>
                                             @if(!$isRenaming)
                                                 <flux:dropdown position="bottom" align="end">
-                                                    <flux:button size="sm" variant="ghost" icon-trailing="chevron-down">
-                                                        Manage
-                                                    </flux:button>
+                                                    <flux:button size="sm" variant="ghost" square icon="ellipsis-vertical" aria-label="Passkey actions" />
                                                     <flux:menu>
                                                         <flux:menu.item
                                                             icon="pencil-square"
