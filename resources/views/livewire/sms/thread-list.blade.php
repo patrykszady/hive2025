@@ -252,7 +252,11 @@
                     @if ($thread->latestMessage)
                         @php
                             $tapback = $thread->latestMessage->parseTapback();
-                            $previewText = trim((string) ($thread->latestMessage->display_text ?? $thread->latestMessage->text));
+                            // english_display_text, not display_text: the card sits beside the
+                            // conversation, and the conversation renders English. Reading the
+                            // raw row here is what made the same message appear in two
+                            // languages at once.
+                            $previewText = trim((string) ($thread->latestMessage->english_display_text ?? $thread->latestMessage->text));
 
                             $previewPrefix = null;
                             if ($thread->latestMessage->isOutbound()) {

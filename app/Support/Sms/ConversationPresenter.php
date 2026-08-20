@@ -777,10 +777,11 @@ class ConversationPresenter
         // heuristic which reads unaccented Spanish ("Cuando nos vemos no hay
         // prisa") as English and leaves it untranslated. Where the cached
         // value exists it is both cheaper and right.
-        $cachedEnglish = trim((string) ($rawPayload['english_text'] ?? ''));
-
-        if ($cachedEnglish !== '') {
-            return $cachedEnglish;
+        // Through the model accessor, not raw_payload directly: that is the
+        // one place the crew signature is stripped, and it is what the thread
+        // list reads too, so both surfaces cannot drift apart again.
+        if (trim((string) ($rawPayload['english_text'] ?? '')) !== '') {
+            return $message->english_display_text;
         }
 
         // A stored body that is really a leaked translation prompt: fall back

@@ -658,6 +658,44 @@ describe('forwarding messages', function (): void {
         expect($rendered->language_badge)->toBe('ES');
     });
 
+    it('shows the same English text in the thread list and the conversation', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        Http::fake();
+
+        // The card beside the conversation used to read display_text straight
+        // off the row, so one message appeared in two languages at once.
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'Cuando nos vemos no hay prisa',
+            'status' => 'received',
+            'raw_payload' => ['english_text' => "When do we see each other? There's no rush.\n-GS"],
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
+
+        // Same accessor the thread-list preview reads.
+        expect($message->fresh()->english_display_text)
+            ->toBe($rendered->translated_display_text)
+            // ...and the crew signature is not shown inside Hive.
+            ->toBe("When do we see each other? There's no rush.");
+    });
+
+    it('strips the crew signature from a translated message', function (): void {
+        $message = new SmsMessage([
+            'text' => 'Hola',
+            'raw_payload' => ['english_text' => "Let me know.\n-GS "],
+        ]);
+
+        expect($message->english_display_text)->toBe('Let me know.');
+    });
+
     it('shows the 3-dot actions menu for image-only messages', function (): void {
         ['user' => $user, 'source' => $source] = makeForwardingFixture();
 

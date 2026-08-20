@@ -50,7 +50,10 @@ class SendOutboundSmsBrowserNotifications implements ShouldQueue
 
         $senderName = trim($sender->first_name) ?: 'A team member';
         $threadLabel = $this->resolveThreadLabel($message);
-        $body = trim($message->display_text ?: 'Sent a message');
+        // english_display_text: a push is a display surface like any
+        // other, and Hive reads in English. It also strips the crew
+        // signature, which carries nothing in a notification.
+        $body = trim($message->english_display_text ?: 'Sent a message');
 
         $webPush->sendToSubscriptions($enabledSubscriptions, [
             'title' => "{$senderName} replied to {$threadLabel}",

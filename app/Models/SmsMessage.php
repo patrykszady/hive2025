@@ -104,12 +104,59 @@ class SmsMessage extends Model
             return null;
         }
 
-        $text = self::repairMojibakeText((string) $this->text);
-
-        // Strip trailing signature (e.g. "\n-PS") or standalone signature (e.g. "-PS")
-        $cleaned = preg_replace('/(?:^|\n)-(?:PS|GS|GSC)$/s', '', $text);
+        $cleaned = self::stripCrewSignature(self::repairMojibakeText((string) $this->text));
 
         return $cleaned !== '' ? $cleaned : null;
+    }
+
+    /**
+     * Drop the outbound crew signature ("-GS") from text shown inside Hive.
+     *
+     * It is appended when the SMS is SENT, so the recipient knows who texted
+     * them — it carries nothing for a colleague reading the same thread in
+     * the app, where the sender is already named above the bubble.
+     *
+     * Tolerates trailing whitespace: the translated copies produced by
+     * sms:backfill-english come back as "…Let me know.\n-GS " often enough
+     * that an end-anchored match alone left the signature on screen.
+     */
+    public static function stripCrewSignature(string $text): string
+    {
+        return (string) preg_replace('/(?:^|\n)\s*-\s*(?:PS|GS|GSC)\s*$/s', '', $text);
+    }
+
+    /**
+     * The English rendering of this message — the single answer both the
+     * conversation and the thread-list preview must agree on.
+     *
+     * Hive reads in English. The conversation went through
+     * ConversationPresenter and showed the translation, while the thread list
+     * read display_text straight off the row — so the same message appeared
+     * as "When do we see each other?" in the thread and "Cuando nos vemos no
+     * hay prisa" in the card beside it. Anything that shows message text
+     * should ask here.
+     *
+     * english_text is cached on the row by sms:backfill-english (and is the
+     * only trustworthy source, since sender_language is NULL across most
+     * historical threads). Falls back to display_text when absent, which is
+     * correct for the messages that were English all along.
+     */
+    public function getEnglishDisplayTextAttribute(): ?string
+    {
+        $payload = is_array($this->raw_payload) ? $this->raw_payload : [];
+        $english = trim((string) ($payload['english_text'] ?? ''));
+
+        if ($english === '') {
+            return $this->display_text;
+        }
+
+        // The cached copy is raw translator output, so it still carries the
+        // "-GS" the original was signed with — display_text strips that, and
+        // this must too or the signature reappears the moment a message is
+        // translated.
+        $cleaned = trim(self::stripCrewSignature($english));
+
+        return $cleaned !== '' ? $cleaned : $this->display_text;
     }
 
     /**
