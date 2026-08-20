@@ -952,12 +952,18 @@ class ConversationPresenter
             return null;
         }
 
-        if (preg_match('/[ąćęłńóśźż]/u', $normalized) === 1) {
-            return 'Polish';
+        // Order and membership both matter here. `ó` belongs to BOTH
+        // alphabets, and while it sat in the Polish class — tested first —
+        // every Spanish word carrying it was read as Polish: "demostración"
+        // put a PL badge on a Spanish thread. Test only the characters that
+        // are exclusive to one language, and let a bare `ó` fall through to
+        // the word hints below rather than decide on its own.
+        if (preg_match('/[ñ¿¡áéíú]/u', $normalized) === 1) {
+            return 'Spanish';
         }
 
-        if (preg_match('/[áéíóúñ¿¡]/u', $normalized) === 1) {
-            return 'Spanish';
+        if (preg_match('/[ąćęłńśźż]/u', $normalized) === 1) {
+            return 'Polish';
         }
 
         $polishHints = ['dziekuje', 'prosze', 'czesc', 'jutro', 'witam', 'tak', 'nie'];

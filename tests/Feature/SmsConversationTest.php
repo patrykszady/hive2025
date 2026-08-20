@@ -632,6 +632,32 @@ describe('forwarding messages', function (): void {
         Http::assertNothingSent();
     });
 
+    it('does not read Spanish as Polish because they share the letter o-acute', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        Http::fake();
+
+        // "demostración" carries ó, which is in BOTH alphabets. While the
+        // Polish character class was tested first and included it, this put a
+        // PL badge on an entirely Spanish thread.
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => '+12245554444',
+            'to_number' => '+12245550001',
+            'text' => '¿Puedo traer un cheque el día de la demostración o necesitas el dinero antes?',
+            'status' => 'sent',
+            'raw_payload' => ['english_text' => 'Can I bring a check on the day of the demonstration?'],
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
+
+        expect($rendered->language_badge)->toBe('ES');
+    });
+
     it('shows the 3-dot actions menu for image-only messages', function (): void {
         ['user' => $user, 'source' => $source] = makeForwardingFixture();
 
