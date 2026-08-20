@@ -332,7 +332,7 @@ describe('forwarding messages', function (): void {
         expect($rendered->translated_display_text)->toBe('Start');
     });
 
-    it('adds a language badge and original toggle metadata when source language differs from viewer', function (): void {
+    it('shows an English reader English only, with no badge or original toggle metadata when source language differs from viewer', function (): void {
         ['user' => $user, 'source' => $source] = makeForwardingFixture();
 
         $message = SmsMessage::query()->create([
@@ -356,8 +356,12 @@ describe('forwarding messages', function (): void {
         $rendered = $visible->firstWhere('id', $message->id);
 
         expect($rendered)->not->toBeNull();
-        expect($rendered->language_badge)->toBe('PL');
-        expect($rendered->show_original_toggle)->toBeTrue();
+        // An English reader sees English and nothing else: no badge, and no
+        // toggle that would put the Polish original back on screen. The
+        // original is not lost — it stays on the row, and the edit/forward
+        // paths still reproduce it verbatim.
+        expect($rendered->language_badge)->toBeNull();
+        expect($rendered->show_original_toggle)->toBeFalse();
         expect($rendered->original_display_text)->toBe('Dzien dobry');
     });
 
@@ -655,7 +659,14 @@ describe('forwarding messages', function (): void {
         $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
         $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
 
-        expect($rendered->language_badge)->toBe('ES');
+        // An English reader gets no badge at all now, so assert the detection
+        // itself — the ó bug also drives whether a message gets translated.
+        expect($rendered->language_badge)->toBeNull();
+
+        $infer = new ReflectionMethod(App\Support\Sms\ConversationPresenter::class, 'inferSupportedLanguageFromText');
+        $infer->setAccessible(true);
+        expect($infer->invoke(new App\Support\Sms\ConversationPresenter(null, null, 1), $message->text))
+            ->toBe('Spanish');
     });
 
     it('shows the same English text in the thread list and the conversation', function (): void {

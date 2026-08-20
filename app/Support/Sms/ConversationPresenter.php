@@ -894,18 +894,13 @@ class ConversationPresenter
             ];
         }
 
-        // English readers keep the old affordance: when a message arrived in
-        // another language, the badge reveals what was actually sent.
-        $sourceBadge = $this->languageBadgeForLanguage($sourceLanguage);
-
-        if ($sourceBadge === null || $sourceLanguage === null || strcasecmp($sourceLanguage, 'English') === 0) {
-            return ['badge' => null, 'show_original_toggle' => false];
-        }
-
-        return [
-            'badge' => $sourceBadge,
-            'show_original_toggle' => $showToggle,
-        ];
+        // English readers get no badge at all. They previously kept a
+        // "reveal what was actually sent" toggle, which meant one press put
+        // Spanish back on screen in a thread that is supposed to read English
+        // — the exact thing this change set out to stop. The original is
+        // never lost: it is still on the row, and the edit/forward paths
+        // reproduce it verbatim.
+        return ['badge' => null, 'show_original_toggle' => false];
     }
 
     protected function shouldBypassViewerTranslation(SmsMessage $message): bool
