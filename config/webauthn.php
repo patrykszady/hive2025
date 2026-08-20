@@ -1,5 +1,19 @@
 <?php
 
+/*
+ * LOCAL DEV: use http://localhost:8000, never http://127.0.0.1:8000.
+ *
+ * WebAuthn requires the Relying Party ID to be a registrable DOMAIN, and an
+ * IP address is not one. On 127.0.0.1 the browser refuses the ceremony before
+ * any request is sent (NotAllowedError / AttestationCancelled, with no server
+ * log line at all) — and omitting rp.id does not help, because the default is
+ * then the origin's host, which is still an IP. `localhost` is the one origin
+ * the spec exempts from both this and the HTTPS requirement.
+ *
+ * APP_URL must also be localhost: /users/* is behind auth, and a login
+ * redirect built from an APP_URL of 127.0.0.1 silently drags the browser back
+ * to the origin that cannot work.
+ */
 $applicationUrl = rtrim((string) env('APP_URL', ''), '/');
 $applicationHost = parse_url($applicationUrl, PHP_URL_HOST) ?: null;
 
