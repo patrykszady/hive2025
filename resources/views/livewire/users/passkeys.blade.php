@@ -69,13 +69,18 @@
                         </div>
                     </div>
                 @else
+                    {{-- Four columns on purpose. This table had seven (Passkey,
+                         Device, Created, Last updated, Origin, Status, Actions)
+                         and scrolled horizontally inside its card. Device
+                         duplicated Passkey outright — the alias FALLS BACK to
+                         the device name, so unrenamed rows said "Windows" twice
+                         — and the rest carried one short value each. Everything
+                         secondary now lives as a sub-line under the column it
+                         belongs to. --}}
                     <flux:table>
                         <flux:table.columns>
                             <flux:table.column>Passkey</flux:table.column>
-                            <flux:table.column>Device</flux:table.column>
                             <flux:table.column>Created</flux:table.column>
-                            <flux:table.column>Last updated</flux:table.column>
-                            <flux:table.column>Origin</flux:table.column>
                             <flux:table.column>Status</flux:table.column>
                             @if($this->canManage)
                                 <flux:table.column>Actions</flux:table.column>
@@ -91,6 +96,17 @@
                                     $transports = is_array($passkey->transports)
                                         ? implode(', ', $passkey->transports)
                                         : (string) ($passkey->transports ?? '');
+                                    // The sub-line under the name: device type only when the
+                                    // alias doesn't already say it (a renamed "My iPhone" keeps
+                                    // its "iOS"; an unrenamed "Windows" doesn't repeat itself),
+                                    // then the origin host — which site this passkey belongs to,
+                                    // the fact that actually distinguishes rows — and transports.
+                                    $originHost = $passkey->origin ? parse_url($passkey->origin, PHP_URL_HOST) : null;
+                                    $meta = collect([
+                                        strcasecmp($alias, $deviceType) !== 0 && $deviceType !== 'Unknown' ? $deviceType : null,
+                                        $originHost,
+                                        $transports !== '' ? $transports : null,
+                                    ])->filter()->implode(' · ');
                                     $isRenaming = $this->renamingId === $passkey->id;
                                 @endphp
                                 <flux:table.row :key="$passkey->id">
@@ -113,34 +129,25 @@
                                                 <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
                                             @enderror
                                         @else
-                                            <div class="flex flex-col">
+                                            {{-- title carries the credential id — it only ever
+                                                 mattered for telling two same-named rows apart,
+                                                 which the origin host now mostly does. --}}
+                                            <div class="flex flex-col" title="{{ $passkey->id }}">
                                                 <span class="font-medium">{{ $alias }}</span>
-                                                <span class="text-xs text-zinc-500 font-mono break-all">
-                                                    {{ \Illuminate\Support\Str::limit($passkey->id, 16) }}
-                                                </span>
+                                                @if($meta !== '')
+                                                    <span class="text-xs text-zinc-500">{{ $meta }}</span>
+                                                @endif
                                             </div>
                                         @endif
                                     </flux:table.cell>
 
                                     <flux:table.cell>
                                         <div class="flex flex-col">
-                                            <span>{{ $deviceType }}</span>
-                                            @if($transports !== '')
-                                                <span class="text-xs text-zinc-500">{{ $transports }}</span>
+                                            <span class="whitespace-nowrap">{{ $passkey->created_at?->format('M j, Y') ?? '—' }}</span>
+                                            @if($passkey->updated_at && ! $passkey->updated_at->equalTo($passkey->created_at))
+                                                <span class="text-xs text-zinc-500 whitespace-nowrap">Updated {{ $passkey->updated_at->diffForHumans() }}</span>
                                             @endif
                                         </div>
-                                    </flux:table.cell>
-
-                                    <flux:table.cell>
-                                        {{ $passkey->created_at?->format('M j, Y') ?? '—' }}
-                                    </flux:table.cell>
-
-                                    <flux:table.cell>
-                                        {{ $passkey->updated_at?->diffForHumans() ?? '—' }}
-                                    </flux:table.cell>
-
-                                    <flux:table.cell class="whitespace-normal break-words text-xs">
-                                        {{ $passkey->origin ?? '—' }}
                                     </flux:table.cell>
 
                                     <flux:table.cell>
