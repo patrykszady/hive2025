@@ -76,8 +76,40 @@
             if (errorDiv) errorDiv.classList.add('hidden');
         }
 
+        // The browser reports "cancelled", "already registered" and "this
+        // origin may not use WebAuthn" as the SAME NotAllowedError, on purpose
+        // — telling them apart would let a site probe what is on your device.
+        // So rule out the one case we can detect ourselves before blaming the
+        // user: an origin that is incapable of WebAuthn no matter what they
+        // do. This cost an hour on 2026-08-19, with the UI confidently telling
+        // someone to delete passkeys that were never involved.
+        function originCannotDoWebAuthn() {
+            const host = window.location.hostname;
+
+            // An IP literal can never be a Relying Party ID (v4, v6, or the
+            // bracketed form). localhost is the one exempt non-HTTPS origin.
+            if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':') || host.startsWith('[')) {
+                return 'This address cannot use passkeys. Open the site on http://localhost instead of an IP address — WebAuthn requires a domain name.';
+            }
+
+            // Secure context is required everywhere except localhost.
+            if (!window.isSecureContext && host !== 'localhost') {
+                return 'Passkeys need a secure connection. Open this site over HTTPS (or on localhost) and try again.';
+            }
+
+            return null;
+        }
+
         function showNotCompletedMessage() {
-            showError('Passkey setup was cancelled.', 'Either you dismissed the prompt, or this device already has a passkey for this account. If a passkey already exists, remove it from your device\'s settings (or your password manager) and try again.');
+            const blocked = originCannotDoWebAuthn();
+
+            if (blocked) {
+                passkeyLog('warn', 'Origin cannot do WebAuthn', { host: window.location.hostname });
+                showError('Passkeys are not available on this address.', blocked);
+                return;
+            }
+
+            showError('Passkey setup was not completed.', 'You may have dismissed the prompt — if so, just try again. If this device already has a passkey for this account, remove it from your device settings (or password manager) first.');
         }
 
         function resetButton() {
