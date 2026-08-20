@@ -605,6 +605,33 @@ describe('forwarding messages', function (): void {
         Http::assertNothingSent();
     });
 
+    it('prefers a cached english_text over guessing the language', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+
+        Http::fake();
+
+        // Unaccented Spanish: the keyword heuristic reads this as English and
+        // leaves it alone, which is exactly why sms:backfill-english exists.
+        $message = SmsMessage::query()->create([
+            'thread_id' => $source->id,
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => '+12245550001',
+            'to_number' => '+12245554444',
+            'text' => 'Cuando nos vemos no hay prisa',
+            'status' => 'received',
+            'raw_payload' => ['english_text' => "When do we see each other? There's no rush."],
+        ]);
+
+        $this->actingAs($user);
+
+        $component = Livewire::test(SmsConversation::class, ['threadId' => $source->id]);
+        $rendered = $component->instance()->processedMessages['visible']->firstWhere('id', $message->id);
+
+        expect($rendered->translated_display_text)->toBe("When do we see each other? There's no rush.");
+        // Cached, so no API call is needed to render the thread.
+        Http::assertNothingSent();
+    });
+
     it('shows the 3-dot actions menu for image-only messages', function (): void {
         ['user' => $user, 'source' => $source] = makeForwardingFixture();
 

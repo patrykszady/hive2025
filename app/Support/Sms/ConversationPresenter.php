@@ -771,6 +771,18 @@ class ConversationPresenter
         $senderLanguage = $this->normalizeLanguage((string) ($rawPayload['sender_language'] ?? ''));
         $originalText = trim((string) ($rawPayload['original_text'] ?? ''));
 
+        // An English rendering translated once by sms:backfill-english wins
+        // over anything inferred here. The fallback below has to GUESS the
+        // source language from the text, and that guess is a keyword
+        // heuristic which reads unaccented Spanish ("Cuando nos vemos no hay
+        // prisa") as English and leaves it untranslated. Where the cached
+        // value exists it is both cheaper and right.
+        $cachedEnglish = trim((string) ($rawPayload['english_text'] ?? ''));
+
+        if ($cachedEnglish !== '') {
+            return $cachedEnglish;
+        }
+
         // A stored body that is really a leaked translation prompt: fall back
         // to the original and put THAT into English.
         if ($originalText !== '' && $this->looksLikeTranslationPromptArtifact($displayText)) {
