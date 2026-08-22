@@ -61,7 +61,10 @@ class SendIncomingCallBrowserNotifications implements ShouldQueue
             'icon' => '/favicons/icon-192x192.png',
             'badge' => '/favicons/icon-96x96.png',
             'data' => [
-                'url' => '/calls',
+                // /calls is not a route — the calls list is a TAB on
+                // /messages, and ?callId= opens this specific call. Clicking
+                // the notification used to land on a 404.
+                'url' => '/messages?activeTab=calls&callId='.$callLog->id,
                 'type' => 'incoming_call',
                 'call_log_id' => $callLog->id,
             ],
