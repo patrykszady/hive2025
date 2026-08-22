@@ -203,8 +203,13 @@
                             <div class="flex flex-col gap-2">
                                 <div class="flex items-center justify-between gap-4">
                                     <div>
-                                        <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Incoming Texts</div>
-                                        <div class="text-xs text-zinc-500">Browser alerts for new SMS/MMS.</div>
+                                        <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Text activity</div>
+                                        {{-- "activity", not "incoming": the same flag also fires
+                                             when a TEAMMATE texts a thread (outbound job, sender
+                                             excluded) — Patryk texting a group notifies Greg. That
+                                             is deliberate team visibility; the old "Incoming
+                                             Texts" label just denied it. --}}
+                                        <div class="text-xs text-zinc-500">Browser alerts for incoming texts and teammates' replies.</div>
                                         <template x-if="smsInboundError">
                                             <div class="text-xs text-red-500 mt-0.5" x-text="smsInboundError"></div>
                                         </template>

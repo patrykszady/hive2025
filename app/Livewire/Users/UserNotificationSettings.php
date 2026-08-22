@@ -16,16 +16,14 @@ class UserNotificationSettings extends Component
 
     public User $user;
 
-    // Per-type channel toggles
+    // Per-type channel toggles. Realtime SMS has no property: it is forced
+    // on in save() and rendered as a disabled-checked switch — a task change
+    // must always be able to reach the crew by text.
     public bool $realtime_email = true;
-    public bool $realtime_sms = true;
     public bool $morning_email = false;
     public bool $morning_sms = false;
     public bool $evening_email = false;
     public bool $evening_sms = false;
-
-    // Browser (managed via Alpine/JS push subscription)
-    public bool $sms_inbound_browser = false;
 
     // Time window
     public string $realtime_start = '07:00';
@@ -49,7 +47,6 @@ class UserNotificationSettings extends Component
 
         if ($setting) {
             $this->realtime_email = (bool) $setting->realtime_email;
-            $this->realtime_sms = (bool) $setting->realtime_sms;
             $this->morning_email = (bool) $setting->morning_email;
             $this->morning_sms = (bool) $setting->morning_sms;
             $this->evening_email = (bool) $setting->evening_email;
@@ -57,10 +54,6 @@ class UserNotificationSettings extends Component
 
             $this->realtime_start = $setting->realtime_start ?? $this->realtime_start;
             $this->realtime_end = $setting->realtime_end ?? $this->realtime_end;
-
-            if ($this->user->vendor_role === 'Admin') {
-                $this->sms_inbound_browser = (bool) $setting->sms_inbound_browser;
-            }
         }
     }
 
@@ -80,12 +73,10 @@ class UserNotificationSettings extends Component
     {
         return [
             'realtime_email' => 'boolean',
-            'realtime_sms' => 'boolean',
             'morning_email' => 'boolean',
             'morning_sms' => 'boolean',
             'evening_email' => 'boolean',
             'evening_sms' => 'boolean',
-            'sms_inbound_browser' => 'boolean',
             'realtime_start' => 'required|date_format:H:i',
             'realtime_end' => 'required|date_format:H:i|after:realtime_start',
         ];
@@ -106,7 +97,6 @@ class UserNotificationSettings extends Component
                 'morning_sms' => $this->morning_sms,
                 'evening_email' => $this->evening_email,
                 'evening_sms' => $this->evening_sms,
-                'sms_inbound_browser' => $this->user->vendor_role === 'Admin' && $this->sms_inbound_browser,
                 'realtime_start' => $this->realtime_start,
                 'realtime_end' => $this->realtime_end,
             ]

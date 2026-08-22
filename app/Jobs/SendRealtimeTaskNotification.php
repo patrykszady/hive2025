@@ -126,8 +126,8 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
 
             try {
                 $this->sendSms($service, $user, $userTasks, $roles, $todayStr, $today, $vendorTimezone, $throttleMinutes, $changes);
-                $this->sendEmail($service, $user);
-                $this->sendPush($service, $user, $userTasks, $todayStr);
+                $this->sendEmail($service, $user, $vendorTimezone);
+                $this->sendPush($service, $user, $userTasks, $todayStr, $vendorTimezone);
             } catch (\Throwable $e) {
                 Log::error("SendRealtimeTaskNotification: Failed for user {$user->id}", [
                     'error' => $e->getMessage(),
@@ -443,9 +443,16 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
 
     // ─── Email ───────────────────────────────────────────────
 
-    protected function sendEmail(TaskNotificationService $service, User $user): void
+    protected function sendEmail(TaskNotificationService $service, User $user, ?string $vendorTimezone = null): void
     {
         if (! $service->shouldNotify($user, 'email', 'realtime')) {
+            return;
+        }
+
+        // The settings page promises "Realtime updates send during this
+        // window" with no channel carve-out, but only SMS honoured it — a
+        // 3 AM task change still emailed and pushed. Same gate, all channels.
+        if (! $service->isWithinRealtimeWindow($user, $vendorTimezone)) {
             return;
         }
 
@@ -465,8 +472,14 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
         User $user,
         \Illuminate\Support\Collection $userTasks,
         string $dateStr,
+        ?string $vendorTimezone = null,
     ): void {
         if (! $service->shouldNotify($user, 'browser', 'realtime')) {
+            return;
+        }
+
+        // Same window gate as SMS and email — see sendEmail() for why.
+        if (! $service->isWithinRealtimeWindow($user, $vendorTimezone)) {
             return;
         }
 
