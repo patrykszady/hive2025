@@ -3,8 +3,12 @@
 
         {{-- DETAILS: multi-year (2020..current year) --}}
         @php($colspan = count($years) + 1)
+        {{-- No overflow wrapper of our own: flux:table ships its own
+             scroll area (<ui-table-scroll-area class="overflow-auto">), and
+             nesting a second overflow-x-auto around it stacked TWO horizontal
+             scrollbars at the bottom of this card. The sticky first column
+             pins against Flux's scroll area either way. --}}
         <div class="card-flush-bottom">
-        <div class="overflow-x-auto">
         <flux:table>
             <flux:table.columns>
                 <flux:table.column class="sticky left-0 z-20 bg-white dark:bg-zinc-800 border-r border-zinc-200 dark:border-zinc-700"></flux:table.column>
@@ -208,7 +212,6 @@
                 @endif
             </flux:table.rows>
         </flux:table>
-        </div>
         </div>
     </x-island-card>
 </div>
