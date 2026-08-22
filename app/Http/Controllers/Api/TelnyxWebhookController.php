@@ -1055,18 +1055,40 @@ class TelnyxWebhookController extends Controller
         $vendor = Vendor::find(1);
         $vendorOptions = $vendor ? (array) $vendor->options : [];
 
-        // After-hours: skip welcome + admin ring, send straight to voicemail menu.
+        // After-hours: a caller we have SAVED rings through as normal;
+        // everyone else goes straight to the voicemail menu.
+        //
+        // The gate is caller_user_id — a User matched by caller ID in
+        // CallLog::lookUpCaller() — deliberately NOT caller_name. A name can
+        // also come from a carrier CNAM lookup or a previous call log, so an
+        // unknown number (a spam caller with a registered name, say) carries
+        // one; gating on the name would ring the crew at 2am for exactly the
+        // callers this is meant to keep out. A User covers team, client and
+        // vendor people alike, which is the intent: someone we know can
+        // always reach us.
         if ($vendor && ! $vendor->isWithinBusinessHours()) {
-            Log::channel('telnyx')->info('Inbound call outside business hours — routing to voicemail', [
-                'call_control_id' => $callControlId,
-                'call_log_id' => $callLogId,
-                'business_hours' => $vendor->businessHours(),
-                'vendor_timezone' => $vendor->timezone,
-            ]);
-            $afterHoursMessage = data_get($vendorOptions, 'after_hours_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_AFTER_HOURS;
-            $this->triggerVoicemail($callControlId, $callLogId, $afterHoursMessage);
-            return response()->json(['status' => 'ok']);
+            if ($callerUserId) {
+                Log::channel('telnyx')->info('Inbound call outside business hours — known user, ringing through', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'caller_user_id' => $callerUserId,
+                    'caller_name' => $callerName,
+                    'business_hours' => $vendor->businessHours(),
+                ]);
+                // Fall through to the normal welcome + admin ring below.
+            } else {
+                Log::channel('telnyx')->info('Inbound call outside business hours — unknown caller, routing to voicemail', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'business_hours' => $vendor->businessHours(),
+                    'vendor_timezone' => $vendor->timezone,
+                ]);
+                $afterHoursMessage = data_get($vendorOptions, 'after_hours_message')
+                    ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_AFTER_HOURS;
+                $this->triggerVoicemail($callControlId, $callLogId, $afterHoursMessage);
+
+                return response()->json(['status' => 'ok']);
+            }
         }
 
         // Build welcome TTS payload

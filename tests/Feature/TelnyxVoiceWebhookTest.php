@@ -197,6 +197,92 @@ beforeEach(function () {
 // Issue #1: Ringback silence — playback.ended should re-loop the audio
 // =========================================================================
 
+/**
+ * After hours, a caller we have SAVED rings through; everyone else gets the
+ * voicemail menu. Both assert on the Telnyx command actually sent, since the
+ * difference between the two paths is which API call goes out.
+ */
+function afterHoursCallPayload(int $callLogId, ?int $callerUserId, ?string $callerName = null): array
+{
+    return [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'inbound-cc-id',
+                'client_state' => base64_encode(json_encode(array_filter([
+                    'action' => 'welcome_or_ring',
+                    'call_log_id' => $callLogId,
+                    'caller_user_id' => $callerUserId,
+                    'caller_name' => $callerName,
+                ], fn ($v) => $v !== null))),
+            ],
+        ],
+    ];
+}
+
+it('rings a saved user through after hours instead of sending them to voicemail', function (): void {
+    // Sunday: outside business_hours_days no matter the clock.
+    Carbon\Carbon::setTestNow(Carbon\Carbon::parse('2026-08-23 03:00:00', 'America/Chicago'));
+
+    expect($this->vendor->fresh()->isWithinBusinessHours())->toBeFalse();
+
+    $callLog = CallLog::create([
+        'direction' => 'incoming',
+        'from_number' => '+12245550001',
+        'to_number' => '+12245554444',
+        'status' => 'ringing',
+    ]);
+
+    $user = User::create([
+        'first_name' => 'Known',
+        'last_name' => 'Caller',
+        'email' => 'known.caller.'.uniqid().'@example.com',
+        'cell_phone' => '2245550001',
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', afterHoursCallPayload($callLog->id, $user->id, 'Known Caller'))
+        ->assertSuccessful();
+
+    // Rings through: the welcome plays, rather than the after-hours
+    // voicemail greeting.
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/actions/speak'));
+
+    Carbon\Carbon::setTestNow();
+});
+
+it('sends an unknown after-hours caller to voicemail', function (): void {
+    Carbon\Carbon::setTestNow(Carbon\Carbon::parse('2026-08-23 03:00:00', 'America/Chicago'));
+
+    $callLog = CallLog::create([
+        'direction' => 'incoming',
+        'from_number' => '+12245559999',
+        'to_number' => '+12245554444',
+        'status' => 'ringing',
+    ]);
+
+    // caller_name set WITHOUT caller_user_id — a CNAM/previous-call name on a
+    // number we have never saved. This is the case that must still go to
+    // voicemail, and the reason the gate is the user id and not the name.
+    $this->postJson('/webhooks/telnyx/voice', afterHoursCallPayload($callLog->id, null, 'Spam Likely'))
+        ->assertSuccessful();
+
+    // Voicemail path: the after-hours greeting plays through the voicemail
+    // MENU (gather_using_speak), not the plain welcome speak the ring-through
+    // path uses — which is exactly what distinguishes the two branches.
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), '/actions/gather_using_speak')) {
+            return false;
+        }
+
+        return str_contains(strtolower((string) ($request->data()['payload'] ?? '')), 'after hours');
+    });
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/actions/speak'));
+
+    Carbon\Carbon::setTestNow();
+});
+
 it('re-loops ringback audio when playback ends while caller is waiting', function () {
     $callLog = CallLog::factory()->create([
         'status' => CallLog::STATUS_ANSWERED,
@@ -2466,7 +2552,11 @@ it('answers spam-flagged calls and routes them through the voicemail IVR instead
 
 it('never offers press-1 after hours, and refuses it server-side even if pressed', function () {
     $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
-    // A KNOWN caller — the profile that normally gets the press-1 retry menu.
+    // An UNKNOWN caller. This test is about the after-hours MENU (press-2
+    // only, and a stale press-1 refused server-side), and since saved users
+    // now ring through after hours it is the unknown caller who reaches that
+    // menu directly. A known caller still lands in the same menu, just via
+    // no-answer rather than immediately.
     $known = User::factory()->create(['first_name' => 'Mark', 'cell_phone' => '8475551234']);
 
     $this->vendor->update(['options' => (object) [
@@ -2487,7 +2577,7 @@ it('never offers press-1 after hours, and refuses it server-side even if pressed
         'user_id' => $known->id,
     ]);
 
-    // After-hours voicemail for a KNOWN caller: menu must be press-2 only.
+    // After-hours voicemail menu: press-2 only, never press-1.
     $this->postJson('/webhooks/telnyx/voice', [
         'data' => [
             'event_type' => 'call.answered',
@@ -2498,8 +2588,6 @@ it('never offers press-1 after hours, and refuses it server-side even if pressed
                     'action' => 'welcome_or_ring',
                     'call_log_id' => $callLog->id,
                     'original_caller' => '+18475551234',
-                    'caller_name' => 'Mark',
-                    'caller_user_id' => $known->id,
                 ])),
             ],
         ],
