@@ -23,6 +23,8 @@
 #   scripts/forge-api.sh set-deploy-script FILE  # replace it from FILE
 #   scripts/forge-api.sh get-env                 # print the live .env (SECRETS)
 #   scripts/forge-api.sh set-env-key KEY VALUE   # add/replace one .env key
+#   scripts/forge-api.sh get-nginx               # print the live nginx config
+#   scripts/forge-api.sh set-nginx FILE          # replace it (checked + auto-rollback)
 #
 # Reads FORGE_API_TOKEN_V2 (preferred) or FORGE_API_TOKEN from .env.
 set -euo pipefail
@@ -209,6 +211,101 @@ print(json.dumps({os.environ['ENV_FIELD']: content}))
             echo "FAILED: HTTP $CODE accepted the write but $KEY does not hold the new value on read-back" >&2
             exit 1
         fi
+        ;;
+    get-nginx)
+        # Prints the site's live nginx config to stdout.
+        if [ "$API_VERSION" = "current" ]; then
+            api GET "$SITE_PATH/nginx" | python3 -c "
+import json, sys
+raw = sys.stdin.read()
+try:
+    sys.stdout.write(json.loads(raw)['data']['attributes']['content'])
+except (ValueError, KeyError, TypeError):
+    sys.stdout.write(raw)"
+        else
+            api GET "$SITE_PATH/nginx" 
+        fi
+        ;;
+    set-nginx)
+        # set-nginx FILE — replace the site's nginx config.
+        #
+        # This is the most dangerous write in this script: a bad config takes
+        # hive.contractors offline for everyone. Forge runs `nginx -t` and
+        # refuses invalid syntax, but syntax is not the risk — a VALID config
+        # that dropped the php location, the FORGE CONFIG includes, or the
+        # server_name would pass nginx -t and still break the site. So the
+        # structural checks below run first, the current config is saved, and
+        # the site is fetched afterwards to confirm it still serves. If it does
+        # not, the backup is restored automatically.
+        FILE="${2:?usage: set-nginx FILE}"
+        [ -s "$FILE" ] || { echo "Refusing: $FILE is empty or missing." >&2; exit 1; }
+
+        for needle in \
+            'server_name hive.contractors' \
+            'root /home/forge/hive.contractors/public' \
+            'fastcgi_pass unix:/var/run/php/' \
+            'FORGE CONFIG'
+        do
+            grep -qF -- "$needle" "$FILE" || {
+                echo "Refusing: $FILE is missing \"$needle\" — that is not a complete site config." >&2
+                exit 1
+            }
+        done
+
+        BACKUP="/tmp/forge-nginx-backup-$(date -u +%Y%m%d%H%M%S).conf"
+        "$0" get-nginx > "$BACKUP"
+        [ -s "$BACKUP" ] || { echo "Refusing: could not read the current config to back it up." >&2; exit 1; }
+        echo "backed up current config -> $BACKUP ($(wc -l < "$BACKUP") lines)"
+
+        # Payload shape is not the same across Forge endpoints — the environment
+        # endpoint wants {"environment": ...} while GET returns data.attributes.
+        # Try the documented shapes in order rather than guessing once.
+        RESP=$(mktemp)
+        CODE=""
+        for field in config content nginx_config nginx; do
+            field="$field" python3 -c "
+import json, os, sys
+print(json.dumps({os.environ['field']: open(sys.argv[1]).read()}))
+" "$FILE" > /tmp/forge-nginx-payload.json
+            CODE=$(curl -sS -X PUT -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
+                -H "Content-Type: application/json" --max-time 60 \
+                -d @/tmp/forge-nginx-payload.json -o "$RESP" -w '%{http_code}' "$SITE_PATH/nginx")
+            case "$CODE" in
+                2*) echo "accepted with field \"$field\" (HTTP $CODE)"; break ;;
+                422) continue ;;
+                *) break ;;
+            esac
+        done
+        rm -f /tmp/forge-nginx-payload.json
+
+        case "$CODE" in
+            2*) ;;
+            *)  echo "FAILED (HTTP $CODE): $(head -c 300 "$RESP")" >&2
+                echo "The live config was NOT changed. Backup remains at $BACKUP" >&2
+                rm -f "$RESP"; exit 1 ;;
+        esac
+        rm -f "$RESP"
+
+        echo "waiting for nginx to reload…"
+        sleep 8
+
+        # Does the site still serve? This is the check that matters.
+        LIVE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://hive.contractors/login || echo 000)
+        case "$LIVE" in
+            200|302) echo "site still serving (HTTP $LIVE) — config applied" ;;
+            *)  echo "SITE IS NOT SERVING (HTTP $LIVE) — restoring the backup" >&2
+                python3 -c "
+import json, sys
+print(json.dumps({'content': open(sys.argv[1]).read()}))
+" "$BACKUP" > /tmp/forge-nginx-rollback.json
+                curl -sS -X PUT -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
+                    -H "Content-Type: application/json" --max-time 60 \
+                    -d @/tmp/forge-nginx-rollback.json -o /dev/null "$SITE_PATH/nginx"
+                rm -f /tmp/forge-nginx-rollback.json
+                sleep 8
+                echo "rolled back; site now: $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://hive.contractors/login)" >&2
+                exit 1 ;;
+        esac
         ;;
     *)
         sed -n '2,18p' "$0"; exit 1

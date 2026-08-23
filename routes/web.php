@@ -741,11 +741,14 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 $hubRoutes();
 
 
-// nginx auth_request target for /menards-vnc/*. Outside the grouped routes on
-// purpose: any middleware that REDIRECTS (guest, registered, vendor.access)
-// hands nginx a 302, and auth_request treats a non-2xx/401/403 as a server
-// error — turning a plain denial into a 500. Only 'auth' is applied, and only
-// so the user is resolved; the controller denies by default.
+// nginx auth_request target for /menards-vnc/*.
+//
+// NO 'auth' middleware, deliberately. auth_request accepts only 2xx (allow) and
+// 401/403 (deny); anything else is a server error. Laravel's 'auth' middleware
+// REDIRECTS a signed-out web request to the login page, and nginx logged
+// exactly that — "auth request unexpected status: 302" — turning every proxied
+// request into a 500. The route still gets the 'web' group (session, cookies)
+// because it lives in this file, so $request->user() resolves normally; the
+// controller returns 401/403 itself and denies by default.
 Route::get('internal/menards-vnc-auth', [\App\Http\Controllers\MenardsVncController::class, 'gate'])
-    ->middleware('auth')
     ->name('menards.vnc.gate');
