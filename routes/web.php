@@ -416,6 +416,13 @@ Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::c
 // Menards receipts fetched by the browser extension running in the server-side
 // signed-in Chromium. Bearer-authed, CSRF-exempt; writes a manifest + PDFs and
 // runs the normal --skip-scrape importer.
+// How the extension's last fetch actually went. Cheap and honest: it reports
+// work it already did, so the server can stop inferring a live session from a
+// window title. See MenardsSyncStatusController for why that inference existed.
+Route::post('api/menards/sync-status', \App\Http\Controllers\MenardsSyncStatusController::class)
+    ->middleware('throttle:60,1')
+    ->name('menards.sync-status');
+
 Route::post('api/menards/receipts', \App\Http\Controllers\MenardsReceiptIngestController::class)
     ->middleware('throttle:12,1')
     ->name('menards.receipts');

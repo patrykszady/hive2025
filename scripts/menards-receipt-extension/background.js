@@ -145,6 +145,34 @@ async function postToHive(payload) {
     return body;
 }
 
+/**
+ * Tell Hive how this run went.
+ *
+ * The server cannot see this any other way: its own signed-in check reads the
+ * window title, because navigating to menards.com to check is what draws the
+ * Imperva challenge. So a dead session used to be invisible server-side —
+ * four scheduled runs in a row failed on 2026-08-23 while `status` still said
+ * signed_in: yes. Best effort: a reporting failure must never fail the sync.
+ */
+async function reportStatus(ok, error, receipts) {
+    try {
+        const { serverUrl, token } = await settings();
+        if (!serverUrl || !token) return;
+
+        await fetch(`${serverUrl}/api/menards/sync-status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ ok, error: error || null, receipts: receipts ?? null }),
+        });
+    } catch (e) {
+        // Swallowed on purpose — see the docblock.
+    }
+}
+
 async function run(reason) {
     const { everSucceeded } = await settings();
     const since = everSucceeded ? sinceDate(DEFAULT_LOOKBACK_DAYS) : BACKFILL_SINCE;
@@ -164,6 +192,7 @@ async function run(reason) {
         if (result.receipts.length === 0) {
             await note(`no receipts on or after ${since} — nothing to send`);
             await chrome.storage.local.set({ lastSuccessAt: new Date().toISOString(), everSucceeded: true, lastError: null });
+            await reportStatus(true, null, 0);
 
             return;
         }
@@ -180,6 +209,8 @@ async function run(reason) {
             lastError: null,
         });
 
+        await reportStatus(true, null, result.receipts.length);
+
         // Hive queues the import rather than running it in the request, so the
         // reply says "accepted", not "imported". How the import itself went is in
         // the menards log on the server; it is not known while this fetch is open.
@@ -188,6 +219,7 @@ async function run(reason) {
     } catch (err) {
         await chrome.storage.local.set({ lastError: err.message });
         await note(`FAILED: ${err.message}`);
+        await reportStatus(false, err.message, null);
     } finally {
         // Only close what we opened — never a tab a person left open.
         if (opened && tab?.id) await chrome.tabs.remove(tab.id).catch(() => {});

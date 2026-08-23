@@ -491,6 +491,20 @@ class MenardsRemoteBrowserService
         // JSON. A health check that breaks the health it is checking is worse
         // than no health check.
         //
+        // The extension's own last fetch outranks every guess below it. It made
+        // a REAL authenticated request; a title is only a hint about one. On
+        // 2026-08-23 the extension recorded "the browser session has expired"
+        // at 08:01 while this method kept answering true for the rest of the
+        // day, so four scheduled syncs ran against a dead session and nothing
+        // said so.
+        $report = \Illuminate\Support\Facades\Cache::get(
+            \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY
+        );
+
+        if (is_array($report) && ($report['session_expired'] ?? false)) {
+            return false;
+        }
+
         // If the browser is already sitting on a real Menards page, the session
         // is good and there is nothing to find out.
         $title = $this->windowTitle();

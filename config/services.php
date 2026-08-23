@@ -60,6 +60,10 @@ return [
     ],
 
     'menards' => [
+        // hCaptcha solving for the Imperva wall (MenardsCaptchaSolver). Read
+        // that class before relying on it: the same approach already failed
+        // here with a VALID token, because Imperva scores the browser.
+        'twocaptcha_key' => env('TWOCAPTCHA_API_KEY'),
         // Shared secret the receipt extension uses to authenticate to
         // /api/menards/receipts (scripts/menards-receipt-extension).
         'bridge_token' => env('MENARDS_BRIDGE_TOKEN'),

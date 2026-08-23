@@ -141,7 +141,13 @@ class MenardsBrowser extends Command
         // there is nothing login() could usefully verify, and verifying it costs
         // a navigation, which is the single thing most likely to draw Imperva's
         // challenge and destroy the session we just proved good.
-        if ($this->recentBatchArrived()) {
+        // ...but proof expires. A batch proves the session was alive WHEN IT
+        // ARRIVED, not now: on 2026-08-23 a batch landed at 07:36 and the
+        // session was dead by 08:01, yet this heuristic went on reporting "the
+        // session works" for the rest of the day while four scheduled syncs
+        // failed. If the extension has since told us the session expired, that
+        // is newer and more direct evidence than the batch, and it wins.
+        if ($this->recentBatchArrived() && ! $this->extensionReportsExpiredSession()) {
             $this->line('A receipt batch arrived within the last day — the session works; not touching the browser.');
         } elseif ($this->login($browser) !== self::SUCCESS) {
             return self::FAILURE;
@@ -238,6 +244,23 @@ class MenardsBrowser extends Command
      * 25 rather than 24 so a daily run that drifts by a few minutes does not
      * conclude the sync is broken when yesterday's batch is 24h01m old.
      */
+    /**
+     * Has the extension told us, since the last batch, that the session died?
+     *
+     * The extension makes a real authenticated request every sync and posts the
+     * outcome to /api/menards/sync-status. That is the only honest signal we
+     * have — checking from PHP means navigating menards.com, which is what
+     * draws the challenge in the first place.
+     */
+    protected function extensionReportsExpiredSession(): bool
+    {
+        $report = \Illuminate\Support\Facades\Cache::get(
+            \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY
+        );
+
+        return is_array($report) && ($report['session_expired'] ?? false);
+    }
+
     protected function recentBatchArrived(): bool
     {
         $dir = storage_path('files/_menards_ingest');

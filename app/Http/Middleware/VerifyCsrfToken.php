@@ -20,6 +20,7 @@ class VerifyCsrfToken extends Middleware
         'api/ewccv/session',
         'api/menards/session',
         'api/menards/receipts',
+        'api/menards/sync-status',
         // Signed with X-TMV-Signature instead.
         'webhooks/trackmyvendor',
     ];
