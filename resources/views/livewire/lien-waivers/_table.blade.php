@@ -22,13 +22,22 @@
 
                     <x-slot:actions>
                         <flux:button.group>
-                            <flux:button size="xs" variant="ghost" icon="arrow-down-tray" href="{{ route('sworn-statements.download-package', $statement) }}">
-                                Download all
-                            </flux:button>
+                            <x-download-button
+                                :href="route('sworn-statements.download-package', $statement)"
+                                label="Download all"
+                                busy-label="Building…" />
                             <flux:dropdown position="bottom" align="end">
                                 <flux:button size="xs" variant="ghost" icon-trailing="chevron-down"></flux:button>
 
                                 <flux:menu>
+                                    {{-- A draw stays editable until its GCSS comes back
+                                         signed; individual signed waivers inside it are
+                                         frozen row-by-row in the modal. --}}
+                                    @if($statement->status !== \App\Enums\LienWaiverStatus::Signed)
+                                        <flux:menu.item icon="pencil-square" wire:click="editDraw({{ $statement->id }})">
+                                            Edit
+                                        </flux:menu.item>
+                                    @endif
                                     <flux:menu.item icon="trash" variant="danger" wire:click="confirmDeleteDraw({{ $statement->id }})">
                                         Delete
                                     </flux:menu.item>

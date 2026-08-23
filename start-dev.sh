@@ -18,6 +18,12 @@ for DEV_ENV_FILE in ".env.dev" ".env.dev.local"; do
   fi
 done
 
+# Sibling projects live next to this repo. Derived from the script's own
+# location rather than a hardcoded home directory — the absolute paths here
+# were /home/patryk/... and silently broke on any machine with a different
+# username. Override WEB_ROOT if your checkouts live somewhere else.
+WEB_ROOT="${WEB_ROOT:-$(cd .. && pwd)}"
+
 LOG_DIR="storage/logs/dev"
 LOCK_FILE="/tmp/hive-dev-server.lock"
 mkdir -p "$LOG_DIR"
@@ -206,9 +212,9 @@ echo ""
 # ==============================================================================
 # GSC (Port 8003)
 # ==============================================================================
-GSC_DIR="/home/patryk/web/gsc"
+GSC_DIR="$WEB_ROOT/gsc"
 if [ ! -d "$GSC_DIR" ]; then
-  echo "❌ gsc directory not found at $GSC_DIR"
+  echo "⬚  gsc not checked out here — skipping"
 else
   echo "════════════════════════════════════════════════════════════════"
   echo "📦 Starting GSC (Port 8003)"
@@ -232,9 +238,9 @@ echo ""
 # ==============================================================================
 # BRECK (Port 8002)
 # ==============================================================================
-BRECK_DIR="/home/patryk/web/breck"
+BRECK_DIR="$WEB_ROOT/breck"
 if [ ! -d "$BRECK_DIR" ]; then
-  echo "❌ breck directory not found at $BRECK_DIR"
+  echo "⬚  breck not checked out here — skipping"
 else
   echo "════════════════════════════════════════════════════════════════"
   echo "📦 Starting BRECK (Port 8002)"
@@ -265,9 +271,9 @@ echo ""
 # ==============================================================================
 # TEST (Port 8005)
 # ==============================================================================
-TEST_DIR="/home/patryk/web/test"
+TEST_DIR="$WEB_ROOT/test"
 if [ ! -d "$TEST_DIR" ]; then
-  echo "❌ test directory not found at $TEST_DIR"
+  echo "⬚  test not checked out here — skipping"
 else
   echo "════════════════════════════════════════════════════════════════"
   echo "📦 Starting TEST (Port 8005)"
@@ -410,7 +416,7 @@ fi
     echo "🌐 Starting Cloudflare Tunnel (dev.hive.contractors)"
     echo "════════════════════════════════════════════════════════════════"
 
-    CLOUDFLARED_CONFIG="/home/patryk/web/hive2025/cloudflared-config.yml"
+    CLOUDFLARED_CONFIG="$PWD/cloudflared-config.yml"
     CLOUDFLARED_BIN="$(command -v cloudflared 2>/dev/null)"
     if [ -z "$CLOUDFLARED_BIN" ] && [ -x "$HOME/.local/bin/cloudflared" ]; then
       CLOUDFLARED_BIN="$HOME/.local/bin/cloudflared"
@@ -428,7 +434,11 @@ fi
       echo "🔄 Starting Cloudflare tunnel..."
       LAUNCHED_TUNNEL=false
       if [ -f "$CLOUDFLARE_CREDENTIALS_FILE" ]; then
-        nohup "$CLOUDFLARED_BIN" tunnel --config "$CLOUDFLARED_CONFIG" run >"$LOG_DIR/cloudflared.log" 2>&1 &
+        # --credentials-file overrides the path baked into the YAML, which is
+        # committed and therefore cannot be correct on every machine.
+        nohup "$CLOUDFLARED_BIN" tunnel --config "$CLOUDFLARED_CONFIG" \
+          run --credentials-file "$CLOUDFLARE_CREDENTIALS_FILE" \
+          >"$LOG_DIR/cloudflared.log" 2>&1 &
         LAUNCHED_TUNNEL=true
       elif [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
         nohup "$CLOUDFLARED_BIN" tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" >"$LOG_DIR/cloudflared.log" 2>&1 &

@@ -46,6 +46,10 @@ class LienWaiverSigningRequest extends Mailable
         // Set when the vendor has no email and the mail goes to the GC user
         // who created the draw instead — renders a "please forward" banner.
         public ?string $forwardVendorName = null,
+        // True when the amount changed after this waiver was already emailed:
+        // the vendor is holding a copy that must not be signed, so both the
+        // subject and the body lead with that.
+        public bool $superseded = false,
     ) {
         $this->theme = 'transparent';
         $this->trackingId = (string) \Illuminate\Support\Str::uuid();
@@ -129,7 +133,7 @@ class LienWaiverSigningRequest extends Mailable
             replyTo: $this->replyToEmail
                 ? [new Address($this->replyToEmail, $this->contractorName)]
                 : [],
-            subject: trim($this->forwardVendorName
+            subject: trim(($this->superseded ? __('lien_waiver.subject_superseded_prefix') . ' ' : '') . ($this->forwardVendorName
                 ? __('lien_waiver.subject_forward', [
                     'vendor' => $this->forwardVendorName,
                     'address' => $this->addressLabel ?: $this->projectLabel,
@@ -137,7 +141,7 @@ class LienWaiverSigningRequest extends Mailable
                 : __('lien_waiver.subject', [
                     'contractor' => $this->contractorName,
                     'address' => $this->addressLabel ?: $this->projectLabel,
-                ]), " |\t"),
+                ])), " |\t"),
         );
     }
 

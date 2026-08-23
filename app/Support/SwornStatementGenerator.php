@@ -321,14 +321,19 @@ class SwornStatementGenerator
     protected static function renderPdf(string $html, ?string $footerHtml = null): string
     {
         try {
-            return Browsershot::html($html)
+            $shot = Browsershot::html($html)
                 ->format('Letter')
                 ->showBackground()
                 ->margins(9, 12, 21, 12)
                 ->showBrowserHeaderAndFooter()
                 ->headerHtml('<span></span>')
-                ->footerHtml($footerHtml ?: self::buildFooterHtml(null, ''))
-                ->pdf();
+                ->footerHtml($footerHtml ?: self::buildFooterHtml(null, ''));
+
+            if ($chromePath = env('CHROME_PATH')) {
+                $shot->setChromePath($chromePath);
+            }
+
+            return $shot->pdf();
         } catch (Throwable $e) {
             return $html;
         }

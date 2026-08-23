@@ -213,15 +213,28 @@
                             {{-- Keyed by vendor: without this, a wire:model.live
                                  change in one row lets the morph carry checkbox
                                  state onto a different vendor's row. --}}
-                            <div wire:key="ss-row-{{ $row['vendor_id'] ?? $i }}" class="space-y-2 rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-700 {{ empty($row['include']) ? 'opacity-50' : '' }}">
+                            @php($rowSigned = !empty($row['waiver_signed']))
+                            <div wire:key="ss-row-{{ $row['vendor_id'] ?? $i }}" class="space-y-2 rounded-lg border px-3 py-2.5 {{ $rowSigned ? 'border-green-300 bg-green-50/40 dark:border-green-800 dark:bg-green-900/10' : 'border-zinc-200 dark:border-zinc-700' }} {{ empty($row['include']) ? 'opacity-50' : '' }}">
                                 <div class="flex min-w-0 items-center gap-2">
-                                    <flux:checkbox wire:model.live="ssRows.{{ $i }}.include" />
+                                    {{-- Signed waivers are frozen: they can't be re-priced
+                                         or dropped from the draw they were sworn against.
+                                         The rest of the draw stays fully editable. --}}
+                                    @if($rowSigned)
+                                        <flux:tooltip position="top" content="Signed — this waiver can no longer be changed or removed from the draw.">
+                                            <flux:icon.lock-closed variant="micro" class="text-green-600 dark:text-green-400" />
+                                        </flux:tooltip>
+                                    @else
+                                        <flux:checkbox wire:model.live="ssRows.{{ $i }}.include" />
+                                    @endif
                                     <div class="min-w-0">
                                         <div class="truncate text-sm font-medium">
                                             <a href="{{ route('vendors.show', $row['vendor_id']) }}" target="_blank">{{ $row['name'] }}</a>
                                         </div>
                                         <div class="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
                                             <span>Paid to date: ${{ number_format((float) $row['paid'], 2) }}</span>
+                                            @if($rowSigned)
+                                                <flux:badge size="sm" color="green" inset="top bottom">Signed</flux:badge>
+                                            @endif
                                             @if(!empty($row['prior_signed_id']))
                                                 @php($priorMatches = abs((float) ($row['prior_signed_amount'] ?? 0) - (float) $row['paid']) < 0.01)
                                                 <flux:tooltip position="top" content="{{ $priorMatches
@@ -252,7 +265,7 @@
                                 <div class="grid grid-cols-3 items-start gap-2">
                                     <div class="min-w-0 space-y-1">
                                         <div class="text-xs text-zinc-500 dark:text-zinc-400">Kind of work</div>
-                                        <flux:autocomplete size="sm" wire:model="ssRows.{{ $i }}.kind" placeholder="Select type of work">
+                                        <flux:autocomplete size="sm" wire:model="ssRows.{{ $i }}.kind" placeholder="Select type of work" :disabled="$rowSigned">
                                             @foreach($this->kindOfWorkOptions as $kind)
                                                 <flux:autocomplete.item wire:key="ss-kind-{{ $i }}-{{ $loop->index }}">{{ $kind }}</flux:autocomplete.item>
                                             @endforeach
@@ -267,14 +280,14 @@
                                             <flux:input.group.prefix>$</flux:input.group.prefix>
                                             {{-- Blank contract defaults to paid-to-date on the documents —
                                                  the placeholder shows exactly what will print. --}}
-                                            <flux:input size="sm" wire:model.live.debounce.500ms="ssRows.{{ $i }}.contract" mask:dynamic="$money($input)" inputmode="decimal" placeholder="{{ (float) $row['paid'] > 0 ? number_format((float) $row['paid'], 2) : '0.00' }}" />
+                                            <flux:input size="sm" wire:model.live.debounce.500ms="ssRows.{{ $i }}.contract" mask:dynamic="$money($input)" inputmode="decimal" placeholder="{{ (float) $row['paid'] > 0 ? number_format((float) $row['paid'], 2) : '0.00' }}" :disabled="$rowSigned" />
                                         </flux:input.group>
                                     </div>
                                     <div class="min-w-0 space-y-1">
                                         <div class="text-xs text-zinc-500 dark:text-zinc-400">This payment</div>
                                         <flux:input.group>
                                             <flux:input.group.prefix>$</flux:input.group.prefix>
-                                            <flux:input size="sm" wire:model="ssRows.{{ $i }}.this_payment" mask:dynamic="$money($input)" inputmode="decimal" placeholder="0.00" />
+                                            <flux:input size="sm" wire:model="ssRows.{{ $i }}.this_payment" mask:dynamic="$money($input)" inputmode="decimal" placeholder="0.00" :disabled="$rowSigned" />
                                         </flux:input.group>
                                     </div>
                                 </div>
@@ -285,11 +298,21 @@
                     <flux:description>No subs or suppliers with money on this project yet.</flux:description>
                 @endif
 
+                @if($editingStatementId)
+                    <flux:callout variant="warning" icon="exclamation-triangle" inline>
+                        <flux:callout.text>
+                            Changing an amount re-issues that vendor's waiver and emails them a
+                            corrected copy. If they sign the version they already have, it will be
+                            rejected when it's scanned back in.
+                        </flux:callout.text>
+                    </flux:callout>
+                @endif
+
                 <div class="flex justify-end gap-2 pt-2">
                     <flux:button type="button" variant="ghost" wire:click="$set('showSwornStatement', false)">Cancel</flux:button>
                     <flux:button type="button" variant="primary" wire:click="generateSwornStatement"
                         wire:target="generateSwornStatement" wire:loading.attr="disabled" wire:loading.class="opacity-60">
-                        Create
+                        {{ $editingStatementId ? 'Save changes' : 'Create' }}
                     </flux:button>
                 </div>
             </div>

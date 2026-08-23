@@ -20,6 +20,15 @@
  *   headless       – true (default) | false for visible browser
  *   since          – ISO date string cutoff (only receipts on/after this date)
  *   delayMs        – base delay between actions in ms (default 2000)
+ *   userDataDir    – persistent Chromium profile directory. Strongly
+ *                    recommended: without it every run is a brand-new browser
+ *                    with no cookies and no device trust, which is what the
+ *                    Imperva wall reacts to.
+ *   proxy           – optional proxy URL, used only until the profile holds a
+ *                    session (Imperva binds cookies to the issuing IP).
+ *   cookies        – optional menards.com cookie jar borrowed from a real
+ *                    browser (see scripts/menards-session-bridge). When present
+ *                    the scraper replays it and skips sign-in altogether.
  */
 
 const puppeteer = require('puppeteer-extra');
@@ -41,7 +50,14 @@ const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
 if (config.captchaApiKey) {
     puppeteer.use(RecaptchaPlugin({
-        provider: { id: 'anticaptcha', token: config.captchaApiKey },
+        // 'anticaptcha' is NOT a provider this plugin ships — puppeteer-extra-
+        // plugin-recaptcha@3.6.8 bundles only dist/provider/2captcha.js, so every
+        // solveRecaptchas() has thrown "Cannot find builtin provider with id
+        // 'anticaptcha'" since 2026-03-22. Inside handleImpervaChallenge that is
+        // swallowed by try/catch, but on the login path it is unguarded: the
+        // moment Menards presents any [data-sitekey] element the run hard-dies
+        // with an error that never mentions a captcha.
+        provider: { id: '2captcha', token: config.captchaApiKey },
         visualFeedback: true,
     }));
 }
@@ -386,10 +402,21 @@ async function pageLooksWalled(page) {
 
 async function login(page) {
     log('Navigating to login page…');
+    // domcontentloaded, not networkidle2. Menards keeps analytics and sensor
+    // connections open, so "no more than 2 in-flight requests for 500ms" can
+    // simply never happen and the goto times out after 60s on a page that
+    // rendered fine seconds earlier — which is exactly how the 2026-08-22 run
+    // failed. Wait for the form we actually need instead of for silence.
     const response = await page.goto('https://www.menards.com/main/login.html', {
-        waitUntil: 'networkidle2',
-        timeout: 60000,
+        waitUntil: 'domcontentloaded',
+        timeout: 90000,
     });
+
+    // The login form is the real readiness signal. Absent it, we are either
+    // still loading or looking at an Imperva shell — both handled below.
+    await page.waitForSelector('#username, input[name="username"], input[type="password"]', {
+        timeout: 30000,
+    }).catch(() => log('  (login form not visible yet — continuing to the wall checks)'));
     log(`  HTTP status: ${response ? response.status() : 'no response'}`);
     log(`  Final URL: ${page.url()}`);
     // Imperva's sensor can trigger a quick re-navigation right after load,
@@ -645,18 +672,67 @@ async function login(page) {
     await screenshot(page, '04_after_login');
     await saveHtml(page, '04_after_login');
 
-    const errorText = await page.$eval(
-        '.error-message, .alert-danger, .login-error, .errorMessage',
-        el => el.textContent.trim()
-    ).catch(() => null);
+    // Classify what actually came back, instead of calling everything a wall.
+    //
+    // The saved dumps show at least four distinct outcomes that this code used
+    // to collapse into "Imperva wall" or "navigation timeout":
+    //   * 2026-08-21 19:07 — <title>Internal Service Error 500 at Menards®</title>
+    //   * 2026-08-18 01:07 — reached checkcredentials.html, then zero cards
+    //   * 2026-08-22 02:22 — login page rendered fully (15 inputs)
+    //   * a Menards page whose SPA never hydrated (real title, zero inputs)
+    // Only the first kind of shell is actually Imperva; the others are a server
+    // error, a rendering failure, and a genuine sign-in. Reporting them as one
+    // thing is what sent this investigation after a bot wall for days.
+    const outcome = await page.evaluate(() => {
+        const title = document.title || '';
+        const text = (document.body?.innerText || '').trim();
+        const html = document.documentElement?.outerHTML || '';
 
-    if (errorText) {
-        throw new Error(`Login failed: ${errorText}`);
+        return {
+            title,
+            url: location.href,
+            textLen: text.length,
+            inputs: document.querySelectorAll('input').length,
+            // Genuine Incapsula markers — not merely "the page looks empty".
+            imperva: /_Incapsula_Resource|Request unsuccessful|Incapsula incident/i.test(html)
+                || !!document.querySelector('iframe[src*="_Incapsula_Resource"]'),
+            serverError: /Internal Service Error|Service Unavailable|\b50[0-9]\b/i.test(title),
+            errorText: (document.querySelector('.error-message, .alert-danger, .login-error, .errorMessage')?.textContent || '').trim(),
+        };
+    }).catch(() => null);
+
+    if (outcome) {
+        log(`  After login — title: "${outcome.title}" | url: ${outcome.url}`);
+        log(`  Page shape — inputs: ${outcome.inputs}, text: ${outcome.textLen} chars, imperva markers: ${outcome.imperva}`);
     }
 
-    if (page.url().includes('error=true') || page.url().includes('login')) {
-        await saveHtml(page, '04_login_failed');
-        throw new Error(`Login failed — still on login page (URL: ${page.url()}). Check credentials or CAPTCHA.`);
+    if (outcome?.serverError) {
+        await saveHtml(page, '04_server_error');
+        // Menards' own application failed. Transient by nature, and nothing
+        // about the scraper can fix it — retry rather than alarm.
+        throw new Error(`MENARDS_SERVER_ERROR: the site returned "${outcome.title}" after submitting credentials.`);
+    }
+
+    if (outcome?.errorText) {
+        throw new Error(`Login failed: ${outcome.errorText}`);
+    }
+
+    if (outcome?.imperva) {
+        await saveHtml(page, '04_imperva_block');
+        throw new Error(`IMPERVA_BLOCK: Incapsula markers present after sign-in (${outcome.url}).`);
+    }
+
+    // checkcredentials.html is the login form's own action target — it has been
+    // since at least 2026-03-22, and landing on it is NORMAL, not a stall. What
+    // matters is whether the page behind it hydrated.
+    if (outcome && outcome.inputs === 0 && outcome.textLen < 50) {
+        await saveHtml(page, '04_not_hydrated');
+        throw new Error(`PAGE_NOT_HYDRATED: "${outcome.title}" rendered no content (${outcome.url}) — the SPA bootstrap did not run.`);
+    }
+
+    if (/\/login\.html/i.test(page.url()) || page.url().includes('error=true')) {
+        await saveHtml(page, '04_login_bounced');
+        throw new Error(`LOGIN_REJECTED: back on the login page (${page.url()}) after submitting credentials.`);
     }
 
     log(`  Login complete — URL: ${page.url()}`);
@@ -851,14 +927,24 @@ async function processCard(page, cardOption, cardIndex, downloadDir) {
 
     log(`Date cutoff (since): ${SINCE ? SINCE.toISOString() : 'none (all dates)'}`);
 
+    // Persistent profile. Every run used to launch a brand-new, cookie-less
+    // Chromium: no Imperva cookies, no history, no device trust — a first-time
+    // headless browser, every single time, which is the most bot-like thing we
+    // could present. Keeping the profile lets Imperva's incap_*/visid_* cookies
+    // and whatever device trust we earn survive between runs. This is the same
+    // call the Yelp automation on gs.construction makes, where wiping the
+    // profile on each attempt is what produced the challenge/429 spiral.
+    const launchArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--window-size=1280,900',
+    ];
+
     const browser = await puppeteer.launch({
         headless: config.headless !== false ? 'new' : false,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--window-size=1280,900',
-        ],
+        userDataDir: config.userDataDir || undefined,
+        args: launchArgs,
     });
 
     try {
@@ -870,7 +956,30 @@ async function processCard(page, cardOption, cardIndex, downloadDir) {
         fs.mkdirSync(downloadDir, { recursive: true });
         await setupDownloadBehavior(page, downloadDir);
 
-        await login(page);
+        // A borrowed session skips sign-in entirely. Imperva refuses the
+        // scraper's own login even when the hCaptcha is solved, so when the
+        // browser extension has handed us a real signed-in jar we replay that
+        // instead of fighting the wall. Falls back to logging in when there is
+        // no jar, so nothing changes on a box that has not paired one.
+        const borrowed = Array.isArray(config.cookies) ? config.cookies : [];
+
+        if (borrowed.length > 0) {
+            log(`Using borrowed session — ${borrowed.length} cookie(s) from the browser bridge`);
+            await page.setCookie(...borrowed);
+            await page.goto('https://www.menards.com/main/home.html', {
+                waitUntil: 'networkidle2',
+                timeout: 60000,
+            });
+            await sleep(DELAY);
+            await screenshot(page, '01_borrowed_session');
+
+            if (/\/login\.html/i.test(page.url())) {
+                await saveHtml(page, '01_borrowed_rejected');
+                throw new Error(`SESSION_NOT_ESTABLISHED: the borrowed session was refused (landed on ${page.url()}) — re-send it from the browser extension.`);
+            }
+        } else {
+            await login(page);
+        }
 
         // Navigate to receipt lookup
         log('Navigating to receipt lookup…');
@@ -886,7 +995,17 @@ async function processCard(page, cardOption, cardIndex, downloadDir) {
         log(`Found ${cards.length} card(s): ${cards.map(c => c.text).join(', ')}`);
 
         if (cards.length === 0) {
-            throw new Error('No cards found in the Select Card dropdown');
+            // An empty dropdown almost never means "this account has no cards" —
+            // it means we are not actually signed in and are looking at the login
+            // page. Say that, instead of sending the next person to debug a
+            // dropdown selector that was never the problem.
+            const url = page.url();
+
+            if (/\/login\.html|checkcredentials/i.test(url)) {
+                throw new Error(`SESSION_NOT_ESTABLISHED: receipt lookup redirected to ${url} — the session did not survive (bot wall).`);
+            }
+
+            throw new Error(`No cards found in the Select Card dropdown (URL: ${url})`);
         }
 
         const allReceipts = [];
@@ -942,7 +1061,15 @@ async function processCard(page, cardOption, cardIndex, downloadDir) {
         // Navigation/network timeouts are menards.com or Imperva having a slow
         // moment — same "transient, retry next scheduled run" class as
         // anti-captcha capacity (75), not a real scraper failure.
-        const transient = /Navigation timeout|net::ERR_TIMED_OUT|net::ERR_CONNECTION|net::ERR_NETWORK_CHANGED/i.test(err.message);
+        // SESSION_NOT_ESTABLISHED is the bot wall silently refusing the session
+        // rather than a broken scraper or bad credentials — those still fail hard
+        // as "Login failed", so this cannot mask a real credential problem.
+        // Only genuine network/site blips are transient. SESSION_NOT_ESTABLISHED
+        // was in this list and should never have been: exit 75 is reported as a
+        // SUCCESS by the command, which is precisely how a full week of zero
+        // receipts went unnoticed. A session that will not establish needs a
+        // human, so it must exit 1 and alarm.
+        const transient = /Navigation timeout|net::ERR_TIMED_OUT|net::ERR_CONNECTION|net::ERR_NETWORK_CHANGED|MENARDS_SERVER_ERROR/i.test(err.message);
         process.exit(transient ? 75 : 1);
     } finally {
         await browser.close();

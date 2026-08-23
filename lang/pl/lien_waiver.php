@@ -3,6 +3,9 @@
 return [
     'subject' => ':contractor | Prośba o Lien Waiver | :address',
     'subject_forward' => 'PRZEKAŻ do :vendor | Prośba o Lien Waiver | :address',
+    'subject_superseded_prefix' => '** KOREKTA — NIE PODPISUJ POPRZEDNIEJ KOPII **',
+    'superseded_heading' => 'To zastępuje zrzeczenie wysłane wcześniej',
+    'superseded_body' => 'Kwota na tym zrzeczeniu uległa zmianie. <strong>Nie podpisuj kopii z naszej poprzedniej wiadomości</strong> — jest nieważna i zostanie odrzucona. Prosimy podpisać i odesłać załączony dokument.',
     'email_title' => 'Lien Waiver',
     'greeting' => 'Dzień dobry :name,',
     'greeting_fallback' => 'Dzień dobry,',

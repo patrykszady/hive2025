@@ -186,6 +186,13 @@ return [
             'days' => 14,
         ],
 
+        'menards' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/menards.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'waiver_scans' => [
             'driver' => 'daily',
             'path' => storage_path('logs/waiver_scans.log'),

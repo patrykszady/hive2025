@@ -114,6 +114,13 @@ class ScrapeMenardsReceipts extends Command
                 'headless'     => $headless,
                 'since'        => $since->toIso8601String(),
                 'delayMs'      => 2000,
+                // When the browser extension has handed us a signed-in session,
+                // pass it through and let the scraper skip its own login —
+                // Imperva refuses that login even with the captcha solved.
+                'cookies'      => \App\Support\MenardsCookieJar::get(),
+                // Persistent profile — kept between runs on purpose. A fresh
+                // profile every run is what the Imperva wall reacts to.
+                'userDataDir'  => storage_path('app/menards-puppeteer'),
             ];
 
             $configFile = tempnam(sys_get_temp_dir(), 'menards_cfg_');
@@ -125,10 +132,44 @@ class ScrapeMenardsReceipts extends Command
             $this->line("  Output: {$outputDir}");
             $this->line("  Since: {$since->toDateTimeString()}");
             $this->line("  Headless: " . ($headless ? 'yes' : 'no'));
+            $jar = \App\Support\MenardsCookieJar::get();
+            $this->line('  Session: ' . ($jar === []
+                ? 'own login (no browser session paired)'
+                : count($jar) . ' borrowed cookie(s), received ' . (\App\Support\MenardsCookieJar::receivedAt() ?? 'unknown')));
             $this->newLine();
 
+            // Headed Chromium on a virtual display, not headless.
+            //
+            // Imperva fingerprints the browser, not the IP: on 2026-08-22 a
+            // headless run from a residential connection got a blank Imperva
+            // shell and a redirect loop, while plain curl from the same machine
+            // got HTTP 200 in 0.2s. `headless: 'new'` is still detectable. The
+            // Yelp automation on gs.construction runs Chromium headed under
+            // Xvfb for exactly this reason, and that is the ingredient this
+            // scraper was missing.
+            //
+            // Falls back to running node directly when Xvfb is not installed,
+            // so the command still works (headless, and probably walled) rather
+            // than failing outright.
+            $xvfbRun = trim((string) shell_exec('command -v xvfb-run 2>/dev/null'));
+            $command = "{$nodePath} {$scriptPath} {$configFile}";
+
+            if ($xvfbRun !== '' && ! $headless) {
+                // -a picks a free display number, so concurrent runs and a
+                // logged-in desktop session cannot collide.
+                $command = sprintf(
+                    '%s -a --server-args=%s %s',
+                    $xvfbRun,
+                    escapeshellarg('-screen 0 1280x900x24'),
+                    $command,
+                );
+                $this->line('  Display: Xvfb (headed Chromium)');
+            } elseif (! $headless) {
+                $this->warn('  Xvfb not installed — running headed without a virtual display.');
+            }
+
             $result = Process::timeout(1800) // 30 min max
-                ->run("{$nodePath} {$scriptPath} {$configFile}");
+                ->run($command);
 
             @unlink($configFile);
 
@@ -144,10 +185,25 @@ class ScrapeMenardsReceipts extends Command
                 // idle workers, or menards.com/Imperva navigation timed out.
                 // Skip quietly; the next scheduled run will try again.
                 if ($result->exitCode() === 75) {
-                    $this->warn('Skipped: transient outage (anti-captcha capacity or site timeout) — will retry on the next scheduled run.');
-                    Log::info('Menards scraper skipped — transient outage', [
+                    // Name the actual cause in the log line. "transient outage"
+                    // covered three unrelated things, so the log said nothing
+                    // about which one happened.
+                    $stderr = $result->errorOutput();
+                    $reason = match (true) {
+                        str_contains($stderr, 'MENARDS_SERVER_ERROR') => 'menards.com returned a 500 — their server, not us',
+                        str_contains($stderr, 'PAGE_NOT_HYDRATED') => 'the page loaded but its JavaScript never rendered',
+                        str_contains($stderr, 'IMPERVA_BLOCK') => 'Imperva/Incapsula blocked the session',
+                        str_contains($stderr, 'LOGIN_REJECTED') => 'credentials were rejected — back on the login page',
+                        str_contains($stderr, 'SESSION_NOT_ESTABLISHED') => 'sign-in did not stick (bot wall refused the session)',
+                        str_contains($stderr, 'Imperva wall persisted') => 'Imperva wall persisted after repeated challenges',
+                        str_contains($stderr, 'no idle workers') => 'captcha solver had no idle workers',
+                        default => 'site navigation timed out',
+                    };
+
+                    $this->warn("Skipped: {$reason} — will retry on the next scheduled run.");
+                    Log::channel('menards')->info('Menards scraper skipped — ' . $reason, [
                         'output_dir' => $outputDir,
-                        'stderr_tail' => substr($result->errorOutput(), -500),
+                        'stderr_tail' => substr($stderr, -500),
                     ]);
 
                     return self::SUCCESS;

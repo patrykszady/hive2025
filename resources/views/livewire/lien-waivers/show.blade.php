@@ -114,9 +114,7 @@
         </x-slot:details>
 
         <x-slot:header_buttons>
-            <flux:button size="sm" icon="arrow-down-tray" href="{{ route('lien-waivers.download', $waiver) }}">
-                Download PDF
-            </flux:button>
+            <x-download-button size="sm" variant="filled" :href="route('lien-waivers.download', $waiver)" label="Download PDF" />
         </x-slot:header_buttons>
     </x-details.card>
 

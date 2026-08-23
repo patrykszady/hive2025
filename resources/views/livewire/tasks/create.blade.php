@@ -60,8 +60,12 @@
                         </flux:badge>
                     @endif
                 </button>
-                @if($view_text['form_submit'] === 'edit' && $form->task)
-                    <button
+                {{-- Notes and Dependencies are available while creating too.
+                     Notes/checklist are plain form state that store() persists, and
+                     a predecessor can be chosen before the row exists (it is applied
+                     on save). Only History is genuinely edit-only — an unsaved task
+                     has no history to show. --}}
+                <button
                         type="button"
                         @click="activeTab = 'notes'"
                         :class="activeTab === 'notes' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
@@ -77,12 +81,15 @@
                     >
                         Dependencies
                         @php
-                            $depCount = $form->task->predecessorDependencies->count() + $form->task->successorDependencies->count();
+                            $depCount = $form->task
+                                ? $form->task->predecessorDependencies->count() + $form->task->successorDependencies->count()
+                                : count($pendingDependencies ?? []);
                         @endphp
                         @if($depCount > 0)
                             <flux:badge size="sm" color="zinc">{{ $depCount }}</flux:badge>
                         @endif
                     </button>
+                    @if($view_text['form_submit'] === 'edit' && $form->task)
                     <button
                         type="button"
                         @click="activeTab = 'history'"
@@ -483,56 +490,56 @@
         </form>
 
         <!-- Notes Panel -->
-        @if($view_text['form_submit'] === 'edit' && $form->task)
-            <div x-show="activeTab === 'notes'" x-effect="if (activeTab === 'notes') $nextTick(() => { $el.querySelector('textarea')?.dispatchEvent(new Event('input', { bubbles: true })) })">
+        {{-- No task row needed: $form->notes and $form->checklist are form state
+             that store() writes on save. Gating this on 'edit' meant an
+             AI-extracted checklist was invisible on the screen where it most
+             needed reviewing. --}}
+        <div x-show="activeTab === 'notes'" x-effect="if (activeTab === 'notes') $nextTick(() => { $el.querySelector('textarea')?.dispatchEvent(new Event('input', { bubbles: true })) })">
                 <div class="relative">
                     <div class="space-y-4">
-                        {{-- SMS IMAGES --}}
-                        @if(!empty($this->taskSmsMediaUrls))
+                        {{-- TASK IMAGES — saved ones plus any still pending from
+                             the message that created this task. Square tiles to
+                             match the project photo grid (projects/*/images), so a
+                             texted photo looks the same wherever it is reviewed.
+                             The grid is narrower here than on the project page:
+                             same tile, fewer columns, because this is a modal. --}}
+                        @if(!empty($this->taskImages))
                             <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-900/30">
                                 <div class="mb-2 flex items-center gap-2">
                                     <flux:icon.photo class="size-4 text-zinc-500" />
                                     <flux:text class="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                                         Task Images From Message
                                     </flux:text>
+                                    <flux:badge size="sm" color="zinc">{{ count($this->taskImages) }}</flux:badge>
                                 </div>
 
-                                <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                    @foreach($this->taskSmsMediaUrls as $index => $url)
-                                        <a href="{{ $url }}" target="_blank" rel="noopener noreferrer" wire:key="task-sms-media-{{ $index }}" class="block overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
-                                            <img src="{{ $url }}" alt="Task image {{ $index + 1 }}" class="h-24 w-full object-cover" loading="lazy" />
-                                        </a>
+                                <div class="grid grid-cols-3 gap-2 pt-1 sm:grid-cols-4 lg:grid-cols-6"
+                                    x-data="{ lb: {{ Js::from($this->taskImageFrames) }} }">
+                                    @foreach($this->taskImages as $index => $url)
+                                        <button type="button"
+                                            wire:key="task-image-{{ $index }}"
+                                            title="Open"
+                                            x-on:click="$dispatch('open-lightbox', { frames: lb, index: {{ $index }} })"
+                                            class="group relative aspect-square cursor-pointer overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                                            {{-- Two retries before the tile dims, and the tile is
+                                                 never removed: on jobsite wifi a dropped request
+                                                 must not blank a photo, and an expired session
+                                                 answers every image with login HTML — removing on
+                                                 error would silently empty the grid. Same rule as
+                                                 the project photo grid. --}}
+                                            <img src="{{ $url }}" alt="Task image {{ $index + 1 }}"
+                                                x-data="{ tries: 0, loaded: false }"
+                                                x-init="loaded = $el.complete && $el.naturalWidth > 0"
+                                                x-on:load="loaded = true"
+                                                x-bind:style="loaded ? 'opacity:1;transition:opacity .35s' : 'opacity:0'"
+                                                x-on:error="if (tries < 2) { tries++; const b = $el.src.replace(/[?&]r=\d+$/, ''); setTimeout(() => $el.src = b + (b.includes('?') ? '&' : '?') + 'r=' + tries, 700 * tries) } else { $el.style.display = 'none'; $el.closest('button').classList.add('opacity-40', 'pointer-events-none') }"
+                                                class="relative h-full w-full object-cover transition group-hover:opacity-90"
+                                                loading="lazy" />
+                                        </button>
                                     @endforeach
                                 </div>
                             </div>
                         @endif
-
-                        {{-- NOTES --}}
-                        <flux:composer
-                            wire:model="form.notes"
-                            label="Notes"
-                            variant="input"
-                            max-rows="20"
-                            placeholder="Notes about this task..."
-                        >
-                            <x-slot name="actionsLeading">
-                                {{-- Empty to push trailing to the right --}}
-                            </x-slot>
-
-                            <x-slot name="actionsTrailing">
-                                <flux:button 
-                                    wire:click="saveNotes" 
-                                    wire:loading.class="opacity-50"
-                                    wire:target="saveNotes"
-                                    type="button" 
-                                    size="sm" 
-                                    variant="filled"
-                                    loading
-                                >
-                                    Save
-                                </flux:button>
-                            </x-slot>
-                        </flux:composer>
 
                         {{-- CHECKLIST --}}
                         <div class="w-full">
@@ -636,17 +643,42 @@
                                 </flux:kanban.column>
                             </flux:kanban>
                         </div>
+
+                        {{-- NOTES --}}
+                        <flux:composer
+                            wire:model="form.notes"
+                            label="Notes"
+                            variant="input"
+                            max-rows="20"
+                            placeholder="Notes about this task..."
+                        >
+                            <x-slot name="actionsLeading">
+                                {{-- Empty to push trailing to the right --}}
+                            </x-slot>
+
+                            <x-slot name="actionsTrailing">
+                                <flux:button 
+                                    wire:click="saveNotes" 
+                                    wire:loading.class="opacity-50"
+                                    wire:target="saveNotes"
+                                    type="button" 
+                                    size="sm" 
+                                    variant="filled"
+                                    loading
+                                >
+                                    Save
+                                </flux:button>
+                            </x-slot>
+                        </flux:composer>
+
                     </div>
                 </div>
             </div>
-        @endif
 
         <!-- Dependencies Panel -->
-        @if($view_text['form_submit'] === 'edit' && $form->task)
-            <div x-show="activeTab === 'dependencies'" x-cloak>
-                @include('livewire.tasks._dependencies-panel')
-            </div>
-        @endif
+        <div x-show="activeTab === 'dependencies'" x-cloak>
+            @include('livewire.tasks._dependencies-panel')
+        </div>
 
         <!-- History Panel -->
         @if($view_text['form_submit'] === 'edit' && $form->task)
@@ -746,4 +778,10 @@
         <flux:button type="submit" form="task_create_form_modal_form" variant="primary" wire:loading.attr="disabled">{{$view_text['button_text']}}</flux:button>
     </x-slot>
 </x-form-modal>
+
+{{-- The lightbox lives outside the modal markup but inside this component, so
+     it is present on every page the task modal is used on (planner, project,
+     messages) without each of those pages having to mount it. It teleports to
+     <body> and listens on the window, so the modal cannot clip it. --}}
+<x-photo-lightbox />
 </div>

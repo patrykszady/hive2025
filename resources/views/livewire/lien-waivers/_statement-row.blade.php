@@ -18,9 +18,7 @@
                     {{-- Project card has "Download all" on the draw header; only the
                          standalone page needs the package link here. --}}
                     @unless($isProjectScoped)
-                        <flux:menu.item icon="arrow-down-tray" href="{{ route('sworn-statements.download-package', $statement) }}">
-                            Download Draw Package
-                        </flux:menu.item>
+                        <x-download-button menu-item :href="route('sworn-statements.download-package', $statement)" label="Download Draw Package" busy-label="Building…" />
                     @endunless
                     <flux:menu.item icon="document-text" href="{{ route('sworn-statements.download', $statement) }}">
                         Download GCSS
@@ -29,6 +27,11 @@
                          header's Download all dropdown instead. --}}
                     @unless($isProjectScoped)
                         <flux:menu.separator />
+                        @if($statement->status !== \App\Enums\LienWaiverStatus::Signed)
+                            <flux:menu.item icon="pencil-square" wire:click="editDraw({{ $statement->id }})">
+                                Edit
+                            </flux:menu.item>
+                        @endif
                         <flux:menu.item icon="trash" variant="danger" wire:click="confirmDeleteDraw({{ $statement->id }})">
                             Delete Draw
                         </flux:menu.item>

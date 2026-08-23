@@ -18,7 +18,14 @@ class SendLienWaiverSigningRequestJob implements ShouldQueue
 
     public int $tries = 3;
 
-    public function __construct(public int $lienWaiverId) {}
+    /**
+     * @param  bool  $superseded  True when this send replaces a document the
+     *                            vendor already has — the amount changed after
+     *                            the first email, so the mail leads with a
+     *                            warning that the earlier copy must not be
+     *                            signed.
+     */
+    public function __construct(public int $lienWaiverId, public bool $superseded = false) {}
 
     public function handle(): void
     {
@@ -93,7 +100,7 @@ class SendLienWaiverSigningRequestJob implements ShouldQueue
         // (In local/dev/test, Mail::alwaysTo redirects delivery to the dev
         // inbox — see AppServiceProvider — while production mails the vendor.)
         $pending->to($recipientEmail)->locale($recipientLocale)->send(
-            new LienWaiverSigningRequest($waiver, $recipientName, $forwardVendorName)
+            new LienWaiverSigningRequest($waiver, $recipientName, $forwardVendorName, $this->superseded)
         );
 
         $waiver->forceFill([

@@ -288,6 +288,10 @@ class WaiverScanIngest
 
         $base['has_affidavit'] = ($base['has_affidavit'] ?? false) || ($incoming['has_affidavit'] ?? false);
 
+        // Highest wins: a torn scan can lose the footer on some pages, and one
+        // legible marker is enough to date the document.
+        $base['revision'] = max((int) ($base['revision'] ?? 0), (int) ($incoming['revision'] ?? 0)) ?: null;
+
         $base['details'] = ($base['details'] ?? []) + ($incoming['details'] ?? []);
 
         return $base;
@@ -328,6 +332,11 @@ class WaiverScanIngest
                 // is always in the OCR text when the section exists — no LLM
                 // judgement needed (the boolean field proved unreliable).
                 'has_affidavit' => preg_match('/CONTRACTOR.{0,3}S\s+AFFIDAVIT/iu', (string) ($content['markdown'] ?? $content['content'] ?? '')) === 1,
+                // Which generation of the document this page came off. Printed
+                // in the footer from revision 2 on; absent (null) on anything
+                // never re-priced. Deterministic OCR read, same as the
+                // affidavit heading above.
+                'revision' => self::revisionFromText((string) ($content['markdown'] ?? $content['content'] ?? '')),
                 // Extracted document details — completeness is computed from
                 // these in code (deterministic), and they're persisted onto
                 // the record's notes on signing. Handwriting transcriptions
@@ -356,25 +365,61 @@ class WaiverScanIngest
 
             $markdown = (string) ($content['markdown'] ?? $content['content'] ?? '');
 
-            // 1. Genuine decoded barcodes only — CU annotates each decoded
-            //    barcode as an image element with the value as the title.
-            if (preg_match_all('/!\[[^\]]*Code[^\]]*\]\([^)"]*"\s*(H(?:LW|SS)-\d{1,10})\s*"\s*\)/i', $markdown, $matches)) {
-                foreach ($matches[1] as $value) {
-                    if (preg_match('/^H(LW|SS)-(\d+)$/i', trim($value), $parts)) {
-                        $code = 'H' . strtoupper($parts[1]) . '-' . (int) $parts[2];
+            // Matching runs in confidence order, and the first source to
+            // produce a code wins its context. All three encode the same
+            // identity, so a later source only ever confirms an earlier one.
+            //
+            // 1. QR. Error-corrected to ~30%, so it is the symbol most likely
+            //    to survive a folded, faxed or threshold-crushed page. CU
+            //    annotates a decoded QR as ![QRCode](... "HLW-11").
+            if (preg_match_all('/!\[[^\]]*QR[^\]]*\]\([^)"]*"\s*(H(?:LW|SS)-\d{1,10})\s*"\s*\)/i', $markdown, $qrMatches)) {
+                foreach ($qrMatches[1] as $value) {
+                    $code = $this->normalizeCode($value);
+                    if ($code !== null) {
                         $codes[$code] = $codes[$code] ?? $context;
                     }
                 }
             }
 
-            // 2. Footer filename fallback: "lien-waiver-{id}-..." carries the
-            //    same id as the barcode (GCSS filenames do not include the id).
-            //    OCR-tolerant: the field is scoped to the footer card so loose
-            //    matching is safe here.
-            $waiverId = $this->waiverIdFromFooterFilename((string) ($fields['FooterFilename'] ?? ''));
-            if ($waiverId !== null) {
-                $code = 'HLW-' . $waiverId;
-                $codes[$code] = $codes[$code] ?? $context;
+            // 2. Code 128. No error correction — one merged bar from a crumpled
+            //    corner loses the whole read — so it ranks below the QR, but it
+            //    is deterministic when it does decode.
+            if (preg_match_all('/!\[[^\]]*Code[^\]]*\]\([^)"]*"\s*(H(?:LW|SS)-\d{1,10})\s*"\s*\)/i', $markdown, $barcodeMatches)) {
+                foreach ($barcodeMatches[1] as $value) {
+                    $code = $this->normalizeCode($value);
+                    if ($code !== null) {
+                        $codes[$code] = $codes[$code] ?? $context;
+                    }
+                }
+            }
+
+            // 3. The id printed in the footer card, read as text. Both symbols
+            //    above are all-or-nothing under damage; characters degrade
+            //    gracefully and stay readable long after a symbol stops
+            //    decoding. Two sources, deliberately different in strictness:
+            //
+            //    a) The analyzer field, which is scoped to the footer card, so
+            //       a mangled separator can be repaired safely — nothing else
+            //       on the page can reach this value.
+            $printed = trim((string) ($fields['FooterDocumentId'] ?? ''));
+            if ($printed !== '') {
+                $code = $this->normalizeCode($printed);
+                if ($code !== null) {
+                    $codes[$code] = $codes[$code] ?? $context;
+                }
+            }
+
+            //    b) Free page text, where the separator must be a literal
+            //       hyphen. That is what keeps body content like "HSS 6,000"
+            //       (a hollow structural section beside an amount) from
+            //       fabricating the code HSS-6.
+            if (preg_match_all('/\bH(?:LW|SS)-\d{1,10}\b/', $markdown, $textMatches)) {
+                foreach ($textMatches[0] as $value) {
+                    $code = $this->normalizeCode($value);
+                    if ($code !== null) {
+                        $codes[$code] = $codes[$code] ?? $context;
+                    }
+                }
             }
         }
 
@@ -548,8 +593,13 @@ class WaiverScanIngest
         foreach (($raw['result']['contents'] ?? []) as $content) {
             foreach (($content['paragraphs'] ?? []) as $paragraph) {
                 $text = (string) ($paragraph['content'] ?? '');
+                // Two wordings: "email the signed copy back to …" on documents
+                // issued before the footer was compacted, "Email signed copy
+                // to …" after. Both must keep matching — old copies stay in
+                // circulation for as long as they take to come back signed.
                 if (stripos($text, 'waivers@hive.contractors') === false
-                    && stripos($text, 'email the signed copy back') === false) {
+                    && stripos($text, 'email the signed copy back') === false
+                    && stripos($text, 'email signed copy') === false) {
                     continue;
                 }
 
@@ -569,31 +619,56 @@ class WaiverScanIngest
     }
 
     /**
-     * The waiver id out of the footer card's filename ("lien-waiver-{id}-...").
+     * Canonicalise a printed or decoded identity into "HLW-{id}" / "HSS-{id}".
      *
-     * This is the ONLY route left when the barcode doesn't decode, which is
-     * routine: phone scanner apps (CamScanner et al) hard-threshold to B/W and
-     * merge the Code 128 bars. The same processing mangles the tiny gray
-     * filename text — a real returned scan OCR'd as
-     * "lien-wa ver-12-pimg-corpentry-inx-..." — so an exact "lien-waiver"
-     * match is too brittle. Instead: drop whitespace, find the first
-     * "-{digits}-" group, and accept it when the text leading up to it still
-     * resembles "lien-waiver". A GCSS footer ("sworn-statement-...") scores far
-     * below the threshold, so it can't be mistaken for a waiver.
+     * OCR pads and mangles the separator ("HLW - 16", "HLW—16", "HLW 16") and
+     * pads the number, so anything that already established this is one of ours
+     * gets repaired here. Returns null when the string is not an identity.
      */
-    protected function waiverIdFromFooterFilename(string $filename): ?int
+    protected function normalizeCode(string $value): ?string
     {
-        // OCR splits words with stray spaces ("lien-wa ver"); the real filename
-        // never contains any, so removing them only ever repairs damage.
-        $normalized = strtolower(preg_replace('/\s+/', '', $filename));
+        $compact = preg_replace('/[\s\x{2013}\x{2014}_-]+/u', '', $value);
 
-        if ($normalized === '' || ! preg_match('/^(.{0,20}?)[-_](\d{1,10})[-_]/', $normalized, $match)) {
+        if (! preg_match('/^H(LW|SS)0*(\d{1,10})$/i', (string) $compact, $parts)) {
             return null;
         }
 
-        similar_text($match[1], 'lien-waiver', $percent);
+        return 'H' . strtoupper($parts[1]) . '-' . (int) $parts[2];
+    }
+    /**
+     * Read the footer's "REV-{n}" marker off a page's OCR text.
+     *
+     * Returns null when absent, which is the normal case: the marker is only
+     * printed from revision 2 on, so every document issued before a waiver was
+     * ever re-priced legitimately has none.
+     */
+    public static function revisionFromText(string $text): ?int
+    {
+        // OCR routinely drops or widens the hyphen ("REV 2", "REV—2").
+        // /u is required: without it the multi-byte en/em dashes are matched
+        // byte-by-byte and never enter the character class.
+        return preg_match('/\bREV\s*[-–—_]?\s*(\d{1,4})\b/iu', $text, $match) === 1
+            ? (int) $match[1]
+            : null;
+    }
 
-        return $percent >= 70.0 ? (int) $match[2] : null;
+    /**
+     * A signature against a document we have since replaced.
+     *
+     * The barcode identifies the waiver, not its version, so a vendor signing
+     * the copy still in their inbox scans back in looking perfectly valid. Only
+     * waivers that have actually been re-priced are checked — an unedited
+     * waiver sits at revision 1, prints no marker, and can never be stale.
+     */
+    protected function isSupersededScan(LienWaiver $waiver, array $context): bool
+    {
+        $current = (int) ($waiver->document_revision ?: 1);
+
+        if ($current <= 1) {
+            return false;
+        }
+
+        return (int) ($context['revision'] ?? 0) < $current;
     }
 
     /**
@@ -613,6 +688,33 @@ class WaiverScanIngest
             Log::channel(self::LOG)->warning('Waiver scan: refusing to sign a cancelled waiver.', ['lien_waiver_id' => $waiverId]);
 
             return 'rejected_cancelled';
+        }
+
+        // Signed against a superseded document: the amount moved after this
+        // waiver was emailed, so what came back swears to a figure that no
+        // longer exists. Never store it, never flip the status — send the
+        // vendor the corrected copy instead.
+        if ($this->isSupersededScan($waiver, $context)) {
+            $current = (int) ($waiver->document_revision ?: 1);
+
+            Log::channel(self::LOG)->warning('Waiver scan: signed copy is superseded — rejecting and re-issuing.', [
+                'lien_waiver_id' => $waiverId,
+                'scan_revision' => $context['revision'] ?? null,
+                'current_revision' => $current,
+            ]);
+
+            $notes = json_decode((string) $waiver->notes, true) ?: [];
+
+            // One corrected copy per revision: a vendor returning the same
+            // stale page twice (or a queue retry) must not re-mail them.
+            if ((int) ($notes['superseded_notified_revision'] ?? 0) < $current) {
+                $notes['superseded_notified_revision'] = $current;
+                $waiver->forceFill(['notes' => json_encode($notes)])->saveQuietly();
+
+                \App\Jobs\SendLienWaiverSigningRequestJob::dispatch($waiver->id, superseded: true);
+            }
+
+            return 'rejected_superseded';
         }
 
         if ($this->rejectsAsUnsigned($context, ['lien_waiver_id' => $waiverId])) {

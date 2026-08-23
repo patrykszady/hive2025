@@ -10,7 +10,7 @@
 .env
 .env.dev
 .env.dev.local
-.env.backup
+.env.backup*
 .phpunit.result.cache
 .phpunit.cache
 /.phpunit.cache/
@@ -48,3 +48,6 @@ scripts/__pycache__/
 # file contained real client names at https://hive.contractors/perf.html
 # with no auth. Never commit rendered app output into public/.
 /public/perf.html
+
+# Bundled extension credentials — never commit
+scripts/menards-receipt-extension/defaults.json

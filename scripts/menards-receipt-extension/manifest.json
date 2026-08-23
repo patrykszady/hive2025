@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Hive — Menards Receipt Sync",
+  "version": "1.0.0",
+  "description": "Fetches Menards receipts on a schedule from inside a signed-in browser and posts them to Hive.",
+  "permissions": ["alarms", "storage", "scripting"],
+  "host_permissions": [
+    "https://www.menards.com/*",
+    "https://hive.contractors/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Sync Menards receipts to Hive"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.menards.com/main/receiptLookup.html*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+# NOTE: credentials-file below is machine-specific and start-dev.sh overrides
+# it at runtime with $HOME/.cloudflared/<tunnel-id>.json. Only edit it if you
+# run cloudflared by hand with this config.
 tunnel: 2f84efc0-98d3-42b6-8ddf-c53d0bb0ce27
 credentials-file: /home/patryk/.cloudflared/2f84efc0-98d3-42b6-8ddf-c53d0bb0ce27.json
 

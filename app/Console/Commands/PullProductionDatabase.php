@@ -42,6 +42,11 @@ class PullProductionDatabase extends Command
             .'D=$(grep "^DB_DATABASE=" .env | cut -d= -f2) && '
             .'MYSQL_PWD="$P" mysqldump -u"$U" --single-transaction --quick --routines "$D" | gzip';
 
+        // /bin/sh returns only the LAST command's status, so a failed ssh or a
+        // truncated gunzip still exits 0 once mysql accepts the empty stream —
+        // the command then reports "Done." over a pull that never happened.
+        // Ubuntu's /bin/sh is dash, which has no `set -o pipefail`, so the whole
+        // pipeline runs under bash explicitly.
         $pipeline = sprintf(
             'ssh -o ConnectTimeout=10 -o BatchMode=yes %s %s | gunzip | MYSQL_PWD=%s mysql -h%s -u%s %s',
             escapeshellarg($host),
@@ -51,6 +56,8 @@ class PullProductionDatabase extends Command
             escapeshellarg((string) $local['username']),
             escapeshellarg((string) $local['database']),
         );
+
+        $pipeline = 'bash -o pipefail -c '.escapeshellarg($pipeline);
 
         $this->info('Streaming production → local (no intermediate files)…');
 

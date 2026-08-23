@@ -21,6 +21,7 @@
 #   scripts/forge-api.sh whoami                  # show version + org slug in use
 #   scripts/forge-api.sh get-deploy-script       # print the live deploy script
 #   scripts/forge-api.sh set-deploy-script FILE  # replace it from FILE
+#   scripts/forge-api.sh get-env                 # print the live .env (SECRETS)
 #
 # Reads FORGE_API_TOKEN_V2 (preferred) or FORGE_API_TOKEN from .env.
 set -euo pipefail
@@ -108,6 +109,21 @@ case "${1:-}" in
             api PUT "$SITE_PATH/deployment/script" /tmp/forge-payload.json
         fi
         echo
+        ;;
+    get-env)
+        # Prints the site's live environment file to stdout. Contains real
+        # credentials — pipe it to a file, don't leave it in scrollback.
+        if [ "$API_VERSION" = "current" ]; then
+            api GET "$SITE_PATH/environment" | python3 -c "
+import json, sys
+raw = sys.stdin.read()
+try:
+    sys.stdout.write(json.loads(raw)['data']['attributes']['content'])
+except (ValueError, KeyError, TypeError):
+    sys.stdout.write(raw)"
+        else
+            api GET "$SITE_PATH/env"
+        fi
         ;;
     *)
         sed -n '2,18p' "$0"; exit 1

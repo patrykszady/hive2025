@@ -12,6 +12,21 @@
 
 @endphp
 
+@if($superseded)
+{{-- Amount changed after this waiver was already emailed. Styled like the
+     forward notice rather than <flux:callout> — Flux renders nothing in an
+     email client, so the callout look is hand-rolled with table + inline
+     styles that survive Outlook. --}}
+<table align="center" width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 0 0 18px;">
+<tr>
+<td bgcolor="#fef2f2" style="border: 1px solid #fca5a5; background-color: #fef2f2; border-radius: 8px; padding: 12px 18px;">
+<p style="margin: 0 0 4px; font-size: 14px; font-weight: 700; color: #991b1b; line-height: 1.5;">{{ __('lien_waiver.superseded_heading') }}</p>
+<p style="margin: 0; font-size: 14px; color: #b91c1c; line-height: 1.5;">{!! __('lien_waiver.superseded_body') !!}</p>
+</td>
+</tr>
+</table>
+@endif
+
 @if($forwardVendorName)
 {{-- Vendor has no email — this went to the draw's creator to pass along. --}}
 <table align="center" width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 0 0 18px;">

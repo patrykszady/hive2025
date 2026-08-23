@@ -277,11 +277,24 @@ Schedule::command('scout:sync-index-settings')
     ->withoutOverlapping()
     ->onOneServer();
 
-// Menards receipt scraping — 4× daily (2-day lookback to catch delayed postings)
+// Menards receipt scraping — once daily with a 14-day lookback.
+//
+// Was 4x/day with `--since={today-2}` and `--force`, which caused three problems:
+//
+//  1. The hardcoded 2-day window OVERRIDES last_queried_at, so any outage longer
+//     than two days is permanently unrecoverable — the 2026-08-05..08-20 gap
+//     could never have healed itself no matter how well the scraper worked.
+//     14 days lets a normal outage backfill on its own.
+//  2. `--force` DELETES the existing receipt before re-importing (see
+//     ScrapeMenardsReceipts.php ~line 360) and re-runs OCR on every row in the
+//     window. Without it, already-imported receipts hit the exists-branch and
+//     cost nothing — which is what makes the wider window free.
+//  3. Four runs a day is four times the request volume at a site that scores
+//     automated clients, for data that changes at most once a day.
 $menardsLogPath = storage_path('logs/menards-scraper.log');
-$menardsSince = now()->subDays(2)->format('Y-m-d');
-foreach (['08:05', '12:05', '16:05', '20:05'] as $time) {
-    Schedule::command("menards:scrape-receipts --match-expenses --force --since={$menardsSince}")->runInBackground()
+$menardsSince = now()->subDays(14)->format('Y-m-d');
+foreach (['08:05'] as $time) {
+    Schedule::command("menards:scrape-receipts --match-expenses --since={$menardsSince}")->runInBackground()
         ->dailyAt($time)
         ->timezone('America/Chicago')
         ->name("menards-scrape-{$time}")

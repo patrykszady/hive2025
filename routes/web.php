@@ -420,6 +420,20 @@ Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orde
 Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::class)
     ->name('ewccv.session');
 
+// Menards session hand-off from the browser extension. Imperva refuses the
+// scraper's own sign-in even when the hCaptcha is solved, so the session comes
+// from a real browser instead. Bearer-authed, CSRF-exempt, rate-limited.
+Route::post('api/menards/session', \App\Http\Controllers\MenardsSessionController::class)
+    ->middleware('throttle:20,1')
+    ->name('menards.session');
+
+// Menards receipts fetched by the browser extension running in the server-side
+// signed-in Chromium. Bearer-authed, CSRF-exempt; writes a manifest + PDFs and
+// runs the normal --skip-scrape importer.
+Route::post('api/menards/receipts', \App\Http\Controllers\MenardsReceiptIngestController::class)
+    ->middleware('throttle:12,1')
+    ->name('menards.receipts');
+
 // TrackMyVendor compliance webhooks — COI/licence expiry and pass/fail
 // changes for subcontractors. Webhook-only product (no REST API, no key):
 // the endpoint below is registered in their Settings → Integrations, and

@@ -33,6 +33,7 @@ class LienWaiver extends Model
         'through_date',
         'jurisdiction',
         'document_hash',
+        'document_revision',
         'draft_path',
         'signed_path',
         'notes',
@@ -46,6 +47,7 @@ class LienWaiver extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'document_revision' => 'integer',
             'exceptions_amount' => 'decimal:2',
             'through_date' => 'date:Y-m-d',
             'sent_at' => 'datetime',

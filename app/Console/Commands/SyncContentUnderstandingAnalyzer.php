@@ -342,10 +342,10 @@ class SyncContentUnderstandingAnalyzer extends Command
                 // (![Code128](... "HLW-2")) from the barcode engine, and an
                 // LLM echo of it grounds on random spans and can hallucinate.
                 'fields' => [
-                    'FooterFilename' => [
+                    'FooterDocumentId' => [
                         'type' => 'string',
                         'method' => 'extract',
-                        'description' => 'The small gray filename text printed inside the bordered card at the bottom-left of the page, next to the barcode. It starts with "lien-waiver-" or "sworn-statement-" and ends with ".pdf". Return the full filename exactly as printed, joining it if it wraps across two lines. If not present, leave empty.',
+                        'description' => 'The bold document id printed inside the bordered card at the bottom-left of the page, directly beneath the barcode and beside the QR code. It looks like "HLW-16" or "HSS-6" — the letter H, then LW or SS, then a hyphen and digits. Return it exactly as printed, including the hyphen. Do NOT return any similar-looking text from elsewhere on the page, such as amounts or table values. If not present, leave empty.',
                     ],
                     'DocumentType' => [
                         'type' => 'string',

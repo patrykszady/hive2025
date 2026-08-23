@@ -49,6 +49,13 @@
         .il-form .fill { display: inline-block; border-bottom: 1px solid #333; padding: 0 5px 1px; min-width: 78px; font-weight: 600; text-align: center; }
         /* Empty blanks get a &nbsp; so their underline sits at the same depth as filled ones. */
         .il-form .fill:empty::after { content: "\00a0"; }
+        /* A blank that becomes a fillable AcroForm field. Rendered as a link
+           purely so Chromium emits a /Rect for it in final print-layout
+           coordinates — PdfAcroFormOverlay turns each one into a text field and
+           removes the link. Invisible on paper: no underline of its own (the
+           .uline/.fill parent already draws one) and transparent text. */
+        .ff { display: inline-block; min-width: 40px; height: 12px; vertical-align: bottom;
+              text-decoration: none; color: transparent; }
         /* Sign-here marker: highlighter-yellow asterisk. */
         .req-star { background: #fde047; padding: 0 2px; font-weight: 700; }
         .il-form .fill.wide { min-width: 170px; }
@@ -164,6 +171,22 @@
             ? number_format((float) $resolvedAmount, 2)
             : '';
     @endphp
+@php
+    /**
+     * Print $value, or an empty fillable field named $name when we have nothing.
+     * Only genuinely blank fields become editable: anything the record already
+     * knows is printed as fixed text so the PDF cannot disagree with the row it
+     * was generated from.
+     */
+    $fillable = function (string $name, ?string $value, string $width = '100%') {
+        $value = trim((string) $value);
+
+        return $value !== ''
+            ? e($value)
+            : '<a class="ff" style="width:' . $width . '" href="hivefield:' . e($name) . '">&nbsp;</a>';
+    };
+@endphp
+
 
     @php
         // Direct view() renders (tests, previews) may omit the generator-computed
@@ -281,12 +304,16 @@
             </p>
 
             <div class="il-row">
-                <div class="il-ln col-date"><span class="lbl">DATE<span class="req-star">*</span></span><span class="uline">{{ $dateIl }}</span></div>
+                <div class="il-ln col-date"><span class="lbl">DATE<span class="req-star">*</span></span><span class="uline">{!! $fillable('waiver_date', $dateIl, '92%') !!}</span></div>
                 <div class="il-ln col-grow"><span class="lbl">COMPANY NAME</span><span class="uline left">{{ $vendor->business_name }}</span></div>
             </div>
             <div class="il-row">
                 <div class="col-date"></div>
-                <div class="il-ln col-grow"><span class="lbl">ADDRESS</span><span class="uline left">{{ $vendorAddressIl }}</span></div>
+                {{-- No address on file: mark it the same way as the other
+                     must-be-completed blanks so the claimant knows to write it
+                     in. A waiver-only document (no affidavit) is also rejected
+                     by the scan ingest when this line comes back empty. --}}
+                <div class="il-ln col-grow"><span class="lbl">ADDRESS{!! $vendorAddressIl === '' ? '<span class="req-star">*</span>' : '' !!}</span><span class="uline left">{!! $fillable('claimant_address', $vendorAddressIl, '96%') !!}</span></div>
             </div>
             <div class="il-ln">
                 <span class="lbl">SIGNATURE AND TITLE<span class="req-star">*</span></span>
@@ -322,9 +349,9 @@
             <p class="il-tw"><strong>TO WHOM IT MAY CONCERN:</strong></p>
 
             <p style="margin-top:0;">
-                THE UNDERSIGNED, (NAME)<span class="req-star">*</span> <span class="fill wide">{{ $firstSignature?->signer_name ?? '' }}</span>
+                THE UNDERSIGNED, (NAME)<span class="req-star">*</span> <span class="fill wide">{!! $fillable('affiant_name', $firstSignature?->signer_name, '170px') !!}</span>
                 BEING DULY SWORN, DEPOSES AND SAYS THAT HE OR SHE IS (POSITION)<span class="req-star">*</span>
-                <span class="fill">{{ $firstSignature?->signer_title ?? '' }}</span>
+                <span class="fill">{!! $fillable('affiant_position', $firstSignature?->signer_title, '130px') !!}</span>
                 OF (COMPANY NAME) <span class="fill wide">{{ $vendor->business_name }}</span>
                 WHO IS THE CONTRACTOR FURNISHING <span class="fill">{{ $furnishingIl }}</span> WORK ON THE
                 BUILDING LOCATED AT <span class="fill wide">{{ $projectAddressIl ?: '' }}</span>

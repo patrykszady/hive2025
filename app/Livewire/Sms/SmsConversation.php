@@ -386,6 +386,9 @@ class SmsConversation extends Component
         $this->messageLimit += 30;
     }
 
+    /** How long after a message its follow-up photos still belong to that task. */
+    protected const TASK_IMAGE_WINDOW_MINUTES = 5;
+
     /**
      * Whether a message is substantial enough to attempt task extraction from.
      * Hides the "Create Task" action for automated schedule blasts and for very
@@ -461,12 +464,7 @@ class SmsConversation extends Component
             $checklistItems = collect($this->fallbackChecklistFromMessage($text, (string) ($extracted['title'] ?? '')));
         }
 
-        $smsImageUrls = collect(is_array($message->media_urls) ? $message->media_urls : [])
-            ->filter(fn ($url) => is_string($url) && SmsMessage::isImageUrl($url))
-            ->map(fn (string $url) => $this->mediaUrl($url))
-            ->unique()
-            ->values()
-            ->all();
+        $smsImageUrls = $this->imagesForTaskFromMessage($message);
 
         $thread = SmsGroupThread::find($this->threadId);
         $matchedTask = null;
@@ -571,6 +569,55 @@ class SmsConversation extends Component
                 ->all(),
             'multi_time' => preg_match_all('/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i', $text) >= 2,
         ])->to(TaskCreate::class);
+    }
+
+    /**
+     * Images to attach to the task: this message's own, plus any that arrive
+     * immediately afterwards from the same sender.
+     *
+     * People announce photos and then send them ("...Sending pictures" followed
+     * by three image-only texts a second later). Reading only the clicked
+     * message's media_urls attached nothing at all in exactly the case where the
+     * photos matter most. A follow-up counts when it is inbound, arrives within
+     * a few minutes, and carries images — a later message with its OWN text is
+     * a new topic and stops the run.
+     *
+     * @return array<int, string>
+     */
+    protected function imagesForTaskFromMessage(SmsMessage $message): array
+    {
+        $urls = collect(is_array($message->media_urls) ? $message->media_urls : []);
+
+        $followUps = SmsMessage::query()
+            ->where('thread_id', $this->threadId)
+            ->where('id', '>', $message->id)
+            ->where('direction', $message->direction)
+            ->where('created_at', '<=', $message->created_at->copy()->addMinutes(self::TASK_IMAGE_WINDOW_MINUTES))
+            ->orderBy('id')
+            ->limit(10)
+            ->get();
+
+        foreach ($followUps as $followUp) {
+            $media = collect(is_array($followUp->media_urls) ? $followUp->media_urls : []);
+
+            // Text of its own means the sender moved on — stop collecting.
+            if (trim((string) $followUp->display_text) !== '') {
+                break;
+            }
+
+            if ($media->isEmpty()) {
+                break;
+            }
+
+            $urls = $urls->merge($media);
+        }
+
+        return $urls
+            ->filter(fn ($url) => is_string($url) && SmsMessage::isImageUrl($url))
+            ->map(fn (string $url) => $this->mediaUrl($url))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

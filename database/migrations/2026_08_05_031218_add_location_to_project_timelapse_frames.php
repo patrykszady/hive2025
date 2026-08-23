@@ -15,7 +15,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('project_timelapse_frames', function (Blueprint $table) {
-            $table->decimal('latitude', 10, 7)->nullable()->after('shot_at');
+            // Not after('shot_at') — that column is added by the 10:00:00 migration
+            // the same day, which sorts AFTER this one. Fresh databases replay these
+            // in filename order and would hit an unknown-column error here.
+            $table->decimal('latitude', 10, 7)->nullable()->after('disk');
             $table->decimal('longitude', 10, 7)->nullable()->after('latitude');
             // Meters, straight from the geolocation fix — a 5m fix and a
             // 3km cell-tower fix should not read as equally trustworthy.

@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Hive — Menards Receipt Sync</title>
+<style>
+    body { font: 14px/1.55 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input { width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; border: 1px solid #d4d4d8; border-radius: 6px; }
+    button { margin-top: 1.25rem; margin-right: .5rem; padding: .5rem 1rem; border: 1px solid #d4d4d8; border-radius: 6px; background: #fafafa; cursor: pointer; }
+    .muted { color: #71717a; font-size: 13px; }
+    #status { margin-top: 1rem; padding: .5rem .75rem; border-radius: 6px; background: #fafafa; white-space: pre-wrap; }
+    #status.error { background: #fef2f2; color: #b91c1c; }
+</style>
+
+<h1>Menards Receipt Sync</h1>
+<p class="muted">
+    Fetches receipts from Menards' own receipt-lookup endpoints using this browser's
+    signed-in session, and posts them to Hive. Runs daily on its own; the button
+    below forces a run now.
+</p>
+
+<label>Hive URL <input id="serverUrl" placeholder="https://hive.contractors" autocomplete="off"></label>
+<label>Bridge token <input id="token" type="password" placeholder="MENARDS_BRIDGE_TOKEN" autocomplete="off"></label>
+
+<button id="save">Save</button>
+<button id="sync">Sync now</button>
+
+<div id="status" class="muted">Loading…</div>
+
+<p class="muted" style="margin-top:1.5rem">
+    You must be signed in to menards.com in this browser. The first run looks back a
+    year to backfill history; later runs cover the last 14 days. Re-importing an
+    existing receipt is a no-op on the server, so overlap is harmless.
+</p>
+
+<script src="options.js"></script>

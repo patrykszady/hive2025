@@ -1,9 +1,30 @@
 @php
+    // $task is null while creating — the picker still works, and the chosen
+    // predecessors live in $pendingDependencies until save() writes them.
     $task = $form->task;
-    $predecessorDeps = $task->predecessorDependencies;
-    $successorDeps = $task->successorDependencies;
-    $hasDeps = $predecessorDeps->isNotEmpty() || $successorDeps->isNotEmpty();
+    $predecessorDeps = $task ? $task->predecessorDependencies : collect();
+    $successorDeps = $task ? $task->successorDependencies : collect();
+    $pending = collect($pendingDependencies ?? []);
+    $hasDeps = $predecessorDeps->isNotEmpty() || $successorDeps->isNotEmpty() || $pending->isNotEmpty();
 @endphp
+
+@if(! $task && $pending->isNotEmpty())
+    {{-- Chosen but not yet written: they are created the moment you save. --}}
+    <div class="space-y-2">
+        <flux:heading size="sm">Predecessors (added on save)</flux:heading>
+        @foreach($pending as $index => $row)
+            <div wire:key="pending-dep-{{ $index }}" class="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-700">
+                <div class="min-w-0">
+                    <div class="truncate text-sm font-medium">{{ $row['title'] }}</div>
+                    <div class="text-xs text-zinc-500 dark:text-zinc-400">
+                        {{ str_replace('_', ' ', $row['type']) }}@if(($row['lag_days'] ?? 0) != 0), {{ $row['lag_days'] }}d lag @endif
+                    </div>
+                </div>
+                <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="removePendingDependency({{ $index }})" />
+            </div>
+        @endforeach
+    </div>
+@endif
 
 <div class="space-y-6">
     {{-- Add new predecessor --}}

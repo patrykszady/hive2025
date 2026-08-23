@@ -3,6 +3,9 @@
 return [
     'subject' => ':contractor | Lien Waiver Request | :address',
     'subject_forward' => 'FORWARD to :vendor | Lien Waiver Request | :address',
+    'subject_superseded_prefix' => '** CORRECTED — DO NOT SIGN THE PREVIOUS COPY **',
+    'superseded_heading' => 'This replaces the waiver we sent you earlier',
+    'superseded_body' => 'The amount on this waiver has changed. <strong>Do not sign the copy from our earlier email</strong> — it is no longer valid and will be rejected if returned. Please sign and return the attached document instead.',
     'email_title' => 'Lien Waiver',
     'greeting' => 'Hi :name,',
     'greeting_fallback' => 'Hi there,',

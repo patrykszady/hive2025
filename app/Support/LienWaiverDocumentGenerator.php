@@ -103,7 +103,25 @@ class LienWaiverDocumentGenerator
             && str_contains($waiver->signed_path, '/scan-')
             && Storage::disk('files')->exists($waiver->signed_path);
 
-        if ($store && ! $hasIngestedScan) {
+        // renderPdf() falls back to raw HTML when Chrome is unavailable. That is
+        // fine for a first render (something is better than nothing), but it
+        // must never replace a document that already rendered properly —
+        // re-pricing a waiver on a box with a broken Chrome would otherwise
+        // swap a real PDF for HTML bytes named .pdf.
+        $wouldDowngrade = $store
+            && ! $hasIngestedScan
+            && ! str_starts_with($pdf, '%PDF')
+            && Storage::disk('files')->exists($relativePath)
+            && str_starts_with((string) Storage::disk('files')->get($relativePath), '%PDF');
+
+        if ($wouldDowngrade) {
+            \Illuminate\Support\Facades\Log::warning('Lien waiver re-render produced HTML, not a PDF — keeping the existing document.', [
+                'lien_waiver_id' => $waiver->id,
+                'path' => $relativePath,
+            ]);
+        }
+
+        if ($store && ! $hasIngestedScan && ! $wouldDowngrade) {
             Storage::disk('files')->put($relativePath, $pdf);
             $absolutePath = Storage::disk('files')->path($relativePath);
 
@@ -160,12 +178,32 @@ class LienWaiverDocumentGenerator
      * preview link rather than throwing in environments without Chrome
      * (CI, lightweight workers, the test suite, etc.).
      */
+    /**
+     * Per-field options for the fillable blanks marked up in the Blade
+     * template. Sizes match the printed text so a typed value sits on the rule
+     * rather than floating above it.
+     */
+    protected const FILLABLE_FIELDS = [
+        'waiver_date' => ['size' => 9, 'maxlen' => 12],
+        'claimant_address' => ['size' => 9],
+        'affiant_name' => ['size' => 9],
+        'affiant_position' => ['size' => 9],
+    ];
+
     protected static function renderPdf(string $html, ?string $headerHtml = null, ?string $footerHtml = null, bool $compact = false): string
     {
         try {
             $shot = Browsershot::html($html)
                 ->format('Letter')
                 ->showBackground();
+
+            // Same as the estimate/project/sheet generators: honour an explicit
+            // browser path. Without it these two were the only documents left
+            // relying on Puppeteer's own resolution, so a machine with a
+            // working CHROME_PATH still failed to render waivers.
+            if ($chromePath = env('CHROME_PATH')) {
+                $shot->setChromePath($chromePath);
+            }
 
             // Compact (no-chrome) forms get tight uniform margins — deeper at
             // the bottom when a footer (filename + barcode) rides along; the
@@ -183,7 +221,11 @@ class LienWaiverDocumentGenerator
                     ->footerHtml((string) ($footerHtml ?: '<span></span>'));
             }
 
-            return $shot->pdf();
+            // Chromium cannot emit form fields, so the blanks are rendered as
+            // marker links and rewritten into real AcroForm text fields here.
+            // A no-op on documents that carry no markers, and on the HTML
+            // fallback below.
+            return PdfAcroFormOverlay::apply($shot->pdf(), self::FILLABLE_FIELDS);
         } catch (Throwable $e) {
             // Fall back to HTML payload so storage/path tracking still works.
             return $html;
@@ -204,6 +246,11 @@ class LienWaiverDocumentGenerator
         $customerName = $waiver->project?->client?->name;
         $customerDisplay = $customerName ? self::escapeHtml(' | ' . $customerName) : '';
         $draftLabel = $waiver->isSigned() ? '' : '<span style="color:#b91c1c;font-weight:700;">DRAFT COPY</span> | ';
+
+        $revisionLabel = self::revisionLabel($waiver);
+        $revisionTag = $revisionLabel !== ''
+            ? '<span style="color:#b91c1c;font-weight:700;">' . self::escapeHtml($revisionLabel) . '</span> | '
+            : '';
 
         return <<<HTML
 <div style="width:100%; font-size:8px; color:#4b5563; font-family:Arial, sans-serif; padding:0 10mm; box-sizing:border-box;">
@@ -229,7 +276,27 @@ HTML;
 
     protected static function buildIllinoisFooterHtml(LienWaiver $waiver): string
     {
-        return PdfDocumentFooter::build(self::barcodeValueFor($waiver), self::filenameFor($waiver));
+        return PdfDocumentFooter::build(
+            self::barcodeValueFor($waiver),
+            self::filenameFor($waiver),
+            revisionLabel: self::revisionLabel($waiver),
+        );
+    }
+
+    /**
+     * "REV-{n}" once a waiver has been re-priced, empty before that.
+     *
+     * The barcode identifies the waiver but not its version, so without this a
+     * vendor could sign the superseded copy still sitting in their inbox and it
+     * would scan back in against a figure that no longer exists. Printed only
+     * from revision 2 on, so every document issued before this feature — and
+     * every waiver never edited — looks exactly as it always did.
+     */
+    public static function revisionLabel(LienWaiver $waiver): string
+    {
+        $revision = (int) ($waiver->document_revision ?: 1);
+
+        return $revision > 1 ? 'REV-' . $revision : '';
     }
 
     protected static function buildFooterHtml(LienWaiver $waiver): string
@@ -249,7 +316,7 @@ HTML;
         return <<<HTML
 <div style="width:100%; font-size:8px; color:#4b5563; font-family:Arial, sans-serif; padding:0 10mm; box-sizing:border-box;">
     <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #d1d5db; padding-top:2px; width:100%;">
-        <span>Hash {$hashRef}</span>
+        <span>{$revisionTag}Hash {$hashRef}</span>
         <span>{$draftLabel}Generated {$generatedAt}</span>
         <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
     </div>

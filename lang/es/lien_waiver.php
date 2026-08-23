@@ -3,6 +3,9 @@
 return [
     'subject' => ':contractor | Solicitud de Lien Waiver | :address',
     'subject_forward' => 'REENVIAR a :vendor | Solicitud de Lien Waiver | :address',
+    'subject_superseded_prefix' => '** CORREGIDO — NO FIRME LA COPIA ANTERIOR **',
+    'superseded_heading' => 'Esto reemplaza la renuncia que le enviamos antes',
+    'superseded_body' => 'El monto de esta renuncia ha cambiado. <strong>No firme la copia de nuestro correo anterior</strong>: ya no es válida y será rechazada si la devuelve. Por favor firme y devuelva el documento adjunto.',
     'email_title' => 'Lien Waiver',
     'greeting' => 'Hola :name,',
     'greeting_fallback' => 'Hola,',

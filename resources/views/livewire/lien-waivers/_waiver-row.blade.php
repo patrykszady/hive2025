@@ -25,9 +25,7 @@
                     <flux:menu.item icon="eye" href="{{ route('lien-waivers.show', $waiver) }}" wire:navigate.hover>
                         View
                     </flux:menu.item>
-                    <flux:menu.item icon="arrow-down-tray" href="{{ route('lien-waivers.download', $waiver) }}">
-                        Download PDF
-                    </flux:menu.item>
+                    <x-download-button menu-item :href="route('lien-waivers.download', $waiver)" label="Download PDF" />
                     {{-- No per-waiver Delete: waivers are removed with their
                          draw (the Delete under the draw's Download all menu). --}}
                     @if(! $waiver->isSigned() && $waiver->status !== \App\Enums\LienWaiverStatus::Cancelled)

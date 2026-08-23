@@ -59,6 +59,15 @@ return [
         'serp_zone' => env('BRIGHTDATA_SERP_ZONE'),
     ],
 
+    'menards' => [
+        // Shared secret for the browser session bridge (scripts/menards-session-bridge).
+        'bridge_token' => env('MENARDS_BRIDGE_TOKEN'),
+        // Server-side signed-in browser (MenardsRemoteBrowserService).
+        'chromium_binary' => env('MENARDS_CHROMIUM_BINARY'),
+        'user_data_dir' => env('MENARDS_USER_DATA_DIR'),
+        'novnc_web' => env('MENARDS_NOVNC_WEB', '/usr/share/novnc'),
+    ],
+
     'azure_cu' => [
         'endpoint'       => env('AZURE_CU_ENDPOINT'),
         'api_key'        => env('AZURE_CU_API_KEY'),

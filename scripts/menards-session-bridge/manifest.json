@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Hive — Menards Session Bridge",
+  "version": "1.0.0",
+  "description": "Lets hive.contractors pull your Menards receipts by sharing the signed-in session this browser already has.",
+  "permissions": ["cookies", "alarms", "storage", "notifications"],
+  "host_permissions": [
+    "https://www.menards.com/*",
+    "https://hive.contractors/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Send Menards session to Hive"
+  }
+}

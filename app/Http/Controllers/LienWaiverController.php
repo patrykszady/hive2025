@@ -97,27 +97,37 @@ class LienWaiverController extends Controller
 
         $merged = $tmpDir . '/package-' . uniqid() . '.pdf';
 
-        $command = array_merge(
-            ['gs', '-dBATCH', '-dNOPAUSE', '-q', '-sDEVICE=pdfwrite', '-sOutputFile=' . $merged],
-            $parts,
+        // Go through PdfMerger rather than invoking Ghostscript here: this
+        // duplicated it, and duplicated its one failure mode too. PdfMerger
+        // merges with FPDI (shipped with the app) and only falls back to `gs`,
+        // so a box without Ghostscript still builds a complete package instead
+        // of silently returning the sworn statement on its own.
+        $mergedBinary = \App\Support\PdfMerger::merge(
+            array_map(static fn ($path) => (string) file_get_contents($path), $parts),
         );
-        $process = new \Symfony\Component\Process\Process($command);
-        $process->setTimeout(120);
-        $process->run();
+
+        if ($mergedBinary !== null) {
+            file_put_contents($merged, $mergedBinary);
+        }
 
         foreach ($cleanup as $path) {
             @unlink($path);
         }
 
-        if (! $process->isSuccessful() || ! is_file($merged)) {
+        if ($mergedBinary === null || ! is_file($merged)) {
             // Fallback: hand back the first document rather than failing the click.
             abort_unless(is_file($parts[0]), 500, 'Could not build the combined PDF.');
 
-            return response()->download($parts[0], $filename, ['Content-Type' => 'application/pdf']);
+            return \App\Support\DownloadCookie::attach(
+                response()->download($parts[0], $filename, ['Content-Type' => 'application/pdf']),
+                request(),
+            );
         }
 
-        return response()->download($merged, $filename, ['Content-Type' => 'application/pdf'])
+        $response = response()->download($merged, $filename, ['Content-Type' => 'application/pdf'])
             ->deleteFileAfterSend(true);
+
+        return \App\Support\DownloadCookie::attach($response, request());
     }
 
     /**
@@ -155,12 +165,15 @@ class LienWaiverController extends Controller
             $absolute = \Storage::disk('files')->path($path);
 
             if (is_file($absolute)) {
-                return response()->download(
-                    $absolute,
-                    // Always name the download with the current scheme, even
-                    // when the stored file predates it.
-                    LienWaiverDocumentGenerator::filenameFor($lienWaiver),
-                    ['Content-Type' => 'application/pdf']
+                return \App\Support\DownloadCookie::attach(
+                    response()->download(
+                        $absolute,
+                        // Always name the download with the current scheme, even
+                        // when the stored file predates it.
+                        LienWaiverDocumentGenerator::filenameFor($lienWaiver),
+                        ['Content-Type' => 'application/pdf']
+                    ),
+                    request(),
                 );
             }
         }
@@ -172,9 +185,9 @@ class LienWaiverController extends Controller
             throw new NotFoundHttpException('Unable to render lien waiver PDF.');
         }
 
-        return response($doc['binary'], 200, [
+        return \App\Support\DownloadCookie::attach(response($doc['binary'], 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="' . $doc['filename'] . '"',
-        ]);
+        ]), request());
     }
 }

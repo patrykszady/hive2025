@@ -58,6 +58,29 @@ class TaskCreate extends Component
     /** How long a Meet runs by default — the same half hour a consult books. */
     public const MEET_MINUTES = 30;
 
+    /**
+     * Predecessors chosen before the task exists, applied by save().
+     *
+     * A dependency is a row linking two task ids, so it cannot be written until
+     * this task has one. Choosing the predecessor, though, needs nothing — so
+     * the picker stays usable while creating and the links are written the
+     * moment the task is saved.
+     *
+     * @var array<int, array{predecessor_task_id: int, type: string, lag_days: int, title: string}>
+     */
+    public array $pendingDependencies = [];
+
+    /**
+     * SMS images waiting to be attached once the task is saved.
+     *
+     * The task does not exist while the modal is open for review, so the URLs
+     * are held here and attached in save() — otherwise reviewing a task and
+     * cancelling would still have written media to a row that was never created.
+     *
+     * @var array<int, string>
+     */
+    public array $pendingSmsMediaUrls = [];
+
     /** Homeowner-slot picker state (mirrors the lead composer's two stages). */
     public ?int $homeownerSlotIndex = null;
 
@@ -768,6 +791,9 @@ class TaskCreate extends Component
         $this->form->reset();
         $this->resetErrorBag();
         $this->pendingSmsTasks = [];
+        // A cancelled draft must not leave images or links waiting for the next task.
+        $this->pendingSmsMediaUrls = [];
+        $this->pendingDependencies = [];
         $this->selectedPredecessorId = null;
         $this->dependencyType = 'finish_to_start';
         $this->homeownerSlotIndex = null;
@@ -1697,28 +1723,30 @@ class TaskCreate extends Component
             return;
         }
 
-        // Persist immediately and reopen in edit mode so the full task editor
-        // (Dates, Notes/Checklist, Dependencies, History) is available for the
-        // user to review and refine. Dependencies and history require a saved
-        // task, so creation must happen before those tabs can be shown.
-        $task = $this->form->store();
+        // Open the modal for review — do NOT persist yet.
+        //
+        // This used to call $this->form->store() straight away so the edit-mode
+        // tabs (Dependencies, History) would be available, which meant clicking
+        // "Create Task" on a message silently created the task before anyone had
+        // looked at it. An AI-extracted title, project, date and checklist are a
+        // draft, not a decision: the user reviews them and presses Save. The two
+        // tabs that genuinely need a saved row stay hidden until then, which is
+        // how every other new task already behaves.
+        $this->ensureProjectOptionLoaded($projectId);
 
-        if (! $task instanceof Task) {
-            $this->modal('task_create_form_modal')->show();
-
-            return;
-        }
-
-        $this->ensureProjectOptionLoaded((int) $task->project_id);
-        $this->attachSmsMediaToTask($task, (array) ($payload['sms_media_urls'] ?? []));
-        $this->form->setTask($task);
+        // Media cannot be attached to a row that does not exist yet, so it rides
+        // along on the component and is attached by store() once the user saves.
+        $this->pendingSmsMediaUrls = collect((array) ($payload['sms_media_urls'] ?? []))
+            ->filter(fn ($url) => is_string($url) && trim($url) !== '')
+            ->unique()
+            ->values()
+            ->all();
 
         if ($this->form->type === 'Meet') {
             $this->syncMeetingParticipants();
         }
 
-        $this->setupViewText('edit');
-        $this->refreshPlannerComponents();
+        $this->setupViewText('create');
 
         $this->modal('task_create_form_modal')->show();
 
@@ -1760,6 +1788,51 @@ class TaskCreate extends Component
 
         $task->update(['options' => $options]);
         $task->refresh();
+    }
+
+    /**
+     * Every image belonging to this task, saved or still pending.
+     *
+     * While creating, the task row does not exist yet and the images live in
+     * $pendingSmsMediaUrls until save(). Reading only the saved task meant the
+     * photos a client texted disappeared from the Notes tab on the one screen
+     * where they are being reviewed.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function taskImages(): array
+    {
+        return collect($this->taskSmsMediaUrls)
+            ->merge($this->pendingSmsMediaUrls)
+            ->filter(fn ($url) => is_string($url) && trim($url) !== '')
+            ->map(fn ($url) => trim((string) $url))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Task images in the shape the shared lightbox expects.
+     *
+     * A texted photo IS its own original — nothing was derived from it — so
+     * `original` mirrors `url`. Same contract the project photo grid feeds the
+     * lightbox, so both open identically.
+     *
+     * @return array<int, array{id: int, url: string, original: string, label: string}>
+     */
+    #[Computed]
+    public function taskImageFrames(): array
+    {
+        return collect($this->taskImages)
+            ->map(fn (string $url, int $i) => [
+                'id' => 0,
+                'url' => $url,
+                'original' => $url,
+                'label' => 'Image ' . ($i + 1),
+            ])
+            ->values()
+            ->all();
     }
 
     /**
@@ -1805,6 +1878,16 @@ class TaskCreate extends Component
      * Find an existing task on the project with the same (or very similar) title
      * so re-running the SMS task action edits it instead of creating a duplicate.
      */
+    /**
+     * Shortest title that may be matched by containment rather than exactly.
+     *
+     * Below this a title is too generic to identify a task: "T", "Gap" and
+     * "Tile" all appear inside unrelated titles, and a wrong match here is
+     * silent and destructive — the new message's images and notes are attached
+     * to whatever task was hit instead of a new one being created.
+     */
+    protected const SMS_TITLE_MATCH_MIN_CHARS = 4;
+
     protected function findSimilarSmsTask(int $projectId, string $title, ?string $date): ?Task
     {
         $title = strtolower(trim($title));
@@ -1813,12 +1896,33 @@ class TaskCreate extends Component
             return null;
         }
 
+        // Word-start boundary instead of a bare substring. "Tile" should match
+        // "Tiles" and "Tile Backsplash" but never "Ventilate" — the boundary is
+        // leading-only so plurals and suffixes still match, which a trailing
+        // \b would wrongly exclude. Escaped so a title containing regex
+        // metacharacters ("A/C Repair", "Trim (kitchen)") cannot break or widen
+        // the pattern.
+        $pattern = '\\b' . preg_quote($title);
+        $distinctive = mb_strlen($title) >= self::SMS_TITLE_MATCH_MIN_CHARS;
+
         return Task::query()
             ->where('project_id', $projectId)
-            ->where(function ($query) use ($title) {
-                $query->whereRaw('LOWER(TRIM(title)) = ?', [$title])
-                    ->orWhereRaw('LOWER(title) LIKE ?', ['%' . $title . '%'])
-                    ->orWhereRaw('? LIKE CONCAT(\'%\', LOWER(title), \'%\')', [$title]);
+            ->where(function ($query) use ($title, $pattern, $distinctive) {
+                // An exact title is always a confident match, at any length.
+                $query->whereRaw('LOWER(TRIM(title)) = ?', [$title]);
+
+                if (! $distinctive) {
+                    return;
+                }
+
+                // Existing title contains this one, at a word start.
+                $query->orWhereRaw('LOWER(title) REGEXP ?', [$pattern])
+                    // …or this title contains the existing one. The column is
+                    // the needle here, so it carries its own length guard.
+                    ->orWhereRaw(
+                        '(CHAR_LENGTH(TRIM(title)) >= ? AND ? LIKE CONCAT(\'%\', LOWER(TRIM(title)), \'%\'))',
+                        [self::SMS_TITLE_MATCH_MIN_CHARS, $title]
+                    );
             })
             ->when(! empty($date), function ($query) use ($date) {
                 $query->where(function ($inner) use ($date) {
@@ -1952,6 +2056,35 @@ class TaskCreate extends Component
     {
         $task = $this->form->store();
 
+        // Predecessors chosen before the row existed are written now. The
+        // circular check runs here, against real ids, because that is the first
+        // moment a cycle is even expressible.
+        if ($task instanceof Task && $this->pendingDependencies !== []) {
+            foreach ($this->pendingDependencies as $pending) {
+                if (TaskDependency::wouldCreateCircularDependency($pending['predecessor_task_id'], $task->id)) {
+                    continue;
+                }
+
+                TaskDependency::create([
+                    'predecessor_task_id' => $pending['predecessor_task_id'],
+                    'successor_task_id' => $task->id,
+                    'type' => $pending['type'],
+                    'lag_days' => $pending['lag_days'],
+                ]);
+            }
+
+            $this->pendingDependencies = [];
+            $this->dispatch('gantt-links-changed');
+        }
+
+        // Images that came in with the SMS are attached now — the row finally
+        // exists. Cancelling the modal instead simply drops them, which is the
+        // point: nothing is written for a task the user chose not to create.
+        if ($task instanceof Task && $this->pendingSmsMediaUrls !== []) {
+            $this->attachSmsMediaToTask($task, $this->pendingSmsMediaUrls);
+            $this->pendingSmsMediaUrls = [];
+        }
+
         if ($task instanceof Task && $task->type === 'Meet' && $task->start_date) {
             CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
         }
@@ -1969,7 +2102,9 @@ class TaskCreate extends Component
                 'required',
                 'exists:tasks,id',
                 function ($attribute, $value, $fail) {
-                    if ($value == $this->form->task->id) {
+                    // An unsaved task has no id, so it cannot be its own
+                    // predecessor — the check only applies once saved.
+                    if ($this->form->task && $value == $this->form->task->id) {
                         $fail('A task cannot depend on itself.');
                     }
                 }
@@ -1977,6 +2112,40 @@ class TaskCreate extends Component
             'dependencyType' => 'required|in:finish_to_start,start_to_start,finish_to_finish,start_to_finish',
             'lagDays' => 'integer',
         ]);
+
+        // Not saved yet: hold the choice and write it in save(). No circular
+        // check is needed — a task that does not exist cannot yet be part of a
+        // cycle, and save() re-checks before writing.
+        if (! $this->form->task) {
+            $predecessor = Task::find($this->selectedPredecessorId);
+
+            if (! $predecessor) {
+                $this->addError('selectedPredecessorId', 'That task no longer exists.');
+
+                return;
+            }
+
+            $already = collect($this->pendingDependencies)
+                ->contains('predecessor_task_id', (int) $this->selectedPredecessorId);
+
+            if ($already) {
+                $this->addError('selectedPredecessorId', 'That task is already a predecessor.');
+
+                return;
+            }
+
+            $this->pendingDependencies[] = [
+                'predecessor_task_id' => (int) $this->selectedPredecessorId,
+                'type' => $this->dependencyType,
+                'lag_days' => (int) $this->lagDays,
+                'title' => (string) $predecessor->title,
+            ];
+
+            $this->selectedPredecessorId = null;
+            $this->lagDays = 0;
+
+            return;
+        }
 
         // Check for circular dependencies
         if (TaskDependency::wouldCreateCircularDependency($this->selectedPredecessorId, $this->form->task->id)) {
@@ -2016,6 +2185,13 @@ class TaskCreate extends Component
         $this->showNotification('dependency_added');
     }
 
+    /** Drop a predecessor chosen before the task was saved (index-addressed). */
+    public function removePendingDependency(int $index): void
+    {
+        unset($this->pendingDependencies[$index]);
+        $this->pendingDependencies = array_values($this->pendingDependencies);
+    }
+
     public function removeDependency($dependencyId)
     {
         TaskDependency::find($dependencyId)->delete();
@@ -2033,17 +2209,29 @@ class TaskCreate extends Component
     #[Computed]
     public function availableTasks()
     {
-        if (!$this->form->task || !$this->form->task->project_id) {
+        // While creating there is no task row yet, so fall back to the project
+        // selected on the form — otherwise the picker is empty exactly when the
+        // user is trying to choose a predecessor.
+        $projectId = $this->form->task?->project_id ?? $this->form->project_id ?? null;
+
+        if (! $projectId) {
             return collect();
         }
 
-        $excludeIds = [$this->form->task->id];
+        $excludeIds = array_filter([$this->form->task?->id]);
 
-        // Exclude tasks that are already predecessors
-        $existingPredecessorIds = $this->form->task->predecessorTasks->pluck('id')->toArray();
-        $excludeIds = array_merge($excludeIds, $existingPredecessorIds);
+        // Exclude tasks that are already predecessors — saved ones, and the
+        // ones chosen in this session that have not been written yet.
+        if ($this->form->task) {
+            $excludeIds = array_merge($excludeIds, $this->form->task->predecessorTasks->pluck('id')->toArray());
+        }
 
-        return Task::where('project_id', $this->form->task->project_id)
+        $excludeIds = array_merge(
+            $excludeIds,
+            collect($this->pendingDependencies)->pluck('predecessor_task_id')->all(),
+        );
+
+        return Task::where('project_id', $projectId)
                 ->whereNotIn('id', $excludeIds)
                 ->whereNotNull('start_date')
                 ->whereNotNull('end_date')
