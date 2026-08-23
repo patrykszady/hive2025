@@ -3,6 +3,15 @@ cd /home/forge/hive.contractors
 # Stash any uncommitted changes (like auto-generated vendor files)
 git stash
 
+# Discard untracked files that would collide with tracked files coming in.
+# public/build/* is committed here (see .gitignore's !/public/build), so a
+# local `npm run build` that produced a file the incoming commit also tracks
+# makes `git pull` abort with "untracked working tree files would be
+# overwritten". `git stash` does not cover untracked files; a scoped clean of
+# the build dir does. -d for dirs, -f to act, limited to public/build so
+# nothing else is touched.
+git clean -df public/build
+
 git pull origin $FORGE_SITE_BRANCH
 
 $FORGE_COMPOSER install --no-dev --no-interaction --prefer-dist --optimize-autoloader
