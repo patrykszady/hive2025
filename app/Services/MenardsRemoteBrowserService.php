@@ -217,7 +217,9 @@ class MenardsRemoteBrowserService
         $token = (string) config('services.menards.bridge_token');
 
         if ($token === '') {
-            Log::channel('menards')->warning('Menards browser: no bridge token set, extension left unconfigured');
+            Log::channel('menards')->error(
+                'Menards browser: MENARDS_BRIDGE_TOKEN is not set — the extension cannot reach Hive'
+            );
 
             return;
         }
@@ -267,18 +269,23 @@ class MenardsRemoteBrowserService
         // because we are already signed in, and then type an email address and a
         // password into whatever control happened to be under those coordinates
         // on the page it landed on instead.
-        $this->navigate('https://www.menards.com/main/receiptLookup.html');
-        sleep(7);
-
-        if (! str_contains($this->windowTitle(), 'Sign In at Menards')) {
+        if ($this->signedIn()) {
             return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
         }
 
-        $this->navigate('https://www.menards.com/main/login.html');
-        sleep(7);
+        if ($this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) === '') {
+            return ['ok' => false, 'error' => 'The sign-in page never loaded. Last page seen: '
+                . ($this->windowTitle() ?: '(none)')];
+        }
+
+        // The title arrives with the document, about a second in; the form is
+        // rendered by Vue several seconds later. Typing between those two moments
+        // sends every keystroke into a page that has no fields yet — which is
+        // exactly what waiting only for the title caused.
+        sleep(6);
 
         // Focus the email field, clear whatever a previous attempt left there.
-        $this->xdo('mousemove 378 512 click 1');
+        $this->click(378, 512);
         usleep(800000);
         $this->xdo('key ctrl+a');
         $this->xdo('key Delete');
@@ -295,34 +302,105 @@ class MenardsRemoteBrowserService
         $this->typeSecret($password);
         usleep(800000);
 
-        $this->xdo('mousemove 378 667 click 1');
-        sleep(12);
+        // Click the button. Enter looks more robust — it does not depend on the
+        // button's position — but this form ignores it: swapping the click for
+        // Enter turned a working sign-in into four consecutive failures with no
+        // error shown on the page, because nothing was ever submitted. Enter
+        // stays only as a fallback.
+        $this->click(378, 667);
+
+        if (! $this->waitForTitleGone('Sign In at Menards', 12)) {
+            $this->xdo('key --clearmodifiers Return');
+        }
+
+        // Wait for the submission to actually navigate before touching the
+        // browser again. A fixed sleep here either wastes time or, on a slow
+        // response, yanks the tab away mid-POST and loses the sign-in.
+        $this->waitForTitleGone('Sign In at Menards');
+
+        if ($this->signedIn()) {
+            Log::channel('menards')->info('Menards browser: signed in', ['title' => $this->windowTitle()]);
+
+            return ['ok' => true, 'url' => $this->windowTitle()];
+        }
 
         $title = $this->windowTitle();
-
-        if ($title !== '' && ! str_contains($title, 'Sign In at Menards')) {
-            Log::channel('menards')->info('Menards browser: signed in', ['title' => $title]);
-
-            return ['ok' => true, 'url' => $title];
-        }
 
         Log::channel('menards')->error('Menards browser: sign-in did not take', ['title' => $title]);
 
         return [
             'ok' => false,
-            'error' => 'Still on the sign-in page after submitting. The credentials may be wrong, or the form layout moved.',
+            'error' => 'The receipt page is still not reachable after submitting. The credentials may be '
+                . 'wrong, or the sign-in form moved. Last page seen: ' . ($title ?: '(none)'),
             'url' => $title,
         ];
     }
 
-    /** Drive the omnibox rather than the page — works regardless of what is rendered. */
+    /**
+     * Drive the omnibox rather than the page — works regardless of what is
+     * rendered, including an error page with no controls at all.
+     *
+     * The ctrl+a is not redundant with ctrl+l. Typing too soon after ctrl+l loses
+     * the first keystroke while Chrome is still focusing the omnibox, and losing
+     * one character turns "https://…" into "ttps://…", which Chrome cannot parse
+     * as a URL and hands to the default search engine instead. The browser then
+     * sits on a Google results page while every title check quietly fails.
+     */
     protected function navigate(string $url): void
     {
         $this->xdo('key ctrl+l');
+        usleep(1200000);
+        $this->xdo('key --clearmodifiers ctrl+a');
+        usleep(300000);
+        // Two leading spaces, which Chrome trims. Even with the pauses above,
+        // the omnibox intermittently swallows the first keystroke after ctrl+l,
+        // and losing one character turns "https://…" into "ttps://…" — not a URL,
+        // so Chrome hands it to the default search engine and the browser ends up
+        // on a Google results page. A dropped space costs nothing.
+        $this->xdo('type --clearmodifiers --delay 25 ' . escapeshellarg('  ' . $url));
         usleep(600000);
-        $this->xdo('type --delay 20 ' . escapeshellarg($url));
-        usleep(400000);
-        $this->xdo('key Return');
+        $this->xdo('key --clearmodifiers Return');
+    }
+
+    /**
+     * Navigate and confirm we arrived somewhere we recognise, retrying if not.
+     *
+     * Returns the matched window title, or '' if none of $accept showed up. Every
+     * caller passes each outcome it can handle — for the receipt page that means
+     * both the page itself and the sign-in page Menards redirects to — so
+     * "matched nothing" means the navigation itself misfired rather than the
+     * session being bad. Retrying is what makes a swallowed keystroke a slower
+     * success instead of a wrong answer.
+     *
+     * @param  array<int, string>  $accept
+     */
+    protected function loadAndWait(string $url, array $accept, int $attempts = 3, int $seconds = 25): string
+    {
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $this->navigate($url);
+
+            $deadline = time() + $seconds;
+
+            do {
+                $title = $this->windowTitle();
+
+                foreach ($accept as $needle) {
+                    if (str_contains($title, $needle)) {
+                        return $title;
+                    }
+                }
+
+                usleep(750000);
+            } while (time() < $deadline);
+
+            Log::channel('menards')->warning('Menards browser: navigation did not land', [
+                'url' => $url,
+                'attempt' => $attempt,
+                'title' => $this->windowTitle(),
+            ]);
+        }
+
+        return '';
     }
 
     /**
@@ -353,6 +431,70 @@ class MenardsRemoteBrowserService
     }
 
     /**
+     * Is the browser's session good enough to reach the receipt page?
+     *
+     * Asks for a positive signal rather than the absence of a negative one. The
+     * first version of this returned "already signed in" whenever the title was
+     * not the sign-in page, which on a freshly provisioned server meant a blank
+     * "New Tab" — still loading, no session at all — was read as success, and
+     * the command reported itself done without having signed in to anything.
+     *
+     * Only the receipt page itself counts: it is what the extension needs, and
+     * Menards redirects it to login.html for anyone without a session.
+     */
+    public function signedIn(): bool
+    {
+        // Both outcomes are accepted so a failure to match means the navigation
+        // misfired, not that the session is bad.
+        return str_contains(
+            $this->loadAndWait(
+                'https://www.menards.com/main/receiptLookup.html',
+                ['Receipt Lookup at Menards', 'Sign In at Menards']
+            ),
+            'Receipt Lookup at Menards'
+        );
+    }
+
+    /** Poll until the title stops matching — i.e. the page navigated away. */
+    protected function waitForTitleGone(string $needle, int $seconds = 25): bool
+    {
+        $deadline = time() + $seconds;
+
+        do {
+            if (! str_contains($this->windowTitle(), $needle)) {
+                return true;
+            }
+
+            usleep(750000);
+        } while (time() < $deadline);
+
+        return false;
+    }
+
+    /**
+     * Poll the window title until it matches, up to $seconds.
+     *
+     * A fixed sleep was the other half of the same bug: seven seconds is plenty
+     * on a warm profile and not nearly enough on a server's first page load,
+     * where Chrome is still building its profile. Polling makes the fast case
+     * fast and the cold case correct.
+     */
+    protected function waitForTitle(string $needle, int $seconds = 25): bool
+    {
+        $deadline = time() + $seconds;
+
+        do {
+            if (str_contains($this->windowTitle(), $needle)) {
+                return true;
+            }
+
+            usleep(750000);
+        } while (time() < $deadline);
+
+        return false;
+    }
+
+    /**
      * What the browser is showing, via the window title.
      *
      * Menards titles the sign-in page "Sign In at Menards®" and every page behind
@@ -370,6 +512,25 @@ class MenardsRemoteBrowserService
         )));
     }
 
+    /**
+     * Move the pointer, let it settle, then press.
+     *
+     * Screen coordinates, not window-relative: the browser window sits at 1,1 on
+     * this display, so the two differ by a pixel, and `mousemove --window` adds a
+     * lookup that can resolve to the wrong X window when Chrome has more than one.
+     *
+     * The pause between moving and clicking is not decoration. Chrome decides what
+     * is under the cursor from its own tracking of pointer motion, and a move and
+     * a press delivered in the same instant can be handled against the previous
+     * position.
+     */
+    protected function click(int $x, int $y): void
+    {
+        $this->xdo(sprintf('mousemove --sync %d %d', $x, $y));
+        usleep(400000);
+        $this->xdo('click --clearmodifiers 1');
+    }
+
     protected function xdo(string $args): void
     {
         shell_exec(sprintf(
@@ -379,18 +540,95 @@ class MenardsRemoteBrowserService
         ));
     }
 
-    /** @return array{running: bool, chrome: bool, signed_in: bool} */
+    /** @return array{running: bool, chrome: bool, extension: bool, configured: bool, signed_in: bool, page: string} */
     public function status(): array
     {
         $cookieDb = $this->userDataDir() . '/Default/Cookies';
+        $running = $this->processAlive('Xvfb ' . self::DISPLAY);
 
         return [
-            'running' => $this->processAlive('Xvfb ' . self::DISPLAY),
+            'running' => $running,
             'chrome' => $this->processAlive('--user-data-dir=' . $this->userDataDir()),
+            // Whether the force-install policy actually took. Worth surfacing:
+            // a policy naming an extension id that does not match the packaged
+            // one fails silently — Chrome starts, the browser looks healthy, and
+            // nothing ever syncs.
+            'extension' => $this->extensionInstalled(),
+            // Whether the extension has been handed a Hive URL and token. start()
+            // writes these from config, so an empty MENARDS_BRIDGE_TOKEN at the
+            // time of the first start leaves the extension unable to deliver
+            // anything — with nothing on screen to say so.
+            'configured' => $this->extensionConfigured(),
             // Cheap heuristic only: a sizeable cookie jar means a session was
-            // persisted at some point, not that it is still valid.
+            // persisted at some point, not that it is still valid. `login`
+            // answers the real question by loading the receipt page.
             'signed_in' => is_file($cookieDb) && filesize($cookieDb) > 20480,
+            'page' => $running ? $this->windowTitle() : '',
         ];
+    }
+
+    /** Has defaults.json been written with a usable Hive URL and token? */
+    public function extensionConfigured(): bool
+    {
+        $path = $this->extensionDir() . '/defaults.json';
+
+        if (! is_file($path)) {
+            return false;
+        }
+
+        $data = json_decode((string) file_get_contents($path), true);
+
+        return ! empty($data['token']) && ! empty($data['serverUrl']);
+    }
+
+    /**
+     * Is our extension actually loaded in this profile?
+     *
+     * Never matched on an extension id. The id comes from whichever signing key
+     * a given server generated, so it differs per machine — assuming a fixed id
+     * is precisely the mistake that let a policy naming one id force-install
+     * nothing at all while every other check reported a healthy browser.
+     *
+     * The two install routes leave different traces, so both are checked:
+     *
+     *   force-installed by policy — unpacked into <profile>/Default/Extensions/
+     *     <id>/<version>/, manifest and all.
+     *   loaded unpacked through the UI (how the dev box is set up) — nothing is
+     *     copied anywhere. Preferences records the source path and no manifest
+     *     at all, so the name is not available and the path is all there is.
+     */
+    public function extensionInstalled(): bool
+    {
+        $profile = $this->userDataDir() . '/Default';
+
+        foreach (glob($profile . '/Extensions/*/*/manifest.json') ?: [] as $manifest) {
+            $data = json_decode((string) file_get_contents($manifest), true);
+
+            if (str_contains((string) ($data['name'] ?? ''), 'Menards Receipt Sync')) {
+                return true;
+            }
+        }
+
+        $prefs = $profile . '/Preferences';
+
+        if (! is_file($prefs)) {
+            return false;
+        }
+
+        $data = json_decode((string) file_get_contents($prefs), true);
+        $source = basename($this->extensionDir());
+
+        foreach ($data['extensions']['settings'] ?? [] as $entry) {
+            if (str_contains((string) ($entry['manifest']['name'] ?? ''), 'Menards Receipt Sync')) {
+                return true;
+            }
+
+            if ($source !== '' && str_contains((string) ($entry['path'] ?? ''), $source)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function stop(): array

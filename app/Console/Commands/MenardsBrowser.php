@@ -141,8 +141,24 @@ class MenardsBrowser extends Command
 
     protected function status(MenardsRemoteBrowserService $browser): int
     {
-        foreach ($browser->status() as $k => $v) {
-            $this->line(sprintf('  %-10s %s', $k, $v ? 'yes' : 'no'));
+        $status = $browser->status();
+
+        foreach ($status as $k => $v) {
+            // 'page' is the window title, not a flag — printing it as yes/no
+            // would throw away the one field that says what is actually on screen.
+            $this->line(sprintf('  %-10s %s', $k, is_bool($v) ? ($v ? 'yes' : 'no') : ($v ?: '—')));
+        }
+
+        if ($status['running'] && ! $status['extension']) {
+            $this->newLine();
+            $this->warn('The receipt extension is not loaded — nothing will sync.');
+            $this->line('Run scripts/provision-menards-browser.sh, then restart: menards:browser start');
+        }
+
+        if (! $status['configured']) {
+            $this->newLine();
+            $this->warn('The extension has no Hive URL or token — it cannot deliver receipts.');
+            $this->line('Set MENARDS_BRIDGE_TOKEN in the environment, then: menards:browser start');
         }
 
         return self::SUCCESS;

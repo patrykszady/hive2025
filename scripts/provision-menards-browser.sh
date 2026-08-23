@@ -72,18 +72,40 @@ cp -r "$EXT_SRC" "$EXT_HOME/src"
 # start; it must not be baked into a signed package.
 rm -f "$EXT_HOME/src/defaults.json"
 
+# manifest.json must NOT carry a "key" field. If it does, Chrome derives the
+# extension id from that key rather than from the signing key below, and the
+# policy written further down — which names the signing key's id — force-installs
+# an id that does not exist. Everything then looks healthy and nothing syncs.
+if python3 -c "import json,sys; sys.exit(0 if 'key' in json.load(open('$EXT_SRC/manifest.json')) else 1)"; then
+    echo "ERROR: manifest.json contains a \"key\" field, which pins the extension id" >&2
+    echo "       to a private key this server does not have. Remove it and redeploy." >&2
+    exit 1
+fi
+
+# No `|| true` here. Swallowing a packing failure is how a stale or absent .crx
+# reaches the policy step and the whole thing fails silently.
+rm -f "$EXT_HOME/src.crx" "$EXT_HOME/src.pem"
 if [ -f "$KEY" ]; then
-    "$CHROME" --pack-extension="$EXT_HOME/src" --pack-extension-key="$KEY" --no-sandbox >/dev/null 2>&1 || true
+    "$CHROME" --pack-extension="$EXT_HOME/src" --pack-extension-key="$KEY" --no-sandbox >/dev/null 2>&1
 else
-    "$CHROME" --pack-extension="$EXT_HOME/src" --no-sandbox >/dev/null 2>&1 || true
+    "$CHROME" --pack-extension="$EXT_HOME/src" --no-sandbox >/dev/null 2>&1
+    [ -f "$EXT_HOME/src.pem" ] || { echo "ERROR: packing produced no signing key" >&2; exit 1; }
     mv "$EXT_HOME/src.pem" "$KEY"
     chmod 600 "$KEY"
 fi
+
+[ -s "$EXT_HOME/src.crx" ] || { echo "ERROR: packing produced no .crx" >&2; exit 1; }
 mv -f "$EXT_HOME/src.crx" "$EXT_HOME/menards.crx"
 
 EXT_ID=$(openssl rsa -in "$KEY" -pubout -outform DER 2>/dev/null \
     | openssl dgst -sha256 -binary | head -c16 | xxd -p | tr -d '\n' | tr '0-9a-f' 'a-p')
 VERSION=$(python3 -c "import json;print(json.load(open('$EXT_SRC/manifest.json'))['version'])")
+
+case "$EXT_ID" in
+    [a-p]*) [ ${#EXT_ID} -eq 32 ] || { echo "ERROR: bad extension id '$EXT_ID'" >&2; exit 1; } ;;
+    *) echo "ERROR: could not derive an extension id from $KEY" >&2; exit 1 ;;
+esac
+
 echo "id: $EXT_ID  version: $VERSION"
 
 say "Chrome policy"
@@ -121,7 +143,11 @@ Next, from the application directory:
   php artisan menards:browser check     # confirms every binary above
   php artisan menards:browser start     # display + browser + VNC, writes defaults.json
   php artisan menards:browser login     # signs in from receipt_accounts
-  php artisan menards:browser status    # expect: running yes / chrome yes / signed_in yes
+  php artisan menards:browser status    # every line must read yes
+
+The status line that matters most is 'extension'. A policy can install nothing
+at all while the browser still starts and looks healthy, so if that reads no,
+stop and fix it before trusting anything else.
 
 To watch it, tunnel and open noVNC — never expose these ports:
 

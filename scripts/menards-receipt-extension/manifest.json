@@ -2,7 +2,6 @@
   "manifest_version": 3,
   "name": "Hive \u2014 Menards Receipt Sync",
   "version": "1.0.0",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt/4FbN+iKUkjPBu00FjG/MYiVd2zGKa4XKzj9qyAwiAF5OuEJr10vemBDuvOUd4+NW+WQisOEAW7Nm2jY2G84l0GM82LN0tkcWO51tCqef06x6cuZGc/kZVHpTcIJ3YpT7RHfxwvJnyAN8OIEm2MyQecFTR3gClOPPFJIWGPDlc7UZhIvYx5XZjw4vlUvBsl3QmNlm583NS/PGw3DjMctFdEIqWp09A+VC3gxSSXZrvyCWYGhcdIm+xJ57kf8VxJRl9e+733A2BDJLki+hYI9lTcZcK7iwsdyJr+nfgLNdMAtyGgFiHo5yoB4llA858okxaJEjAaAMoqtzHodPHfkwIDAQAB",
   "description": "Fetches Menards receipts on a schedule from inside a signed-in browser and posts them to Hive.",
   "permissions": [
     "alarms",
