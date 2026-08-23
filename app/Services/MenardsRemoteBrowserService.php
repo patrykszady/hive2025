@@ -123,6 +123,8 @@ class MenardsRemoteBrowserService
 
         @mkdir($profile, 0775, true);
 
+        $this->writeExtensionDefaults();
+
         $logDir = storage_path('logs');
         @mkdir($logDir, 0775, true);
 
@@ -196,6 +198,185 @@ class MenardsRemoteBrowserService
             'ok' => true,
             'vnc_url' => sprintf('http://127.0.0.1:%d/vnc.html?autoconnect=1&resize=scale', self::WS_PORT),
         ];
+    }
+
+    /**
+     * Hand the extension its Hive URL and bridge token.
+     *
+     * The extension seeds chrome.storage from a bundled defaults.json the first
+     * time it runs, so writing this file is what removes the last piece of typing
+     * from setup — nobody has to enter a 48-character token into an options page
+     * through a remote framebuffer. It is written on every start so a rotated
+     * token reaches the extension without anyone remembering to update it.
+     *
+     * Gitignored, and deliberately so: it holds the token in clear text. Anything
+     * already in chrome.storage wins, so the options page still overrides it.
+     */
+    protected function writeExtensionDefaults(): void
+    {
+        $token = (string) config('services.menards.bridge_token');
+
+        if ($token === '') {
+            Log::channel('menards')->warning('Menards browser: no bridge token set, extension left unconfigured');
+
+            return;
+        }
+
+        $path = $this->extensionDir() . '/defaults.json';
+
+        file_put_contents($path, json_encode([
+            'serverUrl' => rtrim((string) config('app.url'), '/'),
+            'token' => $token,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+
+        @chmod($path, 0600);
+    }
+
+    /**
+     * Sign the server browser in to menards.com, unattended.
+     *
+     * Types the account's own credentials into the real browser over X, the same
+     * events a keyboard would generate — there is no fingerprint being faked and
+     * no captcha being defeated. Menards asks for neither: it serves this browser
+     * a normal login form and accepts a normal submission.
+     *
+     * The password reaches xdotool down a pipe on /dev/stdin, never as an
+     * argument and never through a file. Anything on the box can read another
+     * process's argv from /proc, and a password written to disk outlives the
+     * moment it was needed.
+     *
+     * Coordinates are hard-coded because the sign-in form has one layout and this
+     * runs on one fixed 1280x900 display. They are a guess that is checked: the
+     * method only reports success if the browser actually left login.html, so a
+     * changed layout fails loudly rather than silently typing into nothing.
+     *
+     * @return array{ok: bool, error?: string, url?: string, already?: bool}
+     */
+    public function login(string $email, string $password): array
+    {
+        if (trim((string) shell_exec('command -v xdotool 2>/dev/null')) === '') {
+            return ['ok' => false, 'error' => 'xdotool is not installed — apt install xdotool'];
+        }
+
+        if (! $this->processAlive('Xvfb ' . self::DISPLAY)) {
+            return ['ok' => false, 'error' => 'The browser is not running — run menards:browser start first.'];
+        }
+
+        // Do nothing if the session is still good. Without this check a second
+        // call would navigate to login.html, be redirected away by Menards
+        // because we are already signed in, and then type an email address and a
+        // password into whatever control happened to be under those coordinates
+        // on the page it landed on instead.
+        $this->navigate('https://www.menards.com/main/receiptLookup.html');
+        sleep(7);
+
+        if (! str_contains($this->windowTitle(), 'Sign In at Menards')) {
+            return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
+        }
+
+        $this->navigate('https://www.menards.com/main/login.html');
+        sleep(7);
+
+        // Focus the email field, clear whatever a previous attempt left there.
+        $this->xdo('mousemove 378 512 click 1');
+        usleep(800000);
+        $this->xdo('key ctrl+a');
+        $this->xdo('key Delete');
+        usleep(300000);
+
+        $this->xdo('type --delay 40 ' . escapeshellarg($email));
+        usleep(800000);
+
+        // Tab rather than a second click: after a validation error the form grows
+        // and every field below the email box shifts down by about 26px.
+        $this->xdo('key Tab');
+        usleep(800000);
+
+        $this->typeSecret($password);
+        usleep(800000);
+
+        $this->xdo('mousemove 378 667 click 1');
+        sleep(12);
+
+        $title = $this->windowTitle();
+
+        if ($title !== '' && ! str_contains($title, 'Sign In at Menards')) {
+            Log::channel('menards')->info('Menards browser: signed in', ['title' => $title]);
+
+            return ['ok' => true, 'url' => $title];
+        }
+
+        Log::channel('menards')->error('Menards browser: sign-in did not take', ['title' => $title]);
+
+        return [
+            'ok' => false,
+            'error' => 'Still on the sign-in page after submitting. The credentials may be wrong, or the form layout moved.',
+            'url' => $title,
+        ];
+    }
+
+    /** Drive the omnibox rather than the page — works regardless of what is rendered. */
+    protected function navigate(string $url): void
+    {
+        $this->xdo('key ctrl+l');
+        usleep(600000);
+        $this->xdo('type --delay 20 ' . escapeshellarg($url));
+        usleep(400000);
+        $this->xdo('key Return');
+    }
+
+    /**
+     * Type a secret without it appearing in any process's arguments.
+     *
+     * xdotool --file reads the text from a path; /dev/stdin lets that path be a
+     * pipe we write to directly, so the password exists only in memory shared
+     * between these two processes.
+     */
+    protected function typeSecret(string $secret): void
+    {
+        $cmd = sprintf(
+            'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s xdotool type --delay 40 --file /dev/stdin',
+            escapeshellarg(self::DISPLAY)
+        );
+
+        $proc = proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+
+        if (! is_resource($proc)) {
+            return;
+        }
+
+        fwrite($pipes[0], $secret);
+        fclose($pipes[0]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($proc);
+    }
+
+    /**
+     * What the browser is showing, via the window title.
+     *
+     * Menards titles the sign-in page "Sign In at Menards®" and every page behind
+     * the login something else ("Receipt Lookup at Menards®", "Account Overview
+     * at Menards®"), so the title alone separates success from failure. Reading
+     * the omnibox instead would be more precise and would cost an xclip
+     * dependency for no gain.
+     */
+    protected function windowTitle(): string
+    {
+        return trim((string) shell_exec(sprintf(
+            'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s '
+            . 'xdotool search --onlyvisible --class chrome getwindowname %%@ 2>/dev/null | head -1',
+            escapeshellarg(self::DISPLAY)
+        )));
+    }
+
+    protected function xdo(string $args): void
+    {
+        shell_exec(sprintf(
+            'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s xdotool %s 2>/dev/null',
+            escapeshellarg(self::DISPLAY),
+            $args
+        ));
     }
 
     /** @return array{running: bool, chrome: bool, signed_in: bool} */

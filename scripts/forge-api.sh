@@ -22,6 +22,7 @@
 #   scripts/forge-api.sh get-deploy-script       # print the live deploy script
 #   scripts/forge-api.sh set-deploy-script FILE  # replace it from FILE
 #   scripts/forge-api.sh get-env                 # print the live .env (SECRETS)
+#   scripts/forge-api.sh set-env-key KEY VALUE   # add/replace one .env key
 #
 # Reads FORGE_API_TOKEN_V2 (preferred) or FORGE_API_TOKEN from .env.
 set -euo pipefail
@@ -124,6 +125,57 @@ except (ValueError, KeyError, TypeError):
         else
             api GET "$SITE_PATH/env"
         fi
+        ;;
+    set-env-key)
+        # set-env-key KEY VALUE — add or replace one key in the live .env,
+        # leaving the other ~160 lines untouched.
+        #
+        # Deliberately key-at-a-time rather than a whole-file PUT: the site's
+        # environment is the only copy of a lot of credentials, and an upload
+        # built from a stale local fetch would silently revert anything changed
+        # in the Forge UI in between.
+        KEY="${2:?usage: set-env-key KEY VALUE}"
+        VALUE="${3?usage: set-env-key KEY VALUE}"
+
+        CURRENT=$(mktemp); trap 'rm -f "$CURRENT"' EXIT
+        "$0" get-env > "$CURRENT"
+
+        if [ ! -s "$CURRENT" ]; then
+            echo "Refusing to write: fetched an empty environment." >&2
+            exit 1
+        fi
+
+        UPDATED=$(mktemp); trap 'rm -f "$CURRENT" "$UPDATED"' EXIT
+        KEY="$KEY" VALUE="$VALUE" python3 - "$CURRENT" > "$UPDATED" <<'PYEOF'
+import os, sys
+
+key, value = os.environ['KEY'], os.environ['VALUE']
+lines = open(sys.argv[1]).read().splitlines()
+line = f'{key}={value}'
+
+for i, existing in enumerate(lines):
+    if existing.split('=', 1)[0].strip() == key:
+        lines[i] = line
+        break
+else:
+    lines.append(line)
+
+sys.stdout.write('\n'.join(lines) + '\n')
+PYEOF
+
+        python3 -c "
+import json, sys
+content = open(sys.argv[1]).read()
+print(json.dumps({'data': {'attributes': {'content': content}}}))
+" "$UPDATED" > /tmp/forge-env-payload.json
+
+        if [ "$API_VERSION" = "current" ]; then
+            api PUT "$SITE_PATH/environment" /tmp/forge-env-payload.json >/dev/null
+        else
+            api PUT "$SITE_PATH/env" /tmp/forge-env-payload.json >/dev/null
+        fi
+        rm -f /tmp/forge-env-payload.json
+        echo "set $KEY ($(wc -l < "$UPDATED") lines total)"
         ;;
     *)
         sed -n '2,18p' "$0"; exit 1
