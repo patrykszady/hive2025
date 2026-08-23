@@ -70,11 +70,14 @@ sudo supervisorctl restart nightwatch-agent 2>/dev/null || {
     sudo supervisorctl start nightwatch-agent || echo 'Failed to start Nightwatch (may not be configured)'
 }
 
-# Menards receipt browser — one idempotent pass: writes the extension's config,
-# repacks it if the source changed, restarts/starts the browser as needed, and
-# signs in. The repack MUST be left to `ensure`: running it separately here once
-# consumed the "source changed" marker before ensure could see it, so the new
-# pack was never installed. Guarded with || so browser trouble never fails a
-# site deploy — the browser is not part of serving the site, and the hourly
-# scheduler retries anyway.
-$FORGE_PHP artisan menards:browser ensure || echo 'MENARDS BROWSER NOT HEALTHY — run: php artisan menards:browser status'
+# Menards receipt browser — dispatch one idempotent health pass, DETACHED.
+#
+# ensure starts a PERSISTENT browser (Xvfb/Chrome/x11vnc/websockify) that is
+# meant to outlive the deploy. Run in the foreground it holds the deploy's SSH
+# channel open until Forge's 10-minute timeout, and the deploy is marked FAILED
+# even though the site itself deployed cleanly — which is exactly what happened
+# on the first run (started..ended was exactly 600s). setsid + redirected fds +
+# background returns the deploy immediately; the hourly scheduler owns steady
+# state, and this just makes a post-deploy pass happen without waiting on it.
+setsid $FORGE_PHP artisan menards:browser ensure >> storage/logs/menards-ensure.log 2>&1 < /dev/null &
+echo 'menards:browser ensure dispatched in background (see storage/logs/menards-ensure.log)'
