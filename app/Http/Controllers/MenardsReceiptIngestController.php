@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ImportMenardsReceiptBatch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -16,7 +16,7 @@ use Illuminate\Support\Str;
  * receipt-lookup JSON endpoints, so what arrives here is already decoded
  * transaction data plus a base64 PDF per receipt. This endpoint's whole job is
  * to lay that out on disk in the shape `menards:scrape-receipts --skip-scrape`
- * already reads — a manifest.json plus PDF files — and then run it. Nothing
+ * already reads — a manifest.json plus PDF files — and queue the import. Nothing
  * downstream had to change: OCR, expense matching and de-duplication are the
  * same code paths the browser-driven scraper fed.
  *
@@ -121,29 +121,22 @@ class MenardsReceiptIngestController extends Controller
             'rejected' => count($rejected),
         ]);
 
-        // Import synchronously so the extension learns the outcome. Deliberately
-        // no --force: already-imported receipts hit the exists-branch and cost
-        // nothing, which is what makes a wide lookback window free.
-        $exit = Artisan::call('menards:scrape-receipts', [
-            '--skip-scrape' => true,
-            '--match-expenses' => true,
-            '--output-dir' => $dir,
-        ]);
+        // Always queued, never inline. The importer OCRs every receipt, so how
+        // long this takes is set by how long the scraper has been down — a
+        // backfill runs for twenty minutes and will outlive any HTTP request.
+        // Deliberately no --force: already-imported receipts hit the exists
+        // branch and cost nothing, which is what makes a wide window cheap.
+        ImportMenardsReceiptBatch::dispatch($dir);
 
-        $output = Artisan::output();
-
-        Log::channel('menards')->info('Menards ingest: import finished', [
-            'exit_code' => $exit,
-            'tail' => substr($output, -800),
-        ]);
-
+        // 202: accepted and queued, not imported. The importer's own outcome is
+        // recorded in the menards log, since by the time it is known there is no
+        // longer a request to report it on.
         return response()->json([
-            'ok' => $exit === 0,
+            'ok' => true,
+            'queued' => true,
             'received' => count($manifestReceipts),
             'rejected' => count($rejected),
-            'imported' => count($manifestReceipts),
-            'exit_code' => $exit,
             'dir' => basename($dir),
-        ], $exit === 0 ? 200 : 500);
+        ], 202);
     }
 }

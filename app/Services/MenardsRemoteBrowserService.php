@@ -140,14 +140,18 @@ class MenardsRemoteBrowserService
         //    No --headless, no CDP port: nothing drives this browser but its own
         //    extension and (for the one-time login) a human over VNC.
         $chromeCmd = sprintf(
-            'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s %s --user-data-dir=%s --load-extension=%s --disable-extensions-except=%s '
+            // No --load-extension / --disable-extensions-except. Chrome removed the
+            // former in 137 (151 also ignores the --disable-features escape hatch),
+            // and the latter would suppress the extension we load through the UI
+            // instead. The extension is installed once by hand on chrome://extensions
+            // with Developer mode on, in the same sitting as the one-time sign-in,
+            // and the persistent profile keeps both.
+            'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s %s --user-data-dir=%s '
             . '--no-first-run --no-default-browser-check --disable-session-crashed-bubble '
             . '--window-size=1280,900 --start-maximized %s',
             escapeshellarg(self::DISPLAY),
             escapeshellarg($cfg['chromium']),
             escapeshellarg($profile),
-            escapeshellarg($this->extensionDir()),
-            escapeshellarg($this->extensionDir()),
             escapeshellarg('https://www.menards.com/main/receiptLookup.html')
         );
 
@@ -216,7 +220,7 @@ class MenardsRemoteBrowserService
             'websockify.*' . self::WS_PORT,
             '--user-data-dir=' . $this->userDataDir(),
         ] as $pattern) {
-            @shell_exec('pkill -TERM -f ' . escapeshellarg($pattern) . ' 2>/dev/null');
+            @shell_exec('pkill -TERM -f -- ' . escapeshellarg($this->selfExcludingPattern($pattern)) . ' 2>/dev/null');
         }
 
         usleep(500000);
@@ -249,6 +253,25 @@ class MenardsRemoteBrowserService
      */
     protected function processAlive(string $pattern): bool
     {
-        return trim((string) shell_exec('pgrep -f -- ' . escapeshellarg($pattern) . ' 2>/dev/null')) !== '';
+        return trim((string) shell_exec(
+            'pgrep -f -- ' . escapeshellarg($this->selfExcludingPattern($pattern)) . ' 2>/dev/null'
+        )) !== '';
+    }
+
+    /**
+     * Wrap the pattern's first character in a character class.
+     *
+     * shell_exec() runs these through `sh -c`, and that shell's own command line
+     * contains the pattern — so a bare pattern matches the very shell doing the
+     * asking. Unguarded, status() reported everything as running even with the
+     * display long dead, and stop() killed its own shell before reaching the
+     * processes it was aimed at.
+     *
+     * "[X]vfb :98" still matches the string "Xvfb :98", but no longer matches the
+     * literal "[X]vfb :98" sitting in the asking shell's argv.
+     */
+    protected function selfExcludingPattern(string $pattern): string
+    {
+        return $pattern === '' ? $pattern : '[' . $pattern[0] . ']' . substr($pattern, 1);
     }
 }

@@ -21,8 +21,15 @@ const INGEST_PATH = '/api/menards/receipts';
 /** How far back each run looks. Wide on purpose: re-importing is a no-op server side. */
 const DEFAULT_LOOKBACK_DAYS = 14;
 
-/** A first run should backfill history rather than only the recent window. */
-const FIRST_RUN_LOOKBACK_DAYS = 365;
+/**
+ * How far back a first run reaches.
+ *
+ * A fixed floor, not a day count. Everything before this was already imported by
+ * the old scraper, so reaching further back costs a download and an OCR pass per
+ * receipt to arrive at "skipped" — a year's backfill spent ~20 minutes doing
+ * exactly that. July is where the old scraper's coverage ends and the gap begins.
+ */
+const BACKFILL_SINCE = '2026-07-01';
 
 async function settings() {
     const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastSuccessAt', 'everSucceeded']);
@@ -51,7 +58,11 @@ async function note(text) {
 async function receiptTab() {
     const existing = await chrome.tabs.query({ url: 'https://www.menards.com/main/receiptLookup.html*' });
 
-    if (existing.length) return { tab: existing[0], opened: false };
+    if (existing.length) {
+        await assertOnReceiptPage(existing[0].id);
+
+        return { tab: existing[0], opened: false };
+    }
 
     const tab = await chrome.tabs.create({ url: RECEIPT_URL, active: false });
 
@@ -73,7 +84,47 @@ async function receiptTab() {
     // The SPA still has to boot after 'complete'.
     await new Promise(r => setTimeout(r, 4000));
 
+    await assertOnReceiptPage(tab.id);
+
     return { tab, opened: true };
+}
+
+/**
+ * Menards bounces a signed-out request for the receipt page to login.html, where
+ * our content script does not run — so messaging it fails with Chrome's opaque
+ * "Could not establish connection. Receiving end does not exist." Checking where
+ * the tab actually landed turns that into the one thing the operator can act on.
+ */
+async function assertOnReceiptPage(tabId) {
+    const current = await chrome.tabs.get(tabId).catch(() => null);
+    const url = current?.url || '';
+
+    if (!url.includes('/main/receiptLookup.html')) {
+        throw new Error(
+            `Not signed in to menards.com — the receipt page redirected to ${url || 'an unknown page'}. `
+            + 'Sign in once over noVNC; the profile keeps the session.'
+        );
+    }
+}
+
+/**
+ * Ask the content script to run a sync, reviving it first if it has gone deaf.
+ *
+ * Reloading or updating the extension orphans the content scripts already
+ * running in open tabs: the page keeps executing the old copy, which is no
+ * longer connected to this service worker, so messaging it fails with Chrome's
+ * "Receiving end does not exist." Because we deliberately reuse an open receipt
+ * tab rather than disturbing it, that stale state would otherwise persist until
+ * someone navigated the tab by hand. Injecting a fresh copy fixes it in place.
+ */
+async function sendSync(tabId, since) {
+    try {
+        return await chrome.tabs.sendMessage(tabId, { action: 'sync', since });
+    } catch {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+
+        return await chrome.tabs.sendMessage(tabId, { action: 'sync', since });
+    }
 }
 
 async function postToHive(payload) {
@@ -96,7 +147,7 @@ async function postToHive(payload) {
 
 async function run(reason) {
     const { everSucceeded } = await settings();
-    const since = sinceDate(everSucceeded ? DEFAULT_LOOKBACK_DAYS : FIRST_RUN_LOOKBACK_DAYS);
+    const since = everSucceeded ? sinceDate(DEFAULT_LOOKBACK_DAYS) : BACKFILL_SINCE;
 
     await note(`run start (${reason}), since ${since}`);
 
@@ -106,7 +157,7 @@ async function run(reason) {
     try {
         ({ tab, opened } = await receiptTab());
 
-        const result = await chrome.tabs.sendMessage(tab.id, { action: 'sync', since });
+        const result = await sendSync(tab.id, since);
 
         if (!result?.ok) throw new Error(result?.error || 'content script returned no result');
 
@@ -129,7 +180,10 @@ async function run(reason) {
             lastError: null,
         });
 
-        await note(`sent ${result.receipts.length} receipts; Hive imported ${hive.imported ?? '?'}`
+        // Hive queues the import rather than running it in the request, so the
+        // reply says "accepted", not "imported". How the import itself went is in
+        // the menards log on the server; it is not known while this fetch is open.
+        await note(`sent ${result.receipts.length} receipts; Hive queued ${hive.received ?? '?'} for import`
             + (result.errors.length ? `; ${result.errors.length} failed to download` : ''));
     } catch (err) {
         await chrome.storage.local.set({ lastError: err.message });

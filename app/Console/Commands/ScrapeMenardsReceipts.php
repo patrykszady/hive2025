@@ -342,10 +342,14 @@ class ScrapeMenardsReceipts extends Command
                     continue;
                 }
 
-                // Skip if this expense already has a Menards receipt attached
-                $existingReceipt = ExpenseReceipts::where('expense_id', $expense->id)
-                    ->where('receipt_filename', 'LIKE', '%menards-%')
-                    ->first();
+                // Skip if this expense already has ANY receipt attached.
+                //
+                // This used to look only for filenames LIKE '%menards-%', which
+                // meant an expense already carrying an emailed receipt, a manual
+                // upload, or a row whose filename was never set did not count as
+                // "already has a receipt" — so a second copy was attached to it.
+                // That is how 43 expenses ended up double-linked in one run.
+                $existingReceipt = ExpenseReceipts::where('expense_id', $expense->id)->first();
 
                 if ($existingReceipt && ! $force) {
                     $this->line("  <comment>EXISTS</comment> Expense #{$expense->id} already has receipt — skipping (use --force to overwrite)");
@@ -355,7 +359,19 @@ class ScrapeMenardsReceipts extends Command
                     continue;
                 }
 
+                // --force replaces a receipt this scraper produced. It will not
+                // throw away one that arrived another way: an emailed or manually
+                // uploaded receipt is the record of something we cannot re-fetch,
+                // so it is left alone and the scraped copy is dropped instead.
                 if ($existingReceipt && $force) {
+                    if (! str_contains((string) $existingReceipt->receipt_filename, 'menards-')) {
+                        $this->line("  <comment>KEEP</comment> Expense #{$expense->id} has a non-Menards receipt — leaving it, skipping this one");
+                        $linkedExpenseIds[] = $expense->id;
+                        $skipped++;
+
+                        continue;
+                    }
+
                     $existingReceipt->delete();
                     $this->line("  <comment>REPLACE</comment> Deleting old receipt for expense #{$expense->id}");
                 }

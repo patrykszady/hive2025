@@ -96,6 +96,13 @@ async function collect(sinceDate, onProgress) {
     const { paymentOptions = [] } = await api(API.initialize);
     const wanted = [];
 
+    // Several tenderIds can front the same physical card, so the same purchase
+    // comes back once per tenderId. Left alone that is a wasted download and a
+    // wasted OCR pass each time — a July-to-now window returned 277 rows for 159
+    // actual receipts. The composite id is what download.ajx keys on, so it is
+    // the right thing to dedupe by.
+    const seen = new Set();
+
     for (const card of paymentOptions) {
         let page = 0;
         let total = null;
@@ -115,7 +122,15 @@ async function collect(sinceDate, onProgress) {
             if (rows.length === 0) break;
 
             const fresh = rows.filter(t => (t.businessTransactionDate || '') >= sinceDate);
-            wanted.push(...fresh.map(t => ({ ...t, _card: card })));
+
+            for (const t of fresh) {
+                const id = transactionId(t);
+
+                if (seen.has(id)) continue;
+
+                seen.add(id);
+                wanted.push({ ...t, _card: card });
+            }
 
             onProgress?.(`${card.cardTypeName} ${card.maskedCardNumber}: page ${page + 1}, ${fresh.length} in range`);
 
