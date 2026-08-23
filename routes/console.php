@@ -277,45 +277,23 @@ Schedule::command('scout:sync-index-settings')
     ->withoutOverlapping()
     ->onOneServer();
 
-// Menards receipt scraping is NOT scheduled here any more.
+// Menards browser health is NOT scheduled.
 //
-// Fetching now happens inside the signed-in browser on the server: the receipt
-// extension's own chrome.alarms fires daily, calls Menards' receipt-lookup JSON
-// endpoints with the session a person established, and POSTs the results to
-// /api/menards/receipts, which queues ImportMenardsReceiptBatch. Nothing on the
-// Laravel schedule needs to drive that.
+// It ran hourly until 2026-08-23. On this server every single run was met with
+// Imperva's hCaptcha interstitial — 04:50, 05:00, 05:29, 06:00, unbroken, and a
+// full profile wipe in between changed nothing — so the schedule was doing
+// nothing but making two walled navigations an hour at a site that scores
+// exactly that. Retrying into a standing block does not clear it; it feeds it.
 //
-// What used to be here ran `menards:scrape-receipts` without --skip-scrape,
-// which invokes the Puppeteer scraper. Imperva has been answering that with a
-// 930-byte block page served as HTTP 200 since mid-August, so leaving it in
-// place meant a guaranteed daily failure — and a daily automated request at a
-// site that scores exactly that — for data the extension had already collected.
+// `menards:browser ensure` is still dispatched once per deploy (detached, see
+// scripts/forge-deploy-script.sh) and can be run by hand at any time:
 //
-// The importer itself is still available by hand for a re-import:
-//   php artisan menards:scrape-receipts --skip-scrape --match-expenses --output-dir=<dir>
+//   php artisan menards:browser ensure
 //
-// What IS scheduled is the self-healing check. `ensure` restarts the stack if
-// the server rebooted, rewrites the extension's config if the token changed,
-// and signs back in if Menards expired the session — so any of those repairs
-// itself within the hour. The old arrangement's failure mode was two weeks of
-// silence; this one's is sixty minutes. It also logs loudly (menards channel)
-// when no receipt batch has arrived in a week.
-//
-// Worst case for the hourly cadence: it lands during the extension's once-daily
-// sync and navigates the tab mid-run. Nothing durable is lost — the sync posts
-// once at the end, so an interrupted run posts nothing and the next day's
-// 14-day lookback re-covers it.
-Schedule::command('menards:browser ensure')
-    ->hourly()
-    ->environments(['production'])
-    // 15 minutes, not the 24h default: this mutex lives in the file cache and
-    // survives a reboot, so a crash mid-run would otherwise silently skip every
-    // hourly ensure for a day — on the file store nothing expires it early. The
-    // command also holds its own 15-minute cache lock, which is what actually
-    // serializes it against deploy-time runs.
-    ->withoutOverlapping(15)
-    ->onOneServer()
-    ->appendOutputTo(storage_path('logs/menards-ensure.log'));
+// If the wall is ever cleared and receipts start flowing, a LOW-frequency
+// schedule (daily, near the extension's own alarm) would be reasonable. Hourly
+// was never justified: the extension owns the fetching, and this command only
+// keeps the browser alive.
 
 // Retry scraping product images for material-order receipt items that are missing them
 // Covers items where the initial scrape failed (API timeout, bad search query, etc.)
