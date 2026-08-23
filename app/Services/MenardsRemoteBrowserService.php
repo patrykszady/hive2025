@@ -123,6 +123,7 @@ class MenardsRemoteBrowserService
 
         @mkdir($profile, 0775, true);
 
+        $this->prepareProfileForSessionRestore($profile);
         $this->writeExtensionDefaults();
 
         $logDir = storage_path('logs');
@@ -768,11 +769,39 @@ class MenardsRemoteBrowserService
 
     public function stop(): array
     {
+        // Chrome first, and give it time to actually shut down.
+        //
+        // Menards' session cookie is non-persistent: it survives a restart only
+        // because the profile is set to restore the last session, and Chrome
+        // only writes that state out during an orderly exit. Killing it
+        // alongside everything else left exit_type "Crashed" in the profile and
+        // the session gone — which is what made every deploy cost a human
+        // clicking through an Imperva challenge.
+        $chrome = $this->selfExcludingPattern('--user-data-dir=' . $this->userDataDir());
+        @shell_exec('pkill -TERM -f -- ' . escapeshellarg($chrome) . ' 2>/dev/null');
+
+        // Up to ~12s. A cold profile with many tabs needs a few seconds; waiting
+        // is far cheaper than the sign-in it protects.
+        for ($waited = 0; $waited < 24; $waited++) {
+            if (! $this->processAlive('--user-data-dir=' . $this->userDataDir())) {
+                break;
+            }
+
+            usleep(500000);
+        }
+
+        // Only if it ignored the request. SIGKILL is what loses the session, so
+        // it is the last resort rather than the default.
+        if ($this->processAlive('--user-data-dir=' . $this->userDataDir())) {
+            Log::channel('menards')->warning('Menards browser: Chrome did not exit in time, forcing it — the session may be lost');
+            @shell_exec('pkill -KILL -f -- ' . escapeshellarg($chrome) . ' 2>/dev/null');
+            usleep(500000);
+        }
+
         foreach ([
             'Xvfb ' . self::DISPLAY,
             'x11vnc.*-rfbport ' . self::VNC_PORT,
             'websockify.*' . self::WS_PORT,
-            '--user-data-dir=' . $this->userDataDir(),
         ] as $pattern) {
             @shell_exec('pkill -TERM -f -- ' . escapeshellarg($this->selfExcludingPattern($pattern)) . ' 2>/dev/null');
         }
@@ -780,6 +809,46 @@ class MenardsRemoteBrowserService
         usleep(500000);
 
         return ['ok' => true];
+    }
+
+    /**
+     * Configure the profile to restore its last session on startup.
+     *
+     * This is what keeps the Menards login alive across a restart. The cookie is
+     * non-persistent, so without restore_on_startup Chrome discards it on exit
+     * and the next start needs a human to clear an Imperva challenge before the
+     * stored credentials can even reach a login form.
+     *
+     * Written on every start rather than once by hand: it was set manually on a
+     * dev box and never on production, where the setting silently did not exist
+     * and every deploy therefore cost a sign-in.
+     *
+     * exit_type/exited_cleanly are reset too. After a hard kill Chrome shows a
+     * "Restore pages?" bubble that sits over the page the extension needs, and
+     * on a headless server nobody is there to dismiss it.
+     */
+    protected function prepareProfileForSessionRestore(string $profile): void
+    {
+        $path = $profile . '/Default/Preferences';
+
+        if (! is_file($path)) {
+            // First run: Chrome writes the file itself, and start() sets the
+            // startup URL on the command line anyway.
+            return;
+        }
+
+        $prefs = json_decode((string) file_get_contents($path), true);
+
+        if (! is_array($prefs)) {
+            return;
+        }
+
+        // 1 = restore the last session.
+        $prefs['session']['restore_on_startup'] = 1;
+        $prefs['profile']['exit_type'] = 'Normal';
+        $prefs['profile']['exited_cleanly'] = true;
+
+        file_put_contents($path, json_encode($prefs));
     }
 
     /**
