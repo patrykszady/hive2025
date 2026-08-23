@@ -204,15 +204,22 @@ class MatchVendor extends Component
             'state' => $suggestion['state'] ?? null,
         ]);
 
-        // What future transactions get matched on. The AI's pattern wins; then
-        // whatever is typed in "Match As"; then the raw descriptor. Falling all
-        // the way through matters — with no desc there is no rule, and the click
-        // would silently do nothing again.
-        $matchDesc = collect([
-            $suggestion['match_desc'] ?? null,
-            $this->match_merchant_names[$index]['match_desc'] ?? null,
-            collect($this->merchant_names)->keys()->get($index),
-        ])->first(fn ($value) => filled($value));
+        // What future transactions get matched on. A typed "Match As" wins
+        // outright and is used verbatim — someone chose those characters. The
+        // machine-generated options (the AI's pattern, then the raw descriptor)
+        // get the store number stripped first. Falling all the way through
+        // matters: with no desc there is no rule, and the click would silently
+        // do nothing again.
+        $typed = $this->match_merchant_names[$index]['match_desc'] ?? null;
+
+        $matchDesc = filled($typed)
+            ? $typed
+            : collect([
+                $suggestion['match_desc'] ?? null,
+                collect($this->merchant_names)->keys()->get($index),
+            ])
+                ->map(fn ($value) => $this->stripStoreNumber((string) $value))
+                ->first(fn ($value) => filled($value));
 
         if (filled($matchDesc)) {
             VendorTransaction::create([
@@ -232,6 +239,28 @@ class MatchVendor extends Component
         app(TransactionController::class)->add_vendor_to_transactions();
 
         return redirect(route('transactions.match_vendor'));
+    }
+
+    /**
+     * Drop a card descriptor's trailing store number.
+     *
+     * "CITY-MARKET #0430" describes one store; matching on it would leave every
+     * other City Market unmatched, and each new location would need its own
+     * rule. "CITY-MARKET" catches the chain.
+     *
+     * Only a trailing "#<digits>" is removed, and deliberately nothing else. A
+     * bare trailing number is NOT a store number often enough to touch: the
+     * unmatched transactions here include "CHECK 1378" and "Deposit by
+     * CheckMobile REF: 492821733", where stripping the digits would collapse
+     * every cheque in the account onto a single rule.
+     */
+    protected function stripStoreNumber(string $descriptor): string
+    {
+        $stripped = preg_replace('/\s*#\s*\d+\s*$/', '', $descriptor);
+
+        // Never return an empty pattern — a descriptor that is nothing BUT a
+        // store number is better matched whole than not at all.
+        return filled(trim((string) $stripped)) ? trim((string) $stripped) : trim($descriptor);
     }
 
     public function store_expense_vendors()
