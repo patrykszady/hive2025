@@ -277,26 +277,42 @@ Schedule::command('scout:sync-index-settings')
     ->withoutOverlapping()
     ->onOneServer();
 
-// Menards browser health is NOT scheduled.
+// ── Menards receipts ─────────────────────────────────────────────────────────
 //
-// It ran hourly until 2026-08-23. On this server every single run was met with
-// Imperva's hCaptcha interstitial — 04:50, 05:00, 05:29, 06:00, unbroken, and a
-// full profile wipe in between changed nothing — so the schedule was doing
-// nothing but making two walled navigations an hour at a site that scores
-// exactly that. Retrying into a standing block does not clear it; it feeds it.
+// Fetching happens inside the signed-in browser on the server: the receipt
+// extension calls Menards' own JSON endpoints for every card on the account and
+// POSTs the results to /api/menards/receipts, which queues the import.
 //
-// `menards:browser ensure` is still dispatched once per deploy (detached, see
-// scripts/forge-deploy-script.sh) and can be run by hand at any time:
+// `menards:browser sync` is what starts a run. It opens the extension's own
+// options page with ?sync=1 — a chrome-extension:// URL, so it never navigates
+// menards.com and cannot draw the Imperva challenge that a page load can. The
+// extension reuses the receipt tab that is already open and makes only XHR
+// calls, which is why four runs a day costs no navigations at all.
 //
-//   php artisan menards:browser ensure
+// Four windows: 08:00, 12:00, 16:00 and 20:00 Central. Receipts appear in
+// Menards' lookup within a few hours of a purchase, so this covers a working
+// day without the volume that got this server challenged on 2026-08-23 — that
+// was two walled NAVIGATIONS an hour, which is a different thing entirely.
+foreach (['08:00', '12:00', '16:00', '20:00'] as $menardsSyncTime) {
+    Schedule::command('menards:browser sync')
+        ->dailyAt($menardsSyncTime)
+        ->timezone('America/Chicago')
+        ->name("menards-sync-{$menardsSyncTime}")
+        ->environments(['production'])
+        ->withoutOverlapping(15)
+        ->onOneServer()
+        ->appendOutputTo(storage_path('logs/menards-ensure.log'));
+}
+
+// Health, once a day, half an hour before the first sync window — the browser
+// only has to be alive and signed in by the time the extension fetches.
 //
-// Once daily, shortly before the extension's own alarm — the browser only has
-// to be alive and signed in by the time the extension fetches. Hourly was never
-// justified (the extension owns the fetching, this only keeps the browser up),
-// and on 2026-08-23 it was actively harmful: every run met Imperva's hCaptcha,
-// so the schedule was making two walled navigations an hour at a site that
-// scores exactly that. Retrying into a standing block feeds it rather than
-// clearing it.
+// Hourly was never justified (the extension owns the fetching; this only keeps
+// the browser up), and on 2026-08-23 it was actively harmful: every run met
+// Imperva's hCaptcha, so the schedule was making two walled navigations an hour
+// at a site that scores exactly that. Retrying into a standing block feeds it
+// rather than clearing it. ensure now also skips the browser entirely when a
+// receipt batch arrived recently, so on a healthy day this touches nothing.
 //
 // When a pass finds something only a person can fix — the "I am human" wall
 // above all — it sends a push notification to admins, throttled to once per
@@ -324,34 +340,34 @@ Schedule::job(new DispatchIncompleteReceiptImageScrapesJob)
     ->withoutOverlapping()
     ->onOneServer();
 
-// Weekly EWCCV refresh: re-verify every active workers comp policy and keep
-// coverage-cancellation tracking subscribed. New/changed policies are handled
-// immediately by VendorDocObserver → LookupEwccvForVendor; this catches
-// subscriptions EWCCV dropped and policies whose lookups previously failed.
-Schedule::command('ewccv:scrape-tracking --belongs-to-vendor-id=1')->runInBackground()
-    ->weeklyOn(1, '07:00')
-    ->timezone('America/Chicago')
-    ->name('ewccv-weekly-refresh')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer()
-    ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
+// // Weekly EWCCV refresh: re-verify every active workers comp policy and keep
+// // coverage-cancellation tracking subscribed. New/changed policies are handled
+// // immediately by VendorDocObserver → LookupEwccvForVendor; this catches
+// // subscriptions EWCCV dropped and policies whose lookups previously failed.
+// Schedule::command('ewccv:scrape-tracking --belongs-to-vendor-id=1')->runInBackground()
+//     ->weeklyOn(1, '07:00')
+//     ->timezone('America/Chicago')
+//     ->name('ewccv-weekly-refresh')
+//     ->environments(['production'])
+//     ->withoutOverlapping()
+//     ->onOneServer()
+//     ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
 
-// Daily confirmation of what EWCCV is actually tracking for us — this is the
-// half of the integration that runs unattended. Searching EWCCV is gated by
-// reCAPTCHA v3 Enterprise (a score no captcha service can supply), but its
-// subscription API answers to the ordinary login JWT, so reading our own
-// tracked policies needs no human and no captcha. Daily because a subscription
-// silently disappearing is exactly the failure we must notice: while a policy
-// is tracked, EWCCV emails us if it is cancelled or not renewed.
-Schedule::command('ewccv:sync-subscriptions --belongs-to-vendor-id=1')->runInBackground()
-    ->dailyAt('06:30')
-    ->timezone('America/Chicago')
-    ->name('ewccv-subscription-sync')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer()
-    ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
+// // Daily confirmation of what EWCCV is actually tracking for us — this is the
+// // half of the integration that runs unattended. Searching EWCCV is gated by
+// // reCAPTCHA v3 Enterprise (a score no captcha service can supply), but its
+// // subscription API answers to the ordinary login JWT, so reading our own
+// // tracked policies needs no human and no captcha. Daily because a subscription
+// // silently disappearing is exactly the failure we must notice: while a policy
+// // is tracked, EWCCV emails us if it is cancelled or not renewed.
+// Schedule::command('ewccv:sync-subscriptions --belongs-to-vendor-id=1')->runInBackground()
+//     ->dailyAt('06:30')
+//     ->timezone('America/Chicago')
+//     ->name('ewccv-subscription-sync')
+//     ->environments(['production'])
+//     ->withoutOverlapping()
+//     ->onOneServer()
+//     ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
 
 // System maintenance
 Schedule::command('horizon:snapshot')

@@ -244,8 +244,17 @@ chrome.runtime.onStartup.addListener(seedDefaults);
 chrome.runtime.onInstalled.addListener(async () => {
     await seedDefaults();
 
-    // Daily. The server-side importer is idempotent, so a missed day is covered
-    // by the next run's lookback window rather than needing a catch-up.
+    // A once-daily BACKSTOP, not the schedule.
+    //
+    // Runs are normally started by Laravel (`menards:browser sync`, four times a
+    // day at 08:00/12:00/16:00/20:00 Central), because a schedule that lives in
+    // routes/console.php is visible in `schedule:list`, logged, and changeable
+    // without repacking and reinstalling this extension. This alarm exists so
+    // that a broken cron does not mean silence — it drifts from whenever Chrome
+    // last started, which is exactly why it is not the primary trigger.
+    //
+    // The importer is idempotent, so an extra run costs nothing but a few
+    // requests.
     await chrome.alarms.create(ALARM, { periodInMinutes: 60 * 24, delayInMinutes: 2 });
 });
 

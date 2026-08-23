@@ -652,6 +652,86 @@ class MenardsRemoteBrowserService
      *     copied anywhere. Preferences records the source path and no manifest
      *     at all, so the name is not available and the path is all there is.
      */
+    /**
+     * The installed extension's id, or null if it is not installed.
+     *
+     * Resolved from the profile rather than assumed. The id is derived from
+     * whichever signing key a given server generated, so it differs per machine
+     * — hard-coding one is exactly the mistake that once had a policy
+     * force-installing an id that existed nowhere while every check still
+     * reported a healthy browser.
+     */
+    public function extensionId(): ?string
+    {
+        $profile = $this->userDataDir() . '/Default';
+
+        foreach (glob($profile . '/Extensions/*/*/manifest.json') ?: [] as $manifest) {
+            $data = json_decode((string) file_get_contents($manifest), true);
+
+            if (str_contains((string) ($data['name'] ?? ''), 'Menards Receipt Sync')) {
+                // …/Extensions/<id>/<version>/manifest.json
+                return basename(dirname(dirname($manifest)));
+            }
+        }
+
+        $prefs = $profile . '/Preferences';
+
+        if (! is_file($prefs)) {
+            return null;
+        }
+
+        $data = json_decode((string) file_get_contents($prefs), true);
+        $source = basename($this->extensionDir());
+
+        foreach ($data['extensions']['settings'] ?? [] as $id => $entry) {
+            $isOurs = str_contains((string) ($entry['manifest']['name'] ?? ''), 'Menards Receipt Sync')
+                || ($source !== '' && str_contains((string) ($entry['path'] ?? ''), $source));
+
+            if ($isOurs) {
+                return (string) $id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Ask the extension to fetch receipts now.
+     *
+     * Opens options.html?sync=1, which the options page treats as "start a run".
+     * A URL is the only way in from outside the browser: chrome.runtime
+     * messaging is available only to extension pages, and clicking the button by
+     * screen coordinates broke on any layout change.
+     *
+     * Deliberately a chrome-extension:// URL. It does not touch menards.com, so
+     * it cannot draw the Imperva challenge, and the fetch itself reuses the
+     * receipt tab already open and makes only XHR calls.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function requestSync(): array
+    {
+        if (! $this->processAlive('Xvfb ' . self::DISPLAY)) {
+            return ['ok' => false, 'error' => 'The browser is not running — run menards:browser ensure first.'];
+        }
+
+        $id = $this->extensionId();
+
+        if (! $id) {
+            return ['ok' => false, 'error' => 'The receipt extension is not installed — run scripts/provision-menards-browser.sh.'];
+        }
+
+        // A new tab, not the current one: the receipt tab must stay open, since
+        // the extension reuses it and reusing costs no navigation at all.
+        $this->xdo('key ctrl+t');
+        usleep(800000);
+        $this->navigate(sprintf('chrome-extension://%s/options.html?sync=1', $id));
+
+        Log::channel('menards')->info('Menards: sync requested', ['extension' => $id]);
+
+        return ['ok' => true];
+    }
+
     public function extensionInstalled(): bool
     {
         $profile = $this->userDataDir() . '/Default';

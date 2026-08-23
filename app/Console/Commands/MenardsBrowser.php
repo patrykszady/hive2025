@@ -15,7 +15,7 @@ use Illuminate\Console\Command;
  */
 class MenardsBrowser extends Command
 {
-    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure}
+    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync}
         {--reset-profile : Wipe the browser profile — this signs you out}';
 
     protected $description = 'Manage the server-side signed-in browser used to sync Menards receipts';
@@ -26,6 +26,7 @@ class MenardsBrowser extends Command
             'check' => $this->check($browser),
             'login' => $this->login($browser),
             'ensure' => $this->ensure($browser),
+            'sync' => $this->sync($browser),
             'start' => $this->start($browser),
             'stop' => $this->stop($browser),
             default => $this->status($browser),
@@ -189,6 +190,46 @@ class MenardsBrowser extends Command
             $this->warn("No receipt batch has arrived in {$days} days — the sync may be failing silently.");
             \Illuminate\Support\Facades\Log::channel('menards')->error('Menards ensure: no ingest batch in ' . $days . ' days');
         }
+    }
+
+    /**
+     * Ask the extension to fetch receipts now.
+     *
+     * The scheduler calls this four times a day. It deliberately does NOT run a
+     * full `ensure` first: ensure can navigate menards.com to work out whether
+     * the session is good, and navigation is what draws Imperva's challenge. A
+     * sync only needs the browser up — if the session has lapsed, the extension
+     * says so plainly and the daily ensure is what repairs it.
+     */
+    protected function sync(MenardsRemoteBrowserService $browser): int
+    {
+        $status = $browser->status();
+
+        if (! $status['running'] || ! $status['chrome']) {
+            $this->error('The browser is not running — nothing to sync with.');
+            NotifyMenardsBrowserNeedsAttention::dispatch(
+                'down',
+                'The browser on the server is not running, so no receipts can be fetched.'
+            );
+
+            return self::FAILURE;
+        }
+
+        $result = $browser->requestSync();
+
+        if (! ($result['ok'] ?? false)) {
+            $this->error($result['error'] ?? 'Could not request a sync.');
+
+            return self::FAILURE;
+        }
+
+        // Fire and forget. The extension walks every card and downloads a PDF
+        // per receipt, which takes minutes; holding the scheduler open for it
+        // would just risk overlapping the next window. Its outcome lands in the
+        // menards log via the ingest endpoint.
+        $this->info('Sync requested — the extension is fetching in the background.');
+
+        return self::SUCCESS;
     }
 
     /**

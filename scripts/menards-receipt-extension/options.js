@@ -42,3 +42,21 @@ $('sync').addEventListener('click', async () => {
     $('status').textContent = 'Starting sync…';
     chrome.runtime.sendMessage({ action: 'run' }).catch(() => {});
 });
+
+/**
+ * Auto-start a sync when opened as options.html?sync=1
+ *
+ * This is how the Laravel scheduler triggers a fetch. A URL is the only way in
+ * from outside: chrome.runtime.sendMessage can only be sent by an extension
+ * page, and driving the button by screen coordinates was brittle — the earlier
+ * approach clicked a fixed x/y that any layout change would break.
+ *
+ * The URL is a chrome-extension:// one, so opening it does NOT navigate
+ * menards.com and cannot draw Imperva's challenge. The fetch itself reuses the
+ * receipt tab that is already open and only makes XHR calls.
+ */
+if (new URLSearchParams(location.search).get('sync') === '1') {
+    $('status').className = 'muted';
+    $('status').textContent = 'Starting sync (scheduled)…';
+    chrome.runtime.sendMessage({ action: 'run' }).catch(() => {});
+}
