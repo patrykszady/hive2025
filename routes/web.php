@@ -305,6 +305,14 @@ Route::prefix('client/schedule')->name('client.schedule.')->group(function () {
 
 // Estimate signing (requires auth — guests are redirected to login)
 Route::middleware(['auth', 'registered'])->group(function () {
+
+    // The server-side Menards browser, framed in Hive. /menards-vnc/* itself is
+    // proxied to websockify by nginx (PHP cannot proxy noVNC's WebSocket); nginx
+    // gates it with auth_request against menards.vnc.gate below, so this route
+    // and that one must agree — both Admin only.
+    Route::get('menards/browser', [\App\Http\Controllers\MenardsVncController::class, 'show'])
+        ->name('menards.browser');
+
     Route::get('estimate/sign/{estimate}', EstimateSign::class)
         ->name('estimate.sign');
 
@@ -731,3 +739,13 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 };
 
 $hubRoutes();
+
+
+// nginx auth_request target for /menards-vnc/*. Outside the grouped routes on
+// purpose: any middleware that REDIRECTS (guest, registered, vendor.access)
+// hands nginx a 302, and auth_request treats a non-2xx/401/403 as a server
+// error — turning a plain denial into a 500. Only 'auth' is applied, and only
+// so the user is resolved; the controller denies by default.
+Route::get('internal/menards-vnc-auth', [\App\Http\Controllers\MenardsVncController::class, 'gate'])
+    ->middleware('auth')
+    ->name('menards.vnc.gate');
