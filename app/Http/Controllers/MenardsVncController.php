@@ -84,6 +84,7 @@ class MenardsVncController extends Controller
         return view('menards.vnc', [
             'status' => $status,
             'vncReachable' => $reachable,
+            'vncBase' => (string) config('services.menards.vnc_url', '/menards-vnc'),
         ]);
     }
 

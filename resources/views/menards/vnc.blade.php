@@ -66,7 +66,7 @@
             {{-- The display is 1280x900; resize=scale fits it to the frame. --}}
             <iframe
                 id="menards-vnc-frame"
-                src="/menards-vnc/vnc.html?autoconnect=1&resize=scale&reconnect=1"
+                src="{{ $vncBase }}/vnc.html?autoconnect=1&resize=scale&reconnect=1"
                 class="w-full block"
                 style="height: min(78vh, 900px); border: 0;"
                 title="Menards browser screen"
@@ -101,7 +101,7 @@
                 }).catch(() => {});
             };
 
-            fetch('/menards-vnc/vnc.html', { method: 'GET', credentials: 'same-origin' })
+            fetch('{{ $vncBase }}/vnc.html', { method: 'GET', credentials: 'same-origin' })
                 .then((res) => {
                     if (!res.ok) {
                         report('proxy_error', 'noVNC proxy returned a non-OK status', res.status);
