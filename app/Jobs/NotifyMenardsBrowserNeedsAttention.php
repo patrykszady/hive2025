@@ -22,6 +22,15 @@ use Illuminate\Support\Facades\Log;
  * broke in mid-August and stayed broken for two weeks because it failed into a
  * log nobody read. A wall that waits silently for someone to wonder about it is
  * the same bug wearing different clothes.
+ *
+ * To act on one of these, reach the browser's screen over an SSH tunnel:
+ *
+ *   ssh -L 6098:127.0.0.1:6098 forge@<server>
+ *   http://127.0.0.1:6098/vnc.html?autoconnect=1&resize=scale
+ *
+ * Click "I am human"; `menards:browser login` handles the rest from the stored
+ * credentials. x11vnc and websockify bind to loopback only, so the tunnel is
+ * the only way in and there is no VNC password to manage.
  */
 class NotifyMenardsBrowserNeedsAttention implements ShouldQueue
 {
@@ -90,7 +99,13 @@ class NotifyMenardsBrowserNeedsAttention implements ShouldQueue
             'icon' => '/favicons/icon-192x192.png',
             'badge' => '/favicons/icon-96x96.png',
             'data' => [
-                'url' => '/menards/browser',
+                // No in-app page to link to: the viewer that used to frame the
+                // browser was removed, because publishing a password-less VNC to
+                // the internet behind nothing but a session cookie was a poor
+                // trade for a click that happens rarely. Clearing a wall is now
+                // an SSH tunnel — see the job docblock — so this notification
+                // exists to make sure someone KNOWS, not to hand them a button.
+                'url' => '/',
                 'type' => 'menards_browser',
                 'reason' => $this->reason,
             ],

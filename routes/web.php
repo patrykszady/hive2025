@@ -306,13 +306,6 @@ Route::prefix('client/schedule')->name('client.schedule.')->group(function () {
 // Estimate signing (requires auth — guests are redirected to login)
 Route::middleware(['auth', 'registered'])->group(function () {
 
-    // The server-side Menards browser, framed in Hive. /menards-vnc/* itself is
-    // proxied to websockify by nginx (PHP cannot proxy noVNC's WebSocket); nginx
-    // gates it with auth_request against menards.vnc.gate below, so this route
-    // and that one must agree — both Admin only.
-    Route::get('menards/browser', [\App\Http\Controllers\MenardsVncController::class, 'show'])
-        ->name('menards.browser');
-
     Route::get('estimate/sign/{estimate}', EstimateSign::class)
         ->name('estimate.sign');
 
@@ -726,18 +719,3 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 $hubRoutes();
 
 
-// nginx auth_request target for /menards-vnc/*.
-//
-// NO 'auth' middleware, deliberately. auth_request accepts only 2xx (allow) and
-// 401/403 (deny); anything else is a server error. Laravel's 'auth' middleware
-// REDIRECTS a signed-out web request to the login page, and nginx logged
-// exactly that — "auth request unexpected status: 302" — turning every proxied
-// request into a 500. The route still gets the 'web' group (session, cookies)
-// because it lives in this file, so $request->user() resolves normally; the
-// controller returns 401/403 itself and denies by default.
-Route::get('internal/menards-vnc-auth', [\App\Http\Controllers\MenardsVncController::class, 'gate'])
-    ->name('menards.vnc.gate');
-
-// Where the viewer page reports failures only its own browser can see.
-Route::post('internal/menards-vnc-report', [\App\Http\Controllers\MenardsVncController::class, 'report'])
-    ->name('menards.vnc.report');

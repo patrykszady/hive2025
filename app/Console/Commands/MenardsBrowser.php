@@ -240,7 +240,7 @@ class MenardsBrowser extends Command
             ],
             $this->isWalled($status) => [
                 'wall',
-                'Menards is showing an "I am human" check. Open this and click it — sign-in continues on its own.',
+                'Menards is showing an "I am human" check. Tunnel to the browser and click it; sign-in continues on its own.',
             ],
             ! $status['signed_in'] => [
                 'signed_out',

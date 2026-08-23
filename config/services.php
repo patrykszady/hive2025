@@ -67,11 +67,6 @@ return [
         'chromium_binary' => env('MENARDS_CHROMIUM_BINARY'),
         'user_data_dir' => env('MENARDS_USER_DATA_DIR'),
         'novnc_web' => env('MENARDS_NOVNC_WEB', '/usr/share/novnc'),
-        // Where the viewer page's iframe points. On production this is the
-        // nginx location that proxies websockify behind the app's auth. There is
-        // no such proxy under `artisan serve`, so a dev box overrides this with
-        // the gateway's own address (its own, or a tunnel to production's).
-        'vnc_url' => rtrim((string) env('MENARDS_VNC_URL', '/menards-vnc'), '/'),
     ],
 
     'azure_cu' => [
