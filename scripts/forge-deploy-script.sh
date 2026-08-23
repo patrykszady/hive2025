@@ -61,10 +61,11 @@ sudo supervisorctl restart nightwatch-agent 2>/dev/null || {
     sudo supervisorctl start nightwatch-agent || echo 'Failed to start Nightwatch (may not be configured)'
 }
 
-# Menards receipt browser — repack the extension if its source changed, then
-# make sure the signed-in browser is up, configured, and authenticated
-# (`ensure` is idempotent; the hourly scheduler runs it too). Guarded with ||
-# so browser trouble never fails a site deploy: the browser is not part of
-# serving the site, and the scheduler retries within the hour anyway.
-bash scripts/provision-menards-browser.sh repack || echo 'menards repack skipped (full provision has not run on this host)'
+# Menards receipt browser — one idempotent pass: writes the extension's config,
+# repacks it if the source changed, restarts/starts the browser as needed, and
+# signs in. The repack MUST be left to `ensure`: running it separately here once
+# consumed the "source changed" marker before ensure could see it, so the new
+# pack was never installed. Guarded with || so browser trouble never fails a
+# site deploy — the browser is not part of serving the site, and the hourly
+# scheduler retries anyway.
 $FORGE_PHP artisan menards:browser ensure || echo 'MENARDS BROWSER NOT HEALTHY — run: php artisan menards:browser status'

@@ -67,22 +67,33 @@ as_root() {
     exit 1
 }
 
-# Hash of the extension source that actually ships. defaults.json is excluded
-# twice over: it is rewritten with the live token on every `menards:browser
-# start`, so including it would mean "changed" on every deploy — and it never
-# goes into the package anyway.
+# Hash of the extension source that actually ships — defaults.json included.
+# It MUST ship: a packed, policy-installed extension resolves
+# chrome.runtime.getURL('defaults.json') inside its own installed copy, not in
+# this source directory, so config left out of the package simply does not
+# exist as far as the extension is concerned. (The first version stripped it
+# and the production extension could never have learned its URL or token while
+# every status check read the source file and said "configured".) Including it
+# in the hash is what makes a token rotation repack — its content is otherwise
+# byte-stable across rewrites.
 source_hash() {
-    (cd "$EXT_SRC" && find . -type f ! -name defaults.json -print0 | sort -z \
+    (cd "$EXT_SRC" && find . -type f -print0 | sort -z \
         | xargs -0 sha256sum | sha256sum | cut -c1-16)
 }
 
-# Strictly increasing 4-component version, one tick per second, every component
-# within Chrome's 0–65535 range: 1.<days since 2026-01-01>.<HHMM>.<SS>.
+# Increasing 4-component version, one tick per second, every component within
+# Chrome's 0–65535 range: 1.<days since 2026-01-01>.<HHMM>.<SS>. Derived from a
+# SINGLE reading of the clock: three separate date calls could straddle UTC
+# midnight and emit a version below the one already installed, which Chrome
+# silently refuses to downgrade to — and the hash marker would then pin that
+# never-installed pack as current.
 generated_version() {
-    local days hhmm ss
-    days=$(( ( $(date -u +%s) - 1767225600 ) / 86400 ))   # 1767225600 = 2026-01-01 UTC
-    hhmm=$(( 10#$(date -u +%H%M) ))
-    ss=$(( 10#$(date -u +%S) ))
+    local now days rem hhmm ss
+    now=$(date -u +%s)
+    days=$(( (now - 1767225600) / 86400 ))   # 1767225600 = 2026-01-01 UTC
+    rem=$(( now % 86400 ))
+    hhmm=$(( rem / 3600 * 100 + rem % 3600 / 60 ))
+    ss=$(( rem % 60 ))
     echo "1.${days}.${hhmm}.${ss}"
 }
 
@@ -102,7 +113,6 @@ pack_extension() {
 
     rm -rf "$EXT_HOME/src" "$EXT_HOME/src.crx" "$EXT_HOME/src.pem"
     cp -r "$EXT_SRC" "$EXT_HOME/src"
-    rm -f "$EXT_HOME/src/defaults.json"
 
     python3 - "$EXT_HOME/src/manifest.json" "$version" <<'PYEOF'
 import json, sys
@@ -112,24 +122,29 @@ d['version'] = version
 json.dump(d, open(path, 'w'), indent=2)
 PYEOF
 
-    # No `|| true` on the pack. Swallowing a packing failure is how a stale or
-    # absent .crx once reached the policy step and the whole thing failed silently.
+    # Chrome's output is captured, not discarded: a pack that starts failing
+    # (a Chrome update, a removed binary) must say WHY, and under set -e a
+    # silent death here once left callers reading an absent marker as "no
+    # change" while the extension quietly went stale.
+    local pack_out
     if [ -f "$KEY" ]; then
-        "$CHROME" --pack-extension="$EXT_HOME/src" --pack-extension-key="$KEY" --no-sandbox >/dev/null 2>&1
+        pack_out=$("$CHROME" --pack-extension="$EXT_HOME/src" --pack-extension-key="$KEY" --no-sandbox 2>&1) \
+            || { echo "ERROR: chrome pack failed:" >&2; echo "$pack_out" >&2; return 1; }
     else
-        "$CHROME" --pack-extension="$EXT_HOME/src" --no-sandbox >/dev/null 2>&1
-        [ -f "$EXT_HOME/src.pem" ] || { echo "ERROR: packing produced no signing key" >&2; exit 1; }
+        pack_out=$("$CHROME" --pack-extension="$EXT_HOME/src" --no-sandbox 2>&1) \
+            || { echo "ERROR: chrome pack failed:" >&2; echo "$pack_out" >&2; return 1; }
+        [ -f "$EXT_HOME/src.pem" ] || { echo "ERROR: packing produced no signing key" >&2; return 1; }
         mv "$EXT_HOME/src.pem" "$KEY"
         chmod 600 "$KEY"
     fi
-    [ -s "$EXT_HOME/src.crx" ] || { echo "ERROR: packing produced no .crx" >&2; exit 1; }
+    [ -s "$EXT_HOME/src.crx" ] || { echo "ERROR: packing produced no .crx" >&2; return 1; }
     mv -f "$EXT_HOME/src.crx" "$EXT_HOME/menards.crx"
 
     EXT_ID=$(openssl rsa -in "$KEY" -pubout -outform DER 2>/dev/null \
         | openssl dgst -sha256 -binary | head -c16 | xxd -p | tr -d '\n' | tr '0-9a-f' 'a-p')
     case "$EXT_ID" in
-        [a-p]*) [ ${#EXT_ID} -eq 32 ] || { echo "ERROR: bad extension id '$EXT_ID'" >&2; exit 1; } ;;
-        *) echo "ERROR: could not derive an extension id from $KEY" >&2; exit 1 ;;
+        [a-p]*) [ ${#EXT_ID} -eq 32 ] || { echo "ERROR: bad extension id '$EXT_ID'" >&2; return 1; } ;;
+        *) echo "ERROR: could not derive an extension id from $KEY" >&2; return 1 ;;
     esac
 
     cat > "$EXT_HOME/update.xml" <<XML
@@ -142,7 +157,9 @@ PYEOF
 XML
 
     source_hash > "$EXT_HOME/.source-hash"
-    chmod -R a+rX "$EXT_HOME"
+    # Owner-only: the packed .crx now carries the bridge token. Chrome runs as
+    # this same user, so it can still read everything it needs.
+    chmod -R go-rwx "$EXT_HOME"
     chmod 600 "$KEY"
     echo "id: $EXT_ID  version: $version"
 }
@@ -162,9 +179,13 @@ if [ "$MODE" = "repack" ]; then
         exit 0
     fi
 
-    pack_extension
-    echo "REPACK: changed"
-    exit 0
+    if pack_extension; then
+        echo "REPACK: changed"
+        exit 0
+    fi
+
+    echo "REPACK: failed"
+    exit 3
 fi
 
 [ "$MODE" = "provision" ] || { echo "usage: $0 [provision|repack]" >&2; exit 1; }
@@ -198,9 +219,11 @@ fi
 say "Packing the extension"
 if [ ! -d "$EXT_HOME" ] || [ ! -w "$EXT_HOME" ]; then
     as_root mkdir -p "$EXT_HOME"
-    as_root chown "$USER" "$EXT_HOME"
+    # ${SUDO_USER:-$USER}: under `sudo bash …` $USER is root, and chowning to
+    # root would leave every later no-sudo deploy-time repack unable to write.
+    as_root chown "${SUDO_USER:-$USER}" "$EXT_HOME"
 fi
-pack_extension
+pack_extension || exit 1
 
 say "Chrome policy"
 POLICY_FILE="$POLICY_DIR/menards-receipt-sync.json"
@@ -224,9 +247,15 @@ if [ -f "$POLICY_FILE" ] && [ "$(cat "$POLICY_FILE" 2>/dev/null)" = "$POLICY_CON
 elif (mkdir -p "$POLICY_DIR" && printf '%s\n' "$POLICY_CONTENT" > "$POLICY_FILE" && chmod 644 "$POLICY_FILE") 2>/dev/null; then
     echo "written: $POLICY_FILE"
 else
+    # Via a temp file, not a pipe: `printf | as_root tee` makes stdin a pipe,
+    # which as_root's [ -t 0 ] tty test reads as "no terminal" — wrongly
+    # refusing an interactive user whose sudo merely wants a password.
+    POLICY_TMP=$(mktemp)
+    printf '%s\n' "$POLICY_CONTENT" > "$POLICY_TMP"
     as_root mkdir -p "$POLICY_DIR"
-    printf '%s\n' "$POLICY_CONTENT" | as_root tee "$POLICY_FILE" >/dev/null
+    as_root cp "$POLICY_TMP" "$POLICY_FILE"
     as_root chmod 644 "$POLICY_FILE"
+    rm -f "$POLICY_TMP"
     echo "written: $POLICY_FILE (as root)"
 fi
 

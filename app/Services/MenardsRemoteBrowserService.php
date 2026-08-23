@@ -212,7 +212,7 @@ class MenardsRemoteBrowserService
      * Gitignored, and deliberately so: it holds the token in clear text. Anything
      * already in chrome.storage wins, so the options page still overrides it.
      */
-    protected function writeExtensionDefaults(): void
+    public function writeExtensionDefaults(): void
     {
         $token = (string) config('services.menards.bridge_token');
 
@@ -274,6 +274,12 @@ class MenardsRemoteBrowserService
         }
 
         if ($this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) === '') {
+            if ($this->looksLikeChallengeWall()) {
+                return ['ok' => false, 'error' => 'Imperva is showing a security challenge (hCaptcha). '
+                    . 'Nothing here will solve that: either click it once over noVNC, or leave it — '
+                    . 'the hourly ensure retries after the score cools down.'];
+            }
+
             return ['ok' => false, 'error' => 'The sign-in page never loaded. Last page seen: '
                 . ($this->windowTitle() ?: '(none)')];
         }
@@ -374,7 +380,7 @@ class MenardsRemoteBrowserService
      *
      * @param  array<int, string>  $accept
      */
-    protected function loadAndWait(string $url, array $accept, int $attempts = 3, int $seconds = 25): string
+    protected function loadAndWait(string $url, array $accept, int $attempts = 2, int $seconds = 25): string
     {
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             $this->navigate($url);
@@ -393,6 +399,24 @@ class MenardsRemoteBrowserService
                 usleep(750000);
             } while (time() < $deadline);
 
+            // A Menards page that still has no real title after the full window
+            // is almost certainly Imperva's challenge interstitial ("Additional
+            // security check is required" — an hCaptcha), which sets no <title>,
+            // so Chrome shows the bare URL. Retrying navigation against it is
+            // worse than useless: a burst of rapid navigations is exactly the
+            // signal that raised the score in the first place, and it re-triggers
+            // the load we would otherwise be waiting out. Stop here, say what it
+            // is, and leave the next attempt to the hourly schedule — or to a
+            // person clicking the checkbox over noVNC. We do not solve captchas.
+            if ($this->looksLikeChallengeWall()) {
+                Log::channel('menards')->error('Menards browser: Imperva challenge wall is up', [
+                    'url' => $url,
+                    'title' => $this->windowTitle(),
+                ]);
+
+                return '';
+            }
+
             Log::channel('menards')->warning('Menards browser: navigation did not land', [
                 'url' => $url,
                 'attempt' => $attempt,
@@ -401,6 +425,20 @@ class MenardsRemoteBrowserService
         }
 
         return '';
+    }
+
+    /**
+     * Every real Menards page titles itself "… at Menards®"; the challenge
+     * interstitial sets no title at all, so the window title is the bare URL.
+     * "Contains the domain but never the site suffix, well after load" is
+     * therefore the wall's signature — reachable without any access to the
+     * page's content.
+     */
+    public function looksLikeChallengeWall(): bool
+    {
+        $title = $this->windowTitle();
+
+        return str_contains($title, 'menards.com/') && ! str_contains($title, 'at Menards');
     }
 
     /**

@@ -308,7 +308,12 @@ Schedule::command('scout:sync-index-settings')
 Schedule::command('menards:browser ensure')
     ->hourly()
     ->environments(['production'])
-    ->withoutOverlapping()
+    // 15 minutes, not the 24h default: this mutex lives in the file cache and
+    // survives a reboot, so a crash mid-run would otherwise silently skip every
+    // hourly ensure for a day — on the file store nothing expires it early. The
+    // command also holds its own 15-minute cache lock, which is what actually
+    // serializes it against deploy-time runs.
+    ->withoutOverlapping(15)
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/menards-ensure.log'));
 

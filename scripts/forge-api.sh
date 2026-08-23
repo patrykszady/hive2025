@@ -169,10 +169,14 @@ PYEOF
         # reported success anyway. The response is checked now, and the write is
         # confirmed by reading the environment back rather than trusting the
         # status code: a 202 means "accepted", not "applied".
-        python3 -c "
-import json, sys
+        #
+        # Legacy v1 wants {"content": ...} instead — the current-API shape 422s
+        # there, so the payload is built per branch.
+        if [ "$API_VERSION" = "current" ]; then ENV_FIELD=environment; else ENV_FIELD=content; fi
+        ENV_FIELD="$ENV_FIELD" python3 -c "
+import json, os, sys
 content = open(sys.argv[1]).read()
-print(json.dumps({'environment': content}))
+print(json.dumps({os.environ['ENV_FIELD']: content}))
 " "$UPDATED" > /tmp/forge-env-payload.json
 
         RESP=$(mktemp)
@@ -194,10 +198,15 @@ print(json.dumps({'environment': content}))
         rm -f "$RESP"
 
         sleep 3  # the PUT is applied asynchronously; give it a moment before verifying
-        if "$0" get-env | grep -q "^$KEY="; then
+        # Into a variable, then an exact whole-line match. A pipe into `grep -q`
+        # dies of EPIPE under pipefail once the env outgrows the pipe buffer,
+        # and matching only "^KEY=" would call an update "verified" when the API
+        # kept the OLD value — the line exists either way.
+        READBACK=$("$0" get-env)
+        if grep -qxF -- "$KEY=$VALUE" <<<"$READBACK"; then
             echo "set $KEY (verified, $(wc -l < "$UPDATED") lines total)"
         else
-            echo "FAILED: HTTP $CODE accepted the write but $KEY is not in the environment on read-back" >&2
+            echo "FAILED: HTTP $CODE accepted the write but $KEY does not hold the new value on read-back" >&2
             exit 1
         fi
         ;;

@@ -50,6 +50,29 @@ class MenardsBrowser extends Command
      */
     protected function ensure(MenardsRemoteBrowserService $browser): int
     {
+        // One ensure at a time, whoever invoked it. The scheduler's
+        // withoutOverlapping() only guards scheduler-vs-scheduler; a deploy-time
+        // run and the hourly run would otherwise drive the same display at
+        // once — two xdotool typists sharing one omnibox, one of them feeding
+        // the other's password into a Google search. The 15-minute TTL bounds a
+        // stale lock from a mid-run crash to one skipped cycle.
+        $lock = \Illuminate\Support\Facades\Cache::lock('menards-browser-ensure', 900);
+
+        if (! $lock->get()) {
+            $this->info('Another ensure run is already in progress — leaving it to finish.');
+
+            return self::SUCCESS;
+        }
+
+        try {
+            return $this->ensureLocked($browser);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function ensureLocked(MenardsRemoteBrowserService $browser): int
+    {
         $req = $browser->checkRequirements();
 
         if (! $req['ok']) {
@@ -59,21 +82,44 @@ class MenardsBrowser extends Command
             return self::FAILURE;
         }
 
-        // Repack the policy-installed extension if its source changed. Prints
-        // "REPACK: unavailable" on a box that has never been fully provisioned
-        // (a dev machine using Load unpacked) — not an error here.
+        // Config first, repack second — the order is load-bearing. The packed
+        // extension reads defaults.json from INSIDE its own package (that is
+        // where chrome.runtime.getURL resolves for an installed extension), so
+        // the file must exist in the source tree before packing stages it, and
+        // a change to it must count as a source change so rotation repacks.
+        $browser->writeExtensionDefaults();
+
+        // Repack the policy-installed extension if its source changed. The
+        // marker line is the contract: "unavailable" is a box that has never
+        // been fully provisioned (a dev machine using Load unpacked) — fine;
+        // "failed" or NO marker at all (the script died mid-pack) is a real
+        // problem, reported but not fatal to the rest of the pass — the browser
+        // itself is still worth keeping alive with a stale extension.
         $repack = (string) shell_exec(
             'bash ' . escapeshellarg(base_path('scripts/provision-menards-browser.sh')) . ' repack 2>&1'
         );
         $repackChanged = str_contains($repack, 'REPACK: changed');
+        $repackFailed = ! preg_match('/^REPACK: (changed|unchanged|unavailable)$/m', $repack);
 
         if ($repackChanged) {
             $this->line('Extension source changed — repacked; the restart below installs it.');
         }
 
+        if ($repackFailed) {
+            $this->warn('Extension repack FAILED — the browser keeps running with the previous pack.');
+            $this->line(trim($repack) ?: '(no output from the repack script)');
+            \Illuminate\Support\Facades\Log::channel('menards')->error('Menards ensure: repack failed', [
+                'output' => substr($repack, -500),
+            ]);
+        }
+
         $status = $browser->status();
 
-        if (! $status['running'] || ! $status['chrome'] || ! $status['configured'] || $repackChanged) {
+        // 'extension' belongs in this gate: a running browser whose force-install
+        // never took is only fixable by a restart (Chrome re-reads the policy at
+        // startup), and leaving it out meant ensure reported that failure every
+        // hour without ever attempting its own remedy.
+        if (! $status['running'] || ! $status['chrome'] || ! $status['extension'] || ! $status['configured'] || $repackChanged) {
             $this->line('Starting the browser…');
             $result = $browser->start();
 
@@ -98,7 +144,7 @@ class MenardsBrowser extends Command
         $this->printStatus($final);
 
         $healthy = $final['running'] && $final['chrome'] && $final['extension']
-            && $final['configured'] && $final['signed_in'];
+            && $final['configured'] && $final['signed_in'] && ! $repackFailed;
 
         return $healthy ? self::SUCCESS : self::FAILURE;
     }
@@ -121,7 +167,9 @@ class MenardsBrowser extends Command
         $newest = max(array_map('filemtime', $dirs));
 
         if ($newest < now()->subDays(7)->getTimestamp()) {
-            $days = now()->diffInDays(\Carbon\Carbon::createFromTimestamp($newest));
+            // Plain arithmetic on purpose: Carbon 3's diffInDays() is a signed
+            // float (target minus source), which printed "-9.3 days" here.
+            $days = intdiv(now()->getTimestamp() - $newest, 86400);
             $this->warn("No receipt batch has arrived in {$days} days — the sync may be failing silently.");
             \Illuminate\Support\Facades\Log::channel('menards')->error('Menards ensure: no ingest batch in ' . $days . ' days');
         }
