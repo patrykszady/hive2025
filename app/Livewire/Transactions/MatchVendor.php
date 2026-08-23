@@ -177,18 +177,22 @@ class MatchVendor extends Component
             return;
         }
 
-        if (! empty($suggestion['existing_vendor_id'])) {
-            $this->match_merchant_names[$index]['vendor_id'] = (string) $suggestion['existing_vendor_id'];
-            if (filled($suggestion['match_desc'] ?? null)) {
-                $this->match_merchant_names[$index]['match_desc'] = $suggestion['match_desc'];
-            }
+        // An existing vendor still needs a match rule written, exactly like a new
+        // one. The first version of this only assigned vendor_id to the form
+        // array and returned, so "Use this vendor" looked like it did nothing:
+        // no VendorTransaction, no attach, no re-match, no redirect — and
+        // because the page never reloaded, the same suggestion card stayed on
+        // screen. Both branches now differ only in how the vendor is obtained.
+        $vendor = null;
 
-            return;
+        if (! empty($suggestion['existing_vendor_id'])) {
+            $vendor = Vendor::withoutGlobalScopes()->find($suggestion['existing_vendor_id']);
         }
 
         // Duplicate guard: the suggestion may predate a vendor created since
-        // (stale cache, another tab, a colleague) — reuse it instead.
-        $vendor = Vendor::withoutGlobalScopes()
+        // (stale cache, another tab, a colleague) — reuse it instead. Also
+        // catches an existing_vendor_id that has since been deleted.
+        $vendor ??= Vendor::withoutGlobalScopes()
             ->whereRaw('LOWER(business_name) = ?', [mb_strtolower(trim($suggestion['vendor_name']))])
             ->first();
 
@@ -200,11 +204,21 @@ class MatchVendor extends Component
             'state' => $suggestion['state'] ?? null,
         ]);
 
-        if (filled($suggestion['match_desc'] ?? null)) {
+        // What future transactions get matched on. The AI's pattern wins; then
+        // whatever is typed in "Match As"; then the raw descriptor. Falling all
+        // the way through matters — with no desc there is no rule, and the click
+        // would silently do nothing again.
+        $matchDesc = collect([
+            $suggestion['match_desc'] ?? null,
+            $this->match_merchant_names[$index]['match_desc'] ?? null,
+            collect($this->merchant_names)->keys()->get($index),
+        ])->first(fn ($value) => filled($value));
+
+        if (filled($matchDesc)) {
             VendorTransaction::create([
                 'vendor_id' => $vendor->id,
                 'deposit_check' => null,
-                'desc' => str_replace('*', "\*", $suggestion['match_desc']),
+                'desc' => str_replace('*', "\*", $matchDesc),
                 'plaid_inst_id' => null,
                 'options' => json_encode('/i'),
             ]);
