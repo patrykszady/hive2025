@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\NotifyMenardsBrowserNeedsAttention;
 use App\Services\MenardsRemoteBrowserService;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -146,6 +147,14 @@ class MenardsBrowser extends Command
         $healthy = $final['running'] && $final['chrome'] && $final['extension']
             && $final['configured'] && $final['signed_in'] && ! $repackFailed;
 
+        // Tell someone. The sync is unattended right up until Imperva asks for a
+        // human, and a wall that waits in silence is how the last outage lasted
+        // two weeks. Throttled to one notification per reason per 12 hours by
+        // the job itself, so a schedule that runs all day says this once.
+        if (! $healthy) {
+            $this->notifyAttention($final, $repackFailed);
+        }
+
         return $healthy ? self::SUCCESS : self::FAILURE;
     }
 
@@ -173,6 +182,58 @@ class MenardsBrowser extends Command
             $this->warn("No receipt batch has arrived in {$days} days — the sync may be failing silently.");
             \Illuminate\Support\Facades\Log::channel('menards')->error('Menards ensure: no ingest batch in ' . $days . ' days');
         }
+    }
+
+    /**
+     * Pick the single most useful thing to say, and say only that.
+     *
+     * Ordered by what blocks what: a browser that is down explains everything
+     * below it, and a missing extension means no amount of clicking will help.
+     * Sending one notification per fault would bury the actionable one.
+     */
+    protected function notifyAttention(array $status, bool $repackFailed): void
+    {
+        [$reason, $detail] = match (true) {
+            ! $status['running'] || ! $status['chrome'] => [
+                'down',
+                'The browser on the server is not running, so no receipts can be fetched.',
+            ],
+            ! $status['extension'] => [
+                'extension_missing',
+                'The receipt extension is not installed — the browser runs but nothing will ever sync.',
+            ],
+            ! $status['configured'] => [
+                'extension_missing',
+                'The extension has no Hive URL or token, so it cannot deliver receipts.',
+            ],
+            $this->isWalled($status) => [
+                'wall',
+                'Menards is showing an "I am human" check. Open this and click it — sign-in continues on its own.',
+            ],
+            ! $status['signed_in'] => [
+                'signed_out',
+                'The browser is signed out of menards.com and could not sign back in.',
+            ],
+            default => [
+                'attention',
+                'The Menards receipt browser needs a look.',
+            ],
+        };
+
+        NotifyMenardsBrowserNeedsAttention::dispatch($reason, $detail);
+
+        $this->line("Notified admins: {$detail}");
+    }
+
+    /**
+     * Every real Menards page titles itself "… at Menards®"; the Imperva
+     * interstitial sets no title at all, so Chrome shows the bare URL.
+     */
+    protected function isWalled(array $status): bool
+    {
+        $page = $status['page'] ?? '';
+
+        return str_contains($page, 'menards.com/') && ! str_contains($page, 'at Menards');
     }
 
     /**

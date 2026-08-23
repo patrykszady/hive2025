@@ -290,10 +290,29 @@ Schedule::command('scout:sync-index-settings')
 //
 //   php artisan menards:browser ensure
 //
-// If the wall is ever cleared and receipts start flowing, a LOW-frequency
-// schedule (daily, near the extension's own alarm) would be reasonable. Hourly
-// was never justified: the extension owns the fetching, and this command only
-// keeps the browser alive.
+// Once daily, shortly before the extension's own alarm — the browser only has
+// to be alive and signed in by the time the extension fetches. Hourly was never
+// justified (the extension owns the fetching, this only keeps the browser up),
+// and on 2026-08-23 it was actively harmful: every run met Imperva's hCaptcha,
+// so the schedule was making two walled navigations an hour at a site that
+// scores exactly that. Retrying into a standing block feeds it rather than
+// clearing it.
+//
+// When a pass finds something only a person can fix — the "I am human" wall
+// above all — it sends a push notification to admins, throttled to once per
+// reason per 12 hours. That is the part that matters: the original scraper
+// failed into a log nobody read and stayed broken for two weeks.
+Schedule::command('menards:browser ensure')
+    ->dailyAt('07:30')
+    ->timezone('America/Chicago')
+    ->environments(['production'])
+    // 15 minutes, not the 24h default: this mutex lives in the file cache and
+    // survives a reboot, so a crash mid-run would otherwise silently skip the
+    // next day's pass too. The command holds its own lock as well, which is
+    // what serializes it against the deploy-time run.
+    ->withoutOverlapping(15)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/menards-ensure.log'));
 
 // Retry scraping product images for material-order receipt items that are missing them
 // Covers items where the initial scrape failed (API timeout, bad search query, etc.)
