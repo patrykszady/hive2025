@@ -9,7 +9,6 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
-        "2captcha/2captcha": "*",
         "aws/aws-sdk-php": "^3.247",
         "barryvdh/laravel-snappy": "^1.0",
         "doctrine/dbal": "^4.3",
@@ -59,8 +58,7 @@
         "symfony/http-client": "*",
         "symfony/mailgun-mailer": "^7.0",
         "symfony/panther": "^2.1",
-        "vlucas/phpdotenv": "^5.5",
-        "zoon/puphpeteer": "^2.2"
+        "vlucas/phpdotenv": "^5.5"
     },
     "require-dev": {
         "dbrekelmans/bdi": "^1.0",

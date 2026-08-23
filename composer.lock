@@ -4,86 +4,8 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "1e2fc7e13f0593ba4694c1cef4571def",
+    "content-hash": "61ae9252bfd3442e7a6d63d26a47cce8",
     "packages": [
-        {
-            "name": "2captcha/2captcha",
-            "version": "v1.2.5",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/2captcha/2captcha-php.git",
-                "reference": "ae3fcbd10f005385546651ac8c29bf7a6b7bde1e"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/2captcha/2captcha-php/zipball/ae3fcbd10f005385546651ac8c29bf7a6b7bde1e",
-                "reference": "ae3fcbd10f005385546651ac8c29bf7a6b7bde1e",
-                "shasum": ""
-            },
-            "require": {
-                "ext-curl": "*",
-                "ext-fileinfo": "*",
-                "ext-mbstring": "*",
-                "php": ">=7.3"
-            },
-            "require-dev": {
-                "phpunit/phpunit": "9.6.*"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "TwoCaptcha\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "2captcha",
-                    "email": "info@2captcha.com",
-                    "homepage": "https://2captcha.com/"
-                }
-            ],
-            "description": "PHP package for easy integration with 2captcha API",
-            "keywords": [
-                "2captcha",
-                "2captcha.com",
-                "Captchafox",
-                "Cutcaptcha",
-                "MTCaptcha",
-                "Prosopo",
-                "amazon waf",
-                "anticaptcha",
-                "atbCAPTCHA",
-                "audio captcha",
-                "bypass captcha",
-                "captcha",
-                "captcha solver",
-                "cloudflare turnstile",
-                "datadome",
-                "decaptcha",
-                "friendly captcha",
-                "funcaptcha",
-                "geetest",
-                "keycaptcha",
-                "lemin",
-                "reCAPTCHA V2",
-                "recaptcha",
-                "recaptcha v3",
-                "solve captcha",
-                "temu",
-                "tencent",
-                "vkCaptcha",
-                "vkImage"
-            ],
-            "support": {
-                "issues": "https://github.com/2captcha/2captcha-php/issues",
-                "source": "https://github.com/2captcha/2captcha-php/tree/v1.2.5"
-            },
-            "time": "2026-07-20T08:38:26+00:00"
-        },
         {
             "name": "aws/aws-crt-php",
             "version": "v1.2.7",
@@ -721,75 +643,6 @@
             "time": "2025-01-03T16:18:33+00:00"
         },
         {
-            "name": "clue/socket-raw",
-            "version": "v1.6.0",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/clue/socket-raw.git",
-                "reference": "91e9f619f6769f931454a9882c21ffd7623d06cb"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/clue/socket-raw/zipball/91e9f619f6769f931454a9882c21ffd7623d06cb",
-                "reference": "91e9f619f6769f931454a9882c21ffd7623d06cb",
-                "shasum": ""
-            },
-            "require": {
-                "ext-sockets": "*",
-                "php": ">=5.3"
-            },
-            "require-dev": {
-                "phpunit/phpunit": "^9.3 || ^5.7 || ^4.8.35"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Socket\\Raw\\": "src"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Christian Lück",
-                    "email": "christian@clue.engineering"
-                }
-            ],
-            "description": "Simple and lightweight OOP wrapper for PHP's low-level sockets extension (ext-sockets).",
-            "homepage": "https://github.com/clue/socket-raw",
-            "keywords": [
-                "Socket",
-                "client",
-                "datagram",
-                "dgram",
-                "icmp",
-                "ipv6",
-                "server",
-                "stream",
-                "tcp",
-                "udg",
-                "udp",
-                "unix"
-            ],
-            "support": {
-                "issues": "https://github.com/clue/socket-raw/issues",
-                "source": "https://github.com/clue/socket-raw/tree/v1.6.0"
-            },
-            "funding": [
-                {
-                    "url": "https://clue.engineering/support",
-                    "type": "custom"
-                },
-                {
-                    "url": "https://github.com/clue",
-                    "type": "github"
-                }
-            ],
-            "time": "2022-04-14T14:58:06+00:00"
-        },
-        {
             "name": "clue/stream-filter",
             "version": "v1.7.0",
             "source": {
@@ -930,83 +783,6 @@
                 }
             ],
             "time": "2026-06-07T11:47:49+00:00"
-        },
-        {
-            "name": "composer/semver",
-            "version": "3.4.4",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/composer/semver.git",
-                "reference": "198166618906cb2de69b95d7d47e5fa8aa1b2b95"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/composer/semver/zipball/198166618906cb2de69b95d7d47e5fa8aa1b2b95",
-                "reference": "198166618906cb2de69b95d7d47e5fa8aa1b2b95",
-                "shasum": ""
-            },
-            "require": {
-                "php": "^5.3.2 || ^7.0 || ^8.0"
-            },
-            "require-dev": {
-                "phpstan/phpstan": "^1.11",
-                "symfony/phpunit-bridge": "^3 || ^7"
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-main": "3.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Composer\\Semver\\": "src"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Nils Adermann",
-                    "email": "naderman@naderman.de",
-                    "homepage": "http://www.naderman.de"
-                },
-                {
-                    "name": "Jordi Boggiano",
-                    "email": "j.boggiano@seld.be",
-                    "homepage": "http://seld.be"
-                },
-                {
-                    "name": "Rob Bast",
-                    "email": "rob.bast@gmail.com",
-                    "homepage": "http://robbast.nl"
-                }
-            ],
-            "description": "Semver library that offers utilities, version constraint parsing and validation.",
-            "keywords": [
-                "semantic",
-                "semver",
-                "validation",
-                "versioning"
-            ],
-            "support": {
-                "irc": "ircs://irc.libera.chat:6697/composer",
-                "issues": "https://github.com/composer/semver/issues",
-                "source": "https://github.com/composer/semver/tree/3.4.4"
-            },
-            "funding": [
-                {
-                    "url": "https://packagist.com",
-                    "type": "custom"
-                },
-                {
-                    "url": "https://github.com/composer",
-                    "type": "github"
-                }
-            ],
-            "time": "2025-08-20T19:15:30+00:00"
         },
         {
             "name": "dasprid/enum",
@@ -15605,132 +15381,86 @@
                 "source": "https://github.com/webmozarts/assert/tree/2.4.1"
             },
             "time": "2026-06-15T15:31:57+00:00"
-        },
-        {
-            "name": "zoon/puphpeteer",
-            "version": "v2.4.3",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/zoonru/puphpeteer.git",
-                "reference": "1c35dc91fc6b31046c26ee7d88e06710de4a2da2"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/zoonru/puphpeteer/zipball/1c35dc91fc6b31046c26ee7d88e06710de4a2da2",
-                "reference": "1c35dc91fc6b31046c26ee7d88e06710de4a2da2",
-                "shasum": ""
-            },
-            "require": {
-                "composer/semver": "^3.0",
-                "ext-json": "*",
-                "php": "^8.1",
-                "psr/log": "^3.0",
-                "zoon/rialto": "^1.6"
-            },
-            "require-dev": {
-                "friendsofphp/php-cs-fixer": "^3.2",
-                "monolog/monolog": "^3.0",
-                "phpstan/phpstan": "^2.0",
-                "phpunit/phpunit": "^11",
-                "symfony/console": "^7",
-                "symfony/filesystem": "^7",
-                "symfony/process": "^7",
-                "symfony/var-dumper": "^7"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Nesk\\Puphpeteer\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Johann Pardanaud",
-                    "email": "pardanaud.j@gmail.com"
-                }
-            ],
-            "description": "A Puppeteer bridge for PHP, supporting the entire API.",
-            "keywords": [
-                "automation",
-                "developer-tools",
-                "headless-chrome",
-                "php",
-                "puppeteer",
-                "testing",
-                "web"
-            ],
-            "support": {
-                "issues": "https://github.com/zoonru/puphpeteer/issues",
-                "source": "https://github.com/zoonru/puphpeteer/tree/v2.4.3"
-            },
-            "time": "2026-02-06T10:27:46+00:00"
-        },
-        {
-            "name": "zoon/rialto",
-            "version": "v1.6.6",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/zoonru/rialto.git",
-                "reference": "1e319b5727529e9ae5499861ee05f490ae7b57f8"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/zoonru/rialto/zipball/1e319b5727529e9ae5499861ee05f490ae7b57f8",
-                "reference": "1e319b5727529e9ae5499861ee05f490ae7b57f8",
-                "shasum": ""
-            },
-            "require": {
-                "clue/socket-raw": "^1.2",
-                "ext-json": "*",
-                "ext-sockets": "*",
-                "php": "^7.2 || ^8.0",
-                "psr/log": "^1.0 || ^2.0 || ^3.0",
-                "symfony/process": "^3.3 || ^4.0 || ^5.0 || ^6.0 || ^7.0"
-            },
-            "require-dev": {
-                "monolog/monolog": "^1.0 || ^2.0 || ^3.0",
-                "phpunit/phpunit": "^8.0 || ^9.0 || ^10"
-            },
-            "suggest": {
-                "ext-weakref": "Required to run all the tests"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Nesk\\Rialto\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Johann Pardanaud",
-                    "email": "pardanaud.j@gmail.com"
-                }
-            ],
-            "description": "Manage Node resources from PHP",
-            "keywords": [
-                "Bridge",
-                "Socket",
-                "communication",
-                "node",
-                "php",
-                "wrapper"
-            ],
-            "support": {
-                "issues": "https://github.com/zoonru/rialto/issues",
-                "source": "https://github.com/zoonru/rialto/tree/v1.6.6"
-            },
-            "time": "2025-10-10T16:12:25+00:00"
         }
     ],
     "packages-dev": [
+        {
+            "name": "composer/semver",
+            "version": "3.4.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/composer/semver.git",
+                "reference": "198166618906cb2de69b95d7d47e5fa8aa1b2b95"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/composer/semver/zipball/198166618906cb2de69b95d7d47e5fa8aa1b2b95",
+                "reference": "198166618906cb2de69b95d7d47e5fa8aa1b2b95",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^5.3.2 || ^7.0 || ^8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^1.11",
+                "symfony/phpunit-bridge": "^3 || ^7"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "3.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Composer\\Semver\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Nils Adermann",
+                    "email": "naderman@naderman.de",
+                    "homepage": "http://www.naderman.de"
+                },
+                {
+                    "name": "Jordi Boggiano",
+                    "email": "j.boggiano@seld.be",
+                    "homepage": "http://seld.be"
+                },
+                {
+                    "name": "Rob Bast",
+                    "email": "rob.bast@gmail.com",
+                    "homepage": "http://robbast.nl"
+                }
+            ],
+            "description": "Semver library that offers utilities, version constraint parsing and validation.",
+            "keywords": [
+                "semantic",
+                "semver",
+                "validation",
+                "versioning"
+            ],
+            "support": {
+                "irc": "ircs://irc.libera.chat:6697/composer",
+                "issues": "https://github.com/composer/semver/issues",
+                "source": "https://github.com/composer/semver/tree/3.4.4"
+            },
+            "funding": [
+                {
+                    "url": "https://packagist.com",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/composer",
+                    "type": "github"
+                }
+            ],
+            "time": "2025-08-20T19:15:30+00:00"
+        },
         {
             "name": "dbrekelmans/bdi",
             "version": "1.4.1",
