@@ -482,8 +482,32 @@ class MenardsRemoteBrowserService
      */
     public function signedIn(): bool
     {
-        // Both outcomes are accepted so a failure to match means the navigation
-        // misfired, not that the session is bad.
+        // Look before navigating. Navigation is the expensive move here, and not
+        // in time — it is what draws Imperva's challenge. On 2026-08-23 a working
+        // session (13 receipts fetched at 07:36) was destroyed at 07:58 by a
+        // single navigation to this very page: the wall came up, and from then on
+        // even the extension's XHR calls got the challenge HTML back instead of
+        // JSON. A health check that breaks the health it is checking is worse
+        // than no health check.
+        //
+        // If the browser is already sitting on a real Menards page, the session
+        // is good and there is nothing to find out.
+        $title = $this->windowTitle();
+
+        if (str_contains($title, 'Receipt Lookup at Menards')) {
+            return true;
+        }
+
+        // Any signed-in Menards page will do as evidence — the account pages all
+        // title themselves "… at Menards®" and none of them render for a signed
+        // out visitor.
+        if (str_contains($title, 'at Menards') && ! str_contains($title, 'Sign In at Menards')) {
+            return true;
+        }
+
+        // Genuinely unknown (a blank tab, the sign-in page, a challenge). Now a
+        // navigation is worth its cost. Both outcomes are accepted so a failure
+        // to match means the navigation misfired, not that the session is bad.
         return str_contains(
             $this->loadAndWait(
                 'https://www.menards.com/main/receiptLookup.html',

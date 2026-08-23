@@ -369,14 +369,6 @@ if(env('APP_ENV') === 'local') {
 }
 
 Route::middleware(['auth', 'registered'])->group(function () {
-    Route::get('/menards-scrape-receipts', function () {
-        \Illuminate\Support\Facades\Artisan::queue('menards:scrape-receipts', [
-            '--match-expenses' => true,
-            '--force' => true,
-        ])->onQueue('long-running');
-
-        return redirect('/horizon/jobs/pending');
-    })->name('menards.scrape');
 
     Route::get('/activate-scheduled-projects', function () {
         \Illuminate\Support\Facades\Artisan::call('projects:activate-scheduled');
@@ -427,13 +419,6 @@ Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orde
 // browser earns the accessToken and posts it here. Bearer-authed, CSRF-exempt.
 Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::class)
     ->name('ewccv.session');
-
-// Menards session hand-off from the browser extension. Imperva refuses the
-// scraper's own sign-in even when the hCaptcha is solved, so the session comes
-// from a real browser instead. Bearer-authed, CSRF-exempt, rate-limited.
-Route::post('api/menards/session', \App\Http\Controllers\MenardsSessionController::class)
-    ->middleware('throttle:20,1')
-    ->name('menards.session');
 
 // Menards receipts fetched by the browser extension running in the server-side
 // signed-in Chromium. Bearer-authed, CSRF-exempt; writes a manifest + PDFs and

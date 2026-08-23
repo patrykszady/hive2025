@@ -135,7 +135,14 @@ class MenardsBrowser extends Command
             sleep(10);
         }
 
-        if ($this->login($browser) !== self::SUCCESS) {
+        // Proof beats probing. A receipt batch that arrived in the last day was
+        // fetched BY the extension THROUGH this session, so the session works —
+        // there is nothing login() could usefully verify, and verifying it costs
+        // a navigation, which is the single thing most likely to draw Imperva's
+        // challenge and destroy the session we just proved good.
+        if ($this->recentBatchArrived()) {
+            $this->line('A receipt batch arrived within the last day — the session works; not touching the browser.');
+        } elseif ($this->login($browser) !== self::SUCCESS) {
             return self::FAILURE;
         }
 
@@ -182,6 +189,31 @@ class MenardsBrowser extends Command
             $this->warn("No receipt batch has arrived in {$days} days — the sync may be failing silently.");
             \Illuminate\Support\Facades\Log::channel('menards')->error('Menards ensure: no ingest batch in ' . $days . ' days');
         }
+    }
+
+    /**
+     * Did the extension deliver anything in the last 25 hours?
+     *
+     * 25 rather than 24 so a daily run that drifts by a few minutes does not
+     * conclude the sync is broken when yesterday's batch is 24h01m old.
+     */
+    protected function recentBatchArrived(): bool
+    {
+        $dir = storage_path('files/_menards_ingest');
+
+        if (! is_dir($dir)) {
+            return false;
+        }
+
+        $cutoff = now()->subHours(25)->getTimestamp();
+
+        foreach (glob($dir . '/*', GLOB_ONLYDIR) ?: [] as $batch) {
+            if (filemtime($batch) >= $cutoff) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

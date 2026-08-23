@@ -60,7 +60,8 @@ return [
     ],
 
     'menards' => [
-        // Shared secret for the browser session bridge (scripts/menards-session-bridge).
+        // Shared secret the receipt extension uses to authenticate to
+        // /api/menards/receipts (scripts/menards-receipt-extension).
         'bridge_token' => env('MENARDS_BRIDGE_TOKEN'),
         // Server-side signed-in browser (MenardsRemoteBrowserService).
         'chromium_binary' => env('MENARDS_CHROMIUM_BINARY'),
