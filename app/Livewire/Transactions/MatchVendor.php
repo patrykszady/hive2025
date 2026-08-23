@@ -11,6 +11,7 @@ use App\Models\TransactionBulkMatch;
 use App\Services\VendorSuggestionService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
+use Flux;
 use Livewire\Component;
 
 class MatchVendor extends Component
@@ -66,6 +67,40 @@ class MatchVendor extends Component
             ->groupBy('plaid_merchant_name')
             ->values()
             ->toArray();
+    }
+
+    /**
+     * Re-read everything mount() reads, without a page load.
+     *
+     * These actions change what is left to match, so the lists must be rebuilt
+     * — but a redirect() back to this same route was a full round trip that
+     * threw away scroll position and every other card's half-filled form. The
+     * component owns its state; it can just reload it.
+     */
+    protected function refreshLists(): void
+    {
+        $this->vendors = Vendor::withoutGlobalScopes()
+            ->select(['id', 'business_name', 'city', 'state'])
+            ->orderBy('business_name', 'ASC')
+            ->get();
+
+        $this->loadExpenseReceiptMerchants();
+        $this->loadMerchantNames();
+
+        $this->match_vendor_names = Transaction::transactionsSinVendor()
+            ->select(['id', 'plaid_merchant_name'])
+            ->get()
+            ->groupBy('plaid_merchant_name')
+            ->values()
+            ->toArray();
+
+        // Row indexes are positional, so anything keyed by index is stale the
+        // moment a merchant disappears from the list. Leaving them would apply
+        // one card's suggestion to whichever merchant slid into its place.
+        $this->ai_suggestions = [];
+        $this->match_merchant_names = [];
+        $this->match_expense_merchant_names = [];
+        $this->resetValidation();
     }
 
     public function updated($field)
@@ -238,7 +273,15 @@ class MatchVendor extends Component
 
         app(TransactionController::class)->add_vendor_to_transactions();
 
-        return redirect(route('transactions.match_vendor'));
+        $this->refreshLists();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: $vendor->wasRecentlyCreated ? 'Vendor created and matched.' : 'Vendor matched.',
+            text: $vendor->business_name.(filled($matchDesc) ? ' — future "'.$matchDesc.'" transactions will match automatically.' : ''),
+        );
     }
 
     /**
@@ -307,7 +350,16 @@ class MatchVendor extends Component
         //6-8-2022 run in a queue?
         app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_expenses_sin_vendor();
 
-        return redirect(route('transactions.match_vendor'));
+        $saved = count($this->match_expense_merchant_names);
+        $this->refreshLists();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: $saved === 1 ? 'Expense vendor saved.' : $saved.' expense vendors saved.',
+            text: '',
+        );
     }
 
     public function store()
@@ -377,7 +429,16 @@ class MatchVendor extends Component
         app(\App\Http\Controllers\TransactionController::class)->add_vendor_to_transactions();
         app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();
 
-        return redirect(route('transactions.match_vendor'));
+        $saved = count($this->match_merchant_names);
+        $this->refreshLists();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: $saved === 1 ? 'Transaction matched.' : $saved.' transactions matched.',
+            text: '',
+        );
     }
 
     #[Title('Match Transaction/Vendor')]

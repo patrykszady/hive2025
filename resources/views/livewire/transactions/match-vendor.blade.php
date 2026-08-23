@@ -1,16 +1,33 @@
 <div>
+    <x-page.breadcrumbs :items="[
+        ['label' => 'Global Actions'],
+        ['label' => 'Match Vendor'],
+    ]" />
+
     <div class="space-y-6">
     {{-- Transaction Matching --}}
         <div class="max-w-3xl">
         <form wire:submit="{{ $view_text['form_submit'] }}">
             @foreach($merchant_names as $merchant_name => $merchant_transactions)
-                <x-island-card class="mt-6" wire:key="txn-card-{{ $loop->index }}">
-                    <flux:heading size="lg" class="break-all">
-                        {{ $merchant_name }}
-                    </flux:heading>
-                    @if($merchant_name != $merchant_transactions->first()->plaid_merchant_name)
-                        <flux:subheading>{{ $merchant_transactions->first()->plaid_merchant_name }}</flux:subheading>
-                    @endif
+                <x-island-card
+                    class="mt-6"
+                    wire:key="txn-card-{{ $loop->index }}"
+                    :heading="$merchant_name"
+                    :subheading="$merchant_name != $merchant_transactions->first()->plaid_merchant_name ? $merchant_transactions->first()->plaid_merchant_name : null"
+                >
+                    {{-- Top-right of the header: the card's one action. --}}
+                    <x-slot:actions>
+                        <flux:button
+                            type="button"
+                            size="sm"
+                            icon="sparkles"
+                            wire:click="suggestVendor({{ $loop->index }})"
+                            wire:loading.attr="disabled"
+                            wire:target="suggestVendor({{ $loop->index }})"
+                        >
+                            AI Identify
+                        </flux:button>
+                    </x-slot:actions>
 
                     <div class="space-y-4">
                         {{-- Transaction list --}}
@@ -88,20 +105,8 @@
                             </flux:button>
                         </flux:input.group>
 
-                        <div class="flex items-center gap-3">
-                            <flux:button
-                                type="button"
-                                size="sm"
-                                icon="sparkles"
-                                wire:click="suggestVendor({{ $loop->index }})"
-                                wire:loading.attr="disabled"
-                                wire:target="suggestVendor({{ $loop->index }})"
-                            >
-                                AI Identify
-                            </flux:button>
-                            <div wire:loading wire:target="suggestVendor({{ $loop->index }})" class="text-xs italic text-zinc-500">
-                                Searching the web for this merchant…
-                            </div>
+                        <div wire:loading wire:target="suggestVendor({{ $loop->index }})" class="text-xs italic text-zinc-500">
+                            Searching the web for this merchant…
                         </div>
 
                         @if(isset($ai_suggestions[$loop->index]))
