@@ -250,11 +250,15 @@ it('matches via the deterministic markdown barcode annotation', function () {
     expect($waiver->refresh()->status)->toBe(LienWaiverStatus::Signed);
 });
 
-it('falls back to the footer filename when no barcode decoded at all', function () {
+it('falls back to the printed footer id when no symbol decoded at all', function () {
     [, , , $waiver] = waiverScanFixtures();
 
+    // The footer FILENAME fallback is gone — the filename is no longer printed
+    // (it sat where the notary stamps). Its replacement is the printed id read
+    // as characters: both symbols are all-or-nothing under damage, while text
+    // degrades gracefully and stays readable after a symbol stops decoding.
     $content = cuContentFor('IGNORED', [
-        'FooterFilename' => ['type' => 'string', 'valueString' => "lien-waiver-{$waiver->id}-accomplished-j-plumbing-inc-3154-violet-ln.pdf"],
+        'FooterDocumentId' => ['type' => 'string', 'valueString' => "HLW-{$waiver->id}"],
     ]);
     $content['markdown'] = '<!-- PageFooter: no barcode readable -->';
 
@@ -587,11 +591,13 @@ it('reads the waiver id off an OCR-mangled footer filename when the barcode will
     // missed it and the whole message went to the error folder.
     [, , , $waiver] = waiverScanFixtures();
 
-    // No decoded-barcode annotation in the markdown: the footer filename is the
-    // only route left, exactly as in the real scan.
+    // No decoded-barcode annotation in the markdown: the printed footer id is
+    // the only route left, exactly as in the real scan. The analyzer field is
+    // scoped to the footer card, so a mangled separator can be repaired
+    // safely — nothing else on the page can reach this value.
     fakeScanPipeline([array_merge(
         cuContentFor('HLW-' . $waiver->id, [
-            'FooterFilename' => ['type' => 'string', 'valueString' => "lien-wa ver-{$waiver->id}-pimg-corpentry-inx-:-263-364-214-mark-geil-orodson-3154-viclet-in-craw-1-7026-07-28.odf"],
+            'FooterDocumentId' => ['type' => 'string', 'valueString' => "HLW {$waiver->id}"],
         ]),
         ['markdown' => "## CONTRACTOR'S AFFIDAVIT\n<!-- PageFooter: no readable barcode -->"],
     )]);
@@ -688,16 +694,15 @@ it('treats an indeterminate IsWetSigned (field present, no value) as unknown, no
     assertMovedTo(WSI_SAVED);
 });
 
-it('ignores HLW/HSS-lookalike free text in the page body (no fabricated codes)', function () {
+it('never fabricates a code from hyphenless HLW/HSS lookalikes in the page body', function () {
     [, , , $waiver] = waiverScanFixtures();
 
-    $content = cuContentFor('IGNORED', [
-        'FooterFilename' => ['type' => 'string', 'valueString' => ''],
-    ]);
-    // Real-world GCSS body text: "HSS" (hollow structural section) next to an
-    // amount column must NOT fabricate an HSS-6 code; free text with typed
-    // codes must not match either.
-    $content['markdown'] = "Steel HSS\n6,000.00 column\nAlso typed text HLW-{$waiver->id} should not count";
+    $content = cuContentFor('IGNORED');
+    // The real-world hazard this guards: a GCSS line reading "HSS" (hollow
+    // structural section) beside an amount column must never become HSS-6.
+    // The separator has to be a literal hyphen, so neither line below can
+    // fabricate a code.
+    $content['markdown'] = "Steel HSS\n6,000.00 column\nAlso HLW {$waiver->id} spelled with a space";
 
     fakeScanPipeline([$content]);
 
@@ -706,6 +711,28 @@ it('ignores HLW/HSS-lookalike free text in the page body (no fabricated codes)',
     expect($stats['matched'])->toBe(0)
         ->and($waiver->refresh()->status)->toBe(LienWaiverStatus::Sent);
     assertMovedTo(WSI_ERROR);
+});
+
+it('DOES accept a properly hyphenated id read from page text — the third fallback', function () {
+    [, , , $waiver] = waiverScanFixtures();
+
+    // A deliberate loosening (2026-08 lien-waiver revisions): free page text
+    // carrying a literal "HLW-{id}" now matches, because both symbols are
+    // all-or-nothing under scan damage while characters degrade gracefully.
+    //
+    // The trade-off is real and worth knowing: a document that merely MENTIONS
+    // a waiver id in its prose will match that waiver. It is accepted because
+    // the footer id is itself page text — reading it is how a crushed footer
+    // is recovered — and because everything downstream still has to agree
+    // (company, address, wet-signature) before a waiver flips to Signed.
+    $content = cuContentFor('IGNORED');
+    $content['markdown'] = "## CONTRACTOR'S AFFIDAVIT\nSee waiver HLW-{$waiver->id} attached";
+
+    fakeScanPipeline([$content]);
+
+    $stats = app(WaiverScanIngest::class)->processInbox();
+
+    expect($stats['matched'])->toBe(1);
 });
 
 it('re-rendering a waiver never clobbers an ingested scan', function () {
@@ -822,13 +849,13 @@ it('keeps every page of a genuine multi-page document even when one page barcode
 it('does not trim when there is no page-level evidence to decide safely (matched via footer filename, real multi-page attachment)', function () {
     [, , , $waiver] = waiverScanFixtures();
 
-    // No barcode anywhere in the markdown — matched purely via the footer
-    // filename fallback, exactly like the "falls back to the footer
-    // filename" test above, but this time backed by a REAL 2-page PDF. With
-    // zero barcode-page evidence, selectPagesToKeep() must return null and
-    // trimToOwnPages() must leave the attachment untouched.
+    // No symbol anywhere in the markdown — matched purely via the printed
+    // footer id, like the "falls back to the printed footer id" test above,
+    // but this time backed by a REAL 2-page PDF. With zero barcode-page
+    // evidence, selectPagesToKeep() must return null and trimToOwnPages()
+    // must leave the attachment untouched.
     $content = cuContentFor('IGNORED', [
-        'FooterFilename' => ['type' => 'string', 'valueString' => "lien-waiver-{$waiver->id}-accomplished-j-plumbing-inc-3154-violet-ln.pdf"],
+        'FooterDocumentId' => ['type' => 'string', 'valueString' => "HLW-{$waiver->id}"],
     ]);
     $content['markdown'] = '<!-- PageFooter: no barcode readable -->';
 

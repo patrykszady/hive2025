@@ -16,8 +16,10 @@ use Illuminate\Support\Facades\Storage;
  * Inbound pipeline for waivers@hive.contractors: vendors print, wet-sign and
  * notarize lien waivers / GCSS sworn statements, then email the scans back.
  * Every page we generate carries a Code 128 barcode ("HLW-{waiver id}" /
- * "HSS-{statement id}") plus the filename in the footer, so a scan can be
- * matched to its record even when OCR of the body text is poor.
+ * "HSS-{statement id}"), a QR of the same value, and that id printed as
+ * text, so a scan can be matched to its record even when OCR of the body
+ * text is poor. The filename is NOT printed — it took the corner a notary
+ * stamps.
  *
  * Flow per message (mirrors the certificates@ pipeline):
  *   Inbox -> [no usable attachment] -> Deleted Items
@@ -306,10 +308,17 @@ class WaiverScanIngest
      * page text, where body content like "HSS 6,000" (hollow structural
      * section next to an amount) would fabricate codes, and NOT an LLM echo
      * field (it grounds on random spans and can hallucinate):
-     *   1. decoded barcode annotations in the markdown: ![Code128](... "HLW-2")
-     *      — emitted deterministically by the barcode engine
-     *   2. the footer filename ("lien-waiver-{id}-...", OCR-tolerant since the
-     *      field is already scoped to the footer card)
+     *   1. a decoded QR annotation: ![QRCode](... "HLW-11") — error-corrected
+     *      to ~30%, so the symbol likeliest to survive a folded or faxed page
+     *   2. a decoded Code 128 annotation: ![Code128](... "HLW-2") — no error
+     *      correction, but deterministic when it does decode
+     *   3. the printed footer id read as characters, from the footer-scoped
+     *      analyzer field or from page text where the separator must be a
+     *      literal hyphen
+     *
+     * The footer FILENAME is no longer a source: it is no longer printed (it
+     * occupied the corner a notary stamps). This list said otherwise long
+     * after the code stopped reading it — keep it honest.
      *
      * @return array<string, array{company:?string, address:?string, wet_signed:?bool, type:?string, notary_stamp:?bool, has_affidavit:?bool, details:array}>
      */

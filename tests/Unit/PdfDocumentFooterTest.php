@@ -24,8 +24,13 @@ it('renders a wider Code 128 than the library default, plus a QR backup encoding
 it('degrades to a plain text fallback (not a blank footer) when the barcode value is empty', function () {
     $html = PdfDocumentFooter::build('', 'sworn-statement-x.pdf');
 
+    // The filename is deliberately NOT printed any more: at ~100 characters it
+    // occupied the bottom-right of the page, which is where a notary signs and
+    // stamps. The $filename parameter is kept so callers work unchanged, but
+    // nothing renders it — so the footer must still carry the return address,
+    // which is the part that tells a vendor what to do with the page.
     expect($html)->not->toContain('<img')
-        ->and($html)->toContain('sworn-statement-x.pdf')
+        ->and($html)->not->toContain('sworn-statement-x.pdf')
         ->and($html)->toContain(PdfDocumentFooter::RETURN_EMAIL);
 });
 
