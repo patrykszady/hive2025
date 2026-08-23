@@ -31,8 +31,19 @@ PULL=0
 
 if [ "$CHANNEL" = "--pull" ]; then
     PULL=1
-    CHANNEL="${1:?usage: --pull CHANNEL}"
+    CHANNEL="${1:?usage: --pull CHANNEL [CHANNEL...]}"
     shift || true
+
+    # Pull several in one go: `--pull menards laravel telnyx`. Each lands in
+    # storage/logs/prod-<file>, where the local Log Viewer picks it up on its
+    # own — the pulled copies are gitignored along with the rest of that
+    # directory, which matters because production logs carry real PII.
+    if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+        for extra in "$@"; do
+            "$0" --pull "$extra" || true
+        done
+        set --
+    fi
 fi
 
 while [ $# -gt 0 ]; do
