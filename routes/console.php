@@ -277,32 +277,22 @@ Schedule::command('scout:sync-index-settings')
     ->withoutOverlapping()
     ->onOneServer();
 
-// Menards receipt scraping — once daily with a 14-day lookback.
+// Menards receipt scraping is NOT scheduled here any more.
 //
-// Was 4x/day with `--since={today-2}` and `--force`, which caused three problems:
+// Fetching now happens inside the signed-in browser on the server: the receipt
+// extension's own chrome.alarms fires daily, calls Menards' receipt-lookup JSON
+// endpoints with the session a person established, and POSTs the results to
+// /api/menards/receipts, which queues ImportMenardsReceiptBatch. Nothing on the
+// Laravel schedule needs to drive that.
 //
-//  1. The hardcoded 2-day window OVERRIDES last_queried_at, so any outage longer
-//     than two days is permanently unrecoverable — the 2026-08-05..08-20 gap
-//     could never have healed itself no matter how well the scraper worked.
-//     14 days lets a normal outage backfill on its own.
-//  2. `--force` DELETES the existing receipt before re-importing (see
-//     ScrapeMenardsReceipts.php ~line 360) and re-runs OCR on every row in the
-//     window. Without it, already-imported receipts hit the exists-branch and
-//     cost nothing — which is what makes the wider window free.
-//  3. Four runs a day is four times the request volume at a site that scores
-//     automated clients, for data that changes at most once a day.
-$menardsLogPath = storage_path('logs/menards-scraper.log');
-$menardsSince = now()->subDays(14)->format('Y-m-d');
-foreach (['08:05'] as $time) {
-    Schedule::command("menards:scrape-receipts --match-expenses --since={$menardsSince}")->runInBackground()
-        ->dailyAt($time)
-        ->timezone('America/Chicago')
-        ->name("menards-scrape-{$time}")
-        ->environments(['production'])
-        ->withoutOverlapping()
-        ->onOneServer()
-        ->appendOutputTo($menardsLogPath);
-}
+// What used to be here ran `menards:scrape-receipts` without --skip-scrape,
+// which invokes the Puppeteer scraper. Imperva has been answering that with a
+// 930-byte block page served as HTTP 200 since mid-August, so leaving it in
+// place meant a guaranteed daily failure — and a daily automated request at a
+// site that scores exactly that — for data the extension had already collected.
+//
+// The importer itself is still available by hand for a re-import:
+//   php artisan menards:scrape-receipts --skip-scrape --match-expenses --output-dir=<dir>
 
 // Retry scraping product images for material-order receipt items that are missing them
 // Covers items where the initial scrape failed (API timeout, bad search query, etc.)
