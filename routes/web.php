@@ -752,3 +752,7 @@ $hubRoutes();
 // controller returns 401/403 itself and denies by default.
 Route::get('internal/menards-vnc-auth', [\App\Http\Controllers\MenardsVncController::class, 'gate'])
     ->name('menards.vnc.gate');
+
+// Where the viewer page reports failures only its own browser can see.
+Route::post('internal/menards-vnc-report', [\App\Http\Controllers\MenardsVncController::class, 'report'])
+    ->name('menards.vnc.report');

@@ -579,6 +579,27 @@ class MenardsRemoteBrowserService
     }
 
     /** @return array{running: bool, chrome: bool, extension: bool, configured: bool, signed_in: bool, posts_to: string, page: string} */
+    /**
+     * Can the noVNC gateway actually be reached?
+     *
+     * status() reports on processes; this reports on the socket the browser page
+     * is proxied to. They come apart in practice — websockify can die on its own
+     * while Xvfb and Chrome stay up, and the symptom is a viewer that renders a
+     * blank frame with nothing anywhere saying why.
+     */
+    public function vncReachable(): bool
+    {
+        $sock = @fsockopen('127.0.0.1', self::WS_PORT, $errno, $errstr, 2);
+
+        if ($sock === false) {
+            return false;
+        }
+
+        fclose($sock);
+
+        return true;
+    }
+
     public function status(): array
     {
         $cookieDb = $this->userDataDir() . '/Default/Cookies';
