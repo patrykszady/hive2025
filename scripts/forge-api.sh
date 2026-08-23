@@ -163,19 +163,43 @@ else:
 sys.stdout.write('\n'.join(lines) + '\n')
 PYEOF
 
+        # {"environment": ...} — NOT the JSON:API {"data":{"attributes":…}} shape
+        # the deployments/script endpoint uses. Mixing them up gets a 422, which
+        # the first version of this command threw away with >/dev/null and then
+        # reported success anyway. The response is checked now, and the write is
+        # confirmed by reading the environment back rather than trusting the
+        # status code: a 202 means "accepted", not "applied".
         python3 -c "
 import json, sys
 content = open(sys.argv[1]).read()
-print(json.dumps({'data': {'attributes': {'content': content}}}))
+print(json.dumps({'environment': content}))
 " "$UPDATED" > /tmp/forge-env-payload.json
 
+        RESP=$(mktemp)
         if [ "$API_VERSION" = "current" ]; then
-            api PUT "$SITE_PATH/environment" /tmp/forge-env-payload.json >/dev/null
+            CODE=$(curl -sS -X PUT -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
+                -H "Content-Type: application/json" --max-time 30 \
+                -d @/tmp/forge-env-payload.json -o "$RESP" -w '%{http_code}' "$SITE_PATH/environment")
         else
-            api PUT "$SITE_PATH/env" /tmp/forge-env-payload.json >/dev/null
+            CODE=$(curl -sS -X PUT -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
+                -H "Content-Type: application/json" --max-time 30 \
+                -d @/tmp/forge-env-payload.json -o "$RESP" -w '%{http_code}' "$SITE_PATH/env")
         fi
         rm -f /tmp/forge-env-payload.json
-        echo "set $KEY ($(wc -l < "$UPDATED") lines total)"
+
+        case "$CODE" in
+            2*) ;;
+            *)  echo "FAILED (HTTP $CODE): $(head -c 300 "$RESP")" >&2; rm -f "$RESP"; exit 1 ;;
+        esac
+        rm -f "$RESP"
+
+        sleep 3  # the PUT is applied asynchronously; give it a moment before verifying
+        if "$0" get-env | grep -q "^$KEY="; then
+            echo "set $KEY (verified, $(wc -l < "$UPDATED") lines total)"
+        else
+            echo "FAILED: HTTP $CODE accepted the write but $KEY is not in the environment on read-back" >&2
+            exit 1
+        fi
         ;;
     *)
         sed -n '2,18p' "$0"; exit 1

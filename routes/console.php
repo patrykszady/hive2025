@@ -293,6 +293,24 @@ Schedule::command('scout:sync-index-settings')
 //
 // The importer itself is still available by hand for a re-import:
 //   php artisan menards:scrape-receipts --skip-scrape --match-expenses --output-dir=<dir>
+//
+// What IS scheduled is the self-healing check. `ensure` restarts the stack if
+// the server rebooted, rewrites the extension's config if the token changed,
+// and signs back in if Menards expired the session — so any of those repairs
+// itself within the hour. The old arrangement's failure mode was two weeks of
+// silence; this one's is sixty minutes. It also logs loudly (menards channel)
+// when no receipt batch has arrived in a week.
+//
+// Worst case for the hourly cadence: it lands during the extension's once-daily
+// sync and navigates the tab mid-run. Nothing durable is lost — the sync posts
+// once at the end, so an interrupted run posts nothing and the next day's
+// 14-day lookback re-covers it.
+Schedule::command('menards:browser ensure')
+    ->hourly()
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/menards-ensure.log'));
 
 // Retry scraping product images for material-order receipt items that are missing them
 // Covers items where the initial scrape failed (API timeout, bad search query, etc.)

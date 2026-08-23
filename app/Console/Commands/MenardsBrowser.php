@@ -14,7 +14,7 @@ use Illuminate\Console\Command;
  */
 class MenardsBrowser extends Command
 {
-    protected $signature = 'menards:browser {action=status : start|stop|status|check|login}
+    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure}
         {--reset-profile : Wipe the browser profile — this signs you out}';
 
     protected $description = 'Manage the server-side signed-in browser used to sync Menards receipts';
@@ -24,10 +24,107 @@ class MenardsBrowser extends Command
         return match ($this->argument('action')) {
             'check' => $this->check($browser),
             'login' => $this->login($browser),
+            'ensure' => $this->ensure($browser),
             'start' => $this->start($browser),
             'stop' => $this->stop($browser),
             default => $this->status($browser),
         };
+    }
+
+    /**
+     * Make everything about the receipt browser true, idempotently.
+     *
+     * This is the whole lifecycle as one command: repack the extension if its
+     * source changed, (re)start the stack if it is down / unconfigured / stale,
+     * sign in if the session lapsed, then report. Safe to run any time — the
+     * deploy script runs it after every deploy and the scheduler runs it hourly,
+     * which is what makes the arrangement self-healing: a rebooted server or an
+     * expired session repairs itself within the hour instead of failing silently
+     * for two weeks the way the Puppeteer scraper did.
+     *
+     * The hourly run can, at worst, land during the extension's once-daily sync
+     * and navigate the tab out from under it. That costs nothing durable: the
+     * sync posts its receipts in one request at the end, so an interrupted run
+     * posts nothing, and the next day's run re-covers the window (14-day
+     * lookback, idempotent import).
+     */
+    protected function ensure(MenardsRemoteBrowserService $browser): int
+    {
+        $req = $browser->checkRequirements();
+
+        if (! $req['ok']) {
+            $this->error('Missing host requirements: ' . implode(', ', $req['missing']));
+            $this->line('Run once: bash scripts/provision-menards-browser.sh');
+
+            return self::FAILURE;
+        }
+
+        // Repack the policy-installed extension if its source changed. Prints
+        // "REPACK: unavailable" on a box that has never been fully provisioned
+        // (a dev machine using Load unpacked) — not an error here.
+        $repack = (string) shell_exec(
+            'bash ' . escapeshellarg(base_path('scripts/provision-menards-browser.sh')) . ' repack 2>&1'
+        );
+        $repackChanged = str_contains($repack, 'REPACK: changed');
+
+        if ($repackChanged) {
+            $this->line('Extension source changed — repacked; the restart below installs it.');
+        }
+
+        $status = $browser->status();
+
+        if (! $status['running'] || ! $status['chrome'] || ! $status['configured'] || $repackChanged) {
+            $this->line('Starting the browser…');
+            $result = $browser->start();
+
+            if (! ($result['ok'] ?? false)) {
+                $this->error($result['error'] ?? 'Failed to start.');
+
+                return self::FAILURE;
+            }
+
+            // Chrome needs a moment past process-up to apply the force-install
+            // policy and boot the extension before status can see either.
+            sleep(10);
+        }
+
+        if ($this->login($browser) !== self::SUCCESS) {
+            return self::FAILURE;
+        }
+
+        $this->warnIfNoRecentBatches();
+
+        $final = $browser->status();
+        $this->printStatus($final);
+
+        $healthy = $final['running'] && $final['chrome'] && $final['extension']
+            && $final['configured'] && $final['signed_in'];
+
+        return $healthy ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * The failure mode that actually bit: everything looks healthy and nothing
+     * arrives. The extension only POSTs when it finds receipts, so a quiet week
+     * can be real — but at this company a week without a Menards purchase is
+     * rare enough that a stale ingest directory is worth a loud line in the log
+     * someone can alert on, where the old scraper's two-week silent gap was not.
+     */
+    protected function warnIfNoRecentBatches(): void
+    {
+        $dirs = glob(storage_path('files/_menards_ingest/*'), GLOB_ONLYDIR) ?: [];
+
+        if ($dirs === []) {
+            return; // freshly provisioned — nothing has ever arrived, nothing is "late"
+        }
+
+        $newest = max(array_map('filemtime', $dirs));
+
+        if ($newest < now()->subDays(7)->getTimestamp()) {
+            $days = now()->diffInDays(\Carbon\Carbon::createFromTimestamp($newest));
+            $this->warn("No receipt batch has arrived in {$days} days — the sync may be failing silently.");
+            \Illuminate\Support\Facades\Log::channel('menards')->error('Menards ensure: no ingest batch in ' . $days . ' days');
+        }
     }
 
     /**
@@ -123,10 +220,19 @@ class MenardsBrowser extends Command
         }
 
         $this->info('Browser started.');
-        $this->line('  Sign in here (tunnel the port, then open it):');
-        $this->line('  ' . $result['vnc_url']);
+
+        $postsTo = $browser->postsTo();
+        $this->line('  extension posts to: ' . ($postsTo ?: '(unconfigured — set MENARDS_BRIDGE_TOKEN)'));
         $this->newLine();
-        $this->line('  ssh -L 6098:127.0.0.1:6098 forge@<server>   # then browse to the URL above');
+
+        // The 127.0.0.1 below is correct, not a placeholder: the ssh tunnel maps
+        // your machine's loopback onto this server's, and these ports are bound
+        // to loopback on purpose — they must never be public.
+        $address = trim((string) shell_exec("hostname -I 2>/dev/null | awk '{print \$1}'")) ?: gethostname();
+        $user = get_current_user() ?: 'forge';
+        $this->line('  To watch it (optional):');
+        $this->line("  ssh -L 6098:127.0.0.1:6098 {$user}@{$address}");
+        $this->line('  ' . $result['vnc_url']);
 
         return self::SUCCESS;
     }
@@ -141,26 +247,29 @@ class MenardsBrowser extends Command
 
     protected function status(MenardsRemoteBrowserService $browser): int
     {
-        $status = $browser->status();
+        $this->printStatus($browser->status());
 
+        return self::SUCCESS;
+    }
+
+    protected function printStatus(array $status): void
+    {
         foreach ($status as $k => $v) {
-            // 'page' is the window title, not a flag — printing it as yes/no
-            // would throw away the one field that says what is actually on screen.
+            // 'page' and 'posts_to' are strings, not flags — printing them as
+            // yes/no would throw away exactly the detail they exist to show.
             $this->line(sprintf('  %-10s %s', $k, is_bool($v) ? ($v ? 'yes' : 'no') : ($v ?: '—')));
         }
 
         if ($status['running'] && ! $status['extension']) {
             $this->newLine();
             $this->warn('The receipt extension is not loaded — nothing will sync.');
-            $this->line('Run scripts/provision-menards-browser.sh, then restart: menards:browser start');
+            $this->line('Run scripts/provision-menards-browser.sh, then: php artisan menards:browser ensure');
         }
 
         if (! $status['configured']) {
             $this->newLine();
             $this->warn('The extension has no Hive URL or token — it cannot deliver receipts.');
-            $this->line('Set MENARDS_BRIDGE_TOKEN in the environment, then: menards:browser start');
+            $this->line('Set MENARDS_BRIDGE_TOKEN in the environment, then: php artisan menards:browser ensure');
         }
-
-        return self::SUCCESS;
     }
 }

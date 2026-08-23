@@ -202,30 +202,38 @@ chrome.runtime.onMessage.addListener(msg => {
 chrome.action.onClicked.addListener(() => run('manual'));
 
 /**
- * Seed the Hive URL/token from a bundled defaults.json when storage is empty.
+ * Apply the Hive URL/token from the bundled defaults.json.
  *
- * The browser this runs in lives on a server and is reached only over VNC, so
- * making someone hand-type a 48-character token into an options page through a
- * remote framebuffer is a poor first-run experience. Anything already in storage
- * wins, so the options page still overrides this.
+ * defaults.json is written by the server from its own config on every
+ * `menards:browser start`, which makes it the source of truth here — so it is
+ * applied on every startup, not only when storage is empty. That is what lets a
+ * rotated token or a corrected APP_URL reach the extension without someone
+ * retyping it into an options page through a remote framebuffer. (The first
+ * version seeded only into empty storage, which meant a fix to either value
+ * silently never took effect on a browser that had already run once.)
+ *
+ * Values typed into the options page therefore survive only until the next
+ * browser restart. On the server that is the intended order of authority; on a
+ * dev profile with no defaults.json bundled, the options page remains the way in.
  */
 async function seedDefaults() {
-    const current = await chrome.storage.local.get(['serverUrl', 'token']);
-
-    if (current.serverUrl && current.token) return;
-
     try {
         const res = await fetch(chrome.runtime.getURL('defaults.json'));
         if (!res.ok) return;
 
         const d = await res.json();
+        if (!d.serverUrl && !d.token) return;
 
-        await chrome.storage.local.set({
-            serverUrl: current.serverUrl || d.serverUrl || '',
-            token: current.token || d.token || '',
-        });
+        const current = await chrome.storage.local.get(['serverUrl', 'token']);
+        const next = {
+            serverUrl: d.serverUrl || current.serverUrl || '',
+            token: d.token || current.token || '',
+        };
 
-        await note('seeded configuration from defaults.json');
+        if (next.serverUrl !== current.serverUrl || next.token !== current.token) {
+            await chrome.storage.local.set(next);
+            await note(`applied configuration from defaults.json (posting to ${next.serverUrl})`);
+        }
     } catch {
         // No defaults bundled — the options page is the other way in.
     }

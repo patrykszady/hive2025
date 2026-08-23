@@ -540,7 +540,7 @@ class MenardsRemoteBrowserService
         ));
     }
 
-    /** @return array{running: bool, chrome: bool, extension: bool, configured: bool, signed_in: bool, page: string} */
+    /** @return array{running: bool, chrome: bool, extension: bool, configured: bool, signed_in: bool, posts_to: string, page: string} */
     public function status(): array
     {
         $cookieDb = $this->userDataDir() . '/Default/Cookies';
@@ -563,8 +563,24 @@ class MenardsRemoteBrowserService
             // persisted at some point, not that it is still valid. `login`
             // answers the real question by loading the receipt page.
             'signed_in' => is_file($cookieDb) && filesize($cookieDb) > 20480,
+            // Where the extension will POST receipts — read back from the file
+            // actually handed to it, not from config, so a stale defaults.json
+            // (written before APP_URL or the token changed) is visible here
+            // instead of being discovered as receipts that never arrive.
+            'posts_to' => $this->postsTo(),
             'page' => $running ? $this->windowTitle() : '',
         ];
+    }
+
+    public function postsTo(): string
+    {
+        $path = $this->extensionDir() . '/defaults.json';
+
+        if (! is_file($path)) {
+            return '';
+        }
+
+        return (string) (json_decode((string) file_get_contents($path), true)['serverUrl'] ?? '');
     }
 
     /** Has defaults.json been written with a usable Hive URL and token? */
