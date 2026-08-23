@@ -31,7 +31,6 @@ use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Intervention\Image\Facades\Image;
-use Nesk\Puphpeteer\Puppeteer;
 use setasign\Fpdi\Fpdi;
 use Symfony\Component\DomCrawler\Crawler;
 use App\Support\ApiErrorFormatter;

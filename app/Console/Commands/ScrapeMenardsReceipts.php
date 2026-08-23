@@ -17,13 +17,12 @@ class ScrapeMenardsReceipts extends Command
 {
     protected $signature = 'menards:scrape-receipts
         {--belongs-to-vendor-id= : The belongs_to_vendor_id that owns this Menards account (auto-detected if only one exists)}
-        {--since= : Only scrape receipts on or after this date (e.g. 2025-03-01). Defaults to last_queried_at or 10 days ago}
-        {--visible : Run browser in visible (non-headless) mode}
-        {--dry-run : Scrape only, do not import into database}
-        {--match-expenses : Try to match scraped receipts to existing expenses by date + amount}
+        {--since= : Only import receipts on or after this date (e.g. 2026-07-01). Defaults to last_queried_at or 90 days ago}
+        {--dry-run : Parse the manifest and report, do not write to the database}
+        {--match-expenses : Match imported receipts to existing expenses by date + amount}
         {--force : Overwrite existing Menards receipts (re-run OCR)}
         {--vendor-id= : Menards vendor ID (auto-detected if omitted)}
-        {--skip-scrape : Retained for compatibility; importing is now the only mode}
+        {--skip-scrape : No-op. Importing is the only mode; the flag is kept so existing callers keep working}
         {--output-dir= : Custom output directory (default: storage/files/_temp_menards)}';
 
     protected $description = 'Import Menards receipts that the browser extension collected, matching them to expenses';
@@ -35,7 +34,6 @@ class ScrapeMenardsReceipts extends Command
         $this->line(str_repeat('═', 60));
 
         $outputDir   = $this->option('output-dir') ?: storage_path('files/_temp_menards');
-        $headless    = ! $this->option('visible');
         $dryRun      = $this->option('dry-run');
         $matchExp    = $this->option('match-expenses');
         $force       = $this->option('force');

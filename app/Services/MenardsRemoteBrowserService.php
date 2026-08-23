@@ -534,29 +534,6 @@ class MenardsRemoteBrowserService
     }
 
     /**
-     * Poll the window title until it matches, up to $seconds.
-     *
-     * A fixed sleep was the other half of the same bug: seven seconds is plenty
-     * on a warm profile and not nearly enough on a server's first page load,
-     * where Chrome is still building its profile. Polling makes the fast case
-     * fast and the cold case correct.
-     */
-    protected function waitForTitle(string $needle, int $seconds = 25): bool
-    {
-        $deadline = time() + $seconds;
-
-        do {
-            if (str_contains($this->windowTitle(), $needle)) {
-                return true;
-            }
-
-            usleep(750000);
-        } while (time() < $deadline);
-
-        return false;
-    }
-
-    /**
      * What the browser is showing, via the window title.
      *
      * Menards titles the sign-in page "Sign In at Menards®" and every page behind
