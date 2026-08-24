@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Http;
 class NylasWebhooks extends Command
 {
     protected $signature = 'nylas:webhooks
+        {--ensure : Idempotent: register if missing, heal a lost secret, else no-op. Safe on a schedule.}
         {--register : Create the message.created webhook pointing at this app}
         {--list : Show existing webhooks}
         {--delete= : Delete a webhook by id}';
@@ -56,12 +57,80 @@ class NylasWebhooks extends Command
             return $response->successful() ? self::SUCCESS : self::FAILURE;
         }
 
+        if ($this->option('ensure')) {
+            return $this->ensure($base, $key);
+        }
+
         if (! $this->option('register')) {
-            $this->line('Nothing to do. Use --register, --list, or --delete=<id>.');
+            $this->line('Nothing to do. Use --ensure, --register, --list, or --delete=<id>.');
 
             return self::SUCCESS;
         }
 
+        return $this->register($base, $key);
+    }
+
+    /**
+     * Idempotent convergence, built to run unattended (hourly schedule):
+     *
+     *   webhook missing            -> create it, cache the secret
+     *   webhook there, secret lost -> rotate the secret, cache the new one
+     *   webhook there, secret held -> nothing
+     *
+     * The secret lives in the cache (config('nylas.webhook_secret') overrides
+     * when set), so no deploy step has to copy anything anywhere. Nylas shows
+     * a secret only at creation and rotation — which is exactly when this
+     * stores it.
+     */
+    protected function ensure(string $base, string $key): int
+    {
+        $url = route('webhooks.nylas');
+
+        $response = Http::withToken($key)->timeout(30)->get("$base/v3/webhooks");
+
+        if (! $response->successful()) {
+            $this->error("Could not list webhooks: HTTP {$response->status()}");
+
+            return self::FAILURE;
+        }
+
+        $existing = collect((array) $response->json('data', []))->first(
+            fn ($hook) => (($hook['webhook_url'] ?? null) === $url)
+                && in_array('message.created', (array) ($hook['trigger_types'] ?? []), true)
+        );
+
+        if (! $existing) {
+            return $this->register($base, $key);
+        }
+
+        $secretKnown = (string) config('nylas.webhook_secret') !== ''
+            || (string) cache()->get('nylas:webhook-secret', '') !== '';
+
+        if ($secretKnown) {
+            $this->line('Webhook present, secret held — nothing to do.');
+
+            return self::SUCCESS;
+        }
+
+        // Registered but the signing key is gone (cache flush, redeploy from
+        // scratch). Rotate: the only other moment Nylas reveals a secret.
+        $rotate = Http::withToken($key)->timeout(30)
+            ->post("$base/v3/webhooks/rotate-secret/" . (string) $existing['id']);
+
+        if (! $rotate->successful()) {
+            $this->error("Secret rotation failed: HTTP {$rotate->status()}");
+
+            return self::FAILURE;
+        }
+
+        cache()->forever('nylas:webhook-secret', (string) $rotate->json('data.webhook_secret'));
+        $this->info('Webhook secret rotated and cached.');
+
+        return self::SUCCESS;
+    }
+
+    protected function register(string $base, string $key): int
+    {
         $url = route('webhooks.nylas');
 
         $response = Http::withToken($key)->timeout(60)->post("$base/v3/webhooks", [
@@ -78,11 +147,10 @@ class NylasWebhooks extends Command
         }
 
         $secret = (string) $response->json('data.webhook_secret');
+        cache()->forever('nylas:webhook-secret', $secret);
 
-        $this->info('Webhook registered: ' . (string) $response->json('data.id'));
-        $this->newLine();
-        $this->warn('Set this in the environment NOW — Nylas will not show it again:');
-        $this->line("NYLAS_WEBHOOK_SECRET={$secret}");
+        $this->info('Webhook registered and secret cached: ' . (string) $response->json('data.id'));
+        $this->line('Optional: set NYLAS_WEBHOOK_SECRET in the env to pin it; the cache already works.');
 
         return self::SUCCESS;
     }

@@ -109,6 +109,81 @@ it('fetches the message and files the replied badge end to end', function () {
         ->and($replied->first()->metadata['mailbox'])->toBe('greg@gs.construction');
 });
 
+it('authenticates with the cached secret when the env one is absent', function () {
+    Queue::fake();
+    config(['nylas.webhook_secret' => '']);
+    cache()->forever('nylas:webhook-secret', 'cached-secret');
+
+    signedPost([
+        'type' => 'message.created',
+        'data' => ['object' => ['grant_id' => 'grant-watched', 'id' => 'msg-3']],
+    ], 'cached-secret')->assertOk();
+
+    Queue::assertPushed(ProcessNylasInboundMessage::class);
+
+    cache()->forget('nylas:webhook-secret');
+});
+
+it('ensure registers when the webhook is missing and caches the secret', function () {
+    cache()->forget('nylas:webhook-secret');
+    config(['nylas.webhook_secret' => '']);
+
+    Http::fake([
+        'https://api.us.nylas.com/v3/webhooks' => Http::sequence()
+            ->push(['data' => []]) // list: nothing registered
+            ->push(['data' => ['id' => 'wh-1', 'webhook_secret' => 'fresh-secret']]), // create
+    ]);
+
+    $this->artisan('nylas:webhooks --ensure')->assertSuccessful();
+
+    expect(cache()->get('nylas:webhook-secret'))->toBe('fresh-secret');
+    Http::assertSentCount(2);
+
+    cache()->forget('nylas:webhook-secret');
+});
+
+it('ensure rotates a lost secret instead of duplicating the webhook', function () {
+    cache()->forget('nylas:webhook-secret');
+    config(['nylas.webhook_secret' => '']);
+
+    Http::fake([
+        'https://api.us.nylas.com/v3/webhooks/rotate-secret/wh-1' => Http::response(
+            ['data' => ['id' => 'wh-1', 'webhook_secret' => 'rotated-secret']]
+        ),
+        'https://api.us.nylas.com/v3/webhooks' => Http::response(['data' => [[
+            'id' => 'wh-1',
+            'webhook_url' => route('webhooks.nylas'),
+            'trigger_types' => ['message.created'],
+        ]]]),
+    ]);
+
+    $this->artisan('nylas:webhooks --ensure')->assertSuccessful();
+
+    expect(cache()->get('nylas:webhook-secret'))->toBe('rotated-secret');
+
+    cache()->forget('nylas:webhook-secret');
+});
+
+it('ensure is a no-op when the webhook exists and the secret is held', function () {
+    cache()->forever('nylas:webhook-secret', 'held-secret');
+    config(['nylas.webhook_secret' => '']);
+
+    Http::fake([
+        'https://api.us.nylas.com/v3/webhooks' => Http::response(['data' => [[
+            'id' => 'wh-1',
+            'webhook_url' => route('webhooks.nylas'),
+            'trigger_types' => ['message.created'],
+        ]]]),
+    ]);
+
+    $this->artisan('nylas:webhooks --ensure')->assertSuccessful();
+
+    expect(cache()->get('nylas:webhook-secret'))->toBe('held-secret');
+    Http::assertSentCount(1); // list only — no create, no rotate
+
+    cache()->forget('nylas:webhook-secret');
+});
+
 it('does nothing for a message deleted before the job ran', function () {
     Http::fake([
         'https://api.us.nylas.com/v3/grants/grant-watched/messages/gone*' => Http::response(null, 404),

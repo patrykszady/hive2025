@@ -34,6 +34,18 @@ Schedule::command('crew:ingest-leads')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Keeps the Nylas message.created webhook converged without any deploy step:
+// registers it if missing (the challenge handshake needs the LIVE endpoint,
+// so deploy-time registration would race opcache), and rotates a lost signing
+// secret back into the cache. Until it first succeeds, the endpoint 503s and
+// the five-minute sweeps carry reply capture alone — nothing breaks.
+Schedule::command('nylas:webhooks --ensure')
+    ->hourly()
+    ->name('ensure-nylas-webhook')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // The Azure secret behind every mailbox: check monthly, renew inside the
 // 60-day window — its unwatched 2-year expiry took email down on 2026-08-11.
 Schedule::command('nylas:rotate-microsoft-secret')

@@ -35,7 +35,13 @@ class NylasWebhookController extends Controller
 
     public function handle(Request $request)
     {
+        // Env wins when set; otherwise the secret cached by
+        // `nylas:webhooks --ensure` at registration/rotation time. The cached
+        // path is what lets deploys be fully hands-free.
         $secret = (string) config('nylas.webhook_secret');
+        if ($secret === '') {
+            $secret = (string) cache()->get('nylas:webhook-secret', '');
+        }
 
         if ($secret === '') {
             return response()->json(['ok' => false, 'error' => 'Nylas webhook is not configured.'], 503);
