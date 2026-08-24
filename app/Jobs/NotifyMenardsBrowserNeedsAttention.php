@@ -2,9 +2,8 @@
 
 namespace App\Jobs;
 
-use App\Models\PushSubscription;
+use App\Models\AppNotification;
 use App\Models\User;
-use App\Services\WebPushService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
@@ -22,6 +21,12 @@ use Illuminate\Support\Facades\Log;
  * broke in mid-August and stayed broken for two weeks because it failed into a
  * log nobody read. A wall that waits silently for someone to wonder about it is
  * the same bug wearing different clothes.
+ *
+ * These land in the Notifications tab, NOT as browser push. Push was the wrong
+ * register for this: it interrupts whatever you are doing, on every device, for
+ * something that waits perfectly well until you next look — and at four
+ * scheduled syncs a day a recurring wall made it noise. The in-app list is
+ * where a message can sit until it is read, which is all this ever needed.
  *
  * To act on one of these, reach the browser's screen over an SSH tunnel:
  *
@@ -58,7 +63,7 @@ class NotifyMenardsBrowserNeedsAttention implements ShouldQueue
         $this->onQueue('background');
     }
 
-    public function handle(WebPushService $webPush): void
+    public function handle(): void
     {
         $key = 'menards-browser-notified:' . $this->reason;
 
@@ -66,8 +71,8 @@ class NotifyMenardsBrowserNeedsAttention implements ShouldQueue
             return;
         }
 
-        // Admins only: this links to a page that drives a browser signed into
-        // the company's Menards account, and only Admins can open it anyway.
+        // Admins only: this concerns a browser signed into the company's
+        // Menards account, and only an Admin can act on it.
         $admins = User::all()->filter(fn (User $u) => $u->vendor_role === 'Admin');
 
         if ($admins->isEmpty()) {
@@ -78,45 +83,26 @@ class NotifyMenardsBrowserNeedsAttention implements ShouldQueue
             return;
         }
 
-        $subscriptions = PushSubscription::query()
-            ->whereIn('user_id', $admins->pluck('id'))
-            ->get();
-
-        if ($subscriptions->isEmpty()) {
-            // Worth saying out loud: the notification path is configured but
-            // nobody has actually subscribed a browser, so this is silent.
-            Log::channel('menards')->warning('Menards browser needs attention but no admin has a push subscription', [
-                'reason' => $this->reason,
-                'detail' => $this->detail,
-            ]);
-
-            return;
-        }
-
-        $webPush->sendToSubscriptions($subscriptions, [
-            'title' => $this->title(),
-            'body' => $this->detail,
-            'icon' => '/favicons/icon-192x192.png',
-            'badge' => '/favicons/icon-96x96.png',
-            'data' => [
-                // No in-app page to link to: the viewer that used to frame the
-                // browser was removed, because publishing a password-less VNC to
-                // the internet behind nothing but a session cookie was a poor
-                // trade for a click that happens rarely. Clearing a wall is now
-                // an SSH tunnel — see the job docblock — so this notification
-                // exists to make sure someone KNOWS, not to hand them a button.
-                'url' => '/',
+        foreach ($admins as $admin) {
+            AppNotification::create([
+                'user_id' => $admin->id,
                 'type' => 'menards_browser',
-                'reason' => $this->reason,
-            ],
-            // Stays on screen until acknowledged: the whole point is that it is
-            // not missed, and receipts stop arriving until someone acts.
-            'requireInteraction' => true,
-        ]);
+                'title' => $this->title(),
+                'body' => $this->detail,
+                // No page frames the browser any more — the viewer was removed
+                // rather than publish a password-less VNC behind a session
+                // cookie. The Notifications tab is the destination; a link to
+                // the dashboard only moved people away from the message.
+                'action_url' => null,
+                'data' => [
+                    'reason' => $this->reason,
+                ],
+            ]);
+        }
 
         Log::channel('menards')->info('Menards browser: notified admins', [
             'reason' => $this->reason,
-            'subscriptions' => $subscriptions->count(),
+            'admins' => $admins->count(),
         ]);
     }
 
