@@ -206,93 +206,127 @@ class CrewLeadEmailService
             }
 
             $out['mailboxes']++;
-            $mailbox = strtolower((string) (Http::withToken(config('nylas.api_key'))
-                ->timeout(15)->retry(2, 2000, throw: false)
-                ->get("$base/v3/grants/{$grantId}")->json('data.email') ?? $grantId));
+            $mailbox = $this->grantMailboxEmail($grantId);
 
             foreach ((array) $response->json('data') as $message) {
                 $out['fetched']++;
 
-                $nylasId = (string) ($message['id'] ?? '');
-                $from = ($message['from'][0] ?? []);
-                $fromEmail = strtolower(trim((string) ($from['email'] ?? '')));
-
-                if ($nylasId === '' || $fromEmail === '') {
-                    continue;
-                }
-
-                // Team and system mail is not a lead reply.
-                if (str_ends_with($fromEmail, '@gs.construction') || str_ends_with($fromEmail, '@hive.contractors')) {
-                    continue;
-                }
-
-                // Badge the answered thread BEFORE the lead-only and ledger
-                // skips: estimate replies from established clients have no
-                // lead row, and a reply the ledger already ingested may still
-                // predate this badge existing. The detector gates itself on
-                // reply signals and dedupes on the message id, so calling it
-                // for every external message is safe and idempotent.
-                $sweepHeaders = $this->headerMap($message);
-                app(\App\Services\EmailReplyDetector::class)->record([
-                    'nylas_message_id' => $nylasId,
-                    'from_email' => $fromEmail,
-                    'subject' => (string) ($message['subject'] ?? ''),
-                    'thread_id' => $message['thread_id'] ?? null,
-                    'in_reply_to' => $sweepHeaders['in-reply-to'] ?? null,
-                    'references' => $sweepHeaders['references'] ?? null,
-                    'message_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
-                    'mailbox' => $mailbox,
-                ]);
-
-                // Same dedupe ledger the crew@ ingest uses — a reply CC'd to
-                // crew@ is captured once, whichever sweep sees it first.
-                if (CrewEmailIngest::where('nylas_message_id', $nylasId)->exists()) {
-                    continue;
-                }
-
-                // Only senders we already know as leads.
-                if (! Lead::withoutGlobalScopes()->whereNull('deleted_at')->where('lead_data->email', $fromEmail)->exists()) {
-                    continue;
-                }
-
-                $body = $this->plainBody($message);
-                $row = [
-                    'nylas_message_id' => $nylasId,
-                    'grant_id' => $grantId,
-                    'mailbox' => $mailbox,
-                    'thread_id' => $message['thread_id'] ?? null,
-                    'from_email' => $fromEmail,
-                    'from_name' => $from['name'] ?? null,
-                    'recipients' => [
-                        'to' => array_column($message['to'] ?? [], 'email'),
-                        'cc' => array_column($message['cc'] ?? [], 'email'),
-                    ],
-                    'subject' => Str::limit((string) ($message['subject'] ?? ''), 500, ''),
-                    'message_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
-                    'body_snippet' => Str::limit($body, 2000, ''),
-                ];
-
-                $leadId = $this->recordLeadReply($row, $body);
-
-                CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $row + [
-                    'status' => CrewEmailIngest::STATUS_SKIPPED,
-                    'skip_reason' => 'reply',
-                    'is_lead' => false,
-                    'lead_id' => $leadId,
-                ]);
-
-                if ($leadId) {
+                if ($this->processPersonalInboxMessage($message, $grantId, $mailbox) === 'filed') {
                     $out['replies']++;
-
-                    Log::channel('nylas')->info('Personal inbox sweep: reply filed on lead', [
-                        'lead_id' => $leadId,
-                        'mailbox' => $mailbox,
-                    ]);
                 }
             }
         }
 
         return $out;
+    }
+
+    /**
+     * One inbound personal-mailbox message through the reply pipeline.
+     *
+     * Shared verbatim between the five-minute sweep and the Nylas
+     * `message.created` webhook, so a reply is handled identically whether it
+     * arrived by push or by poll — and safely twice, since every write below
+     * dedupes: the detector on nylas_message_id, the ledger on its own key.
+     *
+     * Returns the outcome: 'filed' (reply landed on a lead), or the skip
+     * reason ('invalid', 'internal', 'already_ingested', 'not_a_lead_reply').
+     */
+    public function processPersonalInboxMessage(array $message, string $grantId, string $mailbox): string
+    {
+        $nylasId = (string) ($message['id'] ?? '');
+        $from = ($message['from'][0] ?? []);
+        $fromEmail = strtolower(trim((string) ($from['email'] ?? '')));
+
+        if ($nylasId === '' || $fromEmail === '') {
+            return 'invalid';
+        }
+
+        // Team and system mail is not a lead reply.
+        if (str_ends_with($fromEmail, '@gs.construction') || str_ends_with($fromEmail, '@hive.contractors')) {
+            return 'internal';
+        }
+
+        // Badge the answered thread BEFORE the lead-only and ledger skips:
+        // estimate replies from established clients have no lead row, and a
+        // reply the ledger already ingested may still predate this badge
+        // existing. The detector gates itself on reply signals and dedupes on
+        // the message id, so calling it for every external message is safe
+        // and idempotent.
+        $headers = $this->headerMap($message);
+        app(\App\Services\EmailReplyDetector::class)->record([
+            'nylas_message_id' => $nylasId,
+            'from_email' => $fromEmail,
+            'subject' => (string) ($message['subject'] ?? ''),
+            'thread_id' => $message['thread_id'] ?? null,
+            'in_reply_to' => $headers['in-reply-to'] ?? null,
+            'references' => $headers['references'] ?? null,
+            'message_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
+            'mailbox' => $mailbox,
+        ]);
+
+        // Same dedupe ledger the crew@ ingest uses — a reply CC'd to crew@ is
+        // captured once, whichever sweep or webhook sees it first.
+        if (CrewEmailIngest::where('nylas_message_id', $nylasId)->exists()) {
+            return 'already_ingested';
+        }
+
+        // Only senders we already know as leads.
+        if (! Lead::withoutGlobalScopes()->whereNull('deleted_at')->where('lead_data->email', $fromEmail)->exists()) {
+            return 'not_a_lead_reply';
+        }
+
+        $body = $this->plainBody($message);
+        $row = [
+            'nylas_message_id' => $nylasId,
+            'grant_id' => $grantId,
+            'mailbox' => $mailbox,
+            'thread_id' => $message['thread_id'] ?? null,
+            'from_email' => $fromEmail,
+            'from_name' => $from['name'] ?? null,
+            'recipients' => [
+                'to' => array_column($message['to'] ?? [], 'email'),
+                'cc' => array_column($message['cc'] ?? [], 'email'),
+            ],
+            'subject' => Str::limit((string) ($message['subject'] ?? ''), 500, ''),
+            'message_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
+            'body_snippet' => Str::limit($body, 2000, ''),
+        ];
+
+        $leadId = $this->recordLeadReply($row, $body);
+
+        CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $row + [
+            'status' => CrewEmailIngest::STATUS_SKIPPED,
+            'skip_reason' => 'reply',
+            'is_lead' => false,
+            'lead_id' => $leadId,
+        ]);
+
+        if (! $leadId) {
+            return 'not_a_lead_reply';
+        }
+
+        Log::channel('nylas')->info('Personal inbox reply filed on lead', [
+            'lead_id' => $leadId,
+            'mailbox' => $mailbox,
+        ]);
+
+        return 'filed';
+    }
+
+    /** The grant's mailbox address, cached a day (it never changes in practice). */
+    public function grantMailboxEmail(string $grantId): string
+    {
+        return (string) cache()->remember(
+            "nylas:grant-email:{$grantId}",
+            now()->addDay(),
+            function () use ($grantId) {
+                $base = rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/');
+
+                return strtolower((string) (Http::withToken(config('nylas.api_key'))
+                    ->timeout(15)->retry(2, 2000, throw: false)
+                    ->get("$base/v3/grants/{$grantId}")->json('data.email') ?? $grantId));
+            }
+        );
     }
 
     /** The grant's own Inbox folder id (no shared_from), cached a day. */

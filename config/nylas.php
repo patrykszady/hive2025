@@ -42,6 +42,11 @@ return [
     'waivers_error_folder_id' => 'AQMkAGQ4MjRmM2M3LTQ1MmEtNGZiYS1hMjUxLWNiMjFiZGZjOTNjZQAuAAADZg-HbmNa8kyefF2rxPPyRwEAi7dz6mqPSUOPEb-C83eK8wAAAgFeAAAA',
     'waivers_deleted_folder_id' => 'AQMkAGQ4MjRmM2M3LTQ1MmEtNGZiYS1hMjUxLWNiMjFiZGZjOTNjZQAuAAADZg-HbmNa8kyefF2rxPPyRwEAi7dz6mqPSUOPEb-C83eK8wAAAgEKAAAA',
 
+    // HMAC key for verifying inbound webhook signatures. Returned ONCE by
+    // Nylas when the webhook is created (see `php artisan nylas:webhooks
+    // --register`); an empty value disables the endpoint (503).
+    'webhook_secret' => env('NYLAS_WEBHOOK_SECRET', ''),
+
     // OAuth scopes required (space separated). Ensure the Nylas Connect flow requests email.send for forwarding.
     // Add NYLAS_SCOPES to .env to override if needed.
     'scopes' => env('NYLAS_SCOPES') ?: 'email.read_only email.send',

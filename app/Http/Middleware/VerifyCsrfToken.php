@@ -15,6 +15,7 @@ class VerifyCsrfToken extends Middleware
         'webhooks/plaid',
         'webhooks/mailtrap/*',
         'webhooks/telnyx/*',
+        'webhooks/nylas',
         'webauthn/*',
         'push/*',
         'api/ewccv/session',

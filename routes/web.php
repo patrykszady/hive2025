@@ -459,6 +459,10 @@ Route::get('webhooks/telnyx/health', [TelnyxWebhookController::class, 'health'])
 
 // Mailtrap webhooks (no auth required - token is validated in the URL)
 Route::post('webhooks/mailtrap/{token}', [MailtrapWebhookController::class, 'handle'])->name('webhooks.mailtrap');
+// Nylas webhooks: GET is the creation handshake (challenge echo), POST the
+// signed events. Auth is the HMAC signature, not a URL token.
+Route::get('webhooks/nylas', [\App\Http\Controllers\Api\NylasWebhookController::class, 'verify'])->name('webhooks.nylas.verify');
+Route::post('webhooks/nylas', [\App\Http\Controllers\Api\NylasWebhookController::class, 'handle'])->name('webhooks.nylas');
 
 // Email tracking pixel (no auth required - loaded by email clients)
 Route::get('t/o', [EmailTrackingController::class, 'trackOpen'])->name('email.track.open');
