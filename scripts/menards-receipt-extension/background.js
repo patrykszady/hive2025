@@ -231,6 +231,58 @@ chrome.runtime.onMessage.addListener(msg => {
     if (msg?.action === 'run') run('options page');
 });
 
+/**
+ * Relay a challenge solve for challenge.js.
+ *
+ * The content script cannot hold the 2captcha key — a content script's source
+ * is readable by the page it runs in. So it reports the sitekey here, and this
+ * asks Hive, which owns the key and does the buying.
+ *
+ * Returns true to keep the message channel open for the async reply; without
+ * it Chrome closes the port and sendResponse lands nowhere.
+ */
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type === 'hive-challenge-unsolvable') {
+        note(`challenge seen but unsolvable: ${msg.reason}`);
+        return false;
+    }
+
+    if (msg?.type !== 'hive-solve-challenge') return false;
+
+    (async () => {
+        try {
+            const { serverUrl, token } = await settings();
+            if (!serverUrl || !token) throw new Error('Hive URL/token not configured');
+
+            await note(`challenge: asking Hive to solve ${msg.siteKey}`);
+
+            const res = await fetch(`${serverUrl}/api/menards/solve-challenge`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ siteKey: msg.siteKey, pageUrl: msg.pageUrl }),
+            });
+
+            const body = await res.json().catch(() => ({}));
+
+            if (!res.ok || !body.ok || !body.token) {
+                throw new Error(body.error || `solve endpoint returned ${res.status}`);
+            }
+
+            await note('challenge: token received, injecting');
+            sendResponse({ ok: true, token: body.token });
+        } catch (err) {
+            await note(`challenge: ${err.message}`);
+            sendResponse({ ok: false, error: err.message });
+        }
+    })();
+
+    return true;
+});
+
 chrome.action.onClicked.addListener(() => run('manual'));
 
 /**

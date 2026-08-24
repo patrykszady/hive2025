@@ -416,6 +416,13 @@ Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::c
 // Menards receipts fetched by the browser extension running in the server-side
 // signed-in Chromium. Bearer-authed, CSRF-exempt; writes a manifest + PDFs and
 // runs the normal --skip-scrape importer.
+// Buys an hCaptcha token for the Imperva wall, for the extension's
+// challenge.js. Rate-capped in the controller because every solve costs money
+// and a wall refusing the BROWSER re-challenges forever.
+Route::post('api/menards/solve-challenge', \App\Http\Controllers\MenardsSolveChallengeController::class)
+    ->middleware('throttle:10,1')
+    ->name('menards.solve-challenge');
+
 // How the extension's last fetch actually went. Cheap and honest: it reports
 // work it already did, so the server can stop inferring a live session from a
 // window title. See MenardsSyncStatusController for why that inference existed.
