@@ -237,6 +237,16 @@ class VendorPaymentEmailTrackingTable extends Component
             })
             ->map(function ($threadEvents, $threadKey) use ($vendorsByEmail, $shouldIgnoreRecipient) {
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
+
+                // "Replied" is the thread's status only while the reply is the
+                // LATEST word. Once we write back on the same thread, the ball
+                // has moved and the newer send's chain tells the truth again.
+                // (Events arrive sorted newest-first, so firstWhere('sent') is
+                // the latest outbound message in the thread.)
+                $latestSentAt = $threadEvents->firstWhere('event_type', 'sent')?->event_at;
+                if ($repliedEvent && $latestSentAt && $repliedEvent->event_at && $repliedEvent->event_at->lt($latestSentAt)) {
+                    $repliedEvent = null;
+                }
                 $mainEvent = $repliedEvent ?? $threadEvents->first();
 
                 // Which email this row belongs to — collapse must never merge

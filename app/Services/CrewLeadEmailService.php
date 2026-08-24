@@ -191,6 +191,9 @@ class CrewLeadEmailService
                     'in' => $this->ownInboxFolderId($grantId),
                     'limit' => $limit ?? 50,
                     'received_after' => $since->getTimestamp(),
+                    // RFC threading headers feed EmailReplyDetector's exact
+                    // In-Reply-To/References match.
+                    'fields' => 'include_headers',
                 ]));
 
             if (! $response->successful()) {
@@ -222,6 +225,24 @@ class CrewLeadEmailService
                 if (str_ends_with($fromEmail, '@gs.construction') || str_ends_with($fromEmail, '@hive.contractors')) {
                     continue;
                 }
+
+                // Badge the answered thread BEFORE the lead-only and ledger
+                // skips: estimate replies from established clients have no
+                // lead row, and a reply the ledger already ingested may still
+                // predate this badge existing. The detector gates itself on
+                // reply signals and dedupes on the message id, so calling it
+                // for every external message is safe and idempotent.
+                $sweepHeaders = $this->headerMap($message);
+                app(\App\Services\EmailReplyDetector::class)->record([
+                    'nylas_message_id' => $nylasId,
+                    'from_email' => $fromEmail,
+                    'subject' => (string) ($message['subject'] ?? ''),
+                    'thread_id' => $message['thread_id'] ?? null,
+                    'in_reply_to' => $sweepHeaders['in-reply-to'] ?? null,
+                    'references' => $sweepHeaders['references'] ?? null,
+                    'message_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
+                    'mailbox' => $mailbox,
+                ]);
 
                 // Same dedupe ledger the crew@ ingest uses — a reply CC'd to
                 // crew@ is captured once, whichever sweep sees it first.
@@ -347,6 +368,21 @@ class CrewLeadEmailService
             $repliedLeadId = null;
             if ($reason === 'reply' && ! $dryRun) {
                 $repliedLeadId = $this->recordLeadReply($base, $body);
+
+                // Independently of whether the sender is a LEAD, badge the
+                // email thread this answers. Estimate replies from established
+                // clients have no lead row, but they absolutely have a thread.
+                $headers = $this->headerMap($message);
+                app(\App\Services\EmailReplyDetector::class)->record([
+                    'nylas_message_id' => $nylasId,
+                    'from_email' => $fromEmail,
+                    'subject' => $subject,
+                    'thread_id' => $base['thread_id'] ?? null,
+                    'in_reply_to' => $headers['in-reply-to'] ?? null,
+                    'references' => $headers['references'] ?? null,
+                    'message_at' => $base['message_at'] ?? null,
+                    'mailbox' => $mailbox,
+                ]);
             }
 
             if (! $dryRun) {

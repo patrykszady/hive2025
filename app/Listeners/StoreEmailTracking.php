@@ -67,6 +67,14 @@ class StoreEmailTracking
             $metadata['rfc_message_id'] = $rfcMessageId;
         }
 
+        // The subject is what a human replies to. EmailReplyDetector matches
+        // "Re: X" back to X when neither the Nylas thread nor the RFC headers
+        // settle it, and that match needs the sent subject on record.
+        $subject = trim((string) $message->getSubject());
+        if ($subject !== '' && ! isset($metadata['subject'])) {
+            $metadata['subject'] = \Illuminate\Support\Str::limit($subject, 500, '');
+        }
+
         // Mailtrap's Symfony transport overwrites the *SentMessage* messageId with Mailtrap's provider message id(s).
         // Persist it so incoming Mailtrap webhooks can be relinked even if custom variables are missing.
         $providerMessageIdRaw = '';
