@@ -103,11 +103,16 @@ class SendLeadReplyJob implements ShouldQueue
                 config(['mail.mailers.nylas.grant_id' => $companyEmail->grant_id]);
             }
 
+            // Replies go to the company inbox (crew@... for GSC) no matter who
+            // sent the reply: that's the mailbox Hive ingests, so client
+            // replies land in the CRM instead of one person's mailbox.
+            $replyToEmail = trim((string) $user->vendor->business_email) ?: $this->fromEmail;
+
             $mailable = new LeadReplyMail(
                 lead: $lead,
                 user: $user,
                 fromEmail: $fromEmail,
-                replyToEmail: $this->fromEmail,
+                replyToEmail: $replyToEmail,
                 emailSubject: $this->subject,
                 emailBody: $this->body,
                 emailTemplateName: $this->emailTemplateName,
@@ -155,7 +160,7 @@ class SendLeadReplyJob implements ShouldQueue
                             lead: $lead,
                             user: $user,
                             fromEmail: $fromEmail,
-                            replyToEmail: $this->fromEmail,
+                            replyToEmail: $replyToEmail,
                             emailSubject: $this->subject,
                             emailBody: $this->body,
                             emailTemplateName: $this->emailTemplateName,

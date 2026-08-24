@@ -170,7 +170,10 @@ class SendEstimateEmailJob implements ShouldQueue
         try {
             $trackingId = (string) Str::uuid();
 
-            $replyToEmail = $this->fromEmail;
+            // Replies go to the company inbox (crew@... for GSC) no matter who
+            // sent the estimate: that's the mailbox Hive ingests, so client
+            // replies land in the CRM instead of one person's mailbox.
+            $replyToEmail = trim((string) $user->vendor->business_email) ?: $this->fromEmail;
 
             $fromEmail = $this->fromEmail;
             if ($trackingProvider === 'mailtrap') {
