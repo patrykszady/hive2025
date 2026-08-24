@@ -68,6 +68,7 @@ class InviteToHive extends Mailable
     {
         return new Content(
             view: 'emails.invite_to_hive',
+            text: 'emails.invite_to_hive-text',
         );
     }
 

@@ -39,6 +39,7 @@ class BankErrorAlert extends Mailable
     {
         return new Content(
             view: 'emails.bank_error_alert',
+            text: 'emails.bank_error_alert-text',
         );
     }
 

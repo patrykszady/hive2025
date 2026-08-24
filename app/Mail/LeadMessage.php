@@ -49,6 +49,7 @@ class LeadMessage extends Mailable
     {
         return new Content(
             view: 'emails.lead_message',
+            text: 'emails.lead_message-text',
         );
     }
 
