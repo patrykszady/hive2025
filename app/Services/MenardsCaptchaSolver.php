@@ -66,12 +66,19 @@ class MenardsCaptchaSolver
         $started = microtime(true);
 
         try {
-            $solver = new TwoCaptcha($this->apiKey());
+            // Options through the constructor: defaultTimeout and
+            // pollingInterval are PRIVATE in the SDK (v1.2), so assigning them
+            // as properties throws "Cannot access private property" — which is
+            // exactly how the first live solve died.
+            //
             // Generous but bounded: a human-farm solve is typically 15-40s, and
             // an unbounded wait would hold the login lock long enough for the
             // next hourly ensure to pile in behind it.
-            $solver->defaultTimeout = 180;
-            $solver->pollingInterval = 5;
+            $solver = new TwoCaptcha([
+                'apiKey' => $this->apiKey(),
+                'defaultTimeout' => 180,
+                'pollingInterval' => 5,
+            ]);
 
             $result = $solver->hcaptcha([
                 'sitekey' => $siteKey,
