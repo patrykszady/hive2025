@@ -274,6 +274,16 @@ class MenardsRemoteBrowserService
             return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
         }
 
+        // Establishing a NEW session makes every earlier report about the old
+        // one obsolete. Without this the expired-session flag outlives what it
+        // describes: on 2026-08-24 a sign-in genuinely succeeded (the browser
+        // reached Account Overview) and was still reported as failed, because
+        // signedIn() honours that flag before it looks at anything else. A
+        // stale fact must not outvote a live one.
+        \Illuminate\Support\Facades\Cache::forget(
+            \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY
+        );
+
         if ($this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) === '') {
             if ($this->looksLikeChallengeWall()) {
                 return ['ok' => false, 'error' => 'Imperva is showing a security challenge (hCaptcha). '
@@ -324,6 +334,11 @@ class MenardsRemoteBrowserService
         // browser again. A fixed sleep here either wastes time or, on a slow
         // response, yanks the tab away mid-POST and loses the sign-in.
         $this->waitForTitleGone('Sign In at Menards');
+
+        // Menards lands on Account Overview first and forwards to the receipt
+        // page a moment later. Judging immediately catches the intermediate
+        // page and calls a successful sign-in a failure.
+        $this->waitForTitle(['Receipt Lookup at Menards', 'Account Overview at Menards'], 15);
 
         if ($this->signedIn()) {
             Log::channel('menards')->info('Menards browser: signed in', ['title' => $this->windowTitle()]);
@@ -530,6 +545,26 @@ class MenardsRemoteBrowserService
             ),
             'Receipt Lookup at Menards'
         );
+    }
+
+    /** Poll until the title matches any of these, or the deadline passes. */
+    protected function waitForTitle(array $needles, int $seconds = 15): bool
+    {
+        $deadline = time() + $seconds;
+
+        do {
+            $title = $this->windowTitle();
+
+            foreach ($needles as $needle) {
+                if (str_contains($title, $needle)) {
+                    return true;
+                }
+            }
+
+            usleep(500000);
+        } while (time() < $deadline);
+
+        return false;
     }
 
     /** Poll until the title stops matching — i.e. the page navigated away. */
