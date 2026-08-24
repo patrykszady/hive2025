@@ -221,10 +221,57 @@ class SendEstimateEmailJob implements ShouldQueue
                 });
             }
 
-            Mail::mailer($mailer)
-                ->to($sanitizedRecipients)
-                ->cc($user->vendor->business_email)
-                ->send($mailable);
+            if ($trackingProvider === 'mailtrap') {
+                // The office copy must NOT ride the client's message: Mailtrap
+                // injects one open pixel per MESSAGE and attributes every load
+                // of it to the original recipient, so a same-envelope CC meant
+                // that opening our own copy showed the estimate as "opened".
+                Mail::mailer($mailer)
+                    ->to($sanitizedRecipients)
+                    ->send($mailable);
+
+                $businessEmail = trim((string) $user->vendor->business_email);
+                if ($businessEmail !== '') {
+                    try {
+                        $copy = new EstimateMail(
+                            estimate: $estimate,
+                            user: $user,
+                            fromEmail: $fromEmail,
+                            replyToEmail: $replyToEmail,
+                            emailSubject: $this->subject,
+                            emailBody: $this->body,
+                            attachmentPaths: $attachmentPaths,
+                            emailTemplateName: $this->emailTemplateName,
+                            senderIp: $this->senderIp,
+                            trackingId: $trackingId,
+                        );
+
+                        // StoreEmailTracking drops messages carrying this header,
+                        // so the copy never creates a 'sent' row and its webhook
+                        // events are ignored as untracked.
+                        $copy->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
+                            $message->getHeaders()->addTextHeader('X-Hive-Internal-Copy', 'true');
+                        });
+
+                        Mail::mailer($mailer)->to($businessEmail)->send($copy);
+                    } catch (Throwable $copyException) {
+                        // The client email already went out. A failed office copy
+                        // must not fail (and retry) the job — that would resend
+                        // the estimate to the client.
+                        Log::warning('SendEstimateEmailJob internal copy failed', [
+                            'estimate_id' => $this->estimateId,
+                            'error' => $copyException->getMessage(),
+                        ]);
+                    }
+                }
+            } else {
+                // Nylas sends carry no tracking pixel, so the same-envelope
+                // copy is harmless there.
+                Mail::mailer($mailer)
+                    ->to($sanitizedRecipients)
+                    ->cc($user->vendor->business_email)
+                    ->send($mailable);
+            }
 
         } catch (Throwable $exception) {
             $mailerForLog = $mailer ?? null;

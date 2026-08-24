@@ -139,10 +139,58 @@ class SendLeadReplyJob implements ShouldQueue
                 });
             }
 
-            Mail::mailer($mailer)
-                ->to($sanitizedRecipients)
-                ->cc($user->vendor->business_email)
-                ->send($mailable);
+            if ($trackingProvider === 'mailtrap') {
+                // The office copy must NOT ride the client's message: Mailtrap
+                // injects one open pixel per MESSAGE and attributes every load
+                // of it to the original recipient, so a same-envelope CC meant
+                // that opening our own copy showed the reply as "opened".
+                Mail::mailer($mailer)
+                    ->to($sanitizedRecipients)
+                    ->send($mailable);
+
+                $businessEmail = trim((string) $user->vendor->business_email);
+                if ($businessEmail !== '') {
+                    try {
+                        $copy = new LeadReplyMail(
+                            lead: $lead,
+                            user: $user,
+                            fromEmail: $fromEmail,
+                            replyToEmail: $this->fromEmail,
+                            emailSubject: $this->subject,
+                            emailBody: $this->body,
+                            emailTemplateName: $this->emailTemplateName,
+                            senderIp: $this->senderIp,
+                            trackingId: $trackingId,
+                            inReplyTo: $this->inReplyToMessageId,
+                            references: $this->references,
+                        );
+
+                        // StoreEmailTracking drops messages carrying this header,
+                        // so the copy never creates a 'sent' row and its webhook
+                        // events are ignored as untracked.
+                        $copy->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
+                            $message->getHeaders()->addTextHeader('X-Hive-Internal-Copy', 'true');
+                        });
+
+                        Mail::mailer($mailer)->to($businessEmail)->send($copy);
+                    } catch (Throwable $copyException) {
+                        // The client email already went out. A failed office copy
+                        // must not fail (and retry) the job — that would resend
+                        // the reply to the client.
+                        Log::warning('SendLeadReplyJob internal copy failed', [
+                            'lead_id' => $this->leadId,
+                            'error' => $copyException->getMessage(),
+                        ]);
+                    }
+                }
+            } else {
+                // Nylas sends carry no tracking pixel, so the same-envelope
+                // copy is harmless there.
+                Mail::mailer($mailer)
+                    ->to($sanitizedRecipients)
+                    ->cc($user->vendor->business_email)
+                    ->send($mailable);
+            }
         } catch (Throwable $exception) {
             Log::error('SendLeadReplyJob failed to send email', [
                 'lead_id' => $this->leadId,

@@ -18,6 +18,16 @@ class StoreEmailTracking
         
         // Extract correlation IDs from headers
         $headers = $message->getHeaders();
+
+        // Internal record copies (office copy of an estimate or lead reply) ride
+        // their own message so the client's tracking pixel stays theirs alone —
+        // Mailtrap injects ONE pixel per message, so a same-envelope CC meant
+        // that opening our own copy fired the client's pixel and the UI showed
+        // "opened". The copy must not create a 'sent' row: without one, every
+        // webhook event it generates is dropped as untracked.
+        if ($headers->has('X-Hive-Internal-Copy')) {
+            return;
+        }
         $nylasMessageId = $headers->get('X-Nylas-Message-Id')?->getBodyAsString();
         $threadId = $headers->get('X-Nylas-Thread-Id')?->getBodyAsString();
         $metadataJson = $headers->get('X-Email-Metadata')?->getBodyAsString();
