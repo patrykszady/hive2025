@@ -170,26 +170,50 @@ class ExpenseSplitsCreate extends Component
 
 
             $items = collect($this->expense_line_items->items);
-            //need to account for tax
-            $tax_rate = round($this->expense_line_items->total_tax / $this->expense_line_items->subtotal, 3);
-            $tax_rate = 1 + $tax_rate;
+
+            // Allocate each split as its items' share of the ACTUAL expense
+            // amount — tax, fees, and shipping ride along proportionally, and
+            // the receipt's printed tax/subtotal arithmetic (or its absence)
+            // can't skew the result.
+            $itemsSubtotal = $items->sum(fn ($item) => (float) ($item->TotalPrice ?? 0));
+            $expenseTotal = (float) $this->expense_total;
 
             $this->ensureSplitsCollection();
-            $this->expense_splits = $this->expense_splits->transform(function ($split, $key) use ($items, $tax_rate) {
-                $items_total = $items->where('split_index', $key)->whereNotNull('split_index')->sum('TotalPrice');
-                $total_with_tax = $items_total * $tax_rate;
 
-                //if last item without amount? check total...
-                //last one. Adjust a penny $0.01 if $expense->amount != getSplitsSumProperty
-                if ($items->whereNull('split_index')->count() == 0) {
-                    $split['amount'] = round($total_with_tax, 2);
-                    //$this->getSplitsSumProperty()
-                } else {
-                    $split['amount'] = round($total_with_tax, 2);
+            if ($itemsSubtotal != 0.0) {
+                $this->expense_splits = $this->expense_splits->transform(function ($split, $key) use ($items, $itemsSubtotal, $expenseTotal) {
+                    $splitItemsTotal = $items
+                        ->where('split_index', $key)
+                        ->whereNotNull('split_index')
+                        ->sum(fn ($item) => (float) ($item->TotalPrice ?? 0));
+
+                    $split['amount'] = round($expenseTotal * ($splitItemsTotal / $itemsSubtotal), 2);
+
+                    return $split;
+                });
+
+                // Once every line item is assigned, the splits must sum to the
+                // expense amount EXACTLY (the modal's balance reads $0.00) —
+                // per-split rounding can drift a penny, so push the remainder
+                // into the largest split where it distorts the least.
+                if ($items->whereNull('split_index')->isEmpty()) {
+                    $difference = round($expenseTotal - $this->expense_splits->sum('amount'), 2);
+
+                    if ($difference != 0.0) {
+                        $largestKey = $this->expense_splits
+                            ->filter(fn ($split) => (float) ($split['amount'] ?? 0) != 0.0)
+                            ->sortByDesc(fn ($split) => abs((float) $split['amount']))
+                            ->keys()
+                            ->first();
+
+                        if ($largestKey !== null) {
+                            $split = $this->expense_splits->get($largestKey);
+                            $split['amount'] = round($split['amount'] + $difference, 2);
+                            $this->expense_splits->put($largestKey, $split);
+                        }
+                    }
                 }
-
-                return $split;
-            });
+            }
         }
 
         $this->validateOnly($field);
