@@ -215,6 +215,11 @@ class AutoReceipts extends Component
 
         if ($receipt && $receipt->expense) {
             $this->authorize('view', $receipt->expense);
+
+            // Sibling receipts render through x-expenses.receipt, which reads
+            // $receipt->expense->vendor — hand them their parent so the
+            // back-reference never lazy-loads.
+            $receipt->expense->receipts->each->setRelation('expense', $receipt->expense);
         }
 
         return $receipt;

@@ -44,6 +44,7 @@ class ProjectDocumentGenerator
                 ->sortBy(fn ($r) => $r->isSupplement() ? 1 : 0)
                 ->first();
             if ($receipt) {
+                $receipt->setRelation('expense', $expense);
                 $expense->receipt = $receipt;
                 $expense->receipt_html = $receipt->receipt_html;
                 $expense->receipt_filename = $receipt->receipt_filename;
@@ -60,6 +61,9 @@ class ProjectDocumentGenerator
                     ->first()
                 : null;
             if ($receipt) {
+                if ($split->expense) {
+                    $receipt->setRelation('expense', $split->expense);
+                }
                 $split->receipt = $receipt;
                 $split->receipt_html = $receipt->receipt_html;
                 $split->receipt_filename = $receipt->receipt_filename;

@@ -46,6 +46,11 @@ class ExpenseReceipts extends Model
 
     public function toSearchableArray(): array
     {
+        // Bulk imports eager-load via makeAllSearchableUsing(); single-row
+        // syncs (model saved → Scout observer) arrive without the relation,
+        // so load it explicitly rather than tripping the lazy-load guard.
+        $this->loadMissing('expense');
+
         $items = $this->receipt_items ?? [];
 
         $descriptions = [];

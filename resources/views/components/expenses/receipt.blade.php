@@ -1,5 +1,10 @@
 @props(['receipt', 'selectedSplit' => null, 'expenseMismatch' => false, 'expenseAmount' => null, 'compactNotes' => true, 'showNotes' => true])
 
+{{-- The SKU-link branch reads $receipt->expense->vendor. Callers should hand
+     the receipt its parent via setRelation; this explicit load is the safety
+     net that keeps any remaining caller off the lazy-load guard. --}}
+@php($receipt->loadMissing('expense.vendor'))
+
 @if(!$receipt->receipt_items || empty($receipt->receipt_items['items'] ?? []))
     <div class="flow-root">
         @if($receipt->isSupplement())

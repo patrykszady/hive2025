@@ -70,12 +70,18 @@ class ExpenseShow extends Component
         // Eager load with ordered receipts
         $this->expense->load([
             'orderedReceipts',
+            'receipts',
+            'vendor',
             // Load distribution so Expense::project() withDefault can use the real name
             'distribution',
             // Load checks for many-to-many relationship with their bank accounts
             'checks.bank_account.bank',
         ]);
 
+        // The receipt card reads $receipt->expense->vendor — hand each
+        // receipt its parent so the back-reference never lazy-loads.
+        $this->expense->receipts->each->setRelation('expense', $this->expense);
+        $this->expense->orderedReceipts->each->setRelation('expense', $this->expense);
     }
 
     public function removeFromCheck(int $checkId): void
