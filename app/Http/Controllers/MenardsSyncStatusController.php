@@ -66,6 +66,12 @@ class MenardsSyncStatusController extends Controller
 
         Cache::put(self::CACHE_KEY, $status, now()->addMonth());
 
+        // A successful authenticated fetch is live proof the session works —
+        // retire any standing "needs sign-in" alert.
+        if ($status['ok']) {
+            Cache::forget(\App\Services\MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY);
+        }
+
         // A dead session is the event worth seeing in the log — it is the one
         // that silently stops receipts arriving, and it is what four scheduled
         // runs failed to surface.

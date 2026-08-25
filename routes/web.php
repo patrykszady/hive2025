@@ -426,6 +426,15 @@ Route::post('api/menards/solve-challenge', \App\Http\Controllers\MenardsSolveCha
 // How the extension's last fetch actually went. Cheap and honest: it reports
 // work it already did, so the server can stop inferring a live session from a
 // window title. See MenardsSyncStatusController for why that inference existed.
+// nginx auth_request target guarding the /menards-vnc/ websockify proxy
+// (scripts/nginx-menards-vnc.conf). Deliberately outside the 'auth' group:
+// auth_request treats a redirect as an error, so guests must get a plain 403.
+Route::get('menards-vnc-auth', function () {
+    abort_unless(auth()->check() && auth()->user()->can('viewAny', \App\Models\Bank::class), 403);
+
+    return response()->noContent();
+})->name('menards.vnc-auth');
+
 Route::post('api/menards/sync-status', \App\Http\Controllers\MenardsSyncStatusController::class)
     ->middleware('throttle:60,1')
     ->name('menards.sync-status');
@@ -574,6 +583,9 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     //BANKS
     Route::get('/banks', BankIndex::class)->name('banks.index');
     Route::get('/banks/{bank}', BankShow::class)->name('banks.show');
+
+    //MENARDS REMOTE BROWSER (noVNC viewer for sign-in / challenge clicks)
+    Route::get('/menards/browser', \App\Livewire\Menards\MenardsBrowserViewer::class)->name('menards.browser');
 
     //CHECKS
     Route::get('/checks', ChecksIndex::class)->name('checks.index');

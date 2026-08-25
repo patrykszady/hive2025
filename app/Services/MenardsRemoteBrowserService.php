@@ -38,6 +38,15 @@ use Illuminate\Support\Facades\Log;
  */
 class MenardsRemoteBrowserService
 {
+    /**
+     * Set whenever an automated sign-in fails (challenge wall or otherwise),
+     * cleared the moment a sign-in succeeds or the extension reports a
+     * working session. The sidebar reads it to surface "Menards needs a
+     * sign-in" — login() forgets the sync-status cache before attempting,
+     * so without this flag a failed attempt would leave no visible trace.
+     */
+    public const NEEDS_SIGNIN_CACHE_KEY = 'menards:needs_signin';
+
     protected const DISPLAY = ':98';
 
     protected const SCREEN = '1280x900x24';
@@ -271,6 +280,8 @@ class MenardsRemoteBrowserService
         // password into whatever control happened to be under those coordinates
         // on the page it landed on instead.
         if ($this->signedIn()) {
+            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
+
             return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
         }
 
@@ -286,10 +297,14 @@ class MenardsRemoteBrowserService
 
         if ($this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) === '') {
             if ($this->looksLikeChallengeWall()) {
+                $this->flagNeedsSignin('challenge');
+
                 return ['ok' => false, 'error' => 'Imperva is showing a security challenge (hCaptcha). '
                     . 'Nothing here will solve that: either click it once over noVNC, or leave it — '
                     . 'the hourly ensure retries after the score cools down.'];
             }
+
+            $this->flagNeedsSignin('login_failed');
 
             return ['ok' => false, 'error' => 'The sign-in page never loaded. Last page seen: '
                 . ($this->windowTitle() ?: '(none)')];
@@ -342,6 +357,7 @@ class MenardsRemoteBrowserService
 
         if ($this->signedIn()) {
             Log::channel('menards')->info('Menards browser: signed in', ['title' => $this->windowTitle()]);
+            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
 
             return ['ok' => true, 'url' => $this->windowTitle()];
         }
@@ -349,6 +365,7 @@ class MenardsRemoteBrowserService
         $title = $this->windowTitle();
 
         Log::channel('menards')->error('Menards browser: sign-in did not take', ['title' => $title]);
+        $this->flagNeedsSignin('login_failed');
 
         return [
             'ok' => false,
@@ -356,6 +373,15 @@ class MenardsRemoteBrowserService
                 . 'wrong, or the sign-in form moved. Last page seen: ' . ($title ?: '(none)'),
             'url' => $title,
         ];
+    }
+
+    protected function flagNeedsSignin(string $reason): void
+    {
+        \Illuminate\Support\Facades\Cache::put(
+            self::NEEDS_SIGNIN_CACHE_KEY,
+            ['reason' => $reason, 'at' => now()->toIso8601String()],
+            now()->addMonth(),
+        );
     }
 
     /**

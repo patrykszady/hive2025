@@ -52,6 +52,7 @@ class AppSidebar extends Component
         $isAdmin = $user->vendor_role === 'Admin';
 
         $hasBankErrors = false;
+        $menardsNeedsLogin = false;
         $clientHome = null;
 
         if ($isClientUser) {
@@ -70,12 +71,19 @@ class AppSidebar extends Component
                 ->get()
                 ->where('plaid_options.error', '!=', false)
                 ->isNotEmpty();
+
+            // Menards receipt browser needs a human: the extension reported a
+            // dead session, or an automated sign-in failed (challenge wall).
+            $syncStatus = Cache::get(\App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY);
+            $menardsNeedsLogin = (bool) ($syncStatus['session_expired'] ?? false)
+                || Cache::has(\App\Services\MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY);
         }
 
         return [
             'isClientUser' => $isClientUser,
             'isAdmin' => $isAdmin,
             'hasBankErrors' => $hasBankErrors,
+            'menardsNeedsLogin' => $menardsNeedsLogin,
             'clientHome' => $clientHome,
             'canViewBanks' => $user->can('viewAny', Bank::class),
             'canViewLienWaivers' => $user->can('viewAny', LienWaiver::class),

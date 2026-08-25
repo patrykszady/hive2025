@@ -21,6 +21,14 @@
                 {{-- BANK ERRORS --}}
                 @if($canViewBanks && $hasBankErrors)
                     <flux:sidebar.item wire:navigate.hover icon="building-library" href="/banks" badge="Error" badge:color="red">Banks</flux:sidebar.item>
+                @endif
+
+                {{-- MENARDS SIGN-IN / CHALLENGE NEEDED --}}
+                @if($canViewBanks && $menardsNeedsLogin)
+                    <flux:sidebar.item wire:navigate.hover icon="computer-desktop" href="{{ route('menards.browser') }}" badge="Sign-in" badge:color="red">Menards</flux:sidebar.item>
+                @endif
+
+                @if($canViewBanks && ($hasBankErrors || $menardsNeedsLogin))
                     <flux:separator class="my-2" />
                 @endif
 
