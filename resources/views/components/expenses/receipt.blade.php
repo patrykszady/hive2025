@@ -57,18 +57,20 @@
                             <div class="flex items-center gap-2">
                                 <div class="shrink-0 w-10"></div>
                                 <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
-                                @if(isset($receipt->expense->vendor) && $receipt->expense->vendor->sku_search_url)
-                                    <flux:link 
-                                        href="{{ $receipt->expense->vendor->sku_search_url . ($line_item['VendorCode'] ?? $line_item['ProductCode'] ?? '') }}" 
+                                {{-- A resolved product page beats a SKU search — store-only codes
+                                     (e.g. HD per-foot moulding UPCs) make the search dead-end. --}}
+                                @if(!empty($line_item['product_url']))
+                                    <flux:link
+                                        href="{{ $line_item['product_url'] }}"
                                         external
                                         class="italic {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? '!text-gray-300' : '' }}"
                                         variant="subtle"
                                     >
                                         {{$line_item['ManufacturerPartNumber'] ?? $line_item['VendorCode'] ?? $line_item['ProductCode'] ?? ''}}
                                     </flux:link>
-                                @elseif(!empty($line_item['product_url']))
-                                    <flux:link 
-                                        href="{{ $line_item['product_url'] }}" 
+                                @elseif(isset($receipt->expense->vendor) && $receipt->expense->vendor->sku_search_url)
+                                    <flux:link
+                                        href="{{ $receipt->expense->vendor->sku_search_url . ($line_item['VendorCode'] ?? $line_item['ProductCode'] ?? '') }}"
                                         external
                                         class="italic {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? '!text-gray-300' : '' }}"
                                         variant="subtle"

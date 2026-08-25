@@ -40,7 +40,7 @@ function expenseWithPrimaryAndSupplement(User $user): array
 
     $primaryItems = [
         'items' => [
-            ['Price' => 10.48, 'Quantity' => 1, 'TotalPrice' => 10.48, 'Description' => 'PW WT 6', 'VendorCode' => '070798005853'],
+            ['Price' => 10.48, 'Quantity' => 1, 'TotalPrice' => 10.48, 'Description' => 'PW WT 6', 'VendorCode' => '070798005853', 'product_url' => 'https://products.example.test/dap-plastic-wood'],
         ],
         'subtotal' => 24.94,
         'total' => 27.5,
@@ -74,11 +74,19 @@ it('folds a notes-only supplement scan into the primary receipt instead of a sec
     $user = expenseShowUser();
     [$expense] = expenseWithPrimaryAndSupplement($user);
 
+    // A resolved product page outranks the vendor's SKU search — store-only
+    // codes make the search dead-end, the product link never does.
+    $vendor = $user->vendor;
+    $vendor->options = ['sku_search_url' => 'https://www.homedepot.com/s/'];
+    $vendor->save();
+
     Livewire::actingAs($user)
         ->test(ExpenseShow::class, ['expense' => $expense])
         ->assertDontSee('Scan 2')
         ->assertDontSee('Receipt 2')
         ->assertSee('PW WT 6')
+        ->assertSee('https://products.example.test/dap-plastic-wood')
+        ->assertDontSee('homedepot.com/s/070798005853')
         ->assertSee($expense->id . '-email.pdf')
         ->assertSee($expense->id . '-scan.pdf')
         ->assertSee('View Scan')
