@@ -142,9 +142,12 @@ class ExpenseReceipts extends Model
      */
     public static function findDuplicateForExpense(int $expenseId, ?string $receiptHtml, array $receiptItems): ?self
     {
+        // expense_id and is_material_order must be hydrated: callers follow a
+        // matched supplement to its primary via resolveSupplementPrimary()
+        // (scoped by expense_id) and refuse to upgrade material-order rows.
         $existingReceipts = static::query()
             ->where('expense_id', $expenseId)
-            ->get(['id', 'receipt_html', 'receipt_items']);
+            ->get(['id', 'expense_id', 'is_material_order', 'receipt_html', 'receipt_items']);
 
         foreach ($existingReceipts as $existingReceipt) {
             if (static::matchesAsDuplicate(
@@ -213,6 +216,143 @@ class ExpenseReceipts extends Model
         }
 
         return false;
+    }
+
+    /**
+     * True when two receipt payloads describe the same physical purchase:
+     * identical total + transaction_date + normalized purchase_order. This is
+     * deliberately weaker than matchesAsDuplicate — the same purchase captured
+     * twice (an emailed e-receipt and a later paper scan) usually fails every
+     * duplicate rule because scan OCR garbles the line items and text.
+     */
+    public static function matchesSamePurchase(array $existingItems, array $candidateItems): bool
+    {
+        $candidateCore = static::normalizeReceiptCoreSignature($candidateItems);
+        $existingCore = static::normalizeReceiptCoreSignature($existingItems);
+
+        return $candidateCore !== null
+            && $existingCore !== null
+            && hash_equals($existingCore, $candidateCore)
+            && static::normalizePurchaseOrderForCompare($existingItems)
+                === static::normalizePurchaseOrderForCompare($candidateItems);
+    }
+
+    /**
+     * Find an existing receipt on the expense that captures the same purchase
+     * as the candidate payload. Prefers the row that actually carries line
+     * items (the primary copy) so precedence decisions and supplement links
+     * are made against it, not against another notes-only supplement.
+     */
+    public static function findSamePurchaseSibling(int $expenseId, array $candidateItems): ?self
+    {
+        $siblings = static::query()
+            ->where('expense_id', $expenseId)
+            ->where('is_material_order', false)
+            ->get()
+            ->filter(fn (self $existing) => static::matchesSamePurchase($existing->receipt_items ?? [], $candidateItems));
+
+        if ($siblings->isEmpty()) {
+            return null;
+        }
+
+        return $siblings->first(fn (self $sibling) => ! empty(($sibling->receipt_items ?? [])['items'] ?? []))
+            ?? $siblings->first();
+    }
+
+    /**
+     * Whether the candidate payload's line items are clearly more faithful
+     * than the incumbent's. Faithful = the items sum reconciles against the
+     * receipt's own subtotal (or total), then more items. Ties go to the
+     * incumbent so an equal-quality re-capture never displaces existing data.
+     */
+    public static function itemsSupersede(array $candidateItems, array $incumbentItems): bool
+    {
+        return (static::lineItemsFidelityScore($candidateItems) <=> static::lineItemsFidelityScore($incumbentItems)) > 0;
+    }
+
+    /**
+     * @return array{0: int, 1: int} [reconciles-with-own-arithmetic, item count]
+     */
+    private static function lineItemsFidelityScore(array $receiptItems): array
+    {
+        $items = array_values(array_filter((array) ($receiptItems['items'] ?? []), 'is_array'));
+        if ($items === []) {
+            return [0, 0];
+        }
+
+        $sum = 0.0;
+        foreach ($items as $item) {
+            $sum += (float) ($item['TotalPrice'] ?? $item['Amount'] ?? 0);
+        }
+
+        $reference = $receiptItems['subtotal'] ?? $receiptItems['total'] ?? null;
+        $reconciles = is_numeric($reference) && abs($sum - (float) $reference) <= 0.05;
+
+        return [$reconciles ? 1 : 0, count($items)];
+    }
+
+    /**
+     * Rewrite a receipt payload into supplement form: the row keeps its file,
+     * OCR text, totals, and handwritten notes, but its line items move aside
+     * to supplanted_items so they never shadow the primary copy's items in
+     * any consumer. supplement_of_receipt_id records which row won.
+     */
+    public static function toSupplementReceiptItems(array $receiptItems, int $primaryReceiptId): array
+    {
+        $items = (array) ($receiptItems['items'] ?? []);
+        if ($items !== []) {
+            $receiptItems['supplanted_items'] = $items;
+        }
+        $receiptItems['items'] = [];
+        $receiptItems['supplement_of_receipt_id'] = $primaryReceiptId;
+
+        return $receiptItems;
+    }
+
+    public function demoteToSupplementOf(self $primary): void
+    {
+        $this->receipt_items = static::toSupplementReceiptItems($this->receipt_items ?? [], $primary->id);
+        $this->save();
+
+        // Supplements that pointed at this row would otherwise be stranded on
+        // an item-less row after a chained upgrade — re-point them at the new
+        // primary so resolveSupplementPrimary() stays a single hop.
+        static::query()
+            ->where('expense_id', $this->expense_id)
+            ->where('id', '!=', $this->id)
+            ->get()
+            ->filter(fn (self $dependent) => (int) (($dependent->receipt_items ?? [])['supplement_of_receipt_id'] ?? 0) === (int) $this->id)
+            ->each(function (self $dependent) use ($primary) {
+                $items = $dependent->receipt_items ?? [];
+                $items['supplement_of_receipt_id'] = $primary->id;
+                $dependent->receipt_items = $items;
+                $dependent->save();
+            });
+    }
+
+    public function isSupplement(): bool
+    {
+        return ! empty(($this->receipt_items ?? [])['supplement_of_receipt_id'] ?? null);
+    }
+
+    /**
+     * The row whose line items speak for this receipt: the primary copy when
+     * this row is a notes-only supplement (its own items are deliberately
+     * empty), otherwise itself. Fidelity comparisons must use this so a
+     * garbled re-scan can't "beat" a supplement row's empty item list.
+     */
+    public function resolveSupplementPrimary(): self
+    {
+        $primaryId = ($this->receipt_items ?? [])['supplement_of_receipt_id'] ?? null;
+        if (! $primaryId) {
+            return $this;
+        }
+
+        $primary = static::query()
+            ->where('expense_id', $this->expense_id)
+            ->find($primaryId);
+
+        return $primary ?? $this;
     }
 
     /**

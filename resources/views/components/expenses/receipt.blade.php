@@ -2,6 +2,16 @@
 
 @if(!$receipt->receipt_items || empty($receipt->receipt_items['items'] ?? []))
     <div class="flow-root">
+        @if($receipt->isSupplement())
+            <flux:callout icon="document-duplicate" class="mb-2">
+                <flux:callout.text>
+                    Scanned copy of this purchase &mdash; line items are shown on the original receipt.
+                    @if($receipt->notes)
+                        Handwritten notes: <span class="font-semibold">{{ $receipt->notes }}</span>
+                    @endif
+                </flux:callout.text>
+            </flux:callout>
+        @endif
         <pre style="background-color:transparent; overflow: auto;">{!! $receipt->receipt_html !!}</pre>
     </div>
 @else

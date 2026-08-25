@@ -2408,7 +2408,10 @@ class CompanyEmailController extends Controller
                             // Attach the currently processed receipt to the chosen expense.
                             // The inner duplicate-content check (HTML hash + line-items signature
                             // including handwritten_notes) will drop byte-identical re-scans but
-                            // allow through scans whose handwritten notes differ.
+                            // allow through scans whose handwritten notes differ. A scan of a
+                            // purchase the expense already has a receipt for (same total + date
+                            // + PO) is saved as a notes-only supplement: the file and handwritten
+                            // notes are kept, but line items stay with the more faithful copy.
                             // (saveExpenseReceipt moves the temp file into receipts/ and persists the receipt record)
                             if (isset($expense) && $expense instanceof Expense) {
                                 $this->saveExpenseReceipt(
@@ -3124,6 +3127,10 @@ class CompanyEmailController extends Controller
                 // already-created HTML-to-PDF receipt (e.g. Erie Insurance).
                 if (!empty($documentAttachments)) {
                     $processedFiles = [];
+                    // Rows created while processing THIS message. Attachments of one
+                    // email are often pages/parts of the same document — they must
+                    // never demote or upgrade each other via the same-purchase rule.
+                    $receiptIdsCreatedThisCall = [];
 
                     foreach ($documentAttachments as $docAttachment) {
                         $attachmentIndex = $docAttachment['index'];
@@ -3189,7 +3196,21 @@ class CompanyEmailController extends Controller
                             ? null
                             : ExpenseReceipts::findDuplicateForExpense($expense_id, $receipt_html, $receipt_items);
 
-                        if ($existingDuplicate) {
+                        // A "duplicate" whose line items are clearly less faithful than
+                        // the incoming copy's is not a redundant re-scan — it's the same
+                        // purchase captured badly (e.g. the clean e-receipt arriving
+                        // after a noted paper scan, which the notes-subset rule flags as
+                        // a duplicate). Upgrade it instead of dropping the better copy.
+                        $upgradesDuplicate = $existingDuplicate
+                            && ! $isMaterialOrder
+                            && ! $existingDuplicate->is_material_order
+                            && ! in_array($existingDuplicate->id, $receiptIdsCreatedThisCall, true)
+                            && ExpenseReceipts::itemsSupersede(
+                                $receipt_items,
+                                $existingDuplicate->resolveSupplementPrimary()->receipt_items ?? [],
+                            );
+
+                        if ($existingDuplicate && ! $upgradesDuplicate) {
                             Storage::disk('files')->delete($ocr_path);
 
                             if ($autoReceiptMessageId) {
@@ -3200,6 +3221,36 @@ class CompanyEmailController extends Controller
                                 $processedFiles[] = $existingDuplicate->receipt_filename;
                             }
                             continue;
+                        }
+
+                        // Not an exact duplicate, but possibly the SAME PURCHASE captured
+                        // a second time (paper scan of an already-emailed e-receipt, or
+                        // the e-receipt arriving after a scan). Keep both files; only the
+                        // copy with the more faithful line items contributes them — the
+                        // other is saved as a notes-only supplement so garbled scan OCR
+                        // never shadows clean items.
+                        $samePurchaseSibling = null;
+                        $demoteSiblingAfterSave = false;
+
+                        if ($upgradesDuplicate) {
+                            $samePurchaseSibling = $existingDuplicate->resolveSupplementPrimary();
+                            $demoteSiblingAfterSave = true;
+                        } elseif (! $skipDuplicateCheck && ! $isMaterialOrder) {
+                            $samePurchaseSibling = ExpenseReceipts::findSamePurchaseSibling($expense_id, $receipt_items);
+
+                            // Never against a row created from this same message —
+                            // that's a page/part of the same document, not a re-capture.
+                            if ($samePurchaseSibling && in_array($samePurchaseSibling->id, $receiptIdsCreatedThisCall, true)) {
+                                $samePurchaseSibling = null;
+                            }
+
+                            if ($samePurchaseSibling) {
+                                if (ExpenseReceipts::itemsSupersede($receipt_items, $samePurchaseSibling->receipt_items ?? [])) {
+                                    $demoteSiblingAfterSave = true;
+                                } else {
+                                    $receipt_items = ExpenseReceipts::toSupplementReceiptItems($receipt_items, $samePurchaseSibling->id);
+                                }
+                            }
                         }
 
                         // Create receipt record in database
@@ -3214,6 +3265,7 @@ class CompanyEmailController extends Controller
                         $expense_receipt->auto_receipt_email_received_at = $autoReceiptEmailReceivedAt;
 
                         $expense_receipt->save();
+                        $receiptIdsCreatedThisCall[] = $expense_receipt->id;
 
                         if ($autoReceiptMessageId) {
                             $this->recordAutoReceiptBatchItem($autoReceiptMessageId, $autoReceiptAttachmentIndex, $expense_receipt->id);
@@ -3234,6 +3286,8 @@ class CompanyEmailController extends Controller
                                 Storage::disk('files')->delete($ocr_path);
                             }
                         }
+
+                        $this->finishSamePurchasePrecedence($expense_receipt, $samePurchaseSibling, $demoteSiblingAfterSave);
 
                         $processedFiles[] = $targetFilename;
                     }
@@ -3274,7 +3328,20 @@ class CompanyEmailController extends Controller
             ? null
             : ExpenseReceipts::findDuplicateForExpense($expense_id, $receiptContent, $receiptFields);
 
-        if ($existingDuplicate) {
+        // A "duplicate" whose line items are clearly less faithful than the
+        // incoming copy's is not a redundant re-scan — it's the same purchase
+        // captured badly (e.g. the clean e-receipt arriving after a noted
+        // paper scan, which the notes-subset rule flags as a duplicate).
+        // Upgrade it instead of dropping the better copy.
+        $upgradesDuplicate = $existingDuplicate
+            && ! $isMaterialOrder
+            && ! $existingDuplicate->is_material_order
+            && ExpenseReceipts::itemsSupersede(
+                $receiptFields,
+                $existingDuplicate->resolveSupplementPrimary()->receipt_items ?? [],
+            );
+
+        if ($existingDuplicate && ! $upgradesDuplicate) {
             Storage::disk('files')->delete($sourcePath);
 
             if ($autoReceiptMessageId) {
@@ -3286,6 +3353,30 @@ class CompanyEmailController extends Controller
             }
 
             return [];
+        }
+
+        // Not an exact duplicate, but possibly the SAME PURCHASE captured a
+        // second time (paper scan of an already-emailed e-receipt, or the
+        // e-receipt arriving after a scan). Keep both files; only the copy
+        // with the more faithful line items contributes them — the other is
+        // saved as a notes-only supplement so garbled scan OCR never shadows
+        // clean items.
+        $samePurchaseSibling = null;
+        $demoteSiblingAfterSave = false;
+
+        if ($upgradesDuplicate) {
+            $samePurchaseSibling = $existingDuplicate->resolveSupplementPrimary();
+            $demoteSiblingAfterSave = true;
+        } elseif (! $skipDuplicateCheck && ! $isMaterialOrder) {
+            $samePurchaseSibling = ExpenseReceipts::findSamePurchaseSibling($expense_id, $receiptFields);
+
+            if ($samePurchaseSibling) {
+                if (ExpenseReceipts::itemsSupersede($receiptFields, $samePurchaseSibling->receipt_items ?? [])) {
+                    $demoteSiblingAfterSave = true;
+                } else {
+                    $receiptFields = ExpenseReceipts::toSupplementReceiptItems($receiptFields, $samePurchaseSibling->id);
+                }
+            }
         }
 
         // Save expense receipt data to the database
@@ -3319,8 +3410,37 @@ class CompanyEmailController extends Controller
                 Storage::disk('files')->delete($sourcePath);
             }
         }
-        
+
+        $this->finishSamePurchasePrecedence($expense_receipt, $samePurchaseSibling, $demoteSiblingAfterSave);
+
         return [$filename];
+    }
+
+    /**
+     * Second half of the same-purchase precedence decision made before the
+     * receipt row was created: demote the incumbent sibling when the new copy
+     * won, and give whichever row ended up as the notes-only supplement a
+     * second OCR pass at its handwritten notes (scan handwriting is exactly
+     * what the first pass most often misses — and the notes are the only data
+     * a supplement contributes).
+     */
+    protected function finishSamePurchasePrecedence(
+        ExpenseReceipts $expenseReceipt,
+        ?ExpenseReceipts $samePurchaseSibling,
+        bool $demoteSibling,
+    ): void {
+        if (! $samePurchaseSibling) {
+            return;
+        }
+
+        if ($demoteSibling) {
+            $samePurchaseSibling->demoteToSupplementOf($expenseReceipt);
+        }
+
+        $supplement = $demoteSibling ? $samePurchaseSibling : $expenseReceipt;
+        if (empty(($supplement->receipt_items ?? [])['handwritten_notes'] ?? [])) {
+            \App\Jobs\BackfillReceiptHandwrittenNoteJob::dispatch($supplement->id, onlyNew: true);
+        }
     }
 
     public function fuzzyMatchVendor($ocrName, $vendors, $threshold = 75.0)

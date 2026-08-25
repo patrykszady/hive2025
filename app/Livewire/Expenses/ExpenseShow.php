@@ -23,6 +23,45 @@ class ExpenseShow extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
+    /**
+     * Receipts grouped for display: one entry per primary (non-supplement)
+     * receipt, newest first, each carrying its notes-only supplement scans.
+     * Supplements never get their own tab — their file rides as an extra
+     * view icon on the primary and only their handwritten notes are shown.
+     * A supplement whose primary row is gone rides with the first group so
+     * its file stays reachable; if only supplements exist they act as
+     * primaries.
+     *
+     * @return \Illuminate\Support\Collection<int, array{receipt: ExpenseReceipts, supplements: \Illuminate\Support\Collection<int, ExpenseReceipts>}>
+     */
+    #[Computed]
+    public function receiptGroups(): \Illuminate\Support\Collection
+    {
+        $receipts = $this->expense->receipts;
+        $primaries = $receipts->reject(fn (ExpenseReceipts $receipt) => $receipt->isSupplement())
+            ->sortByDesc('id')
+            ->values();
+
+        if ($primaries->isEmpty()) {
+            return $receipts->sortByDesc('id')->values()
+                ->map(fn (ExpenseReceipts $receipt) => ['receipt' => $receipt, 'supplements' => collect()]);
+        }
+
+        $primaryIds = $primaries->pluck('id')->all();
+        $supplementsByPrimary = $receipts
+            ->filter(fn (ExpenseReceipts $receipt) => $receipt->isSupplement())
+            ->groupBy(function (ExpenseReceipts $receipt) use ($primaryIds, $primaries) {
+                $primaryId = (int) (($receipt->receipt_items ?? [])['supplement_of_receipt_id'] ?? 0);
+
+                return in_array($primaryId, $primaryIds, true) ? $primaryId : $primaries->first()->id;
+            });
+
+        return $primaries->map(fn (ExpenseReceipts $receipt) => [
+            'receipt' => $receipt,
+            'supplements' => $supplementsByPrimary->get($receipt->id, collect())->sortByDesc('id')->values(),
+        ]);
+    }
+
     public function mount(Expense $expense)
     {
         $this->authorize('view', $expense);

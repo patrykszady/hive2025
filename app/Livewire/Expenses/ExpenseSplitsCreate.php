@@ -215,7 +215,13 @@ class ExpenseSplitsCreate extends Component
             $this->expense = null;
         }
 
-        $receipt = $this->expense?->receipts()->latest()->first();
+        // Newest receipt that actually carries line items — a notes-only
+        // supplement scan must not seed the split UI with an empty item list,
+        // and existing splits were built against the newest item-bearing row.
+        $receipt = $this->expense?->receipts
+            ->filter(fn ($candidate) => ! empty(($candidate->receipt_items ?? [])['items'] ?? []))
+            ->sortByDesc('created_at')
+            ->first();
 
         if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
             $this->expense_line_items = $receipt->receipt_items; // array or object
@@ -319,7 +325,13 @@ class ExpenseSplitsCreate extends Component
 
     public function addSplit()
     {
-        $receipt = $this->expense?->receipts()->latest()->first();
+        // Newest receipt that actually carries line items — a notes-only
+        // supplement scan must not seed the split UI with an empty item list,
+        // and existing splits were built against the newest item-bearing row.
+        $receipt = $this->expense?->receipts
+            ->filter(fn ($candidate) => ! empty(($candidate->receipt_items ?? [])['items'] ?? []))
+            ->sortByDesc('created_at')
+            ->first();
 
         if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
             $items = [];

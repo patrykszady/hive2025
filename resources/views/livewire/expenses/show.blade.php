@@ -305,58 +305,66 @@
                     subheading="Receipt details and information"
                     :details_text="$this->hasReceiptLineItems ? 'Receipt Items' : false"
                 >
-                    @if($expense->receipts->count() === 1 && !empty($expense->receipts->first()->receipt_filename))
+                    @if($this->receiptGroups->count() === 1)
                         <x-slot:header_buttons>
-                            <a
-                                href="{{ route('expenses.original_receipt', ['receipts', $expense->receipts->first()->receipt_filename]) }}"
-                                target="_blank"
-                                title="View Receipt"
-                                aria-label="View Receipt"
-                                class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-700 hover:bg-zinc-950/5 dark:hover:bg-white/10"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
-                                    <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
-                                    <circle cx="12" cy="12" r="2.5"/>
-                                </svg>
-                            </a>
+                            @php $singleGroup = $this->receiptGroups->first(); @endphp
+                            @foreach(collect([$singleGroup['receipt']])->concat($singleGroup['supplements']) as $fileReceipt)
+                                @if(!empty($fileReceipt->receipt_filename))
+                                    <a
+                                        href="{{ route('expenses.original_receipt', ['receipts', $fileReceipt->receipt_filename]) }}"
+                                        target="_blank"
+                                        title="{{ $fileReceipt->isSupplement() ? 'View Scan' : 'View Receipt' }}"
+                                        aria-label="{{ $fileReceipt->isSupplement() ? 'View Scan' : 'View Receipt' }}"
+                                        class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-700 hover:bg-zinc-950/5 dark:hover:bg-white/10"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
+                                            <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
+                                            <circle cx="12" cy="12" r="2.5"/>
+                                        </svg>
+                                    </a>
+                                @endif
+                            @endforeach
                         </x-slot:header_buttons>
                     @endif
                     
 
                     <x-slot:details>
-                        @if($expense->receipts->count() > 1)
-                            {{-- Show tabs for multiple receipts (newest first) --}}
-                            @php $orderedReceipts = $expense->receipts->sortByDesc('id')->values(); @endphp
+                        {{-- One tab per primary receipt (newest first). Notes-only supplement
+                             scans never get a tab: their file rides as an extra view icon on
+                             the primary and only their handwritten notes are shown. --}}
+                        @if($this->receiptGroups->count() > 1)
                             <flux:tab.group>
                                 <flux:tabs>
-                                    @foreach($orderedReceipts as $receipt)
-                                        <flux:tab :name="$receipt->id" class="group">
+                                    @foreach($this->receiptGroups as $group)
+                                        <flux:tab :name="$group['receipt']->id" class="group">
                                             <span class="inline-flex items-center gap-2">
                                                 <span>Receipt {{ $loop->iteration }}</span>
-                        @if(!empty($receipt->receipt_filename))
-                                                    <a
-                                                        href="{{ route('expenses.original_receipt', ['receipts', $receipt->receipt_filename]) }}"
-                                                        target="_blank"
-                                                        title="View Receipt"
-                                                        aria-label="View Receipt"
-                            class="hidden group-aria-selected:inline-flex items-center text-zinc-500 hover:text-zinc-700"
-                                                    >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
-                                                            <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
-                                                            <circle cx="12" cy="12" r="2.5"/>
-                                                        </svg>
-                                                    </a>
-                                                @endif
+                                                @foreach(collect([$group['receipt']])->concat($group['supplements']) as $fileReceipt)
+                                                    @if(!empty($fileReceipt->receipt_filename))
+                                                        <a
+                                                            href="{{ route('expenses.original_receipt', ['receipts', $fileReceipt->receipt_filename]) }}"
+                                                            target="_blank"
+                                                            title="{{ $fileReceipt->isSupplement() ? 'View Scan' : 'View Receipt' }}"
+                                                            aria-label="{{ $fileReceipt->isSupplement() ? 'View Scan' : 'View Receipt' }}"
+                                                            class="hidden group-aria-selected:inline-flex items-center text-zinc-500 hover:text-zinc-700"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
+                                                                <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
+                                                                <circle cx="12" cy="12" r="2.5"/>
+                                                            </svg>
+                                                        </a>
+                                                    @endif
+                                                @endforeach
                                             </span>
                                         </flux:tab>
                                     @endforeach
                                 </flux:tabs>
-                                @foreach($orderedReceipts as $receipt)
-                                    <flux:tab.panel :name="$receipt->id" class="!pt-2">
-                                            <x-expenses.receipt 
-                                                :receipt="$receipt" 
-                                                :selectedSplit="$this->selectedSplit" 
-                                                :expenseMismatch="$this->expenseMismatch" 
+                                @foreach($this->receiptGroups as $group)
+                                    <flux:tab.panel :name="$group['receipt']->id" class="!pt-2">
+                                            <x-expenses.receipt
+                                                :receipt="$group['receipt']"
+                                                :selectedSplit="$this->selectedSplit"
+                                                :expenseMismatch="$this->expenseMismatch"
                                                 :expenseAmount="$this->expenseAmount"
                                                 :compactNotes="false"
                                                 :showNotes="false"
@@ -366,10 +374,11 @@
                             </flux:tab.group>
                         @else
                             {{-- Show single receipt without tabs --}}
-                                <x-expenses.receipt 
-                                    :receipt="$expense->receipts->first()" 
-                                    :selectedSplit="$this->selectedSplit" 
-                                    :expenseMismatch="$this->expenseMismatch" 
+                            @php $singleGroup = $this->receiptGroups->first(); @endphp
+                                <x-expenses.receipt
+                                    :receipt="$singleGroup['receipt']"
+                                    :selectedSplit="$this->selectedSplit"
+                                    :expenseMismatch="$this->expenseMismatch"
                                     :expenseAmount="$this->expenseAmount"
                                     :compactNotes="false"
                                     :showNotes="false"

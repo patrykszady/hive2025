@@ -37,7 +37,12 @@ class ProjectDocumentGenerator
             ->get();
 
         foreach ($expenses as $expense) {
-            $receipt = $expense->receipts()->latest()->first();
+            // Newest receipt, but a notes-only supplement scan never outranks
+            // the primary copy that actually carries the line items.
+            $receipt = $expense->receipts
+                ->sortByDesc('created_at')
+                ->sortBy(fn ($r) => $r->isSupplement() ? 1 : 0)
+                ->first();
             if ($receipt) {
                 $expense->receipt = $receipt;
                 $expense->receipt_html = $receipt->receipt_html;
@@ -49,7 +54,10 @@ class ProjectDocumentGenerator
 
         foreach ($splits as $split) {
             $receipt = $split->expense
-                ? $split->expense->receipts()->latest()->first()
+                ? $split->expense->receipts
+                    ->sortByDesc('created_at')
+                    ->sortBy(fn ($r) => $r->isSupplement() ? 1 : 0)
+                    ->first()
                 : null;
             if ($receipt) {
                 $split->receipt = $receipt;

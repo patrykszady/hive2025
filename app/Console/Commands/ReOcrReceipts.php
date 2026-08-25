@@ -200,6 +200,15 @@ class ReOcrReceipts extends Command
                     }
                 }
 
+                // A notes-only supplement must stay one: the fresh OCR items go
+                // to supplanted_items, line items keep deferring to the primary.
+                if ($receiptRecord->isSupplement()) {
+                    $data = ExpenseReceipts::toSupplementReceiptItems(
+                        $data,
+                        (int) $receiptRecord->receipt_items['supplement_of_receipt_id'],
+                    );
+                }
+
                 $receiptRecord->receipt_items = $data;
                 $receiptRecord->receipt_html  = $result['content'] ?? $receiptRecord->receipt_html;
                 $receiptRecord->save();
@@ -489,6 +498,15 @@ class ReOcrReceipts extends Command
             if (array_key_exists($key, $fields)) {
                 $data[$key] = $fields[$key];
             }
+        }
+
+        // A notes-only supplement must stay one: the fresh OCR items go to
+        // supplanted_items, line items keep deferring to the primary.
+        if ($record->isSupplement()) {
+            $data = ExpenseReceipts::toSupplementReceiptItems(
+                $data,
+                (int) $record->receipt_items['supplement_of_receipt_id'],
+            );
         }
 
         $record->receipt_items = $data;
