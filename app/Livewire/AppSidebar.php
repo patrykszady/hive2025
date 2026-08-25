@@ -31,6 +31,13 @@ class AppSidebar extends Component
             return $this->buildSidebarData($user);
         });
 
+        // Live alert state should not sit in the 5-minute cache: the Menards
+        // flag flips the moment a sign-in fails or succeeds, and a stale
+        // cached payload from before this key existed must not break the view.
+        $sidebarData['menardsNeedsLogin'] = ! $user->is_browsing_as_client
+            && ($sidebarData['canViewBanks'] ?? false)
+            && ($this->menardsNeedsLogin());
+
         // Route-dependent state should not be cached — it changes per request.
         $sidebarData['accountingExpanded'] = request()->is('banks*', 'distributions*', 'sheets*', 'vendors/categories*', 'lien-waivers*')
             || request()->routeIs('banks*', 'distributions*', 'sheets*', 'categories*', 'lien-waivers*');
@@ -52,7 +59,6 @@ class AppSidebar extends Component
         $isAdmin = $user->vendor_role === 'Admin';
 
         $hasBankErrors = false;
-        $menardsNeedsLogin = false;
         $clientHome = null;
 
         if ($isClientUser) {
@@ -71,19 +77,12 @@ class AppSidebar extends Component
                 ->get()
                 ->where('plaid_options.error', '!=', false)
                 ->isNotEmpty();
-
-            // Menards receipt browser needs a human: the extension reported a
-            // dead session, or an automated sign-in failed (challenge wall).
-            $syncStatus = Cache::get(\App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY);
-            $menardsNeedsLogin = (bool) ($syncStatus['session_expired'] ?? false)
-                || Cache::has(\App\Services\MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY);
         }
 
         return [
             'isClientUser' => $isClientUser,
             'isAdmin' => $isAdmin,
             'hasBankErrors' => $hasBankErrors,
-            'menardsNeedsLogin' => $menardsNeedsLogin,
             'clientHome' => $clientHome,
             'canViewBanks' => $user->can('viewAny', Bank::class),
             'canViewLienWaivers' => $user->can('viewAny', LienWaiver::class),
@@ -111,6 +110,18 @@ class AppSidebar extends Component
                 || $user->can('viewOptions', Vendor::class),
             'userId' => $user->id,
         ];
+    }
+
+    /**
+     * Menards receipt browser needs a human: the extension reported a dead
+     * session, or an automated sign-in failed (e.g. the Imperva challenge).
+     */
+    private function menardsNeedsLogin(): bool
+    {
+        $syncStatus = Cache::get(\App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY);
+
+        return (bool) ($syncStatus['session_expired'] ?? false)
+            || Cache::has(\App\Services\MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY);
     }
 
     /**
