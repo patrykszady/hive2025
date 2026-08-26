@@ -15,7 +15,7 @@ use Illuminate\Console\Command;
  */
 class MenardsBrowser extends Command
 {
-    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync}
+    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync|tidy}
         {--reset-profile : Wipe the browser profile — this signs you out}';
 
     protected $description = 'Manage the server-side signed-in browser used to sync Menards receipts';
@@ -29,8 +29,25 @@ class MenardsBrowser extends Command
             'sync' => $this->sync($browser),
             'start' => $this->start($browser),
             'stop' => $this->stop($browser),
+            'tidy' => $this->tidy($browser),
             default => $this->status($browser),
         };
+    }
+
+    /** Collapse the browser to a single receipt-page tab. */
+    protected function tidy(MenardsRemoteBrowserService $browser): int
+    {
+        $result = $browser->tidyTabs();
+
+        if (! $result['ok']) {
+            $this->error($result['error']);
+
+            return self::FAILURE;
+        }
+
+        $this->info('Closed ' . $result['closed'] . ' extra tab(s); one receipt-page tab remains.');
+
+        return self::SUCCESS;
     }
 
     /**

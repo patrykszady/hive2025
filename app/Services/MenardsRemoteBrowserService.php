@@ -198,6 +198,11 @@ class MenardsRemoteBrowserService
             self::VNC_PORT
         ), $logDir . '/menards-browser-websockify.log');
 
+        // Session restore just resurrected every tab from the previous run and
+        // the startup URL added one more — collapse back to a single tab.
+        sleep(3);
+        $this->tidyTabs();
+
         Log::channel('menards')->info('Menards browser: started', [
             'display' => self::DISPLAY,
             'chrome_pid' => $chromePid,
@@ -373,6 +378,50 @@ class MenardsRemoteBrowserService
                 . 'wrong, or the sign-in form moved. Last page seen: ' . ($title ?: '(none)'),
             'url' => $title,
         ];
+    }
+
+    /**
+     * Collapse the window to exactly one tab, left on the receipt page.
+     *
+     * Session restore resurrects every previous tab on each start and appends
+     * one more, and years of that turns the tab strip into confetti. There is
+     * no CDP here (deliberately — nothing may drive this browser but its own
+     * extension and a human), so this works the strip by keyboard: mark tab 1
+     * with chrome://version — a local page whose "About Version" title nothing
+     * on menards.com or Hive can collide with, loaded with zero network — then
+     * close from the far end until only the marker is left, and finally point
+     * the survivor back at the receipt page the extension works from.
+     */
+    public function tidyTabs(): array
+    {
+        if (! $this->processAlive('Xvfb ' . self::DISPLAY)) {
+            return ['ok' => false, 'error' => 'The browser is not running — run menards:browser ensure first.'];
+        }
+
+        $this->xdo('key ctrl+1');
+        usleep(400000);
+        $this->navigate('chrome://version/');
+        sleep(2);
+
+        $closed = 0;
+        for ($i = 0; $i < 40; $i++) {
+            $this->xdo('key ctrl+9');
+            usleep(400000);
+
+            if (str_contains($this->windowTitle(), 'About Version')) {
+                break;
+            }
+
+            $this->xdo('key ctrl+w');
+            $closed++;
+            usleep(400000);
+        }
+
+        $this->navigate('https://www.menards.com/main/receiptLookup.html');
+
+        Log::channel('menards')->info('Menards browser: tabs tidied', ['closed' => $closed]);
+
+        return ['ok' => true, 'closed' => $closed];
     }
 
     protected function flagNeedsSignin(string $reason): void
@@ -802,6 +851,12 @@ class MenardsRemoteBrowserService
         $this->xdo('key ctrl+t');
         usleep(800000);
         $this->navigate(sprintf('chrome-extension://%s/options.html?sync=1', $id));
+
+        // The page's only job is chrome.runtime.sendMessage({action:'run'}) to
+        // the background worker (options.js) — once loaded it is done. Close
+        // it, or one of these piles up per scheduled sync, forever.
+        sleep(4);
+        $this->xdo('key ctrl+w');
 
         Log::channel('menards')->info('Menards: sync requested', ['extension' => $id]);
 
