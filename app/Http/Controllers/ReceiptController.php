@@ -813,7 +813,10 @@ class ReceiptController extends Controller
         if (is_string($handwrittenField) && trim($handwrittenField) !== '') {
             foreach (preg_split('/\s*\|\s*/', $handwrittenField) as $part) {
                 $part = trim($part);
-                if ($part !== '') {
+                // A generate-method field sometimes answers "null"/"none" as
+                // TEXT when there is no handwriting — that's an absence, not
+                // a note. The one exception to prompt-side quality control.
+                if ($part !== '' && ! in_array(mb_strtolower($part), ['null', 'none', 'n/a', 'no handwritten note'], true)) {
                     $handwrittenNotes[] = $part;
                 }
             }
