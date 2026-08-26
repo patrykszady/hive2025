@@ -96,6 +96,42 @@ it('folds a notes-only supplement scan into the primary receipt instead of a sec
         ->assertSee('912');
 });
 
+it('still warns about an amount mismatch when the only extra receipt is a supplement scan', function () {
+    $user = expenseShowUser();
+    [$expense] = expenseWithPrimaryAndSupplement($user);
+
+    // Two rows on the expense, but one purchase: the mismatch check must see
+    // through the supplement. Skew the amount so the mismatch is real.
+    $expense->update(['amount' => 31.02]);
+
+    $component = Livewire::actingAs($user)->test(ExpenseShow::class, ['expense' => $expense->fresh()]);
+
+    expect($component->instance()->expenseMismatch)->toBeTrue();
+});
+
+it('keeps the mismatch banner off when a second primary receipt exists', function () {
+    $user = expenseShowUser();
+    [$expense] = expenseWithPrimaryAndSupplement($user);
+
+    $expense->update(['amount' => 31.02]);
+    ExpenseReceipts::create([
+        'expense_id' => $expense->id,
+        'receipt_filename' => $expense->id . '-other.pdf',
+        'receipt_html' => 'a different purchase',
+        'receipt_items' => [
+            'items' => [
+                ['Price' => 54.13, 'Quantity' => 1, 'TotalPrice' => 54.13, 'Description' => 'OTHER ITEM', 'VendorCode' => '111'],
+            ],
+            'total' => 58.55,
+            'transaction_date' => '2026-08-20',
+        ],
+    ]);
+
+    $component = Livewire::actingAs($user)->test(ExpenseShow::class, ['expense' => $expense->fresh()]);
+
+    expect($component->instance()->expenseMismatch)->toBeFalse();
+});
+
 it('keeps tabs for genuinely different receipts and attaches the supplement icon to its primary tab', function () {
     $user = expenseShowUser();
     [$expense, $primary] = expenseWithPrimaryAndSupplement($user);

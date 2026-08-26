@@ -285,12 +285,17 @@ class ExpenseShow extends Component
     #[Computed]
     public function expenseMismatch(): bool
     {
-        // Only consider mismatch when there is exactly one receipt with parsed line items
-        if ($this->expense->receipts->count() !== 1) {
+        // Only consider mismatch when there is exactly one PRIMARY receipt
+        // with parsed line items. Notes-only supplement scans don't count:
+        // an e-receipt plus its scan is still one purchase, and counting the
+        // scan used to switch this banner off for exactly those expenses.
+        $primaries = $this->expense->receipts->reject(fn (ExpenseReceipts $receipt) => $receipt->isSupplement());
+
+        if ($primaries->count() !== 1) {
             return false;
         }
 
-        $receipt = $this->expense->receipts->first();
+        $receipt = $primaries->first();
         if (!$receipt || !$receipt->receipt_items || !is_array($receipt->receipt_items)) {
             return false;
         }
