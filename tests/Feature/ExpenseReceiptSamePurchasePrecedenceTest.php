@@ -93,6 +93,14 @@ it('recognizes the same purchase across a clean e-receipt and a garbled scan', f
     $emailWithPo = cleanEmailReceiptItems();
     $emailWithPo['purchase_order'] = 'JOB 350';
     expect(ExpenseReceipts::matchesSamePurchase($emailWithPo, $oneSidedPo))->toBeFalse();
+
+    // Punctuation is not a conflict: OCR renders the same PO as "329" on the
+    // e-receipt and "(329" on the scan (expense 27160's real pair).
+    $poClean = cleanEmailReceiptItems();
+    $poClean['purchase_order'] = '329';
+    $poParen = garbledScanItems();
+    $poParen['purchase_order'] = '(329';
+    expect(ExpenseReceipts::matchesSamePurchase($poClean, $poParen))->toBeTrue();
 });
 
 it('scores reconciling line items above garbled ones and ties in favor of the incumbent', function () {

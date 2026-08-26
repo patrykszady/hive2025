@@ -413,7 +413,15 @@ class ExpenseReceipts extends Model
     {
         $po = $receiptItems['purchase_order'] ?? null;
         $normalized = is_string($po) ? trim($po) : '';
-        return $normalized === '0' ? '' : mb_strtolower($normalized);
+
+        if ($normalized === '0') {
+            return '';
+        }
+
+        // Compare on letters and digits only: two captures of the same paper
+        // render the same PO with different punctuation ("329" vs "(329",
+        // "#329", "329."), and that must never read as a conflict.
+        return (string) preg_replace('/[^a-z0-9]+/', '', mb_strtolower($normalized));
     }
 
     /**
