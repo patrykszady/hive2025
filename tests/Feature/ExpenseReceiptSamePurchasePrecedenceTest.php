@@ -83,9 +83,16 @@ it('recognizes the same purchase across a clean e-receipt and a garbled scan', f
     $differentTotal['total'] = 31.02;
     expect(ExpenseReceipts::matchesSamePurchase(cleanEmailReceiptItems(), $differentTotal))->toBeFalse();
 
-    $differentPo = garbledScanItems();
-    $differentPo['purchase_order'] = 'JOB 912';
-    expect(ExpenseReceipts::matchesSamePurchase(cleanEmailReceiptItems(), $differentPo))->toBeFalse();
+    // A PO on one side only is NOT a veto — scans routinely drop the PO the
+    // e-receipt carries (and vice versa), yet it is the same purchase.
+    $oneSidedPo = garbledScanItems();
+    $oneSidedPo['purchase_order'] = 'JOB 912';
+    expect(ExpenseReceipts::matchesSamePurchase(cleanEmailReceiptItems(), $oneSidedPo))->toBeTrue();
+
+    // Two CONFLICTING purchase orders are a veto.
+    $emailWithPo = cleanEmailReceiptItems();
+    $emailWithPo['purchase_order'] = 'JOB 350';
+    expect(ExpenseReceipts::matchesSamePurchase($emailWithPo, $oneSidedPo))->toBeFalse();
 });
 
 it('scores reconciling line items above garbled ones and ties in favor of the incumbent', function () {

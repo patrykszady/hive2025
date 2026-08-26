@@ -235,11 +235,19 @@ class ExpenseReceipts extends Model
         $candidateCore = static::normalizeReceiptCoreSignature($candidateItems);
         $existingCore = static::normalizeReceiptCoreSignature($existingItems);
 
-        return $candidateCore !== null
-            && $existingCore !== null
-            && hash_equals($existingCore, $candidateCore)
-            && static::normalizePurchaseOrderForCompare($existingItems)
-                === static::normalizePurchaseOrderForCompare($candidateItems);
+        if ($candidateCore === null || $existingCore === null || ! hash_equals($existingCore, $candidateCore)) {
+            return false;
+        }
+
+        // Two CONFLICTING purchase orders veto the match; a PO missing on one
+        // side does not. PO extraction differs constantly between captures of
+        // the same paper — scans drop it, and OCR misfiles payment lines or
+        // handwriting into it — so requiring equality left same-purchase
+        // pairs uncombined whenever only one copy carried a PO.
+        $existingPo = static::normalizePurchaseOrderForCompare($existingItems);
+        $candidatePo = static::normalizePurchaseOrderForCompare($candidateItems);
+
+        return $existingPo === $candidatePo || $existingPo === '' || $candidatePo === '';
     }
 
     /**
