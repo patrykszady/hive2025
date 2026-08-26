@@ -20,6 +20,28 @@ document.addEventListener('alpine:init', () => {
         setCallId(value) {
             this.callId = value;
         },
+        // ?callId= owns which call is open; this store only mirrors it, and
+        // that mirror must be re-taken whenever the URL changes. The store is
+        // global and survives wire:navigate while the Livewire panes re-mount
+        // empty, so a leftover callId hides the mobile call list in favour of
+        // a detail pane with nothing in it — and that pane's back button only
+        // renders once a call has loaded, which makes it a dead end.
+        syncCallSelectionFromUrl() {
+            const raw = new URL(window.location.href).searchParams.get('callId');
+            const id = parseInt(raw ?? '', 10);
+            this.callId = Number.isNaN(id) ? null : id;
+        },
+        // Deselect in both places at once. Dropping the URL param matters as
+        // much as the store: syncCallSelectionFromUrl() would otherwise hand
+        // the same dead id straight back on the next tab switch.
+        clearCallSelection() {
+            this.callId = null;
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('callId')) {
+                url.searchParams.delete('callId');
+                window.history.replaceState({}, '', url);
+            }
+        },
     });
 });
 

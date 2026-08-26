@@ -104,6 +104,12 @@
                 url.searchParams.set('activeTab', name);
             }
             window.history.replaceState({}, '', url);
+            // Re-seed selection from the URL we just rewrote. The store is
+            // global and outlives wire:navigate, while the Livewire panes
+            // re-mount empty — so a callId left over from an earlier visit
+            // would hide the mobile list in favour of a detail pane that has
+            // no call to show, with no way back.
+            this.$store.sms.syncCallSelectionFromUrl();
             Alpine.store('sms').setTab(name);
             /* Deferred assignment (no roundtrip): the panels are Alpine-toggled
                and the URL is already updated — the server state rides along
@@ -142,11 +148,11 @@
             store.setTab(@js($activeTab));
             // Seed the selected call from the URL so a deep-linked ?callId= is
             // highlighted in the list. Without this the store starts null and
-            // the call list auto-selects the first row instead of the linked call.
-            if (@js($activeTab) === 'calls') {
-                const callIdParam = new URL(window.location.href).searchParams.get('callId');
-                store.callId = callIdParam ? parseInt(callIdParam, 10) : null;
-            }
+            // the call list auto-selects the first row instead of the linked
+            // call. Unconditional: on the messages tab it clears a callId the
+            // global store carried over from an earlier visit, which would
+            // otherwise strand the calls tab the moment it is opened.
+            store.syncCallSelectionFromUrl();
             // Don't set callsLoading on initial render — the CallList is
             // rendered synchronously, so there is no async load to wait for.
 

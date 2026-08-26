@@ -1,13 +1,38 @@
 <div class="h-full flex flex-col min-h-0">
     @php
         $call = $this->call;
+        // Told to show a call that did not resolve — deleted, or not visible
+        // to this user. Distinct from "nothing selected yet".
+        $staleSelection = ! $call && $this->callId;
     @endphp
 
     @if (! $call)
+        {{-- Asked to show a call we cannot resolve (deleted, or not visible to
+             this user): say so, and release the selection so the mobile list —
+             which hides itself whenever a call is selected — comes back. --}}
         <x-island-card class="flex-1 flex items-center justify-center text-center">
-            <div class="space-y-2 text-zinc-400">
+            {{-- The x-init rides a plain element on purpose: Blade directives
+                 do not compile inside a component tag's attribute list. --}}
+            <div class="space-y-2 text-zinc-400" @if ($staleSelection) x-init="$store.sms.clearCallSelection()" @endif>
                 <flux:icon name="phone" class="size-10 mx-auto opacity-50" />
-                <div class="text-sm">Select a call to see details, recording, and AI summary.</div>
+                <div class="text-sm">
+                    @if ($staleSelection)
+                        That call is no longer available.
+                    @else
+                        Select a call to see details, recording, and AI summary.
+                    @endif
+                </div>
+                {{-- Mobile has no list on screen while a call is selected, so
+                     without this the empty state is a dead end. --}}
+                <flux:button
+                    class="lg:hidden"
+                    size="sm"
+                    variant="ghost"
+                    icon="arrow-left"
+                    x-on:click="$store.sms.clearCallSelection(); $wire.clear(); Livewire.dispatch('call-deselected')"
+                >
+                    Back to calls
+                </flux:button>
             </div>
         </x-island-card>
     @endif
@@ -48,7 +73,7 @@
                 <div class="flex items-center gap-3 min-w-0">
                     <button
                         type="button"
-                        x-on:click="$store.sms.callId = null; $wire.clear(); Livewire.dispatch('call-deselected')"
+                        x-on:click="$store.sms.clearCallSelection(); $wire.clear(); Livewire.dispatch('call-deselected')"
                         class="lg:hidden p-1 -ml-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
                         aria-label="Back"
                     >
