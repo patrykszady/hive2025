@@ -300,7 +300,22 @@ class MenardsRemoteBrowserService
             \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY
         );
 
-        if ($this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) === '') {
+        $loaded = $this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) !== '';
+
+        // The wall's checkbox accepts an X-injected click — that is literally
+        // what a human clicking over noVNC sends (x11vnc injects X events, the
+        // same channel xdotool uses), and such a click passed on 2026-08-26.
+        // Screenshot first so the checkbox position can be calibrated from a
+        // real wall, then click and retry once if coordinates are configured.
+        if (! $loaded && $this->looksLikeChallengeWall()) {
+            $this->captureChallengeScreenshot();
+
+            if ($this->clickChallengeCheckbox()) {
+                $loaded = $this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) !== '';
+            }
+        }
+
+        if (! $loaded) {
             if ($this->looksLikeChallengeWall()) {
                 $this->flagNeedsSignin('challenge');
 
@@ -448,6 +463,56 @@ class MenardsRemoteBrowserService
         Log::channel('menards')->info('Menards browser: tabs tidied', ['closed' => $closed]);
 
         return ['ok' => true, 'closed' => $closed];
+    }
+
+    /**
+     * Keep the last few walls on disk: the first one calibrates the checkbox
+     * coordinates for MENARDS_CHALLENGE_CLICK, later ones show layout drift.
+     */
+    protected function captureChallengeScreenshot(): void
+    {
+        $path = storage_path('app/menards-wall-' . now()->format('Ymd-His') . '.png');
+
+        @shell_exec(sprintf(
+            'env -u WAYLAND_DISPLAY DISPLAY=%s import -window root %s 2>/dev/null',
+            escapeshellarg(self::DISPLAY),
+            escapeshellarg($path)
+        ));
+
+        if (is_file($path)) {
+            Log::channel('menards')->info('Menards browser: challenge wall captured', ['path' => $path]);
+        } else {
+            Log::channel('menards')->warning('Menards browser: wall screenshot failed — is imagemagick installed?');
+        }
+    }
+
+    /**
+     * Click the wall's "I am human" checkbox at the configured coordinates.
+     * Returns true only when the wall is actually gone afterwards. Never
+     * guesses: unconfigured means false, and the screenshot taken by the
+     * caller is how the coordinates get configured in the first place.
+     */
+    protected function clickChallengeCheckbox(): bool
+    {
+        $coords = trim((string) config('services.menards.challenge_click'));
+
+        if (! preg_match('/^(\d+)\s*,\s*(\d+)$/', $coords, $m)) {
+            return false;
+        }
+
+        Log::channel('menards')->info('Menards browser: clicking challenge checkbox', ['at' => $coords]);
+
+        $this->click((int) $m[1], (int) $m[2]);
+        sleep(8);
+
+        $cleared = ! $this->looksLikeChallengeWall();
+
+        Log::channel('menards')->{$cleared ? 'info' : 'warning'}(
+            'Menards browser: challenge click ' . ($cleared ? 'cleared the wall' : 'did not clear the wall'),
+            ['title' => $this->windowTitle()]
+        );
+
+        return $cleared;
     }
 
     protected function flagNeedsSignin(string $reason): void

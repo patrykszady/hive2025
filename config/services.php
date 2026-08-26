@@ -67,6 +67,12 @@ return [
         // Shared secret the receipt extension uses to authenticate to
         // /api/menards/receipts (scripts/menards-receipt-extension).
         'bridge_token' => env('MENARDS_BRIDGE_TOKEN'),
+        // "x,y" screen position of the Imperva wall's "I am human" checkbox on
+        // the :98 display. Calibrated from the storage/app/menards-wall-*.png
+        // screenshot login() captures whenever it meets the wall; unset means
+        // never click blind. An X-injected click here is the same input a
+        // human's noVNC click sends — verified to pass on 2026-08-26.
+        'challenge_click' => env('MENARDS_CHALLENGE_CLICK'),
         // Server-side signed-in browser (MenardsRemoteBrowserService).
         'chromium_binary' => env('MENARDS_CHROMIUM_BINARY'),
         'user_data_dir' => env('MENARDS_USER_DATA_DIR'),
