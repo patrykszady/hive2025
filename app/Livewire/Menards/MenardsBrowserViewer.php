@@ -32,7 +32,7 @@ class MenardsBrowserViewer extends Component
             Artisan::call('menards:browser', ['action' => 'ensure']);
         })->onQueue('background');
 
-        session()->flash('menards-retry', 'Sign-in retry queued — give it a minute, then refresh.');
+        session()->flash('menards-retry', 'Sign-in retry queued — the status below updates on its own.');
     }
 
     #[Title('Menards Browser')]

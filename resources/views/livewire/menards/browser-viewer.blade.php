@@ -1,4 +1,8 @@
-<div class="space-y-4">
+{{-- Poll keeps the status honest on its own: after a captcha click and a
+     queued retry, the red callout flips green here without anyone refreshing.
+     The iframe sits behind wire:ignore so polling never remounts the VNC
+     session mid-click. --}}
+<div class="space-y-4" wire:poll.10s>
     <div class="flex items-center justify-between">
         <div>
             <flux:heading size="xl">Menards Browser</flux:heading>
@@ -38,7 +42,7 @@
         </flux:callout>
     @endif
 
-    <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden bg-zinc-900">
+    <div wire:ignore class="rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden bg-zinc-900">
         <iframe
             src="/menards-vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&path=menards-vnc/websockify"
             title="Menards remote browser"
