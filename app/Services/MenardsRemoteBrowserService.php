@@ -398,17 +398,28 @@ class MenardsRemoteBrowserService
             return ['ok' => false, 'error' => 'The browser is not running — run menards:browser ensure first.'];
         }
 
+        // A stray modal (a Save File dialog sat on this display for weeks)
+        // swallows every keystroke and turns the whole sweep into a no-op
+        // that still counts to the bound. Escape is harmless on a normal
+        // page — send it twice before touching the strip.
+        $this->xdo('key Escape');
+        usleep(300000);
+        $this->xdo('key Escape');
+        usleep(300000);
+
         $this->xdo('key ctrl+1');
         usleep(400000);
         $this->navigate('chrome://version/');
         sleep(2);
 
         $closed = 0;
+        $markerSeen = false;
         for ($i = 0; $i < 40; $i++) {
             $this->xdo('key ctrl+9');
             usleep(400000);
 
             if (str_contains($this->windowTitle(), 'About Version')) {
+                $markerSeen = true;
                 break;
             }
 
@@ -418,6 +429,21 @@ class MenardsRemoteBrowserService
         }
 
         $this->navigate('https://www.menards.com/main/receiptLookup.html');
+
+        // Never finding the marker means the keystrokes weren't landing (a
+        // modal, a lost window) or the pile outran the bound — either way the
+        // "closed" count is not to be trusted as a finished job.
+        if (! $markerSeen) {
+            Log::channel('menards')->warning('Menards browser: tidy never saw its marker tab', ['closed' => $closed]);
+
+            return [
+                'ok' => false,
+                'closed' => $closed,
+                'error' => 'Tidy ran to its bound without finding the marker tab — keystrokes may not be '
+                    . 'reaching the browser (a modal dialog?), or the pile exceeds the bound. '
+                    . 'Look at the display over the /menards/browser viewer.',
+            ];
+        }
 
         Log::channel('menards')->info('Menards browser: tabs tidied', ['closed' => $closed]);
 
