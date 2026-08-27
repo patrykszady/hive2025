@@ -1113,6 +1113,42 @@ class LeadCreate extends Component
             text: 'New number — they get the START prompt first. Text the link from Messages once they opt in.');
     }
 
+    /**
+     * One click from the modal: apply the Consult template and send it.
+     * Without selected availability the email asks the homeowner to pick
+     * consultation times on the signed picker — whose slots are already
+     * gated by Greg's and Patryk's calendars — i.e. the "can we meet for a
+     * consult?" outreach in a single press. With a usable shared time
+     * selected it confirms that time instead, same as the manual flow.
+     */
+    public function sendConsultInvite(): void
+    {
+        // Same scoping as the modal's template picker (vendor global scope
+        // plus the lead type) — just preselected by name.
+        $template = EmailTemplate::query()
+            ->where('type', 'lead')
+            ->where('name', 'Consult')
+            ->first();
+
+        if (! $template) {
+            Flux::toast(
+                duration: 7000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Not sent',
+                text: 'No email template named "Consult" exists.',
+            );
+
+            return;
+        }
+
+        $this->selectedTemplateId = $template->id;
+        $this->subject = $this->replacePlaceholders((string) $template->subject);
+        $this->emailBody = $this->replacePlaceholders((string) $template->body);
+
+        $this->send_message();
+    }
+
     public function send_message(): void
     {
         if (! $this->lead) {

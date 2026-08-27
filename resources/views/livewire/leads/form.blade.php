@@ -182,7 +182,16 @@
                 <flux:button wire:click="confirmRemove" variant="danger">Remove</flux:button>
                 {{-- No Update button: status changes apply immediately (see
                      LeadCreate::updated), everything else on Details is read-only. --}}
-                <div x-show="activeLeadTab === 'messages'">
+                <div x-show="activeLeadTab === 'messages'" class="flex items-center gap-2">
+                    {{-- One click: apply the Consult template and send it — asks
+                         the homeowner to pick consultation times on the signed
+                         picker (gated by Greg's and Patryk's calendars). --}}
+                    <flux:button wire:click="sendConsultInvite" icon="calendar-days"
+                        wire:confirm="Send the consultation invite to {{ $full_name ?: 'this homeowner' }}?"
+                        wire:loading.attr="disabled" wire:target="sendConsultInvite, send_message"
+                        :disabled="$this->sendBlockedReason !== null">
+                        Send Consult Invite
+                    </flux:button>
                     <flux:button type="submit" form="lead_messages_form" variant="primary"
                         wire:loading.attr="disabled" wire:target="send_message"
                         :disabled="$this->sendBlockedReason !== null">
