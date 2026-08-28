@@ -77,6 +77,9 @@ class LeadCreate extends Component
     /** Exact start time (24h "14:30") picked within the selected slot's window. */
     public ?string $selectedExactTime = null;
 
+    /** Office-proposed consult date (GS-side scheduling/reschedule). */
+    public ?string $proposeDate = null;
+
     /** Name for the project the consult booking creates (when the client has none yet). */
     public string $projectName = '';
 
@@ -175,7 +178,7 @@ class LeadCreate extends Component
             'lead', 'full_name', 'email', 'phone', 'phoneEntry', 'address',
             'city', 'state', 'zip',
             'message', 'origin', 'availability', 'selectedAvailability',
-            'selectedExactTime', 'projectName', 'to', 'subject', 'emailBody',
+            'selectedExactTime', 'proposeDate', 'projectName', 'to', 'subject', 'emailBody',
             'selectedTemplateId', 'nylasMessageId', 'nylasReferences',
             'duplicateMatch', 'createAnyway', 'consultMeetingType',
         ]);
@@ -296,6 +299,7 @@ class LeadCreate extends Component
             : [];
         $this->selectedAvailability = [];
         $this->selectedExactTime = null;
+        $this->proposeDate = null;
         $this->projectName = '';
         $this->origin = $this->lead->origin;
         $this->date = $this->lead->date->format('Y-m-d');
@@ -774,15 +778,7 @@ class LeadCreate extends Component
             ]);
         }
 
-        $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
-        $shortVendorName = data_get($vendor?->options, 'short_name') ?: ($vendor?->name ?? config('app.name'));
-
-        $name = preg_replace('/\s+/', ' ', trim((string) $this->full_name));
-        $parts = $name !== '' ? explode(' ', $name) : [];
-        $lastName = count($parts) > 1 ? array_pop($parts) : $name;
-        $clientLastNames = $this->client->last_names ?: $lastName;
-
-        $title = $shortVendorName . ' | ' . $clientLastNames . ' | Consult';
+        $title = $this->consultTaskTitle();
 
         $date = $slot['date'];
 
@@ -1454,6 +1450,13 @@ class LeadCreate extends Component
         $busyIntervals = app(\App\Services\AdminCalendarBusy::class)
             ->busyIntervalsFor((string) ($slot['date'] ?? ''));
 
+        // Same-day scheduling (an office-proposed date can be today) must not
+        // offer starts that have already passed.
+        $tz = PickTimes::timezone();
+        $minStart = ((string) ($slot['date'] ?? '')) === Carbon::now($tz)->format('Y-m-d')
+            ? Carbon::now($tz)->format('H:i')
+            : null;
+
         $options = [];
         while ($cursor < $end) {
             $chipStart = $cursor->format('H:i');
@@ -1462,6 +1465,10 @@ class LeadCreate extends Component
             $clashes = collect($busyIntervals)->contains(
                 fn (array $busy) => $chipStart < $busy[1] && $busy[0] < $chipEnd,
             );
+
+            if ($minStart !== null && $chipStart <= $minStart) {
+                $clashes = true;
+            }
 
             if (! $clashes) {
                 $options[] = [
@@ -1474,6 +1481,144 @@ class LeadCreate extends Component
         }
 
         return $options;
+    }
+
+    /**
+     * The Meet-task title bookConsult() books and rebooks under — the match
+     * key that makes rebooking idempotent, and therefore the ONLY task the
+     * composer may present as "this lead's consult".
+     */
+    protected function consultTaskTitle(): ?string
+    {
+        if (! $this->client || ! $this->lead) {
+            return null;
+        }
+
+        $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
+        $shortVendorName = data_get($vendor?->options, 'short_name') ?: ($vendor?->name ?? config('app.name'));
+
+        $name = preg_replace('/\s+/', ' ', trim((string) $this->full_name));
+        $parts = $name !== '' ? explode(' ', $name) : [];
+        $lastName = count($parts) > 1 ? array_pop($parts) : $name;
+        $clientLastNames = $this->client->last_names ?: $lastName;
+
+        return $shortVendorName . ' | ' . $clientLastNames . ' | Consult';
+    }
+
+    /**
+     * The consult already on the calendar for this lead, shaped for display:
+     * ['label' => 'Thu, Aug 27 · 11:00 AM', 'virtual' => bool, 'task_id' => int].
+     *
+     * Scoped to the exact task bookConsult() would move — this lead's
+     * resolved client, their first project, the consult title — because the
+     * callout promises "send and the invite moves": showing ANY Meet task
+     * the contact has on some other client/project would promise a move
+     * that sending cannot deliver.
+     */
+    #[Computed]
+    public function bookedConsult(): ?array
+    {
+        $project = $this->client?->projects()->first();
+        $title = $this->consultTaskTitle();
+
+        if (! $project || $title === null) {
+            return null;
+        }
+
+        $task = \App\Models\Task::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->where('project_id', $project->id)
+            ->where('type', 'Meet')
+            ->where('title', $title)
+            ->first();
+
+        if (! $task || ! $task->start_date) {
+            return null;
+        }
+
+        $date = Carbon::parse($task->start_date)->format('Y-m-d');
+        $settings = (array) data_get($task->options, 'time_settings.' . $date, []);
+
+        $label = Carbon::parse($task->start_date)->format('D, M j');
+        if (($settings['use_time'] ?? false) && ! empty($settings['start_time'])) {
+            $label .= ' · ' . Carbon::createFromFormat('H:i', $settings['start_time'])->format('g:i A');
+        }
+
+        return [
+            'label' => $label,
+            'virtual' => data_get($task->options, 'meeting_location_type') === 'virtual',
+            'task_id' => $task->id,
+        ];
+    }
+
+    /**
+     * Office-side (re)scheduling: GS picks any weekday, not just the slots
+     * the homeowner shared. The date becomes a synthetic "Anytime" slot, so
+     * every existing rail — busy-gated exact-time chips, the awaiting-exact-
+     * time send guard, bookConsult's idempotent rebooking, the calendar-event
+     * move — carries it with no special cases. Only the email wording knows
+     * the difference (see replacePlaceholders: "offer" vs "confirm").
+     */
+    public function updatedProposeDate(): void
+    {
+        $hadProposal = collect($this->availability)
+            ->contains(fn ($slot) => ! empty(((array) $slot)['office_proposed']));
+
+        $date = trim((string) $this->proposeDate);
+        $isCandidate = $date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date);
+
+        // Clearing an already-empty field must not disturb a homeowner-slot
+        // selection someone made below.
+        if (! $hadProposal && ! $isCandidate) {
+            return;
+        }
+
+        // Drop any previous proposal along with its selection.
+        $this->availability = collect($this->availability)
+            ->reject(fn ($slot) => ! empty(((array) $slot)['office_proposed']))
+            ->values()
+            ->all();
+        $this->selectedAvailability = [];
+        $this->selectedExactTime = null;
+        unset($this->exactTimeOptions, $this->awaitingExactTime, $this->needsProjectName, $this->sendBlockedReason, $this->hasUsableAvailability);
+
+        if (! $isCandidate) {
+            $this->rerenderTemplate();
+
+            return;
+        }
+
+        $tz = PickTimes::timezone();
+        if (Carbon::parse($date, $tz)->lt(Carbon::now($tz)->startOfDay()) || PickTimes::isWeekend($date)) {
+            $this->addError('proposeDate', PickTimes::isWeekend($date)
+                ? 'Consultations are scheduled Monday through Friday.'
+                : 'That date has passed.');
+            $this->proposeDate = null;
+            $this->rerenderTemplate();
+
+            return;
+        }
+
+        $this->resetErrorBag('proposeDate');
+        $this->availability[] = ['date' => $date, 'time' => 'Anytime', 'office_proposed' => true];
+        $this->selectedAvailability = [array_key_last($this->availability)];
+
+        // A day with zero open starts (fully booked, or today after the last
+        // window) must not stand as a selected "Anytime" slot: with no chips
+        // to pick, the {{SELECT Time}} guard never arms and sending would
+        // book a consult with no time at all.
+        if ($this->exactTimeOptions === []) {
+            array_pop($this->availability);
+            $this->selectedAvailability = [];
+            unset($this->exactTimeOptions, $this->awaitingExactTime, $this->needsProjectName, $this->sendBlockedReason, $this->hasUsableAvailability);
+            $this->addError('proposeDate', 'No open times that day — pick another day.');
+            $this->proposeDate = null;
+            $this->rerenderTemplate();
+
+            return;
+        }
+
+        $this->rerenderTemplate();
     }
 
     public function selectExactTime(string $time): void
@@ -1650,11 +1795,22 @@ class LeadCreate extends Component
         // picker (also the path for leads that never gave any availability).
         $rescheduled = $this->lead->hasRescheduled();
 
+        // An office-proposed slot was never "availability you shared" — the
+        // homeowner sees an offer, not a confirmation of their own words.
+        // Resolved before the intro so neither line contradicts the other.
+        $selectedSlotIndex = $this->selectedAvailability[0] ?? null;
+        $officeProposed = $selectedSlotIndex !== null
+            && ! empty(((array) ($this->availability[$selectedSlotIndex] ?? []))['office_proposed']);
+
         // Opening line: a first reply greets them; a reply after they sent new
-        // times thanks them for rescheduling instead.
-        $intro = $rescheduled
-            ? 'Thank you for sending over your new availability! We appreciate you taking the time to reschedule.'
-            : 'Thank you for reaching out to '.e($vendorName).'! We&rsquo;d love to learn more about your project and set up a consultation.';
+        // times thanks them for rescheduling — unless the office is proposing
+        // its own time, where thanking them for availability we are about to
+        // override would read as a contradiction.
+        $intro = match (true) {
+            $officeProposed && $rescheduled => 'Thank you for your patience while we line up your consultation.',
+            $rescheduled => 'Thank you for sending over your new availability! We appreciate you taking the time to reschedule.',
+            default => 'Thank you for reaching out to '.e($vendorName).'! We&rsquo;d love to learn more about your project and set up a consultation.',
+        };
 
         // Say what KIND of meeting this books — a homeowner expecting a
         // doorbell should not get a Teams link, and vice versa.
@@ -1663,8 +1819,11 @@ class LeadCreate extends Component
             : '';
 
         if ($this->hasUsableAvailability) {
-            $timeBlock = ($rescheduled ? 'Based on your updated availability' : 'Based on the availability you shared')
-                .', we&rsquo;d like to confirm this consultation time:<br><strong>'
+            $timeBlock = ($officeProposed
+                    ? 'We&rsquo;d like to offer this consultation time'
+                    : ($rescheduled ? 'Based on your updated availability' : 'Based on the availability you shared')
+                        .', we&rsquo;d like to confirm this consultation time')
+                .':<br><strong>'
                 .$availabilityList.'</strong>'
                 .$formatLine
                 // Same signed picker as the no-time branch: let them reschedule

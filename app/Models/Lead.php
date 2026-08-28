@@ -435,6 +435,7 @@ class Lead extends Model
             ->exists();
     }
 
+
     public static function statusColor(?string $title): string
     {
         return collect(self::selectableStatuses())->firstWhere('code', $title)['color'] ?? 'zinc';

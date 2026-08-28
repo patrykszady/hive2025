@@ -71,6 +71,28 @@
                     placeholder="Subject"
                 />
 
+                {{-- Booked consult: what's on the calendar right now, and that
+                     picking any slot/time below and sending MOVES it. --}}
+                @if ($this->bookedConsult)
+                    <flux:callout icon="calendar-days">
+                        <flux:callout.text>
+                            Consult booked: <strong>{{ $this->bookedConsult['label'] }}</strong>
+                            ({{ $this->bookedConsult['virtual'] ? 'video call' : 'in person' }}).
+                            To reschedule, pick a time below and send — the calendar invite moves with it.
+                        </flux:callout.text>
+                    </flux:callout>
+                @endif
+
+                {{-- GS-side scheduling: propose any weekday, not just the slots
+                     the homeowner shared. Picking a date adds it as a slot; the
+                     exact-time chips below are gated by Greg's and Patryk's
+                     calendars, same as every other consult time. --}}
+                <flux:field>
+                    <flux:label>{{ $this->bookedConsult ? 'Propose a different day' : 'Propose a day' }}</flux:label>
+                    <flux:input type="date" wire:model.live="proposeDate" min="{{ now(\App\Livewire\Leads\PickTimes::timezone())->toDateString() }}" class="max-w-48" />
+                    <flux:error name="proposeDate" />
+                </flux:field>
+
                 @if (! empty($availability))
                     <flux:field>
                         <flux:label>Availability</flux:label>
