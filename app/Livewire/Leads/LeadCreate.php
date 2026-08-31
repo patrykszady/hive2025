@@ -1544,10 +1544,16 @@ class LeadCreate extends Component
             $label .= ' · ' . Carbon::createFromFormat('H:i', $settings['start_time'])->format('g:i A');
         }
 
+        $tz = PickTimes::timezone();
+
         return [
             'label' => $label,
             'virtual' => data_get($task->options, 'meeting_location_type') === 'virtual',
             'task_id' => $task->id,
+            // A consult whose day has passed isn't "booked" to a reader — it
+            // either happened or was missed; both mean the email must talk
+            // about a NEW time, not confirm the old one.
+            'past' => Carbon::parse($task->start_date, $tz)->startOfDay()->lt(Carbon::now($tz)->startOfDay()),
         ];
     }
 
@@ -1802,6 +1808,11 @@ class LeadCreate extends Component
         $officeProposed = $selectedSlotIndex !== null
             && ! empty(((array) ($this->availability[$selectedSlotIndex] ?? []))['office_proposed']);
 
+        // A consult already on the calendar changes the whole register of the
+        // email: greeting a Won client weeks in with "thank you for reaching
+        // out!" reads like we forgot who they are.
+        $booked = $this->bookedConsult;
+
         // Opening line: a first reply greets them; a reply after they sent new
         // times thanks them for rescheduling — unless the office is proposing
         // its own time, where thanking them for availability we are about to
@@ -1809,6 +1820,8 @@ class LeadCreate extends Component
         $intro = match (true) {
             $officeProposed && $rescheduled => 'Thank you for your patience while we line up your consultation.',
             $rescheduled => 'Thank you for sending over your new availability! We appreciate you taking the time to reschedule.',
+            $booked !== null && ($booked['past'] ?? false) => 'We&rsquo;d love to get your consultation with '.e($vendorName).' back on the calendar.',
+            $booked !== null => 'A quick note about your upcoming consultation with '.e($vendorName).'.',
             default => 'Thank you for reaching out to '.e($vendorName).'! We&rsquo;d love to learn more about your project and set up a consultation.',
         };
 
@@ -1819,6 +1832,14 @@ class LeadCreate extends Component
             : '';
 
         if ($this->hasUsableAvailability) {
+            // A time being confirmed/offered while another sits on the
+            // calendar is a MOVE — say so, or the homeowner has two
+            // "confirmed" times and no idea which one is real.
+            $replacesLine = $booked !== null && ! ($booked['past'] ?? false)
+                ? '</p><p></p><p>This replaces the consultation previously scheduled for '
+                    .'<strong>'.e($booked['label']).'</strong>.'
+                : '';
+
             $timeBlock = ($officeProposed
                     ? 'We&rsquo;d like to offer this consultation time'
                     : ($rescheduled ? 'Based on your updated availability' : 'Based on the availability you shared')
@@ -1826,11 +1847,27 @@ class LeadCreate extends Component
                 .':<br><strong>'
                 .$availabilityList.'</strong>'
                 .$formatLine
+                .$replacesLine
                 // Same signed picker as the no-time branch: let them reschedule
                 // themselves rather than asking for a reply we'd hand-handle.
                 .'</p><p></p><p>If this time no longer works for you, you can '
                 .'<a href="'.e($this->lead->availabilityUrl()).'">pick new consultation times</a>'
                 .' and we&rsquo;ll confirm the new one ASAP.';
+        } elseif ($booked !== null && ! ($booked['past'] ?? false)) {
+            // Nothing newly selected, but a consult IS on the books — this
+            // email is a nudge about it, not a first contact.
+            $timeBlock = 'Your consultation is booked for <strong>'.e($booked['label']).'</strong>.'
+                .$formatLine
+                .'</p><p></p><p>If that time no longer works for you, you can '
+                .'<a href="'.e($this->lead->availabilityUrl()).'">pick new consultation times</a>'
+                .' and we&rsquo;ll confirm the change ASAP.';
+        } elseif ($booked !== null) {
+            // The booked day has passed with nothing new selected: name it,
+            // then ask for fresh times.
+            $timeBlock = 'We had your consultation scheduled for <strong>'.e($booked['label']).'</strong>'
+                .' &mdash; let&rsquo;s find a new time. Please '
+                .'<a href="'.e($this->lead->availabilityUrl()).'">select new consultation times</a>'
+                .' that suit you and we&rsquo;ll confirm ASAP.';
         } else {
             // No proposed time, so the "if that time doesn't work" follow-up
             // would be nonsense — each branch carries its own closing line.

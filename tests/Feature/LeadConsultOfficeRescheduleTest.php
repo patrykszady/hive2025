@@ -82,6 +82,17 @@ function officeComposer(array $fx)
         ->set('emailBody', '<p>See you soon</p>');
 }
 
+/** Book a consult through the composer on an office-proposed day. */
+function bookOfficeConsult(array $fx, int $plusDays = 0): void
+{
+    $component = officeComposer($fx)->set('proposeDate', officeProposalDate($plusDays));
+    $options = $component->instance()->exactTimeOptions;
+    $component
+        ->call('selectExactTime', $options[0]['value'])
+        ->set('projectName', 'Bathroom Remodel')
+        ->call('send_message');
+}
+
 it('books a consult on an office-proposed day the homeowner never offered', function () {
     Queue::fake();
     $fx = makeOfficeRescheduleFixture();
@@ -235,6 +246,70 @@ it('never presents another client\'s meeting as this lead\'s booked consult', fu
 
     expect($component->instance()->bookedConsult)->toBeNull();
     $component->assertDontSee('Consult booked');
+});
+
+it('writes a booking-aware nudge when a consult is booked and nothing new is selected', function () {
+    Queue::fake();
+    $fx = makeOfficeRescheduleFixture();
+    bookOfficeConsult($fx);
+
+    $component = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']->id);
+
+    $rendered = (new ReflectionMethod(LeadCreate::class, 'replacePlaceholders'))
+        ->invoke($component->instance(), '{{lead_intro}} {{lead_time_block}}');
+
+    expect($rendered)->toContain('Your consultation is booked for')
+        ->and($rendered)->toContain('A quick note about your upcoming consultation')
+        ->and($rendered)->not->toContain('Thank you for reaching out');
+});
+
+it('asks for fresh times, naming the missed date, when the booked consult has passed', function () {
+    Queue::fake();
+    $fx = makeOfficeRescheduleFixture();
+    bookOfficeConsult($fx);
+
+    // Jump past the booked day; every shared slot is then stale too.
+    $tz = \App\Livewire\Leads\PickTimes::timezone();
+    \Illuminate\Support\Carbon::setTestNow(
+        \Illuminate\Support\Carbon::parse(officeProposalDate(), $tz)->addDays(10)->setTime(9, 0)
+    );
+
+    $component = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']->id);
+
+    $rendered = (new ReflectionMethod(LeadCreate::class, 'replacePlaceholders'))
+        ->invoke($component->instance(), '{{lead_intro}} {{lead_time_block}}');
+
+    expect($rendered)->toContain('We had your consultation scheduled for')
+        ->and($rendered)->toContain('select new consultation times')
+        ->and($rendered)->toContain('back on the calendar')
+        ->and($rendered)->not->toContain('Thank you for reaching out');
+
+    $component->assertSee('that date has passed');
+
+    \Illuminate\Support\Carbon::setTestNow();
+});
+
+it('tells the homeowner the new offer replaces the previously scheduled time', function () {
+    Queue::fake();
+    $fx = makeOfficeRescheduleFixture();
+    bookOfficeConsult($fx);
+
+    $component = Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']->id)
+        ->set('proposeDate', officeProposalDate(8));
+    $options = $component->instance()->exactTimeOptions;
+    $component->call('selectExactTime', $options[0]['value']);
+
+    $rendered = (new ReflectionMethod(LeadCreate::class, 'replacePlaceholders'))
+        ->invoke($component->instance(), '{{lead_time_block}}');
+
+    expect($rendered)->toContain('offer this consultation time')
+        ->and($rendered)->toContain('This replaces the consultation previously scheduled for');
 });
 
 it('shows the booked consult in the modal and refuses weekend proposals', function () {

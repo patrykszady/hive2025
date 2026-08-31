@@ -74,11 +74,17 @@
                 {{-- Booked consult: what's on the calendar right now, and that
                      picking any slot/time below and sending MOVES it. --}}
                 @if ($this->bookedConsult)
-                    <flux:callout icon="calendar-days">
+                    <flux:callout :color="$this->bookedConsult['past'] ? 'amber' : null" icon="calendar-days">
                         <flux:callout.text>
-                            Consult booked: <strong>{{ $this->bookedConsult['label'] }}</strong>
-                            ({{ $this->bookedConsult['virtual'] ? 'video call' : 'in person' }}).
-                            To reschedule, pick a time below and send — the calendar invite moves with it.
+                            @if ($this->bookedConsult['past'])
+                                Consult was scheduled for <strong>{{ $this->bookedConsult['label'] }}</strong>
+                                ({{ $this->bookedConsult['virtual'] ? 'video call' : 'in person' }}) — that date has passed.
+                                Propose a new day below and send to rebook.
+                            @else
+                                Consult booked: <strong>{{ $this->bookedConsult['label'] }}</strong>
+                                ({{ $this->bookedConsult['virtual'] ? 'video call' : 'in person' }}).
+                                To reschedule, pick a time below and send — the calendar invite moves with it.
+                            @endif
                         </flux:callout.text>
                     </flux:callout>
                 @endif
