@@ -196,6 +196,16 @@ it('does not backfill projects whose upcoming Meet is not a consult', function (
     expect(latestStatusCode($task->project_id))->toBe(2);
 });
 
+it('keeps Consult as a valid projects-index status filter', function () {
+    Queue::fake();
+    $fx = consultStatusFixture();
+
+    Livewire::actingAs($fx['admin'])
+        ->withQueryParams(['project_status_title' => 9])
+        ->test(\App\Livewire\Projects\ProjectsIndex::class)
+        ->assertSet('project_status_title', 9);
+});
+
 it('never drags a progressed project back to Consult when another meeting is booked', function () {
     Queue::fake();
     $fx = consultStatusFixture();

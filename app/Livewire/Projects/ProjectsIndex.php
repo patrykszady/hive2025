@@ -75,7 +75,10 @@ class ProjectsIndex extends Component
 
         // Check URL parameters first
         if ($hasStatusParam) {
-            $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
+            // Derived, not hardcoded: a literal list here silently dropped
+            // the Consult status (9) when it was added — an unknown code
+            // nulls the filter, which reads as "show everything".
+            $validCodes = array_column(ProjectStatus::selectableStatuses(), 'code');
             $code = (int) $this->project_status_title;
             $this->project_status_title = in_array($code, $validCodes) ? $code : null;
             Session::put('projects.status', $this->project_status_title);

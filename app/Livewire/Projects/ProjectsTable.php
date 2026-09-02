@@ -147,7 +147,9 @@ class ProjectsTable extends Component
         }
 
         $statusCodes = $this->projectStatusTitle !== null && $this->projectStatusTitle !== '' ? [$this->projectStatusTitle] : [];
-        $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
+        // Derived, not hardcoded: a literal list here silently dropped the
+        // Consult status (9) when it was added.
+        $validCodes = array_column(\App\Models\ProjectStatus::selectableStatuses(), 'code');
 
         $codes = [];
         if (! empty($statusCodes)) {
@@ -198,7 +200,9 @@ class ProjectsTable extends Component
         $project = Project::findOrFail($projectId);
         $this->authorize('update', $project);
 
-        $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
+        // Derived, not hardcoded: a literal list here silently dropped the
+        // Consult status (9) when it was added.
+        $validCodes = array_column(\App\Models\ProjectStatus::selectableStatuses(), 'code');
         if (! in_array($statusCode, $validCodes, true)) {
             return;
         }
