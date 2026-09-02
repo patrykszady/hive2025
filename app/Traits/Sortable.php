@@ -80,10 +80,18 @@ trait Sortable
         DB::transaction(function () {
             $position = 0;
 
-            // Secondary id sort makes duplicate order values deterministic.
+            // Sort in PHP, not SQL: bootSortable's global scope appends its
+            // own orderBy('order') when the query executes — i.e. AFTER any
+            // orderBy chained here — so a chained ->orderBy('id') silently
+            // became the PRIMARY sort and renumbered rows into creation
+            // order, flinging the newest item to the end of the section.
+            // Here `order` leads and `id` only breaks ties.
+            $models = static::sortable($this)->get()
+                ->sortBy([['order', 'asc'], ['id', 'asc']]);
+
             // Quiet saves: renumbering is bookkeeping — running observers and
             // activity logs across every sibling on each drag is noise.
-            foreach (static::sortable($this)->orderBy('id')->get() as $model) {
+            foreach ($models as $model) {
                 if ((int) $model->order !== $position) {
                     $model->order = $position;
                     $model->saveQuietly();

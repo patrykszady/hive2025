@@ -139,6 +139,30 @@ it('moves a line item into the middle of another section at the right spot', fun
         ->and(EstimateLineItem::where('section_id', $a->id)->orderBy('order')->pluck('order')->all())->toBe([0]);
 });
 
+it('leaves a newer item alone when it already sits high in the section', function () {
+    $fx = sortingFixture();
+    $this->actingAs($fx['user']);
+
+    $a = makeSection($fx['estimate'], 'A');
+    $items = [];
+    foreach (['A1', 'A2', 'A3'] as $name) {
+        $items[$name] = makeItem($fx['estimate'], $a, $name);
+    }
+
+    // A LATER-created item dragged near the top: highest id, low order —
+    // exactly estimate 275's "Build Wall". Renumbering by id would fling it
+    // back to the end on the next unrelated drag.
+    $newest = makeItem($fx['estimate'], $a, 'A4-newest');
+    $newest->move(1);
+    expect(sectionOrder($a))->toBe(['A1', 'A4-newest', 'A2', 'A3']);
+
+    // Move a DIFFERENT item; the newest one must hold its place.
+    $items['A3']->refresh();
+    $items['A3']->move(0);
+
+    expect(sectionOrder($a))->toBe(['A3', 'A1', 'A4-newest', 'A2']);
+});
+
 it('keeps working after a deletion left a displaced 999999 order behind', function () {
     $fx = sortingFixture();
     $this->actingAs($fx['user']);
