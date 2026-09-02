@@ -21,6 +21,9 @@ class Login extends Component
     // Step management: 'email' -> 'credentials'
     public string $step = 'email';
     public bool $hasPasskey = false;
+
+    /** Why the passkey step was abandoned — shown above the fallback options. */
+    public ?string $passkeyNotice = null;
     public bool $hasPassword = false;
 
     public function mount(): void
@@ -86,6 +89,7 @@ class Login extends Component
                 ->exists()
             && $this->canUsePasskeysForCurrentRequest();
         $this->hasPassword = filled($user->password);
+        $this->passkeyNotice = null;
         $this->step = 'credentials';
     }
 
@@ -94,6 +98,7 @@ class Login extends Component
         $this->step = 'email';
         $this->password = '';
         $this->hasPasskey = false;
+        $this->passkeyNotice = null;
         $this->hasPassword = false;
         $this->resetErrorBag();
     }
@@ -159,9 +164,22 @@ class Login extends Component
         $this->redirect(route('one-time-login'), navigate: true);
     }
 
-    public function showPasswordLogin(): void
+    /**
+     * Leave the passkey step for the fallback options. Called by the page
+     * when the ceremony cannot proceed: `no-passkey` is NotAllowedError —
+     * the browser found no matching credential on this device (Windows
+     * Hello / Touch ID passkeys never leave the device that made them) or
+     * the prompt was dismissed. Silently swapping to the fallback read as
+     * "passkey login is broken", so the reason is now said out loud.
+     */
+    public function showPasswordLogin(?string $reason = null): void
     {
         $this->hasPasskey = false;
+        $this->passkeyNotice = match ($reason) {
+            'no-passkey' => 'No passkey for this device was found, or the prompt was closed. A passkey made on another computer or phone only works there.',
+            'unsupported' => 'This browser can\'t use passkeys here.',
+            default => null,
+        };
     }
 
     protected function resolveUserFromIdentifier(string $identifier): ?User

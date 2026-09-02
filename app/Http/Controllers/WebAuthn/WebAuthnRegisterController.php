@@ -30,7 +30,7 @@ class WebAuthnRegisterController
      */
     public function register(AttestedRequest $request): Response
     {
-        Log::channel('passkey')->info('WebAuthn register: Request received', [
+        Log::channel('passkeys')->info('WebAuthn register: Request received', [
             'user_id' => $request->user()?->id,
             'session_id' => session()->getId(),
             'auth_check' => auth()->check(),

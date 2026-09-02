@@ -73,14 +73,29 @@
                                     remember: $wire.entangle('remember'),
                                     error: null,
                                     loading: false,
+                                    // Same endpoint and channel as passkey registration, so a
+                                    // failed sign-in reads as one sequence next to the server's
+                                    // own 'WebAuthn login:' lines.
+                                    async log(level, message, data = {}) {
+                                        try {
+                                            await fetch('/api/passkey-debug-log', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || '' },
+                                                body: JSON.stringify({ level, message, data, timestamp: new Date().toISOString(), url: location.href }),
+                                                credentials: 'include',
+                                            });
+                                        } catch (e) {}
+                                    },
                                     init() {
                                         if (!window.isSecureContext) {
-                                            $wire.showPasswordLogin();
+                                            this.log('warning', 'Passkey login: insecure context, falling back');
+                                            $wire.showPasswordLogin('unsupported');
                                             return;
                                         }
 
                                         if (!window.Webpass || Webpass.isUnsupported()) {
-                                            $wire.showPasswordLogin();
+                                            this.log('warning', 'Passkey login: Webpass missing or unsupported, falling back', { webpass: !!window.Webpass });
+                                            $wire.showPasswordLogin('unsupported');
                                             return;
                                         }
                                     },
@@ -92,6 +107,7 @@
                                             this.loading = false;
                                             return;
                                         }
+                                        this.log('info', 'Passkey login: assert started', { email: this.email });
                                         try {
                                             const { success, error } = await Webpass.assert({
                                                 path: '/webauthn/login/options',
@@ -101,16 +117,22 @@
                                                 body: { remember: this.remember ? 'on' : '' },
                                             });
                                             if (success) {
+                                                this.log('info', 'Passkey login: assert succeeded');
                                                 window.location.href = '{{ session('url.intended', route('dashboard')) }}';
                                                 return;
                                             }
+                                            // Webpass wraps ofetch: a server rejection carries its status and
+                                            // parsed body on the error (errors.assertion is the real reason).
+                                            const detail = { name: error?.name, message: error?.message, status: error?.status ?? error?.response?.status, data: error?.data };
                                             if (error?.name === 'NotAllowedError') {
-                                                $wire.showPasswordLogin();
+                                                this.log('warning', 'Passkey login: NotAllowedError — no matching passkey on this device, or prompt dismissed', detail);
+                                                $wire.showPasswordLogin('no-passkey');
                                                 return;
-                                            } else {
-                                                this.error = error?.message || 'Passkey login failed.';
                                             }
+                                            this.log('error', 'Passkey login: assert failed', detail);
+                                            this.error = error?.message || 'Passkey login failed.';
                                         } catch (e) {
+                                            this.log('error', 'Passkey login: assert threw', { name: e?.name, message: e?.message });
                                             this.error = 'Passkey login failed.';
                                         }
                                         this.loading = false;
@@ -164,6 +186,14 @@
                             </div>
                         @else
                             {{-- No passkey: show password form --}}
+                            @if($passkeyNotice)
+                                <flux:callout color="amber" icon="finger-print">
+                                    <flux:callout.text>
+                                        {{ $passkeyNotice }}
+                                        Sign in with {{ $hasPassword ? 'your password or ' : '' }}a one-time code, then add a passkey for this device from your profile.
+                                    </flux:callout.text>
+                                </flux:callout>
+                            @endif
                             @if($hasPassword)
                                 <form wire:submit="login" class="space-y-6">
                                     <flux:field>
