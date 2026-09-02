@@ -3,7 +3,6 @@
 namespace App\Traits;
 
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Lottery;
 
 trait Sortable
 {
@@ -34,11 +33,20 @@ trait Sortable
 
     public function move($position)
     {
-        Lottery::odds(2, outOf: 10)
-            ->winner(fn () => $this->arrange())
-            ->choose();
-
         DB::transaction(function () use ($position) {
+            // The block-shift below is only correct over a gapless 0..N-1
+            // sequence — and real data drifts from that constantly: creation
+            // numbers estimate line items ESTATE-wide while moves are scoped
+            // per-section, cross-section moves and displaced rows leave gaps
+            // and offsets. The UI sends the target INDEX in the visible list,
+            // so anything but 0..N-1 lands the row in the wrong place.
+            //
+            // Renumber first, every time. (This used to be a 2-in-10 Lottery,
+            // which both left 8 in 10 moves running over dirty data AND used
+            // a stale $this->order for the shift when it did fire.)
+            $this->arrange();
+            $this->refresh();
+
             $current = $this->order;
             $after = $position;
 
@@ -72,9 +80,16 @@ trait Sortable
         DB::transaction(function () {
             $position = 0;
 
-            foreach (static::sortable($this)->get() as $model) {
-                $model->order = $position++;
-                $model->save();
+            // Secondary id sort makes duplicate order values deterministic.
+            // Quiet saves: renumbering is bookkeeping — running observers and
+            // activity logs across every sibling on each drag is noise.
+            foreach (static::sortable($this)->orderBy('id')->get() as $model) {
+                if ((int) $model->order !== $position) {
+                    $model->order = $position;
+                    $model->saveQuietly();
+                }
+
+                $position++;
             }
         });
     }
