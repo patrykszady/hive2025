@@ -2,7 +2,7 @@
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
     @include('components.layouts.head')
 
-    <body class="min-h-screen bg-zinc-100 dark:bg-zinc-900">
+    <body class="min-h-screen bg-zinc-100 dark:bg-zinc-900" data-authenticated="true">
         <livewire:browser-timezone />
 
         {{-- Simple header for client portal --}}

@@ -74,12 +74,13 @@ document.addEventListener('alpine:init', () => {
                 succeed(() => queueMicrotask(cleanMessagesUrl));
             });
 
-			// Recover from stale component snapshots (common right after deploy).
-			// Reload only once to avoid request loops from an invalid payload.
-			let reloadedAfterCorruptSnapshot = false;
+			// Recover from stale component snapshots (common right after deploy)
+			// and from expired sessions (419). Reload only once to avoid
+			// request loops from an invalid payload.
+			let reloadedAfterDeadPage = false;
 			window.Livewire.hook('request', ({ fail }) => {
 				fail(({ status, content }) => {
-					if (reloadedAfterCorruptSnapshot) {
+					if (reloadedAfterDeadPage) {
 						return;
 					}
 
@@ -87,8 +88,20 @@ document.addEventListener('alpine:init', () => {
 						&& typeof content === 'string'
 						&& content.includes('Livewire encountered corrupt data when trying to hydrate a component');
 
-					if (isCorruptSnapshot) {
-						reloadedAfterCorruptSnapshot = true;
+					// 419 = the CSRF token died with the session (a login page
+					// left open past SESSION_LIFETIME is the common one). Every
+					// keystroke on a wire:model.live field then fails, so the
+					// input reads as frozen and the user is stranded on a page
+					// that cannot recover itself. Reloading mints a fresh token.
+					//
+					// Guests only: a signed-in user may have unsaved work in the
+					// component, and silently discarding it is worse than
+					// Livewire's own "page expired" prompt.
+					const isExpiredSession = status === 419
+						&& document.body?.dataset.authenticated !== 'true';
+
+					if (isCorruptSnapshot || isExpiredSession) {
+						reloadedAfterDeadPage = true;
 						window.location.reload();
 					}
 				});

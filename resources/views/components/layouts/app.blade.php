@@ -5,8 +5,11 @@
 
     {{-- BODY --}}
     {{-- $fullscreenClasses prop in render of Planner/Board --}}
-    <body 
+    <body
         class="{{isset($fullscreenClasses) ? 'h-screen overflow-hidden ' : 'min-h-screen '}} bg-zinc-100 dark:bg-zinc-800"
+        {{-- Signed-in pages may hold unsaved work, so app.js never auto-reloads
+             them out of an expired session — see the 419 hook. --}}
+        data-authenticated="true"
         @if(config('app.fake_browser_date')) data-fake-today="{{ browser_today()->format('Y-m-d') }}" @endif
     >
         <livewire:browser-timezone />
