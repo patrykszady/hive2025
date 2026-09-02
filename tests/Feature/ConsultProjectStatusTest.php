@@ -159,6 +159,43 @@ it('re-parks in Consult when a passed consult is rebooked to a future day', func
     Carbon::setTestNow();
 });
 
+it('backfills Consult onto Estimate projects still waiting on their consult', function () {
+    Queue::fake();
+    $fx = consultStatusFixture();
+    $task = bookStatusConsult($fx);
+
+    // Simulate the pre-feature world: the booking parked it, knock it back.
+    ProjectStatus::withoutGlobalScopes()
+        ->where('project_id', $task->project_id)
+        ->where('status_code', 9)
+        ->delete();
+    expect(latestStatusCode($task->project_id))->toBe(2);
+
+    $this->artisan('projects:backfill-consult-status')->assertSuccessful();
+    expect(latestStatusCode($task->project_id))->toBe(9);
+
+    // Idempotent: a second run finds nothing to park.
+    $this->artisan('projects:backfill-consult-status')
+        ->expectsOutputToContain('parked: 0')
+        ->assertSuccessful();
+});
+
+it('does not backfill projects whose upcoming Meet is not a consult', function () {
+    Queue::fake();
+    $fx = consultStatusFixture();
+    $task = bookStatusConsult($fx);
+
+    ProjectStatus::withoutGlobalScopes()
+        ->where('project_id', $task->project_id)
+        ->where('status_code', 9)
+        ->delete();
+    Task::withoutGlobalScopes()->whereKey($task->id)->update(['title' => 'Walkthrough with framer']);
+
+    $this->artisan('projects:backfill-consult-status')->assertSuccessful();
+
+    expect(latestStatusCode($task->project_id))->toBe(2);
+});
+
 it('never drags a progressed project back to Consult when another meeting is booked', function () {
     Queue::fake();
     $fx = consultStatusFixture();
