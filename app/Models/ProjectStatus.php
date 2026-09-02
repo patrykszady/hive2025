@@ -21,7 +21,10 @@ class ProjectStatus extends Model
      * Status code to title mapping
      */
     protected const STATUS_LABELS = [
+        // Insertion order IS lifecycle order — selectableStatuses() (and so
+        // every dropdown) renders in this sequence, not by code number.
         1 => 'Invited',
+        9 => 'Consult',
         2 => 'Estimate',
         3 => 'Response',
         4 => 'Prep',
@@ -50,6 +53,7 @@ class ProjectStatus extends Model
         6 => 'green',     // Active
         7 => 'sky',       // Complete - changed from teal for better distinction from green
         8 => 'orange',    // Service Call
+        9 => 'purple',    // Consult - won lead waiting on the meeting
         10 => 'red',      // Cancelled
         11 => 'gray',     // VIEW ONLY
     ];
@@ -66,6 +70,7 @@ class ProjectStatus extends Model
         'green' => ['ring' => 'rgb(240, 253, 244)', 'dot' => 'rgb(34, 197, 94)'],
         'teal' => ['ring' => 'rgb(240, 253, 250)', 'dot' => 'rgb(20, 184, 166)'],
         'orange' => ['ring' => 'rgb(255, 247, 237)', 'dot' => 'rgb(249, 115, 22)'],
+        'purple' => ['ring' => 'rgb(250, 245, 255)', 'dot' => 'rgb(168, 85, 247)'],
         'red' => ['ring' => 'rgb(254, 242, 242)', 'dot' => 'rgb(239, 68, 68)'],
         'gray' => ['ring' => 'rgb(249, 250, 251)', 'dot' => 'rgb(107, 114, 128)'],
         'sky' => ['ring' => 'rgb(240, 249, 255)', 'dot' => 'rgb(14, 165, 233)'],

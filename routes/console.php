@@ -78,6 +78,14 @@ Schedule::command('calls:reconcile-stale --execute')
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
+// A won lead's project waits in Consult until the meeting passes, then
+// starts estimating on its own — see AdvancePastConsultProjects.
+Schedule::command('projects:advance-past-consults')
+    ->hourly()
+    ->name('advance-past-consults')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::job(new RunScheduledTask(\App\Http\Controllers\CompanyEmailController::class, 'dispatchAutoReceiptMailboxJobs'))
     ->everyTenMinutes()
     // ->between('7:00', '22:00')

@@ -859,6 +859,8 @@ class LeadCreate extends Component
                 ? \App\Jobs\UpdateMeetTaskCalendarEvent::dispatch($task->id)
                 : \App\Jobs\CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
 
+            $this->parkProjectInConsult($project, $task);
+
             return true;
         }
 
@@ -899,7 +901,41 @@ class LeadCreate extends Component
         // calendar event for the Meet task.
         \App\Jobs\CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
 
+        $this->parkProjectInConsult($project, $task);
+
         return true;
+    }
+
+    /**
+     * A won lead whose consult hasn't happened yet is not estimating anything
+     * — the project sits in Consult until the meeting passes, then the
+     * scheduled projects:advance-past-consults run moves it to Estimate.
+     * Only a fresh project (Estimate) is parked; a project already past that
+     * — Active, Complete, a Service Call — booking another meeting must
+     * never be dragged backwards.
+     */
+    protected function parkProjectInConsult(\App\Models\Project $project, \App\Models\Task $task): void
+    {
+        if ($task->meetHasPassed(PickTimes::timezone())) {
+            return;
+        }
+
+        $latestCode = \App\Models\ProjectStatus::withoutGlobalScopes()
+            ->where('project_id', $project->id)
+            ->orderByDesc('start_date')
+            ->orderByDesc('id')
+            ->value('status_code');
+
+        if ((int) $latestCode !== 2) {
+            return;
+        }
+
+        \App\Models\ProjectStatus::create([
+            'project_id' => $project->id,
+            'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
+            'status_code' => 9, // Consult
+            'start_date' => today()->format('Y-m-d'),
+        ]);
     }
 
     /**

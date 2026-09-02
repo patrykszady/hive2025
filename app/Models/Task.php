@@ -129,6 +129,29 @@ class Task extends Model
     }
 
     /**
+     * Has this meeting's moment passed? Past dates count outright; today
+     * counts once its time window ends (a dateless meeting holds the whole
+     * day). Drives the Consult→Estimate project advance: a consult has
+     * "happened" exactly when this turns true.
+     */
+    public function meetHasPassed(?string $timezone = null): bool
+    {
+        if (! $this->start_date) {
+            return false;
+        }
+
+        $tz = $timezone ?: config('app.timezone');
+        $date = Carbon::parse($this->start_date)->format('Y-m-d');
+        $today = Carbon::now($tz)->format('Y-m-d');
+
+        if ($date < $today) {
+            return true;
+        }
+
+        return $date === $today && $this->timeHasPassedOn($date, $tz);
+    }
+
+    /**
      * Maps a homeowner-selected time frame to its arrival start time.
      *
      * @var array<string, string>
