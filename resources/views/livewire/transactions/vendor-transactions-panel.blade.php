@@ -71,15 +71,20 @@
 
     <x-island-card heading="Vendor Transactions">
         <div class="card-flush-bottom overflow-x-hidden">
-            <flux:table class="table-fixed w-full">
+            {{-- Embedded table, per the index-table rules: fixed layout, % widths
+                 summing to 100, min-w-0 everywhere, and every free-text cell
+                 truncated behind x-truncate-tooltip. The old break-words cells
+                 wrapped mid-token and spilled long descriptions/regexes into the
+                 neighbouring column. --}}
+            <flux:table class="table-fixed min-w-0 w-full">
                 <flux:table.columns>
-                    <flux:table.column class="w-[16%]">Vendor</flux:table.column>
-                    <flux:table.column class="w-[40%]">Description</flux:table.column>
-                    <flux:table.column class="w-[12%]">Deposit/Check</flux:table.column>
-                    <flux:table.column class="w-[6%]">Sign</flux:table.column>
-                    <flux:table.column class="w-[10%]">Bank</flux:table.column>
-                    <flux:table.column class="w-[12%]">Options</flux:table.column>
-                    <flux:table.column class="w-[4%]"></flux:table.column>
+                    <flux:table.column class="w-[18%] min-w-0">Vendor</flux:table.column>
+                    <flux:table.column class="w-[34%] min-w-0">Description</flux:table.column>
+                    <flux:table.column class="w-[14%] min-w-0">Deposit/Check</flux:table.column>
+                    <flux:table.column class="w-[7%] min-w-0">Sign</flux:table.column>
+                    <flux:table.column class="w-[11%] min-w-0">Bank</flux:table.column>
+                    <flux:table.column class="w-[11%] min-w-0">Options</flux:table.column>
+                    <flux:table.column class="w-[5%] min-w-0"></flux:table.column>
                 </flux:table.columns>
                 <flux:table.rows>
                     @foreach($vendor_transactions as $row)
@@ -89,22 +94,35 @@
                                 2 => '-$ in',
                                 default => 'Any',
                             };
+                            $vendorName = $row['vendor']['business_name'] ?? '—';
+                            $bankName = $row['bank']['name'] ?? '—';
                         @endphp
-                        <flux:table.row wire:key="vendor-txn-{{ $row['id'] }}" class="align-top">
-                            <flux:table.cell class="break-words">{{ $row['vendor']['business_name'] ?? '—' }}</flux:table.cell>
-                            <flux:table.cell class="break-words">{{ $row['desc'] }}</flux:table.cell>
-                            <flux:table.cell class="break-words">{{ $row['deposit_check_label'] }}</flux:table.cell>
-                            <flux:table.cell class="break-words">{{ $amountSignLabel }}</flux:table.cell>
-                            <flux:table.cell class="break-words">{{ $row['bank']['name'] ?? '—' }}</flux:table.cell>
-                            <flux:table.cell class="break-words font-mono text-xs">{{ $row['options'] }}</flux:table.cell>
-                            <flux:table.cell class="text-right">
-                                <flux:button
-                                    size="sm"
-                                    variant="ghost"
-                                    icon="pencil-square"
-                                    wire:click="$dispatchTo('transactions.vendor-transaction-edit-modal', 'editVendorTransaction', { id: {{ $row['id'] }} })"
-                                    title="Edit vendor transaction"
-                                />
+                        <flux:table.row wire:key="vendor-txn-{{ $row['id'] }}">
+                            <flux:table.cell class="min-w-0">
+                                <x-truncate-tooltip :content="$vendorName"><div class="truncate">{{ $vendorName }}</div></x-truncate-tooltip>
+                            </flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                <x-truncate-tooltip :content="$row['desc']"><div class="truncate">{{ $row['desc'] }}</div></x-truncate-tooltip>
+                            </flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                <x-truncate-tooltip :content="$row['deposit_check_label']"><div class="truncate">{{ $row['deposit_check_label'] }}</div></x-truncate-tooltip>
+                            </flux:table.cell>
+                            <flux:table.cell class="min-w-0 whitespace-nowrap">{{ $amountSignLabel }}</flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                <x-truncate-tooltip :content="$bankName"><div class="truncate">{{ $bankName }}</div></x-truncate-tooltip>
+                            </flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                <x-truncate-tooltip :content="$row['options']"><div class="truncate font-mono text-xs">{{ $row['options'] }}</div></x-truncate-tooltip>
+                            </flux:table.cell>
+                            <flux:table.cell class="min-w-0 text-right">
+                                <flux:tooltip content="Edit vendor transaction">
+                                    <flux:button
+                                        size="sm"
+                                        variant="ghost"
+                                        icon="pencil-square"
+                                        wire:click="$dispatchTo('transactions.vendor-transaction-edit-modal', 'editVendorTransaction', { id: {{ $row['id'] }} })"
+                                    />
+                                </flux:tooltip>
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach
