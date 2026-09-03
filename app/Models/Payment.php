@@ -92,8 +92,11 @@ class Payment extends Model
                         ->get();
                 }
                 
-                // Case 4: Standalone payment
-                return collect([$this]);
+                // Case 4: Standalone payment. An ELOQUENT collection, like the
+                // other three cases: callers ->load() relations onto it, and a
+                // base collect([$this]) has no load() — the payment page 500ed
+                // on every standalone payment.
+                return $this->newCollection([$this]);
             }
         );
     }

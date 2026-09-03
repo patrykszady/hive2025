@@ -110,19 +110,23 @@ class MatchVendor extends Component
 
     protected function loadExpenseReceiptMerchants(): void
     {
+        // Group by a COMPUTED key. This used to stamp `merchant_name` onto each
+        // Expense model and group by that — but expenses has no such column,
+        // so the later $expense->save() in store_expense_vendors() tried to
+        // write it and died with "no such column: merchant_name". Every
+        // "NEW Retail Vendor" save for a receipt expense failed this way.
         $this->expense_receipt_merchants = Expense::withoutGlobalScopes()
             ->with(['receipts' => fn ($query) => $query->latest('id')])
             ->whereNull('deleted_at')
             ->where('vendor_id', 0)
             ->get()
-            ->each(function ($expense): void {
+            ->groupBy(function (Expense $expense): string {
                 $receipt = $expense->receipts->first();
 
-                if (is_array($receipt?->receipt_items) && isset($receipt->receipt_items['merchant_name'])) {
-                    $expense->merchant_name = $receipt->receipt_items['merchant_name'];
-                }
+                return is_array($receipt?->receipt_items) && isset($receipt->receipt_items['merchant_name'])
+                    ? (string) $receipt->receipt_items['merchant_name']
+                    : '';
             })
-            ->groupBy('merchant_name')
             ->toBase();
     }
 
@@ -306,6 +310,27 @@ class MatchVendor extends Component
         return filled(trim((string) $stripped)) ? trim((string) $stripped) : trim($descriptor);
     }
 
+    /**
+     * The receipt expenses behind one row of the "match as" form.
+     *
+     * Rows are indexed positionally ($loop->index) over the merchant-keyed
+     * list, while "Match As" is a free-text field the user edits before
+     * saving. Looking the row up by that edited text threw "Undefined array
+     * key \"ART OF VISION\"" the moment someone tidied the merchant name
+     * (2026-09-02, twice) — so resolve by position, and by name only as a
+     * courtesy when it still matches.
+     */
+    protected function expenseRowMerchants(int|string $row, ?string $matchDesc): iterable
+    {
+        $merchants = collect($this->expense_receipt_merchants);
+
+        if (filled($matchDesc) && $merchants->has($matchDesc)) {
+            return $merchants->get($matchDesc);
+        }
+
+        return $merchants->values()->get((int) $row) ?? [];
+    }
+
     public function store_expense_vendors()
     {
         // $this->authorize('create', Expense::class);
@@ -320,7 +345,7 @@ class MatchVendor extends Component
                 ]);
 
                 $vendor_id = $vendor->id;
-                foreach ($this->expense_receipt_merchants[$vendor_match['match_desc']] as $expense) {
+                foreach ($this->expenseRowMerchants($key, $vendor_match['match_desc']) as $expense) {
                     $expense->vendor_id = $vendor_id;
                     $expense->save();
                 }

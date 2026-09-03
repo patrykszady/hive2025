@@ -167,6 +167,19 @@ class MenardsBrowser extends Command
         if ($this->recentBatchArrived() && ! $this->extensionReportsExpiredSession()) {
             $this->line('A receipt batch arrived within the last day — the session works; not touching the browser.');
         } elseif ($this->login($browser) !== self::SUCCESS) {
+            // Imperva asked for a human. That is not a command failure — it
+            // is the expected state this command exists to detect, and it is
+            // already surfaced twice over (the sidebar error and the
+            // attention notification). Exiting non-zero here made the
+            // scheduler log a spurious "failed with exit code 1" exception on
+            // every run for as long as the wall stood.
+            if (\Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
+                $this->notifyAttention($browser->status(), $repackFailed);
+                $this->warn('Menards wants a human at the sign-in wall — flagged in the sidebar; nothing more this run can do.');
+
+                return self::SUCCESS;
+            }
+
             return self::FAILURE;
         }
 
