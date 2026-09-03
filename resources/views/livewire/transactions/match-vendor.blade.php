@@ -113,7 +113,7 @@
                             @php($suggestion = $ai_suggestions[$loop->index])
                             <flux:card class="p-3! space-y-2">
                                 @if(isset($suggestion['error']))
-                                    <flux:subheading>{{ $suggestion['error'] }}</flux:subheading>
+                                    <flux:text>{{ $suggestion['error'] }}</flux:text>
                                 @else
                                     <div class="flex items-center gap-2">
                                         <flux:heading>{{ $suggestion['vendor_name'] }}</flux:heading>
@@ -124,7 +124,7 @@
                                             <flux:badge size="sm" inset="top bottom" color="blue">existing vendor</flux:badge>
                                         @endif
                                     </div>
-                                    <flux:subheading>
+                                    <flux:text>
                                         {{ $suggestion['reasoning'] }}
                                         @if(!empty($suggestion['website']))
                                             <a href="{{ $suggestion['website'] }}" target="_blank" rel="noopener" class="underline">{{ $suggestion['website'] }}</a>
@@ -132,7 +132,7 @@
                                         @if(!empty($suggestion['city']))
                                             &middot; {{ collect([$suggestion['city'], $suggestion['state'] ?? null])->filter()->implode(', ') }}
                                         @endif
-                                    </flux:subheading>
+                                    </flux:text>
                                     <div>
                                         <flux:button
                                             type="button"

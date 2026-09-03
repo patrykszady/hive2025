@@ -1,7 +1,7 @@
 <div class="max-w-5xl mt-12 space-y-6">
     <x-island-card heading="New Vendor Transaction">
         <form wire:submit="createVendorTransaction" class="space-y-4">
-            <div class="grid gap-4 lg:grid-cols-3">
+            <div class="grid gap-4 lg:grid-cols-3 items-end">
                 <flux:select
                     wire:model="new_vendor_transaction.vendor_id"
                     label="Vendor"
@@ -96,9 +96,7 @@
                             <flux:table.cell class="break-words">{{ $row['deposit_check_label'] }}</flux:table.cell>
                             <flux:table.cell class="break-words">{{ $amountSignLabel }}</flux:table.cell>
                             <flux:table.cell class="break-words">{{ $row['bank']['name'] ?? '—' }}</flux:table.cell>
-                            <td class="options-column">
-                                {{ $row['options'] }}
-                            </td>
+                            <flux:table.cell class="break-words font-mono text-xs">{{ $row['options'] }}</flux:table.cell>
                             <flux:table.cell class="text-right">
                                 <flux:button
                                     size="sm"
