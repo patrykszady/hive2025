@@ -5,13 +5,30 @@ namespace App\Livewire\Transactions;
 use App\Models\Bank;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
+use Livewire\WithPagination;
 
+/**
+ * "New Vendor Transaction" form + the paginated, searchable list of match
+ * rules. Rows, vendors and banks are computed per request: the old version
+ * kept all 500+ rows and 800+ vendors as public arrays, so every interaction
+ * shipped them to the browser and back, and the vendor picker printed the
+ * whole list as options.
+ */
 class VendorTransactionsPanel extends Component
 {
-    public array $vendor_transactions = [];
+    use WithPagination;
+
+    public const PER_PAGE = 25;
+
+    public const VENDOR_OPTION_LIMIT = 25;
+
     public array $new_vendor_transaction = [];
+
     public array $depositCheckOptions = [
         '' => 'None',
         '1' => 'Deposit',
@@ -20,24 +37,81 @@ class VendorTransactionsPanel extends Component
         '4' => 'Cash Withdrawal',
     ];
 
-    public $vendors = [];
-    public $banks = [];
+    /** Filters the table by vendor name or description. */
+    public string $search = '';
+
+    /** The form's vendor picker: what was typed, and how far it has scrolled. */
+    public string $vendorSearch = '';
+
+    public int $vendorLimit = self::VENDOR_OPTION_LIMIT;
 
     public function mount(): void
     {
         $this->resetNewVendorTransaction();
-        $this->vendors = Vendor::withoutGlobalScopes()
-            ->select(['id', 'business_name', 'city', 'state'])
-            ->orderBy('business_name', 'ASC')
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    /** The picker's search box calls this (debounced); a new term restarts paging from the top. */
+    public function searchVendors(string $term): void
+    {
+        $this->vendorSearch = $term;
+        $this->vendorLimit = self::VENDOR_OPTION_LIMIT;
+        unset($this->vendorOptions);
+    }
+
+    public function loadMoreVendorOptions(): void
+    {
+        $this->vendorLimit += self::VENDOR_OPTION_LIMIT;
+        unset($this->vendorOptions);
+    }
+
+    /** True while more vendors exist beyond what the open dropdown has shown. */
+    public function hasMoreVendorOptions(): bool
+    {
+        return $this->vendorOptions->count() >= $this->vendorLimit;
+    }
+
+    /**
+     * One scroll-page of vendors matching the search (or the alphabetical
+     * head of the list), plus the selected vendor so the picker can label it.
+     */
+    #[Computed]
+    public function vendorOptions(): Collection
+    {
+        $term = trim($this->vendorSearch);
+        $columns = ['id', 'business_name', 'city', 'state'];
+
+        $options = Vendor::withoutGlobalScopes()
+            ->select($columns)
+            ->when($term !== '', fn ($query) => $query->where('business_name', 'like', "%{$term}%"))
+            ->orderBy('business_name')
+            ->limit($this->vendorLimit)
             ->get();
-        $this->banks = Bank::withoutGlobalScopes()
+
+        $selected = $this->new_vendor_transaction['vendor_id'] ?? '';
+        if (is_numeric($selected) && (int) $selected > 0 && ! $options->contains('id', (int) $selected)) {
+            $vendor = Vendor::withoutGlobalScopes()->select($columns)->find((int) $selected);
+            if ($vendor) {
+                $options->prepend($vendor);
+            }
+        }
+
+        return $options;
+    }
+
+    #[Computed]
+    public function banks(): Collection
+    {
+        return Bank::withoutGlobalScopes()
             ->whereNotNull('plaid_ins_id')
             ->orderBy('name', 'ASC')
             ->get()
             ->unique('plaid_ins_id')
             ->values();
-
-        $this->loadVendorTransactions();
     }
 
     public function updateVendorTransaction($id, $field, $value): void
@@ -86,45 +160,59 @@ class VendorTransactionsPanel extends Component
         $this->loadVendorTransactions();
     }
 
+    /** The rows are computed per request, so a reload is just dropping the cache. */
     protected function loadVendorTransactions(): void
     {
-        $transactions = VendorTransaction::with(['vendor', 'bank'])
-            ->select(['id', 'vendor_id', 'deposit_check', 'amount_sign', 'plaid_inst_id', 'desc', 'options'])
-            ->get()
-            ->sortBy(function (VendorTransaction $transaction): string {
-                $vendorName = strtolower($transaction->vendor?->business_name ?? '');
+        unset($this->vendor_transactions);
+    }
 
-                return sprintf(
-                    '%d|%s|%010d',
-                    $transaction->vendor?->business_name === null ? 1 : 0,
-                    $vendorName,
-                    $transaction->id,
-                );
-            })
-            ->values();
+    /**
+     * The match rules, a page at a time: named vendors first (alphabetical,
+     * case-blind), then the vendor-less deposit/check/transfer rules — the
+     * same order the page always had, now done by the database.
+     */
+    #[Computed]
+    public function vendor_transactions(): LengthAwarePaginator
+    {
+        $term = trim($this->search);
 
-        $this->vendor_transactions = $transactions
-            ->map(function (VendorTransaction $transaction): array {
-                return [
-                    'id' => $transaction->id,
-                    'vendor' => $transaction->vendor ? [
-                        'id' => $transaction->vendor->id,
-                        'business_name' => $transaction->vendor->business_name,
-                    ] : null,
-                    'bank' => $transaction->bank ? [
-                        'id' => $transaction->bank->id,
-                        'name' => $transaction->bank->name,
-                        'plaid_ins_id' => $transaction->bank->plaid_ins_id,
-                    ] : null,
-                    'desc' => $transaction->desc,
-                    'deposit_check' => $transaction->deposit_check,
-                    'deposit_check_label' => $this->depositCheckLabel($transaction->deposit_check),
-                    'amount_sign' => $transaction->amount_sign,
-                    'plaid_inst_id' => $transaction->plaid_inst_id,
-                    'options' => $transaction->options,
-                ];
-            })
-            ->all();
+        return VendorTransaction::query()
+            ->select([
+                'vendor_transactions.id',
+                'vendor_transactions.vendor_id',
+                'vendor_transactions.deposit_check',
+                'vendor_transactions.amount_sign',
+                'vendor_transactions.plaid_inst_id',
+                'vendor_transactions.desc',
+                'vendor_transactions.options',
+            ])
+            ->leftJoin('vendors', 'vendors.id', '=', 'vendor_transactions.vendor_id')
+            ->with(['vendor', 'bank'])
+            ->when($term !== '', fn ($query) => $query->where(fn ($where) => $where
+                ->where('vendor_transactions.desc', 'like', "%{$term}%")
+                ->orWhere('vendors.business_name', 'like', "%{$term}%")))
+            ->orderByRaw('vendors.business_name IS NULL')
+            ->orderByRaw('LOWER(vendors.business_name)')
+            ->orderBy('vendor_transactions.id')
+            ->paginate(self::PER_PAGE)
+            ->through(fn (VendorTransaction $transaction): array => [
+                'id' => $transaction->id,
+                'vendor' => $transaction->vendor ? [
+                    'id' => $transaction->vendor->id,
+                    'business_name' => $transaction->vendor->business_name,
+                ] : null,
+                'bank' => $transaction->bank ? [
+                    'id' => $transaction->bank->id,
+                    'name' => $transaction->bank->name,
+                    'plaid_ins_id' => $transaction->bank->plaid_ins_id,
+                ] : null,
+                'desc' => $transaction->desc,
+                'deposit_check' => $transaction->deposit_check,
+                'deposit_check_label' => $this->depositCheckLabel($transaction->deposit_check),
+                'amount_sign' => $transaction->amount_sign,
+                'plaid_inst_id' => $transaction->plaid_inst_id,
+                'options' => $transaction->options,
+            ]);
     }
 
     protected function resetNewVendorTransaction(): void

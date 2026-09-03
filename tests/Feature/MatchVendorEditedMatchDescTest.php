@@ -39,9 +39,8 @@ it('saves a new retail vendor for the row even when "match as" was edited', func
     ]);
 
     $component = new MatchVendor();
-    $component->mount();
 
-    expect(collect($component->expense_receipt_merchants)->keys()->all())->toBe(['ART OF VISION LLC']);
+    expect(collect($component->expenseCards())->keys()->all())->toBe(['ART OF VISION LLC']);
 
     // The user shortens the merchant name before saving — the key no longer matches.
     $component->match_expense_merchant_names = [0 => ['match_desc' => 'ART OF VISION', 'vendor_id' => 'NEW']];
@@ -66,5 +65,5 @@ it('saves a new retail vendor for the row even when "match as" was edited', func
         ->and($created->business_type)->toBe('Retail')
         ->and(strtoupper($created->business_name))->toBe('ART OF VISION')
         // ...and the row is gone from the list once matched.
-        ->and(collect($component->expense_receipt_merchants))->toBeEmpty();
+        ->and(collect($component->expenseCards()))->toBeEmpty();
 });

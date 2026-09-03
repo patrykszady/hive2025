@@ -1,6 +1,9 @@
 <?php
 
 use App\Livewire\Transactions\MatchVendor;
+use App\Models\Bank;
+use App\Models\BankAccount;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
@@ -26,6 +29,31 @@ uses(RefreshDatabase::class);
  */
 function makeComponent(array $suggestion, string $typed, string $descriptor, Vendor $vendor): MatchVendor
 {
+    // The card list is read from the database now (no seeded collection), so
+    // a descriptor the test relies on must exist as a real unmatched transaction
+    // — created as a signed-in member of the vendor, which the bank-account
+    // scope requires.
+    if ($descriptor !== 'ignored') {
+        $member = User::query()->create([
+            'first_name' => 'Apply', 'last_name' => 'Tester', 'email' => 'apply-'.uniqid().'@example.test',
+            'cell_phone' => '5'.random_int(100000000, 999999999), 'password' => bcrypt('password'),
+            'primary_vendor_id' => $vendor->id,
+        ]);
+        $member->vendors()->attach($vendor->id, ['role_id' => 1]);
+        test()->actingAs($member);
+
+        $bank = Bank::create(['name' => 'Fixture Bank', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_fixture']);
+        $account = BankAccount::create([
+            'vendor_id' => $vendor->id, 'bank_id' => $bank->id, 'account_number' => '0001',
+            'plaid_account_id' => 'acc_fixture_'.uniqid(), 'type' => 'credit',
+        ]);
+        Transaction::create([
+            'transaction_date' => now()->subDay(), 'amount' => 12.34, 'bank_account_id' => $account->id,
+            'plaid_merchant_name' => $descriptor, 'plaid_merchant_description' => $descriptor,
+            'details' => ['category' => ['Shops'], 'payment_channel' => 'in store'],
+        ]);
+    }
+
     $component = new MatchVendor();
     $reflection = new ReflectionClass($component);
 
@@ -33,8 +61,6 @@ function makeComponent(array $suggestion, string $typed, string $descriptor, Ven
         'ai_suggestions' => [0 => $suggestion],
         'match_merchant_names' => [0 => ['match_desc' => $typed, 'vendor_id' => '']],
         'match_expense_merchant_names' => [],
-        'merchant_names' => collect([$descriptor => []]),
-        'vendors' => collect([(object) ['id' => $vendor->id]]),
     ];
 
     foreach ($state as $property => $value) {

@@ -40,7 +40,7 @@ it('reloads vendor transaction rows with the selected vendor relationship', func
 
     expect($vendorTransaction->vendor)->not->toBeNull()
         ->and($vendorTransaction->vendor->is($selectedVendor))->toBeTrue()
-        ->and(collect($panel->vendor_transactions)->firstWhere('id', $vendorTransaction->id)['vendor']['id'])->toBe($selectedVendor->id);
+        ->and($panel->vendor_transactions()->getCollection()->firstWhere('id', $vendorTransaction->id)['vendor']['id'])->toBe($selectedVendor->id);
 });
 
 it('maps deposit check values to readable labels for the table', function () {
@@ -62,7 +62,7 @@ it('maps deposit check values to readable labels for the table', function () {
 
     $panel = new VendorTransactionsPanel();
     $panel->mount();
-    $row = collect($panel->vendor_transactions)->firstWhere('id', $vendorTransaction->id);
+    $row = $panel->vendor_transactions()->getCollection()->firstWhere('id', $vendorTransaction->id);
 
     expect($vendorTransaction->deposit_check)->toBe(2)
         ->and($row['deposit_check_label'])->toBe('Check Paid');
@@ -98,7 +98,7 @@ it('sorts vendor transaction rows by vendor business name', function () {
     $component = new VendorTransactionsPanel();
     $component->mount();
 
-    $vendorNames = collect($component->vendor_transactions)
+    $vendorNames = $component->vendor_transactions()->getCollection()
         ->pluck('vendor.business_name')
         ->all();
 
@@ -132,7 +132,7 @@ it('links plaid institution ids to banks through the vendor transaction relation
 
     $panel = new VendorTransactionsPanel();
     $panel->mount();
-    $row = collect($panel->vendor_transactions)->firstWhere('id', $vendorTransaction->id);
+    $row = $panel->vendor_transactions()->getCollection()->firstWhere('id', $vendorTransaction->id);
 
     expect($vendorTransaction->bank)->not->toBeNull()
         ->and($vendorTransaction->bank->is($bank))->toBeTrue()
@@ -190,7 +190,7 @@ it('creates a new vendor transaction from the page form with vendor and transfer
         ->and($created->desc)->toBe('ZELLE PAYMENT')
         ->and($created->options)->toBe(json_encode('zelle/i'))
         ->and($component->new_vendor_transaction['deposit_check'])->toBe('3')
-        ->and(collect($component->vendor_transactions)->firstWhere('id', $created->id)['vendor']['business_name'])->toBe('Transfer Vendor');
+        ->and($component->vendor_transactions()->getCollection()->firstWhere('id', $created->id)['vendor']['business_name'])->toBe('Transfer Vendor');
 });
 
 it('prevents duplicate vendor transactions from being created in the form', function () {

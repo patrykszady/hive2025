@@ -5,37 +5,51 @@ namespace App\Livewire\Transactions;
 use App\Http\Controllers\TransactionController;
 use App\Models\Expense;
 use App\Models\Transaction;
+use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
-use App\Models\TransactionBulkMatch;
 use App\Services\VendorSuggestionService;
-use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Livewire\Attributes\Title;
 use Flux;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Collection;
+use Livewire\Attributes\Computed;
+use Livewire\Attributes\Title;
 use Livewire\Component;
 
+/**
+ * Global Actions → Match Vendor.
+ *
+ * Only FORM state lives on the component. Everything the page displays is a
+ * computed property, re-read per request. The previous version carried every
+ * unmatched transaction (with relations), every receipt expense and all 800+
+ * vendors as public properties — serialised into the snapshot and hydrated
+ * back on every keystroke — and printed the whole vendor list as options in
+ * every card. That was a 17MB page that stalled before all cards had painted.
+ * Each card's vendor picker now searches the server and shows one scroll-page
+ * of matches at a time.
+ */
 class MatchVendor extends Component
 {
     use AuthorizesRequests;
 
-    public $vendors = [];
-
-    public $expense_receipt_merchants = [];
-
-    public $merchant_names = [];
+    /** Options a vendor picker shows per scroll-page. */
+    public const VENDOR_OPTION_LIMIT = 25;
 
     public $match_merchant_names = [];
 
     public $match_expense_merchant_names = [];
 
-    public $match_vendor_names = [];
-
-    // transaction id => "City, ST" — plain array so it survives Livewire
-    // hydration (virtual select columns don't).
-    public $txn_locations = [];
-
     // card index => AI suggestion payload
     public $ai_suggestions = [];
+
+    /** picker key ("txn_0", "exp_2") => what was typed into its search box */
+    public array $vendor_search = [];
+
+    /** picker key => how many rows the open dropdown has scrolled to */
+    public array $vendor_limit = [];
+
+    /** Per-request memo so a card's options query runs once, not once per use in the view. */
+    protected array $vendorOptionsMemo = [];
 
     public $view_text = [
         'card_title' => 'Save Transactions/Vendor',
@@ -53,69 +67,74 @@ class MatchVendor extends Component
         ];
     }
 
-    public function mount()
-    {
-        $this->vendors = Vendor::withoutGlobalScopes()
-            ->select(['id', 'business_name', 'city', 'state'])
-            ->orderBy('business_name', 'ASC')
-            ->get();
-        $this->loadExpenseReceiptMerchants();
-        $this->loadMerchantNames();
-        $this->match_vendor_names = Transaction::transactionsSinVendor()
-            ->select(['id', 'plaid_merchant_name'])
-            ->get()
-            ->groupBy('plaid_merchant_name')
-            ->values()
-            ->toArray();
-    }
-
-    /**
-     * Re-read everything mount() reads, without a page load.
-     *
-     * These actions change what is left to match, so the lists must be rebuilt
-     * — but a redirect() back to this same route was a full round trip that
-     * threw away scroll position and every other card's half-filled form. The
-     * component owns its state; it can just reload it.
-     */
-    protected function refreshLists(): void
-    {
-        $this->vendors = Vendor::withoutGlobalScopes()
-            ->select(['id', 'business_name', 'city', 'state'])
-            ->orderBy('business_name', 'ASC')
-            ->get();
-
-        $this->loadExpenseReceiptMerchants();
-        $this->loadMerchantNames();
-
-        $this->match_vendor_names = Transaction::transactionsSinVendor()
-            ->select(['id', 'plaid_merchant_name'])
-            ->get()
-            ->groupBy('plaid_merchant_name')
-            ->values()
-            ->toArray();
-
-        // Row indexes are positional, so anything keyed by index is stale the
-        // moment a merchant disappears from the list. Leaving them would apply
-        // one card's suggestion to whichever merchant slid into its place.
-        $this->ai_suggestions = [];
-        $this->match_merchant_names = [];
-        $this->match_expense_merchant_names = [];
-        $this->resetValidation();
-    }
-
     public function updated($field)
     {
+        // A new search term restarts that picker's paging from the top.
+        if (str_starts_with($field, 'vendor_search.')) {
+            unset($this->vendor_limit[substr($field, strlen('vendor_search.'))]);
+
+            return;
+        }
+
+        if (str_starts_with($field, 'vendor_limit.')) {
+            return;
+        }
+
         $this->validateOnly($field);
     }
 
-    protected function loadExpenseReceiptMerchants(): void
+    /**
+     * Unmatched transactions grouped by card descriptor, in card order.
+     * Indexes in the match forms are positions in this collection.
+     */
+    #[Computed]
+    public function merchantCards(): Collection
     {
-        // Group by a COMPUTED key. This used to stamp `merchant_name` onto each
-        // Expense model and group by that — but expenses has no such column,
-        // so the later $expense->save() in store_expense_vendors() tried to
-        // write it and died with "no such column: merchant_name". Every
-        // "NEW Retail Vendor" save for a receipt expense failed this way.
-        $this->expense_receipt_merchants = Expense::withoutGlobalScopes()
+        return Transaction::transactionsSinVendor()
+            ->select([
+                'id',
+                'amount',
+                'transaction_date',
+                'plaid_merchant_description',
+                'plaid_merchant_name',
+                'bank_account_id',
+                // Lean location columns — the whole details JSON would drag
+                // every Plaid payload through the render. On MySQL a JSON null
+                // arrives as the string "null"; filtered below.
+                'details->location->city as plaid_city',
+                'details->location->region as plaid_region',
+            ])
+            ->with([
+                // withoutGlobalScopes at EVERY nesting level — a scoped nested
+                // load would drop sibling companies' bank names.
+                'bank_account' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bank_id', 'type'])->with([
+                    'bank' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'vendor_id', 'name', 'plaid_ins_id'])->with([
+                        'vendor' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'business_name']),
+                    ]),
+                ]),
+            ])
+            ->orderBy('plaid_merchant_description')
+            ->get()
+            ->each(function (Transaction $transaction): void {
+                $parts = collect([$transaction->plaid_city, $transaction->plaid_region])
+                    ->filter(fn ($part) => filled($part) && $part !== 'null');
+
+                // Display-only; these models never leave this request.
+                $transaction->setAttribute('card_location', $parts->implode(', '));
+            })
+            ->groupBy('plaid_merchant_description')
+            ->toBase();
+    }
+
+    /**
+     * Receipt expenses with no vendor, grouped by the receipt's merchant name.
+     * A COMPUTED key: stamping merchant_name onto the Expense models made the
+     * later save() write a column that does not exist.
+     */
+    #[Computed]
+    public function expenseCards(): Collection
+    {
+        return Expense::withoutGlobalScopes()
             ->with(['receipts' => fn ($query) => $query->latest('id')])
             ->whereNull('deleted_at')
             ->where('vendor_id', 0)
@@ -130,43 +149,116 @@ class MatchVendor extends Component
             ->toBase();
     }
 
-    protected function loadMerchantNames(): void
+    /**
+     * The options one card's vendor picker shows: the typed search (or the
+     * alphabetical head of the list), one scroll-page at a time, plus whatever
+     * that card already has selected so the picker can still label it.
+     */
+    public function vendorOptions(string $key): Collection
     {
-        $this->merchant_names = Transaction::transactionsSinVendor()
-            ->select([
-                'id',
-                'amount',
-                'transaction_date',
-                'plaid_merchant_description',
-                'plaid_merchant_name',
-                'bank_account_id',
-                // Lean location columns — selecting the whole details JSON
-                // would serialize every Plaid payload into the Livewire
-                // snapshot. On MySQL a JSON null arrives as the string
-                // "null"; the blade filters it out.
-                'details->location->city as plaid_city',
-                'details->location->region as plaid_region',
-            ])
-            ->with([
-                'bank_account' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bank_id', 'type'])->with([
-                    'bank' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'vendor_id', 'name'])->with([
-                        'vendor' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'business_name']),
-                    ]),
-                ]),
-            ])
-            ->orderBy('plaid_merchant_description')
-            ->get()
-            ->each(function ($transaction): void {
-                // MySQL JSON null arrives as the string "null" — filter both.
-                $parts = collect([$transaction->plaid_city, $transaction->plaid_region])
-                    ->filter(fn ($part) => filled($part) && $part !== 'null');
+        $term = trim((string) ($this->vendor_search[$key] ?? ''));
+        $selected = $this->selectedVendorId($key);
+        $limit = $this->vendorLimitFor($key);
 
-                if ($parts->isNotEmpty()) {
-                    $this->txn_locations[$transaction->id] = $parts->implode(', ');
-                }
-            })
-            ->groupBy('plaid_merchant_description')
-            ->toBase();
+        // Keyed on everything that shapes the list, so a changed term or a
+        // scrolled page within the same request never serves stale options.
+        $memo = implode('|', [$key, $term, $limit, (string) $selected]);
+        if (isset($this->vendorOptionsMemo[$memo])) {
+            return $this->vendorOptionsMemo[$memo];
+        }
+
+        $columns = ['id', 'business_name', 'city', 'state'];
+
+        $options = Vendor::withoutGlobalScopes()
+            ->select($columns)
+            ->when($term !== '', fn ($query) => $query->where('business_name', 'like', "%{$term}%"))
+            ->orderBy('business_name')
+            ->limit($limit)
+            ->get();
+
+        if ($selected !== null && ! $options->contains('id', $selected)) {
+            $vendor = Vendor::withoutGlobalScopes()->select($columns)->find($selected);
+            if ($vendor) {
+                $options->prepend($vendor);
+            }
+        }
+
+        return $this->vendorOptionsMemo[$memo] = $options;
+    }
+
+    /**
+     * The picker's search box calls this (debounced) instead of binding
+     * wire:model: a bound input inside a re-rendering island had its value
+     * written back from the server mid-typing, eating keystrokes ("mnard").
+     * With a method call the typed text lives only in the DOM.
+     */
+    public function searchVendors(string $key, string $term): void
+    {
+        $this->vendor_search[$key] = $term;
+        unset($this->vendor_limit[$key]);
+    }
+
+    /** True while more vendors exist beyond what the open dropdown has shown. */
+    public function hasMoreVendorOptions(string $key): bool
+    {
+        return $this->vendorOptions($key)->count() >= $this->vendorLimitFor($key);
+    }
+
+    /** Scrolling the dropdown's sentinel into view asks for the next page. */
+    public function loadMoreVendorOptions(string $key): void
+    {
+        $this->vendor_limit[$key] = $this->vendorLimitFor($key) + self::VENDOR_OPTION_LIMIT;
+    }
+
+    protected function vendorLimitFor(string $key): int
+    {
+        return max(self::VENDOR_OPTION_LIMIT, (int) ($this->vendor_limit[$key] ?? self::VENDOR_OPTION_LIMIT));
+    }
+
+    /** The numeric vendor a card's form has chosen — NEW/DEPOSIT/CHECK/... are static options, not vendors. */
+    protected function selectedVendorId(string $key): ?int
+    {
+        [$scope, $index] = array_pad(explode('_', $key, 2), 2, null);
+        $form = $scope === 'exp' ? $this->match_expense_merchant_names : $this->match_merchant_names;
+        $value = $form[(int) $index]['vendor_id'] ?? null;
+
+        return is_numeric($value) && (int) $value > 0 ? (int) $value : null;
+    }
+
+    /**
+     * Forget everything the last render knew, without a page load.
+     *
+     * The display collections are computed per request, so this only drops
+     * their caches; the form arrays are positional and must be cleared, or a
+     * card's typed values would apply to whichever merchant slid into its
+     * index once one disappeared from the list.
+     */
+    protected function refreshLists(): void
+    {
+        unset($this->merchantCards, $this->expenseCards);
+        $this->vendorOptionsMemo = [];
+
+        $this->ai_suggestions = [];
+        $this->match_merchant_names = [];
+        $this->match_expense_merchant_names = [];
+        $this->vendor_search = [];
+        $this->vendor_limit = [];
+        $this->resetValidation();
+    }
+
+    /**
+     * Make a vendor visible to the signed-in company. The vendors page is
+     * scoped to this pivot, so a vendor matched here but never linked shows
+     * up nowhere — that is how two "Art Of Vision" rows went missing.
+     * Idempotent: an already-linked vendor is left alone.
+     */
+    protected function linkVendorToCompany(mixed $vendorId): void
+    {
+        $company = auth()->user()?->vendor;
+
+        if ($company && is_numeric($vendorId) && (int) $vendorId > 0) {
+            $company->vendors()->syncWithoutDetaching([(int) $vendorId]);
+        }
     }
 
     /**
@@ -177,16 +269,13 @@ class MatchVendor extends Component
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);
 
-        $descriptor = (string) collect($this->merchant_names)->keys()->get($index, '');
-
+        $descriptor = (string) $this->merchantCards->keys()->get($index, '');
         if ($descriptor === '') {
             return;
         }
 
         $transactions = Transaction::transactionsSinVendor()
             ->where('plaid_merchant_description', $descriptor)
-            // withoutGlobalScopes at EVERY nesting level — a scoped nested
-            // 'bank' load would drop sibling companies' bank names.
             ->with(['bank_account' => fn ($q) => $q->withoutGlobalScopes()
                 ->with(['bank' => fn ($q) => $q->withoutGlobalScopes()])])
             ->get();
@@ -202,28 +291,21 @@ class MatchVendor extends Component
     }
 
     /**
-     * Accept an AI suggestion: an existing vendor fills the form for review;
-     * a new vendor is created with the AI's details (name, website, city)
-     * plus a matching alias, then transactions are linked.
+     * Accept an AI suggestion: an existing vendor is reused, a new one is
+     * created with the AI's details, then a match rule is written and the
+     * transactions linked — both branches differ only in how the vendor is
+     * obtained.
      */
     public function applySuggestion(int $index)
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);
 
         $suggestion = $this->ai_suggestions[$index] ?? null;
-
         if (! is_array($suggestion) || isset($suggestion['error'])) {
             return;
         }
 
-        // An existing vendor still needs a match rule written, exactly like a new
-        // one. The first version of this only assigned vendor_id to the form
-        // array and returned, so "Use this vendor" looked like it did nothing:
-        // no VendorTransaction, no attach, no re-match, no redirect — and
-        // because the page never reloaded, the same suggestion card stayed on
-        // screen. Both branches now differ only in how the vendor is obtained.
         $vendor = null;
-
         if (! empty($suggestion['existing_vendor_id'])) {
             $vendor = Vendor::withoutGlobalScopes()->find($suggestion['existing_vendor_id']);
         }
@@ -246,16 +328,13 @@ class MatchVendor extends Component
         // What future transactions get matched on. A typed "Match As" wins
         // outright and is used verbatim — someone chose those characters. The
         // machine-generated options (the AI's pattern, then the raw descriptor)
-        // get the store number stripped first. Falling all the way through
-        // matters: with no desc there is no rule, and the click would silently
-        // do nothing again.
+        // get the store number stripped first.
         $typed = $this->match_merchant_names[$index]['match_desc'] ?? null;
-
         $matchDesc = filled($typed)
             ? $typed
             : collect([
                 $suggestion['match_desc'] ?? null,
-                collect($this->merchant_names)->keys()->get($index),
+                $this->merchantCards->keys()->get($index),
             ])
                 ->map(fn ($value) => $this->stripStoreNumber((string) $value))
                 ->first(fn ($value) => filled($value));
@@ -270,10 +349,7 @@ class MatchVendor extends Component
             ]);
         }
 
-        //USED IN MULTIPLE OF PLACES MatchVendor@store, TransactionController@add_vendor_to_transactions
-        if (! collect($this->vendors)->pluck('id')->contains($vendor->id)) {
-            auth()->user()->vendor->vendors()->attach($vendor->id);
-        }
+        $this->linkVendorToCompany($vendor->id);
 
         app(TransactionController::class)->add_vendor_to_transactions();
 
@@ -305,24 +381,19 @@ class MatchVendor extends Component
     {
         $stripped = preg_replace('/\s*#\s*\d+\s*$/', '', $descriptor);
 
-        // Never return an empty pattern — a descriptor that is nothing BUT a
-        // store number is better matched whole than not at all.
         return filled(trim((string) $stripped)) ? trim((string) $stripped) : trim($descriptor);
     }
 
     /**
      * The receipt expenses behind one row of the "match as" form.
      *
-     * Rows are indexed positionally ($loop->index) over the merchant-keyed
-     * list, while "Match As" is a free-text field the user edits before
-     * saving. Looking the row up by that edited text threw "Undefined array
-     * key \"ART OF VISION\"" the moment someone tidied the merchant name
-     * (2026-09-02, twice) — so resolve by position, and by name only as a
-     * courtesy when it still matches.
+     * Rows are indexed positionally over the merchant-keyed cards, while
+     * "Match As" is free text the user edits before saving — so resolve by
+     * position, and by name only as a courtesy when it still matches.
      */
     protected function expenseRowMerchants(int|string $row, ?string $matchDesc): iterable
     {
-        $merchants = collect($this->expense_receipt_merchants);
+        $merchants = $this->expenseCards;
 
         if (filled($matchDesc) && $merchants->has($matchDesc)) {
             return $merchants->get($matchDesc);
@@ -333,12 +404,10 @@ class MatchVendor extends Component
 
     public function store_expense_vendors()
     {
-        // $this->authorize('create', Expense::class);
         $this->validate();
 
         foreach ($this->match_expense_merchant_names as $key => $vendor_match) {
             if ($vendor_match['vendor_id'] == 'NEW') {
-                //new Retail Vendor
                 $vendor = Vendor::create([
                     'business_type' => 'Retail',
                     'business_name' => $vendor_match['match_desc'],
@@ -350,30 +419,21 @@ class MatchVendor extends Component
                     $expense->save();
                 }
             } else {
-                $deposit_check = null;
                 $vendor_id = $vendor_match['vendor_id'];
 
-                $institution_id = null;
-                $options = json_encode('/i');
-
-                $vendor_transaction = VendorTransaction::create([
+                VendorTransaction::create([
                     'vendor_id' => $vendor_id,
-                    'deposit_check' => $deposit_check,
+                    'deposit_check' => null,
                     'desc' => $vendor_match['match_desc'],
-                    'plaid_inst_id' => $institution_id,
-                    'options' => $options,
+                    'plaid_inst_id' => null,
+                    'options' => json_encode('/i'),
                 ]);
             }
 
-            //USED IN MULTIPLE OF PLACES TransactionController@add_vendor_to_transactions, ExpesnesForm@createExpenseFromTransaction
-            //add if vendor is not part of the currently logged in vendor
-            if (! in_array($vendor_id, $this->vendors->pluck('id')->toArray())) {
-                auth()->user()->vendor->vendors()->attach($vendor_id);
-            }
+            $this->linkVendorToCompany($vendor_id);
         }
 
-        //6-8-2022 run in a queue?
-        app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_expenses_sin_vendor();
+        app(TransactionController::class)->add_transaction_to_expenses_sin_vendor();
 
         $saved = count($this->match_expense_merchant_names);
         $this->refreshLists();
@@ -389,49 +449,34 @@ class MatchVendor extends Component
 
     public function store()
     {
-        // $this->authorize('create', Expense::class);
         $this->validate();
 
         foreach ($this->match_merchant_names as $key => $vendor_match) {
             if ($vendor_match['vendor_id'] == 'NEW') {
-                //new Retail Vendor
                 $vendor = Vendor::create([
                     'business_type' => 'Retail',
                     'business_name' => $vendor_match['match_desc'],
                 ]);
-
                 $vendor_id = $vendor->id;
             } else {
-                if ($vendor_match['vendor_id'] == 'DEPOSIT') {
-                    $deposit_check = 1;
-                    $vendor_id = null;
-                } elseif ($vendor_match['vendor_id'] == 'CHECK') {
-                    $deposit_check = 2;
-                    $vendor_id = null;
-                } elseif ($vendor_match['vendor_id'] == 'TRANSFER') {
-                    $deposit_check = 3;
-                    $vendor_id = null;
-                } elseif ($vendor_match['vendor_id'] == 'CASH') {
-                    $deposit_check = 4;
-                    $vendor_id = null;
-                } else {
-                    $deposit_check = null;
-                    $vendor_id = $vendor_match['vendor_id'];
-                }
+                [$deposit_check, $vendor_id] = match ($vendor_match['vendor_id']) {
+                    'DEPOSIT' => [1, null],
+                    'CHECK' => [2, null],
+                    'TRANSFER' => [3, null],
+                    'CASH' => [4, null],
+                    default => [null, $vendor_match['vendor_id']],
+                };
 
-                if (isset($vendor_match['bank_specific'])) {
-                    $institution_id = $this->merchant_names->values()[$key][0]['bank_account']['bank']['plaid_ins_id'];
-                } else {
-                    $institution_id = null;
-                }
+                // "Bank specific": the rule applies only to this card's bank.
+                $institution_id = isset($vendor_match['bank_specific'])
+                    ? $this->merchantCards->values()->get($key)?->first()?->bank_account?->bank?->plaid_ins_id
+                    : null;
 
-                if (isset($vendor_match['options'])) {
-                    $options = json_encode($vendor_match['options'].'/i');
-                } else {
-                    $options = json_encode('/i');
-                }
+                $options = isset($vendor_match['options'])
+                    ? json_encode($vendor_match['options'].'/i')
+                    : json_encode('/i');
 
-                $vendor_transaction = VendorTransaction::create([
+                VendorTransaction::create([
                     'vendor_id' => $vendor_id,
                     'deposit_check' => $deposit_check,
                     'amount_sign' => $vendor_match['amount_sign'] ?? null,
@@ -441,18 +486,11 @@ class MatchVendor extends Component
                 ]);
             }
 
-            //USED IN MULTIPLE OF PLACES TransactionController@add_vendor_to_transactions, ExpesnesForm@createExpenseFromTransaction
-            //add if vendor is not part of the currently logged in vendor
-            if (! in_array($vendor_id, $this->vendors->pluck('id')->toArray())) {
-                auth()->user()->vendor->vendors()->attach($vendor_id);
-            }
+            $this->linkVendorToCompany($vendor_id);
         }
 
-        //add vendor to transaction ...
-
-        //6-8-2022 run in a queue?
-        app(\App\Http\Controllers\TransactionController::class)->add_vendor_to_transactions();
-        app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();
+        app(TransactionController::class)->add_vendor_to_transactions();
+        app(TransactionController::class)->add_check_deposit_to_transactions();
 
         $saved = count($this->match_merchant_names);
         $this->refreshLists();
@@ -471,9 +509,6 @@ class MatchVendor extends Component
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);
 
-        return view('livewire.transactions.match-vendor', [
-            'merchant_names' => $this->merchant_names,
-            'vendors' => $this->vendors,
-        ]);
+        return view('livewire.transactions.match-vendor');
     }
 }
