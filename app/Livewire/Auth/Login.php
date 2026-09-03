@@ -7,6 +7,7 @@ use App\Traits\DetectsDeviceType;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class Login extends Component
@@ -86,6 +87,13 @@ class Login extends Component
         $this->hasPasskey = $user->webAuthnCredentials()
                 ->whereNull('disabled_at')
                 ->where('device_type', $this->currentDeviceType())
+                // A passkey belongs to the relying party that minted it: one
+                // created on hive.contractors is invisible to a page served
+                // from localhost, and vice versa. Without this the button was
+                // offered against credentials the browser can never be shown,
+                // and the ceremony could only end in "credentials request was
+                // not completed" — which is exactly how local dev looked.
+                ->where('rp_id', (string) config('webauthn.relying_party.id'))
                 ->exists()
             && $this->canUsePasskeysForCurrentRequest();
         $this->hasPassword = filled($user->password);
@@ -225,8 +233,16 @@ class Login extends Component
     protected function canUsePasskeysForCurrentRequest(): bool
     {
         $request = request();
+        $host = trim((string) $request->getHost());
 
-        if (! $request->isSecure() && ! $request->isFromTrustedProxy()) {
+        // WebAuthn needs a secure context. Browsers grant that to loopback
+        // over plain http as well (localhost, 127.0.0.1, ::1), so demanding
+        // TLS here only blocked local development — the browser would have
+        // been perfectly happy. Note that an IP literal still fails below:
+        // Chrome refuses an IP address as a passkey domain
+        // ("SecurityError: This is an invalid domain"), so locally the
+        // relying party must be `localhost` and the page opened there.
+        if (! $request->isSecure() && ! $request->isFromTrustedProxy() && ! $this->isLoopbackHost($host)) {
             return false;
         }
 
@@ -235,12 +251,44 @@ class Login extends Component
             return true;
         }
 
-        $host = trim((string) $request->getHost());
         if ($host === '') {
             return false;
         }
 
         return $host === $rpId || Str::endsWith($host, '.'.$rpId);
+    }
+
+    protected function isLoopbackHost(string $host): bool
+    {
+        return in_array(strtolower(trim($host, '[]')), ['localhost', '127.0.0.1', '::1'], true);
+    }
+
+    /**
+     * The same page on `localhost`, when passkeys would work there but not
+     * here: you're on 127.0.0.1 (which no browser accepts as a passkey
+     * domain) and the relying party is localhost. Null everywhere else.
+     */
+    #[Computed]
+    public function passkeyLocalhostUrl(): ?string
+    {
+        $request = request();
+        $host = strtolower(trim((string) $request->getHost(), '[]'));
+
+        if (! in_array($host, ['127.0.0.1', '::1'], true)) {
+            return null;
+        }
+
+        if (trim((string) config('webauthn.relying_party.id', '')) !== 'localhost') {
+            return null;
+        }
+
+        // Build from the login route, not fullUrl(): inside a Livewire update
+        // the current URL is the /livewire-<hash>/update endpoint, which sent
+        // the reader to a JSON endpoint instead of the sign-in page.
+        $port = $request->getPort();
+        $port = in_array($port, [80, 443, null], true) ? '' : ':'.$port;
+
+        return $request->getScheme().'://localhost'.$port.route('login', absolute: false);
     }
 
     #[Title('Login')]

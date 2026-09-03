@@ -186,6 +186,16 @@
                             </div>
                         @else
                             {{-- No passkey: show password form --}}
+                            @if($this->passkeyLocalhostUrl)
+                                {{-- Local dev on 127.0.0.1: browsers refuse an IP address as a
+                                     passkey domain, but the same page on localhost works. --}}
+                                <flux:callout icon="finger-print">
+                                    <flux:callout.text>
+                                        Passkeys don't work on 127.0.0.1 — browsers reject IP addresses as passkey domains.
+                                        <a href="{{ $this->passkeyLocalhostUrl }}" class="font-semibold underline">Open this page on localhost</a> to sign in with your passkey.
+                                    </flux:callout.text>
+                                </flux:callout>
+                            @endif
                             @if($passkeyNotice)
                                 <flux:callout color="amber" icon="finger-print">
                                     <flux:callout.text>
