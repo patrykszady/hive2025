@@ -160,10 +160,6 @@
         </form>
         </div>
 
-        <div class="max-w-5xl">
-        <livewire:transactions.vendor-transactions-panel defer />
-        </div>
-
         {{-- Expense Matching --}}
             <div class="max-w-3xl">
             <form wire:submit="store_expense_vendors">
@@ -219,5 +215,9 @@
                 </div>
             </form>
             </div>
+
+        <div class="max-w-5xl">
+        <livewire:transactions.vendor-transactions-panel defer />
+        </div>
     </div>
 </div>
