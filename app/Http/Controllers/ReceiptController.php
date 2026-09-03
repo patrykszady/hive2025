@@ -1235,6 +1235,18 @@ class ReceiptController extends Controller
             $amount = $expenseAmount;
         }
 
+        // ── 11a. The printed TOTAL beats a card / store-credit balance ──
+        // On a return (and on a purchase paid with a gift card) the last
+        // prominent number is the CARD'S balance after the transaction —
+        // "CARD BALANCE 262.99" under "TOTAL -$256.29". CU kept returning the
+        // balance as TotalAmount, so a $256.29 refund was stored as a $262.99
+        // purchase. When the receipt prints a TOTAL that disagrees with what
+        // CU chose and the chosen number is a balance line, the TOTAL wins,
+        // sign included.
+        if (is_string($content) && $content !== '') {
+            $amount = $this->preferPrintedTotal($amount, $content);
+        }
+
         // ── 11b. Reconstruct total from balance + deposit ─────────────
         // Some material-order PDFs (e.g. Studio 41) show "Amount Due" (the
         // remaining balance after prior payments) as the last prominent number.
@@ -2258,10 +2270,74 @@ class ReceiptController extends Controller
         return array_column($indexed, 'item');
     }
 
-    private function extractTotalFromContent(string $content): ?float
+    /**
+     * The receipt's own TOTAL line, signed, when CU's pick is really a card
+     * or store-credit balance printed after it. Null-safe: with no printed
+     * TOTAL, or no balance line matching CU's number, the amount is left alone.
+     */
+    protected function preferPrintedTotal(?float $amount, string $content): ?float
     {
+        $printed = $this->extractPrintedTotal($content);
+        if ($printed === null) {
+            return $amount;
+        }
+
+        if ($amount === null) {
+            return $printed;
+        }
+
+        if (abs($printed - $amount) < 0.005) {
+            return $amount;
+        }
+
+        // Balance-style lines: the card's remaining value, never the sale.
+        $balancePattern = '/\b(?:CARD\s+BALANCE|GIFT\s*CARD\s+BAL(?:ANCE)?|STORE\s+CREDIT\s+BAL(?:ANCE)?|REMAINING\s+BALANCE|BALANCE\s+REMAINING|NEW\s+BALANCE|AVAILABLE\s+BALANCE|CURRENT\s+BALANCE|ENDING\s+BALANCE)\b[^0-9-]{0,20}(-?\$?\s*-?\d{1,3}(?:,\d{3})*\.\d{2})/i';
+
+        if (preg_match_all($balancePattern, $content, $matches) && ! empty($matches[1])) {
+            foreach ($matches[1] as $candidate) {
+                $balance = $this->parseAmountFromString($candidate);
+                if ($balance !== null && abs(abs($balance) - abs($amount)) < 0.005) {
+                    return $printed;
+                }
+            }
+        }
+
+        // A return whose sign CU dropped: same magnitude, printed negative.
+        if ($printed < 0 && abs(abs($printed) - abs($amount)) < 0.005) {
+            return $printed;
+        }
+
+        return $amount;
+    }
+
+    /**
+     * The LAST "TOTAL" line's signed amount — not SUBTOTAL, not a balance.
+     * Accepts the value on the same line or on the next non-blank line, with
+     * the minus before or after the dollar sign ("-$256.29", "$-256.29").
+     */
+    protected function extractPrintedTotal(string $content): ?float
+    {
+        $pattern = '/(?<![A-Z])TOTAL\b[ \t:]*(?:\r?\n\s*)?(-?)\$?\s*(-?)(\d{1,3}(?:,\d{3})*\.\d{2})/i';
+
+        if (! preg_match_all($pattern, $content, $matches, PREG_SET_ORDER) || empty($matches)) {
+            return null;
+        }
+
+        $last = end($matches);
+        $value = $this->parseAmountFromString($last[3]);
+        if ($value === null) {
+            return null;
+        }
+
+        return ($last[1] === '-' || $last[2] === '-') ? -abs($value) : $value;
+    }
+
+    protected function extractTotalFromContent(string $content): ?float
+    {
+        // "BALANCE DUE" only — a bare BALANCE also matched "CARD BALANCE",
+        // the gift card's remaining value, which is never the total.
         $patterns = [
-            '/\b(?:TOTAL|AMOUNT\s+DUE|AMOUNT|BALANCE|CHARGE|PAYMENT)\b[^0-9-]{0,20}(-?\d{1,3}(?:,\d{3})*(?:\.\d{2}))/i',
+            '/\b(?:TOTAL|AMOUNT\s+DUE|AMOUNT|BALANCE\s+DUE|CHARGE|PAYMENT)\b[^0-9-]{0,20}(-?\d{1,3}(?:,\d{3})*(?:\.\d{2}))/i',
             '/(-?\d{1,3}(?:,\d{3})*(?:\.\d{2}))\s+(?:master\s*card|visa|amex|discover|card|debit|credit|mc)\b/i',
         ];
 

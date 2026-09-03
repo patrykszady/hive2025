@@ -135,17 +135,17 @@ class SyncContentUnderstandingAnalyzer extends Command
             ],
             'SubTotal' => [
                 'type'        => 'number',
-                'description' => 'The subtotal before tax, fees, and tip.',
+                'description' => 'The subtotal before tax, fees, and tip — the value on the SUBTOTAL line, WITH its printed sign. On a RETURN / REFUND receipt it is negative (e.g. "SUBTOTAL -232.99" → -232.99).',
                 'method'      => 'extract',
             ],
             'TotalTax' => [
                 'type'        => 'number',
-                'description' => 'Total tax amount charged.',
+                'description' => 'Total tax amount on the TAX / SALES TAX line, WITH its printed sign. On a RETURN / REFUND receipt the tax is refunded and negative (e.g. "SALES TAX -23.30" → -23.30).',
                 'method'      => 'extract',
             ],
             'TotalAmount' => [
                 'type'        => 'number',
-                'description' => 'The grand total amount charged including tax, fees, and tip.',
+                'description' => 'The transaction total: the amount on the line labeled "TOTAL" (or "Grand Total", "Amount Due", "Invoice Total"), including tax, fees and tip, WITH ITS PRINTED SIGN. A RETURN / REFUND receipt (cues: "REFUND", "RETURN", "CREDIT", "ORIG REC", negative item prices) has a NEGATIVE total — return it negative exactly as printed ("TOTAL -$256.29" → -256.29), never its absolute value. NEVER return a card or account BALANCE as the total: lines such as "CARD BALANCE", "GIFT CARD BALANCE", "STORE CREDIT BALANCE", "REMAINING BALANCE", "NEW BALANCE", "AVAILABLE BALANCE" show what is LEFT on a gift card or store-credit card AFTER the transaction and are printed BELOW the TOTAL and the tender lines — they are not the sale. Worked example (Home Depot return): "SUBTOTAL -232.99 / SALES TAX -23.30 / TOTAL -$256.29 / STORE CREDIT -256.29 / CARD BALANCE 262.99" → TotalAmount = -256.29 (NOT 262.99). Worked example (purchase paid with a gift card): "TOTAL 111.94 / GIFT CARD 111.94 / CARD BALANCE 122.21" → TotalAmount = 111.94 (NOT 122.21). If in doubt, TotalAmount must equal SubTotal + TotalTax (+ fees/tip), sign included.',
                 'method'      => 'extract',
             ],
 
@@ -271,7 +271,7 @@ class SyncContentUnderstandingAnalyzer extends Command
                         ],
                         'Amount' => [
                             'type'        => 'number',
-                            'description' => 'Amount paid via this payment method.',
+                            'description' => 'Amount paid (or, on a refund, credited back) via this payment method, WITH its printed sign — on a return the tender line is negative ("STORE CREDIT -256.29" → -256.29). Never the card\'s remaining balance ("CARD BALANCE", "GIFT CARD BALANCE").',
                             'method'      => 'extract',
                         ],
                     ],
