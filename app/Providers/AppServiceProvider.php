@@ -234,6 +234,63 @@ class AppServiceProvider extends ServiceProvider
         VendorDoc::observe(VendorDocObserver::class);
 
         $this->bootSuppressedRecipients();
+        $this->bootReplyToSender();
+    }
+
+    /**
+     * Mail sent FROM the company inbox (crew@… — the vendor's business email)
+     * on behalf of a person gets that person as the first Reply-To, so a
+     * client who hits Reply reaches whoever wrote to them. The company inbox
+     * stays as a second Reply-To: it is the mailbox Hive ingests, and that is
+     * how the reply still lands in the CRM.
+     *
+     * Leaves alone: mail with no known sender (scheduled jobs), mail sent from
+     * the person's own address, and mail carrying an explicit Reply-To that is
+     * neither the company inbox nor the person.
+     */
+    protected function bootReplyToSender(): void
+    {
+        Event::listen(MessageSending::class, function (MessageSending $event): void {
+            $actor = \App\Support\MailActor::current();
+            $actorEmail = strtolower(trim((string) ($actor?->email ?? '')));
+            $inbox = strtolower(trim((string) ($actor?->vendor?->business_email ?? '')));
+
+            if ($actorEmail === '' || $inbox === '' || $actorEmail === $inbox) {
+                return;
+            }
+
+            $message = $event->message;
+            $lower = static fn (array $addresses): array => array_map(
+                static fn ($address): string => strtolower($address->getAddress()),
+                $addresses
+            );
+
+            $from = $lower($message->getFrom());
+            $replyTo = $lower($message->getReplyTo());
+
+            // Only mail that presents itself as the company inbox.
+            if (! in_array($inbox, $from, true) && ! in_array($inbox, $replyTo, true)) {
+                return;
+            }
+
+            // Respect an explicit Reply-To pointing somewhere else entirely.
+            if (array_diff($replyTo, [$inbox, $actorEmail]) !== []) {
+                return;
+            }
+
+            if (in_array($actorEmail, $replyTo, true)) {
+                return;
+            }
+
+            $message->replyTo(
+                new \Symfony\Component\Mime\Address($actor->email, trim((string) $actor->full_name)),
+                new \Symfony\Component\Mime\Address($actor->vendor->business_email, trim((string) $actor->vendor->business_name)),
+            );
+        });
+
+        // A worker runs many jobs: the sender named by one must not outlive it.
+        \Illuminate\Support\Facades\Queue::after(fn () => \App\Support\MailActor::forget());
+        \Illuminate\Support\Facades\Queue::failing(fn () => \App\Support\MailActor::forget());
     }
 
     /**

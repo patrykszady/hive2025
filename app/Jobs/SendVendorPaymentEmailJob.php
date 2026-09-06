@@ -47,6 +47,8 @@ class SendVendorPaymentEmailJob implements ShouldQueue
      */
     public function handle(): void
     {
+        \App\Support\MailActor::as($this->auth_user instanceof \App\Models\User ? $this->auth_user : null);
+
         $to = $this->to_email;
         $cc = array_values(array_filter([
             $this->auth_user->vendor->business_email,

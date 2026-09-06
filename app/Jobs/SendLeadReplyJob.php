@@ -56,6 +56,8 @@ class SendLeadReplyJob implements ShouldQueue
             return;
         }
 
+        \App\Support\MailActor::as($user);
+
         $companyEmail = CompanyEmail::find($this->companyEmailId);
         if (! $companyEmail) {
             Log::warning('SendLeadReplyJob missing company email', [
@@ -103,9 +105,11 @@ class SendLeadReplyJob implements ShouldQueue
                 config(['mail.mailers.nylas.grant_id' => $companyEmail->grant_id]);
             }
 
-            // Replies go to the company inbox (crew@... for GSC) no matter who
-            // sent the reply: that's the mailbox Hive ingests, so client
-            // replies land in the CRM instead of one person's mailbox.
+            // The company inbox (crew@... for GSC) is the mailbox Hive ingests,
+            // so it must stay a Reply-To for client replies to land in the CRM.
+            // The person who wrote the reply is added in front of it at send
+            // time (AppServiceProvider::bootReplyToSender), so "Reply" reaches
+            // them directly as well.
             $replyToEmail = trim((string) $user->vendor->business_email) ?: $this->fromEmail;
 
             $mailable = new LeadReplyMail(

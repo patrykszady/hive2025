@@ -93,10 +93,11 @@ it('sends the client message without an office CC and the office copy as its own
     expect($copyMessage->getHeaders()->has('X-Hive-Internal-Copy'))->toBeTrue()
         ->and($clientMessage->getHeaders()->has('X-Hive-Internal-Copy'))->toBeFalse();
 
-    // Replies route to the company inbox regardless of who sent the message —
-    // that's the mailbox Hive ingests, so client replies land in the CRM.
+    // Replies reach the person who wrote the message first, and the company
+    // inbox second — that's the mailbox Hive ingests, so the reply still
+    // lands in the CRM (AppServiceProvider::bootReplyToSender).
     expect(collect($clientMessage->getReplyTo())->map(fn ($a) => $a->getAddress())->all())
-        ->toBe(['office@gs.construction']);
+        ->toBe([$user->email, 'office@gs.construction']);
 
     // Exactly one tracked send: the client's. The copy created no row.
     $sentRows = EmailTracking::query()->where('event_type', 'sent')->get();

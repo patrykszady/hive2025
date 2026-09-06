@@ -63,6 +63,8 @@ class SendEstimateEmailJob implements ShouldQueue
             return;
         }
 
+        \App\Support\MailActor::as($user);
+
         $companyEmail = CompanyEmail::find($this->companyEmailId);
         if (! $companyEmail) {
             Log::warning('SendEstimateEmailJob missing company email', [
