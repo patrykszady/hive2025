@@ -240,7 +240,6 @@
                             label="Project Name"
                             type="text"
                             placeholder="e.g. Kitchen Remodel"
-                            description="Booking this consult creates the client's project."
                         />
                     </div>
                 @endif
