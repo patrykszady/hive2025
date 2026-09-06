@@ -17,6 +17,8 @@ use Tests\TestCase;
  */
 class CrewLeadEmailServiceTest extends TestCase
 {
+    use \Illuminate\Foundation\Testing\RefreshDatabase;
+
     private function triage(array $overrides = []): ?string
     {
         $service = app(CrewLeadEmailService::class);
@@ -200,5 +202,50 @@ class CrewLeadEmailServiceTest extends TestCase
         foreach (['Remodel quote for my kitchen', 'Renovation enquiry', 'Rec room build-out'] as $subject) {
             $this->assertNull($this->triage(['subject' => $subject]), $subject);
         }
+    }
+
+    public function test_a_sender_with_a_lead_on_file_is_filed_as_a_reply_not_a_new_lead(): void
+    {
+        $vendor = \App\Models\Vendor::factory()->create();
+        $creator = \App\Models\User::query()->create([
+            'first_name' => 'Crew', 'last_name' => 'Inbox', 'email' => 'crew-ingest@example.test',
+            'cell_phone' => '7005550106', 'password' => bcrypt('password'), 'primary_vendor_id' => $vendor->id,
+        ]);
+        \App\Models\Lead::withoutGlobalScopes()->forceCreate([
+            'belongs_to_vendor_id' => $vendor->id,
+            'created_by_user_id' => $creator->id,
+            'date' => now(),
+            'origin' => 'Email',
+            'external_source' => 'crew-email',
+            'lead_data' => ['name' => 'J. Bradley Bates', 'email' => 'bates.jbradley@gmail.com'],
+        ]);
+
+        // No "Re:", no In-Reply-To — a fresh subject from a known sender.
+        $this->assertSame('reply', $this->triage([
+            'from' => [['email' => 'Bates.JBradley@gmail.com', 'name' => 'J. Bradley Bates']],
+            'subject' => 'Bates Window order',
+            'body' => 'Order looks complete. Questions - are the windows NEAT treated?',
+        ]));
+    }
+
+    public function test_a_client_contact_is_not_a_prospect(): void
+    {
+        \App\Models\User::query()->create([
+            'first_name' => 'Bonnie', 'last_name' => 'Bates', 'email' => 'bonnie.j.bates@gmail.com',
+            'cell_phone' => '7005550105', 'password' => bcrypt('password'),
+        ]);
+
+        $this->assertSame('known_contact', $this->triage([
+            'from' => [['email' => 'bonnie.j.bates@gmail.com', 'name' => 'Bonnie Bates']],
+            'subject' => 'Window hardware',
+            'body' => 'Champagne hardware on the dining room windows?',
+        ]));
+    }
+
+    public function test_an_unknown_sender_still_reaches_the_classifier(): void
+    {
+        $this->assertNull($this->triage([
+            'from' => [['email' => 'new.homeowner@example.com', 'name' => 'New Homeowner']],
+        ]));
     }
 }

@@ -457,7 +457,13 @@ class CrewLeadEmailService
 
             // An enquiry without an address or phone can't be scheduled —
             // ask the sender for exactly what's missing, right away, once.
-            $this->requestMissingInfo($lead, $base);
+            // Only when the classifier actually SAID it is an enquiry: an
+            // unsure or failed classification still creates the lead for a
+            // human to look at, but must not email a stranger — or, as on
+            // 2026-09-04, a client mid-order — on the strength of nothing.
+            if ($verdict['is_lead'] === true) {
+                $this->requestMissingInfo($lead, $base);
+            }
 
             CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
                 'status' => CrewEmailIngest::STATUS_LEAD,
@@ -547,6 +553,20 @@ class CrewLeadEmailService
 
         if (trim($subject) === '' && trim($body) === '') {
             return 'empty';
+        }
+
+        // Someone we already know is never a NEW lead, whatever the subject
+        // line says. Brad Bates — four leads on file, mid-order — wrote
+        // "Bates Window order" with three questions, and the pipeline minted
+        // lead #5 and emailed him back asking for his address and phone.
+        // A prior lead's sender is filed onto that lead as a reply; a user
+        // (client contacts are users) is simply not a prospect.
+        if (Lead::withoutGlobalScopes()->whereNull('deleted_at')->where('lead_data->email', $fromEmail)->exists()) {
+            return 'reply';
+        }
+
+        if (\App\Models\User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [$fromEmail])->exists()) {
+            return 'known_contact';
         }
 
         return null;
@@ -816,6 +836,7 @@ TXT;
         }
 
         $lead = Lead::withoutGlobalScopes()
+            ->whereNull('deleted_at')
             ->where('lead_data->email', $fromEmail)
             ->latest('id')
             ->first();
