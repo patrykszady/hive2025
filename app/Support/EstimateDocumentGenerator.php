@@ -407,6 +407,25 @@ class EstimateDocumentGenerator
      */
     protected static function sanitizeHtmlForPdf(string $html): string
     {
+        // Links the reader clicks are not resources Chrome fetches while
+        // rendering, so they must survive untouched — the Reimbursements
+        // download link is a localhost URL on dev and was being rewritten to
+        // an inert "removed-local-ref" host. Park every <a href> behind a
+        // placeholder, sanitize, then put them back.
+        $anchors = [];
+        $html = preg_replace_callback('#<a\b[^>]*\bhref=["\'][^"\']*["\'][^>]*>#i', function ($m) use (&$anchors) {
+            $anchors[] = $m[0];
+
+            return '<!--pdf-anchor-'.(count($anchors) - 1).'-->';
+        }, $html) ?? $html;
+
+        $html = static::stripLocalResources($html);
+
+        return preg_replace_callback('#<!--pdf-anchor-(\d+)-->#', fn ($m) => $anchors[(int) $m[1]] ?? '', $html) ?? $html;
+    }
+
+    protected static function stripLocalResources(string $html): string
+    {
         // Remove <script> tags with localhost/127.x src attributes
         $html = preg_replace('#<script[^>]*src=["\'][^"\']*(?:127\.0\.0\.\d|localhost)[^"\']*["\'][^>]*>.*?</script>#is', '', $html);
 

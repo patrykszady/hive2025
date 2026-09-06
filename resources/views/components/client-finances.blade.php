@@ -32,6 +32,7 @@
                         @if($reimbursementDownloadUrl && (float) ($finances['reimbursments'] ?? 0) > 0)
                             <flux:button
                                 :href="$reimbursementDownloadUrl"
+                                target="_blank"
                                 icon="arrow-down-on-square"
                                 size="xs"
                                 variant="ghost"

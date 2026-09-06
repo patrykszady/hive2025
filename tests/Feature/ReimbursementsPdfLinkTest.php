@@ -69,3 +69,20 @@ it('strips a page break from the edge of a contract template but not from its mi
         ->and(\App\Support\EstimateDocumentGenerator::stripEdgePageBreaks($middle))->toBe($middle)
         ->and(\App\Support\EstimateDocumentGenerator::stripEdgePageBreaks($leading))->toBe('<p>Body.</p>');
 });
+
+it('keeps clickable links intact when sanitizing local resources out of the PDF html', function () {
+    $sanitize = (new ReflectionMethod(\App\Support\EstimateDocumentGenerator::class, 'sanitizeHtmlForPdf'));
+
+    $html = '<script src="http://localhost:8000/app.js"></script>'
+        .'<link href="http://127.0.0.1:8000/app.css" rel="stylesheet">'
+        .'<a href="http://localhost:8000/projects/382/reimbursements.pdf?signature=abc" target="_blank">Download</a>'
+        .'<img src="//localhost:8000/logo.png">';
+
+    $out = $sanitize->invoke(null, $html);
+
+    expect($out)->toContain('href="http://localhost:8000/projects/382/reimbursements.pdf?signature=abc"')
+        ->and($out)->toContain('target="_blank"')
+        ->and($out)->not->toContain('<script')
+        ->and($out)->not->toContain('<link')
+        ->and($out)->toContain('removed-local-ref');
+});
