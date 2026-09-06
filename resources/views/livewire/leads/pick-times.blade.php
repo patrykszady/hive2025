@@ -96,7 +96,7 @@
                     <div class="flex gap-2">
                         <button type="button" wire:click="$set('meeting', 'in_person')" class="cursor-pointer">
                             <flux:badge :color="$meeting === 'in_person' ? 'indigo' : 'zinc'" icon="map-pin">
-                                At our home
+                                At my home
                             </flux:badge>
                         </button>
                         <button type="button" wire:click="$set('meeting', 'virtual')" class="cursor-pointer">
