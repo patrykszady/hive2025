@@ -191,6 +191,12 @@
                             <flux:menu.item icon="arrow-right-circle" wire:click="toggleSelectionMode">
                                 Forward messages
                             </flux:menu.item>
+                            @if ($this->thread->client_id)
+                                {{-- The same signed pick-times link the lead emails carry. --}}
+                                <flux:menu.item icon="calendar-days" wire:click="textConsultScheduleLink">
+                                    Text consult scheduling link
+                                </flux:menu.item>
+                            @endif
                             @if ($this->hasBlockedThreadSpamTargets())
                                 <flux:menu.item icon="no-symbol" wire:click="unblockThreadSpam">
                                     Unblock Number

@@ -1061,6 +1061,38 @@ class SmsConversation extends Component
     /**
      * Mark the current thread's external participant numbers as spam.
      */
+    /**
+     * Text this thread's client the signed "pick consultation times" link —
+     * the same one the lead emails carry ("If this time no longer works for
+     * you, you can pick new consultation times…"). See
+     * ConsultScheduleLinkTexter for how a project without a lead gets one.
+     */
+    public function textConsultScheduleLink(\App\Services\ConsultScheduleLinkTexter $texter): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $thread = $this->thread;
+        if (! $thread) {
+            return;
+        }
+
+        $result = $texter->textToThread($thread, auth()->user());
+
+        if ($result['ok']) {
+            $this->refreshMessages();
+        }
+
+        Flux::toast(
+            variant: $result['variant'],
+            heading: $result['heading'],
+            text: $result['text'],
+            duration: $result['ok'] ? 4000 : 6000,
+            position: 'top right',
+        );
+    }
+
     public function markThreadAsSpam(): void
     {
         if ($this->isClientUser) {
