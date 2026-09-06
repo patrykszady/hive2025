@@ -618,10 +618,7 @@ class Project extends Model
                 }
                 
                 // Only include the GC's (project owner's) change orders — subcontractor bids are handled separately.
-                $finances['change_orders'] = $this->bids()
-                    ->where('type', '!=', 1)
-                    ->where('vendor_id', $this->belongs_to_vendor_id)
-                    ->sum('amount');
+                $finances['change_orders'] = $this->changeOrderSum($this->belongs_to_vendor_id, $bid_estimate_total != 0);
                 $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
                 $finances['reimbursments'] = $splits_sum + $expenses_sum;
                 $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
@@ -663,6 +660,31 @@ class Project extends Model
      *
      * @return array<string, float|int>
      */
+    /**
+     * The vendor's change-order total.
+     *
+     * Without a signed contract (no type-1 bid) the Estimate figure falls
+     * back to the sum of EVERY estimate section — so a change-order bid whose
+     * section sits in that sum would be counted twice. Project 382 showed
+     * Estimate $6,297 + Change Order $3,927 for a $6,297 estimate that way:
+     * the bid had been auto-created for a section on an Active project before
+     * the "no change order before the contract" rule existed. Pre-contract,
+     * only change orders that own no live section count.
+     */
+    protected function changeOrderSum(int $vendorId, bool $hasBaseBid): float
+    {
+        return (float) Bid::withoutGlobalScopes()
+            ->where('project_id', $this->id)
+            ->where('vendor_id', $vendorId)
+            ->where('type', '!=', 1)
+            ->when(! $hasBaseBid, fn ($query) => $query->whereNotExists(fn ($sub) => $sub
+                ->selectRaw('1')
+                ->from('estimate_sections')
+                ->whereColumn('estimate_sections.bid_id', 'bids.id')
+                ->whereNull('estimate_sections.deleted_at')))
+            ->sum('amount');
+    }
+
     public function financesForVendor(int $vendorId): array
     {
         $expenses_sum = Expense::query()
@@ -698,11 +720,7 @@ class Project extends Model
             $finances['estimate'] = $bid_estimate_total;
         }
 
-        $finances['change_orders'] = (float) Bid::withoutGlobalScopes()
-            ->where('project_id', $this->id)
-            ->where('vendor_id', $vendorId)
-            ->where('type', '!=', 1)
-            ->sum('amount');
+        $finances['change_orders'] = $this->changeOrderSum($vendorId, $bid_estimate_total != 0);
         $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
         $finances['reimbursments'] = $splits_sum + $expenses_sum;
         $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
