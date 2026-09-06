@@ -990,5 +990,10 @@ it('notifies vendor admins when a homeowner picks consultation times', function 
         ->and($notification->body)->toContain('video call')
         ->and($notification->data['lead_id'])->toBe($fx['lead']->id);
 
+    // …and every admin's browser gets the same alert.
+    Queue::assertPushed(\App\Jobs\SendBrowserNotificationsToUsers::class, fn ($job) => in_array($fx['admin']->id, $job->userIds, true)
+        && str_contains($job->payload['title'], 'picked consultation times')
+        && str_contains($job->payload['body'], 'Mon, Jul 27 · 7-9 AM'));
+
     \Illuminate\Support\Carbon::setTestNow();
 });

@@ -747,6 +747,15 @@ class ScheduleIndex extends Component
                 'data' => ['project_id' => $project->id],
             ]);
         }
+
+        // …and the same alert to every admin's browser.
+        \App\Support\AdminAlerts::push(
+            $users->pluck('id'),
+            'service_availability_submitted',
+            "{$clientName} shared preferred times",
+            'Preferred service times submitted. Schedule the service call.',
+            url('/planner'),
+        );
     }
 
     /**

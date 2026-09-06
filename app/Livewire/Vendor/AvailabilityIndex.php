@@ -515,6 +515,15 @@ class AvailabilityIndex extends Component
                 ],
             ]);
         }
+
+        // …and the same alert to every admin's browser.
+        \App\Support\AdminAlerts::push(
+            $owningVendor->users()->wherePivot('role_id', 1)->pluck('users.id'),
+            'vendor_times_selected',
+            "{$subVendor->name} scheduled \"{$task->title}\"",
+            trim($summary),
+            $task->project ? route('projects.show', $task->project) : route('planner.cards'),
+        );
     }
 
     /**

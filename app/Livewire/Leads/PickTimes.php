@@ -445,6 +445,15 @@ class PickTimes extends Component
                 ],
             ]);
         }
+
+        // …and the same alert to every admin's browser.
+        \App\Support\AdminAlerts::push(
+            $vendor->users()->wherePivot('role_id', 1)->pluck('users.id'),
+            'lead_times_picked',
+            "{$name} picked consultation times",
+            trim("{$summary}.{$format}"),
+            route('leads.index', ['lead' => $lead->id]),
+        );
     }
 
     public function render()
