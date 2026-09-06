@@ -68,6 +68,12 @@ class EstimateDocumentGenerator
         $client = $project?->client ?? $estimate->client;
         $reimbursements = $estimate->reimbursments;
 
+        // Printed beside Reimbursements in the PDF: a link that fetches the
+        // receipts PDF from the server. Signed, since the reader has no session.
+        $reimbursementsUrl = (float) $reimbursements > 0
+            ? \Illuminate\Support\Facades\URL::signedRoute('projects.reimbursements.pdf', ['project' => $project->id])
+            : null;
+
         // Resolve timezone from the vendor record itself (not auth context)
         $timezone = $resolveTimezone
             ?? (is_string($vendor->timezone) && $vendor->timezone !== '' ? $vendor->timezone : (string) config('app.timezone'));
@@ -126,7 +132,7 @@ class EstimateDocumentGenerator
             ? static::collectRecentChanges($estimate)
             : ['line_items' => [], 'sections' => [], 'since' => null];
 
-        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures', 'recentChanges', 'showAllowances'))->render();
+        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures', 'recentChanges', 'showAllowances', 'reimbursementsUrl'))->render();
 
         // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
         // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),
@@ -498,9 +504,25 @@ class EstimateDocumentGenerator
         ];
 
         return $contractTemplates
-            ->map(fn (EmailTemplate $template) => static::renderContractTemplate($template->body, $placeholderData))
+            ->map(fn (EmailTemplate $template) => static::stripEdgePageBreaks(static::renderContractTemplate($template->body, $placeholderData)))
             ->values()
             ->all();
+    }
+
+    /**
+     * Drop page-break divs (and the blank paragraphs around them) from the
+     * start and end of a rendered template body. Bodies are joined with a
+     * page break already, so an edge break adds nothing — except that the
+     * last template's trailing break printed a 7th page carrying only the
+     * header and footer on every estimate PDF (e.g. 1-91-382-265).
+     */
+    public static function stripEdgePageBreaks(string $html): string
+    {
+        $edge = '(?:\s|<br\s*/?>|<p>(?:\s|&nbsp;)*</p>|<div[^>]*page-break-(?:before|after)\s*:\s*always[^>]*>\s*</div>)';
+
+        $html = preg_replace('#^'.$edge.'+#i', '', $html) ?? $html;
+
+        return preg_replace('#'.$edge.'+$#i', '', $html) ?? $html;
     }
 
     /**

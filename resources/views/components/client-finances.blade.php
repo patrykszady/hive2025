@@ -5,6 +5,9 @@
     'showReimbursementDownload' => false,
     'reimbursementDownloadAction' => 'print_reimbursements',
     'reimbursementDownloadTooltip' => 'Download',
+    // A URL instead of a Livewire action: used by the estimate PDF, where the
+    // reader has no session and a wire:click means nothing. Renders a link.
+    'reimbursementDownloadUrl' => null,
 ])
 
 @php
@@ -26,7 +29,15 @@
                 <flux:table.cell>
                     <div class="flex items-center justify-between gap-2">
                         <span>Reimbursements</span>
-                        @if($showReimbursementDownload && (float) ($finances['reimbursments'] ?? 0) > 0)
+                        @if($reimbursementDownloadUrl && (float) ($finances['reimbursments'] ?? 0) > 0)
+                            <flux:button
+                                :href="$reimbursementDownloadUrl"
+                                icon="arrow-down-on-square"
+                                size="xs"
+                                variant="ghost"
+                                class="shrink-0 !p-0"
+                            >Download</flux:button>
+                        @elseif($showReimbursementDownload && (float) ($finances['reimbursments'] ?? 0) > 0)
                             <flux:button
                                 icon="arrow-down-on-square"
                                 size="xs"

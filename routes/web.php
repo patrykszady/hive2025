@@ -287,6 +287,12 @@ Route::get('lead/times/{lead}', \App\Livewire\Leads\PickTimes::class)
     ->name('lead.availability')
     ->middleware('signed');
 
+// The reimbursement receipts PDF linked from inside an estimate PDF. Opened
+// with no session, so the signature is the credential.
+Route::get('projects/{project}/reimbursements.pdf', \App\Http\Controllers\ReimbursementsPdfController::class)
+    ->name('projects.reimbursements.pdf')
+    ->middleware('signed');
+
 // Short URL for client schedule SMS
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
 
