@@ -30,6 +30,12 @@ return [
         'secret' => env('PLAID_SECRET'),
     ],
 
+    'anthropic' => [
+        'api_key' => env('ANTHROPIC_API_KEY'),
+        // The estimate generator's model. Opus 5 unless overridden.
+        'estimate_model' => env('ANTHROPIC_ESTIMATE_MODEL', 'claude-opus-5'),
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'task_extraction_model' => env('OPENAI_TASK_EXTRACTION_MODEL', 'gpt-4.1'),

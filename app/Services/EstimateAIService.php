@@ -2,47 +2,46 @@
 
 namespace App\Services;
 
+use Anthropic\Client;
+use Anthropic\Core\Exceptions\APIConnectionException;
+use Anthropic\Core\Exceptions\APIStatusException;
+use Anthropic\Core\Exceptions\AuthenticationException;
+use Anthropic\Core\Exceptions\RateLimitException;
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
 use App\Models\LineItem;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use OpenAI\Client;
-use OpenAI\Transporters\HttpTransporter;
-use OpenAI\ValueObjects\ApiKey;
-use OpenAI\ValueObjects\Transporter\BaseUri;
-use OpenAI\ValueObjects\Transporter\Headers;
-use OpenAI\ValueObjects\Transporter\QueryParams;
-use GuzzleHttp\Client as GuzzleClient;
-use Psr\Http\Message\RequestInterface;
-use Psr\Http\Message\ResponseInterface;
+use Illuminate\Support\Str;
 
+/**
+ * Drafts estimate line items with Claude.
+ *
+ * Replaces the GPT-4 generator. Three things are different by construction:
+ *
+ *  - The output is structured JSON whose `line_item_id` is an enum of the
+ *    catalog ids we hand the model, so an off-catalog item cannot come back.
+ *    Prices never come from the model either — every cost is re-read from
+ *    the catalog before anything is shown (see normalizeLineItems).
+ *  - The examples are the company's own most recent estimate sections for
+ *    the rooms the enquiry mentions, not two hard-coded bathrooms.
+ *  - Client details (emails, phone numbers, street addresses) are stripped
+ *    from the enquiry before it is sent, and only the redacted text is
+ *    logged.
+ */
 class EstimateAIService
 {
-    protected Client $client;
+    public const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
-    public function __construct()
+    protected ?Client $client;
+
+    protected string $model;
+
+    public function __construct(?Client $client = null)
     {
-        $guzzleClient = new GuzzleClient;
-        $baseUri = BaseUri::from('https://api.openai.com/v1');
-        
-        $apiKeyValue = config('services.openai.api_key') ?: env('OPENAI_API_KEY');
-        
-        if (empty($apiKeyValue)) {
-            throw new \RuntimeException('OpenAI API key is not configured. Set OPENAI_API_KEY in your .env file.');
-        }
-        
-        $apiKey = ApiKey::from($apiKeyValue);
-        $headers = Headers::withAuthorization($apiKey);
-        $queryParams = QueryParams::create();
-        $streamHandler = function (RequestInterface $request) use ($guzzleClient): ResponseInterface {
-            return $guzzleClient->send($request, ['stream' => true]);
-        };
-
-        $transporter = new HttpTransporter($guzzleClient, $baseUri, $headers, $queryParams, $streamHandler);
-
-        $this->client = new Client($transporter);
+        $this->client = $client;
+        $this->model = (string) config('services.anthropic.estimate_model', 'claude-opus-5');
     }
 
     /**
@@ -56,66 +55,58 @@ class EstimateAIService
     public function generateEstimate(string $inquiry, ?array $floorplanData = null, int $vendorId = 1): array
     {
         $requestId = uniqid('est_ai_');
+        $redactedInquiry = static::redact($inquiry);
+        // Only the numbers. The parser also returns the uploaded file's name
+        // (client-chosen: "Debby_Hill_1463_Winnetka.pdf") and free text — none
+        // of which the model or the log has any use for.
+        $floorplanData = static::floorplanMetrics($floorplanData);
 
         Log::channel('estimate_ai')->info('Estimate generation started', [
             'request_id' => $requestId,
             'vendor_id' => $vendorId,
-            'inquiry' => $inquiry,
+            'model' => $this->model,
+            'inquiry' => $redactedInquiry,
+            'redacted' => $redactedInquiry !== $inquiry,
             'has_floorplan' => ! empty($floorplanData),
             'floorplan_data' => $floorplanData,
         ]);
 
         try {
-            // Get available line items for this vendor
-            $availableLineItems = $this->getAvailableLineItems($vendorId);
+            $availableLineItems = $this->filterRelevantLineItems($this->getAvailableLineItems($vendorId), $redactedInquiry);
+            $examples = $this->getExampleSections($vendorId, $redactedInquiry);
 
-            // Narrow line items to relevant categories to avoid large prompts
-            $availableLineItems = $this->filterRelevantLineItems($availableLineItems, $inquiry);
+            $request = $this->buildRequest($redactedInquiry, $floorplanData, $availableLineItems, $examples);
 
-            Log::channel('estimate_ai')->debug('Line items filtered', [
+            Log::channel('estimate_ai')->debug('Request built', [
                 'request_id' => $requestId,
-                'available_count' => $availableLineItems->count(),
+                'catalog_count' => $availableLineItems->count(),
                 'categories' => $availableLineItems->pluck('category')->unique()->values()->all(),
+                'example_sections' => collect($examples)->pluck('name')->all(),
             ]);
 
-            // Get example estimates for context (bathroom remodels)
-            $exampleEstimates = $this->getExampleEstimates($vendorId);
+            $completion = $this->complete($request);
 
-            // Build the prompt
-            $prompt = $this->buildPrompt($inquiry, $floorplanData, $availableLineItems, $exampleEstimates);
-
-            Log::channel('estimate_ai')->debug('Prompt built', [
+            Log::channel('estimate_ai')->debug('Claude response received', [
                 'request_id' => $requestId,
-                'prompt_length' => strlen($prompt),
-                'example_estimates_count' => count($exampleEstimates),
-                'prompt' => $prompt,
+                'model' => $completion['model'],
+                'stop_reason' => $completion['stop_reason'],
+                'usage' => $completion['usage'],
+                'raw_response' => $completion['text'],
             ]);
 
-            // Call OpenAI
-            $response = $this->client->chat()->create([
-                'model' => 'gpt-4',
-                'messages' => [
-                    ['role' => 'system', 'content' => $this->getSystemPrompt()],
-                    ['role' => 'user', 'content' => $prompt],
-                ],
-                'max_tokens' => 1800,
-                'temperature' => 0.3,
-            ]);
+            if ($completion['stop_reason'] === 'refusal') {
+                return $this->failure($requestId, 'Claude declined to draft this estimate. Reword the description and try again.');
+            }
 
-            $content = $response['choices'][0]['message']['content'];
+            if ($completion['stop_reason'] === 'max_tokens') {
+                return $this->failure($requestId, 'The draft was cut off before it finished. Try a shorter description or fewer rooms at once.');
+            }
 
-            Log::channel('estimate_ai')->debug('OpenAI response received', [
-                'request_id' => $requestId,
-                'response_length' => strlen($content),
-                'raw_response' => $content,
-                'usage' => $response['usage'] ?? null,
-            ]);
-
-            // Parse the JSON response
-            $result = $this->parseResponse($content);
+            $result = $this->parseResponse($completion['text']);
 
             if ($result['success']) {
-                $result['line_items'] = $this->normalizeLineItems($result['line_items']);
+                $allowed = $availableLineItems->pluck('id')->map(fn ($id) => (int) $id)->all();
+                $result['line_items'] = $this->normalizeLineItems($result['line_items'], $allowed);
             }
 
             if ($result['success'] && ! empty($floorplanData)) {
@@ -131,30 +122,16 @@ class EstimateAIService
             ]);
 
             return $result;
-        } catch (\Exception $e) {
-            $message = $e->getMessage();
-
+        } catch (\Throwable $e) {
             Log::channel('estimate_ai')->error('Estimate generation failed', [
                 'request_id' => $requestId,
-                'error' => $message,
+                'error' => $e->getMessage(),
                 'exception_class' => get_class($e),
                 'trace' => $e->getTraceAsString(),
             ]);
+            Log::error('EstimateAIService error: '.$e->getMessage());
 
-            // Keep the original default channel log for error monitoring
-            Log::error('EstimateAIService error: ' . $message);
-
-            $friendlyMessage = $message;
-            if (str_contains($message, 'You exceeded your current quota')) {
-                $friendlyMessage = 'OpenAI API quota exceeded. Please update billing or use a different API key.';
-            }
-
-            return [
-                'success' => false,
-                'line_items' => [],
-                'reasoning' => '',
-                'error' => $friendlyMessage,
-            ];
+            return $this->failure($requestId, $this->friendlyError($e));
         }
     }
 
@@ -174,23 +151,24 @@ class EstimateAIService
         $skippedItems = [];
 
         foreach ($generatedItems as $item) {
-            // Find the matching line item by ID
-            $lineItem = LineItem::find($item['line_item_id']);
+            $lineItem = LineItem::find($item['line_item_id'] ?? null);
 
             if (! $lineItem) {
                 $skippedItems[] = [
                     'line_item_id' => $item['line_item_id'] ?? null,
                     'reason' => 'Line item not found',
                 ];
+
                 continue;
             }
 
             $currentOrder++;
             $quantity = $item['quantity'] ?? 1;
-            $cost = $item['cost'] ?? $lineItem->cost;
+            // The catalog price, always — never a figure the model wrote.
+            $cost = (float) $lineItem->cost;
             $total = $quantity * $cost;
 
-            $estimateLineItem = EstimateLineItem::create([
+            $createdItems[] = EstimateLineItem::create([
                 'estimate_id' => $estimate->id,
                 'line_item_id' => $lineItem->id,
                 'section_id' => $section->id,
@@ -203,13 +181,12 @@ class EstimateAIService
                 'cost' => $cost,
                 'total' => $total,
                 'desc' => $item['desc'] ?? $lineItem->desc,
-                'notes' => $item['notes'] ?? $lineItem->notes,
+                // Never the catalog's own notes: those are internal, and this
+                // line lands on the client's estimate.
+                'notes' => $item['notes'] ?? null,
             ]);
-
-            $createdItems[] = $estimateLineItem;
         }
 
-        // Update section total
         $section->total = $section->estimate_line_items()->sum('total');
         $section->save();
 
@@ -232,45 +209,216 @@ class EstimateAIService
         return $createdItems;
     }
 
-    protected function getSystemPrompt(): string
+    /**
+     * The floorplan fields anything downstream reads — and therefore the only
+     * ones sent or logged.
+     */
+    public static function floorplanMetrics(?array $floorplanData): ?array
+    {
+        if (! $floorplanData) {
+            return null;
+        }
+
+        $metrics = array_filter(
+            array_intersect_key($floorplanData, array_flip(['floor_sqft', 'wall_sqft', 'cement_board_sqft', 'ceiling_height_ft'])),
+            fn ($v) => is_numeric($v),
+        );
+
+        return $metrics === [] ? null : array_map(fn ($v) => (float) $v, $metrics);
+    }
+
+    /**
+     * Strip the details that identify a client before text leaves the
+     * building: email addresses, phone numbers, street addresses and ZIP
+     * codes. Names are left alone — a first name is not enough to identify
+     * anyone, and stripping every capitalised word would eat "Kohler" and
+     * "Hall Bath" too.
+     */
+    public static function redact(string $text): string
+    {
+        $patterns = [
+            // emails
+            '/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/u' => '[email]',
+            // US phone numbers: (224) 555-1234, 224-555-1234, 224.555.1234, +1 224 555 1234
+            '/(?:\+?1[\s.-]?)?\(?\b\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/' => '[phone]',
+            // street addresses: 3299 Middlesax Drive, 1463 W Winnetka St, 12 N. Main Ave.
+            '/\b\d{1,6}(?:-\d{1,4})?\s+(?:[NSEW]\.?\s+)?(?:[A-Z][A-Za-z\'\-]+\s+){1,4}(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Court|Ct|Boulevard|Blvd|Place|Pl|Way|Circle|Cir|Trail|Trl|Terrace|Ter|Parkway|Pkwy|Highway|Hwy)\.?(?:\s*(?:#|Apt\.?|Suite|Ste\.?|Unit)\s*[\w-]+)?\b/i' => '[address]',
+            // ZIP and ZIP+4
+            '/\b\d{5}(?:-\d{4})?\b/' => '[zip]',
+        ];
+
+        return (string) preg_replace(array_keys($patterns), array_values($patterns), $text);
+    }
+
+    /**
+     * The request as the SDK receives it. Kept as one array so a test can
+     * assert on exactly what would be sent.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildRequest(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples): array
+    {
+        return [
+            'model' => $this->model,
+            'maxTokens' => 16000,
+            // No cache marker: the system prompt is ~350 tokens, under Opus 5's
+            // 512-token minimum cacheable prefix, so a marker would never cache.
+            'system' => [
+                ['type' => 'text', 'text' => $this->systemPrompt()],
+            ],
+            'messages' => [
+                ['role' => 'user', 'content' => $this->userPrompt($inquiry, $floorplanData, $lineItems, $examples)],
+            ],
+            'thinking' => ['type' => 'adaptive'],
+            'outputConfig' => [
+                'effort' => 'high',
+                'format' => [
+                    'type' => 'json_schema',
+                    'schema' => $this->outputSchema($lineItems),
+                ],
+            ],
+            // A policy decline is re-run on Anthropic's recommended substitute
+            // server-side instead of coming back as an empty answer.
+            'fallbacks' => 'default',
+            'betas' => [self::FALLBACK_BETA],
+        ];
+    }
+
+    /**
+     * The one place the SDK is called. Tests replace this with a fake.
+     *
+     * @param  array<string, mixed>  $request
+     * @return array{text: string, stop_reason: ?string, model: string, usage: array<string, mixed>}
+     */
+    protected function complete(array $request): array
+    {
+        $message = $this->client()->beta->messages->create(
+            maxTokens: $request['maxTokens'],
+            messages: $request['messages'],
+            model: $request['model'],
+            fallbacks: $request['fallbacks'],
+            outputConfig: $request['outputConfig'],
+            system: $request['system'],
+            thinking: $request['thinking'],
+            betas: $request['betas'],
+        );
+
+        $text = '';
+        foreach ($message->content as $block) {
+            if ($block->type === 'text') {
+                $text .= $block->text;
+            }
+        }
+
+        return [
+            'text' => $text,
+            'stop_reason' => $message->stopReason,
+            'model' => $message->model,
+            'usage' => [
+                'input_tokens' => $message->usage->inputTokens,
+                'output_tokens' => $message->usage->outputTokens,
+                'cache_read_input_tokens' => $message->usage->cacheReadInputTokens,
+                'cache_creation_input_tokens' => $message->usage->cacheCreationInputTokens,
+            ],
+        ];
+    }
+
+    protected function client(): Client
+    {
+        if ($this->client) {
+            return $this->client;
+        }
+
+        $apiKey = (string) config('services.anthropic.api_key');
+        if ($apiKey === '') {
+            throw new \RuntimeException('Anthropic API key is not configured. Set ANTHROPIC_API_KEY in your .env file.');
+        }
+
+        return $this->client = new Client(apiKey: $apiKey);
+    }
+
+    /**
+     * JSON schema for the draft. `line_item_id` is an enum of the catalog ids
+     * offered in this request — the model cannot answer with any other id.
+     */
+    protected function outputSchema(Collection $lineItems): array
+    {
+        $ids = $lineItems->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+
+        return [
+            'type' => 'object',
+            'properties' => [
+                'reasoning' => [
+                    'type' => 'string',
+                    'description' => 'Two to four sentences: what the job is, which rooms, and the main assumptions behind the quantities.',
+                ],
+                'line_items' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'line_item_id' => ['type' => 'integer', 'enum' => $ids ?: [0]],
+                            'quantity' => ['type' => 'number', 'description' => 'Quantity in the catalog unit for this item. 1 for lump-sum (no_unit) items.'],
+                            'desc' => ['type' => 'string', 'description' => 'Optional: a job-specific rewording of the catalog description. Empty string to keep the catalog text.'],
+                            'notes' => ['type' => 'string', 'description' => 'Optional internal note for the estimator. Empty string if none.'],
+                        ],
+                        'required' => ['line_item_id', 'quantity', 'desc', 'notes'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => ['reasoning', 'line_items'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    protected function systemPrompt(): string
     {
         return <<<'PROMPT'
-You are an expert construction estimator for a home remodeling company. You specialize in bathroom, kitchen, and general home renovations.
+You are the estimator at GS Construction & Remodeling, a residential remodeling contractor in the Chicago suburbs. You draft the line items for a new estimate from the company's own price catalog, for a human estimator to review and edit before anything is sent to a client.
 
-Your job is to analyze customer inquiries and generate accurate estimates using the company's standard line items catalog.
+How estimates are built here: an estimate is split into sections, one per room or scope ("Kitchen", "Hall Bath", "Basement"). Each section lists catalog items with a quantity in the item's unit — pieces, sq.ft., li.ft., or no_unit for lump sums, which always have quantity 1. Follow the order of construction within a section: demolition, framing, plumbing rough, electrical rough, HVAC, insulation, drywall, tile prep, tile, finish carpentry, fixtures and trim, painting.
 
-IMPORTANT RULES:
-1. Only use line items from the provided catalog - never invent new ones
-2. Select quantities based on typical bathroom/room sizes unless specific dimensions are provided
-3. Follow the logical order of construction phases: Demo → Framing → Plumbing Rough → Electrical Rough → Insulation → Drywall → Tile Prep → Tile → Finish Work → Painting
-4. For "rip and replace" jobs, always include demolition first
-5. For tile work, include cement boards and related prep work
-6. For electrical work in bathrooms, include GFCI outlets (code requirement)
-7. Always include exhaust fan for bathrooms (code requirement)
-8. Consider supporting items (switches for new lights, patching for electrical work, etc.)
-
-When given floorplan data, use the square footage to calculate quantities for:
-- Floor tile (sq.ft.)
-- Wall tile (sq.ft. - estimate wall area from floor area)
-- Drywall pieces (1 piece = ~32 sq.ft.)
-- Painting (estimate based on room size)
-
-RESPONSE FORMAT:
-Return a valid JSON object with this structure:
-{
-  "reasoning": "Brief explanation of your estimate logic",
-  "line_items": [
-    {
-      "line_item_id": 123,
-      "name": "Item Name",
-      "quantity": 1.0,
-      "cost": 100.00,
-      "desc": "Optional modified description",
-      "notes": "Optional notes"
-    }
-  ]
-}
+Rules:
+- Use only catalog items from the list in the request, by id. If the job needs something the catalog does not have, say so in the reasoning and leave it out.
+- Choose quantities from the dimensions given; if none are given, use the quantities the example sections used for a similar room and say in the reasoning that they are typical, not measured.
+- Include the supporting work a real job needs: switches for new lights, patching after electrical, cement board under tile, GFCI protection and an exhaust fan in bathrooms, code-compliance items where the examples include them.
+- Do not price anything. Costs come from the catalog after you answer.
+- Keep the reasoning short and concrete. Do not repeat the item list in it.
 PROMPT;
+    }
+
+    protected function userPrompt(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples): string
+    {
+        $prompt = "CUSTOMER INQUIRY (contact details already removed):\n{$inquiry}\n\n";
+
+        if ($floorplanData) {
+            $prompt .= "FLOORPLAN DATA:\n".json_encode($floorplanData, JSON_PRETTY_PRINT)."\n\n";
+        }
+
+        $prompt .= "CATALOG ITEMS AVAILABLE FOR THIS DRAFT (id | name | category / sub-category | unit):\n";
+        foreach ($lineItems as $item) {
+            $prompt .= sprintf(
+                "%d | %s | %s / %s | %s\n",
+                $item->id,
+                $item->name,
+                $item->category,
+                $item->sub_category ?? '-',
+                $item->unit_type,
+            );
+        }
+
+        if ($examples !== []) {
+            $prompt .= "\nRECENT SECTIONS THE COMPANY ESTIMATED FOR SIMILAR ROOMS (name, then item × quantity unit):\n";
+            foreach ($examples as $example) {
+                $prompt .= "\n{$example['name']} — {$example['project']}, {$example['date']}:\n";
+                foreach ($example['items'] as $item) {
+                    $prompt .= sprintf("  - %s × %s %s\n", $item['name'], rtrim(rtrim(number_format((float) $item['quantity'], 2, '.', ''), '0'), '.'), $item['unit_type']);
+                }
+            }
+        }
+
+        return $prompt;
     }
 
     protected function getAvailableLineItems(int $vendorId): Collection
@@ -286,93 +434,73 @@ PROMPT;
             ->get(['id', 'name', 'category', 'sub_category', 'unit_type', 'cost', 'desc']);
     }
 
-    protected function getExampleEstimates(int $vendorId): array
+    /**
+     * Room words in the enquiry → the section names they match in history.
+     * Unmatched enquiries fall back to the most recent sections of any kind.
+     *
+     * @return array<int, array{name: string, project: string, date: string, items: array<int, array{name: string, quantity: float, unit_type: string}>}>
+     */
+    protected function getExampleSections(int $vendorId, string $inquiry, int $limit = 4): array
     {
-        // Get recent bathroom estimates as examples
-        $estimates = Estimate::query()
-            ->where('belongs_to_vendor_id', $vendorId)
-            ->whereHas('project', function ($query) {
-                $query->where('project_name', 'like', '%bath%');
-            })
-            ->with(['estimate_sections.estimate_line_items' => function ($query) {
-                $query->orderBy('order');
-            }])
-            ->latest()
-            ->limit(2)
-            ->get();
+        $text = Str::lower($inquiry);
+        $roomWords = [
+            'kitchen' => ['kitchen'],
+            'powder' => ['powder'],
+            'hall bath' => ['hall bath', 'bathroom', 'bath'],
+            'primary bath' => ['primary bath', 'master bath', 'primary suite', 'master bathroom', 'primary bathroom'],
+            'master bath' => ['primary bath', 'master bath', 'primary suite'],
+            'bathroom' => ['bath'],
+            'bath' => ['bath'],
+            'basement' => ['basement'],
+            'laundry' => ['laundry', 'mud'],
+            'mudroom' => ['mud', 'laundry'],
+            'family room' => ['family', 'living'],
+            'living room' => ['living', 'family'],
+            'bedroom' => ['bedroom'],
+            'foyer' => ['foyer', 'entry'],
+            'addition' => ['addition'],
+            'deck' => ['deck'],
+            'garage' => ['garage'],
+            'flooring' => ['flooring'],
+            'paint' => ['painting', 'paint'],
+        ];
 
-        $examples = [];
+        $needles = [];
+        foreach ($roomWords as $word => $sectionNeedles) {
+            if (str_contains($text, $word)) {
+                $needles = array_merge($needles, $sectionNeedles);
+            }
+        }
+        $needles = array_values(array_unique($needles));
 
-        foreach ($estimates as $estimate) {
-            $items = [];
-            foreach ($estimate->estimate_sections as $section) {
-                foreach ($section->estimate_line_items as $lineItem) {
-                    $items[] = [
-                        'name' => $lineItem->name,
-                        'category' => $lineItem->category,
-                        'quantity' => $lineItem->quantity,
-                        'unit_type' => $lineItem->unit_type,
-                        'cost' => $lineItem->cost,
-                    ];
+        $query = EstimateSection::query()
+            ->whereHas('estimate', fn ($q) => $q->withoutGlobalScopes()->whereNull('deleted_at')->where('belongs_to_vendor_id', $vendorId))
+            ->whereHas('estimate_line_items')
+            ->where('name', '!=', '')
+            ->where('name', 'not like', '%change order%')
+            ->with(['estimate.project', 'estimate_line_items' => fn ($q) => $q->orderBy('order')])
+            ->latest('id');
+
+        if ($needles !== []) {
+            $query->where(function ($q) use ($needles) {
+                foreach ($needles as $needle) {
+                    $q->orWhere('name', 'like', "%{$needle}%");
                 }
-            }
-            if (! empty($items)) {
-                $examples[] = [
-                    'project' => $estimate->project?->project_name ?? 'Bathroom Remodel',
-                    'items' => $items,
-                ];
-            }
+            });
         }
 
-        return $examples;
-    }
-
-    protected function buildPrompt(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples): string
-    {
-        $prompt = "CUSTOMER INQUIRY:\n{$inquiry}\n\n";
-
-        if ($floorplanData) {
-            $prompt .= "FLOORPLAN DATA:\n";
-            $prompt .= json_encode($floorplanData, JSON_PRETTY_PRINT);
-            $prompt .= "\n\n";
-        }
-
-        $prompt .= "AVAILABLE LINE ITEMS CATALOG:\n";
-        $prompt .= "Format: ID | Name | Category | SubCategory | UnitType | Cost\n";
-        $prompt .= str_repeat('-', 80) . "\n";
-
-        foreach ($lineItems as $item) {
-            $prompt .= sprintf(
-                "%d | %s | %s | %s | %s | $%.2f\n",
-                $item->id,
-                $item->name,
-                $item->category,
-                $item->sub_category ?? 'N/A',
-                $item->unit_type,
-                $item->cost
-            );
-        }
-
-        if (! empty($examples)) {
-            $prompt .= "\n\nEXAMPLE BATHROOM ESTIMATES (for reference):\n";
-            foreach ($examples as $i => $example) {
-                $prompt .= "\nExample " . ($i + 1) . " - {$example['project']}:\n";
-                foreach ($example['items'] as $item) {
-                    $prompt .= sprintf(
-                        "  - %s (%s): Qty %.1f %s @ $%.2f\n",
-                        $item['name'],
-                        $item['category'],
-                        $item['quantity'],
-                        $item['unit_type'],
-                        $item['cost']
-                    );
-                }
-            }
-        }
-
-        $prompt .= "\n\nGenerate an estimate for this inquiry. Return valid JSON only.";
-
-        return $prompt;
+        return $query->limit($limit)->get()
+            ->map(fn (EstimateSection $section) => [
+                'name' => $section->name,
+                'project' => $section->estimate?->project?->project_name ?? 'past project',
+                'date' => optional($section->created_at)->format('M Y') ?? '',
+                'items' => $section->estimate_line_items
+                    ->map(fn ($item) => ['name' => $item->name, 'quantity' => (float) $item->quantity, 'unit_type' => $item->unit_type])
+                    ->values()
+                    ->all(),
+            ])
+            ->values()
+            ->all();
     }
 
     protected function applyFloorplanQuantities(array $items, array $floorplanData): array
@@ -385,44 +513,17 @@ PROMPT;
             return $items;
         }
 
-        $lineItemIds = collect($items)
-            ->pluck('line_item_id')
-            ->filter()
-            ->unique()
-            ->values();
-
-        $lineItems = LineItem::query()
-            ->whereIn('id', $lineItemIds)
-            ->get(['id', 'name', 'category', 'sub_category', 'unit_type'])
-            ->keyBy('id');
-
-        foreach ($items as $index => $item) {
-            $lineItem = $lineItems->get($item['line_item_id'] ?? null);
-            if (! $lineItem) {
-                continue;
-            }
-
-            $name = strtolower($lineItem->name ?? ($item['name'] ?? ''));
-            $subCategory = strtolower($lineItem->sub_category ?? '');
-            $unitType = $lineItem->unit_type;
-
-            if ($floorSqft && $unitType === 'sq.ft.' && str_contains($name, 'floor') && str_contains($name, 'tile')) {
-                $items[$index]['quantity'] = round((float) $floorSqft, 2);
-                continue;
-            }
-
-            if ($wallSqft && $unitType === 'sq.ft.' && str_contains($name, 'wall') && str_contains($name, 'tile')) {
-                $items[$index]['quantity'] = round((float) $wallSqft, 2);
-                continue;
-            }
-
-            $isCementBoard = str_contains($name, 'cement boards') || $subCategory === 'cement boards';
-            if ($cementBoardSqft && $isCementBoard) {
-                if ($unitType === 'pieces') {
-                    $items[$index]['quantity'] = (float) ceil(((float) $cementBoardSqft) / 32);
-                } else {
-                    $items[$index]['quantity'] = round((float) $cementBoardSqft, 2);
-                }
+        foreach ($items as &$item) {
+            $name = Str::lower((string) ($item['name'] ?? ''));
+            if ($floorSqft && str_contains($name, 'floor tile')) {
+                $item['quantity'] = (float) $floorSqft;
+            } elseif ($wallSqft && str_contains($name, 'wall tile')) {
+                $item['quantity'] = (float) $wallSqft;
+            } elseif ($cementBoardSqft && str_contains($name, 'cement board')) {
+                // Sheets cover ~32 sq.ft.; the catalog item is priced per piece.
+                $item['quantity'] = ($item['unit_type'] ?? null) === 'pieces'
+                    ? (float) ceil($cementBoardSqft / 32)
+                    : round((float) $cementBoardSqft, 2);
             }
         }
 
@@ -431,16 +532,17 @@ PROMPT;
 
     protected function filterRelevantLineItems(Collection $lineItems, string $inquiry): Collection
     {
-        $keywords = strtolower($inquiry);
+        $keywords = Str::lower($inquiry);
 
         $categoryMap = [
-            'demo' => ['Demolition', 'Demo'],
-            'demolition' => ['Demolition', 'Demo'],
+            'kitchen' => ['Demolition', 'Plumbing', 'Electrical', 'Carpentry', 'Drywall', 'Tiles', 'Flooring', 'Painting', 'Services', 'HVAC'],
+            'basement' => ['Demolition', 'Framing', 'Insulation', 'Drywall', 'Electrical', 'Plumbing', 'HVAC', 'Flooring', 'Painting', 'Carpentry', 'Services'],
+            'shower' => ['Plumbing', 'Tiles', 'Glass', 'Demolition'],
             'tile' => ['Tiles', 'Drywall'],
             'tiles' => ['Tiles', 'Drywall'],
             'tub' => ['Plumbing', 'Tiles'],
-            'bath' => ['Demolition', 'Plumbing', 'Electrical', 'Tiles', 'Drywall', 'Services', 'Painting'],
-            'bathroom' => ['Demolition', 'Plumbing', 'Electrical', 'Tiles', 'Drywall', 'Services', 'Painting'],
+            'bath' => ['Demolition', 'Plumbing', 'Electrical', 'Tiles', 'Drywall', 'Services', 'Painting', 'Glass', 'Carpentry'],
+            'bathroom' => ['Demolition', 'Plumbing', 'Electrical', 'Tiles', 'Drywall', 'Services', 'Painting', 'Glass', 'Carpentry'],
             'vanity' => ['Plumbing', 'Carpentry', 'Services'],
             'electrical' => ['Electrical'],
             'light' => ['Electrical'],
@@ -451,6 +553,15 @@ PROMPT;
             'drywall' => ['Drywall'],
             'insulation' => ['Insulation'],
             'floor' => ['Tiles', 'Flooring'],
+            'frame' => ['Framing', 'Carpentry'],
+            'framing' => ['Framing', 'Carpentry'],
+            'window' => ['Carpentry', 'Framing', 'Siding'],
+            'door' => ['Carpentry'],
+            'cabinet' => ['Carpentry', 'Services'],
+            'counter' => ['Carpentry', 'Services'],
+            'hvac' => ['HVAC'],
+            'plumb' => ['Plumbing'],
+            'demo' => ['Demolition'],
         ];
 
         $categories = collect();
@@ -461,105 +572,110 @@ PROMPT;
         }
 
         if ($categories->isEmpty()) {
-            return $lineItems->take(120);
+            return $lineItems->take(160);
         }
 
         $categories = $categories->unique()->values()->all();
 
-        return $lineItems->filter(function ($item) use ($categories) {
-            return in_array($item->category, $categories, true);
-        })->values()->take(160);
+        return $lineItems
+            ->filter(fn ($item) => in_array($item->category, $categories, true))
+            ->values()
+            ->take(200);
     }
 
     protected function parseResponse(string $content): array
     {
-        // Extract JSON from the response (in case there's extra text)
-        if (preg_match('/\{[\s\S]*\}/', $content, $matches)) {
-            $json = $matches[0];
-        } else {
-            $json = $content;
-        }
-
+        $json = preg_match('/\{[\s\S]*\}/', $content, $matches) ? $matches[0] : $content;
         $data = json_decode($json, true);
 
-        if (json_last_error() !== JSON_ERROR_NONE) {
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($data)) {
             Log::channel('estimate_ai')->warning('Failed to parse AI response', [
                 'error' => json_last_error_msg(),
                 'raw_content' => $content,
-                'extracted_json' => $json,
             ]);
 
             return [
                 'success' => false,
                 'line_items' => [],
                 'reasoning' => '',
-                'error' => 'Failed to parse AI response: ' . json_last_error_msg(),
+                'error' => 'Failed to parse the draft: '.json_last_error_msg(),
             ];
         }
 
         return [
             'success' => true,
-            'line_items' => $data['line_items'] ?? [],
-            'reasoning' => $data['reasoning'] ?? '',
+            'line_items' => is_array($data['line_items'] ?? null) ? $data['line_items'] : [],
+            'reasoning' => (string) ($data['reasoning'] ?? ''),
         ];
     }
 
-    protected function normalizeLineItems(array $items): array
+    /**
+     * Re-read every item from the catalog: the name and price shown are the
+     * catalog's, quantities are numeric, and an id outside the offered set —
+     * impossible under the schema, but checked anyway — is dropped.
+     *
+     * @param  array<int, int>|null  $allowedIds
+     */
+    protected function normalizeLineItems(array $items, ?array $allowedIds = null): array
     {
-        $lineItemIds = collect($items)
-            ->pluck('line_item_id')
-            ->filter()
-            ->unique()
-            ->values();
-
-        if ($lineItemIds->isEmpty()) {
-            return $items;
+        $ids = collect($items)->pluck('line_item_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+        if ($ids->isEmpty()) {
+            return [];
         }
 
-        $lineItems = LineItem::query()
-            ->whereIn('id', $lineItemIds)
-            ->get(['id', 'name', 'cost', 'unit_type'])
-            ->keyBy('id');
+        $lineItems = LineItem::query()->whereIn('id', $ids)->get(['id', 'name', 'cost', 'unit_type', 'desc', 'notes'])->keyBy('id');
 
         $normalized = [];
-        $changes = [];
-
+        $dropped = [];
         foreach ($items as $item) {
-            $lineItemId = $item['line_item_id'] ?? null;
-            $lineItem = $lineItemId ? $lineItems->get($lineItemId) : null;
+            $lineItemId = (int) ($item['line_item_id'] ?? 0);
+            $lineItem = $lineItems->get($lineItemId);
 
-            $quantity = $item['quantity'] ?? 1;
-            if (! is_numeric($quantity)) {
-                $quantity = 1;
+            if (! $lineItem || ($allowedIds !== null && ! in_array($lineItemId, $allowedIds, true))) {
+                $dropped[] = $lineItemId;
+
+                continue;
             }
 
-            $quantity = (float) $quantity;
-
-            if ($lineItem) {
-                $originalCost = $item['cost'] ?? null;
-                $item['name'] = $item['name'] ?? $lineItem->name;
-                $item['cost'] = (float) $lineItem->cost;
-
-                if ($originalCost !== null && (float) $originalCost !== (float) $lineItem->cost) {
-                    $changes[] = [
-                        'line_item_id' => $lineItem->id,
-                        'name' => $item['name'],
-                        'original_cost' => $originalCost,
-                        'normalized_cost' => $lineItem->cost,
-                    ];
-                }
+            $quantity = is_numeric($item['quantity'] ?? null) ? (float) $item['quantity'] : 1.0;
+            if ($lineItem->unit_type === 'no_unit' || $quantity <= 0) {
+                $quantity = 1.0;
             }
 
-            $item['quantity'] = $quantity;
-            $normalized[] = $item;
+            $normalized[] = [
+                'line_item_id' => $lineItem->id,
+                'name' => $lineItem->name,
+                'quantity' => $quantity,
+                'cost' => (float) $lineItem->cost,
+                'unit_type' => $lineItem->unit_type,
+                'desc' => trim((string) ($item['desc'] ?? '')) !== '' ? trim((string) $item['desc']) : $lineItem->desc,
+                'notes' => trim((string) ($item['notes'] ?? '')) !== '' ? trim((string) $item['notes']) : null,
+            ];
         }
 
-        if ($changes !== []) {
-            Log::channel('estimate_ai')->info('Normalized AI line item costs to catalog pricing', [
-                'changes' => $changes,
-            ]);
+        if ($dropped !== []) {
+            Log::channel('estimate_ai')->warning('Dropped line items outside the offered catalog', ['line_item_ids' => $dropped]);
         }
 
         return $normalized;
+    }
+
+    protected function friendlyError(\Throwable $e): string
+    {
+        return match (true) {
+            $e instanceof AuthenticationException => 'The Anthropic API key was rejected. Check ANTHROPIC_API_KEY.',
+            $e instanceof RateLimitException => 'Claude is rate-limited right now. Wait a moment and try again.',
+            $e instanceof APIConnectionException => 'Could not reach Claude. Check the connection and try again.',
+            $e instanceof APIStatusException => 'Claude returned an error ('.($e->type?->value ?? 'unknown').'). Try again.',
+            default => $e->getMessage(),
+        };
+    }
+
+    /** @return array{success: false, line_items: array, reasoning: string, error: string} */
+    protected function failure(string $requestId, string $message): array
+    {
+        Log::channel('estimate_ai')->warning('Estimate generation returned no draft', ['request_id' => $requestId, 'error' => $message]);
+
+        return ['success' => false, 'line_items' => [], 'reasoning' => '', 'error' => $message];
     }
 }

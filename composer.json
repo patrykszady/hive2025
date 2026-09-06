@@ -10,6 +10,7 @@
     "require": {
         "php": "^8.2",
         "2captcha/2captcha": "^1.2",
+        "anthropic-ai/sdk": "^0.47.0",
         "aws/aws-sdk-php": "^3.247",
         "barryvdh/laravel-snappy": "^1.0",
         "doctrine/dbal": "^4.3",

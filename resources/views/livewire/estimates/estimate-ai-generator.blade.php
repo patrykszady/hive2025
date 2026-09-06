@@ -2,7 +2,7 @@
     <flux:modal name="estimate-ai-generator-modal" class="w-full max-w-4xl space-y-6" :dismissible="false">
         <div>
             <flux:heading size="lg">AI Estimate Generator</flux:heading>
-            <flux:text class="mt-2">Describe the work needed and optionally upload a floorplan to generate line items automatically.</flux:text>
+            <flux:text class="mt-2">Describe the work and optionally upload a floorplan. Claude drafts line items from your catalog and your past estimates for you to review — leave out the client's contact details.</flux:text>
         </div>
 
         @if(!$showPreview)
