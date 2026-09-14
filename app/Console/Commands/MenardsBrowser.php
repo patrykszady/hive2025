@@ -264,6 +264,10 @@ class MenardsBrowser extends Command
         // daily ensure ran at 07:30 and nothing else ever tried to repair the
         // sign-in. Repair first: login() verifies with a real page load and
         // clears the Imperva checkbox itself where that is calibrated.
+        // Read before login(): a sign-in that lands retires the report.
+        $report = \Illuminate\Support\Facades\Cache::get(\App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY);
+        $apiChallenged = is_array($report) && ($report['session_expired'] ?? false) && ($report['challenge'] ?? false);
+
         if ($this->extensionReportsExpiredSession()) {
             $this->line('The extension last reported a dead session — checking the sign-in before asking for a sync.');
 
@@ -277,6 +281,17 @@ class MenardsBrowser extends Command
 
                 return self::FAILURE;
             }
+        }
+
+        // Signed in, yet the last sync met Imperva on the receipt API: the
+        // pages pass and the API does not, and only the API's own wall can
+        // clear that. See MenardsRemoteBrowserService::clearApiWall().
+        if ($apiChallenged) {
+            $this->line('The last sync met Imperva on the receipt API — clearing that wall before asking for a sync.');
+            $cleared = $browser->clearApiWall();
+            $this->line($cleared['clicked'] ?? false
+                ? 'Clicked the checkbox on the API wall; the sync will tell whether it took.'
+                : ($cleared['error'] ?? 'No checkbox coordinate configured — the API wall was loaded but not clicked.'));
         }
 
         $result = $browser->requestSync();

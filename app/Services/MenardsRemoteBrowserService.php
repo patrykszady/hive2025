@@ -57,6 +57,9 @@ class MenardsRemoteBrowserService
      */
     public const PARK_URL = 'https://www.menards.com/main/accountoverview.html';
 
+    /** The receipt API's first call — loaded as a page, it renders Imperva's wall for the API. */
+    public const API_WALL_URL = 'https://www.menards.com/main/my-account/receipt-lookup/initialize.ajx';
+
     protected const DISPLAY = ':98';
 
     protected const SCREEN = '1280x900x24';
@@ -760,6 +763,49 @@ class MenardsRemoteBrowserService
         }
 
         return $landed;
+    }
+
+    /**
+     * Clear Imperva's wall on the receipt API.
+     *
+     * Imperva protects the receipt API separately from the pages: a browser
+     * it has come to doubt loads Account Overview and the receipt page fine
+     * while every call to the API behind them gets the challenge page — the
+     * receipt page then renders empty, and the extension reports "Imperva's
+     * challenge page". The sign-in check sees only pages and calls that
+     * signed in. The one place the API's own wall can be clicked is the wall
+     * Imperva renders when the API address is loaded as a page — so this
+     * loads it, clicks the calibrated checkbox, and parks the browser again.
+     * Whether the click took is known from the next sync's report; a JSON
+     * body and a wall share the bare-URL title, so nothing here can tell.
+     *
+     * @return array{ok: bool, clicked: bool, error?: string}
+     */
+    public function clearApiWall(): array
+    {
+        if (! $this->xdotoolAvailable() || ! $this->displayUp()) {
+            return ['ok' => false, 'clicked' => false, 'error' => 'The browser is not running.'];
+        }
+
+        $this->navigate(self::API_WALL_URL);
+        sleep(6);
+
+        Log::channel('menards')->info('Menards browser: loaded the receipt API as a page to clear its wall', ['title' => $this->windowTitle()]);
+        $this->captureChallengeScreenshot();
+
+        $clicked = false;
+        $coords = trim((string) config('services.menards.challenge_click'));
+
+        if (preg_match('/^(\d+)\s*,\s*(\d+)$/', $coords, $m)) {
+            $this->click((int) $m[1], (int) $m[2]);
+            $clicked = true;
+            sleep(15);
+        }
+
+        $this->navigate(self::PARK_URL);
+        $this->waitForTitle(['at Menards'], 25);
+
+        return ['ok' => true, 'clicked' => $clicked];
     }
 
     /** "… at Menards®" and not the sign-in page: a page only a signed-in visitor gets. */
