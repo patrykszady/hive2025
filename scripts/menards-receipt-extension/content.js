@@ -153,6 +153,40 @@ async function api(path, body) {
     return JSON.parse(text);
 }
 
+/** Imperva's Advanced Bot Protection token, as the page's script sets it. */
+function reeseToken() {
+    const m = /(?:^|;\s*)reese84=([^;]*)/.exec(document.cookie || '');
+
+    return m ? m[1] : null;
+}
+
+/**
+ * Wait for Imperva's script to refresh its token on this page load.
+ *
+ * The receipt API sits behind Imperva's bot protection, which judges each
+ * call by the reese84 cookie the page's own script mints and refreshes a few
+ * seconds after load. A call made before that refresh carries the previous
+ * token and comes back as the challenge page — which is what separated a
+ * failed run from an identical run that passed a minute later on
+ * 2026-09-14. So: note the token at start, give the script up to 20s to
+ * change it, and go on regardless after that (a token can also simply be
+ * fresh already).
+ */
+async function waitForImpervaToken(maxMs = 20000) {
+    const initial = reeseToken();
+    const started = Date.now();
+
+    while (Date.now() - started < maxMs) {
+        const now = reeseToken();
+
+        if (now && now !== initial) return { refreshed: true, waitedMs: Date.now() - started };
+
+        await sleep(500);
+    }
+
+    return { refreshed: false, waitedMs: Date.now() - started, present: !!reeseToken() };
+}
+
 /** The composite key download.ajx wants; the server never sends it. */
 function transactionId(t) {
     return `${t.storeNumber}-${t.workstationId}-${t.sequenceNumber}-${t.transactionDate}`;
@@ -237,6 +271,11 @@ async function fetchReceipt(t) {
  * Full sync. Returns the payload the Hive ingest endpoint expects.
  */
 async function sync(sinceDate, onProgress) {
+    const token = await waitForImpervaToken();
+    onProgress?.(token.refreshed
+        ? `Imperva token refreshed after ${token.waitedMs}ms`
+        : `Imperva token not refreshed within ${token.waitedMs}ms (${token.present ? 'present' : 'absent'}) — proceeding`);
+
     const transactions = await collect(sinceDate, onProgress);
     onProgress?.(`${transactions.length} transactions on or after ${sinceDate}`);
 

@@ -205,7 +205,21 @@ async function run(reason) {
     try {
         ({ tab, opened } = await receiptTab());
 
-        const result = await sendSync(tab.id, since);
+        let result = await sendSync(tab.id, since);
+
+        // Imperva challenged the API on this page load. The very same run a
+        // minute later passed on 2026-09-14: the token it judges by is
+        // refreshed per page load, and one fresh load with one more try is
+        // cheap next to a whole day without receipts.
+        if (!result?.ok && /challenge page/i.test(result?.error || '')) {
+            await note('receipt API challenged — reloading the receipt page and trying once more');
+            await new Promise(r => setTimeout(r, 15000));
+            await chrome.tabs.reload(tab.id);
+            await waitForLoad(tab.id);
+            await new Promise(r => setTimeout(r, 4000));
+            await assertOnReceiptPage(tab.id);
+            result = await sendSync(tab.id, since);
+        }
 
         if (!result?.ok) throw new Error(result?.error || 'content script returned no result');
 

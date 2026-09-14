@@ -108,3 +108,29 @@ test('without the bridge the isolated fetch is used, so an older pack still work
     assert.equal(fetched.url, '/main/my-account/receipt-lookup/initialize.ajx');
     assert.equal(fetched.init.credentials, 'include');
 });
+
+test('the sync waits for Imperva to refresh its token, then proceeds', async () => {
+    const { ctx } = sandbox({ responder: () => ({ status: 200, text: '{"paymentOptions":[]}' }) });
+    const win = ctx;
+    // Sandbox document: give it a cookie jar the script can read.
+    let cookie = 'reese84=old-token; SESSION=x';
+    Object.defineProperty(win.document, 'cookie', { get: () => cookie, configurable: true });
+
+    const pending = call(ctx, 'waitForImpervaToken(2000)');
+    setTimeout(() => { cookie = 'reese84=fresh-token; SESSION=x'; }, 120);
+    const outcome = await pending;
+
+    assert.equal(outcome.refreshed, true);
+    assert.ok(outcome.waitedMs >= 100 && outcome.waitedMs < 2000);
+});
+
+test('the sync gives up waiting for a token refresh after the deadline and still proceeds', async () => {
+    const { ctx } = sandbox({ responder: () => ({ status: 200, text: '{"paymentOptions":[]}' }) });
+    Object.defineProperty(ctx.document, 'cookie', { get: () => 'reese84=same-token', configurable: true });
+
+    const outcome = await call(ctx, 'waitForImpervaToken(700)');
+
+    assert.equal(outcome.refreshed, false);
+    assert.equal(outcome.present, true);
+    assert.ok(outcome.waitedMs >= 700);
+});
