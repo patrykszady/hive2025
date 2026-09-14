@@ -73,9 +73,19 @@ async function api(path, body) {
 
     const text = await res.text();
 
-    // An HTML body means the session lapsed and we were handed a login page.
+    // An HTML body means we were handed a page instead of JSON: Menards'
+    // login page when the session lapsed, or Imperva's challenge page when
+    // the browser's score dropped — which happens to a live session too, and
+    // is cleared by the "I am human" checkbox, not by signing in. Both are
+    // "the session has expired" to the server (that phrase is what it keys
+    // on); the wording says which, because for a month the log called every
+    // challenge a lapsed session and the diagnosis went the wrong way.
     if (text.trimStart().startsWith('<')) {
-        throw new Error(`${path} returned HTML — the browser session has expired, sign in again.`);
+        const challenged = /Additional security check|Incapsula|imperva|hcaptcha/i.test(text);
+
+        throw new Error(challenged
+            ? `${path} returned Imperva's challenge page — the browser session has expired as far as Menards is concerned until the "I am human" check is cleared.`
+            : `${path} returned HTML — the browser session has expired, sign in again.`);
     }
 
     return JSON.parse(text);

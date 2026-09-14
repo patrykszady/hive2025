@@ -271,11 +271,11 @@ class MenardsRemoteBrowserService
      */
     public function login(string $email, string $password): array
     {
-        if (trim((string) shell_exec('command -v xdotool 2>/dev/null')) === '') {
+        if (! $this->xdotoolAvailable()) {
             return ['ok' => false, 'error' => 'xdotool is not installed — apt install xdotool'];
         }
 
-        if (! $this->processAlive('Xvfb ' . self::DISPLAY)) {
+        if (! $this->displayUp()) {
             return ['ok' => false, 'error' => 'The browser is not running — run menards:browser start first.'];
         }
 
@@ -301,6 +301,18 @@ class MenardsRemoteBrowserService
         );
 
         $loaded = $this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) !== '';
+
+        // Menards bounces a signed-in visitor straight off login.html onto an
+        // account page. That is a sign-in, not a failure — on 2026-09-14 the
+        // browser sat on Account Overview after a human cleared the wall while
+        // this path reported "the sign-in page never loaded".
+        if (! $loaded && $this->onSignedInPage()) {
+            Log::channel('menards')->info('Menards browser: already signed in — login page redirected', ['title' => $this->windowTitle()]);
+            $this->retireExpiredReport();
+            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
+
+            return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
+        }
 
         // The wall's checkbox accepts an X-injected click — that is literally
         // what a human clicking over noVNC sends (x11vnc injects X events, the
@@ -678,39 +690,100 @@ class MenardsRemoteBrowserService
         // at 08:01 while this method kept answering true for the rest of the
         // day, so four scheduled syncs ran against a dead session and nothing
         // said so.
-        $report = \Illuminate\Support\Facades\Cache::get(
-            \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY
-        );
+        //
+        // …but that report says the session was dead when the extension LAST
+        // looked, not that it is dead now. After a human clears the wall over
+        // noVNC the browser lands on Account Overview with the session intact
+        // (2026-09-14), and honouring the old report over that made every
+        // retry fail and the sidebar cry "needs a human" at a signed-in
+        // browser. So while a report stands, no title is trusted — and no
+        // report is trusted over a navigation that actually lands.
+        $reportedExpired = $this->extensionReportsExpiredSession();
 
-        if (is_array($report) && ($report['session_expired'] ?? false)) {
-            return false;
+        if (! $reportedExpired) {
+            // If the browser is already sitting on a real Menards page, the
+            // session is good and there is nothing to find out.
+            $title = $this->windowTitle();
+
+            if (str_contains($title, 'Receipt Lookup at Menards')) {
+                return true;
+            }
+
+            // Any signed-in Menards page will do as evidence — the account
+            // pages all title themselves "… at Menards®" and none of them
+            // render for a signed out visitor.
+            if ($this->onSignedInPage()) {
+                return true;
+            }
         }
 
-        // If the browser is already sitting on a real Menards page, the session
-        // is good and there is nothing to find out.
-        $title = $this->windowTitle();
-
-        if (str_contains($title, 'Receipt Lookup at Menards')) {
-            return true;
-        }
-
-        // Any signed-in Menards page will do as evidence — the account pages all
-        // title themselves "… at Menards®" and none of them render for a signed
-        // out visitor.
-        if (str_contains($title, 'at Menards') && ! str_contains($title, 'Sign In at Menards')) {
-            return true;
-        }
-
-        // Genuinely unknown (a blank tab, the sign-in page, a challenge). Now a
-        // navigation is worth its cost. Both outcomes are accepted so a failure
-        // to match means the navigation misfired, not that the session is bad.
-        return str_contains(
+        // Genuinely unknown (a blank tab, the sign-in page, a challenge, or a
+        // report that may be stale). Now a navigation is worth its cost. Both
+        // outcomes are accepted so a failure to match means the navigation
+        // misfired, not that the session is bad.
+        $landed = str_contains(
             $this->loadAndWait(
                 'https://www.menards.com/main/receiptLookup.html',
                 ['Receipt Lookup at Menards', 'Sign In at Menards']
             ),
             'Receipt Lookup at Menards'
         );
+
+        if ($landed && $reportedExpired) {
+            $this->retireExpiredReport();
+        }
+
+        return $landed;
+    }
+
+    /** "… at Menards®" and not the sign-in page: a page only a signed-in visitor gets. */
+    protected function onSignedInPage(): bool
+    {
+        $title = $this->windowTitle();
+
+        return str_contains($title, 'at Menards') && ! str_contains($title, 'Sign In at Menards');
+    }
+
+    /** Has the extension's last fetch reported the session dead? */
+    public function extensionReportsExpiredSession(): bool
+    {
+        $report = \Illuminate\Support\Facades\Cache::get(
+            \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY
+        );
+
+        return is_array($report) && ($report['session_expired'] ?? false);
+    }
+
+    /**
+     * The browser just proved its session live, so the extension's earlier
+     * "expired" report describes the past. Retired in place — the rest of the
+     * report (receipt count, timestamp) is still the last thing the extension
+     * said — so the sidebar stops asking for a human.
+     */
+    protected function retireExpiredReport(): void
+    {
+        $key = \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY;
+        $report = \Illuminate\Support\Facades\Cache::get($key);
+
+        if (! is_array($report) || ! ($report['session_expired'] ?? false)) {
+            return;
+        }
+
+        $report['session_expired'] = false;
+        $report['revalidated_at'] = now()->toIso8601String();
+        \Illuminate\Support\Facades\Cache::put($key, $report, now()->addMonth());
+
+        Log::channel('menards')->info('Menards browser: session verified live — retired the expired report');
+    }
+
+    protected function xdotoolAvailable(): bool
+    {
+        return trim((string) shell_exec('command -v xdotool 2>/dev/null')) !== '';
+    }
+
+    protected function displayUp(): bool
+    {
+        return $this->processAlive('Xvfb ' . self::DISPLAY);
     }
 
     /** Poll until the title matches any of these, or the deadline passes. */

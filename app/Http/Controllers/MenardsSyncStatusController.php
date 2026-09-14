@@ -61,6 +61,9 @@ class MenardsSyncStatusController extends Controller
             'error' => $validated['error'] ?? null,
             'receipts' => $validated['receipts'] ?? null,
             'session_expired' => $sessionExpired,
+            // Imperva's challenge page, as opposed to Menards' login page: the
+            // session itself is usually intact and one checkbox click restores it.
+            'challenge' => $sessionExpired && str_contains(mb_strtolower((string) ($validated['error'] ?? '')), 'challenge'),
             'at' => now()->toIso8601String(),
         ];
 

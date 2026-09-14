@@ -251,6 +251,26 @@ class MenardsBrowser extends Command
             return self::FAILURE;
         }
 
+        // A sync against a session the extension already reported dead is a
+        // guaranteed failure — three of them a day, every day, while the one
+        // daily ensure ran at 07:30 and nothing else ever tried to repair the
+        // sign-in. Repair first: login() verifies with a real page load and
+        // clears the Imperva checkbox itself where that is calibrated.
+        if ($this->extensionReportsExpiredSession()) {
+            $this->line('The extension last reported a dead session — checking the sign-in before asking for a sync.');
+
+            if ($this->login($browser) !== self::SUCCESS) {
+                if (\Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
+                    $this->notifyAttention($browser->status(), false);
+                    $this->warn('Menards wants a human at the sign-in wall — flagged in the sidebar; skipping this sync.');
+
+                    return self::SUCCESS;
+                }
+
+                return self::FAILURE;
+            }
+        }
+
         $result = $browser->requestSync();
 
         if (! ($result['ok'] ?? false)) {
