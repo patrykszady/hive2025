@@ -39,6 +39,15 @@ class MenardsExtensionUpdateController extends Controller
             abort(404);
         }
 
+        // The one place a fetch by Chrome's updater leaves a trace: nginx's
+        // access log is root-only, and Chrome says nothing when a policy
+        // update URL is never consulted (see 2026-09-14, a whole month of it).
+        \Illuminate\Support\Facades\Log::channel('menards')->info('Menards extension: served to the browser', [
+            'file' => $file,
+            'ip' => $request->ip(),
+            'agent' => (string) $request->userAgent(),
+        ]);
+
         $response = response()->file($path, ['Content-Type' => self::FILES[$file]]);
         $response->setPrivate();
         $response->headers->addCacheControlDirective('no-store');
