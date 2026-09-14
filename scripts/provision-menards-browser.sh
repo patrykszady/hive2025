@@ -113,7 +113,7 @@ codebase_url() {
 # The update base is part of the hash: changing where Chrome fetches from
 # must rewrite update.xml, which only a repack does.
 source_hash() {
-    { (cd "$EXT_SRC" && find . -type f -print0 | sort -z | xargs -0 sha256sum); echo "update-base:$(update_base)"; } \
+    { (cd "$EXT_SRC" && find . -type f -print0 | sort -z | xargs -0 sha256sum); echo "update-base:$(update_base)"; echo "pack-format:2"; } \
         | sha256sum | cut -c1-16
 }
 
@@ -160,11 +160,20 @@ pack_extension() {
     rm -rf "$EXT_HOME/src" "$EXT_HOME/src.crx" "$EXT_HOME/src.pem"
     cp -r "$EXT_SRC" "$EXT_HOME/src"
 
-    python3 - "$EXT_HOME/src/manifest.json" "$version" <<'PYEOF'
+    # The manifest carries its own update_url when updates are served over
+    # https. Chrome's updater checks the URL in the MANIFEST; the policy's URL
+    # only drives the first install. A pack without this field is installed
+    # once and never updated — the August build ran through every repack
+    # until 2026-09-14 for exactly that reason.
+    python3 - "$EXT_HOME/src/manifest.json" "$version" "$(update_base)" <<'PYEOF'
 import json, sys
-path, version = sys.argv[1], sys.argv[2]
+path, version, base = sys.argv[1], sys.argv[2], sys.argv[3]
 d = json.load(open(path))
 d['version'] = version
+if base:
+    d['update_url'] = base + '/update.xml'
+else:
+    d.pop('update_url', None)
 json.dump(d, open(path, 'w'), indent=2)
 PYEOF
 
