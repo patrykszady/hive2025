@@ -74,7 +74,9 @@ it('sends the consult invite in one click, asking the homeowner to pick times', 
         ])->call($job);
 
         return str_contains($seen['subject'], 'Consultation')
-            && str_contains($seen['body'], 'select new consultation times')
+            // A first contact never picked times, so nothing about them is "new".
+            && str_contains($seen['body'], 'select consultation times')
+            && ! str_contains($seen['body'], 'select new consultation times')
             && str_contains($seen['body'], 'Hi Kristin')
             && $seen['template'] === 'Consult'
             && $seen['recipients'] === ['kristin@example.test'];

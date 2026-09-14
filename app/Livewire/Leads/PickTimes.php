@@ -403,7 +403,14 @@ class PickTimes extends Component
         // The lead answered our ask, so the ball is back with us: drop out of
         // "Replied" (which means "waiting on them") so it shows as needing a
         // reply again — and the Message tab / Remove button come back with it.
-        if ($lead->last_status?->title === 'Replied') {
+        //
+        // A "Won" lead lands here too: its consult is booked, and picking new
+        // times means that booking no longer stands. Leaving it Won hid the
+        // reschedule on /leads (nothing to reply to, nothing in the badge) —
+        // so it takes the same path, and the confirmation send that moves the
+        // Meet task sets it back to Won. Lost / Not a Fit stay where a human
+        // put them.
+        if (in_array($lead->last_status?->title, ['Replied', 'Won'], true)) {
             $lead->setStatus('New');
         }
 

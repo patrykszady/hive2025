@@ -418,8 +418,11 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     }
 
     /**
-     * Title-case a person's name, capitalizing after spaces, hyphens and
-     * apostrophes (O'Brien, Jean-Luc) without mangling accented letters.
+     * Title-case a person's name — smith → Smith, o'brien → O'Brien,
+     * JEAN-LUC → Jean-Luc — without mangling accented letters, and without
+     * flattening a name the person capitalised inside: DiMarco, McDonald,
+     * DeVries stay as written. Only a word typed flat (all lower, ALL CAPS)
+     * or starting small (mIchael) is recased.
      */
     protected static function titleCaseName(?string $value): ?string
     {
@@ -428,9 +431,21 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
         }
 
         return preg_replace_callback(
-            "/(?:^|[\s\-\x{2019}'])\p{L}/u",
-            fn ($m) => mb_strtoupper($m[0], 'UTF-8'),
-            mb_strtolower($value, 'UTF-8')
+            '/\p{L}+/u',
+            function ($m) {
+                $word = $m[0];
+                $lower = mb_strtolower($word, 'UTF-8');
+                $initial = mb_substr($word, 0, 1, 'UTF-8');
+
+                if ($word !== $lower
+                    && $word !== mb_strtoupper($word, 'UTF-8')
+                    && $initial === mb_strtoupper($initial, 'UTF-8')) {
+                    return $word;
+                }
+
+                return mb_strtoupper(mb_substr($lower, 0, 1, 'UTF-8'), 'UTF-8').mb_substr($lower, 1, null, 'UTF-8');
+            },
+            $value
         );
     }
 

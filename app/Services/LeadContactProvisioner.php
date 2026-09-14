@@ -186,7 +186,7 @@ class LeadContactProvisioner
      */
     public function isCompleteAddress(array $parsed): bool
     {
-        return trim((string) ($parsed['address'] ?? '')) !== ''
+        return \App\Support\StreetAddress::looksLikeStreet($parsed['address'] ?? null)
             && trim((string) ($parsed['city'] ?? '')) !== ''
             && preg_match('/^[A-Za-z]{2}$/', (string) ($parsed['state'] ?? '')) === 1
             && preg_match('/^\d{5}(?:-\d{4})?$/', (string) ($parsed['zip_code'] ?? '')) === 1;
@@ -423,10 +423,20 @@ class LeadContactProvisioner
 
         $key = self::normalizeAddressKey($parsed['address']);
 
-        // Look across all clients linked to this user (any vendor).
+        // Look across all clients linked to this user (any vendor). A client
+        // whose "address" is a landmark ("By Lake Arlington") is this
+        // household waiting for its street, not a second one.
         foreach ($user->clients()->get() as $candidate) {
-            if (self::normalizeAddressKey($candidate->address) === $key) {
+            $landmark = ! \App\Support\StreetAddress::looksLikeStreet($candidate->address);
+
+            if ($landmark || self::normalizeAddressKey($candidate->address) === $key) {
+                if ($landmark) {
+                    $candidate->address = $parsed['address'];
+                    $candidate->save();
+                }
+
                 $this->backfillMissingFields($candidate, $parsed);
+
                 return $candidate;
             }
         }

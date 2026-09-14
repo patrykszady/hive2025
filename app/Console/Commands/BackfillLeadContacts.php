@@ -8,6 +8,8 @@ use App\Models\CrewEmailIngest;
 use App\Models\Lead;
 use App\Services\LeadAddressCompleter;
 use App\Services\LeadContactProvisioner;
+use App\Support\SenderName;
+use App\Support\StreetAddress;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 
@@ -57,7 +59,7 @@ class BackfillLeadContacts extends Command
             : "DRY RUN — {$leads->count()} lead(s) would be touched. Re-run with --apply to write.");
         $this->newLine();
 
-        $stats = ['addresses' => 0, 'cc_emails' => 0, 'contacts' => 0, 'clients' => 0, 'ambiguous' => 0, 'still_short' => 0, 'junk' => 0];
+        $stats = ['addresses' => 0, 'cc_emails' => 0, 'names' => 0, 'contacts' => 0, 'clients' => 0, 'ambiguous' => 0, 'still_short' => 0, 'junk' => 0];
 
         foreach ($leads as $lead) {
             // Contractors get pitched constantly — domain sales, SEO, business
@@ -100,6 +102,32 @@ class BackfillLeadContacts extends Command
                 $stats['cc_emails']++;
             }
 
+            // 1b. A lead signed with a first name alone ("Will") has its
+            //     surname on the mailbox row's From header ("William
+            //     Johnson89 wa") — and the provisioner creates no contact for
+            //     a one-word name, so without this the lead stays contactless.
+            $completedName = $this->completeName($lead, $data);
+            if ($completedName !== null) {
+                $changes[] = 'name: '.(trim((string) ($data['name'] ?? '')) ?: '—').' → '.$completedName;
+                $data['name'] = $completedName;
+                $stats['names']++;
+            }
+
+            // 1c. A landmark in the address slot ("by Lake Arlington") with
+            //     the street written out in a later reply — filed on the
+            //     lead, never read, because reply mining only filled blanks.
+            $fromReply = $this->streetFromReplies($data);
+            if ($fromReply !== null) {
+                $data['address'] = $fromReply['address'];
+                foreach (['city', 'state', 'zip'] as $field) {
+                    if (empty($data[$field]) && ! empty($fromReply[$field])) {
+                        $data[$field] = $fromReply[$field];
+                    }
+                }
+                $changes[] = 'address from reply: '.$fromReply['address'];
+                $stats['addresses']++;
+            }
+
             // 2. Fill in city/state/ZIP (or record the candidates when the
             //    street matches more than one town).
             $completed = $completer->complete($data);
@@ -125,6 +153,10 @@ class BackfillLeadContacts extends Command
 
                 try {
                     $provisioner->provision($lead->fresh());
+
+                    if ($this->adoptNameCasing($lead->fresh(), $provisioner)) {
+                        $changes[] = 'contact respelled';
+                    }
                 } catch (\Throwable $e) {
                     $this->error("  lead {$lead->id}: provisioning failed — {$e->getMessage()}");
 
@@ -162,8 +194,8 @@ class BackfillLeadContacts extends Command
 
         $this->newLine();
         $this->table(
-            ['addresses completed', 'cc emails recovered', 'contacts created', 'clients created/completed', 'ambiguous addresses', 'skipped as junk', 'still incomplete'],
-            [[$stats['addresses'], $stats['cc_emails'], $stats['contacts'], $stats['clients'], $stats['ambiguous'], $stats['junk'], $stats['still_short']]],
+            ['addresses completed', 'cc emails recovered', 'names completed', 'contacts created', 'clients created/completed', 'ambiguous addresses', 'skipped as junk', 'still incomplete'],
+            [[$stats['addresses'], $stats['cc_emails'], $stats['names'], $stats['contacts'], $stats['clients'], $stats['ambiguous'], $stats['junk'], $stats['still_short']]],
         );
 
         if ($stats['ambiguous'] > 0) {
@@ -230,7 +262,10 @@ class BackfillLeadContacts extends Command
             ->latest('id')
             ->limit((int) $this->option('limit'))
             ->get()
-            ->filter(fn (Lead $lead) => $this->stillIncomplete($lead))
+            // A lead named on the command line is looked at whatever its
+            // state — every step only fills blanks, so it is safe, and the
+            // name respelling has nothing to do with completeness.
+            ->filter(fn (Lead $lead) => $this->option('lead') || $this->stillIncomplete($lead))
             ->values();
     }
 
@@ -252,7 +287,7 @@ class BackfillLeadContacts extends Command
             return true;
         }
 
-        return $clients->every(fn (Client $client) => trim((string) $client->address) === ''
+        return $clients->every(fn (Client $client) => ! StreetAddress::looksLikeStreet($client->address)
             || trim((string) $client->city) === ''
             || trim((string) $client->state) === ''
             || trim((string) $client->zip_code) === '');
@@ -295,6 +330,106 @@ class BackfillLeadContacts extends Command
             ->unique()
             ->values()
             ->all();
+    }
+
+    /**
+     * The street a lead stated in a reply, when its address slot holds a
+     * landmark instead. Newest reply first.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{address: string, city: ?string, state: ?string, zip: ?string}|null
+     */
+    private function streetFromReplies(array $data): ?array
+    {
+        if (StreetAddress::looksLikeStreet($data['address'] ?? null)) {
+            return null;
+        }
+
+        foreach ((array) ($data['email_replies'] ?? []) as $reply) {
+            $found = StreetAddress::findInText((string) ($reply['body'] ?? ''));
+
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The whole name for a lead that arrived with a first name only, from the
+     * From display name on its mailbox row — the pairing the ingest now does
+     * at creation (SenderName), for leads that predate it. Null when there is
+     * nothing to add: two names already, no mailbox row, or a header that
+     * names someone else.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function completeName(Lead $lead, array $data): ?string
+    {
+        $current = \Illuminate\Support\Str::squish((string) ($data['name'] ?? ''));
+        $email = mb_strtolower(trim((string) ($data['email'] ?? '')));
+
+        $ingest = CrewEmailIngest::query()
+            ->where(fn ($q) => $q->where('lead_id', $lead->id)
+                ->when($email !== '', fn ($q) => $q->orWhere('from_email', $email)))
+            ->whereNotNull('from_name')
+            ->orderBy('id')
+            ->first();
+
+        if (! $ingest) {
+            return null;
+        }
+
+        $completed = SenderName::complete($current ?: null, $ingest->from_name, $ingest->from_email);
+
+        if ($completed === null || $completed === $current) {
+            return null;
+        }
+
+        // Two names already: only their spelling may change ("Dimarco" off
+        // the address → "DiMarco" as they write it), never the name itself.
+        // "Toby 312" is one name and a stray number, and may be completed.
+        if (count(SenderName::nameWords($current)) > 1 && ! SenderName::sameName($current, $completed)) {
+            return null;
+        }
+
+        return $completed;
+    }
+
+    /**
+     * A contact created from "Michael Dimarco" stays so after the lead
+     * learns it is "DiMarco" — the provisioner never rewrites a name. A
+     * change in spelling alone is safe to carry over; anything more is a
+     * different name and a human's call. True when the contact changed.
+     */
+    private function adoptNameCasing(Lead $lead, LeadContactProvisioner $provisioner): bool
+    {
+        $user = $lead->user_id ? \App\Models\User::withoutGlobalScopes()->find($lead->user_id) : null;
+        $name = trim((string) (((array) $lead->lead_data)['name'] ?? ''));
+
+        if (! $user || $name === '') {
+            return false;
+        }
+
+        [$first, $last] = $provisioner->splitContacts($name)[0];
+        $update = [];
+
+        if ($first !== (string) $user->first_name && SenderName::sameName($first, (string) $user->first_name)) {
+            $update['first_name'] = $first;
+        }
+
+        if ($last !== (string) $user->last_name && SenderName::sameName($last, (string) $user->last_name)) {
+            $update['last_name'] = $last;
+        }
+
+        if ($update === []) {
+            return false;
+        }
+
+        $user->forceFill($update)->save();
+
+        return true;
     }
 
     /** @return array{user_id: ?int, client: ?string} */

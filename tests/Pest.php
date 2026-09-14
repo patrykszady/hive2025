@@ -1,5 +1,8 @@
 <?php
 
+use App\Models\User;
+use App\Models\Vendor;
+
 /*
 |--------------------------------------------------------------------------
 | Test Case
@@ -44,3 +47,38 @@ uses(PHPUnit\Framework\TestCase::class)->in('Unit');
 // {
 //     // ..
 // }
+
+/**
+ * Shared by the certificates-mailbox tests (InsuranceReplyContext,
+ * VendorDocReconcile, MoveVendorDocs).
+ */
+/*
+ * Mariusz Kot's shape: one owner, two vendor rows ("Kot Construction" from
+ * 2017, "Mariusz Kot Construction" from 2021), and an agent's COI arriving
+ * as a reply to the request we sent for the newer one.
+ */
+function kotVendors(): array
+{
+    // Creating a workers-comp doc dispatches the state lookup job, which
+    // runs a real scraper when the queue is sync — never in a test.
+    \Illuminate\Support\Facades\Queue::fake();
+
+    config([
+        'nylas.certificates_email' => 'certificates@hive.contractors',
+        'nylas.crew_leads.internal_domains' => ['gs.construction', 'hive.contractors'],
+    ]);
+
+    $old = Vendor::factory()->create(['business_name' => 'Kot Construction', 'business_type' => 'Sub']);
+    $new = Vendor::factory()->create(['business_name' => 'Mariusz Kot Construction', 'business_type' => 'Sub']);
+    $gs = Vendor::factory()->create(['business_name' => 'GS Construction & Remodeling', 'business_type' => 'GC']);
+
+    $mariusz = User::query()->create([
+        'first_name' => 'Mariusz', 'last_name' => 'Kot',
+        'email' => 'mariuszkot40@att.net', 'cell_phone' => '8475550100',
+    ]);
+    $old->users()->attach($mariusz->id, ['role_id' => 1]);
+    $new->users()->attach($mariusz->id, ['role_id' => 1]);
+
+    return compact('old', 'new', 'gs', 'mariusz');
+}
+

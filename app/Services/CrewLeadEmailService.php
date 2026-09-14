@@ -8,6 +8,8 @@ use App\Models\Lead;
 use App\Services\LeadAddressCompleter;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Support\SenderName;
+use App\Support\StreetAddress;
 use Illuminate\Support\Str;
 
 /**
@@ -270,8 +272,15 @@ class CrewLeadEmailService
             return 'already_ingested';
         }
 
-        // Only senders we already know as leads.
-        if (! Lead::withoutGlobalScopes()->whereNull('deleted_at')->where('lead_data->email', $fromEmail)->exists()) {
+        // Only senders we already know as leads — by the address they wrote
+        // from, or one they put on the message.
+        if (! $this->leadForMessage([
+            'from_email' => $fromEmail,
+            'recipients' => [
+                'to' => array_column($message['to'] ?? [], 'email'),
+                'cc' => array_column($message['cc'] ?? [], 'email'),
+            ],
+        ])) {
             return 'not_a_lead_reply';
         }
 
@@ -561,7 +570,16 @@ class CrewLeadEmailService
         // lead #5 and emailed him back asking for his address and phone.
         // A prior lead's sender is filed onto that lead as a reply; a user
         // (client contacts are users) is simply not a prospect.
-        if (Lead::withoutGlobalScopes()->whereNull('deleted_at')->where('lead_data->email', $fromEmail)->exists()) {
+        // …and someone writing from a second address who put the one we know
+        // on the message is that same someone (Michael DiMarco, from hotmail
+        // with his outlook address in CC).
+        if ($this->leadForMessage([
+            'from_email' => $fromEmail,
+            'recipients' => [
+                'to' => array_column($message['to'] ?? [], 'email'),
+                'cc' => array_column($message['cc'] ?? [], 'email'),
+            ],
+        ])) {
             return 'reply';
         }
 
@@ -732,7 +750,12 @@ TXT;
         $fields = $verdict['fields'];
 
         $leadData = array_filter([
-            'name' => $fields['name'] ?? $base['from_name'] ?? null,
+            // The sign-off gives a first name ("Will"); the From header's
+            // display name carries the surname ("William Johnson89 wa").
+            // Paired, the lead gets both — and a lead with only one never
+            // gets a contact record. The raw header is the last resort.
+            'name' => SenderName::complete($fields['name'] ?? null, $base['from_name'] ?? null, $base['from_email'] ?? null)
+                ?? $base['from_name'] ?? null,
             'email' => $base['from_email'],
             // Couples write in together and CC each other. Those addresses are
             // the other people on the enquiry — keep them, or provisioning has
@@ -819,6 +842,94 @@ TXT;
     }
 
     /**
+     * The lead a message belongs to, by the addresses on it. The sender
+     * first — the address the lead wrote from, or a second one it has since
+     * written from — then any address the sender put on the message: a
+     * homeowner writing from a new account CCs the one we know
+     * (mdimarco71@hotmail.com, with michael_dimarco@outlook.com in CC).
+     *
+     * @param  array{from_email?: ?string, recipients?: array{to?: array<int, string>, cc?: array<int, string>}}  $base
+     */
+    public function leadForMessage(array $base): ?Lead
+    {
+        $from = mb_strtolower(trim((string) ($base['from_email'] ?? '')));
+
+        if ($from === '') {
+            return null;
+        }
+
+        $lead = Lead::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->where(fn ($q) => $q->where('lead_data->email', $from)
+                ->orWhereJsonContains('lead_data->alt_emails', $from))
+            ->latest('id')
+            ->first();
+
+        if ($lead) {
+            return $lead;
+        }
+
+        $others = collect($base['recipients']['cc'] ?? [])
+            ->merge($base['recipients']['to'] ?? [])
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+            ->map(fn (string $email) => mb_strtolower(trim($email)))
+            ->reject(fn (string $email) => $email === $from || $this->isOurAddress($email))
+            ->unique()
+            ->values();
+
+        if ($others->isEmpty()) {
+            return null;
+        }
+
+        return Lead::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->whereIn('lead_data->email', $others->all())
+            ->latest('id')
+            ->first();
+    }
+
+    /** Our own mailboxes and domains — never a lead's address. */
+    protected function isOurAddress(string $email): bool
+    {
+        $domain = Str::after($email, '@');
+
+        foreach ((array) config('nylas.crew_leads.internal_domains') as $internal) {
+            if ($domain === $internal || str_ends_with($domain, '.'.$internal)) {
+                return true;
+            }
+        }
+
+        if ($email === mb_strtolower(trim((string) config('nylas.crew_leads.mailbox')))) {
+            return true;
+        }
+
+        return \App\Models\CompanyEmail::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [$email])->exists();
+    }
+
+    /**
+     * File a reply the ledger skipped without a lead — sent from an address
+     * we did not know, before replies were matched through CC — onto the
+     * lead it belongs to now. Returns the lead id, or null when it still
+     * matches nothing.
+     */
+    public function relinkReply(CrewEmailIngest $row): ?int
+    {
+        $leadId = $this->recordLeadReply([
+            'from_email' => $row->from_email,
+            'from_name' => $row->from_name,
+            'recipients' => (array) ($row->recipients ?? []),
+            'subject' => $row->subject,
+            'message_at' => $row->message_at,
+        ], (string) $row->body_snippet);
+
+        if ($leadId !== null) {
+            $row->forceFill(['lead_id' => $leadId])->save();
+        }
+
+        return $leadId;
+    }
+
+    /**
      * File an email reply onto the lead who sent it. Returns the lead id, or
      * null when no lead matches the sender.
      *
@@ -835,17 +946,27 @@ TXT;
             return null;
         }
 
-        $lead = Lead::withoutGlobalScopes()
-            ->whereNull('deleted_at')
-            ->where('lead_data->email', $fromEmail)
-            ->latest('id')
-            ->first();
+        $lead = $this->leadForMessage($base);
 
         if (! $lead) {
             return null;
         }
 
         $data = $lead->lead_data instanceof \ArrayObject ? $lead->lead_data->toArray() : (array) $lead->lead_data;
+
+        // Written from a second address: remember it on the lead, so the next
+        // message from there finds its way home without a CC.
+        $from = mb_strtolower(trim($fromEmail));
+        $alts = array_values(array_unique(array_map(
+            fn ($alt) => mb_strtolower(trim((string) $alt)),
+            (array) ($data['alt_emails'] ?? []),
+        )));
+
+        if ($from !== mb_strtolower(trim((string) ($data['email'] ?? ''))) && ! in_array($from, $alts, true)) {
+            $alts[] = $from;
+            $data['alt_emails'] = $alts;
+        }
+
         $replies = array_slice((array) ($data['email_replies'] ?? []), 0, 9);
 
         array_unshift($replies, array_filter([
@@ -861,12 +982,55 @@ TXT;
         // People often answer the "what's your address?" ask right here in
         // the reply — mine it for whatever contact fields are still missing.
         $this->fillMissingContactFromReply($lead->fresh(), $body);
+        $this->completeNameFromReply($lead->fresh(), $base);
 
         if ($lead->last_status?->title === 'Replied') {
             $lead->setStatus('New');
         }
 
         return $lead->id;
+    }
+
+    /**
+     * A lead that arrived signed with a first name alone ("Will") takes its
+     * surname from the reply's From header ("William Johnson89 wa") — the
+     * pairing createLead() does, for leads that predate it. Fills a blank
+     * only: a lead already carrying two names is left alone. A name that
+     * becomes whole is what the provisioner was waiting for.
+     */
+    protected function completeNameFromReply(Lead $lead, array $base): void
+    {
+        try {
+            $data = $lead->lead_data instanceof \ArrayObject ? $lead->lead_data->toArray() : (array) $lead->lead_data;
+            $current = Str::squish((string) ($data['name'] ?? ''));
+
+            if (count(SenderName::nameWords($current)) > 1) {
+                return;
+            }
+
+            $completed = SenderName::complete($current ?: null, $base['from_name'] ?? null, $base['from_email'] ?? null);
+
+            if ($completed === null || $completed === $current) {
+                return;
+            }
+
+            $data['name'] = $completed;
+            $lead->lead_data = $data;
+            $lead->saveQuietly();
+
+            Log::channel('nylas')->info('Crew leads: name completed from reply header', [
+                'lead_id' => $lead->id,
+                'from' => $current,
+                'to' => $completed,
+            ]);
+
+            app(\App\Services\LeadContactProvisioner::class)->provision($lead->fresh());
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Crew leads: reply name completion failed', [
+                'lead_id' => $lead->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -881,19 +1045,35 @@ TXT;
         try {
             $data = $lead->lead_data instanceof \ArrayObject ? $lead->lead_data->toArray() : (array) $lead->lead_data;
 
+            // An address that is a landmark ("by Lake Arlington") is as
+            // missing as none: the street the reply states replaces it.
             $wanted = collect(['address', 'city', 'state', 'zip', 'phone'])
-                ->filter(fn (string $key) => trim((string) ($data[$key] ?? '')) === '')
+                ->filter(fn (string $key) => $key === 'address'
+                    ? ! StreetAddress::looksLikeStreet($data['address'] ?? null)
+                    : trim((string) ($data[$key] ?? '')) === '')
                 ->values();
 
             if ($wanted->isEmpty()) {
                 return;
             }
 
-            $fields = $this->extractContactFromText($body);
+            // A street address written out is read straight off the text;
+            // the model is asked only for what that leaves open.
+            $fields = array_filter((array) StreetAddress::findInText($body), fn ($v) => $v !== null && $v !== '');
+
+            if ($wanted->contains(fn (string $key) => trim((string) ($fields[$key] ?? '')) === '')) {
+                $fields += array_filter($this->extractContactFromText($body), fn ($v) => $v !== null && $v !== '');
+            }
 
             $dirty = false;
             foreach ($wanted as $key) {
                 $value = trim((string) ($fields[$key] ?? ''));
+
+                // Never swap one landmark for another.
+                if ($key === 'address' && ! StreetAddress::looksLikeStreet($value)) {
+                    continue;
+                }
+
                 if ($value !== '') {
                     $data[$key] = $value;
                     $dirty = true;
@@ -1001,7 +1181,8 @@ TXT;
             }
 
             $missing = [];
-            if (trim((string) ($data['address'] ?? '')) === '') {
+            // A landmark ("by Lake Arlington") is a location, not an address.
+            if (! StreetAddress::looksLikeStreet($data['address'] ?? null)) {
                 $missing[] = 'the project address';
             } elseif (trim((string) ($data['city'] ?? '')) === '') {
                 $missing[] = 'your city or town';

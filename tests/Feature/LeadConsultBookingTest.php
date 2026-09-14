@@ -556,7 +556,13 @@ it('offers the link when the lead never gave availability', function () {
         ->call('editLead', $fx['lead']->id)
         ->get('emailBody');
 
-    expect($body)->toContain('select new consultation times');
+    // Nothing "new" about times they never picked in the first place — and
+    // one "we'd love" per email is plenty.
+    expect($body)->toContain('select consultation times')
+        ->and($body)->not->toContain('select new consultation times')
+        ->and($body)->toContain('find a time that works for you')
+        ->and(substr_count(strtolower($body), 'love'))->toBeLessThanOrEqual(1)
+        ->and($body)->toMatch('/lead\/times\/'.$fx['lead']->id.'\?expires=\d+/');
 });
 
 it('refuses to select a slot whose date has passed', function () {
@@ -749,9 +755,31 @@ it('moves a Replied lead back to New when the client submits new times', functio
     expect($fresh->last_status?->title)->toBe('New');
 });
 
-it('leaves a Won or Lost lead status alone when times are submitted', function () {
+it('moves a Won lead back to New when the client reschedules — the booking no longer stands', function () {
     $fx = makeConsultFixture();
     $fx['lead']->setStatus('Won');
+
+    [$d1, $d2] = bookableWeekdays($fx['lead']);
+
+    Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
+        ->set('date', $d1)->call('toggleWindow', 'Anytime')
+        ->set('date', $d2)->call('toggleWindow', 'Anytime')
+        ->call('submit')
+        ->assertSet('submitted', true);
+
+    $fresh = Lead::withoutGlobalScopes()->find($fx['lead']->id);
+    $fresh->unsetRelation('last_status');
+
+    // Same path a Replied lead takes: the row stops reading Won, the badge
+    // counts it, and the composer is back so the office can confirm the new
+    // time — which sets it to Won again.
+    expect($fresh->last_status?->title)->toBe('New')
+        ->and($fresh->hasRescheduled())->toBeTrue();
+});
+
+it('leaves a Lost or Not a Fit lead alone when times are submitted', function (string $status) {
+    $fx = makeConsultFixture();
+    $fx['lead']->setStatus($status);
 
     [$d1, $d2] = bookableWeekdays($fx['lead']);
 
@@ -763,8 +791,8 @@ it('leaves a Won or Lost lead status alone when times are submitted', function (
     $fresh = Lead::withoutGlobalScopes()->find($fx['lead']->id);
     $fresh->unsetRelation('last_status');
 
-    expect($fresh->last_status?->title)->toBe('Won');
-});
+    expect($fresh->last_status?->title)->toBe($status);
+})->with(['Lost', 'Not a Fit']);
 
 it('drops the follow-up line when no time was proposed', function () {
     $fx = makeConsultFixture(['date' => now()->subDays(3)->format('Y-m-d'), 'time' => '1-3 PM']);

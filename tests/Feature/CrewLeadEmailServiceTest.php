@@ -228,6 +228,44 @@ class CrewLeadEmailServiceTest extends TestCase
         ]));
     }
 
+    public function test_a_sender_who_ccs_a_known_lead_address_is_that_lead_replying(): void
+    {
+        Config::set('nylas.crew_leads.mailbox', 'crew@gs.construction');
+
+        $vendor = \App\Models\Vendor::factory()->create();
+        $creator = \App\Models\User::query()->create([
+            'first_name' => 'Crew', 'last_name' => 'Inbox', 'email' => 'crew-ingest-cc@example.test',
+            'cell_phone' => '7005550107', 'password' => bcrypt('password'), 'primary_vendor_id' => $vendor->id,
+        ]);
+        \App\Models\Lead::withoutGlobalScopes()->forceCreate([
+            'belongs_to_vendor_id' => $vendor->id,
+            'created_by_user_id' => $creator->id,
+            'date' => now(),
+            'origin' => 'Email',
+            'external_source' => 'crew-email',
+            'lead_data' => ['name' => 'Michael DiMarco', 'email' => 'michael_dimarco@outlook.com'],
+        ]);
+
+        // A fresh subject from an address we have never seen — but the
+        // address we DO know is on the message.
+        $this->assertSame('reply', $this->triage([
+            'from' => [['email' => 'mdimarco71@hotmail.com', 'name' => 'MiMi DiDi']],
+            'to' => [['email' => 'crew@gs.construction']],
+            'cc' => [['email' => 'michael_dimarco@outlook.com']],
+            'subject' => 'Bathroom quote',
+            'body' => 'Per my original email, we have a small bathroom we are interested in redoing.',
+        ]));
+
+        // Our own addresses on a message never make a stranger a lead's reply.
+        $this->assertNull($this->triage([
+            'from' => [['email' => 'stranger@example.com', 'name' => 'Someone Else']],
+            'to' => [['email' => 'crew@gs.construction']],
+            'cc' => [['email' => 'patryk@gs.construction']],
+            'subject' => 'Deck quote',
+            'body' => 'We would like a quote for a new deck.',
+        ]));
+    }
+
     public function test_a_client_contact_is_not_a_prospect(): void
     {
         \App\Models\User::query()->create([

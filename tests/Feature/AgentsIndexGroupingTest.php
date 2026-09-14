@@ -10,6 +10,10 @@ use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
+// Workers-comp docs queue the state lookup, which runs the real EWCCV
+// scraper on the sync queue — a headless browser has no place in a test.
+beforeEach(fn () => \Illuminate\Support\Facades\Queue::fake());
+
 it('groups business name punctuation variants into one entry', function () {
     $vendor = Vendor::factory()->create();
 

@@ -90,20 +90,17 @@ trait ProcessesVendorDocs
             $calculatedVendorId = $this->resolveVendorId($insuranceInfo, 'insured_name', 'insured_address');
             $calculatedBelongsToVendorId = $this->resolveVendorId($insuranceInfo, 'holder_name', 'holder_address');
 
-            // 4. Validate vendor IDs
-            if (($vendorId && $vendorId != $calculatedVendorId) || ($belongsToVendorId && $belongsToVendorId != $calculatedBelongsToVendorId)) {
-                Log::channel('vendor_docs')->warning('Vendor ID mismatch', [
-                    'file' => $normalizedFilePath,
-                    'provided_vendor_id' => $vendorId,
-                    'calculated_vendor_id' => $calculatedVendorId,
-                    'provided_belongs_to_vendor_id' => $belongsToVendorId,
-                    'calculated_belongs_to_vendor_id' => $calculatedBelongsToVendorId
-                ]);
-                return false;
-            }
-
-            // 5. Use calculated or provided IDs
-            $matchedVendorId = $calculatedVendorId ?: $vendorId;
+            // 4–5. The message said who this is for (a reply to our request,
+            //      the vendor in the subject, the vendor CC'd); the
+            //      certificate says who it insures. Reconcile the two.
+            //      With no message context, a renewal of a policy already on
+            //      file says whose it is (U25AC166671-00 → -01).
+            $matchedVendorId = $this->reconcileVendor(
+                $vendorId ?? $this->policyContinuityVendor($insuranceInfo),
+                $calculatedVendorId,
+                (string) ($insuranceInfo['insured_name']['valueString'] ?? ''),
+                $normalizedFilePath,
+            );
             $matchedBelongsToVendorId = $calculatedBelongsToVendorId ?: $belongsToVendorId;
 
             // 6. Check if we have valid vendor IDs before attempting policy processing
@@ -652,6 +649,106 @@ trait ProcessesVendorDocs
         }
 
         return 'state_license';
+    }
+
+    /**
+     * The vendor a certificate is filed under, given who the message said it
+     * was for ($provided) and who the certificate's insured name matched
+     * ($calculated).
+     *
+     * They agree, or only one of them knows: easy. When they differ, the
+     * message wins if the certificate plausibly belongs to that vendor — the
+     * insured name resembles it, or the same people own both records ("Kot
+     * Construction" and "Mariusz Kot Construction, Inc": one owner, one
+     * address, two vendor rows, and a name match that can land on either).
+     * Otherwise the certificate is for someone else entirely — an agent
+     * answering the wrong thread — and the insured name is the truth.
+     */
+    protected function reconcileVendor(?int $provided, ?int $calculated, string $insuredName, string $file): ?int
+    {
+        if ($provided === null || $calculated === null || $provided === $calculated) {
+            return $calculated ?? $provided;
+        }
+
+        $providedVendor = Vendor::withoutGlobalScopes()->find($provided);
+        $calculatedVendor = Vendor::withoutGlobalScopes()->find($calculated);
+
+        if (! $providedVendor) {
+            return $calculated;
+        }
+
+        $sharedOwner = $calculatedVendor !== null
+            && $providedVendor->users()->withoutGlobalScopes()->pluck('users.id')
+                ->intersect($calculatedVendor->users()->withoutGlobalScopes()->pluck('users.id'))
+                ->isNotEmpty();
+
+        $resembles = $insuredName !== ''
+            && ! empty($providedVendor->business_name)
+            && $this->calculateSimilarityScore($this->normalizeVendorName($insuredName), $providedVendor->business_name) >= 0.7;
+
+        if ($sharedOwner || $resembles) {
+            Log::channel('vendor_docs')->info('Vendor taken from the message over the insured-name match', [
+                'file' => $file,
+                'message_vendor_id' => $provided,
+                'insured_name_vendor_id' => $calculated,
+                'insured_name' => $insuredName,
+                'reason' => $sharedOwner ? 'same owner on both records' : 'insured name resembles the message vendor',
+            ]);
+
+            return $provided;
+        }
+
+        Log::channel('vendor_docs')->warning('Certificate names a different vendor than the message', [
+            'file' => $file,
+            'message_vendor_id' => $provided,
+            'insured_name_vendor_id' => $calculated,
+            'insured_name' => $insuredName,
+        ]);
+
+        return $calculated;
+    }
+
+    /**
+     * The vendor already holding an earlier revision of a policy on this
+     * certificate — "U25AC166671-01" renews the "U25AC166671-00" on file.
+     * Null unless every match points at one vendor.
+     */
+    protected function policyContinuityVendor(array $insuranceInfo): ?int
+    {
+        $numbers = [];
+
+        foreach ($insuranceInfo as $field) {
+            foreach ((array) ($field['valueArray'] ?? []) as $policy) {
+                foreach ((array) ($policy['valueObject'] ?? []) as $key => $value) {
+                    if (str_ends_with((string) $key, '_policy_number') && ! empty($value['valueString'])) {
+                        $numbers[] = self::policyBaseNumber((string) $value['valueString']);
+                    }
+                }
+            }
+        }
+
+        $numbers = array_values(array_unique(array_filter($numbers)));
+
+        if ($numbers === []) {
+            return null;
+        }
+
+        $vendorIds = VendorDoc::withoutGlobalScopes()
+            ->get(['vendor_id', 'number'])
+            ->filter(fn (VendorDoc $doc) => in_array(self::policyBaseNumber((string) $doc->number), $numbers, true))
+            ->pluck('vendor_id')
+            ->unique()
+            ->values();
+
+        return $vendorIds->count() === 1 ? (int) $vendorIds->first() : null;
+    }
+
+    /** "U25AC166671-01" and "u25ac 166671-00" → "U25AC166671". */
+    protected static function policyBaseNumber(string $number): string
+    {
+        $bare = strtoupper((string) preg_replace('/\s+/', '', $number));
+
+        return (string) preg_replace('/-\d{1,3}$/', '', $bare);
     }
 
     //Resolve the vendor ID by name with a fallback to address.

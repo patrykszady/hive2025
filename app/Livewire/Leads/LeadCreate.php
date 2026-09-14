@@ -1907,9 +1907,16 @@ class LeadCreate extends Component
         } else {
             // No proposed time, so the "if that time doesn't work" follow-up
             // would be nonsense — each branch carries its own closing line.
-            $timeBlock = 'We&rsquo;d love to find a time that works for you &mdash; please '
-                .'<a href="'.e($this->lead->availabilityUrl()).'">select new consultation times</a>'
-                .' that suit you and we&rsquo;ll confirm ASAP.';
+            //
+            // "New" times only when they gave some that have since lapsed; a
+            // first contact never picked any, so there is nothing new about
+            // the ones we are asking for.
+            // The intro already said "we'd love" once; twice in a row reads
+            // like a form letter.
+            $timeBlock = 'Let&rsquo;s find a time that works for you &mdash; please '
+                .'<a href="'.e($this->lead->availabilityUrl()).'">'
+                .($this->availability === [] ? 'select consultation times' : 'select new consultation times')
+                .'</a> that suit you and we&rsquo;ll confirm ASAP.';
         }
 
         return str_replace(

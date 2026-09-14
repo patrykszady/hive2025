@@ -153,6 +153,140 @@ it('recovers the partner address from the mailbox row', function () {
         ->and($chris->cell_phone)->toBe('3392220798');
 });
 
+it('completes a first-name-only lead from the From name on its mailbox row', function () {
+    $this->mock(GeoapifyService::class)
+        ->shouldReceive('geocodeAddress')->andReturn([
+            'address' => '7815 Kenton Ave', 'city' => 'Skokie', 'state' => 'IL', 'zip_code' => '60076',
+        ])
+        ->shouldReceive('nearbyAddressCandidates')->andReturn([]);
+
+    // Signed "Will", no surname anywhere in the message — so no contact.
+    $lead = backfillLead([
+        'name' => 'Will',
+        'email' => 'willjohn1089@example.com',
+        'phone' => '(832) 257-1204',
+        'address' => '7815 Kenton Ave',
+        'city' => 'Skokie',
+    ]);
+
+    CrewEmailIngest::create([
+        'nylas_message_id' => 'msg-'.uniqid(),
+        'grant_id' => 'grant-test',
+        'mailbox' => 'crew@gs.construction',
+        'lead_id' => $lead->id,
+        'from_email' => 'willjohn1089@example.com',
+        'from_name' => 'William Johnson89 wa',
+        'recipients' => ['to' => ['crew@gs.construction'], 'cc' => []],
+        'status' => CrewEmailIngest::STATUS_LEAD,
+        'is_lead' => true,
+    ]);
+
+    // The preview names the change and writes nothing.
+    $this->artisan('leads:backfill-contacts', ['--lead' => $lead->id])
+        ->expectsOutputToContain('William Johnson')
+        ->assertSuccessful();
+
+    expect($lead->fresh()->lead_data['name'])->toBe('Will')
+        ->and($lead->fresh()->user_id)->toBeNull();
+
+    $this->artisan('leads:backfill-contacts', ['--lead' => $lead->id, '--apply' => true])
+        ->assertSuccessful();
+
+    $fresh = $lead->fresh();
+    $user = User::find($fresh->user_id);
+
+    expect($fresh->lead_data['name'])->toBe('William Johnson')
+        ->and($user)->not->toBeNull()
+        ->and($user->first_name)->toBe('William')
+        ->and($user->last_name)->toBe('Johnson')
+        ->and($user->clients()->where('address', '7815 Kenton Ave')->exists())->toBeTrue();
+});
+
+it('completes a name that is a first name and a stray number from the address', function () {
+    $this->mock(GeoapifyService::class)
+        ->shouldReceive('geocodeAddress')->andReturn([
+            'address' => '12 Elm St', 'city' => 'Skokie', 'state' => 'IL', 'zip_code' => '60076',
+        ])
+        ->shouldReceive('nearbyAddressCandidates')->andReturn([]);
+
+    $lead = backfillLead([
+        'name' => 'Toby 312',
+        'email' => 'toby.daisy112148@gmail.com',
+        'phone' => '(312) 555-0142',
+        'address' => '12 Elm St',
+        'city' => 'Skokie',
+    ]);
+
+    CrewEmailIngest::create([
+        'nylas_message_id' => 'msg-'.uniqid(),
+        'grant_id' => 'grant-test',
+        'mailbox' => 'crew@gs.construction',
+        'lead_id' => $lead->id,
+        'from_email' => 'toby.daisy112148@gmail.com',
+        'from_name' => 'Toby 312',
+        'recipients' => ['to' => ['crew@gs.construction'], 'cc' => []],
+        'status' => CrewEmailIngest::STATUS_LEAD,
+        'is_lead' => true,
+    ]);
+
+    $this->artisan('leads:backfill-contacts', ['--lead' => $lead->id, '--apply' => true])
+        ->expectsOutputToContain('Toby 312 → Toby Daisy')
+        ->assertSuccessful();
+
+    $user = User::find($lead->fresh()->user_id);
+
+    expect($lead->fresh()->lead_data['name'])->toBe('Toby Daisy')
+        ->and($user->first_name)->toBe('Toby')
+        ->and($user->last_name)->toBe('Daisy');
+});
+
+it('respells a name the way the sender writes it, on the lead and its contact', function () {
+    $this->mock(GeoapifyService::class)
+        ->shouldReceive('geocodeAddress')->andReturn([
+            'address' => '1210 E Crabtree Dr', 'city' => 'Arlington Heights', 'state' => 'IL', 'zip_code' => '60004',
+        ])
+        ->shouldReceive('nearbyAddressCandidates')->andReturn([]);
+
+    // Named off the address at ingest ("michael_dimarco"), so the surname
+    // lost its capital; the contact was built from that.
+    $lead = backfillLead([
+        'name' => 'Michael Dimarco',
+        'email' => 'michael_dimarco@example.com',
+        'phone' => '312 636 2700',
+        'address' => '1210 E Crabtree Dr',
+        'city' => 'Arlington Heights',
+    ]);
+
+    $this->artisan('leads:backfill-contacts', ['--lead' => $lead->id, '--apply' => true])->assertSuccessful();
+    expect(User::find($lead->fresh()->user_id)->last_name)->toBe('Dimarco');
+
+    CrewEmailIngest::create([
+        'nylas_message_id' => 'msg-'.uniqid(),
+        'grant_id' => 'grant-test',
+        'mailbox' => 'crew@gs.construction',
+        'lead_id' => $lead->id,
+        'from_email' => 'michael_dimarco@example.com',
+        'from_name' => 'Michael DiMarco',
+        'recipients' => ['to' => ['crew@gs.construction'], 'cc' => []],
+        'status' => CrewEmailIngest::STATUS_LEAD,
+        'is_lead' => true,
+    ]);
+
+    // Complete already — a lead named on the command line is still looked at.
+    // (One expected substring per output line: the console matcher credits a
+    // line to the first substring it satisfies.)
+    $this->artisan('leads:backfill-contacts', ['--lead' => $lead->id, '--apply' => true])
+        ->expectsOutputToContain('Michael Dimarco → Michael DiMarco | contact respelled')
+        ->assertSuccessful();
+
+    $fresh = $lead->fresh();
+    $user = User::find($fresh->user_id);
+
+    expect($fresh->lead_data['name'])->toBe('Michael DiMarco')
+        ->and($user->first_name)->toBe('Michael')
+        ->and($user->last_name)->toBe('DiMarco');
+});
+
 it('is safe to run twice and never overwrites what is already on file', function () {
     $this->mock(GeoapifyService::class)
         ->shouldReceive('geocodeAddress')->andReturn([

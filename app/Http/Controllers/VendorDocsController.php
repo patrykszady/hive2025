@@ -74,6 +74,18 @@ class VendorDocsController extends Controller
                 continue;
             }
 
+            // Who the message says this is for — a reply to our request, the
+            // vendor named in the subject, the vendor CC'd — decided before
+            // the certificate is read. See InsuranceReplyContext.
+            $context = app(\App\Services\InsuranceReplyContext::class)->resolve($message);
+
+            if ($context !== null) {
+                Log::channel('vendor_docs')->info('Insurance mailbox: vendor from message context', [
+                    'message_id' => $messageId,
+                    'subject' => $message['subject'] ?? null,
+                ] + $context);
+            }
+
             // Process each non-inline attachment
             foreach ($attachments as $attachment) {
                 $attachmentId = $attachment['id'] ?? null;
@@ -98,8 +110,8 @@ class VendorDocsController extends Controller
                             $this->handleVendorDocProcessing(
                                 'files/'.$splitPath,
                                 $docType,
-                                null,
-                                null,
+                                $context['vendor_id'] ?? null,
+                                $context['belongs_to_vendor_id'] ?? null,
                                 $messageId,
                                 $grantId,
                                 $pageLabel
@@ -113,8 +125,8 @@ class VendorDocsController extends Controller
                 $this->handleVendorDocProcessing(
                     $tempFilePath,
                     $docType,
-                    null, // Placeholder for $vendorId
-                    null, // Placeholder for $belongsToVendorId
+                    $context['vendor_id'] ?? null,
+                    $context['belongs_to_vendor_id'] ?? null,
                     $messageId,
                     $grantId
                 );

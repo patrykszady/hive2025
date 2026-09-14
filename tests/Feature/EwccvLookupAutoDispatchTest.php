@@ -8,6 +8,10 @@ use Illuminate\Support\Facades\Bus;
 
 uses(RefreshDatabase::class);
 
+// The lookup job shells out to the EWCCV scraper (a headless browser) —
+// never from a test, where it can hang for the job's full 15 minutes.
+beforeEach(fn () => \Illuminate\Support\Facades\Process::fake());
+
 function makeWorkersCompDoc(array $overrides = []): VendorDoc
 {
     $vendor = Vendor::factory()->create();
