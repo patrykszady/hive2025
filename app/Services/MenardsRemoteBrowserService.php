@@ -47,6 +47,16 @@ class MenardsRemoteBrowserService
      */
     public const NEEDS_SIGNIN_CACHE_KEY = 'menards:needs_signin';
 
+    /**
+     * Where the browser sits between syncs. A signed-in page — so its title
+     * still answers "are we signed in?" — but NOT the receipt page: the
+     * extension opens its own receipt tab for each sync and closes it after,
+     * and a receipt page left open for hours is one Imperva has had hours to
+     * re-score (2026-09-14: the idle receipt tab drew the wall three minutes
+     * after a successful sync, with nothing navigating it).
+     */
+    public const PARK_URL = 'https://www.menards.com/main/accountoverview.html';
+
     protected const DISPLAY = ':98';
 
     protected const SCREEN = '1280x900x24';
@@ -175,7 +185,7 @@ class MenardsRemoteBrowserService
             escapeshellarg(self::DISPLAY),
             escapeshellarg($cfg['chromium']),
             escapeshellarg($profile),
-            escapeshellarg('https://www.menards.com/main/receiptLookup.html')
+            escapeshellarg(self::PARK_URL)
         );
 
         $chromePid = $this->spawn($chromeCmd, $logDir . '/menards-browser-chrome.log');
@@ -467,7 +477,7 @@ class MenardsRemoteBrowserService
             usleep(400000);
         }
 
-        $this->navigate('https://www.menards.com/main/receiptLookup.html');
+        $this->navigate(self::PARK_URL);
 
         // Never finding the marker means the keystrokes weren't landing (a
         // modal, a lost window) or the pile outran the bound — either way the

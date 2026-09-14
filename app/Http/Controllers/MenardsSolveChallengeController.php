@@ -59,6 +59,8 @@ class MenardsSolveChallengeController extends Controller
         if (! config('services.menards.auto_solve')) {
             Log::channel('menards')->info('Menards solve: automatic solving is off — the checkbox click clears the wall', [
                 'siteKey' => $validated['siteKey'],
+                'ip' => $request->ip(),
+                'agent' => (string) $request->userAgent(),
             ]);
 
             return response()->json([

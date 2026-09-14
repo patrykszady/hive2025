@@ -60,21 +60,11 @@ async function note(text) {
 }
 
 /** A tab on the receipt page, reusing one if the browser already has it open. */
-async function receiptTab() {
-    const existing = await chrome.tabs.query({ url: 'https://www.menards.com/main/receiptLookup.html*' });
-
-    if (existing.length) {
-        await assertOnReceiptPage(existing[0].id);
-
-        return { tab: existing[0], opened: false };
-    }
-
-    const tab = await chrome.tabs.create({ url: RECEIPT_URL, active: false });
-
-    // Wait for the content script to be live before messaging it.
-    await new Promise(resolve => {
+/** Resolve once the tab reports a complete load, or after a minute regardless. */
+function waitForLoad(tabId) {
+    return new Promise(resolve => {
         const listener = (id, info) => {
-            if (id === tab.id && info.status === 'complete') {
+            if (id === tabId && info.status === 'complete') {
                 chrome.tabs.onUpdated.removeListener(listener);
                 resolve();
             }
@@ -85,6 +75,28 @@ async function receiptTab() {
             resolve();
         }, 60000);
     });
+}
+
+async function receiptTab() {
+    const existing = await chrome.tabs.query({ url: 'https://www.menards.com/main/receiptLookup.html*' });
+
+    if (existing.length) {
+        // A page that sat open for hours is a page Imperva has had hours to
+        // re-score: on 2026-09-14 the idle receipt tab drew the wall three
+        // minutes after a successful sync, with nothing navigating it. A fresh
+        // load gets a fresh evaluation, and the bridge and content script with it.
+        await chrome.tabs.reload(existing[0].id);
+        await waitForLoad(existing[0].id);
+        await new Promise(r => setTimeout(r, 4000));
+        await assertOnReceiptPage(existing[0].id);
+
+        return { tab: existing[0], opened: false };
+    }
+
+    const tab = await chrome.tabs.create({ url: RECEIPT_URL, active: false });
+
+    // Wait for the content script to be live before messaging it.
+    await waitForLoad(tab.id);
 
     // The SPA still has to boot after 'complete'.
     await new Promise(r => setTimeout(r, 4000));

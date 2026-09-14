@@ -120,30 +120,46 @@
 
     if (!isChallenge()) return;
 
-    const siteKey = findSiteKey();
+    function solve() {
+        const siteKey = findSiteKey();
 
-    if (!siteKey) {
-        log('challenge detected but no sitekey found — reporting rather than guessing');
-        chrome.runtime.sendMessage({ type: 'hive-challenge-unsolvable', reason: 'no sitekey on page' });
-        return;
+        if (!siteKey) {
+            log('challenge detected but no sitekey found — reporting rather than guessing');
+            chrome.runtime.sendMessage({ type: 'hive-challenge-unsolvable', reason: 'no sitekey on page' });
+            return;
+        }
+
+        log(`challenge detected, sitekey ${siteKey}`);
+
+        chrome.runtime.sendMessage(
+            { type: 'hive-solve-challenge', siteKey, pageUrl: window.location.href },
+            (reply) => {
+                if (chrome.runtime.lastError) {
+                    log(`no reply from background: ${chrome.runtime.lastError.message}`);
+                    return;
+                }
+
+                if (!reply || !reply.ok || !reply.token) {
+                    log(`solve failed: ${(reply && reply.error) || 'no token returned'}`);
+                    return;
+                }
+
+                applyToken(reply.token);
+            }
+        );
     }
 
-    log(`challenge detected, sitekey ${siteKey}`);
-
-    chrome.runtime.sendMessage(
-        { type: 'hive-solve-challenge', siteKey, pageUrl: window.location.href },
-        (reply) => {
-            if (chrome.runtime.lastError) {
-                log(`no reply from background: ${chrome.runtime.lastError.message}`);
-                return;
-            }
-
-            if (!reply || !reply.ok || !reply.token) {
-                log(`solve failed: ${(reply && reply.error) || 'no token returned'}`);
-                return;
-            }
-
-            applyToken(reply.token);
+    // Buying a token is off unless the server said otherwise (defaults.json,
+    // applied to storage by the background worker). Checked HERE as well as
+    // in that worker: on 2026-09-14 Chrome kept running a stale cached copy
+    // of the worker after an update, and this file — loaded from disk on
+    // every page — is the copy that can be trusted to know.
+    chrome.storage.local.get('solveChallenges', ({ solveChallenges } = {}) => {
+        if (solveChallenges !== true) {
+            log('challenge seen; automatic solving is off — the server clears the checkbox itself');
+            return;
         }
-    );
+
+        solve();
+    });
 })();
