@@ -515,9 +515,13 @@ class MenardsRemoteBrowserService
         Log::channel('menards')->info('Menards browser: clicking challenge checkbox', ['at' => $coords]);
 
         $this->click((int) $m[1], (int) $m[2]);
-        sleep(8);
 
-        $cleared = ! $this->looksLikeChallengeWall();
+        // Imperva verifies the click, then Menards redirects — on 2026-09-14
+        // that took longer than the fixed 8 seconds this used to wait, so a
+        // click that HAD passed was logged as a failure and admins were paged
+        // while the browser landed on Account Overview moments later. Wait
+        // for a real Menards page instead, up to half a minute.
+        $cleared = $this->waitForTitle(['at Menards'], 30) || ! $this->looksLikeChallengeWall();
 
         Log::channel('menards')->{$cleared ? 'info' : 'warning'}(
             'Menards browser: challenge click ' . ($cleared ? 'cleared the wall' : 'did not clear the wall'),

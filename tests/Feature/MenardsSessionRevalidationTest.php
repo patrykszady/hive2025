@@ -132,6 +132,54 @@ it('still flags the wall when the login page never loads and the title is the ba
         ->and(Cache::get(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)['reason'])->toBe('challenge');
 });
 
+it('counts the checkbox click as cleared once a Menards page appears, however long Imperva takes', function () {
+    config(['services.menards.challenge_click' => '313,391']);
+    $title = 'menards.com/main/login.html - Google Chrome';
+    $browser = Mockery::mock(MenardsRemoteBrowserService::class)->makePartial()->shouldAllowMockingProtectedMethods();
+    $browser->shouldReceive('click')->once()->with(313, 391);
+    $browser->shouldReceive('windowTitle')->andReturnUsing(function () use (&$title) {
+        return $title;
+    });
+    // The wall is still up when polled first; the page comes through later.
+    $browser->shouldReceive('waitForTitle')->once()->with(['at Menards'], 30)->andReturnUsing(function () use (&$title) {
+        $title = ACCOUNT_TITLE;
+
+        return true;
+    });
+
+    $method = new \ReflectionMethod(MenardsRemoteBrowserService::class, 'clickChallengeCheckbox');
+    $method->setAccessible(true);
+
+    expect($method->invoke($browser))->toBeTrue();
+});
+
+it('reports the click as not cleared when the wall stays', function () {
+    config(['services.menards.challenge_click' => '313,391']);
+    $title = 'menards.com/main/login.html - Google Chrome';
+    $browser = Mockery::mock(MenardsRemoteBrowserService::class)->makePartial()->shouldAllowMockingProtectedMethods();
+    $browser->shouldReceive('click')->once();
+    $browser->shouldReceive('windowTitle')->andReturnUsing(function () use (&$title) {
+        return $title;
+    });
+    $browser->shouldReceive('waitForTitle')->once()->andReturn(false);
+
+    $method = new \ReflectionMethod(MenardsRemoteBrowserService::class, 'clickChallengeCheckbox');
+    $method->setAccessible(true);
+
+    expect($method->invoke($browser))->toBeFalse();
+});
+
+it('never clicks blind when no coordinate is configured', function () {
+    config(['services.menards.challenge_click' => null]);
+    $browser = Mockery::mock(MenardsRemoteBrowserService::class)->makePartial()->shouldAllowMockingProtectedMethods();
+    $browser->shouldReceive('click')->never();
+
+    $method = new \ReflectionMethod(MenardsRemoteBrowserService::class, 'clickChallengeCheckbox');
+    $method->setAccessible(true);
+
+    expect($method->invoke($browser))->toBeFalse();
+});
+
 // ── The scheduled sync repairs the sign-in first ────────────────────────
 
 function menardsCredentials(): void
