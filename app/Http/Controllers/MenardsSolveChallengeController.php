@@ -52,6 +52,21 @@ class MenardsSolveChallengeController extends Controller
             'pageUrl' => 'required|url|max:500',
         ]);
 
+        // The kill switch, ahead of the cap and the counter: nothing is spent
+        // and nothing is counted. The extension is told the same through
+        // defaults.json and normally never asks; this holds for a pack that
+        // predates that.
+        if (! config('services.menards.auto_solve')) {
+            Log::channel('menards')->info('Menards solve: automatic solving is off — the checkbox click clears the wall', [
+                'siteKey' => $validated['siteKey'],
+            ]);
+
+            return response()->json([
+                'ok' => false,
+                'error' => 'Automatic captcha solving is off (MENARDS_AUTO_SOLVE). The server clears the checkbox itself; an image puzzle needs a human at /menards/browser.',
+            ], 403);
+        }
+
         if (! $solver->configured()) {
             return response()->json(['ok' => false, 'error' => 'No captcha solver is configured.'], 503);
         }

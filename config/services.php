@@ -70,6 +70,12 @@ return [
         // that class before relying on it: the same approach already failed
         // here with a VALID token, because Imperva scores the browser.
         'twocaptcha_key' => env('TWOCAPTCHA_API_KEY'),
+        // Whether the extension may ask the server to BUY a token for the
+        // wall's hCaptcha. Off by default: the server clears the checkbox
+        // itself (challenge_click below), and a token injected while it does
+        // resets the widget under its click. Six tokens on 2026-09-14 got
+        // nothing in; the one click made while the cap was exhausted did.
+        'auto_solve' => (bool) env('MENARDS_AUTO_SOLVE', false),
         // Shared secret the receipt extension uses to authenticate to
         // /api/menards/receipts (scripts/menards-receipt-extension).
         'bridge_token' => env('MENARDS_BRIDGE_TOKEN'),

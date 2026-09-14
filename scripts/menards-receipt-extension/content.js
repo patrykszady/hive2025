@@ -48,6 +48,52 @@ function csrfToken() {
     return meta || null;
 }
 
+/** How long to wait for page-bridge.js to answer one request. */
+const BRIDGE_TIMEOUT_MS = 90000;
+
+/** Requests in flight through the bridge, by id, resolved by the page's reply. */
+const pendingBridgeRequests = new Map();
+let bridgeRequestSeq = 0;
+
+window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+
+    const msg = event.data;
+    if (!msg || msg.type !== 'hive-menards-response' || !pendingBridgeRequests.has(msg.id)) return;
+
+    const settle = pendingBridgeRequests.get(msg.id);
+    pendingBridgeRequests.delete(msg.id);
+    settle(msg);
+});
+
+/** page-bridge.js marks <html> when it is in place. */
+function bridgeInstalled() {
+    return document.documentElement?.dataset?.hiveMenardsBridge === 'ready';
+}
+
+/**
+ * Ask page-bridge.js to make the request from the page's own world — through
+ * the XMLHttpRequest that Imperva's script wraps, which is what lets the call
+ * pass as the page's own. See page-bridge.js.
+ */
+function bridgeRequest(path, { method, headers, body }) {
+    return new Promise((resolve, reject) => {
+        const id = `hive-${Date.now()}-${++bridgeRequestSeq}`;
+
+        const timer = setTimeout(() => {
+            pendingBridgeRequests.delete(id);
+            reject(new Error(`${path} -> no answer from the page bridge within ${BRIDGE_TIMEOUT_MS / 1000}s`));
+        }, BRIDGE_TIMEOUT_MS);
+
+        pendingBridgeRequests.set(id, (reply) => {
+            clearTimeout(timer);
+            resolve(reply);
+        });
+
+        window.postMessage({ type: 'hive-menards-request', id, path, method, headers, body: body ?? null }, window.location.origin);
+    });
+}
+
 async function api(path, body) {
     const headers = { Accept: 'application/json' };
     const token = csrfToken();
@@ -67,11 +113,27 @@ async function api(path, body) {
         init.body = JSON.stringify(body);
     }
 
-    const res = await fetch(path, init);
+    let ok;
+    let status;
+    let text;
 
-    if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+    if (bridgeInstalled()) {
+        const reply = await bridgeRequest(path, { method: init.method, headers, body: init.body });
 
-    const text = await res.text();
+        if (reply.error) throw new Error(`${path} -> ${reply.error}`);
+
+        ({ ok, status, text } = reply);
+    } else {
+        // No bridge on this page (an extension reloaded under an open tab,
+        // or a dev profile loading an older pack): the isolated world's own
+        // fetch, which Imperva may well challenge. Better than doing nothing.
+        const res = await fetch(path, init);
+        ok = res.ok;
+        status = res.status;
+        text = await res.text();
+    }
+
+    if (!ok) throw new Error(`${path} -> HTTP ${status}`);
 
     // An HTML body means we were handed a page instead of JSON: Menards'
     // login page when the session lapsed, or Imperva's challenge page when

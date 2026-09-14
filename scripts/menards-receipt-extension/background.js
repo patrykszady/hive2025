@@ -32,13 +32,18 @@ const DEFAULT_LOOKBACK_DAYS = 14;
 const BACKFILL_SINCE = '2026-07-01';
 
 async function settings() {
-    const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastSuccessAt', 'everSucceeded']);
+    const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastSuccessAt', 'everSucceeded', 'solveChallenges']);
 
     return {
         serverUrl: (s.serverUrl || '').replace(/\/+$/, ''),
         token: s.token || '',
         lastSuccessAt: s.lastSuccessAt || null,
         everSucceeded: !!s.everSucceeded,
+        // Buying hCaptcha tokens is OFF unless the server says otherwise: the
+        // server clears the wall's checkbox itself, and a token injected while
+        // it does resets the widget under its click. Six tokens on 2026-09-14
+        // bought nothing but that.
+        solveChallenges: s.solveChallenges === true,
     };
 }
 
@@ -121,6 +126,9 @@ async function sendSync(tabId, since) {
     try {
         return await chrome.tabs.sendMessage(tabId, { action: 'sync', since });
     } catch {
+        // The bridge first, in the page's world, so the fresh content script
+        // finds it in place (it checks a marker on <html>).
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['page-bridge.js'], world: 'MAIN' });
         await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
 
         return await chrome.tabs.sendMessage(tabId, { action: 'sync', since });
@@ -251,8 +259,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     (async () => {
         try {
-            const { serverUrl, token } = await settings();
+            const { serverUrl, token, solveChallenges } = await settings();
             if (!serverUrl || !token) throw new Error('Hive URL/token not configured');
+
+            if (!solveChallenges) {
+                throw new Error('automatic solving is off — the server clears the checkbox itself; an image puzzle needs a human');
+            }
 
             await note(`challenge: asking Hive to solve ${msg.siteKey}`);
 
@@ -308,15 +320,16 @@ async function seedDefaults() {
         const d = await res.json();
         if (!d.serverUrl && !d.token) return;
 
-        const current = await chrome.storage.local.get(['serverUrl', 'token']);
+        const current = await chrome.storage.local.get(['serverUrl', 'token', 'solveChallenges']);
         const next = {
             serverUrl: d.serverUrl || current.serverUrl || '',
             token: d.token || current.token || '',
+            solveChallenges: typeof d.solveChallenges === 'boolean' ? d.solveChallenges : current.solveChallenges === true,
         };
 
-        if (next.serverUrl !== current.serverUrl || next.token !== current.token) {
+        if (next.serverUrl !== current.serverUrl || next.token !== current.token || next.solveChallenges !== current.solveChallenges) {
             await chrome.storage.local.set(next);
-            await note(`applied configuration from defaults.json (posting to ${next.serverUrl})`);
+            await note(`applied configuration from defaults.json (posting to ${next.serverUrl}; automatic captcha solving ${next.solveChallenges ? 'on' : 'off'})`);
         }
     } catch {
         // No defaults bundled — the options page is the other way in.

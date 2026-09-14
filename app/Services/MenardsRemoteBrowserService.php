@@ -244,6 +244,7 @@ class MenardsRemoteBrowserService
         file_put_contents($path, json_encode([
             'serverUrl' => rtrim((string) config('app.url'), '/'),
             'token' => $token,
+            'solveChallenges' => (bool) config('services.menards.auto_solve'),
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 
         @chmod($path, 0600);

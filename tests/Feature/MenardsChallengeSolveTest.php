@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Cache;
  * against an overnight loop is worth more than the happy path.
  */
 beforeEach(function () {
-    config(['services.menards.bridge_token' => 'test-bridge-token']);
+    config(['services.menards.bridge_token' => 'test-bridge-token', 'services.menards.auto_solve' => true]);
     Cache::forget(MenardsSolveChallengeController::COUNTER_KEY);
     Cache::forget(MenardsSyncStatusController::CACHE_KEY);
 });
@@ -117,4 +117,35 @@ it('records a healthy sync', function () {
     expect($status['ok'])->toBeTrue()
         ->and($status['receipts'])->toBe(13)
         ->and($status['session_expired'])->toBeFalse();
+});
+
+it('spends nothing while automatic solving is off, which is the default', function () {
+    config(['services.menards.auto_solve' => false]);
+    $this->mock(\App\Services\MenardsCaptchaSolver::class); // any call would fail the test
+    Cache::forget(MenardsSolveChallengeController::COUNTER_KEY);
+
+    $this->withToken('test-bridge-token')
+        ->postJson('/api/menards/solve-challenge', ['siteKey' => str_repeat('a', 36), 'pageUrl' => 'https://www.menards.com/main/login.html'])
+        ->assertStatus(403)
+        ->assertJsonPath('ok', false)
+        ->assertJsonPath('error', fn ($e) => str_contains($e, 'MENARDS_AUTO_SOLVE'));
+
+    expect(Cache::get(MenardsSolveChallengeController::COUNTER_KEY))->toBeNull();
+});
+
+it('hands the extension the auto-solve setting in defaults.json', function () {
+    config(['services.menards.bridge_token' => 'test-bridge-token', 'app.url' => 'https://hive.test/', 'services.menards.auto_solve' => false]);
+    $dir = sys_get_temp_dir() . '/menards-ext-' . uniqid();
+    mkdir($dir);
+
+    $browser = Mockery::mock(\App\Services\MenardsRemoteBrowserService::class)->makePartial();
+    $browser->shouldReceive('extensionDir')->andReturn($dir);
+    $browser->writeExtensionDefaults();
+
+    $defaults = json_decode(file_get_contents($dir . '/defaults.json'), true);
+
+    expect($defaults)->toMatchArray(['serverUrl' => 'https://hive.test', 'token' => 'test-bridge-token', 'solveChallenges' => false]);
+
+    @unlink($dir . '/defaults.json');
+    @rmdir($dir);
 });
