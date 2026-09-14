@@ -4,6 +4,7 @@
 #
 #   bash scripts/provision-menards-browser.sh            # full provision (may need sudo)
 #   bash scripts/provision-menards-browser.sh repack     # repack the extension only (no sudo)
+#   sudo bash scripts/provision-menards-browser.sh policy  # (re)write only Chrome's policy file
 #
 # FULL PROVISION — once per server, then only when the host itself changes:
 #
@@ -76,9 +77,54 @@ as_root() {
 # every status check read the source file and said "configured".) Including it
 # in the hash is what makes a token rotation repack — its content is otherwise
 # byte-stable across rewrites.
+# A value from the app's .env, for the update URL below. Empty when unset.
+env_value() {
+    grep -m1 "^$1=" "$APP_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '"'"'"' ' || true
+}
+
+# Where Chrome fetches update.xml and the .crx from.
+#
+# Over https from the app itself when MENARDS_EXTENSION_SECRET is set (see
+# MenardsExtensionUpdateController), because Chrome 151 silently ignores a
+# file:// update URL: it installed the August pack from one and then never
+# fetched another, so every repack after that was a pack nobody loaded. The
+# file:// form remains for boxes without a secret, where nothing is served.
+update_base() {
+    if [ -n "${MENARDS_UPDATE_BASE:-}" ]; then
+        printf '%s' "${MENARDS_UPDATE_BASE%/}"
+        return
+    fi
+    local secret app_url
+    secret=$(env_value MENARDS_EXTENSION_SECRET)
+    app_url=$(env_value APP_URL)
+    if [ -n "$secret" ] && [ -n "$app_url" ]; then
+        printf '%s/menards-extension/%s' "${app_url%/}" "$secret"
+    fi
+}
+manifest_url() {
+    local base; base=$(update_base)
+    if [ -n "$base" ]; then printf '%s/update.xml' "$base"; else printf 'file://%s/update.xml' "$EXT_HOME"; fi
+}
+codebase_url() {
+    local base; base=$(update_base)
+    if [ -n "$base" ]; then printf '%s/menards.crx' "$base"; else printf 'file://%s/menards.crx' "$EXT_HOME"; fi
+}
+
+# The update base is part of the hash: changing where Chrome fetches from
+# must rewrite update.xml, which only a repack does.
 source_hash() {
-    (cd "$EXT_SRC" && find . -type f -print0 | sort -z \
-        | xargs -0 sha256sum | sha256sum | cut -c1-16)
+    { (cd "$EXT_SRC" && find . -type f -print0 | sort -z | xargs -0 sha256sum); echo "update-base:$(update_base)"; } \
+        | sha256sum | cut -c1-16
+}
+
+# The extension id Chrome derives from the signing key.
+derive_ext_id() {
+    EXT_ID=$(openssl rsa -in "$KEY" -pubout -outform DER 2>/dev/null \
+        | openssl dgst -sha256 -binary | head -c16 | xxd -p | tr -d '\n' | tr '0-9a-f' 'a-p')
+    case "$EXT_ID" in
+        [a-p]*) [ ${#EXT_ID} -eq 32 ] || { echo "ERROR: bad extension id '$EXT_ID'" >&2; return 1; } ;;
+        *) echo "ERROR: could not derive an extension id from $KEY" >&2; return 1 ;;
+    esac
 }
 
 # Increasing 4-component version, one tick per second, every component within
@@ -140,18 +186,13 @@ PYEOF
     [ -s "$EXT_HOME/src.crx" ] || { echo "ERROR: packing produced no .crx" >&2; return 1; }
     mv -f "$EXT_HOME/src.crx" "$EXT_HOME/menards.crx"
 
-    EXT_ID=$(openssl rsa -in "$KEY" -pubout -outform DER 2>/dev/null \
-        | openssl dgst -sha256 -binary | head -c16 | xxd -p | tr -d '\n' | tr '0-9a-f' 'a-p')
-    case "$EXT_ID" in
-        [a-p]*) [ ${#EXT_ID} -eq 32 ] || { echo "ERROR: bad extension id '$EXT_ID'" >&2; return 1; } ;;
-        *) echo "ERROR: could not derive an extension id from $KEY" >&2; return 1 ;;
-    esac
+    derive_ext_id || return 1
 
     cat > "$EXT_HOME/update.xml" <<XML
 <?xml version='1.0' encoding='UTF-8'?>
 <gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
   <app appid='$EXT_ID'>
-    <updatecheck codebase='file://$EXT_HOME/menards.crx' version='$version' />
+    <updatecheck codebase='$(codebase_url)' version='$version' />
   </app>
 </gupdate>
 XML
@@ -161,7 +202,48 @@ XML
     # this same user, so it can still read everything it needs.
     chmod -R go-rwx "$EXT_HOME"
     chmod 600 "$KEY"
-    echo "id: $EXT_ID  version: $version"
+    echo "id: $EXT_ID  version: $version  updates from: $(manifest_url)"
+}
+
+# The Chrome policy that force-installs the extension and says where its
+# updates come from. Root-owned, so this is the one step a deploy cannot do:
+# when the update URL changes (a secret set for the first time), run
+#   sudo bash scripts/provision-menards-browser.sh policy
+# once by hand. Chrome watches the policy directory and reloads on its own.
+write_policy() {
+    POLICY_FILE="$POLICY_DIR/menards-receipt-sync.json"
+    local url; url=$(manifest_url)
+    POLICY_CONTENT=$(cat <<JSON
+{
+  "ExtensionInstallForcelist": ["$EXT_ID;$url"],
+  "ExtensionInstallAllowlist": ["$EXT_ID"],
+  "ExtensionSettings": {
+    "$EXT_ID": {
+      "installation_mode": "force_installed",
+      "update_url": "$url"
+    }
+  }
+}
+JSON
+)
+    if [ -f "$POLICY_FILE" ] && [ "$(cat "$POLICY_FILE" 2>/dev/null)" = "$POLICY_CONTENT" ]; then
+        echo "already in place: $POLICY_FILE (updates from $url)"
+    # Unprivileged first: the dir may already be writable (a test override, or a
+    # root run). Escalate only when the plain write actually fails.
+    elif (mkdir -p "$POLICY_DIR" && printf '%s\n' "$POLICY_CONTENT" > "$POLICY_FILE" && chmod 644 "$POLICY_FILE") 2>/dev/null; then
+        echo "written: $POLICY_FILE (updates from $url)"
+    else
+        # Via a temp file, not a pipe: `printf | as_root tee` makes stdin a pipe,
+        # which as_root's [ -t 0 ] tty test reads as "no terminal" — wrongly
+        # refusing an interactive user whose sudo merely wants a password.
+        POLICY_TMP=$(mktemp)
+        printf '%s\n' "$POLICY_CONTENT" > "$POLICY_TMP"
+        as_root mkdir -p "$POLICY_DIR"
+        as_root cp "$POLICY_TMP" "$POLICY_FILE"
+        as_root chmod 644 "$POLICY_FILE"
+        rm -f "$POLICY_TMP"
+        echo "written: $POLICY_FILE (as root; updates from $url)"
+    fi
 }
 
 # ── repack mode ───────────────────────────────────────────────────────────────
@@ -188,7 +270,15 @@ if [ "$MODE" = "repack" ]; then
     exit 3
 fi
 
-[ "$MODE" = "provision" ] || { echo "usage: $0 [provision|repack]" >&2; exit 1; }
+# ── policy mode ───────────────────────────────────────────────────────────────
+if [ "$MODE" = "policy" ]; then
+    [ -f "$KEY" ] || { echo "Signing key missing — full provisioning has not run on this host." >&2; exit 2; }
+    derive_ext_id || exit 1
+    write_policy
+    exit 0
+fi
+
+[ "$MODE" = "provision" ] || { echo "usage: $0 [provision|repack|policy]" >&2; exit 1; }
 
 # ── full provision ────────────────────────────────────────────────────────────
 say "Host packages"
@@ -226,38 +316,7 @@ fi
 pack_extension || exit 1
 
 say "Chrome policy"
-POLICY_FILE="$POLICY_DIR/menards-receipt-sync.json"
-POLICY_CONTENT=$(cat <<JSON
-{
-  "ExtensionInstallForcelist": ["$EXT_ID;file://$EXT_HOME/update.xml"],
-  "ExtensionInstallAllowlist": ["$EXT_ID"],
-  "ExtensionSettings": {
-    "$EXT_ID": {
-      "installation_mode": "force_installed",
-      "update_url": "file://$EXT_HOME/update.xml"
-    }
-  }
-}
-JSON
-)
-if [ -f "$POLICY_FILE" ] && [ "$(cat "$POLICY_FILE" 2>/dev/null)" = "$POLICY_CONTENT" ]; then
-    echo "already in place"
-# Unprivileged first: the dir may already be writable (a test override, or a
-# root run). Escalate only when the plain write actually fails.
-elif (mkdir -p "$POLICY_DIR" && printf '%s\n' "$POLICY_CONTENT" > "$POLICY_FILE" && chmod 644 "$POLICY_FILE") 2>/dev/null; then
-    echo "written: $POLICY_FILE"
-else
-    # Via a temp file, not a pipe: `printf | as_root tee` makes stdin a pipe,
-    # which as_root's [ -t 0 ] tty test reads as "no terminal" — wrongly
-    # refusing an interactive user whose sudo merely wants a password.
-    POLICY_TMP=$(mktemp)
-    printf '%s\n' "$POLICY_CONTENT" > "$POLICY_TMP"
-    as_root mkdir -p "$POLICY_DIR"
-    as_root cp "$POLICY_TMP" "$POLICY_FILE"
-    as_root chmod 644 "$POLICY_FILE"
-    rm -f "$POLICY_TMP"
-    echo "written: $POLICY_FILE (as root)"
-fi
+write_policy
 
 say "Done"
 SERVER_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')

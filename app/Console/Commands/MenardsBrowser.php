@@ -121,7 +121,9 @@ class MenardsBrowser extends Command
         $repackFailed = ! preg_match('/^REPACK: (changed|unchanged|unavailable)$/m', $repack);
 
         if ($repackChanged) {
-            $this->line('Extension source changed — repacked; the restart below installs it.');
+            $this->line($browser->updatesOverHttps()
+                ? 'Extension source changed — repacked; Chrome fetches it from the app on its next update check.'
+                : 'Extension source changed — repacked; the restart below installs it.');
         }
 
         if ($repackFailed) {
@@ -138,7 +140,13 @@ class MenardsBrowser extends Command
         // never took is only fixable by a restart (Chrome re-reads the policy at
         // startup), and leaving it out meant ensure reported that failure every
         // hour without ever attempting its own remedy.
-        if (! $status['running'] || ! $status['chrome'] || ! $status['extension'] || ! $status['configured'] || $repackChanged) {
+        // A repack restarts Chrome only while the policy points at a file://
+        // manifest, which Chrome reads (if at all) at startup. Served over
+        // https the updater fetches it on its own schedule and a restart
+        // would just draw the Imperva wall for nothing.
+        $restartForPack = $repackChanged && ! $browser->updatesOverHttps();
+
+        if (! $status['running'] || ! $status['chrome'] || ! $status['extension'] || ! $status['configured'] || $restartForPack) {
             $this->line('Starting the browser…');
             $result = $browser->start();
 

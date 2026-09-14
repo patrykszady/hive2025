@@ -76,6 +76,17 @@ class MenardsRemoteBrowserService
         return base_path('scripts/menards-receipt-extension');
     }
 
+    /**
+     * Does Chrome fetch the extension's updates from the app over https (a
+     * secret is configured), rather than from the file:// manifest it no
+     * longer reads? See MenardsExtensionUpdateController.
+     */
+    public function updatesOverHttps(): bool
+    {
+        return trim((string) config('services.menards.update_secret')) !== ''
+            && str_starts_with((string) config('app.url'), 'https://');
+    }
+
     /** @return array{ok: bool, missing: array<int, string>} */
     public function checkRequirements(): array
     {

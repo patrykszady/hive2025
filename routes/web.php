@@ -441,6 +441,13 @@ Route::get('menards-vnc-auth', function () {
     return response()->noContent();
 })->name('menards.vnc-auth');
 
+// The server's own Chrome fetches the extension's update manifest and pack
+// here (policy update_url). No session, no CSRF: a secret path segment gates
+// it. See MenardsExtensionUpdateController.
+Route::get('menards-extension/{secret}/{file}', \App\Http\Controllers\MenardsExtensionUpdateController::class)
+    ->where('file', 'update\.xml|menards\.crx')
+    ->name('menards.extension-update');
+
 Route::post('api/menards/sync-status', \App\Http\Controllers\MenardsSyncStatusController::class)
     ->middleware('throttle:60,1')
     ->name('menards.sync-status');

@@ -87,6 +87,12 @@ return [
         'challenge_click' => env('MENARDS_CHALLENGE_CLICK'),
         // Server-side signed-in browser (MenardsRemoteBrowserService).
         'chromium_binary' => env('MENARDS_CHROMIUM_BINARY'),
+        // Where scripts/provision-menards-browser.sh keeps the packed extension
+        // and its update manifest, and the secret path segment under which the
+        // app serves them to Chrome over https (MenardsExtensionUpdateController).
+        // Unset secret = the file:// update URL, which Chrome 151 ignores.
+        'extension_home' => env('MENARDS_EXT_HOME', '/opt/menards-extension'),
+        'update_secret' => env('MENARDS_EXTENSION_SECRET'),
         'user_data_dir' => env('MENARDS_USER_DATA_DIR'),
         'novnc_web' => env('MENARDS_NOVNC_WEB', '/usr/share/novnc'),
     ],
