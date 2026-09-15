@@ -208,11 +208,64 @@ it('puts the consult on the client\'s open project rather than a finished one', 
         ->call('insertAvailabilitySlot', 0)
         ->call('selectExactTime', '14:00');
 
-    expect($component->get('sendBlockedReason'))->toBeNull();
+    // Proposed, not imposed: the open project is filled into the Project box.
+    expect($component->get('projectName'))->toBe('Kitchen — Consult')
+        ->and($component->get('sendBlockedReason'))->toBeNull()
+        ->and(collect($component->instance()->consultProjectOptions)->pluck('label')->all())->toBe(['Kitchen — Consult', 'Hall Bath — Complete']);
 
     $component->call('send_message');
 
     expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$open->id]);
+});
+
+it('attaches the consult to whichever of the client\'s projects is chosen, or to a new one', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $hallBath = clientProjectWithStatus($fx, 'Hall Bath', 7); // Complete
+    clientProjectWithStatus($fx, 'Kitchen', 9);               // Consult
+
+    // A finished project is still a valid choice when the operator picks it
+    // — by its suggested label, or by bare name in any case.
+    $component = consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'hall bath');
+
+    expect($component->get('sendBlockedReason'))->toBeNull();
+    $component->call('send_message');
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$hallBath->id]);
+
+    // A name matching none of the client's projects creates one — even with
+    // an open project on file, and an emptied box asks for a name first.
+    Task::withoutGlobalScopes()->where('type', 'Meet')->forceDelete();
+    $fx['lead']->setStatus('New');
+    $component = consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', '');
+
+    expect($component->get('sendBlockedReason'))->toBe('Name the project for this consult first');
+    $component->set('projectName', 'Primary Bedroom')->call('send_message');
+
+    $created = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->where('project_name', 'Primary Bedroom')->first();
+    expect($created)->not->toBeNull()
+        ->and(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$created->id]);
+
+    // Another client's project name is just a new name for this client.
+    $strangerClient = Client::factory()->create();
+    $stranger = Project::withoutEvents(fn () => Project::query()->create([
+        'project_name' => 'Elsewhere', 'client_id' => $strangerClient->id, 'address' => '1 Other St', 'city' => 'Cary', 'state' => 'IL', 'zip_code' => 60013, 'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+    Task::withoutGlobalScopes()->where('type', 'Meet')->forceDelete();
+    $fx['lead']->setStatus('New');
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Elsewhere')
+        ->call('send_message');
+    $task = Task::withoutGlobalScopes()->where('type', 'Meet')->first();
+    expect($task->project_id)->not->toBe($stranger->id)
+        ->and(Project::withoutGlobalScopes()->find($task->project_id)->client_id)->toBe($fx['client']->id);
 });
 
 it('warns instead of pretending when a chosen time cannot be booked at all', function () {

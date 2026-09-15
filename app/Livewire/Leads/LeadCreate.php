@@ -77,6 +77,7 @@ class LeadCreate extends Component
     /** Exact start time (24h "14:30") picked within the selected slot's window. */
     public ?string $selectedExactTime = null;
 
+
     /** Office-proposed consult date (GS-side scheduling/reschedule). */
     public ?string $proposeDate = null;
 
@@ -763,14 +764,14 @@ class LeadCreate extends Component
             return false;
         }
 
-        $project = $this->openProjectForConsult();
+        $project = $this->resolvedConsultProject();
 
         if (! $project) {
             $addressParts = $this->lead->shortAddressParts();
             preg_match('/\b([A-Z]{2})\b[,\s]*(\d{5})?/', (string) $this->address, $m);
 
             $project = \App\Models\Project::create([
-                'project_name' => trim($this->projectName) !== '' ? trim($this->projectName) : 'Consult',
+                'project_name' => $this->newProjectName() !== '' ? $this->newProjectName() : 'Consult',
                 'client_id' => $this->client->id,
                 'address' => ($addressParts['street'] ?: $this->address) ?? '',
                 'city' => $addressParts['city'] ?: '',
@@ -1694,8 +1695,80 @@ class LeadCreate extends Component
 
         // Clicking the selected time again falls back to the whole range.
         $this->selectedExactTime = $this->selectedExactTime === $time ? null : $time;
-        unset($this->awaitingExactTime, $this->needsProjectName, $this->sendBlockedReason);
+
+        // First time picked: propose where the consult goes — the client's
+        // newest open project. Every project finished leaves the box empty
+        // for a new name.
+        if ($this->selectedExactTime !== null && trim($this->projectName) === '' && ($open = $this->openProjectForConsult())) {
+            $this->projectName = $this->consultProjectLabel($open);
+        }
+
+        unset($this->awaitingExactTime, $this->needsProjectName, $this->sendBlockedReason, $this->consultProjectOptions);
         $this->rerenderTemplate();
+    }
+
+    public function updatedProjectName(): void
+    {
+        unset($this->needsProjectName, $this->sendBlockedReason);
+    }
+
+    /** "Primary Bath — Cancelled": how a project reads in the Project box. */
+    protected function consultProjectLabel(\App\Models\Project $project): string
+    {
+        return $project->project_name . ' — ' . ($project->latestStatus?->title ?? 'No status');
+    }
+
+    /**
+     * The client's projects as the composer's Project box suggests them,
+     * newest first, each with its lifecycle stage — so a returning client's
+     * consult can be attached to the right job, finished or not. Typing a
+     * name that matches none of them creates a new project.
+     *
+     * @return array<int, array{id: int, label: string}>
+     */
+    #[Computed]
+    public function consultProjectOptions(): array
+    {
+        if (! $this->client) {
+            return [];
+        }
+
+        return $this->client->projects()
+            ->with('latestStatus')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (\App\Models\Project $project) => ['id' => $project->id, 'label' => $this->consultProjectLabel($project)])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The client's project the Project box names — by its suggested label
+     * or by bare name, case-insensitively — or null when the text names
+     * none of them (a new project).
+     */
+    protected function resolvedConsultProject(): ?\App\Models\Project
+    {
+        $typed = mb_strtolower(trim($this->projectName));
+
+        if ($typed === '' || ! $this->client) {
+            return null;
+        }
+
+        return $this->client->projects()
+            ->with('latestStatus')
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (\App\Models\Project $project) => in_array($typed, [
+                mb_strtolower($this->consultProjectLabel($project)),
+                mb_strtolower(trim((string) $project->project_name)),
+            ], true));
+    }
+
+    /** What a new project is called: the typed text, less any stage suffix a suggestion carried. */
+    protected function newProjectName(): string
+    {
+        return trim((string) preg_replace('/\s+—\s+[^—]*$/u', '', trim($this->projectName)));
     }
 
     /**
@@ -1731,7 +1804,8 @@ class LeadCreate extends Component
     {
         return $this->selectedExactTime !== null
             && $this->client !== null
-            && $this->openProjectForConsult() === null;
+            && $this->resolvedConsultProject() === null
+            && $this->newProjectName() === '';
     }
 
     /**
@@ -1761,7 +1835,7 @@ class LeadCreate extends Component
             return 'Pick the exact consult time first';
         }
 
-        if ($this->needsProjectName && trim($this->projectName) === '') {
+        if ($this->needsProjectName) {
             return 'Name the project for this consult first';
         }
 

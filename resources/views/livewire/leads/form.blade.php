@@ -166,14 +166,22 @@
                             @endif
                         </div>
 
-                        @if ($this->needsProjectName)
+                        {{-- Where the consult goes: one of the client's projects
+                             (a returning client's new job may well be a new project
+                             while an old one is still open) or a new one. --}}
+                        @if ($this->selectedExactTime !== null && $this->client)
                             <div class="mt-3">
-                                <flux:input
+                                {{-- One box: pick one of the client's projects from the
+                                     suggestions, or type a name and a new project is created. --}}
+                                <flux:autocomplete
                                     wire:model.live.debounce.300ms="projectName"
-                                    label="Project Name"
-                                    type="text"
-                                    placeholder="e.g. Kitchen Remodel"
-                                />
+                                    label="Project"
+                                    placeholder="Pick a project or type a new name"
+                                >
+                                    @foreach ($this->consultProjectOptions as $option)
+                                        <flux:autocomplete.item wire:key="consult-project-{{ $option['id'] }}">{{ $option['label'] }}</flux:autocomplete.item>
+                                    @endforeach
+                                </flux:autocomplete>
                             </div>
                         @endif
                     </flux:field>
