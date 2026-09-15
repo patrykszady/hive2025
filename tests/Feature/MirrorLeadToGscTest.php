@@ -23,10 +23,10 @@ function hiveBornLead(array $fx, array $overrides = []): Lead
 {
     return Lead::create(array_merge([
         'date' => '2026-09-15 20:06:27',
-        'origin' => 'Email',
-        'external_source' => 'crew-email',
-        'external_id' => 'abc',
-        'lead_data' => ['name' => 'Josh Simmons', 'email' => 'jsims692@example.test', 'address' => '6 Drake Terrace', 'city' => 'Prospect Heights', 'state' => 'IL', 'zip' => '60070', 'message' => 'I have a basement I need remodeling done.'],
+        'origin' => 'Houzz',
+        'external_source' => 'houzz',
+        'external_id' => 'h-abc',
+        'lead_data' => ['name' => 'Josh Simmons', 'email' => 'jsims692@example.test', 'address' => '6 Drake Terrace', 'city' => 'Prospect Heights', 'state' => 'IL', 'zip' => '60070', 'subject' => 'Basement remodel', 'message' => 'I have a basement I need remodeling done.'],
         'belongs_to_vendor_id' => $fx['vendor']->id,
         'created_by_user_id' => $fx['creator']->id,
     ], $overrides));
@@ -41,12 +41,13 @@ it('pushes a lead born here to gs.construction the moment it is created', functi
     Queue::assertPushed(MirrorLeadToGsc::class, fn (MirrorLeadToGsc $job) => $job->leadId === $lead->id);
 });
 
-it('does not push a lead that was born on gs.construction or Yelp', function () {
+it('does not push a lead that was born on gs.construction: the website, Yelp, or an email its reader caught', function () {
     Queue::fake();
     $fx = mirrorFixture();
 
     hiveBornLead($fx, ['origin' => 'gs.construction', 'external_source' => 'gs.construction', 'external_id' => '1']);
     hiveBornLead($fx, ['origin' => 'yelp', 'external_source' => 'yelp', 'external_id' => '151']);
+    hiveBornLead($fx, ['origin' => 'Email', 'external_source' => 'crew-email', 'external_id' => sha1('<x@y>')]);
 
     Queue::assertNotPushed(MirrorLeadToGsc::class);
 });
@@ -54,7 +55,7 @@ it('does not push a lead that was born on gs.construction or Yelp', function () 
 it('sends the lead as the site expects, named by its channel', function () {
     $fx = mirrorFixture();
     Queue::fake();
-    $lead = hiveBornLead($fx, ['origin' => 'Angi', 'external_source' => null, 'external_id' => null]);
+    $lead = hiveBornLead($fx);
 
     Http::fake(['gs.test/api/admin/v1/leads' => Http::response(['data' => ['id' => 42]], 201)]);
 
@@ -64,7 +65,9 @@ it('sends the lead as the site expects, named by its channel', function () {
         return $request->url() === 'https://gs.test/api/admin/v1/leads'
             && $request->hasHeader('Authorization', 'Bearer gsc-admin-token')
             && $request['hive_lead_id'] === $lead->id
-            && $request['source'] === 'angi'
+            && $request['source'] === 'houzz'
+            && $request['external_id'] === 'h-abc'
+            && $request['subject'] === 'Basement remodel'
             && $request['name'] === 'Josh Simmons'
             && $request['zip'] === '60070'
             && str_starts_with((string) $request['received_at'], '2026-09-15T20:06:27');

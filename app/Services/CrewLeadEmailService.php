@@ -440,6 +440,43 @@ class CrewLeadEmailService
             return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => $reason, 'lead_id' => $repliedLeadId];
         }
 
+        // A fresh enquiry. Since 2026-09-15 gs.construction reads these
+        // inboxes too and pushes each enquiry here through the leads API, so
+        // that every lead starts on ss.systems; once that reader is on, this
+        // one leaves new enquiries to it and only files replies (above).
+        if (! (bool) config('nylas.crew_leads.create_leads', true)) {
+            if (! $dryRun) {
+                CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
+                    'status' => CrewEmailIngest::STATUS_SKIPPED,
+                    'skip_reason' => 'gsc_reads',
+                    'is_lead' => false,
+                ]);
+            }
+
+            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => 'gsc_reads'];
+        }
+
+        // The site may have read and pushed this very email already (both
+        // readers run while the hand-over settles): then the lead exists
+        // under the identity both compute from the RFC Message-ID.
+        $existingId = Lead::withoutGlobalScopes()
+            ->where('external_source', (string) config('nylas.crew_leads.external_source'))
+            ->where('external_id', $this->externalId($message, $base))
+            ->value('id');
+
+        if ($existingId) {
+            if (! $dryRun) {
+                CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
+                    'status' => CrewEmailIngest::STATUS_SKIPPED,
+                    'skip_reason' => 'already_ingested',
+                    'is_lead' => true,
+                    'lead_id' => $existingId,
+                ]);
+            }
+
+            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => 'already_ingested', 'lead_id' => $existingId];
+        }
+
         $verdict = $this->classify($subject, $body, $fromEmail);
 
         // Only a CONFIDENT "not a lead" discards. An unsure model creates the
@@ -1226,7 +1263,13 @@ TXT;
      * One-shot — the marker is written before the queue runs, so a crashed
      * worker can never re-ask.
      */
-    protected function requestMissingInfo(Lead $lead, array $base): void
+    /**
+     * Public so the leads API can ask the same question of an email enquiry
+     * that gs.construction read and pushed here.
+     *
+     * @param  array{subject?: ?string, rfc_message_id?: ?string}  $base
+     */
+    public function requestMissingInfo(Lead $lead, array $base): void
     {
         try {
             $data = $lead->lead_data instanceof \ArrayObject ? $lead->lead_data->toArray() : (array) $lead->lead_data;

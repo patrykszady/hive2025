@@ -81,6 +81,13 @@ return [
     'crew_leads' => [
         'enabled' => (bool) env('NYLAS_CREW_LEADS_ENABLED', true),
 
+        // Whether this reader still CREATES leads from new enquiries. Since
+        // 2026-09-15 gs.construction reads crew@, patryk@ and greg@ itself
+        // and pushes each enquiry here through the leads API, so that every
+        // lead starts on ss.systems. With this off, the reader here leaves
+        // new enquiries to the site and only files replies.
+        'create_leads' => (bool) env('NYLAS_CREW_LEADS_CREATE', true),
+
         // The shared mailbox to read.
         'mailbox' => env('NYLAS_CREW_LEADS_MAILBOX', 'crew@gs.construction'),
 

@@ -14,11 +14,11 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Every lead starts on ss.systems. Website and Yelp leads are born there
- * (on gs.construction) and arrive here already known; the rest — the crew
- * inbox, Angi, Houzz, the hive form, a manual entry — are born here, so
- * this pushes them to gs.construction the moment they exist. The 15-minute
- * pull on that side remains the catch-up.
+ * Every lead starts on ss.systems. Website, Yelp and (since 2026-09-15)
+ * email leads are born there (on gs.construction) and arrive here already
+ * known; the rest — Angi, Houzz, the hive form, a manual entry — are born
+ * here, so this pushes them to gs.construction the moment they exist. The
+ * 15-minute pull on that side remains the catch-up.
  */
 class MirrorLeadToGsc implements ShouldQueue
 {
@@ -33,7 +33,7 @@ class MirrorLeadToGsc implements ShouldQueue
     }
 
     /** Leads that are born on gs.construction: pushing them back would make twins. */
-    public const BORN_ON_GSC = ['gs.construction', 'yelp'];
+    public const BORN_ON_GSC = ['gs.construction', 'yelp', 'crew-email'];
 
     public function __construct(public int $leadId) {}
 
@@ -69,6 +69,10 @@ class MirrorLeadToGsc implements ShouldQueue
         $payload = [
             'hive_lead_id' => $lead->id,
             'source' => self::sourceFor($lead),
+            // This side's identity for the lead, so the site can recognise
+            // a row it already holds for the same thing.
+            'external_id' => $lead->external_id,
+            'subject' => $data['subject'] ?? null,
             'name' => $data['name'] ?? null,
             'email' => $data['email'] ?? null,
             'phone' => $data['phone'] ?? null,
