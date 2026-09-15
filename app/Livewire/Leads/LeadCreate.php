@@ -910,12 +910,15 @@ class LeadCreate extends Component
     }
 
     /**
-     * A won lead whose consult hasn't happened yet is not estimating anything
-     * — the project sits in Consult until the meeting passes, then the
-     * scheduled projects:advance-past-consults run moves it to Estimate.
-     * Only a fresh project (Estimate) is parked; a project already past that
-     * — Active, Complete, a Service Call — booking another meeting must
-     * never be dragged backwards.
+     * A booked consult puts its project in Consult, whatever stage it was in.
+     *
+     * A new project arrives in Estimate (the observer's default); a returning
+     * client's project may be Cancelled or Complete — "Primary Bath —
+     * Cancelled" picked in the composer is that bath coming back for a new
+     * look — and either way the calendar says Consult from here until the
+     * meeting has happened, when projects:advance-past-consults moves it on
+     * to Estimate. Left alone only when it already says Consult, or when the
+     * meeting is already in the past.
      */
     protected function parkProjectInConsult(\App\Models\Project $project, \App\Models\Task $task): void
     {
@@ -929,7 +932,7 @@ class LeadCreate extends Component
             ->orderByDesc('id')
             ->value('status_code');
 
-        if ((int) $latestCode !== 2) {
+        if ((int) $latestCode === 9) {
             return;
         }
 

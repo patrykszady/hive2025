@@ -233,7 +233,9 @@ it('attaches the consult to whichever of the client\'s projects is chosen, or to
 
     expect($component->get('sendBlockedReason'))->toBeNull();
     $component->call('send_message');
-    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$hallBath->id]);
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$hallBath->id])
+        // …and the finished project is back in Consult for it.
+        ->and((int) \App\Models\ProjectStatus::withoutGlobalScopes()->where('project_id', $hallBath->id)->orderByDesc('start_date')->orderByDesc('id')->value('status_code'))->toBe(9);
 
     // A name matching none of the client's projects creates one — even with
     // an open project on file, and an emptied box asks for a name first.
