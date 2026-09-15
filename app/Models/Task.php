@@ -99,9 +99,13 @@ class Task extends Model
     }
 
     /**
-     * Whether this task's scheduled time window on the given date is already
-     * over (e.g. a "7-7:30AM" arrival checked at 2PM). Tasks without a time
-     * set are never considered passed — they run all day.
+     * Whether this task's time window on the given date is already over.
+     *
+     * Meaningful for a Meet, whose window IS the meeting (10–10:30 has
+     * happened by 10:31) — that is what meetHasPassed() asks. For ordinary
+     * tasks the window is the crew's ARRIVAL time, not the work's end, so a
+     * schedule must not read a closed window as a finished task. Tasks with
+     * no time set are never considered passed — they run all day.
      */
     public function timeHasPassedOn(string $date, ?string $timezone = null): bool
     {

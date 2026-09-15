@@ -1551,7 +1551,12 @@ it('includes carry-over multi-day tasks in next up when they are scheduled on th
         ->and($nextTitles)->toContain('Measure Windows');
 });
 
-it('hides today tasks whose time window has already passed', function (): void {
+it('keeps today\'s tasks on the schedule after their arrival window has passed', function (): void {
+    // A task's time is when the crew ARRIVES ("Arrival from 7 to 7:30 AM"),
+    // not when the work ends. At 2 PM the roofer who arrived at 7:30 is still
+    // on the roof; "Glass Measure @ 12 PM" (the form mirrors the end to the
+    // start for anything but a Meet) is still on. Until 2026-09-15 the modal
+    // dropped both and showed 0 tasks for today (thread 316).
     \Illuminate\Support\Carbon::setTestNow(
         \Illuminate\Support\Carbon::today(config('app.timezone'))->setTime(14, 0)
     );
@@ -1560,7 +1565,7 @@ it('hides today tasks whose time window has already passed', function (): void {
     $ownerUser = User::query()->create([
         'first_name' => 'Owner',
         'last_name' => 'User',
-        'email' => 'owner.passed-times@example.com',
+        'email' => 'owner.arrival-window@example.com',
         'cell_phone' => '2245550099',
         'primary_vendor_id' => $ownerVendor->id,
     ]);
@@ -1568,7 +1573,7 @@ it('hides today tasks whose time window has already passed', function (): void {
 
     $client = Client::factory()->create();
     $project = Project::query()->create([
-        'project_name' => 'Passed Time Project',
+        'project_name' => 'Arrival Window Project',
         'client_id' => $client->id,
         'address' => '1 Main St',
         'city' => 'Cary',
@@ -1579,29 +1584,21 @@ it('hides today tasks whose time window has already passed', function (): void {
 
     $todayKey = today()->format('Y-m-d');
 
-    Task::query()->create([
-        'title' => 'Roofer',
-        'project_id' => $project->id,
-        'type' => 'Task',
-        'start_date' => today(),
-        'end_date' => today(),
-        'options' => [
-            'dates' => [$todayKey],
-            'time_settings' => [$todayKey => ['use_time' => true, 'start_time' => '07:00', 'end_time' => '07:30']],
-        ],
-    ]);
-
-    Task::query()->create([
-        'title' => 'Rough Inspections',
-        'project_id' => $project->id,
-        'type' => 'Task',
-        'start_date' => today(),
-        'end_date' => today(),
-        'options' => [
-            'dates' => [$todayKey],
-            'time_settings' => [$todayKey => ['use_time' => true, 'start_time' => '15:00', 'end_time' => '17:00']],
-        ],
-    ]);
+    foreach ([
+        ['Roofer', ['use_time' => true, 'start_time' => '07:00', 'end_time' => '07:30']],
+        ['Glass Measure', ['use_time' => true, 'start_time' => '12:00', 'end_time' => '12:00']],
+        ['Plumber', ['use_time' => true, 'start_time' => '09:00', 'end_time' => '']],
+        ['Rough Inspections', ['use_time' => true, 'start_time' => '15:00', 'end_time' => '17:00']],
+    ] as [$title, $settings]) {
+        Task::query()->create([
+            'title' => $title,
+            'project_id' => $project->id,
+            'type' => 'Task',
+            'start_date' => today(),
+            'end_date' => today(),
+            'options' => ['dates' => [$todayKey], 'time_settings' => [$todayKey => $settings]],
+        ]);
+    }
 
     $thread = SmsGroupThread::query()->create([
         'name' => 'Client Thread',
@@ -1616,9 +1613,10 @@ it('hides today tasks whose time window has already passed', function (): void {
         ->call('open', $thread->id)
         ->get('previewMessage');
 
-    // At 2PM: the 7-7:30AM roofer arrival is over, the 3-5PM inspection is not.
-    expect($preview)->toContain('Rough Inspections')
-        ->and($preview)->not->toContain('Roofer');
+    expect($preview)->toContain('Roofer')
+        ->and($preview)->toContain('Glass Measure')
+        ->and($preview)->toContain('Plumber')
+        ->and($preview)->toContain('Rough Inspections');
 
     \Illuminate\Support\Carbon::setTestNow();
 });

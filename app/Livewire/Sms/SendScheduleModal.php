@@ -278,14 +278,12 @@ class SendScheduleModal extends Component
                 }
 
                 if ($normalizedDate >= $todayStr && $normalizedDate <= $endDateStr) {
-                    // Today's tasks drop off once their time window has passed
-                    // (e.g. don't list a 7-7:30AM roofer arrival at 2PM).
-                    if ($normalizedDate === $todayStr && $task->timeHasPassedOn($normalizedDate, browser_timezone())) {
-                        $addedDateKeys[$normalizedDate] = true;
-
-                        continue;
-                    }
-
+                    // A task's time is its ARRIVAL window ("Arrival from 7 to
+                    // 7:30 AM"), not when the work ends — the roofer who
+                    // arrived at 7:30 is still on the roof at 2 PM, and the
+                    // schedule for today still lists him. (Until 2026-09-15
+                    // this dropped today's tasks once the window closed, and
+                    // a "Glass Measure @ 12 PM" vanished at 12:01.)
                     if (! $grouped->has($normalizedDate)) {
                         $grouped[$normalizedDate] = collect();
                     }
@@ -327,13 +325,6 @@ class SendScheduleModal extends Component
                     $dateStr = $cursor->format('Y-m-d');
 
                     if ($dateStr >= $todayStr && $dateStr <= $endDateStr) {
-                        // Today's tasks drop off once their time window has passed.
-                        if ($dateStr === $todayStr && $task->timeHasPassedOn($dateStr, browser_timezone())) {
-                            $cursor->addDay();
-
-                            continue;
-                        }
-
                         if (! $grouped->has($dateStr)) {
                             $grouped[$dateStr] = collect();
                         }
