@@ -746,6 +746,10 @@ Enquiries often come from a couple: put EVERY name in `name` as written
 ("Amy Dusto and Chris Ecker") and EVERY number in `phone` separated by " / ",
 in the same order as the names. Give `zip` only when the message states it —
 a guessed ZIP is worse than none.
+
+`confidence` is how sure you are of your `is_lead` answer, from 0 to 1 —
+NOT how likely the message is to be a lead. A newsletter you are certain is
+not an enquiry is is_lead=false with confidence 0.95.
 TXT;
 
         $schema = [
@@ -773,6 +777,12 @@ TXT;
                 ->timeout(45)
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => config('services.openai.model', 'gpt-4o-mini'),
+                    // The same email must get the same verdict on every
+                    // read: a dry run said "not a lead", the scheduled run
+                    // minutes later filed it (2026-09-15, Apple's terms
+                    // notice), because sampling at the default temperature
+                    // differed.
+                    'temperature' => 0,
                     'messages' => [
                         ['role' => 'system', 'content' => $system],
                         ['role' => 'user', 'content' => "From: {$fromEmail}\nSubject: {$subject}\n\n" . Str::limit($body, 6000, '')],
