@@ -246,4 +246,15 @@ return [
         'token' => env('CLOUDFLARE_API_TOKEN'),
         'zone_id' => env('CLOUDFLARE_ZONE_ID'),
     ],
+
+    /*
+    | gs.construction's admin API (the site ss.systems reads its leads from).
+    | Every lead born here — crew inbox, Angi, Houzz, the hive form — is
+    | pushed there the moment it exists (MirrorLeadToGsc), so it shows on
+    | ss.systems first. Unset = no push (the 15-minute pull is the fallback).
+    */
+    'gsc' => [
+        'url' => env('GSC_API_URL'),
+        'token' => env('GSC_ADMIN_API_TOKEN'),
+    ],
 ];

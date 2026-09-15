@@ -15,6 +15,11 @@ class LeadObserver
      */
     public function created(Lead $lead): void
     {
+        // Every lead starts on ss.systems: one born here goes there now.
+        if (\App\Jobs\MirrorLeadToGsc::configured() && ! in_array($lead->external_source, \App\Jobs\MirrorLeadToGsc::BORN_ON_GSC, true)) {
+            \App\Jobs\MirrorLeadToGsc::dispatch($lead->id)->afterCommit();
+        }
+
         $vendor = Vendor::withoutGlobalScopes()->find($lead->belongs_to_vendor_id);
 
         if (! $vendor) {
