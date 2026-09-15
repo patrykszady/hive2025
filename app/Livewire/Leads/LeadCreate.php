@@ -763,7 +763,7 @@ class LeadCreate extends Component
             return false;
         }
 
-        $project = $this->client->projects()->first();
+        $project = $this->openProjectForConsult();
 
         if (! $project) {
             $addressParts = $this->lead->shortAddressParts();
@@ -1268,6 +1268,12 @@ class LeadCreate extends Component
 
         $booked = $this->bookConsult();
 
+        // A time was chosen for this email but nothing was booked: the lead
+        // has no client to hang a project on. Say so — the email is out,
+        // the calendar is not, and silence here is how a homeowner turns up
+        // to an appointment nobody wrote down.
+        $unbooked = ! $booked && ($this->selectedAvailability[0] ?? null) !== null && ! $this->client;
+
         // A booked consult is a converted lead: the client now has a project
         // and a Meet task on the calendar. Move it out of New/Replied so the
         // Replied filter keeps showing only leads still waiting on us. Lost /
@@ -1281,6 +1287,21 @@ class LeadCreate extends Component
         $this->modal('lead_form_modal')->close();
         $this->dispatch('refreshComponent')->to('leads.leads-index');
         $this->dispatch('lead-status-updated');
+
+        if ($unbooked) {
+            Log::warning('Lead consult not booked: no client for the lead', ['lead_id' => $this->lead->id]);
+
+            Flux::toast(
+                duration: 9000,
+                position: 'top right',
+                variant: 'warning',
+                heading: 'Email queued — consult NOT booked',
+                text: 'This lead has no client record, so the time in the email was not put on the calendar. '
+                    . 'Add the contact on Details, then send again.',
+            );
+
+            return;
+        }
 
         Flux::toast(
             duration: 5000,
@@ -1710,7 +1731,26 @@ class LeadCreate extends Component
     {
         return $this->selectedExactTime !== null
             && $this->client !== null
-            && ! $this->client->projects()->exists();
+            && $this->openProjectForConsult() === null;
+    }
+
+    /**
+     * The client's project a consult belongs on: the newest one that is not
+     * Complete or Cancelled. A returning client's finished bathrooms are not
+     * where their new bedroom consult goes — that needs a project of its own,
+     * which is what needsProjectName() then asks for.
+     */
+    protected function openProjectForConsult(): ?\App\Models\Project
+    {
+        if (! $this->client) {
+            return null;
+        }
+
+        return $this->client->projects()
+            ->with('latestStatus')
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (\App\Models\Project $project) => ! in_array($project->latestStatus?->title, ['Complete', 'Cancelled'], true));
     }
 
     /** Why Send Email is blocked right now, or null when it isn't. */
@@ -1988,15 +2028,18 @@ class LeadCreate extends Component
 
     protected function resolveClientForLead(): ?\App\Models\Client
     {
-        if (! $this->lead?->user) {
-            return null;
+        // No linked contact (an intake that skipped provisioning, a lead
+        // whose email the contact never used): the lead can still be a
+        // client we know by address — Lead::resolveClient() is the same
+        // lookup the leads table and the Won backfill use. Without it the
+        // composer had no client, bookConsult() quietly did nothing, and
+        // the email went out with a time nobody put on the calendar
+        // (2026-09-15, Jeanne Bondi).
+        if (! $this->lead?->user || $this->lead->user->clients->isEmpty()) {
+            return $this->lead?->resolveClient();
         }
 
         $clients = $this->lead->user->clients;
-
-        if ($clients->isEmpty()) {
-            return null;
-        }
 
         $address = $this->lead->lead_data->address ?? null;
 

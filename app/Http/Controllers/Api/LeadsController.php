@@ -175,9 +175,18 @@ class LeadsController extends Controller
         // Short enquiries ("Interior remodel") carry too little to judge, and
         // reading brevity as a pitch would cost a real customer — only longer
         // messages are triaged at all.
+        // Someone we already know — a client writing "can we set up a time
+        // for the bedroom?" — is never a pitch, however casual the message
+        // reads to the classifier (2026-09-15: a returning client's enquiry
+        // was filed as a solicitation, unlinked, and her consult could not
+        // be booked). Link and provision without asking the model.
+        $email = mb_strtolower(trim((string) ($leadData['email'] ?? '')));
+        $known = $email !== ''
+            && \App\Models\User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [$email])->exists();
+
         $message = (string) ($leadData['message'] ?? '');
 
-        $verdict = str_word_count($message) < 12
+        $verdict = $known || str_word_count($message) < 12
             ? ['is_lead' => null, 'confidence' => 0.0, 'reason' => null]
             : app(CrewLeadEmailService::class)->classify(
                 (string) ($leadData['subject'] ?? ''),

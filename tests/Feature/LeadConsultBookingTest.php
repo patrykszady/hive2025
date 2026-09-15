@@ -143,6 +143,97 @@ it('creates the project and the Meet task when sending with a slot and exact tim
         ->and($fx['lead']->fresh()->last_status->title)->toBe('Won');
 });
 
+/** A project for the fixture client in the given lifecycle state. */
+function clientProjectWithStatus(array $fx, string $name, int $statusCode): Project
+{
+    // Without events: the project observer stamps the vendor from the
+    // signed-in user, and nobody is signed in while the fixture is built.
+    $project = Project::withoutEvents(fn () => Project::query()->create([
+        'project_name' => $name,
+        'client_id' => $fx['client']->id,
+        'address' => '123 Main St',
+        'city' => 'Palatine',
+        'state' => 'IL',
+        'zip_code' => 60067,
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+    // A project is visible to a vendor's users through the project_vendor
+    // pivot (ProjectScope), not through belongs_to_vendor_id alone.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $fx['client']->id]);
+    $project->statuses()->create([
+        'status_code' => $statusCode,
+        'start_date' => now()->subDays(30)->toDateString(),
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]);
+
+    return $project;
+}
+
+it('books a consult for a lead with no linked contact when the client is known by address', function () {
+    // Jeanne Bondi, 2026-09-15: a returning client's website enquiry was
+    // filed unlinked, her finished projects were all the composer could
+    // see, and the consult email went out with a time nobody booked.
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $fx['client']->forceFill(['address' => '123 Main St', 'city' => 'Palatine'])->save();
+    $fx['lead']->forceFill(['user_id' => null])->save();
+    clientProjectWithStatus($fx, 'Hall Bath', 7);   // Complete
+    clientProjectWithStatus($fx, 'Powder Room', 10); // Cancelled
+
+    $component = consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00');
+
+    // Finished projects are not where a new consult goes: a name is asked for.
+    expect($component->get('sendBlockedReason'))->toBe('Name the project for this consult first');
+
+    $component->set('projectName', 'Primary Bedroom')->call('send_message');
+
+    Queue::assertPushed(CreateMeetTaskCalendarEvent::class);
+    $project = Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->where('project_name', 'Primary Bedroom')->first();
+    expect($project)->not->toBeNull();
+    $task = Task::withoutGlobalScopes()->where('project_id', $project->id)->where('type', 'Meet')->first();
+    expect($task)->not->toBeNull()
+        ->and(Task::withoutGlobalScopes()->whereIn('project_id', Project::withoutGlobalScopes()->where('client_id', $fx['client']->id)->where('project_name', '!=', 'Primary Bedroom')->pluck('id'))->count())->toBe(0)
+        ->and($fx['lead']->fresh()->last_status->title)->toBe('Won');
+});
+
+it('puts the consult on the client\'s open project rather than a finished one', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    clientProjectWithStatus($fx, 'Hall Bath', 7);            // Complete, older
+    $open = clientProjectWithStatus($fx, 'Kitchen', 9);     // Consult, newer
+
+    $component = consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00');
+
+    expect($component->get('sendBlockedReason'))->toBeNull();
+
+    $component->call('send_message');
+
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$open->id]);
+});
+
+it('warns instead of pretending when a chosen time cannot be booked at all', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    // No contact, and an address no client carries: nothing to book onto.
+    $fx['lead']->forceFill(['user_id' => null])->save();
+    $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), ['address' => '9 Nowhere Ln, Palatine, IL 60067'])]);
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->call('send_message');
+
+    Queue::assertPushed(SendLeadReplyJob::class);
+    Queue::assertNotPushed(CreateMeetTaskCalendarEvent::class);
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->count())->toBe(0)
+        // Not Won: nothing was booked.
+        ->and($fx['lead']->fresh()->last_status->title)->toBe('Replied');
+});
+
 it('keeps the Message tab on a Replied lead but refuses to remove it', function () {
     Queue::fake();
     $fx = makeConsultFixture();
