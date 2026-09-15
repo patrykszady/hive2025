@@ -370,12 +370,14 @@ class LeadCreate extends Component
     }
 
     /**
-     * Replied leads are locked in: the Message composer is gone (the reply
-     * went out — tracking shows on Details) and the lead can't be deleted.
+     * A replied lead is a conversation on record, so it can't be removed —
+     * that is what this gates. The Message composer stays open: a consult
+     * email is re-sent from it when the first went unanswered, a follow-up is
+     * written from it (until 2026-09-15 the composer was locked too, and the
+     * only way to send again was flipping the status back to New).
      *
-     * Unless it BOUNCED. A bounce means nobody read it, so the lead is only
-     * "replied" on paper — locking the composer would leave the one person who
-     * could fix the address with no way to send again.
+     * A BOUNCED reply doesn't count as one: nobody read it, so the lead is
+     * only "replied" on paper — and may still be removed.
      */
     #[Computed]
     public function hasReplied(): bool

@@ -2,18 +2,17 @@
 <div>
 <x-form-modal name="lead_form_modal" title="Lead" x-data="{ activeLeadTab: 'details' }"
     x-on:lead-modal-opened.window="activeLeadTab = 'details'">
-    @if ($this->hasReplied)
-        {{-- Replied leads have nothing but Details — skip the tab chrome. --}}
-        <div class="pt-2">
-            @include('livewire.leads.partials.details-panel')
-        </div>
-    @else
+    {{-- The Message tab stays available after a reply: a consult email is
+         re-sent from here when the first one went unanswered, or a follow-up
+         is written (2026-09-15: Jeanne Bondi, Replied, needed the email again
+         and the only way in was flipping the status back to New). What a
+         reply still locks is Remove — see the footer. --}}
     <flux:tab.group>
         <flux:tabs>
             <flux:tab name="details" x-on:click="activeLeadTab = 'details'">Details</flux:tab>
             {{-- Incomplete contact: finish it on Details first. We never invent
                  the missing pieces, so the blanks are the prompt. --}}
-            @if (! $this->hasReplied && $this->blockingContactInfo === [])
+            @if ($this->blockingContactInfo === [])
                 <flux:tab name="messages" x-on:click="activeLeadTab = 'messages'">Message</flux:tab>
             @endif
         </flux:tabs>
@@ -21,7 +20,7 @@
         <flux:tab.panel name="details" class="pt-4">
             @include('livewire.leads.partials.details-panel')
         </flux:tab.panel>
-        @if (! $this->hasReplied && $this->blockingContactInfo === [])
+        @if ($this->blockingContactInfo === [])
         <flux:tab.panel name="messages" class="pt-4">
             <form id="lead_messages_form" wire:submit="send_message" class="space-y-4">
                 <flux:textarea
@@ -186,7 +185,6 @@
         </flux:tab.panel>
         @endif
     </flux:tab.group>
-    @endif
 
     <x-slot name="footer">
         <flux:spacer />
@@ -205,8 +203,12 @@
                     @endforeach
                 </flux:select>
             </div>
+            {{-- A replied lead is a conversation on record: it can be emailed
+                 again but not removed. --}}
             @if (! $this->hasReplied)
                 <flux:button wire:click="confirmRemove" variant="danger">Remove</flux:button>
+            @endif
+            @if ($this->blockingContactInfo === [])
                 {{-- No Update button: status changes apply immediately (see
                      LeadCreate::updated), everything else on Details is read-only. --}}
                 <div x-show="activeLeadTab === 'messages'" class="flex items-center gap-2">

@@ -585,7 +585,7 @@ it('reopens the Message tab when the reply bounced', function () {
         ->assertSee('Email bounced', false);
 });
 
-it('keeps a delivered reply locked', function () {
+it('keeps the Message tab after a delivered reply, without the bounce notice', function () {
     $fx = repliedLeadWithTracking(['sent', 'delivered']);
 
     $component = Livewire::actingAs($fx['admin'])
@@ -595,7 +595,9 @@ it('keeps a delivered reply locked', function () {
     expect($component->instance()->lastEmailBounced)->toBeFalse()
         ->and($component->instance()->hasReplied)->toBeTrue();
 
-    $component->assertDontSee('name="messages"', false)
+    // Replied locks Remove, not the composer: the email can be sent again.
+    $component->assertSee('name="messages"', false)
+        ->assertDontSee('wire:click="confirmRemove"', false)
         ->assertDontSee('Email bounced', false);
 });
 

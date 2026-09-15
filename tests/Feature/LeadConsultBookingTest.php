@@ -143,7 +143,7 @@ it('creates the project and the Meet task when sending with a slot and exact tim
         ->and($fx['lead']->fresh()->last_status->title)->toBe('Won');
 });
 
-it('locks a Replied lead: no composer, no delete', function () {
+it('keeps the Message tab on a Replied lead but refuses to remove it', function () {
     Queue::fake();
     $fx = makeConsultFixture();
     $fx['lead']->setStatus('Replied');
@@ -154,13 +154,19 @@ it('locks a Replied lead: no composer, no delete', function () {
 
     expect($component->instance()->hasReplied)->toBeTrue();
 
+    // The composer is there — a consult email is re-sent from it when the
+    // first went unanswered — with its send buttons, and no Remove.
+    $component->assertSee('name="messages"', false)
+        ->assertSee('Send Email')
+        ->assertDontSee('wire:click="confirmRemove"', false);
+
     // Remove is guarded server-side too.
     $component->call('confirmRemove')->assertSet('showLeadDelete', false);
     $component->call('remove');
     expect(Lead::withoutGlobalScopes()->find($fx['lead']->id))->not->toBeNull();
 });
 
-it('reverts a Replied lead back to New, reopening the composer for a re-send', function () {
+it('reverts a Replied lead back to New from the status dropdown', function () {
     Queue::fake();
     $fx = makeConsultFixture();
     $fx['lead']->setStatus('Replied');
