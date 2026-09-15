@@ -217,6 +217,20 @@ it('names a lead from the address when the header is a first name and a stray nu
         ->and($fresh->user?->last_name)->toBe('Daisy');
 });
 
+it('links a lead from a sender already on file to that contact', function () {
+    senderNameFixture();
+    $josh = User::query()->create([
+        'first_name' => 'Joshua', 'last_name' => 'Simmons', 'email' => 'jsims692@example.test', 'cell_phone' => '8475550109',
+    ]);
+
+    $lead = ingestedLead(
+        ['email' => 'jsims692@example.test', 'name' => 'Josh Simmons'],
+        ['name' => 'Josh Simmons', 'address' => '6 Drake Terrace', 'city' => 'Prospect Heights', 'zip' => '60070'],
+    );
+
+    expect(Lead::withoutGlobalScopes()->find($lead->id)->user_id)->toBe($josh->id);
+});
+
 function dimarcoLead(array $fx): Lead
 {
     return Lead::withoutEvents(fn () => Lead::create([

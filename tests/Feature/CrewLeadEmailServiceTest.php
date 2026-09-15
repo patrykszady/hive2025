@@ -266,17 +266,36 @@ class CrewLeadEmailServiceTest extends TestCase
         ]));
     }
 
-    public function test_a_client_contact_is_not_a_prospect(): void
+    public function test_a_known_contact_still_reaches_the_classifier(): void
     {
+        // A past client — or a sub whose own basement needs work — is a
+        // prospect like anyone else; only the classifier can tell.
         \App\Models\User::query()->create([
             'first_name' => 'Bonnie', 'last_name' => 'Bates', 'email' => 'bonnie.j.bates@gmail.com',
             'cell_phone' => '7005550105', 'password' => bcrypt('password'),
         ]);
 
-        $this->assertSame('known_contact', $this->triage([
+        $this->assertNull($this->triage([
             'from' => [['email' => 'bonnie.j.bates@gmail.com', 'name' => 'Bonnie Bates']],
-            'subject' => 'Window hardware',
-            'body' => 'Champagne hardware on the dining room windows?',
+            'subject' => 'Basement remodel',
+            'body' => 'I have a basement I need remodeling done — painting, new floors and a bathroom added in. Can I get a quote?',
+        ]));
+    }
+
+    public function test_our_own_team_writing_from_a_personal_address_is_not_a_prospect(): void
+    {
+        $vendor = \App\Models\Vendor::factory()->create();
+        Config::set('nylas.crew_leads.vendor_id', $vendor->id);
+        $greg = \App\Models\User::query()->create([
+            'first_name' => 'Greg', 'last_name' => 'Owner', 'email' => 'greg.personal@gmail.com',
+            'cell_phone' => '7005550108', 'password' => bcrypt('password'), 'primary_vendor_id' => $vendor->id,
+        ]);
+        $vendor->users()->attach($greg->id, ['role_id' => 1]);
+
+        $this->assertSame('team', $this->triage([
+            'from' => [['email' => 'greg.personal@gmail.com', 'name' => 'Greg']],
+            'subject' => 'Basement remodel',
+            'body' => 'Forwarding the plans for the basement remodel we discussed on site today, let me know what you think.',
         ]));
     }
 

@@ -17,7 +17,8 @@ class IngestCrewLeadEmails extends Command
     protected $signature = 'crew:ingest-leads
         {--dry-run : Classify and report without writing leads or ledger rows}
         {--limit= : Cap messages fetched this run}
-        {--days= : Look back this many days instead of using the saved watermark}';
+        {--days= : Look back this many days instead of using the saved watermark}
+        {--reprocess=* : Ledger row id(s) to fetch and ingest again, e.g. after a triage rule changed}';
 
     protected $description = 'Capture prospect enquiries emailed to the crew@ shared mailbox as CRM leads.';
 
@@ -30,6 +31,23 @@ class IngestCrewLeadEmails extends Command
         }
 
         $dryRun = (bool) $this->option('dry-run');
+
+        if ($ids = array_filter(array_map('intval', (array) $this->option('reprocess')))) {
+            foreach ($ids as $id) {
+                $row = \App\Models\CrewEmailIngest::find($id);
+
+                if (! $row) {
+                    $this->error("Ledger row {$id} not found.");
+
+                    continue;
+                }
+
+                $result = $service->reprocessLedgerRow($row);
+                $this->line(sprintf('  row %-5s %-40s → %s%s', $id, \Illuminate\Support\Str::limit((string) $row->subject, 38), $result['status'] ?? '?', isset($result['lead_id']) ? " (lead {$result['lead_id']})" : (isset($result['reason']) ? " ({$result['reason']})" : '')));
+            }
+
+            return self::SUCCESS;
+        }
         $since = $this->option('days') !== null
             ? now()->subDays((int) $this->option('days'))
             : null;

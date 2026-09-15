@@ -583,11 +583,60 @@ class CrewLeadEmailService
             return 'reply';
         }
 
-        if (\App\Models\User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [$fromEmail])->exists()) {
-            return 'known_contact';
+        // Our own team writing from a personal address is not an enquiry.
+        // Anyone else we happen to know — a past client, a subcontractor
+        // whose own basement needs work (Josh Simmons, 2026-09-15: on file
+        // since 2020 as a vendor, skipped as a "known contact") — may well
+        // be one, and the classifier decides like it does for a stranger.
+        if ($this->isTeamMember($fromEmail)) {
+            return 'team';
         }
 
         return null;
+    }
+
+    /** A user who belongs to the vendor the crew mailbox serves. */
+    protected function isTeamMember(string $email): bool
+    {
+        $vendorId = (int) config('nylas.crew_leads.vendor_id');
+
+        return $email !== ''
+            && $vendorId > 0
+            && \App\Models\User::withoutGlobalScopes()
+                ->whereRaw('LOWER(email) = ?', [$email])
+                ->whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendorId))
+                ->exists();
+    }
+
+    /**
+     * Re-run one message the ledger already holds — after a triage rule
+     * changed, say — by fetching it again and ingesting it as if for the
+     * first time. The old ledger row goes first, or the dedupe would answer
+     * "already ingested" before anything else ran.
+     *
+     * @return array<string, mixed>  the ingestMessage() summary
+     */
+    public function reprocessLedgerRow(CrewEmailIngest $row): array
+    {
+        $grantId = (string) $row->grant_id;
+        $mailbox = (string) $row->mailbox;
+        $nylasId = (string) $row->nylas_message_id;
+
+        $response = Http::withToken(config('nylas.api_key'))
+            ->timeout(60)
+            ->retry(2, 2000, throw: false)
+            ->get(rtrim(config('nylas.api_uri', 'https://api.us.nylas.com'), '/') . "/v3/grants/{$grantId}/messages/{$nylasId}", [
+                'shared_from' => $mailbox,
+                'fields' => 'include_headers',
+            ]);
+
+        if (! $response->successful() || ! is_array($response->json('data'))) {
+            return ['status' => 'failed', 'reason' => 'fetch', 'http' => $response->status()];
+        }
+
+        $row->delete();
+
+        return $this->ingestMessage((array) $response->json('data'), $mailbox, $grantId, false);
     }
 
     /** @return array<string, string> lowercased header name => value */
@@ -781,12 +830,20 @@ TXT;
         $date = $base['message_at'] ?? now();
         $vendorId = (int) $cfg['vendor_id'];
 
+        // A sender already on file — a past client, a sub writing about
+        // their own home — is that contact; link the lead to them so the
+        // modal shows who they are and provisioning does not mint a twin.
+        $knownUser = \App\Models\User::withoutGlobalScopes()
+            ->whereRaw('LOWER(email) = ?', [mb_strtolower((string) $base['from_email'])])
+            ->first();
+
         $lead = Lead::create([
             'date' => $date,
             'origin' => 'Email',
             'external_source' => (string) $cfg['external_source'],
             'external_id' => $this->externalId($message, $base),
             'lead_data' => $leadData,
+            'user_id' => $knownUser?->id,
             'belongs_to_vendor_id' => $vendorId,
             'created_by_user_id' => (int) $cfg['created_by_user_id'],
             // `leads.notes` is varchar(255) and shared with the rest of the
