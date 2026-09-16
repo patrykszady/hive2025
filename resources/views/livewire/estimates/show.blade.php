@@ -136,10 +136,14 @@
                         <flux:accordion.item class="!pt-0 !pb-0 !border-b-0">
                             <flux:accordion.heading>
                                 <div class="flex items-center gap-2 group" x-data="{ editing: false }" x-on:click.stop>
-                                    {{-- Display mode: show name as text with dropdown --}}
+                                    {{-- Display mode: show name as text with dropdown. These stay
+                                         <template>s: the heading is a <button>, and a button rendered
+                                         straight inside it would be closed by the HTML parser. The
+                                         name is read from the component's data, because a cloned
+                                         template never receives a re-render. --}}
                                     <template x-if="!editing">
                                         <div class="flex items-center gap-2">
-                                            <span class="text-base font-semibold">{{ $section['name'] ?: 'Unnamed Section' }}</span>
+                                            <span class="text-base font-semibold" x-text="$wire.sections[{{ $index }}]?.name || 'Unnamed Section'">{{ $section['name'] ?: 'Unnamed Section' }}</span>
                                             <flux:dropdown>
                                                 <flux:button size="sm" icon="ellipsis-vertical" variant="ghost"></flux:button>
 
@@ -183,6 +187,13 @@
 
                             <flux:accordion.content>
                                 <flux:separator variant="subtle"/>
+                                @if(!empty($section['ai_scope']))
+                                    <div class="py-3 flex items-start gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+                                        <flux:icon.sparkles class="w-4 h-4 mt-0.5 shrink-0 text-indigo-400" />
+                                        <p class="italic leading-5">{{ $section['ai_scope'] }}</p>
+                                    </div>
+                                    <flux:separator variant="subtle"/>
+                                @endif
                                 <div class="-mx-6">
                                     <flux:table>
                                         <flux:table.columns>

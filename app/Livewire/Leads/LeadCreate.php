@@ -100,6 +100,12 @@ class LeadCreate extends Component
     /** Set by "Create anyway" after the duplicate warning. */
     public bool $createAnyway = false;
 
+    /** An existing user picked for a lead that is not created yet; linked on save. */
+    public ?int $attachUserId = null;
+
+    /** The User dropdown: the linked user's id, or the one just chosen. */
+    public $selectedUserId = null;
+
     public $view_text = [
         'card_title' => 'Create Expense',
         'button_text' => 'Create',
@@ -181,7 +187,7 @@ class LeadCreate extends Component
             'message', 'origin', 'availability', 'selectedAvailability',
             'selectedExactTime', 'proposeDate', 'projectName', 'to', 'subject', 'emailBody',
             'selectedTemplateId', 'nylasMessageId', 'nylasReferences',
-            'duplicateMatch', 'createAnyway', 'consultMeetingType',
+            'duplicateMatch', 'createAnyway', 'consultMeetingType', 'attachUserId', 'selectedUserId', 'user', 'client',
         ]);
         $this->view_text = [
             'card_title' => 'New Lead',
@@ -222,8 +228,9 @@ class LeadCreate extends Component
         // The same person may already be here — as a lead (open that one
         // instead of splitting the history) or as a client contact (worth
         // knowing before creating a "lead" for an existing customer). One
-        // warning, then "Create anyway" goes through.
-        if (! $this->createAnyway && ($match = $this->findExistingContact())) {
+        // warning, then "Create anyway" goes through. Someone who picked an
+        // existing user from the list already knows.
+        if (! $this->createAnyway && $this->attachUserId === null && ($match = $this->findExistingContact())) {
             $this->duplicateMatch = $match;
 
             return;
@@ -251,6 +258,12 @@ class LeadCreate extends Component
             'title' => 'New',
             'belongs_to_vendor_id' => $vendorId,
         ]);
+
+        // The user picked from the list is the contact; provisioning then
+        // only fills in the client at the lead's address.
+        if ($this->attachUserId && ($picked = $this->contactCandidates()->whereKey($this->attachUserId)->first())) {
+            app(\App\Services\LeadContactProvisioner::class)->link($lead, $picked);
+        }
 
         try {
             app(\App\Services\LeadContactProvisioner::class)->provision($lead->fresh());
@@ -291,6 +304,8 @@ class LeadCreate extends Component
         $this->phone = $this->lead->lead_data->phone ?? null;
         $this->phoneEntry = null;
         $this->email = $this->lead->lead_data->email ?? null;
+        $this->attachUserId = null;
+        $this->selectedUserId = $this->lead->user_id;
         $this->consultMeetingType = in_array($this->lead->lead_data['meeting_preference'] ?? null, ['in_person', 'virtual'], true)
             ? $this->lead->lead_data['meeting_preference']
             : 'in_person';
@@ -992,6 +1007,188 @@ class LeadCreate extends Component
         }
 
         $this->to[] = $email;
+    }
+
+    // ---- The lead's user: pick an existing contact, or create one from the lead. ----
+
+    /**
+     * The User dropdown: this company's client contacts and the people its
+     * other leads are linked to — never its own staff, never another
+     * company's customers — with the lead's current user always present.
+     *
+     * @return list<array{id: int, name: string, contact: string, label: string}>
+     */
+    #[Computed]
+    public function userChoices(): array
+    {
+        $choices = $this->contactCandidates()
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->limit(500)
+            ->get()
+            ->map(fn (\App\Models\User $user) => $this->userOption($user));
+
+        $current = $this->lead?->user;
+        if ($current && ! $choices->contains('id', (int) $current->id)) {
+            $choices->prepend($this->userOption($current));
+        }
+
+        return $choices->values()->all();
+    }
+
+    /**
+     * The users this company may link a lead to.
+     */
+    protected function contactCandidates(): \Illuminate\Database\Eloquent\Builder
+    {
+        $vendorId = (int) auth()->user()->vendor->id;
+
+        $leadUserIds = Lead::withoutGlobalScopes()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->whereNotNull('user_id')
+            ->pluck('user_id');
+
+        return \App\Models\User::query()
+            ->where(function ($query) use ($vendorId, $leadUserIds) {
+                $query->whereHas('clients', fn ($clients) => $clients->withoutGlobalScopes()->whereHas('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->where('vendors.id', $vendorId)))
+                    ->orWhereIn('id', $leadUserIds);
+            })
+            ->where(fn ($query) => $query->whereNull('primary_vendor_id')->orWhere('primary_vendor_id', '!=', $vendorId))
+            ->whereDoesntHave('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->where('vendors.id', $vendorId));
+    }
+
+    /**
+     * @return array{id: int, name: string, contact: string, label: string}
+     */
+    protected function userOption(\App\Models\User $user): array
+    {
+        $name = trim((string) $user->full_name);
+        $contact = $user->hasRoutableEmail()
+            ? (string) $user->email
+            : ($user->cell_phone ? preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', (string) $user->cell_phone) : '');
+
+        return [
+            'id' => (int) $user->id,
+            'name' => $name,
+            'contact' => (string) $contact,
+            'label' => $contact !== '' ? "{$name} — {$contact}" : $name,
+        ];
+    }
+
+    /** Choosing a different user in the dropdown links them. */
+    public function updatedSelectedUserId($value): void
+    {
+        if (is_numeric($value) && (int) $value !== (int) ($this->lead?->user_id ?? $this->attachUserId)) {
+            $this->attachUser((int) $value);
+        }
+    }
+
+    /**
+     * Link an existing user to the lead — now if the lead exists, on save if
+     * it does not — and take their email and phone where the lead has none.
+     */
+    public function attachUser(int $userId): void
+    {
+        $user = $this->contactCandidates()->whereKey($userId)->first();
+
+        if ($user === null) {
+            $this->selectedUserId = $this->lead?->user_id ?? $this->attachUserId;
+
+            return;
+        }
+
+        $this->selectedUserId = $user->id;
+        $this->full_name = trim((string) $user->full_name);
+        if (blank($this->email) && $user->hasRoutableEmail()) {
+            $this->email = $user->email;
+        }
+        if (blank($this->phone) && $user->hasRoutablePhone()) {
+            $this->phone = $user->cell_phone;
+        }
+        if (! $this->lead?->exists) {
+            $this->attachUserId = $user->id;
+
+            return;
+        }
+
+        $this->rememberContactOnLead();
+        app(\App\Services\LeadContactProvisioner::class)->link($this->lead->fresh(), $user);
+        $this->reloadLeadContact();
+
+        Flux::toast(
+            duration: 4000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'User linked',
+            text: trim((string) $user->full_name).' is now the contact on this lead.',
+        );
+    }
+
+    /**
+     * "Add User": a user record from the name, email and phone on the lead,
+     * linked to it — for a lead whose contact was never provisioned.
+     */
+    public function addUser(): void
+    {
+        if (! $this->lead?->exists || $this->lead->user_id) {
+            return;
+        }
+
+        $this->validate(['full_name' => ['required', 'string', 'max:120']], [], ['full_name' => 'name']);
+
+        if (blank($this->email) && blank($this->phone)) {
+            $this->addError('email', 'An email or phone number is needed to create a user.');
+
+            return;
+        }
+
+        $this->rememberContactOnLead();
+        $user = app(\App\Services\LeadContactProvisioner::class)->createContactFor($this->lead->fresh(), (string) $this->full_name, $this->email, $this->phone);
+
+        if ($user === null) {
+            $this->addError('full_name', 'A name is needed to create a user.');
+
+            return;
+        }
+
+        $this->reloadLeadContact();
+
+        Flux::toast(
+            duration: 4000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'User added',
+            text: trim((string) $user->full_name).' was created and linked to this lead.',
+        );
+    }
+
+    /** The name, email and phone in the boxes onto the lead itself. */
+    protected function rememberContactOnLead(): void
+    {
+        $lead = $this->lead->fresh();
+        $data = $lead->lead_data;
+        $data['name'] = trim((string) $this->full_name) ?: ($data['name'] ?? null);
+        if (filled($this->email)) {
+            $data['email'] = trim((string) $this->email);
+        }
+        if (filled($this->phone)) {
+            $data['phone'] = preg_replace('/\D/', '', (string) $this->phone);
+        }
+        $lead->lead_data = $data;
+        $lead->saveQuietly();
+    }
+
+    protected function reloadLeadContact(): void
+    {
+        $this->lead = $this->lead->fresh(['user.clients.users', 'last_status', 'feedback']);
+        $this->user = $this->lead->user;
+        $this->client = $this->resolveClientForLead();
+        $this->selectedUserId = $this->lead->user_id;
+        if ($this->user) {
+            $this->full_name = trim((string) $this->user->full_name);
+        }
+        unset($this->userChoices, $this->missingContactInfo, $this->blockingContactInfo, $this->needsPhone);
+        $this->dispatch('refreshComponent')->to('leads.leads-index');
     }
 
     /**

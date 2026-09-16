@@ -3,6 +3,9 @@
 namespace App\Livewire\Estimates;
 
 use App\Models\Estimate;
+use App\Models\EstimateAiDraft;
+use App\Models\EstimateAiRule;
+use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
 use App\Services\EstimateAIService;
 use Flux;
@@ -35,6 +38,16 @@ class EstimateAIGenerator extends Component
 
     public string $error = '';
 
+    /** The record of this run in the generator's memory. */
+    public ?int $draftId = null;
+
+    public bool $showRules = false;
+
+    public string $newRule = '';
+
+    /** Running total of the rows streamed so far; not component state. */
+    protected float $draftTotal = 0.0;
+
     protected function rules(): array
     {
         return [
@@ -58,7 +71,7 @@ class EstimateAIGenerator extends Component
         if ($sectionId) {
             $this->sectionId = $sectionId;
         }
-        $this->reset(['inquiry', 'floorplan', 'generatedItems', 'reasoning', 'error', 'showPreview']);
+        $this->reset(['inquiry', 'floorplan', 'generatedItems', 'reasoning', 'error', 'showPreview', 'draftId', 'showRules', 'newRule']);
         $this->modal('estimate-ai-generator-modal')->show();
     }
 
@@ -69,80 +82,294 @@ class EstimateAIGenerator extends Component
             'sectionId' => 'required',
         ]);
 
+        $this->authorize('update', $this->estimate);
+
         $this->isGenerating = true;
         $this->error = '';
         $this->generatedItems = [];
         $this->reasoning = '';
+        $this->draftId = null;
+        $this->draftTotal = 0.0;
+        $result = null;
+
+        $section = EstimateSection::findOrFail($this->sectionId);
 
         try {
-            $floorplanData = null;
-
-            // Parse floorplan if uploaded
-            if ($this->floorplan) {
-                $floorplanData = $this->parseFloorplan();
-            }
+            $floorplanData = $this->floorplan ? $this->parseFloorplan() : null;
 
             $service = app(EstimateAIService::class);
             $result = $service->generateEstimate(
                 inquiry: $this->inquiry,
                 floorplanData: $floorplanData,
-                vendorId: $this->estimate->belongs_to_vendor_id ?? 1
+                vendorId: $this->estimate->belongs_to_vendor_id ?? 1,
+                // Every line lands on the estimate the moment it is drafted.
+                onLineItem: fn (array $item, int $index) => $this->draftLine($section, $item),
             );
 
-            if ($result['success']) {
-                $this->generatedItems = $result['line_items'];
-                $this->reasoning = $result['reasoning'];
-                $this->showPreview = true;
-            } else {
+            $this->reasoning = $result['reasoning'] ?? '';
+
+            if (! $result['success']) {
                 $this->error = $result['error'] ?? 'Failed to generate estimate';
+            } elseif ($this->generatedItems === []) {
+                $this->error = 'Nothing was drafted. Describe the work in more detail and try again.';
             }
         } catch (\Exception $e) {
-            $this->error = 'An error occurred: ' . $e->getMessage();
+            $this->error = 'An error occurred: '.$e->getMessage();
         } finally {
             $this->isGenerating = false;
         }
+
+        // Whatever was drafted is on the estimate already, cut off or not.
+        if ($this->generatedItems !== []) {
+            // The section keeps what was asked for and how the scope was read.
+            $section->forceFill(['ai_inquiry' => $this->inquiry, 'ai_scope' => $this->reasoning ?: null])->save();
+            $this->recordDraft($section, $result['meta'] ?? []);
+
+            $this->showPreview = true;
+            $this->refreshEstimate();
+            // Stay here to review the draft, whatever else re-rendered meanwhile.
+            $this->modal('estimate-ai-generator-modal')->show();
+        }
     }
 
-    public function applyEstimate(): void
+    /**
+     * One drafted item onto the section, then into the table the estimator
+     * is watching, with the running total and the status line kept in step.
+     *
+     * @param  array<string, mixed>  $item
+     */
+    protected function draftLine(EstimateSection $section, array $item): void
     {
-        if (empty($this->generatedItems)) {
+        $line = app(EstimateAIService::class)->applyLineItem($this->estimate, $section, $item);
+
+        if ($line === null) {
+            return;
+        }
+
+        $row = $this->rowFor($line);
+        $this->generatedItems[] = $row;
+        $this->draftTotal += $row['total'];
+        $count = count($this->generatedItems);
+
+        $this->stream(
+            to: 'draft-rows',
+            content: view('livewire.estimates.partials.ai-draft-row', ['item' => $row, 'index' => $count - 1, 'editable' => false])->render(),
+        );
+        $this->stream(to: 'draft-total', content: money($this->draftTotal), replace: true);
+        $this->stream(to: 'draft-status', content: "Drafting from your catalog… {$count} line ".($count === 1 ? 'item' : 'items').' so far', replace: true);
+    }
+
+    /**
+     * The run goes into the generator's memory: what was asked, what came
+     * back. What the estimator changes afterwards is read from the section.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    protected function recordDraft(EstimateSection $section, array $meta): void
+    {
+        $draft = EstimateAiDraft::create([
+            'vendor_id' => $this->estimate->belongs_to_vendor_id ?? 1,
+            'estimate_id' => $this->estimate->id,
+            'section_id' => $section->id,
+            'user_id' => auth()->id(),
+            'request_id' => $meta['request_id'] ?? null,
+            'model' => $meta['model'] ?? null,
+            'inquiry' => $this->inquiry,
+            'floorplan' => $meta['floorplan'] ?? null,
+            'reasoning' => $this->reasoning ?: null,
+            'drafted_items' => array_map(fn (array $row) => [
+                'estimate_line_item_id' => $row['id'],
+                'line_item_id' => $row['line_item_id'],
+                'name' => $row['name'],
+                'quantity' => $row['quantity'],
+                'unit_type' => $row['unit_type'],
+                'cost' => $row['cost'],
+            ], $this->generatedItems),
+            'usage' => $meta['usage'] ?? null,
+            'stop_reason' => $meta['stop_reason'] ?? null,
+            'status' => EstimateAiDraft::DRAFTED,
+        ]);
+
+        $this->draftId = $draft->id;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function rowFor(EstimateLineItem $line): array
+    {
+        return [
+            'id' => $line->id,
+            'line_item_id' => $line->line_item_id,
+            'name' => $line->name,
+            'category' => $line->category,
+            'sub_category' => $line->sub_category,
+            'quantity' => (float) $line->quantity,
+            'unit_type' => $line->unit_type,
+            'cost' => (float) $line->cost,
+            'total' => (float) $line->total,
+        ];
+    }
+
+    /**
+     * A quantity typed in the table is saved to its line straight away; a
+     * blank or zero counts as one.
+     */
+    public function updatedGeneratedItems(mixed $value, string $key): void
+    {
+        [$index, $field] = array_pad(explode('.', $key, 2), 2, null);
+
+        if ($field !== 'quantity' || ! isset($this->generatedItems[$index])) {
             return;
         }
 
         $this->authorize('update', $this->estimate);
 
-        $section = EstimateSection::findOrFail($this->sectionId);
+        $line = EstimateLineItem::find($this->generatedItems[$index]['id']);
+        if ($line === null) {
+            return;
+        }
 
-        $service = app(EstimateAIService::class);
-        $createdItems = $service->applyToEstimate($this->estimate, $section, $this->generatedItems);
+        $quantity = is_numeric($value) && (float) $value > 0 ? (float) $value : 1.0;
+        $line->quantity = $quantity;
+        $line->total = $quantity * (float) $line->cost;
+        $line->save();
+
+        $this->generatedItems[$index]['total'] = (float) $line->total;
+        $this->refreshEstimate();
+    }
+
+    public function removeItem(int $index): void
+    {
+        if (! isset($this->generatedItems[$index])) {
+            return;
+        }
+
+        $this->authorize('update', $this->estimate);
+
+        // Never wanted: gone for good, not parked among the restorable lines.
+        EstimateLineItem::find($this->generatedItems[$index]['id'])?->forceDelete();
+
+        unset($this->generatedItems[$index]);
+        $this->generatedItems = array_values($this->generatedItems);
+        $this->refreshEstimate();
+    }
+
+    /** Every drafted line off the estimate, and back to the description. */
+    public function discardDraft(): void
+    {
+        $this->authorize('update', $this->estimate);
+
+        foreach ($this->generatedItems as $row) {
+            EstimateLineItem::find($row['id'])?->forceDelete();
+        }
+
+        EstimateSection::find($this->sectionId)?->forceFill(['ai_inquiry' => null, 'ai_scope' => null])->save();
+        EstimateAiDraft::whereKey($this->draftId)->update(['status' => EstimateAiDraft::DISCARDED]);
+
+        $this->reset(['generatedItems', 'reasoning', 'error', 'showPreview', 'draftId']);
+        $this->refreshEstimate();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            heading: 'Draft discarded',
+            text: 'The drafted line items were removed from the estimate.',
+        );
+    }
+
+    /** The draft is on the estimate already; this closes up. */
+    public function finish(): void
+    {
+        $count = count($this->generatedItems);
+        $section = EstimateSection::find($this->sectionId);
+
+        EstimateAiDraft::whereKey($this->draftId)->update(['status' => EstimateAiDraft::FINISHED]);
 
         $this->modal('estimate-ai-generator-modal')->close();
-
-        $this->dispatch('refreshComponent')->to('estimates.estimate-show');
-        $this->dispatch('refresh')->to('projects.project-finances');
+        $this->refreshEstimate();
 
         Flux::toast(
             duration: 5000,
             position: 'top right',
             variant: 'success',
             heading: 'AI Estimate Applied',
-            text: count($createdItems) . ' line items added to ' . ($section->name ?? 'section'),
+            text: $count.' line '.($count === 1 ? 'item' : 'items').' added to '.($section?->name ?: 'section'),
         );
 
-        $this->reset(['inquiry', 'floorplan', 'generatedItems', 'reasoning', 'showPreview']);
+        $this->reset(['inquiry', 'floorplan', 'generatedItems', 'reasoning', 'error', 'showPreview', 'draftId']);
     }
 
-    public function removeItem(int $index): void
+    // ---- The company's estimating rules: read on every draft, written here. ----
+
+    public function addRule(): void
     {
-        unset($this->generatedItems[$index]);
-        $this->generatedItems = array_values($this->generatedItems);
+        $this->authorize('update', $this->estimate);
+        $this->validate(['newRule' => 'required|string|min:5|max:500']);
+
+        EstimateAiRule::create([
+            'vendor_id' => $this->vendorId(),
+            'text' => trim($this->newRule),
+            'status' => EstimateAiRule::ACTIVE,
+            'source' => EstimateAiRule::MANUAL,
+            'created_by' => auth()->id(),
+        ]);
+
+        $this->newRule = '';
     }
 
-    public function updateQuantity(int $index, float $quantity): void
+    public function approveRule(int $ruleId): void
     {
-        if (isset($this->generatedItems[$index])) {
-            $this->generatedItems[$index]['quantity'] = max(0.1, $quantity);
+        $this->authorize('update', $this->estimate);
+        $this->rule($ruleId)?->update(['status' => EstimateAiRule::ACTIVE]);
+    }
+
+    public function dismissRule(int $ruleId): void
+    {
+        $this->authorize('update', $this->estimate);
+        $this->rule($ruleId)?->update(['status' => EstimateAiRule::DISMISSED]);
+    }
+
+    public function deleteRule(int $ruleId): void
+    {
+        $this->authorize('update', $this->estimate);
+        $rule = $this->rule($ruleId);
+
+        // A proposal that was approved and then deleted is not proposed again.
+        $rule?->fingerprint ? $rule->update(['status' => EstimateAiRule::DISMISSED]) : $rule?->delete();
+    }
+
+    protected function rule(int $ruleId): ?EstimateAiRule
+    {
+        return EstimateAiRule::query()->forVendor($this->vendorId())->find($ruleId);
+    }
+
+    protected function vendorId(): int
+    {
+        return (int) ($this->estimate->belongs_to_vendor_id ?? 1);
+    }
+
+    /** The edit modal saved or removed a line: re-read the drafted rows. */
+    #[On('estimate-line-item-saved')]
+    public function reloadDraftLines(): void
+    {
+        if ($this->generatedItems === []) {
+            return;
         }
+
+        $lines = EstimateLineItem::query()->whereIn('id', array_column($this->generatedItems, 'id'))->get()->keyBy('id');
+
+        $this->generatedItems = collect($this->generatedItems)
+            ->filter(fn (array $row) => $lines->has($row['id']))
+            ->map(fn (array $row) => $this->rowFor($lines->get($row['id'])))
+            ->values()
+            ->all();
+    }
+
+    protected function refreshEstimate(): void
+    {
+        $this->dispatch('refreshComponent')->to('estimates.estimate-show');
+        $this->dispatch('refresh')->to('projects.project-finances');
     }
 
     protected function parseFloorplan(): ?array
@@ -627,21 +854,20 @@ class EstimateAIGenerator extends Component
 
     public function getEstimatedTotalProperty(): float
     {
-        $total = 0;
-        foreach ($this->generatedItems as $item) {
-            $quantity = $item['quantity'] ?? 1;
-            $cost = $item['cost'] ?? 0;
-            $total += $quantity * $cost;
-        }
-
-        return $total;
+        return array_sum(array_map(fn (array $row) => (float) ($row['total'] ?? 0), $this->generatedItems));
     }
 
     public function render()
     {
+        $sections = $this->estimate->estimate_sections;
+        $rules = EstimateAiRule::query()->forVendor($this->vendorId())->whereIn('status', [EstimateAiRule::ACTIVE, EstimateAiRule::PROPOSED])->orderBy('id')->get();
+
         return view('livewire.estimates.estimate-ai-generator', [
-            'sections' => $this->estimate->estimate_sections,
+            'sections' => $sections,
+            'sectionName' => $sections->firstWhere('id', $this->sectionId)?->name ?: 'Unnamed Section',
             'estimatedTotal' => $this->getEstimatedTotalProperty(),
+            'activeRules' => $rules->where('status', EstimateAiRule::ACTIVE)->values(),
+            'proposedRules' => $rules->where('status', EstimateAiRule::PROPOSED)->values(),
         ]);
     }
 }

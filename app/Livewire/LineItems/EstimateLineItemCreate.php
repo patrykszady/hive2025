@@ -455,6 +455,7 @@ class EstimateLineItemCreate extends Component
         $this->modal('estimate_line_item_form_modal')->close();
         $this->dispatch('refreshComponent')->to('estimates.estimate-show');
         $this->dispatch('refresh')->to(ProjectFinances::class);
+        $this->dispatch('estimate-line-item-saved', id: $this->estimate_line_item->id);
     }
 
     public function editOnEstimate($estimate_line_item_id)
@@ -509,6 +510,7 @@ class EstimateLineItemCreate extends Component
         $this->modal('estimate_line_item_form_modal')->close();
         $this->dispatch('refreshComponent')->to('estimates.estimate-show');
         $this->dispatch('refresh')->to(ProjectFinances::class);
+        $this->dispatch('estimate-line-item-saved', id: $this->estimate_line_item->id);
     }
 
     public function updateGlobalLineItem(): void

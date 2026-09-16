@@ -39,6 +39,11 @@ Schedule::command('crew:ingest-leads')
 // so deploy-time registration would race opcache), and rotates a lost signing
 // secret back into the cache. Until it first succeeds, the endpoint 503s and
 // the five-minute sweeps carry reply capture alone — nothing breaks.
+// What the estimators changed after AI drafts, turned into proposed estimating rules.
+Schedule::command('estimates:ai-propose-rules')
+    ->dailyAt('04:10')
+    ->withoutOverlapping();
+
 Schedule::command('nylas:webhooks --ensure')
     ->hourly()
     ->name('ensure-nylas-webhook')

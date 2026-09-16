@@ -301,17 +301,44 @@
                 </flux:callout>
             @endif
 
-            <flux:input.group label="User">
-                <flux:input
-                    wire:model.live="full_name"
-                    type="text"
-                    placeholder="Lead User"
-                />
+            {{-- The lead's user: a dropdown of the company's existing contacts
+                 to link (now, or on save for a new lead), and "Add User" to
+                 create one from the details below when none is linked. --}}
+            <flux:field>
+                <flux:label>User</flux:label>
+                <div class="flex items-end gap-2">
+                    <flux:select variant="listbox" searchable wire:model.live="selectedUserId" placeholder="Choose an existing user..." class="flex-1 min-w-0">
+                        <x-slot name="search">
+                            <flux:select.search placeholder="Search by name, email or phone..." />
+                        </x-slot>
+                        @foreach ($this->userChoices as $choice)
+                            <flux:select.option value="{{ $choice['id'] }}" wire:key="lead-user-choice-{{ $choice['id'] }}">{{ $choice['label'] }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
 
-                <flux:button icon="plus">
-                    Add User
-                </flux:button>
-            </flux:input.group>
+                    @if ($lead?->exists && $this->user)
+                        <flux:button icon="user" href="{{ route('users.show', $this->user) }}" target="_blank" class="whitespace-nowrap">
+                            {{ $this->user->first_name }}
+                        </flux:button>
+                    @elseif ($lead?->exists)
+                        <flux:button icon="plus" wire:click="addUser" wire:loading.attr="disabled" wire:target="addUser" class="whitespace-nowrap">
+                            Add User
+                        </flux:button>
+                    @endif
+                </div>
+                @if ($lead?->exists && ! $this->user)
+                    <flux:description>No user is linked to this lead yet. Choose an existing one, or Add User to create one from the details below.</flux:description>
+                @elseif (! $lead?->exists && $attachUserId)
+                    <flux:description>Will be linked to this existing user when the lead is created.</flux:description>
+                @endif
+            </flux:field>
+
+            <flux:input
+                wire:model.live="full_name"
+                label="Name"
+                type="text"
+                placeholder="Full name"
+            />
 
             {{-- Hidden while the gate prompt is up: two boxes for the same
                  number is confusing, and this one is the legacy edit field.

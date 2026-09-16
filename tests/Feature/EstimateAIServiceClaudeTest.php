@@ -13,80 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-/**
- * The estimate generator on Claude. The SDK call is the one thing faked:
- * everything up to it (what would be sent) and after it (what the estimator
- * sees) runs for real.
- */
-class FakeClaudeEstimateService extends EstimateAIService
-{
-    public array $sentRequests = [];
-
-    public function __construct(public array $reply = ['text' => '{"reasoning":"","line_items":[]}', 'stop_reason' => 'end_turn'])
-    {
-        parent::__construct();
-    }
-
-    protected function complete(array $request): array
-    {
-        $this->sentRequests[] = $request;
-
-        return [
-            'text' => $this->reply['text'],
-            'stop_reason' => $this->reply['stop_reason'],
-            'model' => 'claude-opus-5',
-            'usage' => ['input_tokens' => 1200, 'output_tokens' => 300, 'cache_read_input_tokens' => 0, 'cache_creation_input_tokens' => 900],
-        ];
-    }
-}
-
-function claudeEstimateFixture(): array
-{
-    $vendor = Vendor::query()->create([
-        'business_name' => 'GS Construction', 'business_type' => 'Sub', 'business_email' => 'gc@example.test',
-        'address' => '123 Main St', 'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601',
-    ]);
-    $user = User::query()->create([
-        'first_name' => 'Est', 'last_name' => 'Imator', 'email' => 'claude-est-'.uniqid().'@example.test',
-        'cell_phone' => fake()->unique()->numerify('224666####'), 'password' => bcrypt('password'),
-    ]);
-    $user->forceFill(['primary_vendor_id' => $vendor->id])->saveQuietly();
-    test()->actingAs($user);
-
-    $catalog = [];
-    foreach ([
-        ['Demo Bathroom', 'Demolition', 'Demo', 'no_unit', 850],
-        ['Shower Rough Plumbing', 'Plumbing', 'Rough', 'pieces', 1050],
-        ['New GFCI Location', 'Electrical', 'Rough', 'pieces', 230],
-        ['Floor Tile', 'Tiles', 'Floor', 'sq.ft.', 23.85],
-        ['Full Drywall', 'Drywall', 'Install', 'pieces', 205],
-        ['Roof Shingles', 'Roofing', 'Install', 'sq.ft.', 12],
-        ['Cement Boards', 'Tiles', 'Prep', 'pieces', 38],
-    ] as [$name, $category, $sub, $unit, $cost]) {
-        $catalog[$name] = LineItem::withoutGlobalScopes()->create([
-            'name' => $name, 'category' => $category, 'sub_category' => $sub, 'unit_type' => $unit, 'cost' => $cost,
-            'desc' => "Catalog description of {$name}", 'belongs_to_vendor_id' => $vendor->id,
-        ]);
-    }
-
-    // One real past Hall Bath section — the example the model should be shown.
-    $project = Project::query()->create([
-        'project_name' => 'Hall Bath',
-        'client_id' => Client::query()->create(['business_name' => 'Owner', 'address' => '1 Oak St', 'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601'])->id,
-        'address' => '1 Oak St', 'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601',
-    ]);
-    $estimate = Estimate::withoutGlobalScopes()->create(['project_id' => $project->id, 'belongs_to_vendor_id' => $vendor->id]);
-    $section = EstimateSection::create(['estimate_id' => $estimate->id, 'name' => 'Hall Bath', 'total' => 0]);
-    foreach ([['Demo Bathroom', 1], ['Floor Tile', 45], ['New GFCI Location', 2]] as [$name, $qty]) {
-        EstimateLineItem::create([
-            'estimate_id' => $estimate->id, 'section_id' => $section->id, 'line_item_id' => $catalog[$name]->id,
-            'name' => $name, 'category' => $catalog[$name]->category, 'sub_category' => $catalog[$name]->sub_category,
-            'unit_type' => $catalog[$name]->unit_type, 'quantity' => $qty, 'cost' => $catalog[$name]->cost, 'total' => $qty * $catalog[$name]->cost,
-        ]);
-    }
-
-    return compact('vendor', 'user', 'catalog', 'estimate', 'section');
-}
+require_once __DIR__.'/../Support/estimate-ai-fixtures.php';
 
 it('sends Claude a redacted enquiry, the offered catalog as an id enum, and the company\'s own past section as the example', function () {
     $fx = claudeEstimateFixture();
@@ -118,12 +45,14 @@ it('sends Claude a redacted enquiry, the offered catalog as an id enum, and the 
         // ...while the scope survives.
         ->and($userText)->toContain('rip and replace')->toContain('New tile floor and shower');
 
-    // The catalog offered is the bathroom-relevant slice, and the schema's enum is exactly that slice.
+    // The whole catalog is offered — the model, not a keyword list, decides what the job
+    // needs — and the schema's enum is exactly what was offered.
     $enum = $req['outputConfig']['format']['schema']['properties']['line_items']['items']['properties']['line_item_id']['enum'];
     expect($enum)->toContain($fx['catalog']['Floor Tile']->id)
         ->and($enum)->toContain($fx['catalog']['Shower Rough Plumbing']->id)
-        ->and($enum)->not->toContain($fx['catalog']['Roof Shingles']->id)
-        ->and($userText)->not->toContain('Roof Shingles');
+        ->and($enum)->toContain($fx['catalog']['Roof Shingles']->id)
+        ->and(count($enum))->toBe(count($fx['catalog']))
+        ->and($userText)->toContain('Roof Shingles');
 
     // The example is the real past Hall Bath, not a hard-coded one.
     expect($userText)->toContain('RECENT SECTIONS')->toContain('Hall Bath')->toContain('Floor Tile × 45 sq.ft.');
@@ -149,7 +78,8 @@ it('returns catalog-priced items from the draft, drops anything outside the offe
 
     expect($result['success'])->toBeTrue()
         ->and($result['reasoning'])->toBe('Typical hall bath.')
-        ->and(collect($result['line_items'])->pluck('name')->all())->toBe(['Demo Bathroom', 'Floor Tile'])
+        // Roofing is in the catalog, so it stays; 999999 is nobody's item.
+        ->and(collect($result['line_items'])->pluck('name')->all())->toBe(['Demo Bathroom', 'Floor Tile', 'Roof Shingles'])
         // Lump sum → quantity 1 whatever the model said.
         ->and($result['line_items'][0]['quantity'])->toBe(1.0)
         ->and($result['line_items'][0]['cost'])->toBe(850.0)
@@ -271,6 +201,54 @@ it('sizes cement board in pieces from square feet, and tile in square feet', fun
     expect($byName['Floor Tile']['quantity'])->toBe(120.0)
         // 120 sq.ft. of board is 4 sheets, not 120 sheets.
         ->and($byName['Cement Boards']['quantity'])->toBe(4.0);
+});
+
+it('hands each drafted line item to the caller as it streams in, priced and named from the catalog', function () {
+    $fx = claudeEstimateFixture();
+    $c = $fx['catalog'];
+    $service = new FakeClaudeEstimateService([
+        'text' => json_encode(['reasoning' => 'Hall bath: floor and shower.', 'line_items' => [
+            ['line_item_id' => $c['Demo Bathroom']->id, 'quantity' => 1],
+            ['line_item_id' => $c['Floor Tile']->id, 'quantity' => 1],
+            ['line_item_id' => 999999, 'quantity' => 100],
+            ['line_item_id' => $c['Cement Boards']->id, 'quantity' => 1],
+        ]]),
+        'stop_reason' => 'end_turn',
+    ]);
+
+    $streamed = [];
+    $result = $service->generateEstimate(
+        inquiry: 'Hall bath: tile floor and shower walls.',
+        floorplanData: ['floor_sqft' => 120, 'cement_board_sqft' => 120],
+        vendorId: $fx['vendor']->id,
+        onLineItem: function (array $item, int $index) use (&$streamed) {
+            $streamed[$index] = $item;
+        },
+    );
+
+    // The reply was streamed, and the rows came out one by one in the model's order.
+    expect(count($service->streamedChunks))->toBeGreaterThan(10)
+        ->and(array_keys($streamed))->toBe([0, 1, 2])
+        ->and(collect($streamed)->pluck('name')->all())->toBe(['Demo Bathroom', 'Floor Tile', 'Cement Boards'])
+        // Catalog name, category and price on every streamed row; 999999 is nobody's item and never streams.
+        ->and($streamed[1]['category'])->toBe('Tiles')
+        ->and($streamed[1]['cost'])->toBe(23.85)
+        ->and($streamed[1]['desc'])->toBe('Catalog description of Floor Tile')
+        // The floorplan sizes streamed rows exactly as it sizes the finished draft.
+        ->and($streamed[1]['quantity'])->toBe(120.0)
+        ->and($streamed[2]['quantity'])->toBe(4.0)
+        // What streamed is what the estimator then reviews.
+        ->and($result['success'])->toBeTrue()
+        ->and($result['line_items'])->toBe(array_values($streamed));
+});
+
+it('does not stream when nobody is listening', function () {
+    $fx = claudeEstimateFixture();
+    $service = new FakeClaudeEstimateService();
+
+    $service->generateEstimate('Hall bath: new tile floor.', null, $fx['vendor']->id);
+
+    expect($service->streamedChunks)->toBe([]);
 });
 
 it('carries the catalog\'s notes onto the estimate line, never the model\'s', function () {

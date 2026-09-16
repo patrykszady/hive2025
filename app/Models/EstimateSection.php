@@ -15,7 +15,7 @@ class EstimateSection extends Model
 {
     use HasFactory, LogsActivity, SoftDeletes, Sortable;
 
-    protected $fillable = ['estimate_id', 'order', 'name', 'total', 'bid_id', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['estimate_id', 'order', 'name', 'total', 'bid_id', 'ai_inquiry', 'ai_scope', 'created_at', 'updated_at', 'deleted_at'];
 
     protected function scopeSortable($query, $section)
     {

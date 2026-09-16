@@ -165,6 +165,71 @@ class LeadContactProvisioner
     }
 
     /**
+     * A contact the estimator asked for by hand, from the lead modal: matched
+     * or created from the name, email and phone on the lead, then linked to
+     * it. Unlike provision(), a missing email or phone does not stop it —
+     * someone clicked "Add User" on purpose — but a name and one way to reach
+     * them are still needed.
+     */
+    public function createContactFor(Lead $lead, string $name, ?string $email, ?string $phone): ?User
+    {
+        [$firstName, $lastName] = $this->splitName($name);
+        $email = $this->stringValue($email);
+        $phone = $this->normalizePhone($phone);
+
+        if ($firstName === '' || ($email === null && $phone === null)) {
+            return null;
+        }
+
+        $user = $this->findOrCreateUser([$firstName, $lastName], $email, $phone);
+        $this->link($lead, $user);
+
+        return $user;
+    }
+
+    /**
+     * Point the lead at a contact and, when the lead has an address, put the
+     * contact on the client at that address — the same two links provision()
+     * makes, for a contact chosen from the existing users.
+     */
+    public function link(Lead $lead, User $user): void
+    {
+        if ((int) $lead->user_id !== (int) $user->id) {
+            $lead->user_id = $user->id;
+            $lead->saveQuietly();
+        }
+
+        $data = $lead->lead_data;
+        $address = $this->stringValue($data['address'] ?? null);
+        $vendorId = (int) $lead->belongs_to_vendor_id;
+
+        if ($address === null || $this->userBelongsToVendor($user, $vendorId)) {
+            return;
+        }
+
+        $stated = array_filter([
+            'address' => $address,
+            'city' => $this->stringValue($data['city'] ?? null),
+            'state' => $this->stringValue($data['state'] ?? null),
+            'zip_code' => $this->stringValue($data['zip'] ?? null),
+        ]);
+
+        $client = $this->findOrCreateClient($user, $address, $vendorId, $stated);
+
+        if ($client === null) {
+            return;
+        }
+
+        if (! $user->clients()->where('clients.id', $client->id)->exists()) {
+            $user->clients()->attach($client->id);
+        }
+
+        if (! $client->vendors()->where('vendors.id', $vendorId)->exists()) {
+            $client->vendors()->attach($vendorId, ['source' => $lead->origin]);
+        }
+    }
+
+    /**
      * Enough to create a contact: both names, an address we can mail and a
      * number we can call.
      *

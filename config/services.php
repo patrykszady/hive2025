@@ -39,6 +39,8 @@ return [
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'task_extraction_model' => env('OPENAI_TASK_EXTRACTION_MODEL', 'gpt-4.1'),
+        // Embeds past estimate sections and new enquiries for the AI estimate generator's retrieval.
+        'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'vendor_suggestion_model' => env('OPENAI_VENDOR_SUGGESTION_MODEL', 'gpt-4o'),
         'vendor_suggestion_fallback_model' => env('OPENAI_VENDOR_SUGGESTION_FALLBACK_MODEL', 'gpt-4o'),
     ],

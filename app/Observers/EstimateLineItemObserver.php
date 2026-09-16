@@ -28,6 +28,11 @@ class EstimateLineItemObserver
      */
     public function deleted(EstimateLineItem $estimateLineItem): void
     {
+        // A force delete fires "deleted" and then "forceDeleted": count it once.
+        if ($estimateLineItem->isForceDeleting()) {
+            return;
+        }
+
         $this->adjust_section_total($estimateLineItem, 'subtract');
     }
 

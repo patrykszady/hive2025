@@ -2,15 +2,25 @@
 
 namespace App\Services;
 
+use Anthropic\Beta\Messages\BetaRawContentBlockDeltaEvent;
+use Anthropic\Beta\Messages\BetaRawMessageDeltaEvent;
+use Anthropic\Beta\Messages\BetaRawMessageStartEvent;
+use Anthropic\Beta\Messages\BetaTextDelta;
 use Anthropic\Client;
 use Anthropic\Core\Exceptions\APIConnectionException;
 use Anthropic\Core\Exceptions\APIStatusException;
 use Anthropic\Core\Exceptions\AuthenticationException;
 use Anthropic\Core\Exceptions\RateLimitException;
 use App\Models\Estimate;
+use App\Models\EstimateAiDraft;
+use App\Models\EstimateAiRule;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
 use App\Models\LineItem;
+use App\Models\Vendor;
+use App\Services\EstimateAI\DraftCorrections;
+use App\Services\EstimateAI\LineItemStreamParser;
+use App\Services\EstimateAI\SectionRetriever;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -32,15 +42,21 @@ use Illuminate\Support\Str;
  */
 class EstimateAIService
 {
+    /** Catalog lines offered to the model at most; each is one short line. */
+    public const CATALOG_CAP = 500;
+
     public const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
     protected ?Client $client;
 
     protected string $model;
 
-    public function __construct(?Client $client = null)
+    protected ?SectionRetriever $retriever;
+
+    public function __construct(?Client $client = null, ?SectionRetriever $retriever = null)
     {
         $this->client = $client;
+        $this->retriever = $retriever;
         $this->model = (string) config('services.anthropic.estimate_model', 'claude-opus-5');
     }
 
@@ -52,14 +68,22 @@ class EstimateAIService
      * @param  int  $vendorId  The vendor ID to filter line items
      * @return array{success: bool, line_items: array, reasoning: string, error?: string}
      */
-    public function generateEstimate(string $inquiry, ?array $floorplanData = null, int $vendorId = 1): array
+    /**
+     * @param  callable(array<string, mixed> $lineItem, int $index): void|null  $onLineItem  called with each
+     *                                                                                   catalog-resolved line item as the model finishes it
+     * @param  list<int>  $excludeSectionIds  past sections never shown as examples (the evaluation's own answer key)
+     * @return array{success: bool, line_items: array<int, array<string, mixed>>, reasoning?: string, error?: string, meta: array<string, mixed>}
+     */
+    public function generateEstimate(string $inquiry, ?array $floorplanData = null, int $vendorId = 1, ?callable $onLineItem = null, array $excludeSectionIds = []): array
     {
         $requestId = uniqid('est_ai_');
+        $meta = ['request_id' => $requestId, 'model' => $this->model, 'usage' => null, 'stop_reason' => null, 'example_section_ids' => [], 'catalog_count' => 0, 'floorplan' => null];
         $redactedInquiry = static::redact($inquiry);
         // Only the numbers. The parser also returns the uploaded file's name
         // (client-chosen: "Debby_Hill_1463_Winnetka.pdf") and free text — none
         // of which the model or the log has any use for.
         $floorplanData = static::floorplanMetrics($floorplanData);
+        $meta['floorplan'] = $floorplanData;
 
         Log::channel('estimate_ai')->info('Estimate generation started', [
             'request_id' => $requestId,
@@ -73,18 +97,31 @@ class EstimateAIService
 
         try {
             $availableLineItems = $this->filterRelevantLineItems($this->getAvailableLineItems($vendorId), $redactedInquiry);
-            $examples = $this->getExampleSections($vendorId, $redactedInquiry);
+            $examples = $this->getExampleSections($vendorId, $redactedInquiry, 4, $excludeSectionIds);
+            $rules = $this->activeRules($vendorId);
+            $corrections = $this->pastCorrections(array_column($examples, 'section_id'));
+            $meta['example_section_ids'] = array_column($examples, 'section_id');
+            $meta['catalog_count'] = $availableLineItems->count();
 
-            $request = $this->buildRequest($redactedInquiry, $floorplanData, $availableLineItems, $examples);
+            $request = $this->buildRequest($redactedInquiry, $floorplanData, $availableLineItems, $examples, $rules, $corrections, $this->companyLine($vendorId));
 
             Log::channel('estimate_ai')->debug('Request built', [
                 'request_id' => $requestId,
                 'catalog_count' => $availableLineItems->count(),
                 'categories' => $availableLineItems->pluck('category')->unique()->values()->all(),
-                'example_sections' => collect($examples)->pluck('name')->all(),
+                'example_sections' => collect($examples)->map(fn ($e) => $e['name'].' ('.$e['score'].')')->all(),
+                'rules' => count($rules),
+                'corrections' => count($corrections),
             ]);
 
-            $completion = $this->complete($request);
+            $onText = $onLineItem === null
+                ? null
+                : $this->streamLineItems($onLineItem, $availableLineItems, $floorplanData);
+
+            $completion = $this->complete($request, $onText);
+            $meta['model'] = $completion['model'];
+            $meta['usage'] = $completion['usage'];
+            $meta['stop_reason'] = $completion['stop_reason'];
 
             Log::channel('estimate_ai')->debug('Claude response received', [
                 'request_id' => $requestId,
@@ -95,11 +132,11 @@ class EstimateAIService
             ]);
 
             if ($completion['stop_reason'] === 'refusal') {
-                return $this->failure($requestId, 'Claude declined to draft this estimate. Reword the description and try again.');
+                return $this->failure($requestId, 'Claude declined to draft this estimate. Reword the description and try again.', $meta);
             }
 
             if ($completion['stop_reason'] === 'max_tokens') {
-                return $this->failure($requestId, 'The draft was cut off before it finished. Try a shorter description or fewer rooms at once.');
+                return $this->failure($requestId, 'The draft was cut off before it finished. Try a shorter description or fewer rooms at once.', $meta);
             }
 
             $result = $this->parseResponse($completion['text']);
@@ -121,6 +158,8 @@ class EstimateAIService
                 'line_items' => $result['line_items'],
             ]);
 
+            $result['meta'] = $meta;
+
             return $result;
         } catch (\Throwable $e) {
             Log::channel('estimate_ai')->error('Estimate generation failed', [
@@ -131,12 +170,15 @@ class EstimateAIService
             ]);
             Log::error('EstimateAIService error: '.$e->getMessage());
 
-            return $this->failure($requestId, $this->friendlyError($e));
+            return $this->failure($requestId, $this->friendlyError($e), $meta);
         }
     }
 
     /**
      * Apply AI-generated line items to an estimate section.
+     *
+     * @param  array<int, array<string, mixed>>  $generatedItems
+     * @return list<EstimateLineItem>
      */
     public function applyToEstimate(Estimate $estimate, EstimateSection $section, array $generatedItems): array
     {
@@ -147,46 +189,18 @@ class EstimateAIService
         ]);
 
         $createdItems = [];
-        $currentOrder = $section->estimate_line_items()->max('order') ?? -1;
         $skippedItems = [];
 
         foreach ($generatedItems as $item) {
-            $lineItem = LineItem::find($item['line_item_id'] ?? null);
+            $created = $this->applyLineItem($estimate, $section, $item);
 
-            if (! $lineItem) {
-                $skippedItems[] = [
-                    'line_item_id' => $item['line_item_id'] ?? null,
-                    'reason' => 'Line item not found',
-                ];
+            if ($created === null) {
+                $skippedItems[] = ['line_item_id' => $item['line_item_id'] ?? null, 'reason' => 'Line item not found'];
 
                 continue;
             }
 
-            $currentOrder++;
-            $quantity = $item['quantity'] ?? 1;
-            // The catalog price, always — never a figure the model wrote.
-            $cost = (float) $lineItem->cost;
-            $total = $quantity * $cost;
-
-            $createdItems[] = EstimateLineItem::create([
-                'estimate_id' => $estimate->id,
-                'line_item_id' => $lineItem->id,
-                'section_id' => $section->id,
-                'order' => $currentOrder,
-                'name' => $lineItem->name,
-                'category' => $lineItem->category,
-                'sub_category' => $lineItem->sub_category,
-                'unit_type' => $lineItem->unit_type,
-                'quantity' => $quantity,
-                'cost' => $cost,
-                'total' => $total,
-                // The catalog's own text, verbatim — the description and
-                // notes already on file for this item are what the estimate
-                // says, whether a person or the model picked it (2026-09-16:
-                // a drafted kitchen carried the model's rewordings instead).
-                'desc' => $lineItem->desc,
-                'notes' => $lineItem->notes,
-            ]);
+            $createdItems[] = $created;
         }
 
         $section->total = $section->estimate_line_items()->sum('total');
@@ -198,17 +212,48 @@ class EstimateAIService
             'created_count' => count($createdItems),
             'skipped_count' => count($skippedItems),
             'skipped_items' => $skippedItems,
-            'section_total' => $section->total,
-            'created_items' => collect($createdItems)->map(fn ($item) => [
-                'id' => $item->id,
-                'name' => $item->name,
-                'quantity' => $item->quantity,
-                'cost' => $item->cost,
-                'total' => $item->total,
-            ])->all(),
         ]);
 
         return $createdItems;
+    }
+
+    /**
+     * One drafted item onto the estimate, at the catalog's price and with the
+     * catalog's own text. Null when the catalog item no longer exists.
+     *
+     * @param  array<string, mixed>  $item
+     */
+    public function applyLineItem(Estimate $estimate, EstimateSection $section, array $item): ?EstimateLineItem
+    {
+        $lineItem = LineItem::find($item['line_item_id'] ?? null);
+
+        if (! $lineItem) {
+            return null;
+        }
+
+        $quantity = is_numeric($item['quantity'] ?? null) && (float) $item['quantity'] > 0 ? (float) $item['quantity'] : 1.0;
+        // The catalog price, always — never a figure the model wrote.
+        $cost = (float) $lineItem->cost;
+
+        return EstimateLineItem::create([
+            'estimate_id' => $estimate->id,
+            'line_item_id' => $lineItem->id,
+            'section_id' => $section->id,
+            'order' => ($section->estimate_line_items()->max('order') ?? -1) + 1,
+            'name' => $lineItem->name,
+            'category' => $lineItem->category,
+            'sub_category' => $lineItem->sub_category,
+            'unit_type' => $lineItem->unit_type,
+            'quantity' => $quantity,
+            'cost' => $cost,
+            'total' => $quantity * $cost,
+            // The catalog's own text, verbatim — the description and
+            // notes already on file for this item are what the estimate
+            // says, whether a person or the model picked it (2026-09-16:
+            // a drafted kitchen carried the model's rewordings instead).
+            'desc' => $lineItem->desc,
+            'notes' => $lineItem->notes,
+        ]);
     }
 
     /**
@@ -286,7 +331,7 @@ class EstimateAIService
      *
      * @return array<string, mixed>
      */
-    protected function buildRequest(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples): array
+    protected function buildRequest(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples, array $rules = [], array $corrections = [], string $companyLine = ''): array
     {
         return [
             'model' => $this->model,
@@ -294,10 +339,10 @@ class EstimateAIService
             // No cache marker: the system prompt is ~350 tokens, under Opus 5's
             // 512-token minimum cacheable prefix, so a marker would never cache.
             'system' => [
-                ['type' => 'text', 'text' => $this->systemPrompt()],
+                ['type' => 'text', 'text' => $this->systemPrompt($companyLine)],
             ],
             'messages' => [
-                ['role' => 'user', 'content' => $this->userPrompt($inquiry, $floorplanData, $lineItems, $examples)],
+                ['role' => 'user', 'content' => $this->userPrompt($inquiry, $floorplanData, $lineItems, $examples, $rules, $corrections)],
             ],
             'thinking' => ['type' => 'adaptive'],
             'outputConfig' => [
@@ -317,40 +362,117 @@ class EstimateAIService
     /**
      * The one place the SDK is called. Tests replace this with a fake.
      *
+     * With $onText the reply is streamed and every text delta is handed to it
+     * as it arrives; the returned text is the same either way.
+     *
      * @param  array<string, mixed>  $request
+     * @param  callable(string): void|null  $onText
      * @return array{text: string, stop_reason: ?string, model: string, usage: array<string, mixed>}
      */
-    protected function complete(array $request): array
+    protected function complete(array $request, ?callable $onText = null): array
     {
-        $message = $this->client()->beta->messages->create(
-            maxTokens: $request['maxTokens'],
-            messages: $request['messages'],
-            model: $request['model'],
-            fallbacks: $request['fallbacks'],
-            outputConfig: $request['outputConfig'],
-            system: $request['system'],
-            thinking: $request['thinking'],
-            betas: $request['betas'],
-        );
+        $arguments = [
+            'maxTokens' => $request['maxTokens'],
+            'messages' => $request['messages'],
+            'model' => $request['model'],
+            'fallbacks' => $request['fallbacks'],
+            'outputConfig' => $request['outputConfig'],
+            'system' => $request['system'],
+            'thinking' => $request['thinking'],
+            'betas' => $request['betas'],
+        ];
+
+        if ($onText === null) {
+            $message = $this->client()->beta->messages->create(...$arguments);
+
+            $text = '';
+            foreach ($message->content as $block) {
+                if ($block->type === 'text') {
+                    $text .= $block->text;
+                }
+            }
+
+            return [
+                'text' => $text,
+                'stop_reason' => $message->stopReason,
+                'model' => $message->model,
+                'usage' => [
+                    'input_tokens' => $message->usage->inputTokens,
+                    'output_tokens' => $message->usage->outputTokens,
+                    'cache_read_input_tokens' => $message->usage->cacheReadInputTokens,
+                    'cache_creation_input_tokens' => $message->usage->cacheCreationInputTokens,
+                ],
+            ];
+        }
+
+        $stream = $this->client()->beta->messages->createStream(...$arguments);
 
         $text = '';
-        foreach ($message->content as $block) {
-            if ($block->type === 'text') {
-                $text .= $block->text;
+        $stopReason = null;
+        $model = (string) $request['model'];
+        $usage = [
+            'input_tokens' => null,
+            'output_tokens' => null,
+            'cache_read_input_tokens' => null,
+            'cache_creation_input_tokens' => null,
+        ];
+
+        try {
+            foreach ($stream as $event) {
+                if ($event instanceof BetaRawMessageStartEvent) {
+                    $model = $event->message->model ?: $model;
+                    $usage['input_tokens'] = $event->message->usage->inputTokens;
+                    $usage['cache_read_input_tokens'] = $event->message->usage->cacheReadInputTokens;
+                    $usage['cache_creation_input_tokens'] = $event->message->usage->cacheCreationInputTokens;
+                } elseif ($event instanceof BetaRawContentBlockDeltaEvent) {
+                    if ($event->delta instanceof BetaTextDelta && $event->delta->text !== '') {
+                        $text .= $event->delta->text;
+                        $onText($event->delta->text);
+                    }
+                } elseif ($event instanceof BetaRawMessageDeltaEvent) {
+                    $stopReason = $event->delta->stopReason ?? $stopReason;
+                    $usage['output_tokens'] = $event->usage->outputTokens;
+                }
             }
+        } finally {
+            $stream->close();
         }
 
         return [
             'text' => $text,
-            'stop_reason' => $message->stopReason,
-            'model' => $message->model,
-            'usage' => [
-                'input_tokens' => $message->usage->inputTokens,
-                'output_tokens' => $message->usage->outputTokens,
-                'cache_read_input_tokens' => $message->usage->cacheReadInputTokens,
-                'cache_creation_input_tokens' => $message->usage->cacheCreationInputTokens,
-            ],
+            'stop_reason' => $stopReason,
+            'model' => $model,
+            'usage' => $usage,
         ];
+    }
+
+    /**
+     * Text deltas in, catalog-resolved line items out: one $onLineItem call per
+     * item the moment the model closes it, with the same normalisation and
+     * floorplan quantities the finished draft gets.
+     *
+     * @param  callable(array<string, mixed>, int): void  $onLineItem
+     * @return \Closure(string): void
+     */
+    protected function streamLineItems(callable $onLineItem, Collection $lineItems, ?array $floorplanData): \Closure
+    {
+        $parser = new LineItemStreamParser;
+        $allowed = $lineItems->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $streamed = 0;
+
+        return function (string $chunk) use ($parser, $onLineItem, $allowed, $floorplanData, &$streamed): void {
+            foreach ($parser->push($chunk) as $raw) {
+                $items = $this->normalizeLineItems([$raw], $allowed);
+
+                if ($items !== [] && ! empty($floorplanData)) {
+                    $items = $this->applyFloorplanQuantities($items, $floorplanData);
+                }
+
+                foreach ($items as $item) {
+                    $onLineItem($item, $streamed++);
+                }
+            }
+        };
     }
 
     protected function client(): Client
@@ -402,10 +524,11 @@ class EstimateAIService
         ];
     }
 
-    protected function systemPrompt(): string
+    protected function systemPrompt(string $companyLine = ''): string
     {
-        return <<<'PROMPT'
-You are the estimator at GS Construction & Remodeling, a residential remodeling contractor in the Chicago suburbs. You draft the line items for a new estimate from the company's own price catalog, for a human estimator to review and edit before anything is sent to a client.
+        $companyLine = $companyLine !== '' ? $companyLine : 'a residential remodeling contractor';
+
+        return "You are the estimator at {$companyLine}. You draft the line items for a new estimate from the company's own price catalog, for a human estimator to review and edit before anything is sent to a client.\n".<<<'PROMPT'
 
 How estimates are built here: an estimate is split into sections, one per room or scope ("Kitchen", "Hall Bath", "Basement"). Each section lists catalog items with a quantity in the item's unit — pieces, sq.ft., li.ft., or no_unit for lump sums, which always have quantity 1. Follow the order of construction within a section: demolition, framing, plumbing rough, electrical rough, HVAC, insulation, drywall, tile prep, tile, finish carpentry, fixtures and trim, painting.
 
@@ -414,13 +537,38 @@ Rules:
 - Choose quantities from the dimensions given; if none are given, use the quantities the example sections used for a similar room and say in the reasoning that they are typical, not measured.
 - Include the supporting work a real job needs: switches for new lights, patching after electrical, cement board under tile, GFCI protection and an exhaust fan in bathrooms, code-compliance items where the examples include them.
 - Do not price anything. Costs come from the catalog after you answer.
+- Follow the company's own estimating rules when the request lists them, and learn from the corrections its estimators made to earlier drafts of similar work: what they removed was not wanted, what they added was missing.
 - Keep the reasoning short and concrete. Do not repeat the item list in it.
 PROMPT;
     }
 
-    protected function userPrompt(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples): string
+    /** "GS Construction, a residential remodeling contractor in Palatine, IL" — the company whose estimator the model plays. */
+    protected function companyLine(int $vendorId): string
+    {
+        $vendor = Vendor::withoutGlobalScopes()->find($vendorId);
+        if ($vendor === null) {
+            return '';
+        }
+
+        $place = collect([$vendor->city, $vendor->state])->filter()->implode(', ');
+
+        // The short name where there is one ("GS Construction"); the legal name is title-cased on save.
+        $name = trim((string) ($vendor->short_name ?: $vendor->business_name));
+
+        return $name.', a residential remodeling contractor'.($place !== '' ? " in {$place}" : '');
+    }
+
+    protected function userPrompt(string $inquiry, ?array $floorplanData, Collection $lineItems, array $examples, array $rules = [], array $corrections = []): string
     {
         $prompt = "CUSTOMER INQUIRY (contact details already removed):\n{$inquiry}\n\n";
+
+        if ($rules !== []) {
+            $prompt .= "COMPANY ESTIMATING RULES (written by this company's estimators; follow them):\n";
+            foreach ($rules as $rule) {
+                $prompt .= "- {$rule}\n";
+            }
+            $prompt .= "\n";
+        }
 
         if ($floorplanData) {
             $prompt .= "FLOORPLAN DATA (measured from a room scan; size quantities from these numbers, per room where rooms are listed):\n"
@@ -452,7 +600,56 @@ PROMPT;
             }
         }
 
+        if ($corrections !== []) {
+            $prompt .= "\nWHAT THE ESTIMATORS CHANGED AFTER EARLIER AI DRAFTS OF SIMILAR WORK (do not repeat these mistakes):\n";
+            foreach ($corrections as $correction) {
+                $prompt .= "- {$correction['section']}: asked for \"{$correction['inquiry']}\" — {$correction['summary']}\n";
+            }
+        }
+
         return $prompt;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function activeRules(int $vendorId): array
+    {
+        return EstimateAiRule::query()->forVendor($vendorId)->active()->orderBy('id')->pluck('text')->map(fn ($t) => trim((string) $t))->filter()->values()->all();
+    }
+
+    /**
+     * The corrections estimators made to kept AI drafts of the example
+     * sections: the nearest past work, so the nearest past mistakes.
+     *
+     * @param  list<int>  $sectionIds
+     * @return list<array{section: string, inquiry: string, summary: string}>
+     */
+    protected function pastCorrections(array $sectionIds, int $limit = 6): array
+    {
+        if ($sectionIds === []) {
+            return [];
+        }
+
+        return EstimateAiDraft::query()
+            ->whereIn('section_id', $sectionIds)
+            ->where('status', '!=', EstimateAiDraft::DISCARDED)
+            ->with('section')
+            ->latest('id')
+            ->get()
+            ->map(function (EstimateAiDraft $draft) {
+                $corrections = DraftCorrections::forDraft($draft);
+
+                return DraftCorrections::isEmpty($corrections) ? null : [
+                    'section' => $draft->section?->name ?: 'Section',
+                    'inquiry' => Str::limit(static::redact(trim((string) $draft->inquiry)), 140),
+                    'summary' => DraftCorrections::summarize($corrections),
+                ];
+            })
+            ->filter()
+            ->take($limit)
+            ->values()
+            ->all();
     }
 
     protected function getAvailableLineItems(int $vendorId): Collection
@@ -469,66 +666,25 @@ PROMPT;
     }
 
     /**
-     * Room words in the enquiry → the section names they match in history.
-     * Unmatched enquiries fall back to the most recent sections of any kind.
+     * The company's own past sections closest to the enquiry — by meaning
+     * when embeddings are available, by word overlap otherwise — as the
+     * examples the model drafts from.
      *
-     * @return array<int, array{name: string, project: string, date: string, items: array<int, array{name: string, quantity: float, unit_type: string}>}>
+     * @param  list<int>  $excludeSectionIds
+     * @return list<array{section_id: int, score: float, name: string, project: string, date: string, items: list<array{name: string, quantity: float, unit_type: string}>}>
      */
-    protected function getExampleSections(int $vendorId, string $inquiry, int $limit = 4): array
+    protected function getExampleSections(int $vendorId, string $inquiry, int $limit = 4, array $excludeSectionIds = []): array
     {
-        $text = Str::lower($inquiry);
-        $roomWords = [
-            'kitchen' => ['kitchen'],
-            'powder' => ['powder'],
-            'hall bath' => ['hall bath', 'bathroom', 'bath'],
-            'primary bath' => ['primary bath', 'master bath', 'primary suite', 'master bathroom', 'primary bathroom'],
-            'master bath' => ['primary bath', 'master bath', 'primary suite'],
-            'bathroom' => ['bath'],
-            'bath' => ['bath'],
-            'basement' => ['basement'],
-            'laundry' => ['laundry', 'mud'],
-            'mudroom' => ['mud', 'laundry'],
-            'family room' => ['family', 'living'],
-            'living room' => ['living', 'family'],
-            'bedroom' => ['bedroom'],
-            'foyer' => ['foyer', 'entry'],
-            'addition' => ['addition'],
-            'deck' => ['deck'],
-            'garage' => ['garage'],
-            'flooring' => ['flooring'],
-            'paint' => ['painting', 'paint'],
-        ];
+        $retriever = $this->retriever ?? app(SectionRetriever::class);
 
-        $needles = [];
-        foreach ($roomWords as $word => $sectionNeedles) {
-            if (str_contains($text, $word)) {
-                $needles = array_merge($needles, $sectionNeedles);
-            }
-        }
-        $needles = array_values(array_unique($needles));
-
-        $query = EstimateSection::query()
-            ->whereHas('estimate', fn ($q) => $q->withoutGlobalScopes()->whereNull('deleted_at')->where('belongs_to_vendor_id', $vendorId))
-            ->whereHas('estimate_line_items')
-            ->where('name', '!=', '')
-            ->where('name', 'not like', '%change order%')
-            ->with(['estimate.project', 'estimate_line_items' => fn ($q) => $q->orderBy('order')])
-            ->latest('id');
-
-        if ($needles !== []) {
-            $query->where(function ($q) use ($needles) {
-                foreach ($needles as $needle) {
-                    $q->orWhere('name', 'like', "%{$needle}%");
-                }
-            });
-        }
-
-        return $query->limit($limit)->get()
-            ->map(fn (EstimateSection $section) => [
-                'name' => $section->name,
-                'project' => $section->estimate?->project?->project_name ?? 'past project',
-                'date' => optional($section->created_at)->format('M Y') ?? '',
-                'items' => $section->estimate_line_items
+        return collect($retriever->similar($vendorId, $inquiry, $limit, $excludeSectionIds))
+            ->map(fn (array $row) => [
+                'section_id' => (int) $row['section']->id,
+                'score' => (float) $row['score'],
+                'name' => $row['section']->name,
+                'project' => $row['section']->estimate?->project?->project_name ?? 'past project',
+                'date' => optional($row['section']->created_at)->format('M Y') ?? '',
+                'items' => $row['section']->estimate_line_items
                     ->map(fn ($item) => ['name' => $item->name, 'quantity' => (float) $item->quantity, 'unit_type' => $item->unit_type])
                     ->values()
                     ->all(),
@@ -575,7 +731,33 @@ PROMPT;
         return $items;
     }
 
+    /**
+     * The catalog offered to the model. A company's whole catalog fits (a
+     * few hundred short lines), and the model is the one who knows that a
+     * wine cellar needs a header, glass and drywall as well as the HVAC the
+     * enquiry happened to mention — so it is all offered. Only a catalog
+     * larger than the cap is trimmed, and then the trades the enquiry names
+     * come first.
+     */
     protected function filterRelevantLineItems(Collection $lineItems, string $inquiry): Collection
+    {
+        if ($lineItems->count() <= self::CATALOG_CAP) {
+            return $lineItems->values();
+        }
+
+        $categories = $this->categoriesNamedIn($inquiry);
+        [$named, $rest] = $lineItems->partition(fn ($item) => in_array($item->category, $categories, true));
+
+        return $named->concat($rest)->take(self::CATALOG_CAP)->values();
+    }
+
+    /**
+     * Trade categories the words of an enquiry point at, for ordering a
+     * catalog too large to offer whole.
+     *
+     * @return list<string>
+     */
+    protected function categoriesNamedIn(string $inquiry): array
     {
         $keywords = Str::lower($inquiry);
 
@@ -584,48 +766,40 @@ PROMPT;
             'basement' => ['Demolition', 'Framing', 'Insulation', 'Drywall', 'Electrical', 'Plumbing', 'HVAC', 'Flooring', 'Painting', 'Carpentry', 'Services'],
             'shower' => ['Plumbing', 'Tiles', 'Glass', 'Demolition'],
             'tile' => ['Tiles', 'Drywall'],
-            'tiles' => ['Tiles', 'Drywall'],
             'tub' => ['Plumbing', 'Tiles'],
             'bath' => ['Demolition', 'Plumbing', 'Electrical', 'Tiles', 'Drywall', 'Services', 'Painting', 'Glass', 'Carpentry'],
-            'bathroom' => ['Demolition', 'Plumbing', 'Electrical', 'Tiles', 'Drywall', 'Services', 'Painting', 'Glass', 'Carpentry'],
             'vanity' => ['Plumbing', 'Carpentry', 'Services'],
-            'electrical' => ['Electrical'],
+            'electric' => ['Electrical'],
             'light' => ['Electrical'],
-            'lights' => ['Electrical'],
             'exhaust' => ['Electrical', 'HVAC'],
             'fan' => ['Electrical', 'HVAC'],
             'paint' => ['Painting'],
             'drywall' => ['Drywall'],
             'insulation' => ['Insulation'],
-            'floor' => ['Tiles', 'Flooring'],
-            'frame' => ['Framing', 'Carpentry'],
-            'framing' => ['Framing', 'Carpentry'],
-            'window' => ['Carpentry', 'Framing', 'Siding'],
+            'floor' => ['Tiles', 'Flooring', 'Hardwood', 'Carpet'],
+            'fram' => ['Framing', 'Carpentry'],
+            'header' => ['Framing', 'Carpentry'],
+            'window' => ['Carpentry', 'Framing', 'Siding', 'Windows'],
             'door' => ['Carpentry'],
             'cabinet' => ['Carpentry', 'Services'],
-            'counter' => ['Carpentry', 'Services'],
+            'counter' => ['Carpentry', 'Services', 'Stone Fabricator'],
+            'glass' => ['Glass'],
+            'glaz' => ['Glass'],
             'hvac' => ['HVAC'],
             'plumb' => ['Plumbing'],
-            'demo' => ['Demolition'],
+            'demo' => ['Demolition', 'Demo'],
+            'roof' => ['Roofing'],
+            'siding' => ['Siding'],
         ];
 
-        $categories = collect();
-        foreach ($categoryMap as $keyword => $mappedCategories) {
+        $categories = [];
+        foreach ($categoryMap as $keyword => $mapped) {
             if (str_contains($keywords, $keyword)) {
-                $categories = $categories->merge($mappedCategories);
+                $categories = array_merge($categories, $mapped);
             }
         }
 
-        if ($categories->isEmpty()) {
-            return $lineItems->take(160);
-        }
-
-        $categories = $categories->unique()->values()->all();
-
-        return $lineItems
-            ->filter(fn ($item) => in_array($item->category, $categories, true))
-            ->values()
-            ->take(200);
+        return array_values(array_unique($categories));
     }
 
     protected function parseResponse(string $content): array
@@ -668,7 +842,7 @@ PROMPT;
             return [];
         }
 
-        $lineItems = LineItem::query()->whereIn('id', $ids)->get(['id', 'name', 'cost', 'unit_type', 'desc', 'notes'])->keyBy('id');
+        $lineItems = LineItem::query()->whereIn('id', $ids)->get(['id', 'name', 'category', 'sub_category', 'cost', 'unit_type', 'desc', 'notes'])->keyBy('id');
 
         $normalized = [];
         $dropped = [];
@@ -690,6 +864,8 @@ PROMPT;
             $normalized[] = [
                 'line_item_id' => $lineItem->id,
                 'name' => $lineItem->name,
+                'category' => $lineItem->category,
+                'sub_category' => $lineItem->sub_category,
                 'quantity' => $quantity,
                 'cost' => (float) $lineItem->cost,
                 'unit_type' => $lineItem->unit_type,
@@ -718,10 +894,10 @@ PROMPT;
     }
 
     /** @return array{success: false, line_items: array, reasoning: string, error: string} */
-    protected function failure(string $requestId, string $message): array
+    protected function failure(string $requestId, string $message, array $meta = []): array
     {
         Log::channel('estimate_ai')->warning('Estimate generation returned no draft', ['request_id' => $requestId, 'error' => $message]);
 
-        return ['success' => false, 'line_items' => [], 'reasoning' => '', 'error' => $message];
+        return ['success' => false, 'line_items' => [], 'reasoning' => '', 'error' => $message, 'meta' => $meta + ['request_id' => $requestId]];
     }
 }
