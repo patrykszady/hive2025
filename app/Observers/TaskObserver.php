@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Jobs\DeleteMeetTaskCalendarEvent;
+use App\Jobs\MarkClientLeadWon;
 use App\Jobs\SendBatchVendorAvailabilitySms;
 use App\Jobs\SendPendingTaskReminderToClients;
 use App\Jobs\SendRealtimeTaskNotification;
@@ -33,6 +34,37 @@ class TaskObserver
 
         // Text the homeowner the scheduled service-call tasks (batched, 5-min delay)
         $this->queueServiceCallClientNotification($task);
+
+        $this->markConsultLeadWon($task);
+    }
+
+    /**
+     * A consult put on the calendar — or moved — is a converted lead,
+     * whichever screen did it. The composer marks Won itself; a consult
+     * created or dragged in the task form did not (Carri Taraszka's lead sat
+     * at New after her consult was moved to 2:00, 2026-09-16). Only an
+     * upcoming "… Consult" Meet counts, and only when it was created or its
+     * day/time actually changed.
+     */
+    private function markConsultLeadWon(Task $task, bool $timeChanged = true): void
+    {
+        if ($task->type !== 'Meet' || ! $timeChanged || ! preg_match('/ Consult$/', (string) $task->title)) {
+            return;
+        }
+
+        if (! $task->start_date || Carbon::parse($task->start_date)->lt(now()->startOfDay())) {
+            return;
+        }
+
+        $clientIds = \Illuminate\Support\Facades\DB::table('project_vendor')
+            ->where('project_id', $task->project_id)
+            ->whereNotNull('client_id')
+            ->distinct()
+            ->pluck('client_id');
+
+        foreach ($clientIds as $clientId) {
+            MarkClientLeadWon::dispatch((int) $clientId, $task->belongs_to_vendor_id, consultBooked: true);
+        }
     }
 
     public function creating(Task $task): void
@@ -74,6 +106,12 @@ class TaskObserver
         $datesChanged = $task->getOriginal('start_date') != $task->start_date 
             || $task->getOriginal('end_date') != $task->end_date
             || $originalOptionsDates != $newOptionsDates;
+
+        // A consult moved to another day or time (the start can change on the
+        // same day) converts its lead like a fresh booking does.
+        $originalTimes = is_object($originalOptions) ? ($originalOptions->time_settings ?? null) : (is_array($originalOptions) ? ($originalOptions['time_settings'] ?? null) : null);
+        $newTimes = is_object($task->options) ? ($task->options->time_settings ?? null) : (is_array($task->options) ? ($task->options['time_settings'] ?? null) : null);
+        $this->markConsultLeadWon($task, $datesChanged || json_encode($originalTimes) !== json_encode($newTimes));
         $needsStatusSet = $task->vendor_id && $task->vendor_status === null;
 
         // But only if the change came from the dashboard (authenticated user), not from the vendor's public page

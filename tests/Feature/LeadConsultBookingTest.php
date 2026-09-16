@@ -1424,6 +1424,45 @@ it('trims a name typed on the lead to its first word when there is no client', f
     expect($greeting)->toBe('Hi Preet,');
 });
 
+it('re-sending the confirmation of the time already booked converts a re-picked lead back to Won', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    // An opted-in thread from the start, or the first send would open a
+    // pending consent thread that keeps the second text from going out.
+    $thread = consultThread($fx);
+    $texts = [];
+    $this->mock(\App\Services\GroupSmsService::class, function ($mock) use ($thread, &$texts) {
+        $mock->shouldReceive('sendToThread')->twice()
+            ->withArgs(function ($t, $text) use ($thread, &$texts) { $texts[] = $text; return $t->id === $thread->id; });
+    });
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Kitchen Remodel')
+        ->call('send_message');
+    expect($fx['lead']->fresh()->last_status->title)->toBe('Won');
+
+    // They re-picked through the link: back to New, consult still on the calendar.
+    $fx['lead']->setStatus('New');
+
+    // The office confirms the same time again: nothing to book, still a
+    // confirmation — for the lead's status and for the text that goes with it.
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->call('send_message');
+
+    $task = Task::withoutGlobalScopes()->where('type', 'Meet')->firstOrFail();
+    $label = \Illuminate\Support\Carbon::parse($task->start_date)->format('D, M j').' · 2:00 PM';
+
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->count())->toBe(1)
+        ->and($fx['lead']->fresh()->last_status->title)->toBe('Won')
+        ->and($texts)->toHaveCount(2)
+        ->and($texts[1])->toContain("Your consultation with GSC is confirmed for {$label}")
+        ->and($texts[1])->not->toContain('Pick a consultation time');
+});
+
 // ── The team's calendars gate the composer too ───────────────────────────
 
 it('withholds start times the calendars are busy for, and says so when a picked window has none left', function () {

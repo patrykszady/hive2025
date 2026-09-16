@@ -1276,10 +1276,24 @@ class LeadCreate extends Component
 
         $booked = $this->bookConsult();
 
+        // bookConsult() may have converted the lead through the task observer;
+        // read the status fresh before deciding anything on it.
+        $this->lead->unsetRelation('last_status');
+
+        // Re-sending the confirmation of a time already on the calendar (after
+        // the homeowner re-picked and put the lead back to New) books nothing
+        // new, but it IS the office confirming the consult: that converts too.
+        $confirmed = $booked || ($this->selectedExactTime !== null
+            && ($consult = $this->bookedConsult()) !== null
+            && ! ($consult['past'] ?? true));
+
         // Whatever the email said, the client's thread hears it too — the
         // same people, both channels — and a client with no thread yet is
         // sent the START prompt so the next one can be texted.
-        $texted = $this->textAlongsideEmail($booked);
+        // A re-sent confirmation books nothing new but confirms all the same:
+        // the text must say "confirmed for…", not "pick a time" (Jeanne
+        // Bondi's thread, 2026-09-16).
+        $texted = $this->textAlongsideEmail($confirmed);
 
         // A time was chosen for this email but nothing was booked: the lead
         // has no client to hang a project on. Say so — the email is out,
@@ -1291,7 +1305,7 @@ class LeadCreate extends Component
         // and a Meet task on the calendar. Move it out of New/Replied so the
         // Replied filter keeps showing only leads still waiting on us. Lost /
         // Not a Fit are someone's decision — never resurrect those here.
-        if ($booked && in_array($this->lead->last_status?->title ?? 'New', ['New', 'Replied'], true)) {
+        if ($confirmed && in_array($this->lead->last_status?->title ?? 'New', ['New', 'Replied'], true)) {
             $this->lead->setStatus('Won');
             $this->lead->unsetRelation('last_status');
             $this->lead_status = 'Won';

@@ -96,6 +96,16 @@ it('does not overwrite a human decision like Lost or Not a Fit', function (strin
     expect($lead->fresh()->last_status->title)->toBe($status);
 })->with(['Lost', 'Not a Fit', 'Replied']);
 
+it('converts a Replied lead when the conversion comes from a booked consult', function () {
+    $vendor = Vendor::factory()->create();
+    $client = makeClientForVendor($vendor);
+    $lead = makeLeadForClient($vendor, $client, 'Replied');
+
+    (new MarkClientLeadWon($client->id, $vendor->id, consultBooked: true))->handle();
+
+    expect($lead->fresh()->last_status->title)->toBe('Won');
+});
+
 it('writes no duplicate status row when the lead is already Won', function () {
     $vendor = Vendor::factory()->create();
     $client = makeClientForVendor($vendor);

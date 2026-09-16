@@ -26,6 +26,12 @@ class MarkClientLeadWon implements ShouldQueue
     public function __construct(
         public int $clientId,
         public ?int $vendorId = null,
+        /**
+         * A consult was booked or moved (TaskObserver), not merely a project
+         * created: that also converts a Replied lead — the office confirmed a
+         * meeting, so "waiting on them" no longer applies.
+         */
+        public bool $consultBooked = false,
     ) {}
 
     public function handle(): void
@@ -39,7 +45,7 @@ class MarkClientLeadWon implements ShouldQueue
         // Only leads still sitting in New convert — a lead someone already
         // marked Lost/Not a Fit stays where the human put it.
         $leads = Lead::withoutGlobalScopes()
-            ->whereLatestStatus('New')
+            ->whereLatestStatus($this->consultBooked ? ['New', 'Replied'] : 'New')
             ->when($this->vendorId, fn ($q) => $q->where('belongs_to_vendor_id', $this->vendorId))
             ->with(['user.clients', 'last_status'])
             ->get();
@@ -50,7 +56,7 @@ class MarkClientLeadWon implements ShouldQueue
             }
 
             if ($lead->setStatus('Won')) {
-                Log::info('Lead marked Won after project creation', [
+                Log::info($this->consultBooked ? 'Lead marked Won after a consult was booked' : 'Lead marked Won after project creation', [
                     'lead_id' => $lead->id,
                     'client_id' => $client->id,
                 ]);
