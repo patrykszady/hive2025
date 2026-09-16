@@ -13,6 +13,9 @@
     $leadFileId = $this->lead?->id;
     // Email replies the lead has sent since — filed by the crew@ ingest.
     $leadReplies = $this->lead?->lead_data['email_replies'] ?? [];
+    // What they told us about the scheduling experience — newest first
+    // (Lead::feedback() already orders that way).
+    $leadFeedback = $this->lead?->feedback ?? collect();
 @endphp
     <form id="lead_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-3">
         <flux:textarea
@@ -63,6 +66,35 @@
                                 @endif
                             </div>
                             <flux:text class="whitespace-pre-line text-sm text-zinc-600 dark:text-zinc-300">{{ $reply['body'] ?? '' }}</flux:text>
+                        </div>
+                    @endforeach
+                </div>
+            </flux:field>
+        @endif
+
+        {{-- What they told us about the scheduling experience — newest
+             first, same treatment as the replies above. --}}
+        @if ($leadFeedback->isNotEmpty())
+            <flux:field>
+                <flux:label>Feedback</flux:label>
+                <div class="space-y-2">
+                    @foreach ($leadFeedback as $note)
+                        <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+                            <div class="mb-1 flex items-center justify-between gap-2">
+                                @if ($note->rating)
+                                    <flux:badge size="sm" :color="$note->rating >= 4 ? 'green' : ($note->rating <= 2 ? 'red' : 'yellow')">
+                                        {{ $note->rating }}/5
+                                    </flux:badge>
+                                @else
+                                    <flux:badge size="sm" color="zinc">No rating</flux:badge>
+                                @endif
+                                <flux:text class="shrink-0 text-xs text-zinc-500">
+                                    {{ $note->created_at->copy()->setTimezone(browser_timezone())->format('M j, g:ia') }}
+                                </flux:text>
+                            </div>
+                            @if ($note->message)
+                                <flux:text class="whitespace-pre-line text-sm text-zinc-600 dark:text-zinc-300">{{ $note->message }}</flux:text>
+                            @endif
                         </div>
                     @endforeach
                 </div>

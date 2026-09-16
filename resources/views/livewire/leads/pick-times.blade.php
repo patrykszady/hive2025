@@ -110,6 +110,11 @@
                 <flux:error name="date" />
                 <flux:error name="times" />
 
+                {{-- Why the button is off, right where people look for it. --}}
+                @if($this->submitHint)
+                    <flux:callout variant="warning" icon="exclamation-triangle" :heading="$this->submitHint" />
+                @endif
+
                 <flux:button variant="primary" class="w-full" wire:click="submit" :disabled="! $this->canSubmit">
                     Send availability
                 </flux:button>
@@ -120,6 +125,66 @@
                     weekday late afternoon or Saturday morning works for you, please email us.
                 </flux:text>
             @endif
+
+            {{-- Small, unobtrusive — visible whether they're still
+                 picking or already saw the thank-you. --}}
+            <div class="pt-2 text-center">
+                @if ($feedbackSent)
+                    <flux:badge icon="check-circle" color="green" size="sm">Feedback sent — thank you!</flux:badge>
+                @else
+                    <flux:modal.trigger name="lead_feedback_modal">
+                        <flux:button size="sm" variant="ghost" icon="chat-bubble-left-ellipsis">
+                            Feedback
+                        </flux:button>
+                    </flux:modal.trigger>
+                @endif
+            </div>
+
+            <flux:modal name="lead_feedback_modal" class="space-y-4 max-w-md">
+                <div class="space-y-1">
+                    <flux:heading size="lg">How was scheduling with us?</flux:heading>
+                    <flux:subheading>A quick note helps us make this easier for the next person.</flux:subheading>
+                </div>
+
+                <flux:field>
+                    <flux:radio.group wire:model="feedbackRating" label="Rating" variant="segmented">
+                        <flux:radio value="1" label="1" />
+                        <flux:radio value="2" label="2" />
+                        <flux:radio value="3" label="3" />
+                        <flux:radio value="4" label="4" />
+                        <flux:radio value="5" label="5" />
+                    </flux:radio.group>
+                    <flux:error name="feedbackRating" />
+                </flux:field>
+
+                <flux:field>
+                    <flux:label>Anything you'd like to add? (optional)</flux:label>
+                    <flux:textarea
+                        wire:model="feedbackMessage"
+                        rows="3"
+                        maxlength="2000"
+                        placeholder="What was clunky, confusing, or great?"
+                    />
+                    <flux:error name="feedbackMessage" />
+                </flux:field>
+
+                <flux:error name="feedback" />
+
+                <div class="flex gap-2 mb-0!">
+                    <flux:button wire:click="closeFeedbackModal" variant="ghost" class="flex-1">
+                        Cancel
+                    </flux:button>
+                    <flux:button
+                        variant="primary"
+                        class="flex-1"
+                        x-on:click="$wire.sendFeedback(window.innerWidth + 'x' + window.innerHeight)"
+                        wire:loading.attr="disabled"
+                        wire:target="sendFeedback"
+                    >
+                        Send
+                    </flux:button>
+                </div>
+            </flux:modal>
         </div>
     </div>
 

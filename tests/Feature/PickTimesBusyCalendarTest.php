@@ -312,3 +312,47 @@ it('blocks the window before an event on its start boundary', function () {
         ->and($busy->windowIsBusy($day, '9-11 AM'))->toBeTrue()
         ->and($busy->windowIsBusy($day, '11-1 PM'))->toBeFalse();
 });
+
+it('says under the Send button exactly what is still missing, until nothing is', function () {
+    $lead = busyCalendarFixture([]);
+    $tz = PickTimes::timezone();
+
+    $dayOne = busyTestDay($lead);
+    $dayTwo = Carbon::parse($dayOne, $tz)->addDay();
+    while ($dayTwo->isWeekend()) {
+        $dayTwo->addDay();
+    }
+    $dayTwo = $dayTwo->format('Y-m-d');
+
+    $component = Livewire::test(PickTimes::class, ['lead' => $lead->id])->set('date', $dayOne);
+    $hint = fn () => $component->instance()->submitHint;
+
+    // Nothing picked yet: the whole rule, where the button is.
+    expect($hint())->toBe('Choose at least 3 times across 2 different days to send your availability.');
+    $component->assertSee('Choose at least 3 times across 2 different days to send your availability.');
+
+    $component->call('toggleWindow', '1-3 PM');
+    expect($hint())->toBe('Choose 2 more times on a different day to send your availability.');
+
+    // Three windows on one day: the count is met, the days are not.
+    $component->call('toggleWindow', '9-11 AM')->call('toggleWindow', '7-9 AM');
+    expect($hint())->toBe('Choose a time on a different day to send your availability.')
+        ->and($component->instance()->canSubmit)->toBeFalse();
+
+    $component->set('date', $dayTwo)->call('toggleWindow', '7-9 AM');
+    expect($hint())->toBeNull()
+        ->and($component->instance()->canSubmit)->toBeTrue();
+    $component->assertDontSee('to send your availability');
+
+    // One window on each of two days: the days are met, one more time is needed.
+    $fresh = Livewire::test(PickTimes::class, ['lead' => $lead->id])
+        ->set('date', $dayOne)->call('toggleWindow', '1-3 PM')
+        ->set('date', $dayTwo)->call('toggleWindow', '7-9 AM');
+    expect($fresh->instance()->submitHint)->toBe('Choose 1 more time to send your availability.');
+
+    // "Anytime" is worth two times, so a whole free day plus one window on another day is enough.
+    $anytime = Livewire::test(PickTimes::class, ['lead' => $lead->id])
+        ->set('date', $dayOne)->call('toggleWindow', 'Anytime')
+        ->set('date', $dayTwo)->call('toggleWindow', '7-9 AM');
+    expect($anytime->instance()->submitHint)->toBeNull();
+});

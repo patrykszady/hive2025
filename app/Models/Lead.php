@@ -52,6 +52,13 @@ class Lead extends Model
             ->orderByDesc('id');
     }
 
+    public function feedback(): HasMany
+    {
+        // Newest first everywhere this is read: the details panel, and any
+        // future notifyTeam-style summary.
+        return $this->hasMany(LeadFeedback::class)->latest();
+    }
+
     /**
      * Canonical lead statuses with badge colors — single source of truth for
      * the row dropdown, bulk actions and the edit form. Shaped like
@@ -217,7 +224,9 @@ class Lead extends Model
             }
         }
 
-        return ['city' => $city, 'street' => $street];
+        // Read as an address, not as typed: "6 drake terrace" shows as
+        // "6 Drake Terrace"; capitals the sender used are kept.
+        return ['city' => $city, 'street' => $street !== '' ? \App\Support\StreetAddress::tidyCase($street) : ''];
     }
 
     /**
@@ -347,13 +356,14 @@ class Lead extends Model
     }
 
     /**
-     * Did this lead come back through the public picker with new times? Set by
-     * PickTimes::submit(); the consult email thanks them for rescheduling
-     * instead of greeting them as a first contact.
+     * Has the homeowner sent availability on top of availability they had
+     * already given (or of a consult already booked)? Set by the picker at
+     * that moment. `availability_updated_at` alone is not it: that stamps
+     * every pick, including the very first one through the link.
      */
     public function hasRescheduled(): bool
     {
-        return filled($this->lead_data['availability_updated_at'] ?? null);
+        return filled($this->lead_data['availability_rescheduled_at'] ?? null);
     }
 
     /**
@@ -426,13 +436,124 @@ class Lead extends Model
             return false;
         }
 
+        return $this->consultTasksQuery()->exists();
+    }
+
+    /**
+     * The consultations still ahead for this lead's contact: Meet tasks
+     * titled "… Consult" on their client's projects, from today on. These
+     * are what removing the lead cancels — a consult already held stays in
+     * the history, and a task that is not a consult is not the lead's to
+     * take down.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\Task>
+     */
+    public function bookedConsultTasks(): \Illuminate\Support\Collection
+    {
+        if (! $this->user_id) {
+            return collect();
+        }
+
+        return $this->consultTasksQuery()
+            ->where('title', 'like', '% Consult')
+            ->whereNotNull('start_date')
+            ->whereDate('start_date', '>=', \Carbon\Carbon::now(\App\Livewire\Leads\PickTimes::timezone())->startOfDay())
+            ->orderBy('start_date')
+            ->get();
+    }
+
+    /**
+     * Cancel this lead's upcoming consultations. Deleting the Meet task is
+     * what withdraws the calendar invite (TaskObserver dispatches the Nylas
+     * event deletion) — lead 170 was removed with its consult left on
+     * everyone's calendar (2026-09-15). A project the booking made just for
+     * that consult, still at the Consult stage with nothing else on it,
+     * goes with it, so the client it created can be tidied as an orphan.
+     *
+     * @return array{consults: array<int, string>, projects: array<int, string>}
+     */
+    public function cancelBookedConsults(): array
+    {
+        $cancelled = ['consults' => [], 'projects' => []];
+
+        foreach ($this->bookedConsultTasks() as $task) {
+            $project = $task->project()->withoutGlobalScopes()->first();
+            // Task's Sortable trait re-orders siblings on delete through
+            // $task->project, which is vendor-scoped: hand it the project
+            // so a console run (no session) or another vendor's admin
+            // still deletes cleanly.
+            $task->setRelation('project', $project);
+            $cancelled['consults'][] = self::consultLabel($task);
+            $task->delete();
+
+            if ($project && self::projectExistsOnlyForConsult($project)) {
+                $cancelled['projects'][] = (string) $project->project_name;
+                $project->delete();
+            }
+        }
+
+        return $cancelled;
+    }
+
+    /** "Sep 21, 10:00 AM" (or just the date) for a consult task. */
+    public static function consultLabel(\App\Models\Task $task): string
+    {
+        $date = \Carbon\Carbon::parse($task->start_date);
+        $start = (string) data_get($task->options, 'time_settings.'.$date->format('Y-m-d').'.start_time', '');
+
+        return $start !== ''
+            ? $date->format('M j').', '.\Carbon\Carbon::parse($start)->format('g:i A')
+            : $date->format('M j');
+    }
+
+    /** A project at the Consult stage with no tasks left on it. */
+    protected static function projectExistsOnlyForConsult(\App\Models\Project $project): bool
+    {
+        $stage = self::projectStage($project);
+
+        return (int) $stage === 9
+            && ! \App\Models\Task::withoutGlobalScopes()->whereNull('deleted_at')->where('project_id', $project->id)->exists();
+    }
+
+    /** The project's latest stage code, read past the session's vendor scope. */
+    protected static function projectStage(\App\Models\Project $project): ?int
+    {
+        $code = \App\Models\ProjectStatus::withoutGlobalScopes()
+            ->where('project_id', $project->id)
+            ->orderByDesc('id')
+            ->value('status_code');
+
+        return $code === null ? null : (int) $code;
+    }
+
+    /**
+     * Meet tasks on the contact's client's projects, however titled.
+     *
+     * Walks the pivots itself (client_user → project_vendor → projects →
+     * tasks) under the LEAD's vendor rather than through Project::client(),
+     * which is scoped to whoever is signed in: on the console nobody is, and
+     * in a vendor's session another vendor's consult must not appear.
+     * withoutGlobalScopes() drops soft-deletion too, so it is spelled out —
+     * or a cancelled consult on a removed project still counts as booked.
+     */
+    protected function consultTasksQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        $clientIds = \Illuminate\Support\Facades\DB::table('client_user')
+            ->where('user_id', $this->user_id)
+            ->select('client_id');
+
+        $projectIds = \Illuminate\Support\Facades\DB::table('project_vendor')
+            ->whereIn('client_id', $clientIds)
+            ->when($this->belongs_to_vendor_id, fn ($q) => $q->where('vendor_id', $this->belongs_to_vendor_id))
+            ->select('project_id');
+
         return \App\Models\Task::withoutGlobalScopes()
+            ->whereNull('tasks.deleted_at')
             ->where('type', 'Meet')
-            ->whereHas('project', fn ($project) => $project->withoutGlobalScopes()
-                ->whereHas('client', fn ($client) => $client->withoutGlobalScopes()
-                    ->whereHas('users', fn ($user) => $user->withoutGlobalScopes()
-                        ->where('users.id', $this->user_id))))
-            ->exists();
+            ->whereIn('project_id', \App\Models\Project::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->whereIn('id', $projectIds)
+                ->select('id'));
     }
 
 
@@ -450,6 +571,8 @@ class Lead extends Model
      */
     public function deleteImpact(): array
     {
+        $consultTasks = $this->bookedConsultTasks();
+
         $impact = [
             'clients' => [],
             'user' => null,
@@ -458,6 +581,16 @@ class Lead extends Model
             // holding a link or an appointment tied to this lead.
             'schedule_link' => $this->hasActiveScheduleLink(),
             'booked_consult' => $this->hasBookedConsult(),
+            // What the delete cancels: the upcoming consults (invites
+            // withdrawn) and any project that existed only for one.
+            'consults' => $consultTasks->map(fn ($task) => self::consultLabel($task))->values()->all(),
+            'consult_projects' => $consultTasks
+                ->map(fn ($task) => $task->project()->withoutGlobalScopes()->first())
+                ->filter(fn ($project) => $project && self::projectWouldBeOrphanedByConsults($project, $consultTasks))
+                ->map(fn ($project) => (string) $project->project_name)
+                ->unique()
+                ->values()
+                ->all(),
         ];
 
         $user = $this->user;
@@ -466,8 +599,11 @@ class Lead extends Model
             return $impact;
         }
 
+        // Judged as if the consults were already cancelled: a project made
+        // for the consult goes, and the client it left behind is an orphan.
+        $goingProjects = $impact['consult_projects'];
         $clients = $user->clients()->get();
-        $orphanedClients = $clients->filter(fn ($client) => $this->clientIsOrphaned($client, $user));
+        $orphanedClients = $clients->filter(fn ($client) => $this->clientIsOrphaned($client, $user, $goingProjects));
 
         $impact['clients'] = $orphanedClients->map(fn ($client) => $client->name)->values()->all();
 
@@ -489,6 +625,10 @@ class Lead extends Model
     {
         $user = $this->user;
         $impact = $this->deleteImpact();
+
+        // First, so the invite is withdrawn and a consult-only project is
+        // gone before the orphan check below looks at the client.
+        $this->cancelBookedConsults();
 
         $this->delete();
 
@@ -518,10 +658,31 @@ class Lead extends Model
      * A client record exists only for this lead when it has no projects and no
      * contact other than the lead's own.
      */
-    protected function clientIsOrphaned(Client $client, User $user): bool
+    /**
+     * @param  array<int, string>  $goingProjects  names of projects the consult cancellation removes first
+     */
+    protected function clientIsOrphaned(Client $client, User $user, array $goingProjects = []): bool
     {
-        return ! $client->projects()->exists()
+        return ! $client->projects()->whereNotIn('project_name', $goingProjects ?: [''])->exists()
             && ! $client->users()->where('users.id', '!=', $user->id)->exists();
+    }
+
+    /**
+     * Would cancelling these consults leave the project with nothing on it,
+     * at the Consult stage — i.e. it existed only for the consult?
+     *
+     * @param  \Illuminate\Support\Collection<int, \App\Models\Task>  $consultTasks
+     */
+    protected static function projectWouldBeOrphanedByConsults(\App\Models\Project $project, \Illuminate\Support\Collection $consultTasks): bool
+    {
+        $stage = self::projectStage($project);
+
+        return (int) $stage === 9
+            && ! \App\Models\Task::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->where('project_id', $project->id)
+                ->whereNotIn('id', $consultTasks->pluck('id')->all())
+                ->exists();
     }
 
     /**

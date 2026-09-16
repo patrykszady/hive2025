@@ -46,3 +46,22 @@ it('reads the street address out of a message', function (string $text, ?array $
     'a phone number' => ['Please call me at 847 749 4614', null],
     'nothing' => ['', null],
 ]);
+
+it('tidies a street\'s casing without taking any capital away', function (string $typed, string $shown) {
+    expect(\App\Support\StreetAddress::tidyCase($typed))->toBe($shown);
+})->with([
+    'all lower' => ['6 drake terrace', '6 Drake Terrace'],
+    'already right' => ['6 Drake Terrace', '6 Drake Terrace'],
+    'internal capitals kept' => ['12 McDonald Ct NE', '12 McDonald Ct NE'],
+    'ordinal and unit untouched' => ['2258 south 8th avenue #4b', '2258 South 8th Avenue #4b'],
+    'joining word stays small' => ['1 avenue of the americas', '1 Avenue of the Americas'],
+    'shouting is left alone' => ['400 N WHEELING RD', '400 N WHEELING RD'],
+    'extra spaces kept' => ['6  drake terrace', '6  Drake Terrace'],
+]);
+
+it('shows the leads table street cased for reading', function () {
+    $lead = new \App\Models\Lead(['lead_data' => ['address' => '6 drake terrace, prospect heights, IL 60070', 'city' => 'Prospect Heights']]);
+
+    expect($lead->shortAddressParts())->toBe(['city' => 'Prospect Heights', 'street' => '6 Drake Terrace']);
+});
+

@@ -21,7 +21,7 @@ uses(RefreshDatabase::class);
  * the link the lead emails carry — for a project that never came through
  * the leads pipeline (Debby, project 444, thread 42).
  */
-function consultTextFixture(bool $optedIn = true, bool $withClient = true): array
+function consultTextFixture(bool $optedIn = true, bool $withClient = true, bool $withPartner = false): array
 {
     $vendor = Vendor::factory()->create(['options' => ['short_name' => 'GSC']]);
     $admin = new User();
@@ -46,16 +46,47 @@ function consultTextFixture(bool $optedIn = true, bool $withClient = true): arra
         $client->users()->attach($contact->id);
     }
 
+    $participants = ['+12245321090'];
+    $partner = null;
+    if ($withPartner) {
+        $partner = User::query()->create([
+            'first_name' => 'Alan', 'last_name' => 'Hill',
+            'email' => 'alan.'.uniqid().'@example.com',
+            'cell_phone' => '2245321091',
+        ]);
+        $client?->users()->attach($partner->id);
+        $participants[] = '+12245321091';
+    }
+
     $thread = SmsGroupThread::create([
         'from_number' => '+12247354200',
         'vendor_id' => $vendor->id,
-        'participants' => ['+12245321090'],
+        'participants' => $participants,
         'client_id' => $client?->id,
     ]);
-    $thread->threadParticipants()->create(['phone_number' => '+12245321090', 'opted_in_at' => $optedIn ? now() : null]);
+    foreach ($participants as $number) {
+        $thread->threadParticipants()->create(['phone_number' => $number, 'opted_in_at' => $optedIn ? now() : null]);
+    }
 
-    return compact('vendor', 'admin', 'contact', 'client', 'thread');
+    return compact('vendor', 'admin', 'contact', 'client', 'thread', 'partner');
 }
+
+it('greets everyone on a couple\'s thread, not just the first contact', function () {
+    $fx = consultTextFixture(withPartner: true);
+    $this->actingAs($fx['admin']);
+
+    $this->mock(GroupSmsService::class, function ($mock) {
+        $mock->shouldReceive('sendToThread')
+            ->once()
+            ->withArgs(fn ($thread, $text) => str_starts_with($text, "Hi Debby & Alan,\n\nPick a consultation time with GSC here: "));
+    });
+
+    expect(app(ConsultScheduleLinkTexter::class)->textToThread($fx['thread'], $fx['admin'])['ok'])->toBeTrue();
+
+    // One lead, on the first contact, as before.
+    expect(Lead::withoutGlobalScopes()->where('user_id', $fx['contact']->id)->count())->toBe(1)
+        ->and(Lead::withoutGlobalScopes()->where('user_id', $fx['partner']->id)->count())->toBe(0);
+});
 
 it('texts the pick-times link and quietly gives the contact a lead to hang it on', function () {
     $fx = consultTextFixture();
@@ -78,13 +109,38 @@ it('texts the pick-times link and quietly gives the contact a lead to hang it on
         ->and($lead->origin)->toBe('Messages')
         ->and($lead->lead_data['phone'])->toBe('2245321090')
         ->and($lead->lead_data['address'])->toBe('1463 W Winnetka St')
+        // Born with a stage like every other lead, then Replied: the link is
+        // our reply and the ball is with them (lead 171 sat at "Set status").
+        ->and($lead->statuses()->orderBy('id')->pluck('title')->all())->toBe(['New', 'Replied'])
         // Nothing new arrived: no "new lead" notification for the team.
         ->and(AppNotification::count())->toBe(0);
 
-    // A second text reuses the lead rather than minting another.
+    // A second text reuses the lead rather than minting another, and writes no second Replied.
     $this->mock(GroupSmsService::class, fn ($mock) => $mock->shouldReceive('sendToThread')->once());
     app(ConsultScheduleLinkTexter::class)->textToThread($fx['thread'], $fx['admin']);
-    expect(Lead::withoutGlobalScopes()->where('user_id', $fx['contact']->id)->count())->toBe(1);
+    expect(Lead::withoutGlobalScopes()->where('user_id', $fx['contact']->id)->count())->toBe(1)
+        ->and($lead->statuses()->count())->toBe(2);
+});
+
+it('never downgrades a lead that already progressed, and gives a stageless one its New first', function () {
+    $fx = consultTextFixture();
+    $this->actingAs($fx['admin']);
+    $this->mock(GroupSmsService::class, fn ($mock) => $mock->shouldReceive('sendToThread')->twice());
+
+    // A lead made before this path recorded a stage (lead 171, 2026-09-15).
+    $lead = Lead::withoutEvents(fn () => Lead::create([
+        'date' => now(), 'origin' => 'Messages', 'user_id' => $fx['contact']->id,
+        'belongs_to_vendor_id' => $fx['vendor']->id, 'created_by_user_id' => $fx['admin']->id,
+        'lead_data' => ['name' => 'Debby'],
+    ]));
+
+    app(ConsultScheduleLinkTexter::class)->textToThread($fx['thread'], $fx['admin']);
+    expect($lead->statuses()->orderBy('id')->pluck('title')->all())->toBe(['New', 'Replied']);
+
+    // Won stays Won: offering new times does not undo a booking on its own.
+    $lead->setStatus('Won');
+    app(ConsultScheduleLinkTexter::class)->textToThread($fx['thread'], $fx['admin']);
+    expect($lead->fresh()->last_status?->title)->toBe('Won');
 });
 
 it('confirms the booked consult and offers new times when one is on the books', function () {

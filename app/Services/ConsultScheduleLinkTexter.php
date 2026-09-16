@@ -55,7 +55,10 @@ class ConsultScheduleLinkTexter
 
         $vendor = Vendor::withoutGlobalScopes()->find($lead->belongs_to_vendor_id);
         $contractor = trim((string) (data_get($vendor?->options, 'short_name') ?: $vendor?->name)) ?: config('app.name');
-        $firstName = trim((string) $contact->first_name) ?: strtok(trim((string) ($lead->lead_data['name'] ?? '')), ' ');
+        // A couple's thread carries both their numbers: greet both (thread
+        // 180 read "Hi Carri," to Carri and Alan). Anyone on the thread we
+        // know by name, in the thread's order; the lead's name as the fallback.
+        $firstName = self::greetingNames($thread, $client, (string) ($lead->lead_data['name'] ?? ''));
         $link = $this->shortener->shorten($lead->availabilityUrl());
         $booked = $this->bookedConsult($client);
 
@@ -68,25 +71,72 @@ class ConsultScheduleLinkTexter
 
         $this->sms->sendToThread($thread, $text, [], $actor->id);
 
+        // Texting the link is our reply: a New lead moves to Replied (waiting
+        // on them), exactly as the email composer does — never downgrading a
+        // lead that already progressed (Won stays Won). A lead this path made
+        // before it recorded a stage gets its New first, so its history reads
+        // like everyone else's instead of "Set status" (lead 171, 2026-09-15).
+        if ($lead->statuses()->doesntExist()) {
+            $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $lead->belongs_to_vendor_id]);
+            $lead->unsetRelation('last_status');
+        }
+
+        if (($lead->last_status?->title ?? 'New') === 'New') {
+            $lead->setStatus('Replied');
+        }
+
         return $this->result(true, 'success', 'Texted', 'Consult scheduling link sent to '.($contact->first_name ?: 'the client').'.');
     }
 
     /** The client contact behind the thread's number, else the client's first contact. */
     protected function contactFor(SmsGroupThread $thread, Client $client): ?User
     {
-        $users = $client->users()->withoutGlobalScopes()->get();
-        $phones = collect((array) $thread->participants)
-            ->map(fn ($p) => preg_replace('/\D/', '', (string) $p))
-            ->map(fn ($d) => strlen($d) === 11 && str_starts_with($d, '1') ? substr($d, 1) : $d)
+        return self::contactsFor($thread, $client)->first() ?? $client->users()->withoutGlobalScopes()->first();
+    }
+
+    /**
+     * "Carri and Alan" — the first names of everyone on the thread we know,
+     * in the thread's order, else the first name from $fallbackName. Shared
+     * with the consult confirmation text so every text greets the same way.
+     */
+    public static function greetingNames(SmsGroupThread $thread, Client $client, string $fallbackName = ''): string
+    {
+        $names = self::contactsFor($thread, $client)
+            ->map(fn (User $user) => trim((string) ($user->nickname ?: $user->first_name)))
             ->filter()
-            ->all();
+            ->unique()
+            ->values();
 
-        return $users->first(function (User $user) use ($phones) {
-            $digits = preg_replace('/\D/', '', (string) $user->cell_phone);
-            $digits = strlen($digits) === 11 && str_starts_with($digits, '1') ? substr($digits, 1) : $digits;
+        // Joined the way Client::first_names joins them, so an email and a
+        // text to the same couple read the same ("Carri & Alan").
+        return $names->isEmpty()
+            ? (string) strtok(trim($fallbackName), ' ')
+            : $names->join(', ', ' & ');
+    }
 
-            return $digits !== '' && in_array($digits, $phones, true);
-        }) ?? $users->first();
+    /**
+     * Every client contact whose number is on the thread, in the thread's
+     * participant order — a couple texting together is two of them.
+     *
+     * @return \Illuminate\Support\Collection<int, User>
+     */
+    public static function contactsFor(SmsGroupThread $thread, Client $client): \Illuminate\Support\Collection
+    {
+        $normalize = function (?string $number): string {
+            $digits = preg_replace('/\D/', '', (string) $number);
+
+            return strlen($digits) === 11 && str_starts_with($digits, '1') ? substr($digits, 1) : $digits;
+        };
+
+        $users = $client->users()->withoutGlobalScopes()->get();
+
+        return collect((array) $thread->participants)
+            ->map($normalize)
+            ->filter()
+            ->map(fn (string $phone) => $users->first(fn (User $user) => $normalize($user->cell_phone) === $phone))
+            ->filter()
+            ->unique('id')
+            ->values();
     }
 
     /** The contact's open lead, or a quiet one made for this purpose. */
@@ -102,7 +152,7 @@ class ConsultScheduleLinkTexter
             return $lead;
         }
 
-        return Lead::withoutEvents(fn () => Lead::create([
+        $lead = Lead::withoutEvents(fn () => Lead::create([
             'date' => now(),
             'origin' => 'Messages',
             'user_id' => $contact->id,
@@ -119,6 +169,13 @@ class ConsultScheduleLinkTexter
                 'source' => 'Consult scheduling link texted from Messages',
             ], fn ($v) => $v !== null && $v !== ''),
         ]));
+
+        // Parity with every other way a lead is born (form, crew inbox, Angi,
+        // the composer): without a status row it has no pipeline stage and
+        // the leads table can only offer "Set status".
+        $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $vendorId]);
+
+        return $lead;
     }
 
     /**

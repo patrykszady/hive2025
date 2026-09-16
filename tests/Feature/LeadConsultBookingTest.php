@@ -209,23 +209,62 @@ it('puts the consult on the client\'s open project rather than a finished one', 
         ->call('selectExactTime', '14:00');
 
     // Proposed, not imposed: the open project is filled into the Project box.
+    // The finished bathroom is not offered at all.
     expect($component->get('projectName'))->toBe('Kitchen — Consult')
         ->and($component->get('sendBlockedReason'))->toBeNull()
-        ->and(collect($component->instance()->consultProjectOptions)->pluck('label')->all())->toBe(['Kitchen — Consult', 'Hall Bath — Complete']);
+        ->and(collect($component->instance()->consultProjectOptions)->pluck('label')->all())->toBe(['Kitchen — Consult']);
 
     $component->call('send_message');
 
     expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$open->id]);
 });
 
+it('offers only projects a consult can land on: Consult, Estimate or Cancelled, never one that was ever Complete', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    clientProjectWithStatus($fx, 'Hall Bath', 7);     // Complete
+    clientProjectWithStatus($fx, 'Master Suite', 6);  // Active
+    $cancelled = clientProjectWithStatus($fx, 'Basement', 10); // Cancelled
+    $estimate = clientProjectWithStatus($fx, 'Deck', 2);       // Estimate
+    // Finished, then cancelled: it was Complete once, so it stays out.
+    $reopened = clientProjectWithStatus($fx, 'Toilet', 7);
+    $reopened->statuses()->create(['status_code' => 10, 'start_date' => now()->toDateString(), 'belongs_to_vendor_id' => $fx['vendor']->id]);
+    $consult = clientProjectWithStatus($fx, 'Paint', 9);       // Consult, newest
+
+    $component = consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00');
+
+    $options = collect($component->instance()->consultProjectOptions);
+    expect($options->pluck('label')->all())
+        ->toBe(['Paint — Consult', 'Deck — Estimate', 'Basement — Cancelled'])
+        // Each carries its stage as the badge the projects table uses.
+        ->and($options->map(fn ($o) => [$o['name'], $o['stage'], $o['color']])->all())
+        ->toBe([['Paint', 'Consult', 'purple'], ['Deck', 'Estimate', 'blue'], ['Basement', 'Cancelled', 'red']])
+        // The newest open one is proposed; a Cancelled one is offered but never proposed.
+        ->and($component->get('projectName'))->toBe('Paint — Consult');
+    // …and the box renders them as badges, with the plain label as the pick value.
+    $component->assertSeeHtml('value="Paint — Consult"')->assertSee('Consult');
+
+    $consult->delete();
+    $estimate->delete();
+    $fresh = consultComposer($fx)->call('insertAvailabilitySlot', 0)->call('selectExactTime', '14:00');
+    expect(collect($fresh->instance()->consultProjectOptions)->pluck('label')->all())->toBe(['Basement — Cancelled'])
+        ->and($fresh->get('projectName'))->toBe('')
+        ->and($fresh->get('sendBlockedReason'))->toBe('Name the project for this consult first');
+    // Picking the cancelled one is allowed, and brings it back to Consult.
+    $fresh->set('projectName', 'Basement — Cancelled')->call('send_message');
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$cancelled->id]);
+});
+
 it('attaches the consult to whichever of the client\'s projects is chosen, or to a new one', function () {
     Queue::fake();
     $fx = makeConsultFixture();
-    $hallBath = clientProjectWithStatus($fx, 'Hall Bath', 7); // Complete
+    $hallBath = clientProjectWithStatus($fx, 'Hall Bath', 2); // Estimate
     clientProjectWithStatus($fx, 'Kitchen', 9);               // Consult
 
-    // A finished project is still a valid choice when the operator picks it
-    // — by its suggested label, or by bare name in any case.
+    // A project still at Estimate is a valid choice when the operator picks
+    // it — by its suggested label, or by bare name in any case.
     $component = consultComposer($fx)
         ->call('insertAvailabilitySlot', 0)
         ->call('selectExactTime', '14:00')
@@ -234,8 +273,22 @@ it('attaches the consult to whichever of the client\'s projects is chosen, or to
     expect($component->get('sendBlockedReason'))->toBeNull();
     $component->call('send_message');
     expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$hallBath->id])
-        // …and the finished project is back in Consult for it.
+        // …and that project is in Consult for it.
         ->and((int) \App\Models\ProjectStatus::withoutGlobalScopes()->where('project_id', $hallBath->id)->orderByDesc('start_date')->orderByDesc('id')->value('status_code'))->toBe(9);
+
+    // A finished project cannot be picked, even by its exact name: the
+    // consult gets a new project of that name instead.
+    $finished = clientProjectWithStatus($fx, 'Toilet', 7); // Complete
+    Task::withoutGlobalScopes()->where('type', 'Meet')->forceDelete();
+    $fx['lead']->setStatus('New');
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Toilet')
+        ->call('send_message');
+    $consultProject = Task::withoutGlobalScopes()->where('type', 'Meet')->value('project_id');
+    expect($consultProject)->not->toBe($finished->id)
+        ->and(Project::withoutGlobalScopes()->find($consultProject)->project_name)->toBe('Toilet');
 
     // A name matching none of the client's projects creates one — even with
     // an open project on file, and an emptied box asks for a name first.
@@ -1009,6 +1062,43 @@ it('thanks the client for rescheduling once they have sent new times', function 
         ->and($compose())->not->toContain('Thank you for reaching out');
 });
 
+it('does not thank a first-time picker for rescheduling — that comes with the second set of times', function () {
+    $fx = makeConsultFixture();
+    \App\Models\EmailTemplate::create([
+        'vendor_id' => $fx['vendor']->id, 'type' => 'lead', 'name' => 'Consult', 'subject' => 'Consultation',
+        'body' => '<p>{{lead_intro}}</p><p>{{lead_time_block}}</p>',
+    ]);
+
+    // A lead texted the link before ever giving times (Carri & Alan, 2026-09-15).
+    $data = $fx['lead']->lead_data;
+    unset($data['availability']);
+    $fx['lead']->lead_data = $data;
+    $fx['lead']->save();
+
+    $compose = fn () => Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']->id)
+        ->get('emailBody');
+
+    [$d1, $d2] = bookableWeekdays($fx['lead']);
+    $pick = fn () => Livewire::test(\App\Livewire\Leads\PickTimes::class, ['lead' => $fx['lead']->id])
+        ->set('date', $d1)->call('toggleWindow', 'Anytime')
+        ->set('date', $d2)->call('toggleWindow', 'Anytime')
+        ->call('submit')
+        ->assertSet('submitted', true);
+
+    // Their first times: a first contact, however they got the link.
+    $pick();
+    expect(Lead::withoutGlobalScopes()->find($fx['lead']->id)->hasRescheduled())->toBeFalse()
+        ->and($compose())->toContain('Thank you for reaching out')
+        ->and($compose())->not->toContain('reschedule');
+
+    // Times on top of times: now they have rescheduled.
+    $pick();
+    expect(Lead::withoutGlobalScopes()->find($fx['lead']->id)->hasRescheduled())->toBeTrue()
+        ->and($compose())->toContain('taking the time to reschedule');
+});
+
 it('lets someone who already picked once take any slot that has not started', function () {
     $fx = makeConsultFixture();
     $tz = \App\Livewire\Leads\PickTimes::timezone();
@@ -1017,7 +1107,7 @@ it('lets someone who already picked once take any slot that has not started', fu
     \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-07-28 09:00', $tz));
 
     $data = $fx['lead']->lead_data;
-    $data['availability_updated_at'] = now()->toDateTimeString();
+    $data['availability_rescheduled_at'] = now()->toDateTimeString();
     $fx['lead']->lead_data = $data;
     $fx['lead']->save();
 
@@ -1177,3 +1267,199 @@ it('notifies vendor admins when a homeowner picks consultation times', function 
 
     \Illuminate\Support\Carbon::setTestNow();
 });
+
+// ── The same people, both channels ──────────────────────────────────────
+
+/** An opted-in thread for the fixture's client, on the contact's number. */
+function consultThread(array $fx, bool $optedIn = true, ?\App\Models\User $partner = null): \App\Models\SmsGroupThread
+{
+    $numbers = [\App\Services\GroupSmsService::formatE164($fx['contact']->cell_phone)];
+    if ($partner) {
+        $numbers[] = \App\Services\GroupSmsService::formatE164($partner->cell_phone);
+    }
+
+    $thread = \App\Models\SmsGroupThread::create([
+        'from_number' => '+12247354200',
+        'vendor_id' => $fx['vendor']->id,
+        'participants' => $numbers,
+        'client_id' => $fx['client']->id,
+    ]);
+    foreach ($numbers as $number) {
+        $thread->threadParticipants()->create(['phone_number' => $number, 'opted_in_at' => $optedIn ? now() : null]);
+    }
+
+    return $thread;
+}
+
+it('confirms the booked consult by text as well, to everyone on the client\'s thread', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $partner = User::query()->create([
+        'first_name' => 'Alan', 'last_name' => 'Singh',
+        'email' => 'alan.'.uniqid().'@example.com', 'cell_phone' => fake()->unique()->numerify('224777####'),
+    ]);
+    $fx['client']->users()->attach($partner->id);
+    $fx['client']->update(['address' => '3395 Portshire Dr', 'city' => 'Hoffman Estates']);
+    $thread = consultThread($fx, partner: $partner);
+
+    $sent = null;
+    $this->mock(\App\Services\GroupSmsService::class, function ($mock) use ($thread, &$sent) {
+        $mock->shouldReceive('sendToThread')->once()
+            ->withArgs(function ($t, $text) use ($thread, &$sent) {
+                $sent = $text;
+
+                return $t->id === $thread->id;
+            });
+    });
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Kitchen Remodel')
+        ->call('send_message');
+
+    $task = Task::withoutGlobalScopes()->where('type', 'Meet')->firstOrFail();
+    $label = \Illuminate\Support\Carbon::parse($task->start_date)->format('D, M j').' · 2:00 PM';
+
+    expect($sent)->toStartWith("Hi Preet & Alan,\n\nYour consultation with GSC is confirmed for {$label} at ")
+        ->and($sent)->toContain('pick new consultation times here: ')
+        ->and($sent)->toContain('confirm the new one ASAP.');
+    // The email still goes out as before.
+    Queue::assertPushed(SendLeadReplyJob::class);
+});
+
+it('sends nothing more by text while the thread still awaits START', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    consultThread($fx, optedIn: false);
+    $this->mock(\App\Services\GroupSmsService::class, function ($mock) {
+        $mock->shouldNotReceive('sendToThread');
+        $mock->shouldNotReceive('sendNewGroup');
+    });
+
+    consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00')
+        ->set('projectName', 'Kitchen Remodel')
+        ->call('send_message');
+
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->count())->toBe(1);
+    Queue::assertPushed(SendLeadReplyJob::class);
+});
+
+it('starts the START consent flow with every contact when the client has no thread yet', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $partner = User::query()->create([
+        'first_name' => 'Alan', 'last_name' => 'Singh',
+        'email' => 'alan3.'.uniqid().'@example.com', 'cell_phone' => '2247770101',
+    ]);
+    $fx['client']->users()->attach($partner->id);
+
+    $this->mock(\App\Services\GroupSmsService::class, function ($mock) use ($fx) {
+        $mock->shouldNotReceive('sendToThread');
+        $mock->shouldReceive('sendNewGroup')->once()
+            ->withArgs(fn ($numbers, $text, $projectId, $clientId) => $numbers === [
+                \App\Services\GroupSmsService::formatE164($fx['contact']->cell_phone),
+                '+12247770101',
+            ] && $clientId === $fx['client']->id)
+            ->andReturn(new \App\Models\SmsGroupThread);
+    });
+
+    consultComposer($fx)->call('send_message');
+
+    Queue::assertPushed(SendLeadReplyJob::class);
+});
+
+it('texts the pick-times ask, or a heads-up, to match the email that went out', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $thread = consultThread($fx);
+    $texts = [];
+    $this->mock(\App\Services\GroupSmsService::class, function ($mock) use ($thread, &$texts) {
+        $mock->shouldReceive('sendToThread')->twice()->withArgs(function ($t, $text) use ($thread, &$texts) {
+            $texts[] = $text;
+
+            return $t->id === $thread->id;
+        });
+    });
+
+    // An email carrying the pick-times link: the same ask by text.
+    consultComposer($fx)
+        ->set('emailBody', '<p>Pick times: https://hive.test/lead/times/'.$fx['lead']->id.'?expires=1&signature=x</p>')
+        ->call('send_message');
+    // Any other email: a heads-up naming it.
+    consultComposer($fx)->set('subject', 'Your estimate')->call('send_message');
+
+    expect($texts[0])->toStartWith("Hi Preet,\n\nPick a consultation time with GSC here: ")
+        ->and($texts[1])->toBe("Hi Preet,\n\nWe just emailed you about \"Your estimate\" — please check your inbox. If texting is easier, just reply here.");
+});
+
+it('greets every contact on the client in the consult email', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $partner = User::query()->create([
+        'first_name' => 'Alan', 'last_name' => 'Singh',
+        'email' => 'alan2.'.uniqid().'@example.com', 'cell_phone' => fake()->unique()->numerify('224666####'),
+    ]);
+    $fx['client']->users()->attach($partner->id);
+
+    $component = consultComposer($fx);
+    $greeting = (new ReflectionMethod(LeadCreate::class, 'replacePlaceholders'))
+        ->invoke($component->instance(), 'Hi {{client_first_name}}, — {{client_first_names}}');
+
+    expect($greeting)->toBe('Hi Preet & Alan, — Preet & Alan');
+});
+
+it('trims a name typed on the lead to its first word when there is no client', function () {
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $fx['client']->users()->detach();
+    $fx['lead']->update(['user_id' => null]);
+
+    $component = Livewire::actingAs($fx['admin'])->test(LeadCreate::class)->call('editLead', $fx['lead']->id);
+    $greeting = (new ReflectionMethod(LeadCreate::class, 'replacePlaceholders'))
+        ->invoke($component->instance(), 'Hi {{client_first_name}},');
+
+    expect($greeting)->toBe('Hi Preet,');
+});
+
+// ── The team's calendars gate the composer too ───────────────────────────
+
+it('withholds start times the calendars are busy for, and says so when a picked window has none left', function () {
+    Queue::fake();
+    $fx = makeConsultFixture(); // the homeowner picked 1-3 PM
+    $date = $fx['lead']->lead_data['availability'][0]['date'];
+
+    // Patryk or Greg busy 1:00-2:00 (with the buffer, 12:30-2:30): only 2:30 is left.
+    $this->mock(\App\Services\AdminCalendarBusy::class, fn ($mock) => $mock->shouldReceive('busyIntervalsFor')
+        ->with($date)->andReturn([['12:30', '14:30']]));
+
+    $component = consultComposer($fx)->call('insertAvailabilitySlot', 0);
+    expect(collect($component->instance()->exactTimeOptions)->pluck('label')->all())->toBe(['2:30 PM'])
+        ->and($component->instance()->selectedSlotWindowKnown)->toBeTrue();
+    $component->assertDontSee('No free start left');
+
+    // The whole window went busy since they picked it: the slot is marked
+    // booked and can't be selected, and with nothing usable left the email
+    // asks for new times instead of confirming one.
+    \App\Models\EmailTemplate::create([
+        'vendor_id' => $fx['vendor']->id, 'type' => 'lead', 'name' => 'Consult', 'subject' => 'Consultation',
+        'body' => '<p>{{lead_intro}}</p><p>{{lead_time_block}}</p>',
+    ]);
+    $this->mock(\App\Services\AdminCalendarBusy::class, fn ($mock) => $mock->shouldReceive('busyIntervalsFor')
+        ->with($date)->andReturn([['12:30', '15:30']]));
+
+    $component = Livewire::actingAs($fx['admin'])->test(LeadCreate::class)->call('editLead', $fx['lead']->id);
+    expect($component->instance()->slotProblems)->toBe(['booked'])
+        ->and($component->instance()->hasUsableAvailability)->toBeFalse();
+    $component->assertSee('· booked')
+        ->assertSee('The calendars are booked for all of these preferred times');
+
+    $component->call('insertAvailabilitySlot', 0);
+    expect($component->get('selectedAvailability'))->toBe([])
+        ->and($component->get('emailBody'))->toContain('select new consultation times')
+        ->and($component->get('emailBody'))->toContain('no longer open on our calendar')
+        ->and($component->get('sendBlockedReason'))->toBeNull();
+});
+

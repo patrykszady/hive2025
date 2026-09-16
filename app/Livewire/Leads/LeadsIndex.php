@@ -254,7 +254,7 @@ class LeadsIndex extends Component
     public function leads()
     {
         $leads =
-            Lead::with(['user.clients', 'last_status'])->when($this->origin, function ($query) {
+            Lead::with(['user.clients', 'last_status'])->withCount('feedback')->when($this->origin, function ($query) {
                 return $query->where('origin', $this->origin);
             })
                 ->when(! empty($this->statuses), function ($query) {

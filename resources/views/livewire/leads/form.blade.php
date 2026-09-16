@@ -8,12 +8,16 @@
          and the only way in was flipping the status back to New). What a
          reply still locks is Remove — see the footer. --}}
     <flux:tab.group>
-        <flux:tabs>
-            <flux:tab name="details" x-on:click="activeLeadTab = 'details'">Details</flux:tab>
+        {{-- The footer's controls follow the selected tab (status on Details,
+             Send on Message), so the tab state is bound, not tracked by
+             click: a click handler missed keyboard and programmatic tab
+             changes and left the Message tab open with no Send button. --}}
+        <flux:tabs x-model="activeLeadTab">
+            <flux:tab name="details">Details</flux:tab>
             {{-- Incomplete contact: finish it on Details first. We never invent
                  the missing pieces, so the blanks are the prompt. --}}
             @if ($this->blockingContactInfo === [])
-                <flux:tab name="messages" x-on:click="activeLeadTab = 'messages'">Message</flux:tab>
+                <flux:tab name="messages">Message</flux:tab>
             @endif
         </flux:tabs>
 
@@ -101,30 +105,46 @@
                 @if (! empty($availability))
                     <flux:field>
                         <flux:label>Availability</flux:label>
+                        @php($problems = $this->slotProblems)
                         @if ($this->hasUsableAvailability)
                             <flux:description class="mb-2">Click to select a slot for the email.</flux:description>
+                        @elseif (in_array('booked', $problems, true))
+                            <flux:description class="mb-2">The calendars are booked for {{ in_array('past', $problems, true) ? 'the rest of' : 'all of' }} these preferred times — the email asks {{ $full_name ?: 'the client' }} to pick new ones instead.</flux:description>
                         @else
                             <flux:description class="mb-2">These preferred times have passed — the email asks {{ $full_name ?: 'the client' }} to pick new ones instead.</flux:description>
                         @endif
                         <div class="flex flex-wrap gap-2">
                             @foreach ($availability as $index => $slot)
                                 @php($selected = in_array($index, $selectedAvailability, true))
-                                @php($past = ! \App\Models\Lead::slotIsBookable((array) $slot))
+                                @php($problem = $problems[$index] ?? null)
+                                {{-- A slot that has passed is struck through; one the
+                                     calendars have filled since the homeowner picked it
+                                     says so — neither can be selected. --}}
                                 <button type="button"
                                     wire:click="insertAvailabilitySlot({{ $index }})"
-                                    @disabled($past)
-                                    class="{{ $past ? 'cursor-not-allowed' : 'cursor-pointer' }}"
+                                    @disabled($problem !== null)
+                                    title="{{ $problem === 'booked' ? 'No free start left — the calendars are booked then.' : '' }}"
+                                    class="{{ $problem !== null ? 'cursor-not-allowed' : 'cursor-pointer' }}"
                                 >
-                                    <flux:badge :color="$past ? 'zinc' : ($selected ? 'indigo' : 'sky')" :class="$past ? 'line-through opacity-60' : ''">
+                                    <flux:badge :color="$problem !== null ? 'zinc' : ($selected ? 'indigo' : 'sky')" :class="$problem === 'past' ? 'line-through opacity-60' : ($problem === 'booked' ? 'opacity-60' : '')">
                                         @if ($selected)
                                             <flux:icon.check variant="micro" class="size-3.5" />
                                         @endif
                                         {{ \Carbon\Carbon::parse($slot['date'])->format('D, M j') }} · {{ $slot['time'] }}
+                                        @if ($problem === 'booked')
+                                            <span class="ml-1 font-normal">· booked</span>
+                                        @endif
                                     </flux:badge>
                                 </button>
                             @endforeach
                         </div>
 
+                        {{-- A window the homeowner picked can fill up on Patryk's or
+                             Greg's calendar between their pick and this email: say so,
+                             instead of a slot with nothing under it and Send blocked. --}}
+                        @if (! empty($selectedAvailability) && $this->exactTimeOptions === [] && $this->selectedSlotWindowKnown)
+                            <flux:callout variant="warning" icon="calendar" class="mt-2" heading="No free start left in this window — the calendars are booked then. Pick another of their slots, or propose a different time." />
+                        @endif
                         @if (! empty($selectedAvailability) && $this->exactTimeOptions !== [])
                             <flux:description class="mt-2 mb-1">Pick the exact time for the consult.</flux:description>
                             <div class="flex flex-wrap gap-2">
@@ -178,8 +198,15 @@
                                     label="Project"
                                     placeholder="Pick a project or type a new name"
                                 >
+                                    {{-- Each suggestion shows the project's stage as the badge the
+                                         projects table draws for it; picking one puts the plain
+                                         "Name — Stage" text in the box (the value), which is what
+                                         resolvedConsultProject() reads back. --}}
                                     @foreach ($this->consultProjectOptions as $option)
-                                        <flux:autocomplete.item wire:key="consult-project-{{ $option['id'] }}">{{ $option['label'] }}</flux:autocomplete.item>
+                                        <flux:autocomplete.item wire:key="consult-project-{{ $option['id'] }}" value="{{ $option['label'] }}" label="{{ $option['label'] }}" class="gap-2">
+                                            <span class="truncate">{{ $option['name'] }}</span>
+                                            <flux:badge size="sm" inset="top bottom" :color="$option['color']">{{ $option['stage'] }}</flux:badge>
+                                        </flux:autocomplete.item>
                                     @endforeach
                                 </flux:autocomplete>
                             </div>
@@ -259,7 +286,9 @@
             @if($impact['schedule_link'] || $impact['booked_consult'])
                 <flux:callout icon="exclamation-triangle" variant="warning" inline>
                     <flux:callout.text>
-                        @if($impact['booked_consult'])
+                        @if(($impact['consults'] ?? []) !== [])
+                            The <strong>consultation on {{ collect($impact['consults'])->join(', ', ' and ') }}</strong> will be cancelled and the calendar invite withdrawn.
+                        @elseif($impact['booked_consult'])
                             This lead has a <strong>booked consultation</strong>.
                         @endif
                         @if($impact['schedule_link'])
@@ -271,6 +300,10 @@
 
             <ul class="list-disc pl-5 space-y-1 text-sm text-zinc-600 dark:text-zinc-300">
                 <li>The lead, its statuses and its message history are removed.</li>
+
+                @foreach($impact['consult_projects'] ?? [] as $projectName)
+                    <li>The project <strong>{{ $projectName }}</strong>, created for that consultation and holding nothing else, is removed.</li>
+                @endforeach
 
                 @foreach($impact['clients'] as $clientName)
                     <li>The client record <strong>{{ $clientName }}</strong> is removed — it has no projects and no other contacts.</li>

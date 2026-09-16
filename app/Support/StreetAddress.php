@@ -19,6 +19,41 @@ final class StreetAddress
 
     private const DIRECTION = 'n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest';
 
+    /**
+     * A street with its casing tidied for display — "6 drake terrace" reads
+     * "6 Drake Terrace" — without ever taking a capital away: "McDonald",
+     * "PO Box" and "NE" stay as typed, only fully lower-case words are
+     * capitalised. Numbers and units ("2nd", "#4") are left alone, and the
+     * small joining words stay small except at the front.
+     */
+    public static function tidyCase(string $street): string
+    {
+        $small = ['of', 'the', 'and', 'de', 'la', 'del', 'at'];
+        $words = preg_split('/(\s+)/u', trim($street), -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
+        $seenWord = false;
+
+        foreach ($words as $i => $word) {
+            if ($word === '' || preg_match('/^\s+$/u', $word)) {
+                continue;
+            }
+
+            $isFirst = ! $seenWord;
+            $seenWord = true;
+
+            if ($word !== mb_strtolower($word) || ! preg_match('/^\p{L}/u', $word)) {
+                continue; // already cased, or starts with a digit / "#"
+            }
+
+            if (! $isFirst && in_array($word, $small, true)) {
+                continue;
+            }
+
+            $words[$i] = mb_strtoupper(mb_substr($word, 0, 1)).mb_substr($word, 1);
+        }
+
+        return implode('', $words);
+    }
+
     /** A street line has a house number: "by Lake Arlington" is a landmark. */
     public static function looksLikeStreet(?string $value): bool
     {

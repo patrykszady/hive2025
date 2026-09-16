@@ -100,10 +100,18 @@
                             </flux:table.cell>
 
                             <flux:table.cell class="w-[17%] min-w-0">
-                                <x-table-link
-                                    :href="($leadClient = $this->clientForLead($lead)) ? route('clients.show', $leadClient) : null"
-                                    :label="$lead->lead_data['name'] ?? ''"
-                                />
+                                <div class="flex items-center gap-1 min-w-0">
+                                    <x-table-link
+                                        class="flex-1 min-w-0"
+                                        :href="($leadClient = $this->clientForLead($lead)) ? route('clients.show', $leadClient) : null"
+                                        :label="$lead->lead_data['name'] ?? ''"
+                                    />
+                                    @if ($lead->feedback_count > 0)
+                                        <flux:tooltip content="Left feedback" position="top">
+                                            <flux:icon.chat-bubble-left-ellipsis variant="micro" class="shrink-0 text-indigo-400" />
+                                        </flux:tooltip>
+                                    @endif
+                                </div>
                             </flux:table.cell>
 
                             <flux:table.cell class="w-[12%]">
@@ -166,7 +174,7 @@
                         <flux:callout.text>
                             {{ collect($impact['holding'])->join(', ', ' and ') }}
                             {{ count($impact['holding']) === 1 ? 'has' : 'have' }} an active scheduling link or a booked
-                            consultation — homeowners may still be holding those links.
+                            consultation — a booked consultation is cancelled and its calendar invite withdrawn; a link still out keeps working only because deleted leads are kept recoverable.
                         </flux:callout.text>
                     </flux:callout>
                 @endif

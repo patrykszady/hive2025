@@ -3,7 +3,10 @@
 namespace App\Livewire\Leads;
 
 use App\Models\Lead;
+use App\Models\LeadFeedback;
 use App\Models\Vendor;
+use Flux;
+use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 
@@ -34,6 +37,14 @@ class PickTimes extends Component
     /** How they'd like to meet: at the house, or a Teams video call. */
     public string $meeting = 'in_person';
 
+    // Feedback control — independent of the picking/submitted state above,
+    // so it survives (and shows) regardless of which one the page is in.
+    public bool $feedbackSent = false;
+
+    public ?string $feedbackRating = null;
+
+    public string $feedbackMessage = '';
+
     /** Same windows the gs.construction lead form offers. */
     public const WINDOWS = ['Anytime', '7-9 AM', '9-11 AM', '11-1 PM', '1-3 PM'];
 
@@ -57,6 +68,9 @@ class PickTimes extends Component
      * against this moment, so a 1-3 PM slot stops being offered at 1 PM.
      */
     public const MIN_LEAD_HOURS_RESCHEDULE = 0;
+
+    /** Flood guard for the guest feedback control: no auth, so cap by lead. */
+    public const MAX_FEEDBACK_PER_DAY = 5;
 
     /**
      * How much a pick is worth toward MIN_TIMES: a whole free day ("Anytime")
@@ -86,10 +100,50 @@ class PickTimes extends Component
     /** Send stays disabled until the minimums are met (button + server). */
     public function getCanSubmitProperty(): bool
     {
-        $weight = collect($this->times)->sum(fn ($t) => static::slotWeight($t['time']));
+        return $this->submitHint === null;
+    }
 
-        return $weight >= self::MIN_TIMES
-            && collect($this->times)->pluck('date')->unique()->count() >= self::MIN_DAYS;
+    /**
+     * Why Send is still off, in the homeowner's terms — or null once the
+     * minimums are met. A disabled button on its own said nothing; the rule
+     * lived only in the intro, which people had scrolled past by the time
+     * they were looking for the button. "Anytime" counts as two times, so
+     * the count is what is still missing, not how many windows to click.
+     */
+    public function getSubmitHintProperty(): ?string
+    {
+        $weight = collect($this->times)->sum(fn ($t) => static::slotWeight($t['time']));
+        $days = collect($this->times)->pluck('date')->unique()->count();
+
+        $needTimes = max(0, self::MIN_TIMES - $weight);
+        $needDays = max(0, self::MIN_DAYS - $days);
+
+        if ($needTimes === 0 && $needDays === 0) {
+            return null;
+        }
+
+        if ($this->times === []) {
+            return sprintf(
+                'Choose at least %d times across %d different days to send your availability.',
+                self::MIN_TIMES,
+                self::MIN_DAYS,
+            );
+        }
+
+        $times = $needTimes > 0 ? sprintf('%d more time%s', $needTimes, $needTimes === 1 ? '' : 's') : null;
+        $where = match (true) {
+            $needDays === 0 => null,
+            $needDays === 1 => 'on a different day',
+            default => sprintf('across %d more days', $needDays),
+        };
+
+        $ask = match (true) {
+            $times !== null && $where !== null => "Choose {$times} {$where}",
+            $times !== null => "Choose {$times}",
+            default => 'Choose a time '.$where,
+        };
+
+        return "{$ask} to send your availability.";
     }
 
     public function mount(int $lead): void
@@ -390,6 +444,16 @@ class PickTimes extends Component
 
         $lead = $this->lead;
         $data = $lead->lead_data;
+
+        // A reschedule is availability on top of availability — or of a
+        // consult already on the books. A first pick through the link (a
+        // lead who was texted or emailed the picker before ever giving
+        // times) is a first contact: Carri & Alan were thanked "for taking
+        // the time to reschedule" on the first times they ever sent.
+        if (! empty($data['availability']) || $lead->hasBookedConsult()) {
+            $data['availability_rescheduled_at'] = now()->toDateTimeString();
+        }
+
         $data['availability'] = $this->times;
         $data['availability_updated_at'] = now()->toDateTimeString();
         // A stated preference only — the composer pre-selects it and the team
@@ -417,6 +481,117 @@ class PickTimes extends Component
         $this->notifyTeam($lead);
 
         $this->submitted = true;
+    }
+
+    public function closeFeedbackModal(): void
+    {
+        $this->modal('lead_feedback_modal')->close();
+    }
+
+    /**
+     * A quick note on how scheduling went, sent from this same signed page —
+     * while picking or after. Same in-app + browser-push mechanism as
+     * notifyTeam() below: no email, no SMS.
+     */
+    public function sendFeedback(?string $viewport = null): void
+    {
+        $this->resetErrorBag(['feedbackRating', 'feedbackMessage', 'feedback']);
+
+        $this->validate([
+            'feedbackRating' => ['nullable', 'in:1,2,3,4,5'],
+            'feedbackMessage' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $message = trim($this->feedbackMessage);
+
+        if ($this->feedbackRating === null && $message === '') {
+            $this->addError('feedback', 'Please add a rating or a note before sending.');
+
+            return;
+        }
+
+        $lead = $this->lead;
+
+        // RateLimiter increments atomically via the cache store (same
+        // primitive LoginRequest uses for login throttling), so concurrent
+        // requests for the same lead can't all read a stale pre-insert count
+        // and all slip under the cap the way a plain count-then-create would.
+        $feedback = RateLimiter::attempt(
+            "lead-feedback:{$lead->id}",
+            self::MAX_FEEDBACK_PER_DAY,
+            fn () => LeadFeedback::create([
+                'lead_id' => $lead->id,
+                'context' => 'pick-times',
+                'rating' => $this->feedbackRating !== null ? (int) $this->feedbackRating : null,
+                'message' => $message !== '' ? $message : null,
+                'meta' => array_filter([
+                    'user_agent' => mb_substr((string) request()->userAgent(), 0, 255),
+                    'viewport' => $viewport ? mb_substr($viewport, 0, 20) : null,
+                    'state' => $this->submitted ? 'submitted' : 'picking',
+                ]),
+            ]),
+            86400,
+        );
+
+        if ($feedback === false) {
+            $this->addError('feedback', "We've already received several notes from you today — thank you, the team has them.");
+
+            return;
+        }
+
+        $this->notifyTeamOfFeedback($lead, $feedback);
+
+        $this->feedbackRating = null;
+        $this->feedbackMessage = '';
+        $this->feedbackSent = true;
+        $this->modal('lead_feedback_modal')->close();
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Thank you!',
+            text: 'Your feedback was sent to the team.',
+        );
+    }
+
+    /**
+     * Feedback lands in /notifications the same way picked times do — one
+     * AppNotification row per vendor admin plus a browser push. No
+     * Notification/Mail class involved, same as notifyTeam() below.
+     */
+    protected function notifyTeamOfFeedback(Lead $lead, LeadFeedback $feedback): void
+    {
+        $vendor = Vendor::withoutGlobalScopes()->find($lead->belongs_to_vendor_id);
+
+        if (! $vendor) {
+            return;
+        }
+
+        $name = trim((string) ($lead->lead_data['name'] ?? '')) ?: 'A lead';
+        $ratingText = $feedback->rating ? "{$feedback->rating}/5" : 'No rating given';
+        $note = trim((string) $feedback->message);
+        $body = $note !== '' ? "{$ratingText} — \"{$note}\"" : $ratingText;
+
+        foreach ($vendor->users()->wherePivot('role_id', 1)->get() as $admin) {
+            \App\Models\AppNotification::create([
+                'user_id' => $admin->id,
+                'type' => 'lead_feedback_submitted',
+                'title' => "{$name} left feedback on scheduling",
+                'body' => $body,
+                'action_url' => route('leads.index', ['lead' => $lead->id]),
+                'data' => [
+                    'lead_id' => $lead->id,
+                    'feedback_id' => $feedback->id,
+                ],
+            ]);
+        }
+
+        \App\Support\AdminAlerts::push(
+            $vendor->users()->wherePivot('role_id', 1)->pluck('users.id'),
+            'lead_feedback_submitted',
+            "{$name} left feedback on scheduling",
+            $body,
+            route('leads.index', ['lead' => $lead->id]),
+        );
     }
 
     /**

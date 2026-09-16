@@ -666,7 +666,12 @@ class Task extends Model
 
     protected function scopeSortable($query, $task)
     {
-        return $task->project->tasks();
+        // Siblings are the tasks on the same project. The project relation
+        // is vendor-scoped to the session, so a delete run from the console
+        // (no session) or on another vendor's behalf must still find it.
+        $project = $task->project ?? Project::withoutGlobalScopes()->find($task->project_id);
+
+        return $project->tasks();
     }
 
     public function wouldOverlapWithSiblings($startDate, $endDate)
