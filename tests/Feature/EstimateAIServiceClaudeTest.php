@@ -155,8 +155,9 @@ it('returns catalog-priced items from the draft, drops anything outside the offe
         ->and($result['line_items'][0]['cost'])->toBe(850.0)
         ->and($result['line_items'][1]['quantity'])->toBe(48.5)
         ->and($result['line_items'][1]['cost'])->toBe(23.85)
-        ->and($result['line_items'][1]['desc'])->toBe('Porcelain 12x24 on the floor')
-        ->and($result['line_items'][1]['notes'])->toBe('confirm sq ft');
+        // The catalog's text, never the model's rewording.
+        ->and($result['line_items'][1]['desc'])->toBe('Catalog description of Floor Tile')
+        ->and($result['line_items'][1]['notes'])->toBe($c['Floor Tile']->notes);
 });
 
 it('turns a refusal or a cut-off draft into a plain message, never an empty apply', function () {
@@ -203,8 +204,40 @@ it('applies a draft to a section at catalog prices', function () {
     expect($created)->toHaveCount(1)
         ->and((float) $created[0]->cost)->toBe(205.0)
         ->and((float) $created[0]->total)->toBe(820.0)
-        ->and($created[0]->desc)->toBe('Ceiling and one wall')
+        // The description and notes on file for the item, not the model's.
+        ->and($created[0]->desc)->toBe('Catalog description of Full Drywall')
+        ->and($created[0]->notes)->toBe($c['Full Drywall']->notes)
         ->and((float) $section->fresh()->total)->toBe(820.0);
+});
+
+it('puts the catalog text back on drafted lines nobody has edited, and leaves edited lines alone', function () {
+    $fx = claudeEstimateFixture();
+    $c = $fx['catalog'];
+    $c['Full Drywall']->update(['notes' => 'Two coats, sanded between.']);
+    $section = EstimateSection::create(['estimate_id' => $fx['estimate']->id, 'name' => 'Powder Room', 'total' => 0]);
+
+    $line = fn (LineItem $item, array $extra) => EstimateLineItem::create(array_merge([
+        'estimate_id' => $fx['estimate']->id, 'line_item_id' => $item->id, 'section_id' => $section->id,
+        'name' => $item->name, 'category' => $item->category, 'sub_category' => $item->sub_category, 'unit_type' => $item->unit_type, 'cost' => $item->cost,
+    ], $extra));
+    $drafted = $line($c['Full Drywall'], ['order' => 0, 'quantity' => 4, 'total' => 820, 'desc' => 'Ceiling and one wall', 'notes' => 'Allowance']);
+    $edited = $line($c['Floor Tile'], ['order' => 1, 'quantity' => 10, 'total' => 238.5, 'desc' => 'Porcelain, herringbone', 'notes' => 'Client supplies']);
+    \Illuminate\Support\Facades\DB::table('estimate_line_item')->where('id', $edited->id)->update(['updated_at' => now()->addMinute()]);
+
+    $this->artisan('estimates:restore-catalog-text', ['estimate' => $fx['estimate']->id, '--dry-run' => true])
+        ->expectsOutputToContain('would be')
+        ->assertSuccessful();
+    expect($drafted->fresh()->desc)->toBe('Ceiling and one wall');
+
+    // The fixture's own sample lines are untouched too, so more than one restores.
+    $this->artisan('estimates:restore-catalog-text', ['estimate' => $fx['estimate']->id])
+        ->expectsOutputToContain('were restored to the catalog text')
+        ->assertSuccessful();
+
+    expect($drafted->fresh()->desc)->toBe('Catalog description of Full Drywall')
+        ->and($drafted->fresh()->notes)->toBe('Two coats, sanded between.')
+        ->and($edited->fresh()->desc)->toBe('Porcelain, herringbone')
+        ->and($edited->fresh()->notes)->toBe('Client supplies');
 });
 
 it('sends only the floorplan numbers — never the uploaded file\'s name', function () {
@@ -240,19 +273,22 @@ it('sizes cement board in pieces from square feet, and tile in square feet', fun
         ->and($byName['Cement Boards']['quantity'])->toBe(4.0);
 });
 
-it('never copies the catalog\'s internal notes onto the estimate', function () {
+it('carries the catalog\'s notes onto the estimate line, never the model\'s', function () {
+    // The notes on file for an item are part of what the estimate says
+    // (2026-09-16: a drafted kitchen showed the model's rewordings instead).
     $fx = claudeEstimateFixture();
     $c = $fx['catalog'];
-    $c['Full Drywall']->forceFill(['notes' => 'INTERNAL: crew of two, order 10% extra'])->save();
+    $c['Full Drywall']->forceFill(['notes' => 'Crew of two, order 10% extra'])->save();
     $section = EstimateSection::create(['estimate_id' => $fx['estimate']->id, 'name' => 'Powder Room', 'total' => 0]);
 
     $created = (new EstimateAIService())->applyToEstimate($fx['estimate'], $section, [
         ['line_item_id' => $c['Full Drywall']->id, 'quantity' => 2, 'notes' => null],
-        ['line_item_id' => $c['Full Drywall']->id, 'quantity' => 1, 'notes' => 'Ceiling only'],
+        ['line_item_id' => $c['Full Drywall']->id, 'quantity' => 1, 'notes' => 'Ceiling only', 'desc' => 'Model rewording'],
     ]);
 
-    expect($created[0]->notes)->toBeNull()
-        ->and($created[1]->notes)->toBe('Ceiling only');
+    expect($created[0]->notes)->toBe('Crew of two, order 10% extra')
+        ->and($created[1]->notes)->toBe('Crew of two, order 10% extra')
+        ->and($created[1]->desc)->toBe('Catalog description of Full Drywall');
 });
 
 it('redacts lowercase, all-caps and hyphenated-number addresses too', function () {

@@ -180,10 +180,12 @@ class EstimateAIService
                 'quantity' => $quantity,
                 'cost' => $cost,
                 'total' => $total,
-                'desc' => $item['desc'] ?? $lineItem->desc,
-                // Never the catalog's own notes: those are internal, and this
-                // line lands on the client's estimate.
-                'notes' => $item['notes'] ?? null,
+                // The catalog's own text, verbatim — the description and
+                // notes already on file for this item are what the estimate
+                // says, whether a person or the model picked it (2026-09-16:
+                // a drafted kitchen carried the model's rewordings instead).
+                'desc' => $lineItem->desc,
+                'notes' => $lineItem->notes,
             ]);
         }
 
@@ -219,12 +221,40 @@ class EstimateAIService
             return null;
         }
 
-        $metrics = array_filter(
-            array_intersect_key($floorplanData, array_flip(['floor_sqft', 'wall_sqft', 'cement_board_sqft', 'ceiling_height_ft'])),
-            fn ($v) => is_numeric($v),
+        $numbers = [
+            'floor_sqft', 'wall_sqft', 'cement_board_sqft', 'ceiling_height_ft', 'perimeter_ft',
+            'window_area_sqft', 'window_casing_lf', 'door_casing_lf',
+            'cabinet_count', 'base_cabinet_lf', 'upper_cabinet_lf', 'tall_cabinet_lf', 'countertop_lf',
+        ];
+
+        $metrics = array_map(
+            fn ($v) => (float) $v,
+            array_filter(array_intersect_key($floorplanData, array_flip($numbers)), fn ($v) => is_numeric($v)),
         );
 
-        return $metrics === [] ? null : array_map(fn ($v) => (float) $v, $metrics);
+        // A room scan also says which room each number belongs to, and what
+        // appliances stand there — nothing in either identifies the client.
+        $rooms = collect((array) ($floorplanData['rooms'] ?? []))
+            ->filter(fn ($r) => is_array($r) && filled($r['name'] ?? null))
+            ->map(fn (array $r) => array_filter([
+                'name' => Str::limit((string) $r['name'], 40, ''),
+                'dimensions' => isset($r['dimensions']) ? Str::limit((string) $r['dimensions'], 40, '') : null,
+            ] + array_map(fn ($v) => (float) $v, array_filter(
+                array_intersect_key($r, array_flip(['floor_sqft', 'wall_sqft', 'ceiling_height_ft', 'perimeter_ft', 'window_casing_lf', 'door_casing_lf'])),
+                fn ($v) => is_numeric($v),
+            ))))
+            ->values()
+            ->all();
+        if ($rooms !== []) {
+            $metrics['rooms'] = $rooms;
+        }
+
+        $appliances = array_filter(array_map('intval', array_filter((array) ($floorplanData['appliances'] ?? []), 'is_numeric')));
+        if ($appliances !== []) {
+            $metrics['appliances'] = $appliances;
+        }
+
+        return $metrics === [] ? null : $metrics;
     }
 
     /**
@@ -359,10 +389,10 @@ class EstimateAIService
                         'properties' => [
                             'line_item_id' => ['type' => 'integer', 'enum' => $ids ?: [0]],
                             'quantity' => ['type' => 'number', 'description' => 'Quantity in the catalog unit for this item. 1 for lump-sum (no_unit) items.'],
-                            'desc' => ['type' => 'string', 'description' => 'Optional: a job-specific rewording of the catalog description. Empty string to keep the catalog text.'],
-                            'notes' => ['type' => 'string', 'description' => 'Optional internal note for the estimator. Empty string if none.'],
                         ],
-                        'required' => ['line_item_id', 'quantity', 'desc', 'notes'],
+                        // No desc/notes: each line carries the catalog's own
+                        // description and notes, never a rewording.
+                        'required' => ['line_item_id', 'quantity'],
                         'additionalProperties' => false,
                     ],
                 ],
@@ -393,7 +423,11 @@ PROMPT;
         $prompt = "CUSTOMER INQUIRY (contact details already removed):\n{$inquiry}\n\n";
 
         if ($floorplanData) {
-            $prompt .= "FLOORPLAN DATA:\n".json_encode($floorplanData, JSON_PRETTY_PRINT)."\n\n";
+            $prompt .= "FLOORPLAN DATA (measured from a room scan; size quantities from these numbers, per room where rooms are listed):\n"
+                ."- floor_sqft sizes flooring and floor tile; wall_sqft sizes paint, drywall and wall tile; perimeter_ft sizes baseboard.\n"
+                ."- window_casing_lf and door_casing_lf size casings; base_cabinet_lf, upper_cabinet_lf and tall_cabinet_lf are the cabinet runs in linear feet; countertop_lf is the counter run.\n"
+                ."- appliances are what is there now: one hookup or install per unit that is replaced or moved.\n"
+                .json_encode($floorplanData, JSON_PRETTY_PRINT)."\n\n";
         }
 
         $prompt .= "CATALOG ITEMS AVAILABLE FOR THIS DRAFT (id | name | category / sub-category | unit):\n";
@@ -508,17 +542,28 @@ PROMPT;
         $floorSqft = $floorplanData['floor_sqft'] ?? null;
         $wallSqft = $floorplanData['wall_sqft'] ?? null;
         $cementBoardSqft = $floorplanData['cement_board_sqft'] ?? null;
+        $perimeter = $floorplanData['perimeter_ft'] ?? null;
+        $windowCasing = $floorplanData['window_casing_lf'] ?? null;
+        $doorCasing = $floorplanData['door_casing_lf'] ?? null;
 
-        if (! $floorSqft && ! $wallSqft && ! $cementBoardSqft) {
+        if (! $floorSqft && ! $wallSqft && ! $cementBoardSqft && ! $perimeter && ! $windowCasing && ! $doorCasing) {
             return $items;
         }
 
         foreach ($items as &$item) {
             $name = Str::lower((string) ($item['name'] ?? ''));
+            $linear = ($item['unit_type'] ?? null) === 'li.ft.';
             if ($floorSqft && str_contains($name, 'floor tile')) {
                 $item['quantity'] = (float) $floorSqft;
             } elseif ($wallSqft && str_contains($name, 'wall tile')) {
                 $item['quantity'] = (float) $wallSqft;
+            } elseif ($perimeter && $linear && str_contains($name, 'baseboard')) {
+                // The scan measured the room's perimeter: that is the baseboard run.
+                $item['quantity'] = (float) $perimeter;
+            } elseif ($windowCasing && $linear && str_contains($name, 'window casing')) {
+                $item['quantity'] = (float) $windowCasing;
+            } elseif ($doorCasing && $linear && str_contains($name, 'door casing')) {
+                $item['quantity'] = (float) $doorCasing;
             } elseif ($cementBoardSqft && str_contains($name, 'cement board')) {
                 // Sheets cover ~32 sq.ft.; the catalog item is priced per piece.
                 $item['quantity'] = ($item['unit_type'] ?? null) === 'pieces'
@@ -648,8 +693,9 @@ PROMPT;
                 'quantity' => $quantity,
                 'cost' => (float) $lineItem->cost,
                 'unit_type' => $lineItem->unit_type,
-                'desc' => trim((string) ($item['desc'] ?? '')) !== '' ? trim((string) $item['desc']) : $lineItem->desc,
-                'notes' => trim((string) ($item['notes'] ?? '')) !== '' ? trim((string) $item['notes']) : null,
+                // Always the catalog's text: the model is not asked for any.
+                'desc' => $lineItem->desc,
+                'notes' => $lineItem->notes,
             ];
         }
 

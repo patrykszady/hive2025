@@ -1,0 +1,64 @@
+Room,Description,Value
+Entire Roomplan,Name,KITCHEN EXISTING - Sample
+Entire Roomplan,Address,1 Sample Street
+Entire Roomplan,Latitude,0 m
+Entire Roomplan,Longitude,0 m
+Entire Roomplan,Altitude [ft],724'  0"
+Entire Roomplan,Total exterior floor area [ft^2],164.3
+Entire Roomplan,Total livable floor area [ft^2],147.4
+Kitchen,Floor area [ft^2],92.1
+Dining Room,Floor area [ft^2],55.3
+Kitchen,Dimensions [ft],9' 11" x 9'  3"
+Dining Room,Dimensions (bounding box) [ft],9'  3" x 6'  0"
+Dining Room,Dimensions (inscribed) [ft],9'  3" x 5'  8"
+Entire Roomplan,Wall area [ft^2],341.2
+Kitchen,Wall area [ft^2],219.6
+Dining Room,Wall area [ft^2],121.6
+Entire Roomplan,Volume [ft^3],1201.83
+Kitchen,Volume [ft^3],750.90 
+Dining Room,Volume [ft^3],450.93 
+Kitchen,Ceiling height [ft],8'  2" 
+Dining Room,Ceiling height [ft],8'  2" 
+Entire Roomplan,Total perimeter in rooms [ft],68' 11"
+Kitchen,Perimeter [ft],38'  5"
+Dining Room,Perimeter [ft],30'  6"
+Dining Room,Doors total casing length [ft],17' 11"
+Dining Room,Windows total casing length [ft],13'  8"
+Kitchen,Windows total casing length [ft],11'  8"
+Entire Roomplan,Total window area [ft^2],15.7
+Dining Room,Window dimensions [ft],2'  1" x 4'  3"
+Kitchen,Window dimensions [ft],2'  8" x 2'  7"
+Dining Room,Door dimensions [ft],3'  2" x 7'  1"
+Entire Roomplan,# Cabinets,10
+Entire Roomplan,# Dining chairs,2
+Entire Roomplan,# Dishwashers,1
+Entire Roomplan,# Stoves,1
+Entire Roomplan,# Dining tables,1
+Entire Roomplan,# Fridges,1
+Entire Roomplan,# Sinks,1
+Entire Roomplan,# Ovens,1
+Kitchen,Cabinet dimensions (w x h x d) [ft],3' 11" x 3'  0" x 2'  2"
+Kitchen,Cabinet dimensions (w x h x d) [ft],3'  2" x 3'  0" x 2'  2"
+Kitchen,Cabinet dimensions (w x h x d) [ft],6' 10" x 2'  7" x 1'  2"
+Kitchen,Cabinet dimensions (w x h x d) [ft],3'  0" x 3'  0" x 2'  2"
+Kitchen,Cabinet dimensions (w x h x d) [ft],2'  6" x 3'  0" x 2'  1"
+Kitchen,Cabinet dimensions (w x h x d) [ft],3'  7" x 3'  0" x 1'  2"
+Kitchen,Cabinet dimensions (w x h x d) [ft],1' 11" x 3'  0" x 2'  0"
+Kitchen,Cabinet dimensions (w x h x d) [ft],3'  2" x 2'  7" x 1'  1"
+Kitchen,Cabinet dimensions (w x h x d) [ft],2'  9" x 2'  7" x 1'  0"
+Kitchen,Cabinet dimensions (w x h x d) [ft],2' 11" x 1'  7" x 1'  2"
+Dining Room,Dining chair dimensions (w x h x d) [ft],1'  6" x 2' 10" x 1'  9"
+Dining Room,Dining chair dimensions (w x h x d) [ft],1'  6" x 2' 10" x 1'  9"
+Kitchen,Fridge dimensions (w x h x d) [ft],2' 11" x 5'  9" x 2'  8"
+Dining Room,Dining table dimensions (w x h x d) [ft],4'  1" x 2'  6" x 2'  9"
+Kitchen,Oven dimensions (w x h x d) [ft],2'  8" x 3'  1" x 2'  2"
+Kitchen,Dishwasher dimensions (w x h x d) [ft],2'  0" x 3'  0" x 2'  2"
+Kitchen,Sink dimensions (w x h x d) [ft],1'  9" x 0'  9" x 1'  7"
+Kitchen,Stove dimensions (w x h x d) [ft],2'  8" x 0'  4" x 2'  2"
+Key,Dimensions (bounding box),Smallest rectangle that contains the room
+Key,Dimensions (inscribed),Largest rectangle that fits inside the room
+Key,Dimensions,Rectangular rooms: inscribed dimensions == bounding box dimensions
+Settings,Wall thickness [ft] (total wall length: 48'  6"),0'  4"
+Settings,Doors casing width [ft],0'  2"
+Settings,Windows casing width [ft],0'  2"
+Settings,Each room area method,Internal wall area excluded

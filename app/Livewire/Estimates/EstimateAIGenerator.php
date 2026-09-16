@@ -340,64 +340,120 @@ class EstimateAIGenerator extends Component
         return $hasRoom && $hasDescription && $hasValue;
     }
 
+    /**
+     * Everything a Polycam room scan tells us that sizes an estimate, not
+     * just the four totals: each room's floor, walls, ceiling, perimeter and
+     * casings; the cabinets as linear feet, split into base and upper by
+     * depth (uppers are the shallow ones), with the countertop run as the
+     * base cabinets plus what sits under the counter; the appliances by
+     * count. Totals come from the "Entire Roomplan" rows when the export
+     * has them, else from the rooms.
+     *
+     * @param  array<int, array<int, string>>  $rows  Room, Description, Value
+     */
     protected function extractPolycamMetrics(array $rows): array
     {
-        $floorSqft = null;
-        $wallSqft = null;
-        $ceilingHeight = null;
-        $perimeter = null;
+        $rooms = [];
+        $totals = ['floor_sqft' => null, 'wall_sqft' => null, 'perimeter_ft' => null, 'window_area_sqft' => null];
+        $cabinets = [];
+        $underCounterWidths = [];
+        $appliances = [];
+        $skipRooms = ['entire roomplan', 'key', 'settings', ''];
 
         foreach ($rows as $row) {
-            $description = strtolower(trim($row[1] ?? ''));
-            $value = trim($row[2] ?? '');
+            $room = trim((string) ($row[0] ?? ''));
+            $description = strtolower(trim((string) ($row[1] ?? '')));
+            $value = trim((string) ($row[2] ?? ''));
+            $isTotal = strtolower($room) === 'entire roomplan';
+            $perRoom = ! in_array(strtolower($room), $skipRooms, true);
 
-            // Floor area: "Floor area [ft^2]" or "Total livable floor area [ft^2]"
-            if (str_contains($description, 'floor area') && str_contains($description, 'ft')) {
-                $parsed = $this->parsePolycamValue($value);
-                if ($parsed !== null) {
-                    // Use Total livable floor area if available, otherwise individual room
-                    if (str_contains($description, 'livable') || $floorSqft === null) {
-                        $floorSqft = $parsed;
-                    }
-                }
+            if ($perRoom && ! isset($rooms[$room])) {
+                $rooms[$room] = ['name' => $room];
             }
 
-            // Wall area: "Wall area [ft^2]"
-            if (str_contains($description, 'wall area') && str_contains($description, 'ft')) {
-                $parsed = $this->parsePolycamValue($value);
-                if ($parsed !== null && $wallSqft === null) {
-                    $wallSqft = $parsed;
+            if ($isTotal && str_contains($description, 'livable floor area')) {
+                $totals['floor_sqft'] = $this->parsePolycamValue($value);
+            } elseif ($isTotal && str_contains($description, 'wall area')) {
+                $totals['wall_sqft'] = $this->parsePolycamValue($value);
+            } elseif ($isTotal && str_contains($description, 'total perimeter')) {
+                $totals['perimeter_ft'] = $this->parsePolycamFeetInches($value);
+            } elseif ($isTotal && str_contains($description, 'total window area')) {
+                $totals['window_area_sqft'] = $this->parsePolycamValue($value);
+            } elseif ($isTotal && preg_match('/^# (.+)$/', $description, $m)) {
+                $appliances[str_replace(' ', '_', trim($m[1]))] = (int) $this->parsePolycamValue($value);
+            } elseif ($perRoom && str_starts_with($description, 'floor area')) {
+                $rooms[$room]['floor_sqft'] = $this->parsePolycamValue($value);
+            } elseif ($perRoom && str_starts_with($description, 'wall area')) {
+                $rooms[$room]['wall_sqft'] = $this->parsePolycamValue($value);
+            } elseif ($perRoom && str_starts_with($description, 'ceiling height')) {
+                $rooms[$room]['ceiling_height_ft'] = $this->parsePolycamFeetInches($value);
+            } elseif ($perRoom && str_starts_with($description, 'perimeter')) {
+                $rooms[$room]['perimeter_ft'] = $this->parsePolycamFeetInches($value);
+            } elseif ($perRoom && str_starts_with($description, 'dimensions') && ! str_contains($description, 'bounding')) {
+                $rooms[$room]['dimensions'] = preg_replace('/\s+/', ' ', $value);
+            } elseif ($perRoom && str_contains($description, 'windows total casing length')) {
+                $rooms[$room]['window_casing_lf'] = $this->parsePolycamFeetInches($value);
+            } elseif ($perRoom && str_contains($description, 'doors total casing length')) {
+                $rooms[$room]['door_casing_lf'] = $this->parsePolycamFeetInches($value);
+            } elseif ($perRoom && str_starts_with($description, 'cabinet dimensions')) {
+                if ($dims = $this->parsePolycamDimensions($value)) {
+                    $cabinets[] = $dims;
                 }
-            }
-
-            // Ceiling height: "Ceiling height [ft]"
-            if (str_contains($description, 'ceiling height')) {
-                $parsed = $this->parsePolycamFeetInches($value);
-                if ($parsed !== null) {
-                    $ceilingHeight = $parsed;
-                }
-            }
-
-            // Perimeter: "Perimeter [ft]"
-            if (str_contains($description, 'perimeter') && str_contains($description, 'ft')) {
-                $parsed = $this->parsePolycamFeetInches($value);
-                if ($parsed !== null) {
-                    $perimeter = $parsed;
+            } elseif ($perRoom && str_starts_with($description, 'dishwasher dimensions')) {
+                if ($dims = $this->parsePolycamDimensions($value)) {
+                    $underCounterWidths[] = $dims[0];
                 }
             }
         }
 
-        $cementBoardSqft = ($floorSqft || $wallSqft)
-            ? round(($floorSqft ?? 0) + ($wallSqft ?? 0), 2)
-            : null;
+        $rooms = array_values(array_filter($rooms, fn ($r) => count($r) > 1));
+        $sum = fn (string $key) => collect($rooms)->pluck($key)->filter(fn ($v) => is_numeric($v))->sum();
+        $round = fn ($v) => is_numeric($v) && $v > 0 ? round((float) $v, 2) : null;
 
-        return [
-            'floor_sqft' => $floorSqft ? round($floorSqft, 2) : null,
-            'wall_sqft' => $wallSqft ? round($wallSqft, 2) : null,
-            'cement_board_sqft' => $cementBoardSqft,
-            'ceiling_height_ft' => $ceilingHeight ? round($ceilingHeight, 2) : null,
-            'perimeter_ft' => $perimeter ? round($perimeter, 2) : null,
-        ];
+        $floorSqft = $round($totals['floor_sqft'] ?? $sum('floor_sqft'));
+        $wallSqft = $round($totals['wall_sqft'] ?? $sum('wall_sqft'));
+        $ceilingHeight = $round(collect($rooms)->pluck('ceiling_height_ft')->filter()->max());
+
+        // Base cabinets stand deep (about 2'); uppers are the shallow boxes
+        // (about 1'). Tall pantries (5'+) are neither. Widths add up to the
+        // run in linear feet — what cabinet and countertop items are sized by.
+        $base = collect($cabinets)->filter(fn ($c) => $c[2] >= 1.75 && $c[1] < 5);
+        $upper = collect($cabinets)->filter(fn ($c) => $c[2] < 1.75);
+        $tall = collect($cabinets)->filter(fn ($c) => $c[2] >= 1.75 && $c[1] >= 5);
+        $baseLf = $round($base->sum(fn ($c) => $c[0]));
+
+        return array_filter([
+            'floor_sqft' => $floorSqft,
+            'wall_sqft' => $wallSqft,
+            // Kept for the bath heuristic downstream (floor plus walls, as
+            // before); a kitchen will not tile every wall.
+            'cement_board_sqft' => ($floorSqft || $wallSqft) ? round(($floorSqft ?? 0) + ($wallSqft ?? 0), 2) : null,
+            'ceiling_height_ft' => $ceilingHeight,
+            'perimeter_ft' => $round($totals['perimeter_ft'] ?? $sum('perimeter_ft')),
+            'window_area_sqft' => $round($totals['window_area_sqft']),
+            'window_casing_lf' => $round($sum('window_casing_lf')),
+            'door_casing_lf' => $round($sum('door_casing_lf')),
+            'cabinet_count' => $cabinets !== [] ? count($cabinets) : ($appliances['cabinets'] ?? null),
+            'base_cabinet_lf' => $baseLf,
+            'upper_cabinet_lf' => $round($upper->sum(fn ($c) => $c[0])),
+            'tall_cabinet_lf' => $round($tall->sum(fn ($c) => $c[0])),
+            'countertop_lf' => $baseLf !== null ? round($baseLf + array_sum($underCounterWidths), 2) : null,
+            'appliances' => array_filter(array_intersect_key($appliances, array_flip(['fridges', 'stoves', 'ovens', 'dishwashers', 'sinks', 'microwaves', 'washers', 'dryers', 'toilets', 'bathtubs', 'showers']))),
+            'rooms' => array_map(fn ($r) => array_filter(array_map(fn ($v) => is_float($v) ? round($v, 2) : $v, $r), fn ($v) => $v !== null && $v !== ''), $rooms),
+        ], fn ($v) => $v !== null && $v !== [] && $v !== 0);
+    }
+
+    /** "3' 11\" x 3'  0\" x 2'  2\"" -> [width, height, depth] in feet, or null. */
+    protected function parsePolycamDimensions(string $value): ?array
+    {
+        $parts = array_map('trim', preg_split('/\s*[x×]\s*/i', $value) ?: []);
+        if (count($parts) < 3) {
+            return null;
+        }
+
+        $dims = array_map(fn ($p) => $this->parsePolycamFeetInches($p), array_slice($parts, 0, 3));
+
+        return in_array(null, $dims, true) ? null : $dims;
     }
 
     protected function parsePolycamValue(string $value): ?float
