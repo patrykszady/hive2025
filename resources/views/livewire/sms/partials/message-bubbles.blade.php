@@ -42,7 +42,44 @@
                         <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
                             @foreach ($msg->media_urls as $url)
                                 @php $mediaUrl = $resolveMediaUrl($url); @endphp
-                                @if (\App\Models\SmsMessage::isVideoUrl($url))
+                                @if (\App\Models\SmsMessage::isContactCardUrl($url))
+                                    {{-- A shared contact (vCard). Until 2026-09-17 these were
+                                         stored as .bin and drawn as an image: "Image unavailable". --}}
+                                    @php $cards = array_values(array_filter($msg->contactCards(), fn ($c) => ($c['url'] ?? null) === $url)); @endphp
+                                    @forelse ($cards as $card)
+                                        <div class="flex items-start gap-3 rounded-xl border px-3 py-2.5 {{ $msg->isOutbound() ? 'border-white/30 bg-white/10' : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800' }}">
+                                            <div class="flex size-9 shrink-0 items-center justify-center rounded-full {{ $msg->isOutbound() ? 'bg-white/20' : 'bg-zinc-200 dark:bg-zinc-700' }}">
+                                                <flux:icon.user class="size-5" />
+                                            </div>
+                                            <div class="min-w-0 flex-1 text-sm">
+                                                <div class="font-semibold">{{ $card['name'] !== '' ? $card['name'] : 'Contact' }}</div>
+                                                @if ($card['org'] !== '' || $card['title'] !== '')
+                                                    <div class="opacity-75">{{ trim($card['title'].($card['title'] !== '' && $card['org'] !== '' ? ' · ' : '').$card['org']) }}</div>
+                                                @endif
+                                                @foreach ($card['phones'] as $phone)
+                                                    <div class="mt-1 flex flex-wrap items-center gap-x-2">
+                                                        <a href="tel:{{ preg_replace('/[^0-9+]/', '', $phone['number']) }}" class="underline decoration-dotted underline-offset-2">{{ $phone['number'] }}</a>
+                                                        @if ($phone['type'] !== '')<span class="text-xs uppercase opacity-60">{{ $phone['type'] }}</span>@endif
+                                                    </div>
+                                                @endforeach
+                                                @foreach ($card['emails'] as $email)
+                                                    <div class="mt-1"><a href="mailto:{{ $email['address'] }}" class="underline decoration-dotted underline-offset-2 break-all">{{ $email['address'] }}</a></div>
+                                                @endforeach
+                                                @foreach ($card['addresses'] as $address)
+                                                    <div class="mt-1 opacity-75">{{ $address }}</div>
+                                                @endforeach
+                                                @if ($card['note'] !== '')
+                                                    <div class="mt-1 whitespace-pre-line opacity-75">{{ $card['note'] }}</div>
+                                                @endif
+                                                <a href="{{ $mediaUrl }}" download class="mt-1.5 inline-block text-xs underline opacity-75">Save contact (.vcf)</a>
+                                            </div>
+                                        </div>
+                                    @empty
+                                        <a href="{{ $mediaUrl }}" download class="flex items-center gap-1.5 py-2 text-sm underline opacity-75">
+                                            <flux:icon.user class="size-4" /> Contact card (.vcf)
+                                        </a>
+                                    @endforelse
+                                @elseif (\App\Models\SmsMessage::isVideoUrl($url))
                                     @if ($interactive)
                                     <button type="button" class="block relative" wire:click="openVideoLightbox('{{ $url }}')">
                                         <video preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black pointer-events-none" playsinline>
@@ -236,7 +273,44 @@
                         <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
                             @foreach ($msg->media_urls as $url)
                                 @php $mediaUrl = $resolveMediaUrl($url); @endphp
-                                @if (\App\Models\SmsMessage::isVideoUrl($url))
+                                @if (\App\Models\SmsMessage::isContactCardUrl($url))
+                                    {{-- A shared contact (vCard). Until 2026-09-17 these were
+                                         stored as .bin and drawn as an image: "Image unavailable". --}}
+                                    @php $cards = array_values(array_filter($msg->contactCards(), fn ($c) => ($c['url'] ?? null) === $url)); @endphp
+                                    @forelse ($cards as $card)
+                                        <div class="flex items-start gap-3 rounded-xl border px-3 py-2.5 {{ $msg->isOutbound() ? 'border-white/30 bg-white/10' : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800' }}">
+                                            <div class="flex size-9 shrink-0 items-center justify-center rounded-full {{ $msg->isOutbound() ? 'bg-white/20' : 'bg-zinc-200 dark:bg-zinc-700' }}">
+                                                <flux:icon.user class="size-5" />
+                                            </div>
+                                            <div class="min-w-0 flex-1 text-sm">
+                                                <div class="font-semibold">{{ $card['name'] !== '' ? $card['name'] : 'Contact' }}</div>
+                                                @if ($card['org'] !== '' || $card['title'] !== '')
+                                                    <div class="opacity-75">{{ trim($card['title'].($card['title'] !== '' && $card['org'] !== '' ? ' · ' : '').$card['org']) }}</div>
+                                                @endif
+                                                @foreach ($card['phones'] as $phone)
+                                                    <div class="mt-1 flex flex-wrap items-center gap-x-2">
+                                                        <a href="tel:{{ preg_replace('/[^0-9+]/', '', $phone['number']) }}" class="underline decoration-dotted underline-offset-2">{{ $phone['number'] }}</a>
+                                                        @if ($phone['type'] !== '')<span class="text-xs uppercase opacity-60">{{ $phone['type'] }}</span>@endif
+                                                    </div>
+                                                @endforeach
+                                                @foreach ($card['emails'] as $email)
+                                                    <div class="mt-1"><a href="mailto:{{ $email['address'] }}" class="underline decoration-dotted underline-offset-2 break-all">{{ $email['address'] }}</a></div>
+                                                @endforeach
+                                                @foreach ($card['addresses'] as $address)
+                                                    <div class="mt-1 opacity-75">{{ $address }}</div>
+                                                @endforeach
+                                                @if ($card['note'] !== '')
+                                                    <div class="mt-1 whitespace-pre-line opacity-75">{{ $card['note'] }}</div>
+                                                @endif
+                                                <a href="{{ $mediaUrl }}" download class="mt-1.5 inline-block text-xs underline opacity-75">Save contact (.vcf)</a>
+                                            </div>
+                                        </div>
+                                    @empty
+                                        <a href="{{ $mediaUrl }}" download class="flex items-center gap-1.5 py-2 text-sm underline opacity-75">
+                                            <flux:icon.user class="size-4" /> Contact card (.vcf)
+                                        </a>
+                                    @endforelse
+                                @elseif (\App\Models\SmsMessage::isVideoUrl($url))
                                     @if ($interactive)
                                     <button type="button" class="block relative" wire:click="openVideoLightbox('{{ $url }}')">
                                         <video preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black pointer-events-none" playsinline>

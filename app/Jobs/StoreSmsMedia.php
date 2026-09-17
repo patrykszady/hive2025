@@ -74,6 +74,11 @@ class StoreSmsMedia implements ShouldQueue
                     str_contains($contentType, 'amr') => 'amr',
                     str_contains($contentType, 'audio') => 'mp3',
                     str_contains($contentType, 'pdf') => 'pdf',
+                    // A shared contact (text/x-vcard from Android, text/vcard from iOS):
+                    // the thread shows it as a card (SmsMessage::contactCards()).
+                    str_contains($contentType, 'vcard') => 'vcf',
+                    str_contains($contentType, 'calendar') => 'ics',
+                    str_contains($contentType, 'text/plain') => 'txt',
                     default => 'bin',
                 };
 

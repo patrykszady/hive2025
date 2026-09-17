@@ -202,6 +202,51 @@ class SmsMessage extends Model
     }
 
     /**
+     * A shared contact (.vcf) — stored by StoreSmsMedia when the carrier sends
+     * text/x-vcard. Until 2026-09-17 these landed as .bin and the thread tried
+     * to draw them as an image ("Image unavailable").
+     */
+    public static function isContactCardUrl(string $url): bool
+    {
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?: $url, PATHINFO_EXTENSION));
+
+        return in_array($ext, ['vcf', 'vcard'], true);
+    }
+
+    /**
+     * The contacts inside this message's .vcf attachments, parsed once per
+     * request. Each card: name, first, last, org, title, note, phones
+     * [{type, number}], emails [{type, address}], addresses [string], url.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function contactCards(): array
+    {
+        if ($this->parsedContactCards !== null) {
+            return $this->parsedContactCards;
+        }
+        $cards = [];
+        foreach ($this->media_urls ?? [] as $url) {
+            if (! is_string($url) || ! self::isContactCardUrl($url) || str_starts_with($url, 'http')) {
+                continue;
+            }
+            $disk = \Illuminate\Support\Facades\Storage::disk('files');
+            if (! $disk->exists($url)) {
+                continue;
+            }
+            foreach (\App\Support\VCard::parse((string) $disk->get($url)) as $card) {
+                $card['url'] = $url;
+                $cards[] = $card;
+            }
+        }
+
+        return $this->parsedContactCards = $cards;
+    }
+
+    /** @var list<array<string, mixed>>|null */
+    private ?array $parsedContactCards = null;
+
+    /**
      * MIME type guess from a URL extension. Returns null if unknown.
      */
     public static function mimeForUrl(string $url): ?string
@@ -209,6 +254,7 @@ class SmsMessage extends Model
         $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?: $url, PATHINFO_EXTENSION));
 
         return match ($ext) {
+            'vcf', 'vcard' => 'text/vcard',
             'mp4', 'm4v' => 'video/mp4',
             'mov', 'qt' => 'video/quicktime',
             'webm' => 'video/webm',
