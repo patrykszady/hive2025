@@ -11,6 +11,7 @@ use App\Services\NylasService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -207,6 +208,47 @@ it('drops a slot that went busy between picking and submitting', function () {
         ->and(collect($component->get('times'))->pluck('time')->all())->toBe(['9-11 AM', '7-9 AM']);
 });
 
+it('asks the calendars for a span Microsoft accepts, in whole days', function () {
+    $lead = busyCalendarFixture([]);
+    $day = busyTestDay($lead);
+
+    Cache::flush();
+    $mock = Mockery::mock(NylasService::class);
+    $mock->shouldReceive('getFreeBusy')
+        ->withArgs(function (string $grant, array $emails, int $start, int $end) {
+            $days = ($end - $start) / 86400;
+
+            // Up to the end of the last fetched day, but never the 63 whole
+            // days that 62 + end-of-day rounds up to.
+            return $emails === ['patryk@gs.test', 'greg@gs.test']
+                && $days > AdminCalendarBusy::HORIZON_DAYS
+                && ceil($days) <= AdminCalendarBusy::PROVIDER_MAX_DAYS;
+        })
+        ->once()
+        ->andReturn(['status' => 200, 'success' => true, 'data' => ['request_id' => 'req-2', 'data' => []]]);
+    app()->instance(NylasService::class, $mock);
+
+    expect(app(AdminCalendarBusy::class)->windowIsBusy($day, '1-3 PM'))->toBeFalse();
+});
+
+it('says why the lookup failed, in the provider\'s words', function () {
+    $lead = busyCalendarFixture([]);
+    Cache::flush();
+    Log::shouldReceive('channel')->with('nylas')->andReturnSelf();
+    Log::shouldReceive('error')->once()->withArgs(fn (string $message, array $context) => str_contains($message, 'free/busy') && str_contains($context['error'], 'ErrorTimeIntervalTooBig'));
+    Log::shouldReceive('warning')->zeroOrMoreTimes();
+
+    $mock = Mockery::mock(NylasService::class);
+    $mock->shouldReceive('getFreeBusy')->andReturn([
+        'status' => 400, 'success' => false,
+        'data' => ['type' => 'general_error', 'message' => 'Bad Request', 'provider_error' => ['error' => ['code' => 'ErrorTimeIntervalTooBig']]],
+        'body' => '{}',
+    ]);
+    app()->instance(NylasService::class, $mock);
+
+    expect(app(AdminCalendarBusy::class)->windowIsBusy(busyTestDay($lead), '1-3 PM'))->toBeFalse();
+});
+
 it('treats calendars as free when the lookup fails', function () {
     $lead = busyCalendarFixture([]);
     $day = busyTestDay($lead);
@@ -243,7 +285,9 @@ it('withholds exact-time chips that collide with a calendar event', function () 
     $day = busySafeDay();
 
     // Event 2:00-2:30 PM inside the 1-3 PM window: of the chips
-    // 1:00 / 1:30 / 2:00 / 2:30, only 2:00 overlaps and must vanish.
+    // 1:00 / 1:30 / 2:00 / 2:30, 2:00 overlaps and 1:30 and 2:30 sit inside
+    // the 30-minute travel buffer around it — only 1:00 survives, the same
+    // rule the homeowner's windows get.
     $lead = busyCalendarFixture([[
         Carbon::parse($day.' 14:00', $tz),
         Carbon::parse($day.' 14:30', $tz),
@@ -271,7 +315,7 @@ it('withholds exact-time chips that collide with a calendar event', function () 
 
     $values = array_column($component->instance()->exactTimeOptions, 'value');
 
-    expect($values)->toBe(['13:00', '13:30', '14:30'])
+    expect($values)->toBe(['13:00'])
         ->and($values)->not->toContain('14:00');
 });
 

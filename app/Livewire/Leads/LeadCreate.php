@@ -1902,10 +1902,11 @@ class LeadCreate extends Component
 
         // Starts that collide with what's already on Patryk's or Greg's
         // calendar are withheld — offering them books a clash the office then
-        // has to untangle. selectExactTime() validates against this list, so
-        // the filter holds server-side too.
-        $busyIntervals = app(\App\Services\AdminCalendarBusy::class)
-            ->busyIntervalsFor((string) ($slot['date'] ?? ''));
+        // has to untangle — with the same travel buffer the homeowner's
+        // windows get. selectExactTime() validates against this list, so the
+        // filter holds server-side too.
+        $busy = app(\App\Services\AdminCalendarBusy::class);
+        $date = (string) ($slot['date'] ?? '');
 
         // Same-day scheduling (an office-proposed date can be today) must not
         // offer starts that have already passed.
@@ -1919,9 +1920,7 @@ class LeadCreate extends Component
             $chipStart = $cursor->format('H:i');
             $chipEnd = $cursor->copy()->addMinutes(self::CONSULT_MINUTES)->format('H:i');
 
-            $clashes = collect($busyIntervals)->contains(
-                fn (array $busy) => $chipStart < $busy[1] && $busy[0] < $chipEnd,
-            );
+            $clashes = $busy->startIsBusy($date, $chipStart, self::CONSULT_MINUTES);
 
             if ($minStart !== null && $chipStart <= $minStart) {
                 $clashes = true;

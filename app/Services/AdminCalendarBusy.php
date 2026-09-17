@@ -36,11 +36,18 @@ class AdminCalendarBusy
     private const BUFFER_MINUTES = 30;
 
     /**
-     * How far ahead busy data is fetched. Matches the Microsoft Graph cap
-     * (62 days); the picker's calendar reaches further, but a lead booking
-     * two months out is rare enough to leave un-gated.
+     * How far ahead busy data is fetched. Microsoft caps a free/busy query at
+     * 62 days and rounds the span UP to whole days, so asking for 62 days to
+     * the end of the last day is 63 and a 400 — which is what every lookup
+     * returned on 2026-09-16, silently, while both pickers offered booked
+     * times as free. Sixty days to the end of the last day is 61. The
+     * picker's calendar reaches further, but a lead booking two months out
+     * is rare enough to leave un-gated.
      */
-    public const HORIZON_DAYS = 62;
+    public const HORIZON_DAYS = 60;
+
+    /** Microsoft's cap on one free/busy query, in whole days. */
+    public const PROVIDER_MAX_DAYS = 62;
 
     public function __construct(private readonly NylasService $nylas) {}
 
@@ -80,6 +87,30 @@ class AdminCalendarBusy
             $paddedEnd = $toTime(min(23 * 60 + 59, $toMinutes($busyEnd) + self::BUFFER_MINUTES));
 
             if ($start < $paddedEnd && $paddedStart < $end) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Would a consult starting at $start (HH:MM) and running $minutes clash
+     * with an event, travel buffer included? The office's exact-time chips
+     * use this, so a 12:30 start is withheld next to a 1:00 meeting just as
+     * the homeowner's 11-1 PM window is.
+     */
+    public function startIsBusy(string $date, string $start, int $minutes): bool
+    {
+        $toMinutes = fn (string $t): int => ((int) substr($t, 0, 2)) * 60 + (int) substr($t, 3, 2);
+        $chipStart = $toMinutes($start);
+        $chipEnd = $chipStart + $minutes;
+
+        foreach ($this->busyIntervalsFor($date) as [$busyStart, $busyEnd]) {
+            $paddedStart = max(0, $toMinutes($busyStart) - self::BUFFER_MINUTES);
+            $paddedEnd = $toMinutes($busyEnd) + self::BUFFER_MINUTES;
+
+            if ($chipStart < $paddedEnd && $paddedStart < $chipEnd) {
                 return true;
             }
         }
@@ -162,9 +193,7 @@ class AdminCalendarBusy
                 );
 
                 if (! ($response['success'] ?? false)) {
-                    Log::channel('nylas')->warning('Admin free/busy lookup failed — treating calendars as free', [
-                        'status' => $response['status'] ?? null,
-                    ]);
+                    $this->lookupFailed($response['status'] ?? null, (string) ($response['error'] ?? json_encode($response['data']['provider_error'] ?? $response['data']['error'] ?? $response['body'] ?? '')));
 
                     return [];
                 }
@@ -195,13 +224,46 @@ class AdminCalendarBusy
 
                 return $byDate;
             } catch (\Throwable $e) {
-                Log::channel('nylas')->warning('Admin free/busy lookup threw — treating calendars as free', [
-                    'error' => $e->getMessage(),
-                ]);
+                $this->lookupFailed(null, $e->getMessage());
 
                 return [];
             }
         });
+    }
+
+    /**
+     * A failed lookup fails open, so it must at least be loud: the error in
+     * the log with the provider's own words, and a browser alert to the
+     * admins (at most one every few hours) — a day of silently offering
+     * booked times is how this was found the first time.
+     */
+    protected function lookupFailed(?int $status, string $error): void
+    {
+        Log::channel('nylas')->error('Admin free/busy lookup failed — treating calendars as free', [
+            'status' => $status,
+            'error' => mb_substr($error, 0, 600),
+        ]);
+
+        if (! Cache::add('admin_calendar_busy:alerted', true, now()->addHours(6))) {
+            return;
+        }
+
+        try {
+            $vendorId = (int) config('nylas.crew_leads.vendor_id', 1);
+            $adminIds = \App\Models\Vendor::withoutGlobalScopes()->find($vendorId)?->users()->wherePivot('role_id', 1)->pluck('users.id') ?? collect();
+
+            if ($adminIds->isNotEmpty()) {
+                \App\Support\AdminAlerts::push(
+                    $adminIds,
+                    'calendar_busy_failed',
+                    'Calendar check is failing',
+                    'The consult time pickers cannot read the calendars right now, so booked times are being offered. Nylas said: '.mb_substr($error, 0, 140),
+                    route('leads.index'),
+                );
+            }
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Admin free/busy alert could not be sent', ['error' => $e->getMessage()]);
+        }
     }
 
     /**

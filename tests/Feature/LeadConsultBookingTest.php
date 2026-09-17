@@ -1420,9 +1420,10 @@ it('withholds start times the calendars are busy for, and says so when a picked 
     $fx = makeConsultFixture(); // the homeowner picked 1-3 PM
     $date = $fx['lead']->lead_data['availability'][0]['date'];
 
-    // Patryk or Greg busy 1:00-2:00 (with the buffer, 12:30-2:30): only 2:30 is left.
-    $this->mock(\App\Services\AdminCalendarBusy::class, fn ($mock) => $mock->shouldReceive('busyIntervalsFor')
-        ->with($date)->andReturn([['12:30', '14:30']]));
+    // Patryk or Greg busy 1:00-2:00 — with the 30-minute travel buffer the
+    // chips keep clear of 12:30-2:30, so only 2:30 is left.
+    $this->partialMock(\App\Services\AdminCalendarBusy::class, fn ($mock) => $mock->shouldReceive('busyIntervalsFor')
+        ->with($date)->andReturn([['13:00', '14:00']]));
 
     $component = consultComposer($fx)->call('insertAvailabilitySlot', 0);
     expect(collect($component->instance()->exactTimeOptions)->pluck('label')->all())->toBe(['2:30 PM'])
@@ -1436,7 +1437,7 @@ it('withholds start times the calendars are busy for, and says so when a picked 
         'vendor_id' => $fx['vendor']->id, 'type' => 'lead', 'name' => 'Consult', 'subject' => 'Consultation',
         'body' => '<p>{{lead_intro}}</p><p>{{lead_time_block}}</p>',
     ]);
-    $this->mock(\App\Services\AdminCalendarBusy::class, fn ($mock) => $mock->shouldReceive('busyIntervalsFor')
+    $this->partialMock(\App\Services\AdminCalendarBusy::class, fn ($mock) => $mock->shouldReceive('busyIntervalsFor')
         ->with($date)->andReturn([['12:30', '15:30']]));
 
     $component = Livewire::actingAs($fx['admin'])->test(LeadCreate::class)->call('editLead', $fx['lead']->id);
