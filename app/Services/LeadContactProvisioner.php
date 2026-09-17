@@ -5,12 +5,14 @@ namespace App\Services;
 use App\Models\Client;
 use App\Models\Lead;
 use App\Models\User;
+use App\Support\SenderName;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class LeadContactProvisioner
 {
+
     /** @var array<string,string> */
     protected const STREET_SUFFIXES = [
         'st' => 'street', 'str' => 'street', 'street' => 'street',
@@ -95,8 +97,9 @@ class LeadContactProvisioner
             ->values()
             ->all();
 
-        DB::transaction(function () use ($lead, $contacts, $email, $partnerEmails, $phones, $address, $stated) {
+        DB::transaction(function () use ($lead, $data, $contacts, $email, $partnerEmails, $phones, $address, $stated) {
             $users = [];
+            $surnameFromEmail = false;
 
             foreach ($contacts as $index => $contact) {
                 // The sender's address belongs to whoever wrote in; the others
@@ -108,6 +111,19 @@ class LeadContactProvisioner
                     ? $email
                     : $this->matchEmailToContact($contact, $partnerEmails);
                 $contactPhone = $phones[$index] ?? null;
+
+                // A surname the form left off may be in the message ("Thanks,
+                // Katherine Brown") or in the address (valina.markhay@): still
+                // theirs to give.
+                if (trim($contact[1]) === '') {
+                    $surname = $this->surnameFromMessage($this->stringValue($data['message'] ?? null), $contact[0])
+                        ?? $this->surnameFromEmail($contact[0], $contactEmail);
+
+                    if ($surname !== null) {
+                        $contact[1] = $surname;
+                        $surnameFromEmail = $surnameFromEmail || count($contacts) === 1;
+                    }
+                }
 
                 // A contact record is only worth creating when it's whole:
                 // full name, email AND phone. A half-contact looks like a real
@@ -131,6 +147,16 @@ class LeadContactProvisioner
 
             if ($lead->user_id !== $primary->id) {
                 $lead->user_id = $primary->id;
+            }
+
+            // The lead is filed under the name the contact now carries.
+            if ($surnameFromEmail) {
+                $data = $lead->lead_data;
+                $data['name'] = trim($primary->first_name.' '.$primary->last_name);
+                $lead->lead_data = $data;
+            }
+
+            if ($lead->isDirty()) {
                 $lead->saveQuietly();
             }
 
@@ -181,6 +207,10 @@ class LeadContactProvisioner
             return null;
         }
 
+        if ($lastName === '') {
+            $lastName = $this->surnameFromEmail($firstName, $email) ?? '';
+        }
+
         $user = $this->findOrCreateUser([$firstName, $lastName], $email, $phone);
         $this->link($lead, $user);
 
@@ -227,6 +257,30 @@ class LeadContactProvisioner
         if (! $client->vendors()->where('vendors.id', $vendorId)->exists()) {
             $client->vendors()->attach($vendorId, ['source' => $lead->origin]);
         }
+    }
+
+    /**
+     * The surname a lead's email address gives away for a first name
+     * (valina.markhay@ → Markhay); the rules live with the other name logic.
+     */
+    public function surnameFromEmail(string $firstName, ?string $email): ?string
+    {
+        return SenderName::surnameFromAddress($firstName, $email);
+    }
+
+    /**
+     * The surname a message signs with ("Thanks, Katherine Brown") for a
+     * lead entered with a first name alone.
+     */
+    public function surnameFromMessage(?string $message, string $firstName): ?string
+    {
+        $full = SenderName::fromSignOff($message, $firstName);
+
+        if ($full === null) {
+            return null;
+        }
+
+        return trim((string) substr($full, strlen(trim($firstName)))) ?: null;
     }
 
     /**

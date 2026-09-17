@@ -1291,6 +1291,11 @@ TXT;
             }
 
             $missing = [];
+            // "Katherine" with nothing to complete it from is not a contact yet.
+            $nameWords = SenderName::nameWords((string) ($data['name'] ?? ''));
+            if (count($nameWords) < 2) {
+                $missing[] = $nameWords === [] ? 'your name' : 'your last name';
+            }
             // A landmark ("by Lake Arlington") is a location, not an address.
             if (! StreetAddress::looksLikeStreet($data['address'] ?? null)) {
                 $missing[] = 'the project address';

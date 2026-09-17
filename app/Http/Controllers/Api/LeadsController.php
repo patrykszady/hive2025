@@ -192,6 +192,11 @@ class LeadsController extends Controller
             'extraction_status' => array_key_exists('is_lead', $extracted) ? 'ok' : null,
         ], fn ($v) => $v !== null && $v !== '' && $v !== []);
 
+        // A first name alone is completed from the message's sign-off or the
+        // address itself ("Katherine" + katherinebrown521@ → Katherine Brown)
+        // before anything is filed under it.
+        $leadData['name'] = \App\Support\SenderName::completeFromMessage($leadData['name'], $leadData['email'], $message) ?? $leadData['name'];
+
         // A lead's address becomes a client record — complete it before the
         // lead is stored, so what lands is whole rather than a bare street.
         $leadData = app(LeadAddressCompleter::class)->complete($leadData);
@@ -272,11 +277,18 @@ class LeadsController extends Controller
             app(LeadContactProvisioner::class)->provision($lead->fresh());
         }
 
-        // An email enquiry without an address or phone can't be scheduled —
-        // ask the sender for exactly what's missing, right away, once. Only
-        // when the classifier actually SAID it is an enquiry; a stranger, or
-        // a client mid-order, must not be emailed on the strength of nothing.
-        if ($isEmail && $hinted) {
+        // An enquiry without a surname, an address or a phone can't be
+        // scheduled — ask the sender for exactly what's missing, right away,
+        // once. An email enquiry only when the classifier actually SAID it is
+        // one; a stranger, or a client mid-order, must not be emailed on the
+        // strength of nothing. A website enquiry only when it came in as a
+        // first name alone that nothing could complete (the form already
+        // collects the rest, and the site has thanked them) — and never when
+        // it looks like a solicitation.
+        $solicitation = $verdict['is_lead'] === false && $verdict['confidence'] >= 0.8;
+        $firstNameOnly = count(\App\Support\SenderName::nameWords((string) ($leadData['name'] ?? ''))) < 2;
+
+        if (($isEmail && $hinted) || (! $isEmail && ! $solicitation && $firstNameOnly)) {
             app(CrewLeadEmailService::class)->requestMissingInfo($lead->fresh(), [
                 'subject' => $subject,
                 'rfc_message_id' => $data['in_reply_to'] ?? null,
@@ -287,6 +299,34 @@ class LeadsController extends Controller
             'data' => ['id' => $lead->id],
             'created' => true,
         ], 201);
+    }
+
+    /**
+     * Remove a lead the site withdrew. Only this company's own leads, and
+     * the same removal the lead modal does: booked consults cancelled, a
+     * contact and client that existed for nothing else cleaned up.
+     */
+    public function destroy(Request $request, int $lead): JsonResponse
+    {
+        $vendorId = $request->user()?->vendor?->id;
+        if (! $vendorId) {
+            return response()->json(['message' => 'Authenticated user is not associated with a vendor.'], 403);
+        }
+
+        $found = Lead::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->find($lead);
+
+        if (! $found) {
+            return response()->json(['message' => 'No such lead.'], 404);
+        }
+
+        $found->deleteWithOrphans();
+
+        Log::info('Lead removed by the site', ['lead_id' => $found->id, 'external_source' => $found->external_source, 'external_id' => $found->external_id]);
+
+        return response()->json(['data' => ['id' => $found->id], 'deleted' => true]);
     }
 
     /**

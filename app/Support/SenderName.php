@@ -24,6 +24,14 @@ final class SenderName
         'mr', 'mrs', 'ms', 'miss', 'dr', 'jr', 'sr', 'ii', 'iii', 'iv',
     ];
 
+    /** Parts of a mailbox name that are never a surname (beyond NOISE). */
+    private const MAILBOX_WORDS = [
+        'hi', 'my', 'the', 'family', 'house', 'business', 'help', 'inbox', 'llc', 'inc', 'co', 'and', 'x', 'xx',
+    ];
+
+    /** What a message signs off with, before the name: "Thanks, Katherine Brown". */
+    private const SIGN_OFFS = 'thanks|thank you|many thanks|thx|regards|best regards|kind regards|warm regards|best|all the best|cheers|sincerely|yours|take care|talk soon|—|--|-';
+
     /**
      * Formal first name => short forms people sign with, for the pairs a
      * prefix test can't see. "Will" → "William" needs no entry; "Bill" does.
@@ -280,21 +288,175 @@ final class SenderName
             }
         }
 
-        // The address spells the name out ("michael_dimarco"): the part that
-        // is their first name says which part is the surname.
-        $parts = self::addressParts($email);
+        // The address spells the name out ("michael_dimarco",
+        // "katherinebrown521"): the part that is their first name says which
+        // part is the surname.
+        $surname = self::surnameFromAddress($signOff, $email);
 
-        if ($parts !== null) {
-            if (self::sameFirstName($signOff, $parts[0])) {
-                return $signOff.' '.self::caseName($parts[1]);
-            }
-
-            if (self::sameFirstName($signOff, $parts[1])) {
-                return $signOff.' '.self::caseName($parts[0]);
-            }
+        if ($surname !== null) {
+            return $signOff.' '.$surname;
         }
 
         return $extracted;
+    }
+
+    /**
+     * The name a lead should carry given what was typed or extracted, the
+     * message itself and the address: a full name stands; a first name alone
+     * is completed from a sign-off in the message ("Thanks, Katherine
+     * Brown"), failing that from the address (katherinebrown521@ → Brown),
+     * and otherwise stays a first name — which is when someone has to ask.
+     */
+    public static function completeFromMessage(?string $name, ?string $email, ?string $message): ?string
+    {
+        $words = self::nameWords((string) $name);
+
+        if ($words === []) {
+            return null;
+        }
+
+        if (count($words) >= 2) {
+            return implode(' ', $words);
+        }
+
+        return self::fromSignOff($message, $words[0]) ?? self::complete($words[0], null, $email);
+    }
+
+    /**
+     * The full name a message wrote out for someone who signed, or was
+     * entered, with a first name alone: "Thanks, Katherine Brown", a
+     * "Regards," line with "Katherine Brown" on the next, "My name is
+     * Katherine Brown", or a bare "Katherine Brown" as the last line. The
+     * first word has to be their first name — a Katherine whose message ends
+     * "Bob Smith" is quoting someone, not signing — and the rest has to look
+     * like a name.
+     */
+    public static function fromSignOff(?string $message, string $firstName): ?string
+    {
+        $first = trim($firstName);
+        $text = str_replace(["\r\n", "\r"], "\n", strip_tags((string) $message));
+
+        if ($first === '' || trim($text) === '') {
+            return null;
+        }
+
+        $name = '(\p{Lu}[\p{L}\'’\-]+(?:[ \t]+\p{Lu}[\p{L}\'’\-]+){1,2})';
+        $candidates = [];
+
+        if (preg_match_all('/\b(?i:my name is|this is|i am|i\'m|i’m)[ \t]+'.$name.'/u', $text, $m)) {
+            array_push($candidates, ...$m[1]);
+        }
+
+        $lines = array_values(array_filter(array_map('trim', explode("\n", $text)), fn (string $line) => $line !== ''));
+        $tail = array_values(array_slice($lines, -6));
+
+        foreach ($tail as $i => $line) {
+            if (preg_match('/^(?i:'.self::SIGN_OFFS.')[\s,!.]*'.$name.'[ \t]*[.!]?$/u', $line, $m)) {
+                $candidates[] = $m[1];
+
+                continue;
+            }
+
+            if (preg_match('/^(?i:'.self::SIGN_OFFS.')[\s,!.]*$/u', $line) && isset($tail[$i + 1]) && preg_match('/^'.$name.'[ \t]*$/u', $tail[$i + 1], $m)) {
+                $candidates[] = $m[1];
+            }
+        }
+
+        $last = $tail === [] ? '' : $tail[count($tail) - 1];
+        if (preg_match('/^'.$name.'[ \t]*$/u', $last, $m)) {
+            $candidates[] = $m[1];
+        }
+
+        foreach ($candidates as $candidate) {
+            $words = self::nameWords($candidate);
+
+            if (count($words) < 2 || ! self::sameFirstName($first, $words[0])) {
+                continue;
+            }
+
+            $surname = array_slice($words, 1);
+
+            if (array_filter($surname, fn (string $word) => in_array(self::key($word), self::NOISE, true)) !== []) {
+                continue;
+            }
+
+            return $first.' '.implode(' ', $surname);
+        }
+
+        return null;
+    }
+
+    /**
+     * The surname an email address gives away for a known first name:
+     * "valina.markhay", "markhay_valina" or "v-markhay" for a Valina all say
+     * Markhay, and "katherinebrown521" for a Katherine says Brown. An address
+     * in parts counts when one part is the first name (or its initial) and
+     * exactly one other part is a plain word that is not a mailbox word like
+     * "info" or "home". An address in one piece counts only when it starts
+     * or ends with the whole first name and that name is five letters or
+     * more — "willjohn1089" could be Will John or Will Johnson, and Will
+     * could be William, so it says nothing.
+     */
+    public static function surnameFromAddress(string $firstName, ?string $email): ?string
+    {
+        $firstKey = self::key($firstName);
+        $local = Str::before(mb_strtolower(trim((string) $email)), '@');
+
+        if ($firstKey === '' || $local === '') {
+            return null;
+        }
+
+        $parts = array_values(array_filter(array_map(
+            fn (string $part) => (string) preg_replace('/\d+$/', '', $part),
+            preg_split('/[._\-+]+/', $local) ?: [],
+        ), fn (string $part) => $part !== ''));
+
+        if (count($parts) === 1) {
+            return self::surnameJoinedTo($firstKey, $parts[0]);
+        }
+
+        if (count($parts) < 2) {
+            return null;
+        }
+
+        $isFirst = fn (string $part) => strlen($part) === 1 ? $part === $firstKey[0] : self::sameFirstName($firstName, $part);
+
+        if (! collect($parts)->contains($isFirst)) {
+            return null;
+        }
+
+        $candidates = collect($parts)
+            ->reject($isFirst)
+            ->filter(fn (string $part) => strlen($part) >= 2 && preg_match('/^[a-z]+$/', $part) === 1 && ! self::isMailboxWord($part))
+            ->unique()
+            ->values();
+
+        return $candidates->count() === 1 ? self::caseName($candidates->first()) : null;
+    }
+
+    private static function surnameJoinedTo(string $firstKey, string $local): ?string
+    {
+        if (strlen($firstKey) < 5 || preg_match('/^[a-z]+$/', $local) !== 1) {
+            return null;
+        }
+
+        $rest = null;
+        if (str_starts_with($local, $firstKey)) {
+            $rest = substr($local, strlen($firstKey));
+        } elseif (str_ends_with($local, $firstKey)) {
+            $rest = substr($local, 0, -strlen($firstKey));
+        }
+
+        if ($rest === null || strlen($rest) < 3 || self::isMailboxWord($rest)) {
+            return null;
+        }
+
+        return self::caseName($rest);
+    }
+
+    private static function isMailboxWord(string $word): bool
+    {
+        return in_array($word, self::NOISE, true) || in_array($word, self::MAILBOX_WORDS, true);
     }
 
     /**

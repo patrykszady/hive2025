@@ -17,6 +17,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])
         Route::post('leads', [LeadsController::class, 'store'])
             ->name('api.v1.leads.store');
 
+        // The site took a submission back (a supplier's quote it later
+        // recognised as mail to us, not an enquiry): the lead it made here
+        // goes with it, consults and orphaned client included.
+        Route::delete('leads/{lead}', [LeadsController::class, 'destroy'])
+            ->name('api.v1.leads.destroy');
+
         // The vendor's connected mailboxes: what gs.construction reads for
         // email enquiries (see MailboxesController).
         Route::get('mailboxes', MailboxesController::class)
