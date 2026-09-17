@@ -82,3 +82,4 @@ function kotVendors(): array
     return compact('old', 'new', 'gs', 'mariusz');
 }
 
+require_once __DIR__.'/Support/consult-fixtures.php';
