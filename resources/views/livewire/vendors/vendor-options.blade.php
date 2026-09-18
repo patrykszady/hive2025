@@ -239,13 +239,38 @@
                         <div class="flex items-center justify-between gap-4">
                             <div>
                                 <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Screening Prompt</div>
-                                <div class="text-xs text-zinc-500">Played to your team member when they answer. They can hang up to send the caller to voicemail or stay on the line to connect.</div>
+                                <div class="text-xs text-zinc-500">Played to your team member when they answer, before the caller is connected. They can hang up to send the caller to voicemail or stay on the line to connect. Every word is a wait for both sides; off, they are connected the moment they answer and the caller's name is on their phone's screen instead.</div>
                             </div>
                             <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('screening')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview screening prompt" />
                         </div>
-                        <div>
+                        <flux:switch wire:model="screening_enabled" label="Announce the caller before connecting" />
+                        <div x-show="$wire.screening_enabled" x-cloak>
                             <flux:textarea wire:model="screening_message" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_SCREENING }}" resize="vertical" />
                             <div class="text-xs text-zinc-400 mt-1">Placeholders: <code class="text-zinc-500">{name}</code> (caller) <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                        </div>
+                    </div>
+
+                    {{-- Text sent to an inbound caller when the announced admin presses 1 --}}
+                    <div class="space-y-2">
+                        <div>
+                            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Text after pressing 1 on an incoming call</div>
+                            <div class="text-xs text-zinc-500">While you hear who is calling, press 1 if you cannot take it: the caller gets this text, hears the same by voice, and every phone stops ringing. Logged as a promised callback, not voicemail.</div>
+                        </div>
+                        <div>
+                            <flux:textarea wire:model="inbound_callback_text" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_INBOUND_CALLBACK_TEXT }}" resize="vertical" />
+                            <div class="text-xs text-zinc-400 mt-1">Placeholder: <code class="text-zinc-500">{company}</code></div>
+                        </div>
+                    </div>
+
+                    {{-- Text sent to an outbound target when the caller presses 1 --}}
+                    <div class="space-y-2">
+                        <div>
+                            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Text after pressing 1 on an outbound call</div>
+                            <div class="text-xs text-zinc-500">On a call you placed from Hive, press 1 on your phone (for example when their voicemail picks up) and this text goes to the person you called. It appears in their Messages thread.</div>
+                        </div>
+                        <div>
+                            <flux:textarea wire:model="missed_call_text" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_MISSED_CALL_TEXT }}" resize="vertical" />
+                            <div class="text-xs text-zinc-400 mt-1">Placeholder: <code class="text-zinc-500">{company}</code></div>
                         </div>
                     </div>
 

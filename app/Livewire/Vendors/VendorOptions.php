@@ -33,6 +33,18 @@ class VendorOptions extends Component
     public string $welcome_message = '';
     public string $welcome_message_unknown = '';
     public string $screening_message = '';
+
+    /**
+     * Announce the caller to whoever picks up before connecting them. Off,
+     * the team member is connected the moment they answer (their phone's
+     * caller ID already shows the caller's name); the prompt alone cost
+     * 6–7 s of every inbound pickup (2026-09-17 log review).
+     */
+    public bool $screening_enabled = true;
+
+    public string $missed_call_text = '';
+
+    public string $inbound_callback_text = '';
     public string $voicemail_message = '';
     public string $voicemail_message_unknown = '';
     public string $ivr_press1_message = '';
@@ -50,7 +62,9 @@ class VendorOptions extends Component
 
     public const DEFAULT_WELCOME = "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
     public const DEFAULT_WELCOME_UNKNOWN = "{greeting}! Thanks for calling {company}. One moment while we connect you.";
-    public const DEFAULT_SCREENING = "{name} is calling. Hang up now to send them to voicemail, or remain on the line to connect.";
+    // Short on purpose: the answering team member hears it before the caller
+    // is connected, so every word is dead air for both sides.
+    public const DEFAULT_SCREENING = "Call from {name}. Press 1 to text them back.";
     public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to redial {company}. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
     public const DEFAULT_VOICEMAIL_UNKNOWN = "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
     public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
@@ -59,6 +73,14 @@ class VendorOptions extends Component
     public const DEFAULT_SPAM = "Your call has been identified as spam and will not ring through. If this is not a spam call, please press 2 to send a text on your behalf so the {company} crew knows to call you back as soon as possible. Or stay on the line to leave a voicemail.";
     public const DEFAULT_AFTER_HOURS = "You've reached {company} after hours.";
     public const DEFAULT_RECORDING_DISCLOSURE = 'This call is recorded.';
+
+    // Sent to the person we called when the caller presses 1 during an
+    // outbound call (typically once their voicemail picks up).
+    public const DEFAULT_MISSED_CALL_TEXT = '{company} tried reaching you. Please give us a call back.';
+
+    // Sent to an inbound caller when the admin who is announced the call
+    // presses 1 instead of taking it.
+    public const DEFAULT_INBOUND_CALLBACK_TEXT = '{company} will call you right back.';
 
     /** @var \Illuminate\Support\Collection<\App\Models\User> Available admin users with cell phones */
     public $adminUsersWithPhones;
@@ -105,6 +127,9 @@ class VendorOptions extends Component
         $this->welcome_message = data_get($this->vendor->options, 'welcome_message', '') ?: self::DEFAULT_WELCOME;
         $this->welcome_message_unknown = data_get($this->vendor->options, 'welcome_message_unknown', '') ?: self::DEFAULT_WELCOME_UNKNOWN;
         $this->screening_message = data_get($this->vendor->options, 'screening_message', '') ?: self::DEFAULT_SCREENING;
+        $this->screening_enabled = (bool) data_get($this->vendor->options, 'screening_enabled', true);
+        $this->missed_call_text = data_get($this->vendor->options, 'missed_call_text', '') ?: self::DEFAULT_MISSED_CALL_TEXT;
+        $this->inbound_callback_text = data_get($this->vendor->options, 'inbound_callback_text', '') ?: self::DEFAULT_INBOUND_CALLBACK_TEXT;
         $this->voicemail_message = data_get($this->vendor->options, 'voicemail_message', '') ?: self::DEFAULT_VOICEMAIL;
         $this->voicemail_message_unknown = data_get($this->vendor->options, 'voicemail_message_unknown', '') ?: self::DEFAULT_VOICEMAIL_UNKNOWN;
         $this->ivr_press1_message = data_get($this->vendor->options, 'ivr_press1_message', '') ?: self::DEFAULT_IVR_PRESS1;
@@ -139,6 +164,9 @@ class VendorOptions extends Component
             'welcome_message' => 'nullable|string|max:500',
             'welcome_message_unknown' => 'nullable|string|max:500',
             'screening_message' => 'nullable|string|max:500',
+            'screening_enabled' => 'boolean',
+            'missed_call_text' => 'nullable|string|max:320',
+            'inbound_callback_text' => 'nullable|string|max:320',
             'voicemail_message' => 'nullable|string|max:500',
             'voicemail_message_unknown' => 'nullable|string|max:500',
             'ivr_press1_message' => 'nullable|string|max:500',
@@ -178,6 +206,9 @@ class VendorOptions extends Component
         $options['welcome_message'] = $this->welcome_message ?: null;
         $options['welcome_message_unknown'] = $this->welcome_message_unknown ?: null;
         $options['screening_message'] = $this->screening_message ?: null;
+        $options['screening_enabled'] = $this->screening_enabled;
+        $options['missed_call_text'] = $this->missed_call_text ?: null;
+        $options['inbound_callback_text'] = $this->inbound_callback_text ?: null;
         $options['voicemail_message'] = $this->voicemail_message ?: null;
         $options['voicemail_message_unknown'] = $this->voicemail_message_unknown ?: null;
         $options['ivr_press1_message'] = $this->ivr_press1_message ?: null;

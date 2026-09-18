@@ -25,6 +25,7 @@ use App\Services\SpamFilterService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -563,6 +564,10 @@ class TelnyxWebhookController extends Controller
             ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
         $this->sendCallCommand($callControlId, 'playback_start', [
             'audio_url' => $holdAudioUrl,
+            // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
+            // and wait a webhook round trip for the re-loop — a pocket of silence every
+            // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
+            'loop' => 'infinity',
             'client_state' => base64_encode(json_encode([
                 'action' => 'click_to_call_waiting',
                 'call_log_id' => $callLogId,
@@ -584,7 +589,8 @@ class TelnyxWebhookController extends Controller
                         'to' => $targetPhone,
                         'from' => $from,
                         'from_display_name' => 'GS Construction',
-                        'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                        // Long enough for the carrier to divert to voicemail (see config).
+                        'timeout_secs' => (int) config('services.telnyx.click_to_call_timeout', 45),
                         'preferred_codecs' => config('services.telnyx.preferred_codecs'),
                         'answering_machine_detection' => 'premium',
                         'answering_machine_detection_config' => [
@@ -673,30 +679,18 @@ class TelnyxWebhookController extends Controller
             'call_log_id' => $callLogId,
         ]);
 
-        // Start recording on the target leg without beep (beep will be replaced with
-        // verbal disclosure TTS). Dual-channel captures target audio + bridged-in user audio.
-        if (config('call_recording.mode') === 'auto' && $callLog) {
-            // Temporarily override play_beep to false since we're using verbal disclosure
-            $this->sendCallCommand($callControlId, 'record_start', [
-                'channels' => config('call_recording.channels', 'dual'),
-                'format' => config('call_recording.format', 'wav'),
-                'play_beep' => false,  // No beep; using verbal disclosure instead
-                'client_state' => base64_encode(json_encode([
-                    'action' => 'call_recording',
-                    'call_log_id' => $callLog->id,
-                ])),
-            ]);
-            $callLog->update([
-                'recording_started_at' => now(),
-                'purge_after' => now()->addDays((int) config('call_recording.retention_days', 180)),
-            ]);
-        }
-
-        // Set the bridged flag IMMEDIATELY so any in-flight `call.playback.ended`
-        // webhooks for the user's ringback don't re-loop the ringback audio
-        // over the conference. Without this, ringback would keep restarting
-        // for ~30s while we created the conference and bridged in, drowning out
-        // the target's audio (especially noticeable when the target is voicemail).
+        // Everything between this webhook and the two people hearing each
+        // other, in the order that gets them talking soonest (2026-09-17 log
+        // review: 7 s typical, 10–17 s when one command stalled):
+        //   1. mark both legs bridged BEFORE any playback_stop — playback_stop
+        //      makes Telnyx fire call.playback.ended at once, and the ringback
+        //      handler re-loops the ringback unless this flag is already set;
+        //   2. speak the recording disclosure to the target right away, so
+        //      they hear a voice within a third of a second instead of dead
+        //      air while the conference is set up behind it;
+        //   3. in ONE batch: stop the user's ringback, start recording and
+        //      create the conference (first target) — one round trip, not three;
+        //   4. join the target: audio.
         if ($userCallControlId) {
             Cache::put("telnyx_bridged:{$userCallControlId}", true, now()->addMinutes(60));
         }
@@ -722,6 +716,25 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
+            $this->speakOutboundDisclosure($callControlId, $callLogId, $userCallControlId);
+
+            // Dual-channel recording on the target leg captures the target and
+            // the user bridged in; the spoken disclosure replaces the beep.
+            $recordStartBody = null;
+            if (config('call_recording.mode') === 'auto') {
+                $recordStartBody = [
+                    'command_id' => (string) \Illuminate\Support\Str::uuid(),
+                    'channels' => config('call_recording.channels', 'dual'),
+                    'format' => config('call_recording.format', 'wav'),
+                    'play_beep' => false,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'call_recording',
+                        'call_log_id' => $callLog->id,
+                    ])),
+                ];
+            }
+            $recordingRequested = false;
+
             $metadata = $callLog->metadata ?? [];
             $conferenceId = $metadata['conference_id'] ?? null;
 
@@ -729,13 +742,16 @@ class TelnyxWebhookController extends Controller
                 $conferenceLockKey = "telnyx_click_to_call_conference_lock:{$callLogId}";
                 if (Cache::add($conferenceLockKey, 'creating', 30)) {
                     $conferenceName = "click_to_call_{$callLogId}_" . substr(md5($userCallControlId), 0, 8);
-                    // Stop the ringback on the USER's leg only. The target just
-                    // answered and never had playback started, so stopping it
-                    // there was a wasted round trip sitting in the connect path
-                    // (5 sequential Telnyx calls between answer and audio).
-                    $this->sendCallCommand($userCallControlId, 'playback_stop');
-
-                    $conferenceId = $this->createConference($conferenceName, $userCallControlId);
+                    $batch = [
+                        'stop_user_ringback' => ['url' => $this->callActionUrl($userCallControlId, 'playback_stop'), 'body' => ['command_id' => (string) \Illuminate\Support\Str::uuid()]],
+                        'create_conference' => ['url' => 'https://api.telnyx.com/v2/conferences', 'body' => $this->conferenceCreateBody($conferenceName, $userCallControlId)],
+                    ];
+                    if ($recordStartBody) {
+                        $batch['record_start'] = ['url' => $this->callActionUrl($callControlId, 'record_start'), 'body' => $recordStartBody];
+                        $recordingRequested = true;
+                    }
+                    $results = $this->telnyxParallel($batch);
+                    $conferenceId = $this->conferenceIdFromResponse($results['create_conference'] ?? null, $conferenceName, $userCallControlId);
 
                     if (! $conferenceId) {
                         Log::channel('telnyx')->error('Click-to-call: failed to create conference', [
@@ -751,7 +767,6 @@ class TelnyxWebhookController extends Controller
                     $metadata['conference_id'] = $conferenceId;
                     $metadata['conference_name'] = $conferenceName;
                     $metadata['joined_target_call_control_ids'] = $metadata['joined_target_call_control_ids'] ?? [];
-
                     $callLog->update(['metadata' => $metadata]);
                     Cache::forget($conferenceLockKey);
                 }
@@ -770,6 +785,12 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
+            if ($recordStartBody && ! $recordingRequested) {
+                // A later target joining an existing conference: its own recording.
+                $this->sendCallCommand($callControlId, 'record_start', $recordStartBody);
+                $recordingRequested = true;
+            }
+
             if (! $this->joinConference($conferenceId, $callControlId)) {
                 Log::channel('telnyx')->warning('Click-to-call: target conference join failed', [
                     'call_log_id' => $callLogId,
@@ -778,6 +799,13 @@ class TelnyxWebhookController extends Controller
                 ]);
                 $this->sendCallCommand($callControlId, 'hangup');
                 return response()->json(['status' => 'ok']);
+            }
+
+            if ($recordingRequested) {
+                $callLog->update([
+                    'recording_started_at' => $callLog->recording_started_at ?? now(),
+                    'purge_after' => now()->addDays((int) config('call_recording.retention_days', 180)),
+                ]);
             }
 
             Cache::put("telnyx_bridged:{$userCallControlId}", true, now()->addMinutes(60));
@@ -789,7 +817,6 @@ class TelnyxWebhookController extends Controller
                 ->unique()
                 ->values()
                 ->all();
-
             $metadata['joined_target_call_control_ids'] = $joinedTargetCallControlIds;
             $metadata['answered_target_call_control_id'] = $metadata['answered_target_call_control_id'] ?? $callControlId;
 
@@ -807,28 +834,6 @@ class TelnyxWebhookController extends Controller
                 'status' => CallLog::STATUS_TRANSFERRED,
                 'metadata' => $metadata,
             ]);
-
-            // Play outbound recording disclosure to the target after they've joined the conference
-            if (config('call_recording.disclosure.enabled') && config('call_recording.outbound_disclosure.enabled')) {
-                $disclosurePhrase = trim((string) config('call_recording.outbound_disclosure.phrase'));
-                if ($disclosurePhrase !== '') {
-                    Log::channel('telnyx')->info('Click-to-call: playing outbound recording disclosure', [
-                        'target_call_control_id' => $callControlId,
-                        'call_log_id' => $callLogId,
-                        'disclosure' => $disclosurePhrase,
-                    ]);
-
-                    $this->sendCallCommand($callControlId, 'speak', [
-                        'payload' => $disclosurePhrase,
-                        ...$this->ttsVoiceParams(),
-                        'client_state' => base64_encode(json_encode([
-                            'action' => 'click_to_call_target_intro_done',
-                            'call_log_id' => $callLogId,
-                            'user_call_control_id' => $userCallControlId,
-                        ])),
-                    ]);
-                }
-            }
         } else {
             Log::channel('telnyx')->error('No user call control ID for bridge', [
                 'call_log_id' => $callLogId,
@@ -950,8 +955,13 @@ class TelnyxWebhookController extends Controller
         // Note: Telnyx Call Control v2 has no 'leave' action for calls in conferences.
         // Instead, speak the failure message directly on the user's call, then hang up.
         if ($userCallControlId) {
+            $notAnswered = match ($hangupCause) {
+                'user_busy' => 'The line is busy. Please try again later.',
+                'call_rejected' => 'The call was declined.',
+                default => 'The person you called did not answer. Please try again later.',
+            };
             $this->sendCallCommand($userCallControlId, 'speak', [
-                'payload' => 'The person you called did not answer. Please try again later.',
+                'payload' => $notAnswered,
                 ...$this->ttsVoiceParams(),
                 'client_state' => base64_encode(json_encode([
                     'action' => 'click_to_call_failed_tts',
@@ -1196,6 +1206,28 @@ class TelnyxWebhookController extends Controller
         $conferenceId = $metadata['conference_id'] ?? null;
         $isLateAnswerer = ! empty($joinedAdminIds) && $conferenceId;
 
+        // Vendor Options → "Announce the caller before connecting". Off, the
+        // admin is connected the moment they answer: their phone already
+        // showed the caller's name (from_display_name), and the prompt alone
+        // was 6–7 s of every inbound pickup (2026-09-17 log review). The
+        // hang-up-to-voicemail behaviour is unchanged.
+        $vendorOptions = (array) (Vendor::find(1)?->options ?? []);
+        if (! (bool) data_get($vendorOptions, 'screening_enabled', true)) {
+            Log::channel('telnyx')->info('Screening off — connecting the answering admin straight away', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLog->id,
+                'admin_user_id' => $adminUserId,
+                'is_late_answerer' => $isLateAnswerer,
+            ]);
+
+            return $this->handleAdminScreenDone($callControlId, [
+                'call_log_id' => $callLog->id,
+                'incoming_call_control_id' => $incomingCallControlId,
+                'admin_user_id' => $adminUserId,
+                'conference_id' => $isLateAnswerer ? $conferenceId : null,
+            ]);
+        }
+
         return $this->playAdminScreeningPrompt(
             $callControlId,
             $callLog,
@@ -1277,6 +1309,15 @@ class TelnyxWebhookController extends Controller
         // playing, Telnyx still fires call.speak.ended for the interrupted
         // speak. Don't try to bridge a dead admin — route the caller to the
         // voicemail IVR instead so they aren't left in silence.
+        if ($callLogId && Cache::has("telnyx_callback_promised:{$callLogId}")) {
+            Log::channel('telnyx')->info('Screening prompt ended after the admin pressed 1 — caller is being told we will call back', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
         if (Cache::has("telnyx_admin_dead:{$callControlId}")) {
             Log::channel('telnyx')->info('Screening prompt ended but admin already hung up — routing caller to voicemail', [
                 'admin_call_control_id' => $callControlId,
@@ -1390,6 +1431,10 @@ class TelnyxWebhookController extends Controller
                 ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
             $this->sendCallCommand($callControlId, 'playback_start', [
                 'audio_url' => $holdAudioUrl,
+                // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
+                // and wait a webhook round trip for the re-loop — a pocket of silence every
+                // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
+                'loop' => 'infinity',
                 'client_state' => base64_encode(json_encode([
                     'action' => 'admin_waiting_for_tts',
                     'call_log_id' => $callLogId,
@@ -1496,6 +1541,10 @@ class TelnyxWebhookController extends Controller
                 ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
             $this->sendCallCommand($callControlId, 'playback_start', [
                 'audio_url' => $holdAudioUrl,
+                // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
+                // and wait a webhook round trip for the re-loop — a pocket of silence every
+                // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
+                'loop' => 'infinity',
                 'client_state' => base64_encode(json_encode([
                     'action' => 'admin_waiting_for_tts',
                     'call_log_id' => $callLogId,
@@ -1540,12 +1589,16 @@ class TelnyxWebhookController extends Controller
         Cache::put("telnyx_bridged:{$incomingCallControlId}", true, now()->addMinutes(60));
         Cache::put("telnyx_bridged:{$adminCallControlId}", true, now()->addMinutes(60));
 
-        // Stop any audio on both legs before joining the conference.
-        $this->sendCallCommand($incomingCallControlId, 'playback_stop');
-        $this->sendCallCommand($adminCallControlId, 'playback_stop');
-
-        // Create the conference seeded with the caller's leg.
-        $conferenceId = $this->createConference($conferenceName, $incomingCallControlId);
+        // Stop the audio on both legs and create the conference (seeded with
+        // the caller's leg) in ONE batch — three round trips became one
+        // (2026-09-17: 7–9 s from an admin's pickup to audio, most of it the
+        // screening prompt, the rest this).
+        $results = $this->telnyxParallel([
+            'stop_caller_ringback' => ['url' => $this->callActionUrl($incomingCallControlId, 'playback_stop'), 'body' => ['command_id' => (string) \Illuminate\Support\Str::uuid()]],
+            'stop_admin_hold' => ['url' => $this->callActionUrl($adminCallControlId, 'playback_stop'), 'body' => ['command_id' => (string) \Illuminate\Support\Str::uuid()]],
+            'create_conference' => ['url' => 'https://api.telnyx.com/v2/conferences', 'body' => $this->conferenceCreateBody($conferenceName, $incomingCallControlId)],
+        ]);
+        $conferenceId = $this->conferenceIdFromResponse($results['create_conference'] ?? null, $conferenceName, $incomingCallControlId);
         if (! $conferenceId) {
             Log::channel('telnyx')->error('Failed to create conference — hanging up admin leg', [
                 'call_log_id' => $callLogId,
@@ -1643,6 +1696,10 @@ class TelnyxWebhookController extends Controller
 
                 $this->sendCallCommand($incomingCallControlId, 'playback_start', [
                     'audio_url' => $holdAudioUrl,
+                    // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
+                    // and wait a webhook round trip for the re-loop — a pocket of silence every
+                    // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
+                    'loop' => 'infinity',
                     'client_state' => base64_encode(json_encode([
                         'action' => 'caller_waiting',
                         'call_log_id' => $callLogId,
@@ -2006,6 +2063,15 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
+            if (Cache::has("telnyx_callback_promised:{$callLogId}")) {
+                Log::channel('telnyx')->info('All admin legs gone after an admin pressed 1 — caller was promised a callback, no voicemail', [
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
+
             // All admins failed — set cache flag (race-proof signal for
             // caller_waiting re-loop safety net) then trigger voicemail
             Cache::put("telnyx_all_admins_failed:{$callLogId}", true, now()->addMinutes(10));
@@ -2196,6 +2262,10 @@ class TelnyxWebhookController extends Controller
                     ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
                 $this->sendCallCommand($callControlId, 'playback_start', [
                     'audio_url' => $holdAudioUrl,
+                    // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
+                    // and wait a webhook round trip for the re-loop — a pocket of silence every
+                    // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
+                    'loop' => 'infinity',
                     'client_state' => base64_encode(json_encode($reloopClientState)),
                 ]);
             } else {
@@ -2244,6 +2314,12 @@ class TelnyxWebhookController extends Controller
             'client_state' => $clientState,
             'client_state_raw_present' => $clientStateRaw !== null,
         ]);
+
+        if ($action === 'hangup_after_speak') {
+            $this->sendCallCommand($callControlId, 'hangup');
+
+            return response()->json(['status' => 'ok']);
+        }
 
         if ($action === 'admin_screen_done') {
             return $this->handleAdminScreenDone($callControlId, $clientState ?? []);
@@ -2306,7 +2382,12 @@ class TelnyxWebhookController extends Controller
                 $pendingAdminCcId = $freshMetadata['pending_admin_call_control_id'] ?? null;
                 $pendingAdminUserId = $freshMetadata['pending_admin_user_id'] ?? null;
 
-                if ($pendingAdminCcId) {
+                if ($callLogId && Cache::has("telnyx_callback_promised:{$callLogId}")) {
+                    Log::channel('telnyx')->info('TTS completed but an admin pressed 1 — caller gets the callback message instead', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+                } elseif ($pendingAdminCcId) {
                     // Admin answered during TTS — bridge now
                     Log::channel('telnyx')->info('TTS completed — admin already waiting, bridging now', [
                         'call_control_id' => $callControlId,
@@ -2331,6 +2412,10 @@ class TelnyxWebhookController extends Controller
                         ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
                     $this->sendCallCommand($callControlId, 'playback_start', [
                         'audio_url' => $holdAudioUrl,
+                        // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
+                        // and wait a webhook round trip for the re-loop — a pocket of silence every
+                        // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
+                        'loop' => 'infinity',
                         'client_state' => base64_encode(json_encode([
                             'action' => 'caller_waiting',
                             'call_log_id' => $callLogId,
@@ -2402,6 +2487,10 @@ class TelnyxWebhookController extends Controller
                 ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
             $this->sendCallCommand($callControlId, 'playback_start', [
                 'audio_url' => $holdAudioUrl,
+                // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
+                // and wait a webhook round trip for the re-loop — a pocket of silence every
+                // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
+                'loop' => 'infinity',
                 'client_state' => base64_encode(json_encode([
                     'action' => 'caller_waiting',
                     'call_log_id' => $callLogId,
@@ -2479,6 +2568,20 @@ class TelnyxWebhookController extends Controller
             }
 
             // Fall back to bridge for non-conference scenarios
+            // The disclosure now starts BEFORE the conference join (2026-09-17),
+            // so it can end while the create or join is still in flight. A
+            // conference on the call log, or the creation lock, means that join
+            // is coming — never bridge the legs directly over it.
+            $freshMetadata = $callLog?->fresh()?->metadata ?? [];
+            if (! empty($freshMetadata['conference_id']) || ($callLogId && Cache::has("telnyx_click_to_call_conference_lock:{$callLogId}"))) {
+                Log::channel('telnyx')->info('Click-to-call: target intro done — conference join in progress', [
+                    'target_call_control_id' => $callControlId,
+                    'user_call_control_id' => $userCallControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                return response()->json(['status' => 'ok']);
+            }
+
             Log::channel('telnyx')->info('Click-to-call: target intro done — bridging with user', [
                 'target_call_control_id' => $callControlId,
                 'user_call_control_id' => $userCallControlId,
@@ -2746,11 +2849,33 @@ class TelnyxWebhookController extends Controller
                     'result' => $result,
                     'call_log_id' => $callLogId,
                 ]);
+                // The user is listening to the voicemail greeting: a word in
+                // their ear only, so they know 1 texts the target instead.
+                if ($userCallControlId && Cache::add("telnyx_voicemail_whisper:{$callLogId}", true, now()->addMinutes(10))) {
+                    $this->sendCallCommand($userCallControlId, 'speak', [
+                        'payload' => 'Voicemail. Press one to text them instead.',
+                        ...$this->ttsVoiceParams(),
+                    ]);
+                }
 
                 return response()->json(['status' => 'ok']);
             }
 
             // Prevent race condition with handleClickToCallTargetAnswered — only one handler should bridge
+            // The target-answered handler runs on call.answered — before this
+            // result arrives — and creates the conference under its own lock.
+            // A conference on the call log, or that lock, means the user is
+            // (about to be) joined to the machine already: leave it alone.
+            $freshMetadata = $callLog?->fresh()?->metadata ?? [];
+            if (! empty($freshMetadata['conference_id']) || ($callLogId && Cache::has("telnyx_click_to_call_conference_lock:{$callLogId}"))) {
+                Log::channel('telnyx')->info('AMD detected machine on click-to-call target — conference already in progress, ignoring', [
+                    'call_control_id' => $callControlId,
+                    'result' => $result,
+                    'call_log_id' => $callLogId,
+                ]);
+                return response()->json(['status' => 'ok']);
+            }
+
             $bridgeLockKey = "telnyx_bridge_lock:{$callLogId}";
             if (! Cache::add($bridgeLockKey, 'amd_machine', 60)) {
                 Log::channel('telnyx')->info('AMD: bridge already initiated by target answered handler — skipping', [
@@ -2825,7 +2950,29 @@ class TelnyxWebhookController extends Controller
             'digit' => $digit,
         ]);
 
-        if ($digit !== '9' || ! $callControlId) {
+        if (! $callControlId) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        // 1 on the GS user's leg of an outbound call: text the person we
+        // called ("GS Construction tried reaching you…"), typically once
+        // their voicemail has picked up. The target's own leg is never the
+        // user's leg, so a 1 pressed on their side does nothing.
+        if ($digit === '1') {
+            $clientStateRaw = $payload['client_state'] ?? null;
+            $clientState = $clientStateRaw ? (json_decode(base64_decode($clientStateRaw), true) ?: []) : [];
+            if (in_array($clientState['action'] ?? null, ['admin_ring', 'admin_screen_done', 'admin_waiting_for_tts'], true)) {
+                // An admin hearing "Call from {name}" who cannot take it: the
+                // caller gets "we will call you right back" by text and voice.
+                $this->textCallerFromInboundCall($callControlId, $clientState);
+            } else {
+                $this->textTargetFromOutboundCall($callControlId);
+            }
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        if ($digit !== '9') {
             return response()->json(['status' => 'ok']);
         }
 
@@ -2888,6 +3035,223 @@ class TelnyxWebhookController extends Controller
         $this->inviteRemainingRecipients($callLog);
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * 1 pressed on a leg: if it is the GS user's leg of a click-to-call,
+     * text the target a "we tried reaching you" message, log it in the
+     * target's thread and confirm in the user's ear. Once per call.
+     */
+    protected function textTargetFromOutboundCall(string $callControlId): void
+    {
+        $callLog = CallLog::query()
+            ->where('call_control_id', $callControlId)
+            ->orWhereJsonContains('metadata->admin_call_control_ids', $callControlId)
+            ->latest('id')
+            ->first();
+        $targetPhone = $callLog ? $this->answeredTargetPhone($callLog) : null;
+
+        if (! $callLog || ! $targetPhone) {
+            Log::channel('telnyx')->info('DTMF 1 ignored: not the GS leg of an outbound call', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLog?->id,
+            ]);
+
+            return;
+        }
+        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED, CallLog::STATUS_FAILED], true)) {
+            return;
+        }
+        if (! Cache::add("telnyx_missed_text:{$callLog->id}", true, now()->addMinutes(30))) {
+            Log::channel('telnyx')->info('DTMF 1: text already sent for this call', ['call_log_id' => $callLog->id]);
+            $this->sendCallCommand($callControlId, 'speak', ['payload' => 'Text already sent.', ...$this->ttsVoiceParams()]);
+
+            return;
+        }
+
+        $sent = $this->sendMissedYouText($callLog, $targetPhone);
+        $this->sendCallCommand($callControlId, 'speak', [
+            'payload' => $sent ? 'Text sent.' : 'Sorry, the text could not be sent.',
+            ...$this->ttsVoiceParams(),
+        ]);
+        if (! $sent) {
+            Cache::forget("telnyx_missed_text:{$callLog->id}");
+        }
+    }
+
+    /** The number of the target that answered (or the only target) on a click-to-call. */
+    protected function answeredTargetPhone(CallLog $callLog): ?string
+    {
+        $metadata = $callLog->metadata ?? [];
+        $phones = array_values(array_filter((array) ($metadata['target_phones'] ?? [])));
+        $legs = array_values(array_filter((array) ($metadata['target_call_control_ids'] ?? [])));
+        $answeredLeg = $metadata['answered_target_call_control_id'] ?? null;
+        if ($answeredLeg && count($phones) === count($legs)) {
+            $i = array_search($answeredLeg, $legs, true);
+            if ($i !== false && ! empty($phones[$i])) {
+                return $phones[$i];
+            }
+        }
+
+        return ($phones[0] ?? null) ?: (($metadata['target_phone'] ?? null) ?: null);
+    }
+
+    /**
+     * Send the "tried reaching you" text to an outbound target and record it
+     * as an outbound message in the target's thread, so it shows in Messages
+     * like any text the team sends. Returns whether Telnyx accepted it.
+     */
+    protected function sendMissedYouText(CallLog $callLog, string $targetPhone): bool
+    {
+        return $this->sendTextFromCall($callLog, $targetPhone, $this->vendorText('missed_call_text', \App\Livewire\Vendors\VendorOptions::DEFAULT_MISSED_CALL_TEXT));
+    }
+
+    /** The vendor's short name for prompts and texts. */
+    protected function companyShortName(): string
+    {
+        $vendor = Vendor::find(1);
+
+        return (string) (data_get((array) ($vendor?->options ?? []), 'short_name') ?: ($vendor?->business_name ?: 'We'));
+    }
+
+    /** A vendor-configured text with {company} filled in, or its default. */
+    protected function vendorText(string $option, string $default): string
+    {
+        $vendor = Vendor::find(1);
+        $template = trim((string) (data_get((array) ($vendor?->options ?? []), $option) ?: $default));
+
+        return trim(str_replace('{company}', $this->companyShortName(), $template));
+    }
+
+    /**
+     * 1 pressed on an admin's leg while the caller is announced or on hold:
+     * the admin cannot take it. The caller is texted "{company} will call you
+     * right back", told the same by voice, and released; every admin leg is
+     * hung up; the call is logged as a promised callback, never as voicemail.
+     *
+     * @param  array<string, mixed>  $clientState  the admin leg's state (call_log_id, incoming_call_control_id, admin_user_id)
+     */
+    protected function textCallerFromInboundCall(string $adminCallControlId, array $clientState): void
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $incomingCallControlId = $clientState['incoming_call_control_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $callerPhone = $callLog?->from_number;
+        if (! $callLog || ! $incomingCallControlId || ! $callerPhone) {
+            Log::channel('telnyx')->info('DTMF 1 on an admin leg ignored: no caller to text', [
+                'admin_call_control_id' => $adminCallControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            return;
+        }
+        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED], true)) {
+            return;
+        }
+        if (! Cache::add("telnyx_callback_promised:{$callLogId}", true, now()->addMinutes(10))) {
+            return; // another admin pressed 1 first
+        }
+
+        $sent = $this->sendTextFromCall($callLog, $callerPhone, $this->vendorText('inbound_callback_text', \App\Livewire\Vendors\VendorOptions::DEFAULT_INBOUND_CALLBACK_TEXT));
+        Log::channel('telnyx')->info('Admin pressed 1 — caller promised a callback by text', [
+            'admin_call_control_id' => $adminCallControlId,
+            'call_log_id' => $callLogId,
+            'text_sent' => $sent,
+        ]);
+
+        // The admin hears the outcome and is released; the other admin legs stop ringing.
+        $this->sendCallCommand($adminCallControlId, 'speak', [
+            'payload' => $sent ? 'Text sent. Goodbye.' : 'Sorry, the text could not be sent. Goodbye.',
+            ...$this->ttsVoiceParams(),
+            'client_state' => base64_encode(json_encode(['action' => 'hangup_after_speak', 'call_log_id' => $callLogId])),
+        ]);
+        $this->hangupOtherAdminLegs($callLogId, $adminCallControlId);
+
+        // The caller: ringback off, the promise by voice, then release.
+        $firstName = trim((string) \Illuminate\Support\Str::before(trim((string) ($callLog->caller_name ?: '')), ' '));
+        $goodbye = 'Thanks for your call'.($firstName !== '' ? " {$firstName}" : '').'. '.$this->companyShortName()." can't take your call and will call you right back.";
+        Cache::put("telnyx_bridged:{$incomingCallControlId}", true, now()->addMinutes(10)); // no ringback re-loop
+        $this->sendCallCommand($incomingCallControlId, 'playback_stop');
+        $this->sendCallCommand($incomingCallControlId, 'speak', [
+            'payload' => $goodbye,
+            ...$this->ttsVoiceParams(),
+            'client_state' => base64_encode(json_encode(['action' => 'hangup_after_speak', 'call_log_id' => $callLogId])),
+        ]);
+
+        $callLog->update([
+            'status' => CallLog::STATUS_MISSED,
+            'hangup_cause' => 'callback_promised',
+            'ended_at' => now(),
+        ]);
+    }
+
+    /**
+     * Send a text from our number to a phone on a call and record it as an
+     * outbound message in that phone's thread, so it shows in Messages like
+     * any text the team sends. Returns whether Telnyx accepted it.
+     */
+    protected function sendTextFromCall(CallLog $callLog, string $targetPhone, string $text): bool
+    {
+        $vendor = Vendor::find(1);
+        $ourNumber = config('services.telnyx.from');
+        $apiKey = config('services.telnyx.api_key');
+        if (! $ourNumber || ! $apiKey || $text === '') {
+            Log::channel('telnyx')->error('Cannot send missed-you text — Telnyx number, key or text missing', ['call_log_id' => $callLog->id]);
+
+            return false;
+        }
+
+        $to = GroupSmsService::formatE164($targetPhone);
+        $sendTo = $to;
+        if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
+            $sendTo = $devTo;
+        }
+        $payload = ['from' => $ourNumber, 'to' => $sendTo, 'text' => $text];
+        if ($profile = config('services.telnyx.messaging_profile_id')) {
+            $payload['messaging_profile_id'] = $profile;
+        }
+
+        $providerId = null;
+        try {
+            $response = Http::withToken($apiKey)->timeout(10)->post('https://api.telnyx.com/v2/messages', $payload);
+            if (! $response->successful()) {
+                Log::channel('telnyx')->error('Missed-you text rejected by Telnyx', ['call_log_id' => $callLog->id, 'status' => $response->status(), 'error' => $response->json()]);
+
+                return false;
+            }
+            $providerId = $response->json('data.id');
+        } catch (\Throwable $e) {
+            Log::channel('telnyx')->error('Missed-you text failed', ['call_log_id' => $callLog->id, 'error' => $e->getMessage()]);
+
+            return false;
+        }
+
+        $thread = SmsGroupThread::findByParticipant($ourNumber, $to) ?: $this->createThreadForInboundMessage($to, $ourNumber);
+        if ($thread && ! $thread->vendor_id) {
+            $thread->update(['vendor_id' => $vendor?->id]);
+        }
+        SmsMessage::create([
+            'thread_id' => $thread?->id,
+            'provider' => 'telnyx',
+            'provider_message_id' => $providerId ?: 'missed_text_'.$callLog->id,
+            'direction' => SmsMessage::DIRECTION_OUTBOUND,
+            'from_number' => $ourNumber,
+            'to_numbers' => [$to],
+            'text' => $text,
+            'status' => 'sent',
+            'sent_by_user_id' => $callLog->user_id,
+        ]);
+        if ($thread) {
+            $thread->update(['last_activity_at' => now()]);
+            try {
+                \App\Events\SmsMessageReceived::dispatch($thread->id);
+            } catch (\Throwable $e) {
+                Log::warning('SMS broadcast failed', ['thread_id' => $thread->id, 'error' => $e->getMessage()]);
+            }
+        }
+        Log::channel('telnyx')->info('Missed-you text sent from outbound call', ['call_log_id' => $callLog->id, 'to' => $sendTo, 'provider_message_id' => $providerId]);
+
+        return true;
     }
 
     /**
@@ -4063,31 +4427,9 @@ class TelnyxWebhookController extends Controller
 
         try {
             $response = $this->telnyxHttp(0)
-                ->post('https://api.telnyx.com/v2/conferences', [
-                    'name' => $name,
-                    'call_control_id' => $beneficiaryCallControlId,
-                    'comfort_noise' => true,
-                    // Disable join/leave beeps. They overlap the screening prompt /
-                    // welcome TTS as participants enter and leave the conference
-                    // and were reported as confusing in production.
-                    'beep_enabled' => 'never',
-                ]);
+                ->post('https://api.telnyx.com/v2/conferences', $this->conferenceCreateBody($name, $beneficiaryCallControlId));
 
-            if ($response->successful()) {
-                $id = $response->json('data.id');
-                Log::channel('telnyx')->info('Conference created', [
-                    'name' => $name,
-                    'conference_id' => $id,
-                    'beneficiary_call_control_id' => $beneficiaryCallControlId,
-                ]);
-                return $id;
-            }
-
-            Log::channel('telnyx')->error('Conference create failed', [
-                'name' => $name,
-                'status' => $response->status(),
-                'error' => $response->json(),
-            ]);
+            return $this->conferenceIdFromResponse($response, $name, $beneficiaryCallControlId);
         } catch (\Exception $e) {
             Log::channel('telnyx')->error('Conference create exception', [
                 'name' => $name,
@@ -4169,14 +4511,19 @@ class TelnyxWebhookController extends Controller
         }
 
         try {
+            $startedAt = microtime(true);
             $response = $this->telnyxHttp()
                 ->post("https://api.telnyx.com/v2/calls/{$callControlId}/actions/{$action}", $params);
+            $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
 
             if ($response->successful()) {
+                // `ms` is the whole round trip including any retry: a command
+                // that took seconds is the delay the caller heard (2026-09-17).
                 Log::channel('telnyx')->info("Call command sent: {$action}", [
                     'call_control_id' => $callControlId,
                     'command_id' => $params['command_id'],
                     'result' => $response->json('data.result'),
+                    'ms' => $elapsedMs,
                 ]);
                 return true;
             } else {
@@ -4215,6 +4562,146 @@ class TelnyxWebhookController extends Controller
 
             return false;
         }
+    }
+
+    /**
+     * Send several independent Telnyx requests at once and wait for all of
+     * them. The commands between a pickup and audio (stop the ringback, start
+     * recording, create the conference) used to go one after another, each a
+     * round trip of 0.1–0.3 s — and 8–10 s whenever one stalled. A request
+     * that fails to connect inside the batch is sent once more on its own with
+     * telnyxHttp()'s retry policy; anything still failing comes back null.
+     * Every call command carries a command_id so a repeat can never run twice.
+     *
+     * @param  array<string, array{url: string, body?: array<string, mixed>}>  $requests  keyed by a name for the log
+     * @return array<string, \Illuminate\Http\Client\Response|null>
+     */
+    protected function telnyxParallel(array $requests): array
+    {
+        if ($requests === []) {
+            return [];
+        }
+        $token = config('services.telnyx.api_key');
+        $connect = (int) config('services.telnyx.command_connect_timeout', 3);
+        $timeout = (int) config('services.telnyx.command_timeout', 4);
+        $startedAt = microtime(true);
+
+        $responses = Http::pool(function (Pool $pool) use ($requests, $token, $connect, $timeout) {
+            $out = [];
+            foreach ($requests as $name => $request) {
+                $out[] = $pool->as((string) $name)
+                    ->withToken($token)
+                    ->connectTimeout($connect)
+                    ->timeout($timeout)
+                    ->post($request['url'], $request['body'] ?? []);
+            }
+
+            return $out;
+        });
+        $batchMs = (int) round((microtime(true) - $startedAt) * 1000);
+
+        $results = [];
+        foreach ($requests as $name => $request) {
+            $response = $responses[$name] ?? null;
+            if (! $response instanceof \Illuminate\Http\Client\Response) {
+                Log::channel('telnyx')->warning('Telnyx batch request did not connect — sending it again on its own', [
+                    'request' => $name,
+                    'url' => $request['url'],
+                    'error' => $response instanceof \Throwable ? $response->getMessage() : 'no response',
+                ]);
+                try {
+                    $response = $this->telnyxHttp()->post($request['url'], $request['body'] ?? []);
+                } catch (\Throwable $e) {
+                    Log::channel('telnyx')->error('Telnyx request failed after the batch and a retry', [
+                        'request' => $name,
+                        'url' => $request['url'],
+                        'error' => $e->getMessage(),
+                    ]);
+                    $response = null;
+                }
+            }
+            $results[$name] = $response;
+        }
+
+        Log::channel('telnyx')->info('Telnyx batch sent', [
+            'requests' => array_keys($requests),
+            'ms' => $batchMs,
+            'statuses' => array_map(fn ($r) => $r?->status(), $results),
+        ]);
+
+        return $results;
+    }
+
+    /** The URL of a call-control action, for telnyxParallel(). */
+    protected function callActionUrl(string $callControlId, string $action): string
+    {
+        return "https://api.telnyx.com/v2/calls/{$callControlId}/actions/{$action}";
+    }
+
+    /** @return array<string, mixed> the body createConference() sends */
+    protected function conferenceCreateBody(string $name, string $beneficiaryCallControlId): array
+    {
+        return [
+            'name' => $name,
+            'call_control_id' => $beneficiaryCallControlId,
+            'comfort_noise' => true,
+            // Disable join/leave beeps. They overlap the screening prompt /
+            // welcome TTS as participants enter and leave the conference
+            // and were reported as confusing in production.
+            'beep_enabled' => 'never',
+        ];
+    }
+
+    /** The conference id out of a create response, logged the way createConference() always logged it. */
+    protected function conferenceIdFromResponse(mixed $response, string $name, string $beneficiaryCallControlId): ?string
+    {
+        if ($response instanceof \Illuminate\Http\Client\Response && $response->successful()) {
+            $id = $response->json('data.id');
+            Log::channel('telnyx')->info('Conference created', [
+                'name' => $name,
+                'conference_id' => $id,
+                'beneficiary_call_control_id' => $beneficiaryCallControlId,
+            ]);
+
+            return is_string($id) && $id !== '' ? $id : null;
+        }
+        Log::channel('telnyx')->error('Conference create failed', [
+            'name' => $name,
+            'status' => $response instanceof \Illuminate\Http\Client\Response ? $response->status() : null,
+            'error' => $response instanceof \Illuminate\Http\Client\Response ? $response->json() : 'no response',
+        ]);
+
+        return null;
+    }
+
+    /**
+     * Speak the outbound recording disclosure to the person we called, the
+     * moment they answer — before the conference join, so they hear a voice
+     * within a third of a second and the join happens behind it.
+     */
+    protected function speakOutboundDisclosure(string $targetCallControlId, ?int $callLogId, ?string $userCallControlId): void
+    {
+        if (! config('call_recording.disclosure.enabled') || ! config('call_recording.outbound_disclosure.enabled')) {
+            return;
+        }
+        $disclosurePhrase = trim((string) config('call_recording.outbound_disclosure.phrase'));
+        if ($disclosurePhrase === '') {
+            return;
+        }
+        Log::channel('telnyx')->info('Click-to-call: playing outbound recording disclosure', [
+            'target_call_control_id' => $targetCallControlId,
+            'call_log_id' => $callLogId,
+            'disclosure' => $disclosurePhrase,
+        ]);
+        $this->sendCallCommand($targetCallControlId, 'speak', [
+            'payload' => $disclosurePhrase,
+            ...$this->ttsVoiceParams(),
+            'client_state' => base64_encode(json_encode([
+                'action' => 'click_to_call_target_intro_done',
+                'call_log_id' => $callLogId,
+                'user_call_control_id' => $userCallControlId,
+            ])),
+        ]);
     }
 
     /**

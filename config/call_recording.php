@@ -60,7 +60,11 @@ return [
     */
     'outbound_disclosure' => [
         'enabled' => (bool) env('CALL_RECORDING_OUTBOUND_DISCLOSURE_ENABLED', true),
-        'phrase' => env('CALL_RECORDING_OUTBOUND_DISCLOSURE_PHRASE', 'GS Construction is calling you. This call is being recorded.'),
+        // Spoken to the person we are calling the moment they pick up, while
+        // the conference is joined behind it. Short on purpose: every word is
+        // a delay before they can talk (the old two-sentence version ran ~5 s).
+        // The caller ID already names the company (from_display_name).
+        'phrase' => env('CALL_RECORDING_OUTBOUND_DISCLOSURE_PHRASE', 'This call is recorded.'),
         'voice' => env('CALL_RECORDING_OUTBOUND_DISCLOSURE_VOICE', 'Azure.en-US-AvaMultilingualNeural'),
         'voice_type' => env('CALL_RECORDING_OUTBOUND_DISCLOSURE_VOICE_TYPE', 'azure'),
     ],

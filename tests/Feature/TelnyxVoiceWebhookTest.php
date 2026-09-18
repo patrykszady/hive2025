@@ -914,9 +914,9 @@ it('first admin answering plays screening prompt then on speak.ended creates con
             return false;
         }
         $payload = (string) ($request->data()['payload'] ?? '');
-        return str_contains($payload, 'Bob Smith is calling')
-            && str_contains($payload, 'voicemail')
-            && str_contains($payload, 'remain on the line');
+        // The default screening prompt is short on purpose (2026-09-17):
+        // every word is dead air for both sides before they are connected.
+        return str_contains($payload, 'Call from Bob Smith');
     });
 
     // No conference yet — wait for speak.ended.
@@ -1022,7 +1022,7 @@ it('late admin answering plays screening prompt then on speak.ended joins existi
         if (! str_contains($request->url(), 'admin-cc-2/actions/speak') || $request->method() !== 'POST') {
             return false;
         }
-        return str_contains((string) ($request->data()['payload'] ?? ''), 'Bob Smith is calling');
+        return str_contains((string) ($request->data()['payload'] ?? ''), 'Call from Bob Smith');
     });
 
     // No join yet.
@@ -2635,4 +2635,243 @@ it('never offers press-1 after hours, and refuses it server-side even if pressed
     });
 
     \Carbon\Carbon::setTestNow();
+});
+
+// ---------------------------------------------------------------------------
+// Pickup → audio (2026-09-17 log review: inbound 7–9 s, outbound 7 s typical
+// and 10–17 s when a command stalled). The disclosure now plays while the
+// conference is joined behind it, the setup commands go out as one batch,
+// and the screening prompt can be switched off.
+// ---------------------------------------------------------------------------
+
+it('with screening off, the answering admin is connected without a prompt', function () {
+    $vendor = Vendor::find(1) ?? Vendor::query()->forceCreate(['id' => 1, 'business_name' => 'GS Construction']);
+    $vendor->options = array_merge((array) $vendor->options, ['screening_enabled' => false]);
+    $vendor->save();
+    $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'from_number' => '+18472123894',
+        'caller_name' => 'Bob Smith',
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1'], 'tts_complete' => true, 'joined_admin_ids' => []],
+    ]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-123']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'client_state' => base64_encode(json_encode(['action' => 'admin_ring', 'call_log_id' => $callLog->id, 'incoming_call_control_id' => 'incoming-cc', 'admin_user_id' => $admin->id])),
+    ]]])->assertSuccessful();
+
+    // No prompt to the admin; the caller's ringback and the admin's hold are
+    // stopped and the conference created in one go, then the admin joins.
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'admin-cc-1/actions/speak'));
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences') && ($request->data()['call_control_id'] ?? null) === 'incoming-cc');
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/playback_stop'));
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/v2/conferences/conf-uuid-123/actions/join') && ($request->data()['call_control_id'] ?? null) === 'admin-cc-1');
+    expect($callLog->fresh()->metadata['joined_admin_ids'] ?? [])->toContain($admin->id);
+    expect($callLog->fresh()->status)->toBe(CallLog::STATUS_TRANSFERRED);
+});
+
+it('speaks the outbound disclosure the moment the target answers and joins the conference behind it', function () {
+    config(['call_recording.mode' => 'auto', 'call_recording.disclosure.enabled' => true, 'call_recording.outbound_disclosure.enabled' => true, 'call_recording.outbound_disclosure.phrase' => 'This call is recorded.']);
+    $callLog = CallLog::factory()->create(['status' => CallLog::STATUS_ANSWERED, 'metadata' => ['type' => 'click_to_call', 'target_call_control_ids' => ['target-cc-1']]]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-123']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'target-cc-1',
+        'client_state' => base64_encode(json_encode(['action' => 'click_to_call_target_ring', 'call_log_id' => $callLog->id, 'user_call_control_id' => 'user-cc-id'])),
+    ]]])->assertSuccessful();
+
+    $urls = collect(Http::recorded())->map(fn ($pair) => $pair[0]->url())->values();
+    $speakAt = $urls->search(fn ($u) => str_contains($u, 'target-cc-1/actions/speak'));
+    $joinAt = $urls->search(fn ($u) => str_contains($u, '/conferences/conf-123/actions/join'));
+    expect($speakAt)->not->toBeFalse('the disclosure was spoken');
+    expect($joinAt)->not->toBeFalse('the target was joined');
+    expect($speakAt)->toBeLessThan($joinAt, 'the disclosure starts before the join, not after it');
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'target-cc-1/actions/speak') && ($request->data()['payload'] ?? null) === 'This call is recorded.');
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'user-cc-id/actions/playback_stop'));
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'target-cc-1/actions/record_start') && ($request->data()['play_beep'] ?? null) === false);
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences') && ($request->data()['call_control_id'] ?? null) === 'user-cc-id');
+    $fresh = $callLog->fresh();
+    expect($fresh->status)->toBe(CallLog::STATUS_TRANSFERRED);
+    expect($fresh->metadata['conference_id'] ?? null)->toBe('conf-123');
+    expect($fresh->recording_started_at)->not->toBeNull();
+});
+
+it('does not bridge the legs directly when the disclosure ends while the conference join is in flight', function () {
+    $callLog = CallLog::factory()->create(['status' => CallLog::STATUS_ANSWERED, 'metadata' => ['type' => 'click_to_call', 'conference_id' => 'conf-123']]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.speak.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'target-cc-1',
+        'client_state' => base64_encode(json_encode(['action' => 'click_to_call_target_intro_done', 'call_log_id' => $callLog->id, 'user_call_control_id' => 'user-cc-id'])),
+    ]]])->assertSuccessful();
+
+    Http::assertNothingSent();
+});
+
+it('sends the setup commands as one batch and retries a request that did not connect on its own', function () {
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/calls/leg-a/actions/playback_stop' => Http::failedConnection(),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $controller = new class(app(\App\Services\GroupSmsService::class), app(\App\Services\SpamFilterService::class)) extends \App\Http\Controllers\Api\TelnyxWebhookController {
+        public function batch(array $requests): array { return $this->telnyxParallel($requests); }
+    };
+
+    $results = $controller->batch([
+        'stop' => ['url' => 'https://api.telnyx.com/v2/calls/leg-a/actions/playback_stop', 'body' => ['command_id' => 'cmd-1']],
+        'record' => ['url' => 'https://api.telnyx.com/v2/calls/leg-b/actions/record_start', 'body' => ['command_id' => 'cmd-2']],
+    ]);
+
+    expect($results['record'])->not->toBeNull();
+    expect($results['record']->successful())->toBeTrue();
+    expect($results['stop'])->toBeNull('a request that never connects comes back null after the batch and its own retry');
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'leg-b/actions/record_start') && ($request->data()['command_id'] ?? null) === 'cmd-2');
+});
+
+it('plays a looping ring tone to an admin who answers while the caller still hears the greeting', function () {
+    $vendor = Vendor::find(1) ?? Vendor::query()->forceCreate(['id' => 1, 'business_name' => 'GS Construction']);
+    $vendor->options = array_merge((array) $vendor->options, ['screening_enabled' => false]);
+    $vendor->save();
+    $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'from_number' => '+18472123894',
+        'caller_name' => 'Bob Smith',
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1'], 'tts_complete' => false, 'joined_admin_ids' => []],
+    ]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-123']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    // Admin answers 2 s into the caller's greeting: no prompt, a ring tone at
+    // once, looped on Telnyx's side so it never gaps, and no conference yet.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'client_state' => base64_encode(json_encode(['action' => 'admin_ring', 'call_log_id' => $callLog->id, 'incoming_call_control_id' => 'incoming-cc', 'admin_user_id' => $admin->id])),
+    ]]])->assertSuccessful();
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'admin-cc-1/actions/speak'));
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'admin-cc-1/actions/playback_start')
+        && filled($request->data()['audio_url'] ?? null)
+        && ($request->data()['loop'] ?? null) === 'infinity');
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences'));
+    expect($callLog->fresh()->metadata['pending_admin_call_control_id'] ?? null)->toBe('admin-cc-1');
+
+    // The greeting ends: the ring tone stops and the two are joined in one batch.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.speak.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'incoming-cc',
+        'client_state' => base64_encode(json_encode(['action' => 'welcome_done', 'call_log_id' => $callLog->id])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'admin-cc-1/actions/playback_stop'));
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences') && ($request->data()['call_control_id'] ?? null) === 'incoming-cc');
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/v2/conferences/conf-uuid-123/actions/join') && ($request->data()['call_control_id'] ?? null) === 'admin-cc-1');
+    expect($callLog->fresh()->status)->toBe(CallLog::STATUS_TRANSFERRED);
+});
+
+it('loops the ring tone the caller hears after the greeting until an admin joins', function () {
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'from_number' => '+18472123894',
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1'], 'joined_admin_ids' => []],
+    ]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.speak.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'incoming-cc',
+        'client_state' => base64_encode(json_encode(['action' => 'welcome_done', 'call_log_id' => $callLog->id])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/playback_start')
+        && ($request->data()['loop'] ?? null) === 'infinity');
+});
+
+// ---------------------------------------------------------------------------
+// Outbound: reaching the target's voicemail (2026-09-17). Production rang
+// targets for 20 s (TELNYX_VOICE_TIMEOUT) while carriers divert to voicemail
+// after 25–30 s, so five of six unanswered calls that week were cancelled by
+// us and the user heard "did not answer" instead of leaving a message.
+// ---------------------------------------------------------------------------
+
+it('rings an outbound target long enough for the carrier to divert to voicemail', function () {
+    config(['services.telnyx.voice_timeout' => 20, 'services.telnyx.click_to_call_timeout' => 45]);
+    $callLog = CallLog::factory()->create(['status' => CallLog::STATUS_INITIATED ?? 'initiated', 'metadata' => ['type' => 'click_to_call']]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake(['api.telnyx.com/v2/calls' => Http::response(['data' => ['call_control_id' => 'target-cc-1']], 200), 'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'user-cc-id',
+        'client_state' => base64_encode(json_encode(['action' => 'click_to_call', 'call_log_id' => $callLog->id, 'target_phone' => '+18475550123'])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+18475550123'
+        && ($request->data()['timeout_secs'] ?? null) === 45);
+});
+
+it('leaves the user on the machine when detection fires while the conference join is in progress', function () {
+    $callLog = CallLog::factory()->create(['status' => CallLog::STATUS_ANSWERED, 'metadata' => ['type' => 'click_to_call', 'conference_id' => 'conf-123']]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.machine.premium.detection.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'target-cc-1',
+        'result' => 'machine',
+        'client_state' => base64_encode(json_encode(['action' => 'click_to_call_target_ring', 'call_log_id' => $callLog->id, 'user_call_control_id' => 'user-cc-id'])),
+    ]]])->assertSuccessful();
+
+    // No second conference, no hangup, no "leave your message" prompt over the join.
+    Http::assertNothingSent();
+});
+
+it('tells the user the line was busy rather than that nobody answered', function () {
+    $callLog = CallLog::factory()->create(['status' => CallLog::STATUS_ANSWERED, 'metadata' => ['type' => 'click_to_call', 'target_call_control_ids' => ['target-cc-1']]]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'target-cc-1',
+        'hangup_cause' => 'user_busy',
+        'client_state' => base64_encode(json_encode(['action' => 'click_to_call_target_ring', 'call_log_id' => $callLog->id, 'user_call_control_id' => 'user-cc-id'])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'user-cc-id/actions/speak') && str_starts_with((string) ($request->data()['payload'] ?? ''), 'The line is busy'));
+    expect($callLog->fresh()->status)->toBe(CallLog::STATUS_MISSED);
 });

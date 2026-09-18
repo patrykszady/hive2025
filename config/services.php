@@ -131,6 +131,12 @@ return [
         'connection_id' => env('TELNYX_CONNECTION_ID'),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
+        // How long a click-to-call target rings before we give up. Carriers
+        // divert to voicemail after 25–30 s; at 20 s (the shared voice
+        // timeout on production) five of six unanswered outbound calls in the
+        // week to 2026-09-17 were cancelled by us at exactly 20 s, and the
+        // user heard "did not answer" instead of the target's voicemail.
+        'click_to_call_timeout' => (int) env('TELNYX_CLICK_TO_CALL_TIMEOUT', 45),
         // Comma-separated codec preference (highest fidelity first). Wideband
         // codecs (OPUS ≤48kHz, AMR-WB/G722 16kHz "HD Voice") double the audio
         // bandwidth of legacy 8kHz G.711, giving clearer recordings and better
@@ -149,8 +155,14 @@ return [
         // indefinitely, leaving calls silent/stuck. Transient connection
         // errors are retried with the same idempotent command_id so a retry
         // never double-speaks or double-dials.
-        'command_timeout' => (int) env('TELNYX_COMMAND_TIMEOUT', 10),
-        'command_connect_timeout' => (int) env('TELNYX_COMMAND_CONNECT_TIMEOUT', 5),
+        // A call-control command normally answers in 0.1–0.3 s (measured from
+        // the Forge box, 2026-09-17). At 10 s a stalled command held the
+        // webhook worker for the full 10 s before the retry went through —
+        // three outbound calls on 16–17 Sep took 10–12 s from the target
+        // picking up to audio, and Telnyx re-sent the webhook meanwhile.
+        // 4 s gives a stall one quarter of that cost; the retry still wins.
+        'command_timeout' => (int) env('TELNYX_COMMAND_TIMEOUT', 4),
+        'command_connect_timeout' => (int) env('TELNYX_COMMAND_CONNECT_TIMEOUT', 3),
         'command_retries' => (int) env('TELNYX_COMMAND_RETRIES', 2),
 
         // Ed25519 public key (base64) from the Telnyx Mission Control portal
