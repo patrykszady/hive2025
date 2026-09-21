@@ -1078,12 +1078,15 @@ class SmsConversation extends Component
             return;
         }
 
-        $result = $texter->textToThread($thread, auth()->user());
-
+        $result = $texter->composeForThread($thread, auth()->user());
         if ($result['ok']) {
-            $this->refreshMessages();
+            // Into the message box, not out the door: the sender reads it and
+            // presses send. ui-composer owns the textarea, so the value is set
+            // there and an input event lets wire:model pick it up.
+            $this->newMessage = $result['message'];
+            $encoded = json_encode($result['message']);
+            $this->js("(function(){ const ta = \$wire.\$el.querySelector('ui-composer textarea'); if (ta) { ta.value = {$encoded}; ta.dispatchEvent(new Event('input', { bubbles: true })); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } })()");
         }
-
         Flux::toast(
             variant: $result['variant'],
             heading: $result['heading'],

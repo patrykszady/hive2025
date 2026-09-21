@@ -32,9 +32,14 @@ class ConsultScheduleLinkTexter
     }
 
     /**
-     * @return array{ok: bool, variant: string, heading: string, text: string}
+     * Compose the text without sending it: the conversation drops it into the
+     * message box for the sender to read and send (2026-09-21 — an auto-sent
+     * "is booked for Mon 9:00 AM" went out at 3 PM the same day to a client
+     * who had already said he could not make it).
+     *
+     * @return array{ok: bool, variant: string, heading: string, text: string, message: string, lead_id: int|null}
      */
-    public function textToThread(SmsGroupThread $thread, User $actor): array
+    public function composeForThread(SmsGroupThread $thread, User $actor): array
     {
         $client = $thread->client_id ? Client::withoutGlobalScopes()->find($thread->client_id) : null;
         if (! $client) {
@@ -63,29 +68,59 @@ class ConsultScheduleLinkTexter
         $booked = $this->bookedConsult($client);
 
         // One voice with the lead emails: confirm what's on the books and offer
-        // the picker, or simply offer the picker.
-        $text = 'Hi'.($firstName ? " {$firstName}" : '').",\n\n"
-            .($booked
-                ? "Your consultation with {$contractor} is booked for {$booked}. If this time no longer works for you, you can pick new consultation times here: {$link} and we’ll confirm the new one ASAP."
-                : "Pick a consultation time with {$contractor} here: {$link}");
+        // the picker; when the booked time has already passed, say so and ask
+        // for a new one; otherwise simply offer the picker.
+        $greeting = 'Hi'.($firstName ? " {$firstName}" : '').",\n\n";
+        if ($booked && $booked['past']) {
+            $text = $greeting."We had your consultation with {$contractor} scheduled for {$booked['label']} — let's find a new time. Pick one here: {$link} and we’ll confirm it ASAP.";
+        } elseif ($booked) {
+            $text = $greeting."Your consultation with {$contractor} is booked for {$booked['label']}. If this time no longer works for you, you can pick new consultation times here: {$link} and we’ll confirm the new one ASAP.";
+        } else {
+            $text = $greeting."Pick a consultation time with {$contractor} here: {$link}";
+        }
 
-        $this->sms->sendToThread($thread, $text, [], $actor->id);
+        return $this->result(true, 'success', 'Ready to send', 'The consult text is in the message box — read it over and send.')
+            + ['message' => $text, 'lead_id' => $lead->id];
+    }
 
-        // Texting the link is our reply: a New lead moves to Replied (waiting
-        // on them), exactly as the email composer does — never downgrading a
-        // lead that already progressed (Won stays Won). A lead this path made
-        // before it recorded a stage gets its New first, so its history reads
-        // like everyone else's instead of "Set status" (lead 171, 2026-09-15).
+    /**
+     * Compose and send in one go (the pre-2026-09-21 behaviour, kept for the
+     * callers that want it). Texting the link is our reply: a New lead moves
+     * to Replied (waiting on them), exactly as the email composer does —
+     * never downgrading a lead that already progressed (Won stays Won). A
+     * lead this path made before it recorded a stage gets its New first, so
+     * its history reads like everyone else's instead of "Set status".
+     *
+     * @return array{ok: bool, variant: string, heading: string, text: string}
+     */
+    public function textToThread(SmsGroupThread $thread, User $actor): array
+    {
+        $composed = $this->composeForThread($thread, $actor);
+        if (! $composed['ok']) {
+            return $composed;
+        }
+        $this->sms->sendToThread($thread, $composed['message'], [], $actor->id);
+        $this->markReplied((int) $composed['lead_id']);
+
+        $contact = $this->contactFor($thread, Client::withoutGlobalScopes()->find($thread->client_id));
+
+        return $this->result(true, 'success', 'Texted', 'Consult scheduling link sent to '.($contact?->first_name ?: 'the client').'.');
+    }
+
+    /** A New lead moves to Replied once we have texted the link; anything further along stays. */
+    public function markReplied(int $leadId): void
+    {
+        $lead = Lead::withoutGlobalScopes()->find($leadId);
+        if (! $lead) {
+            return;
+        }
         if ($lead->statuses()->doesntExist()) {
             $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $lead->belongs_to_vendor_id]);
             $lead->unsetRelation('last_status');
         }
-
         if (($lead->last_status?->title ?? 'New') === 'New') {
             $lead->setStatus('Replied');
         }
-
-        return $this->result(true, 'success', 'Texted', 'Consult scheduling link sent to '.($contact->first_name ?: 'the client').'.');
     }
 
     /** The client contact behind the thread's number, else the client's first contact. */
@@ -182,36 +217,52 @@ class ConsultScheduleLinkTexter
      * "Wed, Sep 10 · 1:00 PM" for the next upcoming consult Meet on any of the
      * client's projects, or null. Same label the lead email uses.
      */
-    protected function bookedConsult(Client $client): ?string
+    /**
+     * The consult on the books for this client: the next one ahead, or —
+     * when nothing is ahead — the most recent one of the past week, flagged
+     * `past` so the text says "we had it scheduled for…" instead of
+     * confirming a time that has gone.
+     *
+     * @return array{label: string, past: bool}|null
+     */
+    protected function bookedConsult(Client $client): ?array
     {
         $tz = PickTimes::timezone();
         $projectIds = $client->projects()->withoutGlobalScopes()->pluck('id');
         if ($projectIds->isEmpty()) {
             return null;
         }
-
-        $task = Task::withoutGlobalScopes()
+        $now = Carbon::now($tz);
+        $tasks = Task::withoutGlobalScopes()
             ->whereNull('deleted_at')
             ->whereIn('project_id', $projectIds)
             ->where('type', 'Meet')
             ->where('title', 'like', '% Consult')
             ->whereNotNull('start_date')
-            ->whereDate('start_date', '>=', Carbon::now($tz)->startOfDay())
+            ->whereDate('start_date', '>=', $now->copy()->subDays(7)->startOfDay())
             ->orderBy('start_date')
-            ->first();
-
-        if (! $task) {
+            ->get();
+        if ($tasks->isEmpty()) {
             return null;
         }
 
-        $date = Carbon::parse($task->start_date)->format('Y-m-d');
-        $settings = (array) data_get($task->options, 'time_settings.'.$date, []);
-        $label = Carbon::parse($task->start_date)->format('D, M j');
-        if (($settings['use_time'] ?? false) && ! empty($settings['start_time'])) {
-            $label .= ' at '.Carbon::createFromFormat('H:i', $settings['start_time'])->format('g:i A');
-        }
+        $describe = function (Task $task) use ($tz, $now): array {
+            $date = Carbon::parse($task->start_date)->format('Y-m-d');
+            $settings = (array) data_get($task->options, 'time_settings.'.$date, []);
+            $label = Carbon::parse($task->start_date)->format('D, M j');
+            $starts = Carbon::parse($date, $tz)->endOfDay();
+            if (($settings['use_time'] ?? false) && ! empty($settings['start_time'])) {
+                $label .= ' at '.Carbon::createFromFormat('H:i', $settings['start_time'])->format('g:i A');
+                $starts = Carbon::parse($date.' '.$settings['start_time'], $tz);
+            }
 
-        return $label;
+            return ['label' => $label, 'past' => $starts->lt($now)];
+        };
+
+        $described = $tasks->map($describe);
+        $upcoming = $described->first(fn (array $c) => ! $c['past']);
+
+        return $upcoming ?? $described->last();
     }
 
     /** @return array{ok: bool, variant: string, heading: string, text: string} */

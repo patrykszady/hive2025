@@ -190,15 +190,50 @@ it('sends nothing when the thread has no client to hang the link on', function (
     expect($result['ok'])->toBeFalse()->and($result['heading'])->toBe('No client on this thread');
 });
 
-it('is reachable from the conversation menu', function () {
+it('the conversation menu drafts the text into the message box and sends nothing', function () {
     $fx = consultTextFixture();
 
-    $this->mock(GroupSmsService::class, fn ($mock) => $mock->shouldReceive('sendToThread')->once());
+    $this->mock(GroupSmsService::class, fn ($mock) => $mock->shouldReceive('sendToThread')->never());
 
     Livewire::actingAs($fx['admin'])
         ->test(SmsConversation::class)
         ->call('loadThread', $fx['thread']->id)
-        ->assertSee('Text consult scheduling link')
+        ->assertSee('Draft consult scheduling text')
         ->call('textConsultScheduleLink')
-        ->assertHasNoErrors();
+        ->assertHasNoErrors()
+        ->assertSet('newMessage', fn ($value) => str_starts_with((string) $value, 'Hi') && str_contains((string) $value, 'Pick a consultation time with GSC here: '));
+});
+
+it('says the consult was missed when its time has passed, and keeps it out of the future tense', function () {
+    $fx = consultTextFixture();
+    $this->actingAs($fx['admin']);
+    $project = Project::create([
+        'project_name' => 'Wine Cellar', 'client_id' => $fx['client']->id,
+        'address' => '1463 W Winnetka St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+    ]);
+    $tz = \App\Livewire\Leads\PickTimes::timezone();
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::parse('2026-09-21 15:00', $tz));
+    $date = '2026-09-21';
+    Task::create([
+        'project_id' => $project->id, 'title' => 'GSC/Hill Consult', 'type' => 'Meet',
+        'start_date' => $date, 'end_date' => $date, 'order' => 0, 'user_ids' => [$fx['admin']->id], 'notes' => '',
+        'options' => ['dates' => [$date], 'time_settings' => [$date => ['use_time' => true, 'start_time' => '09:00', 'end_time' => '10:00']]],
+    ]);
+
+    // 9:00 AM this morning, now 3 PM: "we had it scheduled", not "is booked for".
+    $composed = app(ConsultScheduleLinkTexter::class)->composeForThread($fx['thread'], $fx['admin']);
+    expect($composed['ok'])->toBeTrue();
+    expect($composed['message'])->toContain('We had your consultation with GSC scheduled for Mon, Sep 21 at 9:00 AM — let\'s find a new time. Pick one here: ');
+    expect($composed['message'])->not->toContain('is booked for');
+
+    // Two days later it still reads as missed; a week and more later it is forgotten and the plain picker is offered.
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::parse('2026-09-23 10:00', $tz));
+    expect(app(ConsultScheduleLinkTexter::class)->composeForThread($fx['thread'], $fx['admin'])['message'])->toContain('We had your consultation');
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::parse('2026-09-30 10:00', $tz));
+    expect(app(ConsultScheduleLinkTexter::class)->composeForThread($fx['thread'], $fx['admin'])['message'])->toContain('Pick a consultation time with GSC here: ');
+
+    // A consult later today that has not started is still "booked for".
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::parse('2026-09-21 08:00', $tz));
+    expect(app(ConsultScheduleLinkTexter::class)->composeForThread($fx['thread'], $fx['admin'])['message'])->toContain('is booked for Mon, Sep 21 at 9:00 AM.');
+    \Carbon\Carbon::setTestNow();
 });
