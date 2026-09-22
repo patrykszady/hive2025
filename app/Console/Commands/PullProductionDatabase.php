@@ -78,6 +78,14 @@ class PullProductionDatabase extends Command
         $tables = \DB::select('SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ?', [$local['database']])[0]->n;
         $this->info("Done. {$tables} tables in {$local['database']}.");
 
+        // The local cache was built from the database this command just
+        // replaced (jpeterson's SEO snapshot is cached for 15 minutes, for
+        // one), so a pull that left it in place kept showing the old
+        // numbers and read as "the pull did nothing". Cleared here rather
+        // than by the caller, so the four-command sequence in every README
+        // stays as it is.
+        $this->call('cache:clear');
+
         return self::SUCCESS;
     }
 }
