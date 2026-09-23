@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
             tailwindcss(),
         ],
         server: {
-            host: true,
+            host: '0.0.0.0',
             port: vitePort,
             strictPort: true,
             hmr: {
