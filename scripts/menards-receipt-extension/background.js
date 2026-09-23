@@ -193,6 +193,43 @@ async function reportStatus(ok, error, receipts) {
     }
 }
 
+/**
+ * One sync, with a single fresh page load and second try when the first
+ * attempt could not even reach the page. Two cases, both cheap next to a
+ * whole day without receipts:
+ *
+ *  - Imperva challenged the API on this page load. The very same run a
+ *    minute later passed on 2026-09-14: the token it judges by is refreshed
+ *    per page load.
+ *  - The page load itself failed and Chrome is showing its own error page,
+ *    so the content script is not there to answer ("Frame with ID 0 is
+ *    showing error page", "Receiving end does not exist"). A TLS handshake
+ *    through the residential proxy dropped that way on 2026-09-23; the retry
+ *    a minute later fetched five receipts.
+ */
+async function syncWithOneReload(tab, since) {
+    const retryable = /challenge page|showing error page|Receiving end does not exist|Could not establish connection/i;
+
+    let result;
+    try {
+        result = await sendSync(tab.id, since);
+    } catch (err) {
+        if (!retryable.test(err.message || '')) throw err;
+        result = { ok: false, error: err.message };
+    }
+
+    if (result?.ok || !retryable.test(result?.error || '')) return result;
+
+    await note(`first try failed (${result.error}) — reloading the receipt page and trying once more`);
+    await new Promise(r => setTimeout(r, 15000));
+    await chrome.tabs.reload(tab.id);
+    await waitForLoad(tab.id);
+    await new Promise(r => setTimeout(r, 4000));
+    await assertOnReceiptPage(tab.id);
+
+    return sendSync(tab.id, since);
+}
+
 async function run(reason) {
     const { everSucceeded } = await settings();
     const since = everSucceeded ? sinceDate(DEFAULT_LOOKBACK_DAYS) : BACKFILL_SINCE;
@@ -205,21 +242,7 @@ async function run(reason) {
     try {
         ({ tab, opened } = await receiptTab());
 
-        let result = await sendSync(tab.id, since);
-
-        // Imperva challenged the API on this page load. The very same run a
-        // minute later passed on 2026-09-14: the token it judges by is
-        // refreshed per page load, and one fresh load with one more try is
-        // cheap next to a whole day without receipts.
-        if (!result?.ok && /challenge page/i.test(result?.error || '')) {
-            await note('receipt API challenged — reloading the receipt page and trying once more');
-            await new Promise(r => setTimeout(r, 15000));
-            await chrome.tabs.reload(tab.id);
-            await waitForLoad(tab.id);
-            await new Promise(r => setTimeout(r, 4000));
-            await assertOnReceiptPage(tab.id);
-            result = await sendSync(tab.id, since);
-        }
+        const result = await syncWithOneReload(tab, since);
 
         if (!result?.ok) throw new Error(result?.error || 'content script returned no result');
 
