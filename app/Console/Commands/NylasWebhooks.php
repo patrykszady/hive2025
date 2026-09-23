@@ -6,7 +6,8 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Manage the Nylas v3 webhook subscription for message.created.
+ * Manage the Nylas v3 webhook subscription: message.created for reply
+ * capture, event.updated for Meets moved on the calendar.
  *
  * Registration must run AFTER the endpoint is deployed: Nylas GETs the
  * callback with a challenge during creation and refuses the webhook unless
@@ -15,9 +16,12 @@ use Illuminate\Support\Facades\Http;
  */
 class NylasWebhooks extends Command
 {
+    /** Every trigger the webhook controller acts on. */
+    private const TRIGGER_TYPES = ['message.created', 'event.updated'];
+
     protected $signature = 'nylas:webhooks
-        {--ensure : Idempotent: register if missing, heal a lost secret, else no-op. Safe on a schedule.}
-        {--register : Create the message.created webhook pointing at this app}
+        {--ensure : Idempotent: register if missing, add missing triggers, heal a lost secret, else no-op. Safe on a schedule.}
+        {--register : Create the webhook pointing at this app}
         {--list : Show existing webhooks}
         {--delete= : Delete a webhook by id}';
 
@@ -74,6 +78,7 @@ class NylasWebhooks extends Command
      * Idempotent convergence, built to run unattended (hourly schedule):
      *
      *   webhook missing            -> create it, cache the secret
+     *   webhook missing a trigger  -> add it, keeping the ones it has
      *   webhook there, secret lost -> rotate the secret, cache the new one
      *   webhook there, secret held -> nothing
      *
@@ -103,13 +108,39 @@ class NylasWebhooks extends Command
             return $this->register($base, $key);
         }
 
+        if (($existing['status'] ?? 'active') !== 'active') {
+            $this->warn("Webhook status is {$existing['status']}: Nylas is getting errors back from {$url}.");
+        }
+
+        $existingTriggers = (array) ($existing['trigger_types'] ?? []);
+        $missingTriggers = array_values(array_diff(self::TRIGGER_TYPES, $existingTriggers));
+        $triggersConverged = true;
+
+        if ($missingTriggers !== []) {
+            $update = Http::withToken($key)->timeout(30)->put("$base/v3/webhooks/" . (string) $existing['id'], [
+                'trigger_types' => array_values(array_unique([...$existingTriggers, ...$missingTriggers])),
+            ]);
+
+            $triggersConverged = $update->successful();
+
+            if ($triggersConverged) {
+                $this->info('Webhook triggers added: ' . implode(', ', $missingTriggers));
+            } else {
+                // Reported, not fatal: the secret below still has to heal.
+                $this->error("Adding triggers failed: HTTP {$update->status()}");
+                $this->line((string) $update->body());
+            }
+        }
+
         $secretKnown = (string) config('nylas.webhook_secret') !== ''
             || (string) cache()->get('nylas:webhook-secret', '') !== '';
 
         if ($secretKnown) {
-            $this->line('Webhook present, secret held — nothing to do.');
+            if ($missingTriggers === []) {
+                $this->line('Webhook present, secret held — nothing to do.');
+            }
 
-            return self::SUCCESS;
+            return $triggersConverged ? self::SUCCESS : self::FAILURE;
         }
 
         // Registered but the signing key is gone (cache flush, redeploy from
@@ -126,7 +157,7 @@ class NylasWebhooks extends Command
         cache()->forever('nylas:webhook-secret', (string) $rotate->json('data.webhook_secret'));
         $this->info('Webhook secret rotated and cached.');
 
-        return self::SUCCESS;
+        return $triggersConverged ? self::SUCCESS : self::FAILURE;
     }
 
     protected function register(string $base, string $key): int
@@ -134,9 +165,9 @@ class NylasWebhooks extends Command
         $url = route('webhooks.nylas');
 
         $response = Http::withToken($key)->timeout(60)->post("$base/v3/webhooks", [
-            'trigger_types' => ['message.created'],
+            'trigger_types' => self::TRIGGER_TYPES,
             'webhook_url' => $url,
-            'description' => 'Hive reply capture (personal inboxes)',
+            'description' => 'Hive reply capture (personal inboxes) and Meet calendar sync',
         ]);
 
         if (! $response->successful()) {

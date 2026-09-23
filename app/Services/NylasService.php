@@ -319,6 +319,17 @@ class NylasService
     }
 
     /**
+     * Read one calendar event. Nylas requires the calendar_id for events; the
+     * event itself is under data.data of the returned array.
+     */
+    public function getEvent(string $grantId, string $eventId, string $calendarId): array
+    {
+        return $this->makeNylasRequest('GET', "/grants/{$grantId}/events/{$eventId}", [
+            'calendar_id' => $calendarId,
+        ]);
+    }
+
+    /**
      * Update a calendar event for a given grant.
      */
     public function updateEvent(string $grantId, string $eventId, array $payload): array

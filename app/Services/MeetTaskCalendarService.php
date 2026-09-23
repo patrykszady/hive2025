@@ -295,6 +295,98 @@ class MeetTaskCalendarService
     }
 
     /**
+     * Move a Meet task to the day and time its calendar event now has — for a
+     * meet moved in Outlook or Google instead of in Hive (Patryk/Mark Consult
+     * went to 1:45 in Outlook on 2026-09-22 while Hive kept 2:00).
+     *
+     * Only the schedule comes back; title, guests and location stay Hive's.
+     * A Meet is one day, so the event's start day becomes its only date. The
+     * calendar wins only when it changed after Hive last saved the task, so a
+     * Hive edit whose push is still queued is not undone by the old time.
+     * Nothing is written to the calendar from here. With $notify the save
+     * notifies like a dashboard edit: the schedule-changed text when the meet
+     * is or was today.
+     *
+     * @return array{from: string, to: string}|null the move made (on a dry run, the one that would be); null when the task already matches
+     */
+    public function syncFromCalendar(Task $task, bool $dryRun = false, bool $notify = true): ?array
+    {
+        if ($task->type !== 'Meet') {
+            return null;
+        }
+
+        $eventMeta = $this->resolveEventMetadata($task);
+        $eventId = (string) ($eventMeta['event_id'] ?? '');
+        $grantId = (string) ($eventMeta['grant_id'] ?? '');
+        $calendarId = (string) ($eventMeta['calendar_id'] ?? '');
+
+        if ($eventId === '' || $grantId === '' || $calendarId === '') {
+            return null;
+        }
+
+        $response = $this->nylasService->getEvent($grantId, $eventId, $calendarId);
+
+        if (! ($response['success'] ?? false)) {
+            Log::channel('nylas')->warning('Meet calendar sync: event could not be read', [
+                'task_id' => $task->id,
+                'event_id' => $eventId,
+                'status' => $response['status'] ?? null,
+            ]);
+
+            return null;
+        }
+
+        $event = (array) data_get($response, 'data.data', []);
+        $calendarChangedAt = (int) ($event['updated_at'] ?? 0);
+
+        if (($event['status'] ?? null) === 'cancelled'
+            || ($task->updated_at && $calendarChangedAt <= $task->updated_at->timestamp)) {
+            return null;
+        }
+
+        $task->loadMissing('project.createdByVendor');
+
+        $calendarSchedule = $this->scheduleFromEvent((array) ($event['when'] ?? []), $this->resolveTimezone($task));
+        $taskSchedule = $this->scheduleFromTask($task);
+
+        if ($calendarSchedule === null || $calendarSchedule === $taskSchedule) {
+            return null;
+        }
+
+        $move = ['from' => $this->scheduleLabel($taskSchedule), 'to' => $this->scheduleLabel($calendarSchedule)];
+
+        if ($dryRun) {
+            return $move;
+        }
+
+        $date = $calendarSchedule['date'];
+        $options = (array) ($task->options ?? []);
+        $timeSettings = (array) ($options['time_settings'] ?? []);
+        unset($timeSettings[$taskSchedule['date']]);
+        $timeSettings[$date] = $calendarSchedule['use_time']
+            ? ['use_time' => true, 'start_time' => $calendarSchedule['start_time'], 'end_time' => $calendarSchedule['end_time']]
+            : ['use_time' => false];
+        $options['time_settings'] = $timeSettings;
+        $options['dates'] = [$date];
+
+        $task->start_date = $date;
+        $task->end_date = $date;
+        $task->options = $options;
+        $task->movedByCalendar = $notify;
+        $task->save();
+        $task->movedByCalendar = false;
+
+        Log::channel('nylas')->info('Meet task moved to match its calendar event', [
+            'task_id' => $task->id,
+            'event_id' => $eventId,
+            'from' => $move['from'],
+            'to' => $move['to'],
+        ]);
+
+        return $move;
+    }
+
+    /**
      * A plain-email copy of the invite to the owning company's mailbox
      * (crew@) so the consult booking is archived like payment and estimate
      * emails are. Never a participant — an archive, not an attendee. Failure
@@ -430,7 +522,7 @@ class MeetTaskCalendarService
 
     private function resolveDateRange(Task $task): array
     {
-        $timezone = (string) ($task->project?->createdByVendor?->timezone ?: config('app.timezone'));
+        $timezone = $this->resolveTimezone($task);
         $startDate = $task->start_date?->copy() ?: now($timezone);
         $dateKey = $startDate->format('Y-m-d');
 
@@ -461,13 +553,80 @@ class MeetTaskCalendarService
             ], $startAt, $endAt, $timezone, false];
         }
 
-        $allDayDate = $startDate->copy()->setTimezone($timezone)->format('Y-m-d');
-        $startAt = Carbon::parse("{$allDayDate} 00:00", $timezone);
-        $endAt = Carbon::parse("{$allDayDate} 23:59", $timezone);
+        // The task's date is already the local day. Converting it (midnight
+        // UTC) to the vendor's timezone put Chicago all-day meets a day early.
+        $startAt = Carbon::parse("{$dateKey} 00:00", $timezone);
+        $endAt = Carbon::parse("{$dateKey} 23:59", $timezone);
 
         return [[
-            'date' => $allDayDate,
+            'date' => $dateKey,
         ], $startAt, $endAt, $timezone, true];
+    }
+
+    private function resolveTimezone(Task $task): string
+    {
+        return (string) ($task->project?->createdByVendor?->timezone ?: config('app.timezone'));
+    }
+
+    /**
+     * The event's schedule in the vendor's timezone, shaped like the task's.
+     *
+     * @param  array<string, mixed>  $when  Nylas `when`: a timespan, a date or a datespan
+     * @return array{date: string, use_time: bool, start_time: ?string, end_time: ?string}|null
+     */
+    private function scheduleFromEvent(array $when, string $timezone): ?array
+    {
+        if (isset($when['start_time'], $when['end_time'])) {
+            $startAt = Carbon::createFromTimestamp((int) $when['start_time'], $timezone);
+            $endAt = Carbon::createFromTimestamp((int) $when['end_time'], $timezone);
+
+            return [
+                'date' => $startAt->format('Y-m-d'),
+                'use_time' => true,
+                'start_time' => $startAt->format('H:i'),
+                'end_time' => $endAt->format('H:i'),
+            ];
+        }
+
+        $date = $when['date'] ?? $when['start_date'] ?? null;
+
+        return is_string($date) && $date !== ''
+            ? ['date' => $date, 'use_time' => false, 'start_time' => null, 'end_time' => null]
+            : null;
+    }
+
+    /**
+     * The task's schedule as Hive sends it to the calendar, so a missing or
+     * backwards end time compares as the hour resolveDateRange fills in.
+     *
+     * @return array{date: string, use_time: bool, start_time: ?string, end_time: ?string}
+     */
+    private function scheduleFromTask(Task $task): array
+    {
+        [, $startAt, $endAt, , $allDay] = $this->resolveDateRange($task);
+
+        return [
+            'date' => $startAt->format('Y-m-d'),
+            'use_time' => ! $allDay,
+            'start_time' => $allDay ? null : $startAt->format('H:i'),
+            'end_time' => $allDay ? null : $endAt->format('H:i'),
+        ];
+    }
+
+    /**
+     * "Sep 23, 2:00 PM–2:30 PM", or "Sep 23 (all day)".
+     *
+     * @param  array{date: string, use_time: bool, start_time: ?string, end_time: ?string}  $schedule
+     */
+    private function scheduleLabel(array $schedule): string
+    {
+        $day = Carbon::parse($schedule['date'])->format('M j');
+
+        if (! $schedule['use_time']) {
+            return "{$day} (all day)";
+        }
+
+        return $day.', '.Carbon::parse($schedule['start_time'])->format('g:i A').'–'.Carbon::parse($schedule['end_time'])->format('g:i A');
     }
 
     private function resolveOwnerAndVendorContactEmails(Task $task): Collection

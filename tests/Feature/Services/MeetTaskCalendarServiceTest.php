@@ -95,6 +95,62 @@ it('creates an all-day nylas event when meet task has no time set', function ():
     });
 });
 
+it('keeps an all-day meet on its own day for a vendor behind UTC', function (): void {
+    config([
+        'nylas.api_key' => 'test-key',
+        'nylas.meet.enabled' => true,
+        'nylas.meet.dev_recipient' => 'dev@example.test',
+    ]);
+
+    $vendor = Vendor::factory()->create(['timezone' => 'America/Chicago']);
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Framing/Foundation Consult',
+        'client_id' => Client::factory()->create()->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+
+    CompanyEmail::withoutGlobalScopes()->create([
+        'vendor_id' => $vendor->id,
+        'email' => 'calendar@pmg.test',
+        'grant_id' => 'grant_123',
+    ]);
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Framing/Foundation Consult',
+        'type' => 'Meet',
+        'order' => 1,
+        'project_id' => $project->id,
+        'user_ids' => [],
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => 1,
+        'start_date' => '2026-07-03',
+        'end_date' => '2026-07-03',
+        'options' => [
+            'meeting_participants' => ['external@example.test'],
+            'time_settings' => ['2026-07-03' => ['use_time' => false]],
+        ],
+    ]));
+
+    Http::fake([
+        'https://api.us.nylas.com/v3/grants/grant_123/calendars*' => Http::response([
+            'data' => [['id' => 'cal_abc', 'is_primary' => true]],
+        ], 200),
+        'https://api.us.nylas.com/v3/grants/grant_123/events*' => Http::response([
+            'data' => ['id' => 'evt_123'],
+        ], 200),
+    ]);
+
+    app(MeetTaskCalendarService::class)->createMeetEvent($task);
+
+    Http::assertSent(fn ($request): bool => str_contains($request->url(), '/grants/grant_123/events')
+        && ($request->data()['when']['date'] ?? null) === '2026-07-03');
+});
+
 /**
  * A Meet task wired up enough to render an invite description.
  *

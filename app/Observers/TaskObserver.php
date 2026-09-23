@@ -324,8 +324,9 @@ class TaskObserver
             return;
         }
 
-        // Only dispatch from authenticated dashboard changes
-        if (! auth()->check()) {
+        // Only dispatch from authenticated dashboard changes, or a Meet moved
+        // in Outlook/Google — the same change, made on the calendar
+        if (! auth()->check() && ! $task->movedByCalendar) {
             return;
         }
 
@@ -352,6 +353,7 @@ class TaskObserver
             'project_id' => $task->project_id,
             'affected_user_ids' => $affectedUserIds,
             'changed_by_user_id' => auth()->id(),
+            'moved_by_calendar' => $task->movedByCalendar,
             'scheduled_for' => $sendAt->toDateTimeString(),
         ]);
 

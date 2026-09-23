@@ -46,6 +46,13 @@ $FORGE_PHP artisan reverb:restart
 # re-verified route caching against the Livewire prefix.
 $FORGE_PHP artisan optimize:clear
 
+# optimize:clear includes cache:clear, which drops the Nylas webhook secret
+# `nylas:webhooks --ensure` cached, and the endpoint 503s every delivery until
+# the hourly run rotates a new one — the likely reason Nylas had the webhook
+# "failing" on 2026-09-23. Meets moved on the calendar reach Hive only through
+# this webhook, so heal it now; it also adds any trigger the controller gained.
+$FORGE_PHP artisan nylas:webhooks --ensure || true
+
 # Smoke test: the single file whose absence kills the whole front end. If
 # this fails the deploy is marked failed in Forge rather than going quietly.
 # The pattern must stay loose around the filename: Livewire serves

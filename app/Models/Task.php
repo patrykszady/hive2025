@@ -31,6 +31,13 @@ class Task extends Model
     ];
 
     /**
+     * Set for the save that moves a Meet to match its calendar event, so the
+     * observer sends the schedule-changed notification a dashboard edit would.
+     * A plain property, not a column.
+     */
+    public bool $movedByCalendar = false;
+
+    /**
      * Accessor used by the vendor availability page.
      * Example: "Mon, Jan 13, 2026 @ 7AM"
      */

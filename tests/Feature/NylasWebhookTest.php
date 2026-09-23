@@ -153,7 +153,7 @@ it('ensure rotates a lost secret instead of duplicating the webhook', function (
         'https://api.us.nylas.com/v3/webhooks' => Http::response(['data' => [[
             'id' => 'wh-1',
             'webhook_url' => route('webhooks.nylas'),
-            'trigger_types' => ['message.created'],
+            'trigger_types' => ['message.created', 'event.updated'],
         ]]]),
     ]);
 
@@ -172,7 +172,7 @@ it('ensure is a no-op when the webhook exists and the secret is held', function 
         'https://api.us.nylas.com/v3/webhooks' => Http::response(['data' => [[
             'id' => 'wh-1',
             'webhook_url' => route('webhooks.nylas'),
-            'trigger_types' => ['message.created'],
+            'trigger_types' => ['message.created', 'event.updated'],
         ]]]),
     ]);
 
