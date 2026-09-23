@@ -97,6 +97,20 @@ return [
         'update_secret' => env('MENARDS_EXTENSION_SECRET'),
         'user_data_dir' => env('MENARDS_USER_DATA_DIR'),
         'novnc_web' => env('MENARDS_NOVNC_WEB', '/usr/share/novnc'),
+        // The residential proxy the server's Chrome exits through (the 2captcha
+        // pool gsc's Yelp stack uses; same env names). Imperva scores the
+        // droplet's own address as a bot; see App\Support\MenardsProxy. The
+        // session id keeps the browser and every captcha solve on one exit.
+        'proxy_host' => env('CAPTCHA_PROXY_HOST'),
+        'proxy_username' => env('CAPTCHA_PROXY_USERNAME'),
+        'proxy_password' => env('CAPTCHA_PROXY_PASSWORD'),
+        'proxy_session' => env('MENARDS_PROXY_SESSION', 'menards'),
+        // The official 2captcha Solver extension (force-installed next to the
+        // receipt extension by scripts/provision-menards-browser.sh) clears
+        // the wall's hCaptcha. While it is on, the blind checkbox click stays
+        // out of its way: a token landing under a click reset the widget.
+        'solver_extension' => (bool) env('MENARDS_SOLVER_EXTENSION', false),
+        'solver_extension_id' => env('MENARDS_SOLVER_EXTENSION_ID', 'ifibfemgeogfhoebkmokieepdoobkbpo'),
     ],
 
     'azure_cu' => [

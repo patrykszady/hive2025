@@ -6,12 +6,15 @@
   "permissions": [
     "alarms",
     "storage",
-    "scripting"
+    "scripting",
+    "webRequest",
+    "webRequestAuthProvider"
   ],
   "host_permissions": [
     "https://www.menards.com/*",
     "https://hive.contractors/*",
-    "http://127.0.0.1:8000/*"
+    "http://127.0.0.1:8000/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js",

@@ -222,15 +222,34 @@ XML
 write_policy() {
     POLICY_FILE="$POLICY_DIR/menards-receipt-sync.json"
     local url; url=$(manifest_url)
+
+    # The official 2captcha Solver extension rides the same policy when
+    # MENARDS_SOLVER_EXTENSION is on: it clears the wall's hCaptcha in place.
+    # Its API key and proxy are typed into its own settings once over noVNC.
+    local solver_on solver_id solver_force="" solver_allow="" solver_settings=""
+    solver_on=$(env_value MENARDS_SOLVER_EXTENSION)
+    solver_id=$(env_value MENARDS_SOLVER_EXTENSION_ID); solver_id="${solver_id:-ifibfemgeogfhoebkmokieepdoobkbpo}"
+    case "$(printf '%s' "$solver_on" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on)
+            solver_force=", \"$solver_id;https://clients2.google.com/service/update2/crx\""
+            solver_allow=", \"$solver_id\""
+            solver_settings=",
+    \"$solver_id\": {
+      \"installation_mode\": \"force_installed\",
+      \"update_url\": \"https://clients2.google.com/service/update2/crx\"
+    }"
+            ;;
+    esac
+
     POLICY_CONTENT=$(cat <<JSON
 {
-  "ExtensionInstallForcelist": ["$EXT_ID;$url"],
-  "ExtensionInstallAllowlist": ["$EXT_ID"],
+  "ExtensionInstallForcelist": ["$EXT_ID;$url"$solver_force],
+  "ExtensionInstallAllowlist": ["$EXT_ID"$solver_allow],
   "ExtensionSettings": {
     "$EXT_ID": {
       "installation_mode": "force_installed",
       "update_url": "$url"
-    }
+    }$solver_settings
   }
 }
 JSON

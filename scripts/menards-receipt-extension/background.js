@@ -346,21 +346,56 @@ async function seedDefaults() {
         const d = await res.json();
         if (!d.serverUrl && !d.token) return;
 
-        const current = await chrome.storage.local.get(['serverUrl', 'token', 'solveChallenges']);
+        const current = await chrome.storage.local.get(['serverUrl', 'token', 'solveChallenges', 'proxy']);
         const next = {
             serverUrl: d.serverUrl || current.serverUrl || '',
             token: d.token || current.token || '',
             solveChallenges: typeof d.solveChallenges === 'boolean' ? d.solveChallenges : current.solveChallenges === true,
+            // The residential proxy's credentials (see onAuthRequired below);
+            // null when the server has no proxy configured.
+            proxy: d.proxy && d.proxy.host ? d.proxy : null,
         };
 
-        if (next.serverUrl !== current.serverUrl || next.token !== current.token || next.solveChallenges !== current.solveChallenges) {
+        if (next.serverUrl !== current.serverUrl || next.token !== current.token || next.solveChallenges !== current.solveChallenges
+            || JSON.stringify(next.proxy) !== JSON.stringify(current.proxy || null)) {
             await chrome.storage.local.set(next);
-            await note(`applied configuration from defaults.json (posting to ${next.serverUrl}; automatic captcha solving ${next.solveChallenges ? 'on' : 'off'})`);
+            await note(`applied configuration from defaults.json (posting to ${next.serverUrl}; automatic captcha solving ${next.solveChallenges ? 'on' : 'off'}; proxy ${next.proxy ? next.proxy.host : 'none'})`);
         }
     } catch {
         // No defaults bundled — the options page is the other way in.
     }
 }
+
+/**
+ * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`
+ * carries no credentials, and everything this browser sends to Menards (and
+ * to hCaptcha, for the solver plugin) goes through that proxy. The
+ * credentials arrive in defaults.json like the Hive token does. A request is
+ * answered once: a second challenge for the same request means the
+ * credentials are wrong, and cancelling beats looping on it.
+ */
+const answeredProxyAuth = new Set();
+
+chrome.webRequest.onAuthRequired.addListener(
+    async (details) => {
+        if (!details.isProxy) return {};
+
+        const { proxy } = await chrome.storage.local.get('proxy');
+        if (!proxy || !proxy.username) return {};
+        if (details.challenger && details.challenger.host && details.challenger.host !== proxy.host) return {};
+
+        if (answeredProxyAuth.has(details.requestId)) {
+            await note(`proxy ${proxy.host} refused the credentials — check CAPTCHA_PROXY_* on the server`);
+            return { cancel: true };
+        }
+        answeredProxyAuth.add(details.requestId);
+        if (answeredProxyAuth.size > 500) answeredProxyAuth.clear();
+
+        return { authCredentials: { username: proxy.username, password: proxy.password } };
+    },
+    { urls: ['<all_urls>'] },
+    ['asyncBlocking'],
+);
 
 chrome.runtime.onStartup.addListener(seedDefaults);
 

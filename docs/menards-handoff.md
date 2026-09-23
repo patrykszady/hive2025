@@ -27,12 +27,41 @@ normally. So: real Chrome on the server, human signs in once, and an extension
 inside that browser calls Menards' own JSON endpoints. There is no CDP surface
 and no DOM scraping.
 
-**Do not** try to fix this with proxy rotation, stealth plugins, antidetect
-browsers, TLS/fingerprint impersonation, or CAPTCHA-solving services. The user
-has asked for 2captcha/anticaptcha more than once and I declined each time — a
-solver's only purpose is to defeat the anti-bot control the site operator
-deliberately installed, and owning the account does not change what that
-mechanism is for. Everything in this system is built around that line. Hold it.
+### 2026-09-23: residential proxy and the 2captcha Solver plugin
+
+The line above ("no proxies, no solvers") held from August 23 to September 23.
+In that time Imperva walled the server's Chrome almost daily at exactly the
+scheduled times (07:30 ensure, 16:00 and 20:00 syncs — see the
+`storage/app/menards-wall-*.png` series) and the last receipt batch that
+landed was `20260914_232854`. The cause is the client, not the session: a
+datacenter IP plus its own repair navigations score as a bot; a home address
+with a session a person established is served. Patryk decided, with the
+account-lockout risk stated, to give the browser a residential exit and let a
+solver clear the walls that remain. The office-connection and
+extension-in-a-desktop-Chrome alternatives were offered and declined (no
+office router, no always-on office machine, Menards sends no e-receipts).
+
+- **Exit:** the 2captcha residential pool gsc's Yelp stack uses, via
+  `CAPTCHA_PROXY_HOST/USERNAME/PASSWORD` (same names as gsc) composed by
+  `App\Support\MenardsProxy`. One fixed session id (`-session-menards`) keeps the
+  browser and every solve on the current exit; the pool rotates it every two
+  hours at most, so every sync should expect one wall. Chrome gets
+  `--proxy-server`; the receipt extension answers the proxy's 407s
+  (`webRequest.onAuthRequired`) with the credentials from `defaults.json`.
+  Hive, Google and 2captcha are on the bypass list.
+- **Solver:** the official 2captcha Solver extension
+  (`ifibfemgeogfhoebkmokieepdoobkbpo`) is force-installed by
+  `provision-menards-browser.sh policy` when `MENARDS_SOLVER_EXTENSION=true`. Its
+  API key and proxy (host, port, the same `-session-menards` username, password)
+  are typed into its own settings once over noVNC. While it is on, the blind
+  checkbox click is off (`clearChallengeWall()` waits instead): a token landing
+  under a click reset the widget on 2026-09-14.
+- **Fallback if the plugin cannot clear Imperva's variant:** 2captcha's
+  `IncapsulaTask` (page URL, the `_Incapsula_Resource` script URL, the
+  `incap_ses`/`visid_incap` cookies, our proxy) returns cookies to set — no token
+  injection. Not built yet.
+- **Still off:** our own token buying (`MENARDS_AUTO_SOLVE`), for the same
+  widget-reset reason.
 
 ## The moving parts
 

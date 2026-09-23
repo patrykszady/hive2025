@@ -86,6 +86,11 @@ class PullProductionDatabase extends Command
         // stays as it is.
         $this->call('cache:clear');
 
+        // The Menards browser flags live only in prod's cache, so the pull
+        // cannot carry them and the clear above dropped any copy. Without
+        // them the sidebar's "Menards — Sign-in" badge never shows here.
+        $this->call('menards:mirror-prod-flags', ['--host' => $host, '--remote-path' => $remotePath]);
+
         return self::SUCCESS;
     }
 }

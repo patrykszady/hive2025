@@ -8,7 +8,9 @@
             <flux:heading size="xl">Menards Browser</flux:heading>
             <flux:text class="mt-1">The receipt-sync browser running on the server. When a security challenge or sign-in is needed, complete it right here.</flux:text>
         </div>
-        <flux:button wire:click="retrySignin" icon="arrow-path">Retry sign-in</flux:button>
+        @if($hasBrowserStack)
+            <flux:button wire:click="retrySignin" icon="arrow-path">Retry sign-in</flux:button>
+        @endif
     </div>
 
     @if (session('menards-retry'))
@@ -42,18 +44,29 @@
         </flux:callout>
     @endif
 
-    <div wire:ignore class="rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden bg-zinc-900">
-        <iframe
-            src="/menards-vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&path=menards-vnc/websockify"
-            title="Menards remote browser"
-            class="w-full block"
-            style="height: calc(100vh - 20rem); min-height: 480px;"
-        ></iframe>
-    </div>
+    @if($hasBrowserStack)
+        <div wire:ignore class="rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden bg-zinc-900">
+            <iframe
+                src="/menards-vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&path=menards-vnc/websockify"
+                title="Menards remote browser"
+                class="w-full block"
+                style="height: calc(100vh - 20rem); min-height: 480px;"
+            ></iframe>
+        </div>
 
-    <flux:text class="text-sm">
-        If the viewer fails to connect, the browser stack may be down on the server — run
-        <span class="font-mono">php artisan menards:browser ensure</span> there, or check that the noVNC proxy
-        (<span class="font-mono">/menards-vnc/</span>) is configured in nginx.
-    </flux:text>
+        <flux:text class="text-sm">
+            If the viewer fails to connect, the browser stack may be down on the server — run
+            <span class="font-mono">php artisan menards:browser ensure</span> there, or check that the noVNC proxy
+            (<span class="font-mono">/menards-vnc/</span>) is configured in nginx.
+        </flux:text>
+    @else
+        <flux:callout icon="computer-desktop">
+            <flux:callout.heading>The browser runs on the production server</flux:callout.heading>
+            <flux:callout.text>
+                This environment has no Menards browser stack (no <span class="font-mono">MENARDS_CHROMIUM_BINARY</span>,
+                extension or noVNC proxy), so there is nothing to embed here. The status above is production's,
+                mirrored by <span class="font-mono">php artisan menards:mirror-prod-flags</span>.
+            </flux:callout.text>
+        </flux:callout>
+    @endif
 </div>

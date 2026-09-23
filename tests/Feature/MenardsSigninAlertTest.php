@@ -66,13 +66,27 @@ it('hides the Menards alert when the session is healthy', function (): void {
 });
 
 it('renders the browser viewer page with the challenge callout and noVNC frame', function (): void {
+    config(['services.menards.chromium_binary' => '/usr/bin/chromium']);
     Cache::put(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY, ['reason' => 'challenge', 'at' => now()->toIso8601String()], 600);
 
     Livewire::actingAs(menardsAlertAdmin())
         ->test(MenardsBrowserViewer::class)
         ->assertSee('Menards needs a human')
         ->assertSee('security challenge')
+        ->assertSee('wire:click="retrySignin"', false)
         ->assertSee('/menards-vnc/vnc.html');
+});
+
+it('explains where the browser runs instead of framing a 404 where there is no browser stack', function (): void {
+    config(['services.menards.chromium_binary' => null]);
+    Cache::put(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY, ['reason' => 'challenge', 'at' => now()->toIso8601String()], 600);
+
+    Livewire::actingAs(menardsAlertAdmin())
+        ->test(MenardsBrowserViewer::class)
+        ->assertSee('Menards needs a human')
+        ->assertSee('The browser runs on the production server')
+        ->assertDontSee('wire:click="retrySignin"', false)
+        ->assertDontSee('/menards-vnc/vnc.html');
 });
 
 it('gates the noVNC auth endpoint: guests 403, admins 204', function (): void {

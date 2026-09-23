@@ -182,12 +182,17 @@ class MenardsRemoteBrowserService
             // instead. The extension is installed once by hand on chrome://extensions
             // with Developer mode on, in the same sitting as the one-time sign-in,
             // and the persistent profile keeps both.
+            //
+            // The residential proxy (App\Support\MenardsProxy) is what stops
+            // Imperva scoring the droplet's address as a bot; its credentials
+            // are answered by the extension, since --proxy-server takes none.
             'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s %s --user-data-dir=%s '
             . '--no-first-run --no-default-browser-check --disable-session-crashed-bubble '
-            . '--window-size=1280,900 --start-maximized %s',
+            . '--window-size=1280,900 --start-maximized %s %s',
             escapeshellarg(self::DISPLAY),
             escapeshellarg($cfg['chromium']),
             escapeshellarg($profile),
+            \App\Support\MenardsProxy::fromConfig()?->chromeArguments() ?? '',
             escapeshellarg(self::PARK_URL)
         );
 
@@ -269,6 +274,9 @@ class MenardsRemoteBrowserService
             'serverUrl' => rtrim((string) config('app.url'), '/'),
             'token' => $token,
             'solveChallenges' => (bool) config('services.menards.auto_solve'),
+            // The residential proxy's credentials, for the 407s Chrome
+            // itself cannot answer (see the onAuthRequired listener).
+            'proxy' => \App\Support\MenardsProxy::fromConfig()?->forExtension(),
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 
         @chmod($path, 0600);
@@ -347,7 +355,7 @@ class MenardsRemoteBrowserService
         if (! $loaded && $this->looksLikeChallengeWall()) {
             $this->captureChallengeScreenshot();
 
-            if ($this->clickChallengeCheckbox()) {
+            if ($this->clearChallengeWall()) {
                 $loaded = $this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) !== '';
             }
         }
@@ -356,9 +364,9 @@ class MenardsRemoteBrowserService
             if ($this->looksLikeChallengeWall()) {
                 $this->flagNeedsSignin('challenge');
 
-                return ['ok' => false, 'error' => 'Imperva is showing a security challenge (hCaptcha). '
-                    . 'Nothing here will solve that: either click it once over noVNC, or leave it — '
-                    . 'the hourly ensure retries after the score cools down.'];
+                return ['ok' => false, 'error' => 'Imperva is showing a security challenge (hCaptcha) that was not cleared. '
+                    . 'Either click it once over noVNC, or leave it — '
+                    . 'ensure retries after the score cools down.'];
             }
 
             $this->flagNeedsSignin('login_failed');
@@ -550,6 +558,40 @@ class MenardsRemoteBrowserService
 
         Log::channel('menards')->{$cleared ? 'info' : 'warning'}(
             'Menards browser: challenge click ' . ($cleared ? 'cleared the wall' : 'did not clear the wall'),
+            ['title' => $this->windowTitle()]
+        );
+
+        return $cleared;
+    }
+
+    /**
+     * Get past the wall. With the 2captcha Solver extension on, it solves the
+     * hCaptcha in place and Imperva then lets the page through — clicking
+     * under it resets the widget, so this only waits. Otherwise the
+     * calibrated checkbox click.
+     */
+    protected function clearChallengeWall(): bool
+    {
+        if ((bool) config('services.menards.solver_extension')) {
+            return $this->waitForSolverExtension();
+        }
+
+        return $this->clickChallengeCheckbox();
+    }
+
+    /**
+     * The plugin needs a moment to see the widget, up to a minute or two for
+     * a worker to solve it, and a few seconds for Imperva to verify: three
+     * minutes before calling it a failure.
+     */
+    protected function waitForSolverExtension(int $seconds = 180): bool
+    {
+        Log::channel('menards')->info('Menards browser: waiting for the solver extension to clear the wall', ['seconds' => $seconds]);
+
+        $cleared = $this->waitForTitle(['at Menards'], $seconds) || ! $this->looksLikeChallengeWall();
+
+        Log::channel('menards')->{$cleared ? 'info' : 'warning'}(
+            'Menards browser: solver extension ' . ($cleared ? 'cleared the wall' : 'did not clear the wall in time'),
             ['title' => $this->windowTitle()]
         );
 
@@ -796,7 +838,13 @@ class MenardsRemoteBrowserService
         $clicked = false;
         $coords = trim((string) config('services.menards.challenge_click'));
 
-        if (preg_match('/^(\d+)\s*,\s*(\d+)$/', $coords, $m)) {
+        if ((bool) config('services.menards.solver_extension')) {
+            // This page is titled by its URL before and after the JSON renders,
+            // so there is nothing to watch for: give the plugin a solve's worth
+            // of time and let the park below prove the outcome.
+            Log::channel('menards')->info('Menards browser: giving the solver extension time to clear the API wall');
+            sleep(90);
+        } elseif (preg_match('/^(\d+)\s*,\s*(\d+)$/', $coords, $m)) {
             $this->click((int) $m[1], (int) $m[2]);
             $clicked = true;
             sleep(15);

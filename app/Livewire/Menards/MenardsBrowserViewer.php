@@ -45,6 +45,10 @@ class MenardsBrowserViewer extends Component
             'syncStatus' => $syncStatus,
             'needsSignin' => $needsSignin,
             'needsAttention' => (bool) ($syncStatus['session_expired'] ?? false) || $needsSignin !== null,
+            // The browser stack (Chromium, the extension, the noVNC proxy)
+            // exists only on the server; dev mirrors the flags and has no
+            // frame to show.
+            'hasBrowserStack' => (string) config('services.menards.chromium_binary') !== '',
         ]);
     }
 }
