@@ -71,11 +71,17 @@ fi
 echo "Livewire assets OK ($LW_URL)"
 
 # Restart Nightwatch daemon with better error handling
+# Forge names its daemons daemon-<id>, so find Nightwatch's supervisor program
+# by its command. The old `supervisorctl restart nightwatch-agent` named a
+# program that never existed, and with stderr hidden it did nothing on every
+# deploy until 2026-09-23.
 echo 'Restarting Nightwatch daemon...'
-sudo supervisorctl restart nightwatch-agent 2>/dev/null || {
-    echo 'Nightwatch not running, starting it...'
-    sudo supervisorctl start nightwatch-agent || echo 'Failed to start Nightwatch (may not be configured)'
-}
+NW_PROGRAM=$(grep -ls 'nightwatch:agent' /etc/supervisor/conf.d/*.conf | head -1 | xargs -r grep -h '^\[program:' | sed -E 's/^\[program:(.*)\]$/\1/')
+if [ -n "$NW_PROGRAM" ]; then
+    sudo supervisorctl restart "$NW_PROGRAM:*" || echo "Nightwatch restart failed ($NW_PROGRAM)"
+else
+    echo 'Nightwatch daemon not configured'
+fi
 
 # Menards receipt browser — dispatch one idempotent health pass, DETACHED.
 #
