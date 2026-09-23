@@ -101,10 +101,18 @@ return [
         // pool gsc's Yelp stack uses; same env names). Imperva scores the
         // droplet's own address as a bot; see App\Support\MenardsProxy. The
         // session id keeps the browser and every captcha solve on one exit.
+        // MENARDS_PROXY=false keeps the browser on the droplet's own address
+        // while the credentials stay set — for a pool whose exits are not yet
+        // pinned to the US (Menards 403s a Russian or Brazilian exit outright).
+        'proxy_enabled' => (bool) env('MENARDS_PROXY', true),
         'proxy_host' => env('CAPTCHA_PROXY_HOST'),
         'proxy_username' => env('CAPTCHA_PROXY_USERNAME'),
         'proxy_password' => env('CAPTCHA_PROXY_PASSWORD'),
         'proxy_session' => env('MENARDS_PROXY_SESSION', 'menards'),
+        // `-region-us` is the only geo parameter this pool honours (sampled
+        // 5/5 US exits on 2026-09-23); `-country-` and `-state-` are ignored
+        // and hand out Brazilian or Russian exits, which Menards 403s outright.
+        'proxy_region' => env('MENARDS_PROXY_REGION', 'us'),
         // The official 2captcha Solver extension (force-installed next to the
         // receipt extension by scripts/provision-menards-browser.sh) clears
         // the wall's hCaptcha. While it is on, the blind checkbox click stays

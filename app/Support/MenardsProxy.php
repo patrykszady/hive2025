@@ -21,12 +21,17 @@ final class MenardsProxy
         public readonly string $password,
     ) {}
 
-    /** Null until CAPTCHA_PROXY_HOST, _USERNAME and _PASSWORD are all set. */
+    /** Null while MENARDS_PROXY is off, and until CAPTCHA_PROXY_HOST, _USERNAME and _PASSWORD are all set. */
     public static function fromConfig(): ?self
     {
+        if (! config('services.menards.proxy_enabled', true)) {
+            return null;
+        }
+
         $endpoint = trim((string) config('services.menards.proxy_host', ''));
         $username = trim((string) config('services.menards.proxy_username', ''));
         $password = (string) config('services.menards.proxy_password', '');
+        $region = trim((string) config('services.menards.proxy_region', ''));
         $session = trim((string) config('services.menards.proxy_session', ''));
 
         if ($endpoint === '' || $username === '' || $password === '') {
@@ -35,12 +40,17 @@ final class MenardsProxy
 
         [$host, $port] = array_pad(explode(':', $endpoint, 2), 2, '');
 
-        return new self(
-            $host,
-            (int) ($port !== '' ? $port : 3128),
-            $session !== '' ? "{$username}-session-{$session}" : $username,
-            $password,
-        );
+        // The pool reads its options off the username: `-region-us` pins the
+        // exit country, `-session-<id>` keeps one exit for up to two hours.
+        if ($region !== '') {
+            $username .= "-region-{$region}";
+        }
+
+        if ($session !== '') {
+            $username .= "-session-{$session}";
+        }
+
+        return new self($host, (int) ($port !== '' ? $port : 3128), $username, $password);
     }
 
     /**

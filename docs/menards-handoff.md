@@ -43,12 +43,18 @@ office router, no always-on office machine, Menards sends no e-receipts).
 
 - **Exit:** the 2captcha residential pool gsc's Yelp stack uses, via
   `CAPTCHA_PROXY_HOST/USERNAME/PASSWORD` (same names as gsc) composed by
-  `App\Support\MenardsProxy`. One fixed session id (`-session-menards`) keeps the
-  browser and every solve on the current exit; the pool rotates it every two
-  hours at most, so every sync should expect one wall. Chrome gets
-  `--proxy-server`; the receipt extension answers the proxy's 407s
-  (`webRequest.onAuthRequired`) with the credentials from `defaults.json`.
-  Hive, Google and 2captcha are on the bypass list.
+  `App\Support\MenardsProxy`. The pool reads options off the username:
+  `-region-us` pins the exit to the US (sampled 5/5 on 2026-09-23; `-country-`
+  and `-state-` are ignored and hand out Brazilian/Russian exits, which Menards
+  403s outright; `-city-` is refused with a 407), and one fixed session id
+  (`-session-menards`) keeps the browser and every solve on the current exit,
+  which the pool rotates every two hours at most — so every sync should expect
+  one wall. Chrome gets `--proxy-server`; the receipt extension answers the
+  proxy's 407s (`webRequest.onAuthRequired`, through the callback Chrome hands
+  an asyncBlocking listener — a returned Promise is ignored and left Chrome's
+  own proxy sign-in dialog on screen for eleven hours on 2026-09-23) with the
+  credentials from `defaults.json`. Hive, Google and 2captcha are on the bypass
+  list. `MENARDS_PROXY=false` keeps the droplet's own address as a fallback.
 - **Solver:** the official 2captcha Solver extension
   (`ifibfemgeogfhoebkmokieepdoobkbpo`) is force-installed by
   `provision-menards-browser.sh policy` when `MENARDS_SOLVER_EXTENSION=true`. Its

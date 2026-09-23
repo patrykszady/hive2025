@@ -376,22 +376,29 @@ async function seedDefaults() {
  */
 const answeredProxyAuth = new Set();
 
+async function proxyAuthResponse(details) {
+    if (!details.isProxy) return {};
+
+    const { proxy } = await chrome.storage.local.get('proxy');
+    if (!proxy || !proxy.username) return {};
+    if (details.challenger && details.challenger.host && details.challenger.host !== proxy.host) return {};
+
+    if (answeredProxyAuth.has(details.requestId)) {
+        await note(`proxy ${proxy.host} refused the credentials — check CAPTCHA_PROXY_* on the server`);
+        return { cancel: true };
+    }
+    answeredProxyAuth.add(details.requestId);
+    if (answeredProxyAuth.size > 500) answeredProxyAuth.clear();
+
+    return { authCredentials: { username: proxy.username, password: proxy.password } };
+}
+
+// An asyncBlocking listener answers through the callback Chrome hands it; a
+// returned Promise is ignored, and the first version returned one — so Chrome
+// put its own proxy sign-in dialog on screen and nothing loaded (2026-09-23).
 chrome.webRequest.onAuthRequired.addListener(
-    async (details) => {
-        if (!details.isProxy) return {};
-
-        const { proxy } = await chrome.storage.local.get('proxy');
-        if (!proxy || !proxy.username) return {};
-        if (details.challenger && details.challenger.host && details.challenger.host !== proxy.host) return {};
-
-        if (answeredProxyAuth.has(details.requestId)) {
-            await note(`proxy ${proxy.host} refused the credentials — check CAPTCHA_PROXY_* on the server`);
-            return { cancel: true };
-        }
-        answeredProxyAuth.add(details.requestId);
-        if (answeredProxyAuth.size > 500) answeredProxyAuth.clear();
-
-        return { authCredentials: { username: proxy.username, password: proxy.password } };
+    (details, asyncCallback) => {
+        proxyAuthResponse(details).then(asyncCallback, () => asyncCallback({}));
     },
     { urls: ['<all_urls>'] },
     ['asyncBlocking'],
