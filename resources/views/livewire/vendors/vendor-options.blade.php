@@ -157,20 +157,35 @@
                 <flux:description>Configure inbound call routing, welcome messages, and voicemail.</flux:description>
 
                 <div class="mt-2 flex flex-col gap-4">
-                    {{-- Call Recipients --}}
+                    {{-- Call Recipients (list order = ring order) --}}
                     <div>
                         <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2">Call Recipients</div>
-                        <div class="text-xs text-zinc-500 mb-3">Inbound calls ring the first selected person; each next person rings after {{ \App\Http\Controllers\Api\TelnyxWebhookController::RING_SECONDS }} seconds without an answer. Whoever is on the call can press 9 to ring the others in, and anyone selected here who calls this line during a live call joins it.</div>
+                        <div class="text-xs text-zinc-500 mb-3">Inbound calls ring the first person below; each next person rings after {{ \App\Http\Controllers\Api\TelnyxWebhookController::RING_SECONDS }} seconds without an answer. Use the arrows to change who is called first. Whoever is on the call can press 9 to ring the others in, and anyone selected here who calls this line during a live call joins it. Changes apply when you save.</div>
+                        @php
+                            $callOrder = $this->orderedRecipientIds();
+                        @endphp
                         @if ($adminUsersWithPhones->isNotEmpty())
                             <div class="flex flex-col gap-2">
-                                @foreach ($adminUsersWithPhones as $adminUser)
-                                    <label class="flex items-center gap-3 cursor-pointer">
-                                        <flux:checkbox wire:model="call_recipients" value="{{ $adminUser->id }}" />
-                                        <div>
-                                            <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ $adminUser->full_name }}</span>
-                                            <span class="text-xs text-zinc-500 ml-1">{{ $adminUser->cell_phone }}</span>
-                                        </div>
-                                    </label>
+                                @foreach ($this->recipientRows() as $adminUser)
+                                    @php
+                                        $position = array_search((int) $adminUser->id, $callOrder, true);
+                                    @endphp
+                                    <div wire:key="call-recipient-{{ $adminUser->id }}" class="flex items-center gap-3">
+                                        <span class="w-5 text-right text-xs font-medium tabular-nums text-zinc-500">{{ $position === false ? '' : $position + 1 }}</span>
+                                        <label class="flex flex-1 items-center gap-3 cursor-pointer min-w-0">
+                                            <flux:checkbox wire:model.live="call_recipients" value="{{ $adminUser->id }}" />
+                                            <div class="min-w-0 truncate">
+                                                <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ $adminUser->full_name }}</span>
+                                                <span class="text-xs text-zinc-500 ml-1">{{ $adminUser->cell_phone }}</span>
+                                            </div>
+                                        </label>
+                                        @if ($position !== false && count($callOrder) > 1)
+                                            <div class="flex items-center gap-1">
+                                                <flux:button size="xs" variant="ghost" icon="chevron-up" wire:click="moveRecipientUp({{ $adminUser->id }})" :disabled="$position === 0" title="Call earlier" aria-label="Call {{ $adminUser->full_name }} earlier" />
+                                                <flux:button size="xs" variant="ghost" icon="chevron-down" wire:click="moveRecipientDown({{ $adminUser->id }})" :disabled="$position === count($callOrder) - 1" title="Call later" aria-label="Call {{ $adminUser->full_name }} later" />
+                                            </div>
+                                        @endif
+                                    </div>
                                 @endforeach
                             </div>
                         @else
@@ -239,7 +254,7 @@
                         <div class="flex items-center justify-between gap-4">
                             <div>
                                 <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Screening Prompt</div>
-                                <div class="text-xs text-zinc-500">Played to your team member when they answer, before the caller is connected. They can hang up to send the caller to voicemail or stay on the line to connect. Every word is a wait for both sides; off, they are connected the moment they answer and the caller's name is on their phone's screen instead.</div>
+                                <div class="text-xs text-zinc-500">Played to your team member when they answer, followed by "{{ \App\Livewire\Vendors\VendorOptions::SCREENING_KEY_INSTRUCTION }}" They press 5 to be connected. If no key is pressed, for example because their phone's voicemail answered, the next person rings. Off, whoever answers is connected at once, including a voicemail box.</div>
                             </div>
                             <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('screening')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview screening prompt" />
                         </div>

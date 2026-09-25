@@ -1303,7 +1303,13 @@ class TelnyxWebhookController extends Controller
             '{greeting}' => $greeting,
         ]);
 
-        Log::channel('telnyx')->info('Playing admin screening prompt', [
+        // The answerer must press a key to be connected. A carrier voicemail
+        // box stays on the line but never presses anything, so "stay on the
+        // line to connect" put callers into Patryk's personal voicemail on
+        // 2026-09-25 (it answered 18 s in) and the cascade never reached Greg.
+        $promptText = trim($promptText.' '.\App\Livewire\Vendors\VendorOptions::SCREENING_KEY_INSTRUCTION);
+
+        Log::channel('telnyx')->info('Playing admin screening prompt (keypress to connect)', [
             'admin_call_control_id' => $callControlId,
             'call_log_id' => $callLog->id,
             'admin_user_id' => $adminUserId,
@@ -1311,11 +1317,16 @@ class TelnyxWebhookController extends Controller
             'caller_label' => $callerLabel,
         ]);
 
-        $this->sendCallCommand($callControlId, 'speak', [
+        $this->sendCallCommand($callControlId, 'gather_using_speak', [
             'payload' => $promptText,
             ...$this->ttsVoiceParams(),
+            'valid_digits' => '0123456789*#',
+            'minimum_digits' => 1,
+            'maximum_digits' => 1,
+            'timeout_millis' => self::SCREENING_KEY_WAIT_MS,
+            'maximum_tries' => 1,
             'client_state' => base64_encode(json_encode([
-                'action' => 'admin_screen_done',
+                'action' => 'admin_screen',
                 'call_log_id' => $callLog->id,
                 'incoming_call_control_id' => $incomingCallControlId,
                 'admin_user_id' => $adminUserId,
@@ -1325,6 +1336,12 @@ class TelnyxWebhookController extends Controller
 
         return response()->json(['status' => 'ok']);
     }
+
+    /**
+     * How long the answering phone has, after the prompt finishes, to press
+     * a key before it is treated as a voicemail box and dropped.
+     */
+    public const SCREENING_KEY_WAIT_MS = 5000;
 
     /**
      * Called from handleCallSpeakEnded when the admin screening prompt finishes
@@ -1494,106 +1511,39 @@ class TelnyxWebhookController extends Controller
     protected function handleAdminScreenResult(string $callControlId, string $digits, array $clientState): JsonResponse
     {
         $callLogId = $clientState['call_log_id'] ?? null;
-        $incomingCallControlId = $clientState['incoming_call_control_id'] ?? null;
-        $adminUserId = $clientState['admin_user_id'] ?? null;
-        $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
-        if (! $callLog || ! $incomingCallControlId) {
-            $this->sendCallCommand($callControlId, 'hangup');
-            return response()->json(['status' => 'ok']);
-        }
-
-        if (empty($digits)) {
-            // No keypress — carrier voicemail or admin didn't interact
-            Log::channel('telnyx')->info('Admin screen timeout (no keypress) — hanging up', [
-                'call_control_id' => $callControlId,
-                'call_log_id' => $callLogId,
-            ]);
-            $this->sendCallCommand($callControlId, 'hangup');
-            return response()->json(['status' => 'ok']);
-        }
-
-        // Admin pressed a key — confirmed human
-        Log::channel('telnyx')->info('Admin screen passed (keypress confirmed human)', [
-            'call_control_id' => $callControlId,
-            'digits' => $digits,
-            'call_log_id' => $callLogId,
-            'admin_user_id' => $adminUserId,
-        ]);
-
-        // If caller disconnected, abort
-        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
-            $this->sendCallCommand($callControlId, 'hangup');
-            return response()->json(['status' => 'ok']);
-        }
-
-        // If a conference already exists (race: another admin became first), join it.
-        $callLog->refresh();
-        $metadata = $callLog->metadata ?? [];
-        $conferenceId = $metadata['conference_id'] ?? null;
-
-        if ($conferenceId) {
-            $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $conferenceId);
-            return response()->json(['status' => 'ok']);
-        }
-
-        // ── First admin to confirm: claim the bridge lock and create conference ──
-        $bridgeLockKey = "telnyx_bridge_lock:{$callLogId}";
-        if (! Cache::add($bridgeLockKey, 'admin_screen', 60)) {
-            // Lost the race — somebody else became the first joiner. If a
-            // conference now exists, join it; otherwise hang up gracefully.
-            $callLog->refresh();
-            $conferenceId = ($callLog->metadata ?? [])['conference_id'] ?? null;
-            if ($conferenceId) {
-                Log::channel('telnyx')->info('Lost first-join race — joining conference instead', [
-                    'call_control_id' => $callControlId,
-                    'call_log_id' => $callLogId,
-                    'conference_id' => $conferenceId,
-                ]);
-                $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $conferenceId);
-            } else {
-                $this->sendCallCommand($callControlId, 'hangup');
-            }
-            return response()->json(['status' => 'ok']);
-        }
-
-        // Check TTS completion (race-safe via cache)
-        $ttsComplete = ! empty($metadata['tts_complete'])
-            || Cache::has("telnyx_tts_complete:{$callLogId}");
-
-        if ($ttsComplete) {
-            // TTS done — start the conference now
-            $this->startConferenceWithCaller($callControlId, $callLogId, $incomingCallControlId, $adminUserId);
-        } else {
-            // TTS still playing — hold this admin until TTS finishes; speak.ended
-            // handler will pick the pending admin up and start the conference.
-            Log::channel('telnyx')->info('Admin confirmed but TTS still playing — holding admin', [
+        // No key: a voicemail box (or someone who let it be). Drop this leg;
+        // handleAdminRingHangup then rings the next person in the cascade,
+        // or sends the caller to the voicemail menu after the last one.
+        if ($digits === '') {
+            Log::channel('telnyx')->info('Screening: no key pressed — treating the answer as voicemail and dropping the leg', [
                 'admin_call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
+                'admin_user_id' => $clientState['admin_user_id'] ?? null,
             ]);
 
-            $metadata['pending_admin_call_control_id'] = $callControlId;
-            $metadata['pending_admin_user_id'] = $adminUserId;
-            $callLog->update(['metadata' => $metadata]);
+            if (! Cache::has("telnyx_admin_dead:{$callControlId}")) {
+                $this->sendCallCommand($callControlId, 'hangup');
+            }
 
-            $holdAudioUrl = config('services.telnyx.hold_audio_url')
-                ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
-            $this->sendCallCommand($callControlId, 'playback_start', [
-                'audio_url' => $holdAudioUrl,
-                // Loop on Telnyx's side: the 30 s file used to end, fire call.playback.ended,
-                // and wait a webhook round trip for the re-loop — a pocket of silence every
-                // 30 s for whoever was waiting (2026-09-17). The re-loop handler stays as a safety net.
-                'loop' => 'infinity',
-                'client_state' => base64_encode(json_encode([
-                    'action' => 'admin_waiting_for_tts',
-                    'call_log_id' => $callLogId,
-                    'incoming_call_control_id' => $incomingCallControlId,
-                    'admin_user_id' => $adminUserId,
-                ])),
-            ]);
+            return response()->json(['status' => 'ok']);
         }
 
-        return response()->json(['status' => 'ok']);
+        // 1: can't take it — the caller is promised a callback by text.
+        if ($digits === '1') {
+            $this->textCallerFromInboundCall($callControlId, $clientState);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Any other key: a person is on the line — connect them.
+        Log::channel('telnyx')->info('Screening: key pressed — connecting', [
+            'admin_call_control_id' => $callControlId,
+            'call_log_id' => $callLogId,
+            'digits' => $digits,
+        ]);
+
+        return $this->handleAdminScreenDone($callControlId, $clientState);
     }
 
     /**
@@ -3016,6 +2966,14 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
+        // Keys pressed during the screening prompt are read from the gather's
+        // result (handleAdminScreenResult); acting on them here too would
+        // text the caller twice or connect a leg the gather is still judging.
+        $dtmfState = json_decode(base64_decode((string) ($payload['client_state'] ?? '')), true) ?: [];
+        if (($dtmfState['action'] ?? null) === 'admin_screen') {
+            return response()->json(['status' => 'ok']);
+        }
+
         // 1 on the GS user's leg of an outbound call: text the person we
         // called ("GS Construction tried reaching you…"), typically once
         // their voicemail has picked up. The target's own leg is never the
@@ -3535,11 +3493,11 @@ class TelnyxWebhookController extends Controller
 
     /**
      * How long each recipient's phone rings before the cascade moves on.
-     * Must stay under the ~25 s carriers allow before their own voicemail
-     * answers the leg, or the caller lands in a personal mailbox instead of
-     * reaching the next person (or our voicemail menu).
+     * 15 s stays under the carrier voicemail on the team's phones (Patryk's
+     * answered at 18 s on 2026-09-25 and swallowed a call); the keypress
+     * screening catches any voicemail that answers sooner.
      */
-    public const RING_SECONDS = 20;
+    public const RING_SECONDS = 15;
 
     /**
      * Dials the first reachable recipient in $queueUserIds and stores the

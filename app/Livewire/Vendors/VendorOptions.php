@@ -73,7 +73,14 @@ class VendorOptions extends Component
     public const DEFAULT_WELCOME_UNKNOWN = "{greeting}! Thanks for calling {company}. One moment while we connect you.";
     // Short on purpose: the answering team member hears it before the caller
     // is connected, so every word is dead air for both sides.
-    public const DEFAULT_SCREENING = "Call from {name}. Press 1 to text them back.";
+    public const DEFAULT_SCREENING = "Call from {name}.";
+
+    /**
+     * Always spoken after the screening prompt. The answerer must press a key
+     * to connect, so a voicemail box that picks up is dropped (it never
+     * presses anything) and the next person rings instead.
+     */
+    public const SCREENING_KEY_INSTRUCTION = "Press 5 to connect, or 1 to text them back.";
     public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to redial {company}. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
     public const DEFAULT_VOICEMAIL_UNKNOWN = "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
     public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
@@ -191,6 +198,67 @@ class VendorOptions extends Component
         ];
     }
 
+    /**
+     * Ticked recipients in call order, limited to admins who can receive
+     * calls (the list the page offers).
+     *
+     * @return array<int, int>
+     */
+    public function orderedRecipientIds(): array
+    {
+        $offered = collect($this->adminUsersWithPhones)->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+        return array_values(array_unique(array_filter(
+            array_map('intval', $this->call_recipients),
+            fn (int $id) => in_array($id, $offered, true)
+        )));
+    }
+
+    /**
+     * The admins to show in the Call Recipients list: ticked people first,
+     * in the order they are called, then everyone else.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\User>
+     */
+    public function recipientRows(): \Illuminate\Support\Collection
+    {
+        $order = array_flip($this->orderedRecipientIds());
+
+        return collect($this->adminUsersWithPhones)
+            ->sortBy(fn ($user) => $order[(int) $user->id] ?? PHP_INT_MAX)
+            ->values();
+    }
+
+    /**
+     * Moves a ticked recipient one place earlier in the call order.
+     */
+    public function moveRecipientUp(int $userId): void
+    {
+        $this->moveRecipient($userId, -1);
+    }
+
+    /**
+     * Moves a ticked recipient one place later in the call order.
+     */
+    public function moveRecipientDown(int $userId): void
+    {
+        $this->moveRecipient($userId, 1);
+    }
+
+    protected function moveRecipient(int $userId, int $offset): void
+    {
+        $order = $this->orderedRecipientIds();
+        $index = array_search($userId, $order, true);
+        $target = $index === false ? false : $index + $offset;
+
+        if ($index === false || $target < 0 || $target >= count($order)) {
+            return;
+        }
+
+        [$order[$index], $order[$target]] = [$order[$target], $order[$index]];
+        $this->call_recipients = $order;
+    }
+
     public function save(): void
     {
         $this->authorize('viewOptions', Vendor::class);
@@ -208,16 +276,10 @@ class VendorOptions extends Component
         $options['sms_enabled'] = $this->sms_team_enabled && $this->sms_client_enabled && $this->sms_vendor_enabled;
 
         // Phone system settings
-        // Stored order is the ring order (the cascade dials the first name,
-        // then the next after each unanswered window). Checkbox groups append
-        // in click order, so normalize to the order the list displays.
-        $checkedRecipients = array_map('intval', $this->call_recipients);
-        $options['call_recipients'] = collect($this->adminUsersWithPhones)
-            ->pluck('id')
-            ->map(fn ($id) => (int) $id)
-            ->filter(fn (int $id) => in_array($id, $checkedRecipients, true))
-            ->values()
-            ->all();
+        // Stored order is the ring order: the cascade dials the first name,
+        // then the next after each unanswered window. The arrows set it; a
+        // newly ticked person joins at the end.
+        $options['call_recipients'] = $this->orderedRecipientIds();
         $options['default_contract_signers'] = array_map('intval', $this->default_contract_signers);
         $options['call_welcome_enabled'] = $this->call_welcome_enabled;
         $options['voicemail_enabled'] = $this->voicemail_enabled;
@@ -320,7 +382,7 @@ class VendorOptions extends Component
         $template = match ($type) {
             'welcome' => $this->welcome_message ?: self::DEFAULT_WELCOME,
             'welcome_unknown' => $this->welcome_message_unknown ?: self::DEFAULT_WELCOME_UNKNOWN,
-            'screening' => $this->screening_message ?: self::DEFAULT_SCREENING,
+            'screening' => trim(($this->screening_message ?: self::DEFAULT_SCREENING).' '.self::SCREENING_KEY_INSTRUCTION),
             'voicemail' => $this->voicemail_message ?: self::DEFAULT_VOICEMAIL,
             'voicemail_unknown' => $this->voicemail_message_unknown ?: self::DEFAULT_VOICEMAIL_UNKNOWN,
             'ivr_press1' => $this->ivr_press1_message ?: self::DEFAULT_IVR_PRESS1,

@@ -866,7 +866,7 @@ it('does NOT send AMD config when dialing admins (DTMF screening replaces AMD)',
 // Conference flow (multi-recipient ring + late join + DTMF 9 invite)
 // =========================================================================
 
-it('first admin answering plays screening prompt then on speak.ended creates conference and joins', function () {
+it('first admin answering plays screening prompt then on pressing 5 creates conference and joins', function () {
     $admin = User::factory()->create([
         'first_name' => 'Patryk',
         'cell_phone' => '2249993880',
@@ -911,7 +911,7 @@ it('first admin answering plays screening prompt then on speak.ended creates con
 
     // Screening TTS sent to admin
     Http::assertSent(function ($request) {
-        if (! str_contains($request->url(), 'admin-cc-1/actions/speak') || $request->method() !== 'POST') {
+        if (! str_contains($request->url(), 'admin-cc-1/actions/gather_using_speak') || $request->method() !== 'POST') {
             return false;
         }
         $payload = (string) ($request->data()['payload'] ?? '');
@@ -928,12 +928,13 @@ it('first admin answering plays screening prompt then on speak.ended creates con
     // Step 2: speak.ended fires → conference is created and admin joins.
     $this->postJson('/webhooks/telnyx/voice', [
         'data' => [
-            'event_type' => 'call.speak.ended',
+            'event_type' => 'call.gather.ended',
             'record_type' => 'event',
             'payload' => [
                 'call_control_id' => 'admin-cc-1',
+                'digits' => '5',
                 'client_state' => base64_encode(json_encode([
-                    'action' => 'admin_screen_done',
+                    'action' => 'admin_screen',
                     'call_log_id' => $callLog->id,
                     'incoming_call_control_id' => 'incoming-cc',
                     'admin_user_id' => $admin->id,
@@ -966,7 +967,7 @@ it('first admin answering plays screening prompt then on speak.ended creates con
     expect($callLog->status)->toBe(CallLog::STATUS_TRANSFERRED);
 });
 
-it('late admin answering plays screening prompt then on speak.ended joins existing conference', function () {
+it('late admin answering plays screening prompt then on pressing 5 joins existing conference', function () {
     $first = User::factory()->create([
         'first_name' => 'Patryk',
         'cell_phone' => '2249993880',
@@ -1020,7 +1021,7 @@ it('late admin answering plays screening prompt then on speak.ended joins existi
     ])->assertSuccessful();
 
     Http::assertSent(function ($request) {
-        if (! str_contains($request->url(), 'admin-cc-2/actions/speak') || $request->method() !== 'POST') {
+        if (! str_contains($request->url(), 'admin-cc-2/actions/gather_using_speak') || $request->method() !== 'POST') {
             return false;
         }
         return str_contains((string) ($request->data()['payload'] ?? ''), 'Call from Bob Smith');
@@ -1034,12 +1035,13 @@ it('late admin answering plays screening prompt then on speak.ended joins existi
     // Step 2: speak.ended → join the existing conference.
     $this->postJson('/webhooks/telnyx/voice', [
         'data' => [
-            'event_type' => 'call.speak.ended',
+            'event_type' => 'call.gather.ended',
             'record_type' => 'event',
             'payload' => [
                 'call_control_id' => 'admin-cc-2',
+                'digits' => '5',
                 'client_state' => base64_encode(json_encode([
-                    'action' => 'admin_screen_done',
+                    'action' => 'admin_screen',
                     'call_log_id' => $callLog->id,
                     'incoming_call_control_id' => 'incoming-cc',
                     'admin_user_id' => $second->id,
@@ -3235,4 +3237,194 @@ it('still screens an unknown caller without carrier verification', function () {
     ]]])->assertSuccessful();
 
     Http::assertSent(fn ($request) => str_contains($request->url(), 'ipqualityscore.com'));
+});
+
+// =========================================================================
+// Keypress to connect (2026-09-25): Patryk's carrier voicemail answered his
+// leg 18 s in, stayed on the line through "remain on the line to connect",
+// and was bridged to the caller; the cascade never reached Greg. A person
+// now presses a key to connect; no key means voicemail, so the leg is
+// dropped and the next recipient rings.
+// =========================================================================
+
+function keypressScreenState(CallLog $callLog, User $admin, ?string $conferenceId = null): string
+{
+    return base64_encode(json_encode([
+        'action' => 'admin_screen',
+        'call_log_id' => $callLog->id,
+        'incoming_call_control_id' => 'incoming-cc',
+        'admin_user_id' => $admin->id,
+        'conference_id' => $conferenceId,
+    ]));
+}
+
+it('asks the answering phone to press a key, and waits a few seconds for it', function () {
+    [$patryk] = cascadeRecipients();
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Andzelina Szady',
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1'], 'joined_admin_ids' => [], 'tts_complete' => true],
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'client_state' => base64_encode(json_encode(['action' => 'admin_ring', 'call_log_id' => $callLog->id, 'incoming_call_control_id' => 'incoming-cc', 'admin_user_id' => $patryk->id])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'admin-cc-1/actions/gather_using_speak')) {
+            return false;
+        }
+        $data = $request->data();
+        $state = json_decode(base64_decode($data['client_state'] ?? ''), true);
+
+        return str_contains((string) $data['payload'], 'Andzelina Szady')
+            && str_contains((string) $data['payload'], 'Press 5 to connect')
+            && ($data['timeout_millis'] ?? null) === \App\Http\Controllers\Api\TelnyxWebhookController::SCREENING_KEY_WAIT_MS
+            && ($state['action'] ?? null) === 'admin_screen';
+    });
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'admin-cc-1/actions/speak'));
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences'));
+});
+
+it('drops a voicemail that answers without pressing a key, then rings the next person', function () {
+    [$patryk, $greg] = cascadeRecipients();
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Andzelina Szady',
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1'], 'cascade_pending_ids' => [$greg->id], 'joined_admin_ids' => [], 'tts_complete' => true],
+    ]);
+
+    // The prompt ends and nothing is pressed: the voicemail box is hung up, not connected.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.gather.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'digits' => '',
+        'status' => 'timeout',
+        'client_state' => keypressScreenState($callLog, $patryk),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'admin-cc-1/actions/hangup'));
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences'));
+
+    // Its hangup moves the cascade on to Greg.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'hangup_cause' => 'normal_clearing',
+        'client_state' => keypressScreenState($callLog, $patryk),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+1' . $greg->cell_phone);
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+    expect($callLog->fresh()->metadata['conference_id'] ?? null)->toBeNull();
+});
+
+it('keeps a voicemail out of a live call when a press-9 invite reaches it', function () {
+    [$patryk, $greg] = cascadeRecipients();
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1', 'admin-cc-2'], 'joined_admin_ids' => [$patryk->id], 'conference_id' => 'conf-live-1'],
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.gather.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-2',
+        'digits' => '',
+        'client_state' => keypressScreenState($callLog, $greg, 'conf-live-1'),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'admin-cc-2/actions/hangup'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/actions/join'));
+});
+
+it('connects the answerer who presses a key other than 1', function () {
+    [$patryk] = cascadeRecipients();
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1'], 'joined_admin_ids' => [], 'tts_complete' => true],
+    ]);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-7']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.gather.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'digits' => '7',
+        'client_state' => keypressScreenState($callLog, $patryk),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/v2/conferences/conf-uuid-7/actions/join')
+        && ($request->data()['call_control_id'] ?? null) === 'admin-cc-1');
+    expect($callLog->fresh()->status)->toBe(CallLog::STATUS_TRANSFERRED);
+});
+
+it('treats 1 during the prompt as "text them back", once, without connecting', function () {
+    [$patryk] = cascadeRecipients();
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'from_number' => '+18479246893',
+        'caller_name' => 'Andzelina Szady',
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1'], 'joined_admin_ids' => [], 'tts_complete' => true],
+    ]);
+
+    // The text itself goes through SMS tables this file does not build;
+    // count the sends instead of performing them.
+    $sent = new \ArrayObject();
+    app()->bind(\App\Http\Controllers\Api\TelnyxWebhookController::class, fn () => new class(app(\App\Services\GroupSmsService::class), app(\App\Services\SpamFilterService::class), $sent) extends \App\Http\Controllers\Api\TelnyxWebhookController {
+        public function __construct($groupSms, $spam, public \ArrayObject $sent)
+        {
+            parent::__construct($groupSms, $spam);
+        }
+
+        protected function sendTextFromCall(CallLog $callLog, string $targetPhone, string $text): bool
+        {
+            $this->sent->append($targetPhone);
+
+            return true;
+        }
+    });
+
+    // The live key event arrives first and must be left to the gather.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.dtmf.received', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'digit' => '1',
+        'client_state' => keypressScreenState($callLog, $patryk),
+    ]]])->assertSuccessful();
+    expect(Cache::has("telnyx_callback_promised:{$callLog->id}"))->toBeFalse();
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.gather.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'admin-cc-1',
+        'digits' => '1',
+        'client_state' => keypressScreenState($callLog, $patryk),
+    ]]])->assertSuccessful();
+
+    expect(Cache::has("telnyx_callback_promised:{$callLog->id}"))->toBeTrue()
+        ->and($sent->getArrayCopy())->toBe(['+18479246893']);
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences'));
+});
+
+it('rings each person for 15 seconds', function () {
+    expect(\App\Http\Controllers\Api\TelnyxWebhookController::RING_SECONDS)->toBe(15);
+});
+
+it('rewrites a saved prompt that told people to stay on the line', function () {
+    $migration = require base_path('database/migrations/2026_09_25_205137_update_screening_prompt_for_keypress_connect.php');
+
+    $this->vendor->update(['options' => (object) array_merge((array) $this->vendor->options, [
+        'screening_message' => '{name} is calling. Hang up now, or remain on the line to connect.',
+    ])]);
+
+    $migration->up();
+
+    expect(data_get($this->vendor->fresh()->options, 'screening_message'))->toBe('{name} is calling.')
+        ->and($migration::withoutStayOnTheLine('Remain on the line to connect.'))->toBeNull()
+        ->and($migration::withoutStayOnTheLine('Call from {name}.'))->toBe('Call from {name}.');
 });

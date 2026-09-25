@@ -36,26 +36,64 @@ function ringOrder_admin(Vendor $vendor, string $firstName): User
     return $user;
 }
 
-it('saves call recipients in the order the list shows, which is the ring order', function () {
+it('rings in the order set with the arrows, and saves that order', function () {
     $vendor = ringOrder_phoneVendor();
     $patryk = ringOrder_admin($vendor, 'Patryk');
     $greg = ringOrder_admin($vendor, 'Greg');
 
-    // Ticked Greg first, then Patryk: the stored order still follows the list.
+    $component = Livewire::actingAs($patryk)
+        ->test(VendorOptions::class)
+        ->set('call_recipients', [(string) $patryk->id, (string) $greg->id])
+        ->call('moveRecipientUp', $greg->id);
+
+    expect($component->instance()->orderedRecipientIds())->toBe([$greg->id, $patryk->id]);
+
+    $component->call('save')->assertHasNoErrors();
+
+    expect(data_get($vendor->fresh()->options, 'call_recipients'))->toBe([$greg->id, $patryk->id]);
+});
+
+it('ignores arrows past either end and on people who are not ticked', function () {
+    $vendor = ringOrder_phoneVendor();
+    $patryk = ringOrder_admin($vendor, 'Patryk');
+    $greg = ringOrder_admin($vendor, 'Greg');
+    $alex = ringOrder_admin($vendor, 'Alex');
+
+    $component = Livewire::actingAs($patryk)
+        ->test(VendorOptions::class)
+        ->set('call_recipients', [(string) $patryk->id, (string) $greg->id])
+        ->call('moveRecipientUp', $patryk->id)
+        ->call('moveRecipientDown', $greg->id)
+        ->call('moveRecipientUp', $alex->id);
+
+    expect($component->instance()->orderedRecipientIds())->toBe([$patryk->id, $greg->id]);
+});
+
+it('adds a newly ticked person at the end of the call order', function () {
+    $vendor = ringOrder_phoneVendor();
+    $patryk = ringOrder_admin($vendor, 'Patryk');
+    $greg = ringOrder_admin($vendor, 'Greg');
+    $alex = ringOrder_admin($vendor, 'Alex');
+
+    $component = Livewire::actingAs($patryk)
+        ->test(VendorOptions::class)
+        ->set('call_recipients', [(string) $greg->id, (string) $patryk->id])
+        ->set('call_recipients', [(string) $greg->id, (string) $patryk->id, (string) $alex->id]);
+
+    expect($component->instance()->orderedRecipientIds())->toBe([$greg->id, $patryk->id, $alex->id]);
+});
+
+it('lists ticked people first, in call order, with arrows', function () {
+    $vendor = ringOrder_phoneVendor();
+    $patryk = ringOrder_admin($vendor, 'Patryk');
+    $greg = ringOrder_admin($vendor, 'Greg');
+
     Livewire::actingAs($patryk)
         ->test(VendorOptions::class)
         ->set('call_recipients', [(string) $greg->id, (string) $patryk->id])
-        ->call('save')
-        ->assertHasNoErrors();
-
-    expect(data_get($vendor->fresh()->options, 'call_recipients'))->toBe([$patryk->id, $greg->id]);
-});
-
-it('explains the ring cascade next to the recipient list', function () {
-    $vendor = ringOrder_phoneVendor();
-    $admin = ringOrder_admin($vendor, 'Patryk');
-
-    Livewire::actingAs($admin)
-        ->test(VendorOptions::class)
-        ->assertSee('rings after 20 seconds without an answer');
+        ->assertSeeInOrder(['Greg Admin', 'Patryk Admin'])
+        ->assertSee('moveRecipientUp('.$patryk->id.')', false)
+        ->assertSee('Use the arrows to change who is called first')
+        ->assertSee('after 15 seconds without an answer')
+        ->assertDontSee('Seconds to ring each person');
 });
