@@ -208,7 +208,16 @@ class VendorOptions extends Component
         $options['sms_enabled'] = $this->sms_team_enabled && $this->sms_client_enabled && $this->sms_vendor_enabled;
 
         // Phone system settings
-        $options['call_recipients'] = array_map('intval', $this->call_recipients);
+        // Stored order is the ring order (the cascade dials the first name,
+        // then the next after each unanswered window). Checkbox groups append
+        // in click order, so normalize to the order the list displays.
+        $checkedRecipients = array_map('intval', $this->call_recipients);
+        $options['call_recipients'] = collect($this->adminUsersWithPhones)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => in_array($id, $checkedRecipients, true))
+            ->values()
+            ->all();
         $options['default_contract_signers'] = array_map('intval', $this->default_contract_signers);
         $options['call_welcome_enabled'] = $this->call_welcome_enabled;
         $options['voicemail_enabled'] = $this->voicemail_enabled;

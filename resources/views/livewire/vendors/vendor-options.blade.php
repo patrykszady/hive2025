@@ -160,7 +160,7 @@
                     {{-- Call Recipients --}}
                     <div>
                         <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2">Call Recipients</div>
-                        <div class="text-xs text-zinc-500 mb-3">Select which team members receive inbound calls.</div>
+                        <div class="text-xs text-zinc-500 mb-3">Inbound calls ring the first selected person; each next person rings after {{ \App\Http\Controllers\Api\TelnyxWebhookController::RING_SECONDS }} seconds without an answer. Whoever is on the call can press 9 to ring the others in, and anyone selected here who calls this line during a live call joins it.</div>
                         @if ($adminUsersWithPhones->isNotEmpty())
                             <div class="flex flex-col gap-2">
                                 @foreach ($adminUsersWithPhones as $adminUser)

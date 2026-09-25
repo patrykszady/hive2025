@@ -277,6 +277,36 @@ class TelnyxWebhookController extends Controller
             }
         }
 
+        // A call recipient phoning the business line while a call is live
+        // joins that conference instead of starting a new inbound flow — the
+        // "join at any time" path. No CallLog row: this is a join, not a call.
+        if ($incomingFrom && ($join = $this->liveConferenceJoinForCaller($incomingFrom))) {
+            [$liveCallLog, $joiningAdmin] = $join;
+
+            if (! Cache::add("telnyx_admin_join_live:{$callControlId}", true, 300)) {
+                return response()->json(['status' => 'ok']);
+            }
+
+            Log::channel('telnyx')->info('Call recipient dialing in — joining live conference', [
+                'call_control_id' => $callControlId,
+                'admin_user_id' => $joiningAdmin->id,
+                'live_call_log_id' => $liveCallLog->id,
+            ]);
+
+            $this->sendCallCommand($callControlId, 'answer', [
+                'send_silence_when_idle' => true,
+                'preferred_codecs' => config('services.telnyx.preferred_codecs'),
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_join_live',
+                    'call_log_id' => $liveCallLog->id,
+                    'incoming_call_control_id' => $liveCallLog->call_control_id,
+                    'admin_user_id' => $joiningAdmin->id,
+                ])),
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
         // Deduplicate — Telnyx retries the webhook if we don't respond fast enough
         $existing = CallLog::findByCallControlId($callControlId);
         if ($existing) {
@@ -305,13 +335,15 @@ class TelnyxWebhookController extends Controller
         // Pre-check if caller is known (without creating CallLog yet)
         $isKnownCaller = false;
         if ($incomingFrom) {
-            $normalizedPhone = preg_replace('/[^0-9]/', '', $incomingFrom);
-            $isKnownCaller = User::where('cell_phone', 'LIKE', "%{$normalizedPhone}")
-                ->orWhere('cell_phone', 'LIKE', "%{$incomingFrom}")
-                ->exists()
-                || Client::where('home_phone', 'LIKE', "%{$normalizedPhone}")
-                ->orWhere('home_phone', 'LIKE', "%{$incomingFrom}")
-                ->exists();
+            // Match on the last 10 digits: Telnyx sends +1XXXXXXXXXX while
+            // users and clients store 10 digits, so matching the full number
+            // never found a saved contact and every one of them went through
+            // spam screening.
+            $lastTenDigits = substr(preg_replace('/[^0-9]/', '', $incomingFrom), -10);
+            $isKnownCaller = strlen($lastTenDigits) === 10 && (
+                User::where('cell_phone', 'LIKE', "%{$lastTenDigits}")->exists()
+                || Client::where('home_phone', 'LIKE', "%{$lastTenDigits}")->exists()
+            );
         }
 
         $spamResult = $this->spamFilterService->evaluate([
@@ -498,6 +530,11 @@ class TelnyxWebhookController extends Controller
         // ── Admin Ring: an admin answered → bridge with the incoming caller ──
         if ($action === 'admin_ring') {
             return $this->handleAdminRingAnswered($callControlId, $clientState);
+        }
+
+        // ── A recipient dialed the business line during a live call → join it ──
+        if ($action === 'admin_join_live') {
+            return $this->handleAdminJoinLiveAnswered($callControlId, $clientState);
         }
 
         // Other legs (e.g. transfer destinations) — do nothing
@@ -1816,7 +1853,7 @@ class TelnyxWebhookController extends Controller
         $action = $clientState['action'] ?? null;
 
         // ── Admin ring leg hung up (timeout/no answer) ──
-        if (in_array($action, ['admin_ring', 'admin_screen', 'admin_waiting_for_tts'], true)) {
+        if (in_array($action, ['admin_ring', 'admin_screen', 'admin_waiting_for_tts', 'admin_join_live'], true)) {
             return $this->handleAdminRingHangup($callControlId, $clientState, $hangupCause);
         }
 
@@ -2072,6 +2109,29 @@ class TelnyxWebhookController extends Controller
                 ]);
 
                 return response()->json(['status' => 'ok']);
+            }
+
+            // Ring cascade: nobody has connected yet and recipients remain
+            // in the queue — ring the next one instead of giving up. After a
+            // real conversation (a conference exists) the cascade stays dead:
+            // an admin ending the call must not re-ring the team.
+            if (empty($metadata['conference_id']) && ! empty($metadata['cascade_pending_ids'])) {
+                $nextLeg = $this->dialNextAdminInCascade(
+                    $callLog,
+                    $incomingCallControlId,
+                    $callLogId,
+                    (array) $metadata['cascade_pending_ids'],
+                    $callLog->caller_name,
+                );
+
+                if ($nextLeg) {
+                    Log::channel('telnyx')->info('Cascade: ringing next recipient', [
+                        'call_log_id' => $callLogId,
+                        'next_admin_call_control_id' => $nextLeg,
+                    ]);
+
+                    return response()->json(['status' => 'ok']);
+                }
             }
 
             // All admins failed — set cache flag (race-proof signal for
@@ -3294,7 +3354,9 @@ class TelnyxWebhookController extends Controller
         // dial from our Telnyx number; the recipient's caller ID will show our
         // business number. We surface the actual caller via `from_display_name`
         // (CNAM) — some mobile carriers display it, others ignore it.
-        $timeout = 15;
+        // Same window as the inbound cascade, so a press-9 invite rings as
+        // long as a first ring would.
+        $timeout = self::RING_SECONDS;
 
         $newCallControlIds = $metadata['admin_call_control_ids'] ?? [];
         $dialedPhones = [];
@@ -3451,26 +3513,66 @@ class TelnyxWebhookController extends Controller
             return;
         }
 
-        $apiKey = config('services.telnyx.api_key');
+        // Ring cascade: the first recipient rings alone for RING_SECONDS;
+        // only when that leg dies unanswered does the next recipient ring
+        // (handleAdminRingHangup walks cascade_pending_ids). Everyone can
+        // still end up on the same call: each answer joins the one
+        // conference, and a connected admin pulls the others in with 9.
+        $viableIds = $adminUsers->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $queue = array_values(array_filter(
+            array_map('intval', $recipientUserIds),
+            fn ($id) => in_array($id, $viableIds, true)
+        ));
+
+        $dialed = $this->dialNextAdminInCascade($callLog, $incomingCallControlId, $callLogId, $queue, $originalCaller);
+
+        // If no admins were successfully dialed, trigger voicemail
+        if (! $dialed) {
+            Log::channel('telnyx')->error('Failed to dial any admins — triggering voicemail');
+            $this->triggerVoicemail($incomingCallControlId, $callLogId);
+        }
+    }
+
+    /**
+     * How long each recipient's phone rings before the cascade moves on.
+     * Must stay under the ~25 s carriers allow before their own voicemail
+     * answers the leg, or the caller lands in a personal mailbox instead of
+     * reaching the next person (or our voicemail menu).
+     */
+    public const RING_SECONDS = 20;
+
+    /**
+     * Dials the first reachable recipient in $queueUserIds and stores the
+     * rest as cascade_pending_ids on the call log. Returns the new leg's
+     * call_control_id, or null when nobody could be dialed. Ids the loop
+     * walks past (bad phone, failed dial) are consumed, so a recipient is
+     * never rung twice by one cascade.
+     */
+    protected function dialNextAdminInCascade(?CallLog $callLog, string $incomingCallControlId, ?int $callLogId, array $queueUserIds, ?string $originalCaller): ?string
+    {
         $connectionId = config('services.telnyx.connection_id');
         $telnyxFrom = config('services.telnyx.from');
         // NOTE: Telnyx rejects outbound calls (error D51 "Unverified origination
         // number") when `from` is a non-Telnyx number we don't own. We must dial
         // from our Telnyx number; recipient's native caller ID shows that. The
         // actual caller is surfaced via `from_display_name` (CNAM).
-        // Use a short timeout so admin phones stop ringing well before
-        // carrier voicemail picks up (~25s). This ensures callers always
-        // reach our Telnyx Voicemail Menu instead of personal voicemail.
-        $timeout = 15;
-        $adminCallControlIds = [];
-        $dialedPhones = [];
+        $queueUserIds = array_values(array_unique(array_map('intval', $queueUserIds)));
+        $dialedCcId = null;
+        $triedPhones = [];
+        // A recipient phoning the line is the caller: never ring their own
+        // phone (with call waiting it would ring through their own call).
+        $callerDigits = substr(preg_replace('/\D/', '', (string) ($callLog?->from_number ?? $originalCaller)), -10);
 
-        foreach ($adminUsers as $adminUser) {
-            $phone = $this->normalizeDialPhone($adminUser->cell_phone);
-            if (! $phone || GroupSmsService::isOurNumber($phone) || isset($dialedPhones[$phone])) {
+        while ($queueUserIds !== [] && ! $dialedCcId) {
+            $adminUserId = array_shift($queueUserIds);
+            $adminUser = User::find($adminUserId);
+            $phone = $adminUser ? $this->normalizeDialPhone($adminUser->cell_phone) : null;
+
+            if (! $phone || GroupSmsService::isOurNumber($phone) || isset($triedPhones[$phone])
+                || ($callerDigits !== '' && substr(preg_replace('/\D/', '', $phone), -10) === $callerDigits)) {
                 continue;
             }
-            $dialedPhones[$phone] = true;
+            $triedPhones[$phone] = true;
 
             try {
                 $response = $this->telnyxHttp(0)
@@ -3479,15 +3581,13 @@ class TelnyxWebhookController extends Controller
                         'to' => $phone,
                         'from' => $telnyxFrom,
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
-                        'timeout_secs' => $timeout,
+                        'timeout_secs' => self::RING_SECONDS,
                         'preferred_codecs' => config('services.telnyx.preferred_codecs'),
                         // No answering_machine_detection here — deliberately.
                         // handleAmdEnded discards every AMD result for
                         // admin_ring legs (screening replaced it), so
-                        // requesting it billed premium detection on every admin
-                        // leg of every inbound call for nothing. The companion
-                        // 'machine_detection' key wasn't even a real Dial
-                        // parameter, so Telnyx silently ignored it.
+                        // requesting it billed premium detection on every
+                        // admin leg of every inbound call for nothing.
                         'client_state' => base64_encode(json_encode([
                             'action' => 'admin_ring',
                             'call_log_id' => $callLogId,
@@ -3498,17 +3598,14 @@ class TelnyxWebhookController extends Controller
                     ]);
 
                 if ($response->successful()) {
-                    $data = $response->json('data') ?? [];
-                    $adminCcId = $data['call_control_id'] ?? null;
-                    if ($adminCcId) {
-                        $adminCallControlIds[] = $adminCcId;
-                    }
+                    $dialedCcId = $response->json('data.call_control_id') ?: null;
 
-                    Log::channel('telnyx')->info('Dialed admin', [
+                    Log::channel('telnyx')->info('Dialed admin (cascade)', [
                         'admin_user_id' => $adminUser->id,
                         'admin_name' => $adminUser->full_name,
                         'phone' => $phone,
-                        'admin_call_control_id' => $adminCcId,
+                        'admin_call_control_id' => $dialedCcId,
+                        'remaining_in_cascade' => count($queueUserIds),
                     ]);
                 } else {
                     Log::channel('telnyx')->error('Failed to dial admin', [
@@ -3526,20 +3623,88 @@ class TelnyxWebhookController extends Controller
             }
         }
 
-        // Store admin call control IDs and metadata in the call log for tracking
         if ($callLog) {
+            $callLog->refresh();
             $metadata = $callLog->metadata ?? [];
-            $metadata['admin_call_control_ids'] = $adminCallControlIds;
-            $metadata['admin_dial_initiated_at'] = now()->toDateTimeString();
-            $metadata['admin_dial_count'] = count($adminCallControlIds);
+            if ($dialedCcId) {
+                $legIds = $metadata['admin_call_control_ids'] ?? [];
+                $legIds[] = $dialedCcId;
+                $metadata['admin_call_control_ids'] = array_values(array_unique($legIds));
+            }
+            $metadata['cascade_pending_ids'] = $queueUserIds;
+            $metadata['admin_dial_initiated_at'] = $metadata['admin_dial_initiated_at'] ?? now()->toDateTimeString();
+            $metadata['admin_dial_count'] = (int) ($metadata['admin_dial_count'] ?? 0) + ($dialedCcId ? 1 : 0);
             $callLog->update(['metadata' => $metadata]);
         }
 
-        // If no admins were successfully dialed, trigger voicemail
-        if (empty($adminCallControlIds)) {
-            Log::channel('telnyx')->error('Failed to dial any admins — triggering voicemail');
-            $this->triggerVoicemail($incomingCallControlId, $callLogId);
+        return $dialedCcId;
+    }
+
+    /**
+     * When the caller is one of the configured call recipients and a call is
+     * live right now, they are joining, not calling: returns that call's log
+     * and the recipient. Inbound business calls only — never a click-to-call.
+     *
+     * @return array{0: CallLog, 1: User}|null
+     */
+    protected function liveConferenceJoinForCaller(string $from): ?array
+    {
+        $digits = substr(preg_replace('/\D/', '', $from), -10);
+        if (strlen($digits) !== 10) {
+            return null;
         }
+
+        // TODO: Multi-vendor support — look up vendor by connection_id
+        $vendor = Vendor::find(1);
+        $recipientIds = array_map('intval', (array) data_get($vendor?->options ?? [], 'call_recipients', []));
+        if ($recipientIds === []) {
+            return null;
+        }
+
+        $joiningAdmin = User::whereIn('id', $recipientIds)
+            ->get()
+            ->first(fn (User $user) => substr(preg_replace('/\D/', '', (string) $user->cell_phone), -10) === $digits);
+
+        if (! $joiningAdmin) {
+            return null;
+        }
+
+        $liveCallLog = CallLog::query()
+            ->where('direction', 'incoming')
+            ->where('status', CallLog::STATUS_TRANSFERRED)
+            ->whereNotNull('metadata->conference_id')
+            ->where('updated_at', '>=', now()->subHours(4))
+            ->latest('id')
+            ->first();
+
+        return $liveCallLog ? [$liveCallLog, $joiningAdmin] : null;
+    }
+
+    /**
+     * The dial-in leg was answered by us: drop the recipient straight into
+     * the live conference. If the call ended in the meantime, hang up.
+     */
+    protected function handleAdminJoinLiveAnswered(string $callControlId, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $adminUserId = $clientState['admin_user_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $conferenceId = $callLog?->metadata['conference_id'] ?? null;
+
+        if (! $callLog || ! $conferenceId
+            || in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED], true)) {
+            Log::channel('telnyx')->info('Dial-in join: call ended before the join — hanging up', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        $this->joinAdminToConference($callControlId, $callLog->id, $adminUserId, $conferenceId);
+
+        return response()->json(['status' => 'ok']);
     }
 
     /**

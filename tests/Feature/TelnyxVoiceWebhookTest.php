@@ -2876,3 +2876,363 @@ it('tells the user the line was busy rather than that nobody answered', function
     Http::assertSent(fn ($request) => str_contains($request->url(), 'user-cc-id/actions/speak') && str_starts_with((string) ($request->data()['payload'] ?? ''), 'The line is busy'));
     expect($callLog->fresh()->status)->toBe(CallLog::STATUS_MISSED);
 });
+
+// =========================================================================
+// Ring cascade (2026-09-25): the first recipient rings alone for
+// RING_SECONDS; each next recipient rings only after the previous window
+// passes unanswered. Joining stays open the whole call: answers land in one
+// conference, 9 rings the others in, and a recipient calling the business
+// line during a live call joins it.
+// =========================================================================
+
+function cascadeRecipients(): array
+{
+    $patryk = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+    $greg = User::factory()->create(['first_name' => 'Greg', 'cell_phone' => '2249991111']);
+
+    test()->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'call_recipients' => [$patryk->id, $greg->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    return [$patryk, $greg];
+}
+
+it('rings only the first recipient at first, for the 20-second window, and queues the rest', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    // Configured order beats id order: flip it and expect Greg to ring first.
+    $this->vendor->update(['options' => (object) array_merge((array) $this->vendor->options, [
+        'call_recipients' => [$greg->id, $patryk->id],
+    ])]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'from_number' => '+18472123894',
+        'caller_name' => 'Bob Smith',
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'incoming-cc',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'welcome_or_ring',
+            'call_log_id' => $callLog->id,
+            'original_caller' => '+18472123894',
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+1' . $greg->cell_phone
+        && ($request->data()['timeout_secs'] ?? null) === \App\Http\Controllers\Api\TelnyxWebhookController::RING_SECONDS);
+
+    $dialCount = 0;
+    foreach (Http::recorded() as [$request]) {
+        if (str_ends_with($request->url(), '/v2/calls') && $request->method() === 'POST') {
+            $dialCount++;
+        }
+    }
+    expect($dialCount)->toBe(1);
+
+    $metadata = $callLog->fresh()->metadata;
+    expect($metadata['cascade_pending_ids'] ?? null)->toBe([$patryk->id])
+        ->and($metadata['admin_call_control_ids'] ?? [])->toContain('admin-cc-id-1')
+        ->and($metadata['admin_dial_count'] ?? null)->toBe(1);
+});
+
+it('rings the next recipient when the first window passes unanswered, without voicemail', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Bob Smith',
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-1'],
+            'cascade_pending_ids' => [$greg->id],
+            'joined_admin_ids' => [],
+            'tts_complete' => true,
+            'admin_dial_count' => 1,
+        ],
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'cascade-cc-1',
+        'hangup_cause' => 'timeout',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_ring',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $patryk->id,
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+1' . $greg->cell_phone
+        && ($request->data()['timeout_secs'] ?? null) === \App\Http\Controllers\Api\TelnyxWebhookController::RING_SECONDS);
+
+    // The caller keeps waiting — no voicemail menu yet.
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+
+    $metadata = $callLog->fresh()->metadata;
+    expect($metadata['cascade_pending_ids'] ?? null)->toBe([])
+        ->and($metadata['admin_call_control_ids'] ?? [])->toBe(['admin-cc-id-1'])
+        ->and($metadata['admin_dial_count'] ?? null)->toBe(2);
+});
+
+it('sends the caller to voicemail only after the last recipient in the cascade', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-2'],
+            'cascade_pending_ids' => [],
+            'joined_admin_ids' => [],
+            'tts_complete' => true,
+        ],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'cascade-cc-2',
+        'hangup_cause' => 'timeout',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_ring',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $greg->id,
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/calls') && $request->method() === 'POST');
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+});
+
+it('does not restart the cascade when an admin ends a real conversation', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-1'],
+            'cascade_pending_ids' => [$greg->id],
+            'joined_admin_ids' => [$patryk->id],
+            'conference_id' => 'conf-live-1',
+            'conference_name' => 'call_x',
+        ],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'cascade-cc-1',
+        'hangup_cause' => 'normal_clearing',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_ring',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $patryk->id,
+        ])),
+    ]]])->assertSuccessful();
+
+    // Greg's phone stays silent; the caller gets the voicemail menu instead.
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/calls') && $request->method() === 'POST');
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+});
+
+it('lets a recipient who calls the business line join the live call, without a new call log', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'direction' => 'incoming',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'caller_name' => 'Bob Smith',
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-1'],
+            'joined_admin_ids' => [$patryk->id],
+            'conference_id' => 'conf-live-1',
+        ],
+    ]);
+    $logsBefore = CallLog::count();
+
+    Http::fake([
+        'api.telnyx.com/v2/conferences/conf-live-1/actions/join' => Http::response(['data' => ['result' => 'ok']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.initiated', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'greg-dialin-cc',
+        'direction' => 'incoming',
+        'from' => '+1' . $greg->cell_phone,
+        'to' => '+12247354200',
+    ]]])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'greg-dialin-cc/actions/answer')) {
+            return false;
+        }
+        $state = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+
+        return ($state['action'] ?? null) === 'admin_join_live';
+    });
+    expect(CallLog::count())->toBe($logsBefore);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'greg-dialin-cc',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_join_live',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $greg->id,
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/v2/conferences/conf-live-1/actions/join')
+        && ($request->data()['call_control_id'] ?? null) === 'greg-dialin-cc');
+
+    $metadata = $callLog->fresh()->metadata;
+    expect($metadata['joined_admin_ids'] ?? [])->toContain($greg->id)
+        ->and($metadata['admin_call_control_ids'] ?? [])->toContain('greg-dialin-cc');
+});
+
+it('gives a recipient the normal inbound flow when nothing is live', function () {
+    [$patryk, $greg] = cascadeRecipients();
+    $logsBefore = CallLog::count();
+
+    Http::fake([
+        'api.telnyx.com/v2/number_lookup/*' => Http::response(['data' => []], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.initiated', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'greg-callin-cc',
+        'direction' => 'incoming',
+        'from' => '+1' . $greg->cell_phone,
+        'to' => '+12247354200',
+        // Carrier-verified, so the spam filter lets it through without a lookup.
+        'stir_shaken' => ['verstat' => 'TN-Validation-Passed-A'],
+        'call_session_id' => 'sess-1',
+        'call_leg_id' => 'leg-1',
+        'connection_id' => 'conn-1',
+    ]]])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'greg-callin-cc/actions/answer')) {
+            return false;
+        }
+        $state = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+
+        return ($state['action'] ?? null) === 'welcome_or_ring';
+    });
+    expect(CallLog::count())->toBe($logsBefore + 1);
+});
+
+it('hangs up a dial-in join politely when the live call ended before the answer', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'direction' => 'incoming',
+        'status' => CallLog::STATUS_COMPLETED,
+        'metadata' => ['conference_id' => 'conf-live-1', 'joined_admin_ids' => [$patryk->id]],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'greg-dialin-cc',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_join_live',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $greg->id,
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'greg-dialin-cc/actions/hangup'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/actions/join'));
+});
+
+it('skips the caller\'s own phone when a recipient calls in and nothing is live', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    // Greg calls the line with no live call: Patryk rings, never Greg himself.
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'from_number' => '+1' . $greg->cell_phone,
+        'caller_name' => 'Greg',
+    ]);
+
+    $this->vendor->update(['options' => (object) array_merge((array) $this->vendor->options, [
+        'call_recipients' => [$greg->id, $patryk->id],
+    ])]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'incoming-cc',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'welcome_or_ring',
+            'call_log_id' => $callLog->id,
+            'original_caller' => '+1' . $greg->cell_phone,
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+1' . $patryk->cell_phone);
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+1' . $greg->cell_phone);
+});
+
+it('recognizes a saved contact calling from their +1 number and skips the spam lookup', function () {
+    $saved = User::factory()->create(['first_name' => 'Saved', 'cell_phone' => '2245557788']);
+
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'ipqualityscore.com/*' => Http::response(['success' => true, 'fraud_score' => 100, 'spammer' => true], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    // No carrier verification at all: only knowing the caller lets it through.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.initiated', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'saved-contact-cc',
+        'direction' => 'incoming',
+        'from' => '+1' . $saved->cell_phone,
+        'to' => '+12247354200',
+    ]]])->assertSuccessful();
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'ipqualityscore.com'));
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'saved-contact-cc/actions/answer')) {
+            return false;
+        }
+        $state = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+
+        return ($state['action'] ?? null) === 'welcome_or_ring';
+    });
+});
+
+it('still screens an unknown caller without carrier verification', function () {
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'ipqualityscore.com/*' => Http::response(['success' => true, 'fraud_score' => 100, 'spammer' => true, 'recent_abuse' => true], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+    config(['services.ipqualityscore.api_key' => 'test-key']);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.initiated', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'stranger-cc',
+        'direction' => 'incoming',
+        'from' => '+18475550199',
+        'to' => '+12247354200',
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'ipqualityscore.com'));
+});
