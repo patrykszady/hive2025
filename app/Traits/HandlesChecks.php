@@ -24,7 +24,11 @@ trait HandlesChecks
     public function handlesChecksRules(): array
     {
         return [
-            'bank_account_id' => 'required_without:form.paid_by',
+            'bank_account_id' => [
+                'nullable',
+                'required_without:form.paid_by',
+                Rule::exists('bank_accounts', 'id')->where('vendor_id', auth()->user()->vendor->id),
+            ],
             'check_type'      => 'required_with:bank_account_id',
             'next_check_auto' => 'nullable',
             // Must be unique across ALL bank accounts under the same bank (for paper checks only)
@@ -213,12 +217,17 @@ trait HandlesChecks
             return null;
         }
 
-        $bankId = BankAccount::withoutGlobalScopes()->withTrashed()
-            ->find($this->bank_account_id)?->bank_id;
+        // bank_account_id is client-writable (wire:model.live) — resolve it
+        // only through this component's own tenant-scoped bank_accounts list,
+        // never by looking the id up directly, or a forged id could surface
+        // another company's scanned check images.
+        $bankId = $this->bank_accounts->find($this->bank_account_id)?->bank_id;
 
-        $siblingAccountIds = $bankId
-            ? BankAccount::withoutGlobalScopes()->withTrashed()->where('bank_id', $bankId)->pluck('id')
-            : collect([$this->bank_account_id]);
+        if (! $bankId) {
+            return null;
+        }
+
+        $siblingAccountIds = BankAccount::withoutGlobalScopes()->withTrashed()->where('bank_id', $bankId)->pluck('id');
 
         return CheckImage::whereIn('bank_account_id', $siblingAccountIds)
             ->where('check_number', (int) $this->check_number)

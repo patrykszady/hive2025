@@ -34,8 +34,7 @@ class AppSidebar extends Component
         // Live alert state should not sit in the 5-minute cache: the Menards
         // flag flips the moment a sign-in fails or succeeds, and a stale
         // cached payload from before this key existed must not break the view.
-        $sidebarData['menardsNeedsLogin'] = ! $user->is_browsing_as_client
-            && ($sidebarData['canViewBanks'] ?? false)
+        $sidebarData['menardsNeedsLogin'] = $user->can('menards-browser')
             && ($this->menardsNeedsLogin());
 
         // Route-dependent state should not be cached — it changes per request.

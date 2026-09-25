@@ -31,6 +31,14 @@ class ExpenseIndex extends Component
     use AuthorizesRequests, WithPagination;
 
     /**
+     * Values expense_statuses (a client-writable #[Url] array) is allowed to
+     * carry — each one is string-interpolated straight into a Meilisearch
+     * filter, so an unlisted value could inject filter syntax instead of a
+     * status.
+     */
+    private const VALID_EXPENSE_STATUSES = ['Complete', 'No Transaction', 'No Project', 'Missing Info', 'Deleted'];
+
+    /**
      * How many skeleton rows the loading placeholder should paint — the card's
      * page size, so the skeleton is the same height as the table that replaces
      * it (no jump on load). Callers that can cheaply COUNT the real rows pass
@@ -663,8 +671,13 @@ class ExpenseIndex extends Component
         // Build filter conditions for non-search filters
         $filterConditions = [];
         
-        // Add status filters if any are selected (exclude "Deleted" — handled via __soft_deleted)
-        $realStatuses = array_filter($this->expense_statuses, fn ($s) => $s !== 'Deleted');
+        // Add status filters if any are selected (exclude "Deleted" — handled via __soft_deleted).
+        // expense_statuses is client-writable — whitelist before it goes into
+        // the filter string, or an unlisted value could inject filter syntax.
+        $realStatuses = array_filter(
+            $this->expense_statuses,
+            fn ($s) => $s !== 'Deleted' && in_array($s, self::VALID_EXPENSE_STATUSES, true),
+        );
         if (!empty($realStatuses)) {
             $statusFilter = [];
             foreach ($realStatuses as $status) {
@@ -672,30 +685,31 @@ class ExpenseIndex extends Component
             }
             $filterConditions[] = '(' . implode(' OR ', $statusFilter) . ')';
         }
-        
+
         // Add vendor filter
         if (is_numeric($this->expense_vendor)) {
-            $filterConditions[] = "vendor_id = {$this->expense_vendor}";
+            $filterConditions[] = "vendor_id = " . (int) $this->expense_vendor;
         }
-        
+
         // Handle project filter
         if (is_numeric($this->project_id)) {
             // Match either direct project_id or any split containing that project
-            $filterConditions[] = "(project_id = {$this->project_id} OR split_project_ids = {$this->project_id})";
+            $projectId = (int) $this->project_id;
+            $filterConditions[] = "(project_id = {$projectId} OR split_project_ids = {$projectId})";
         } elseif ($this->project_id === 'NO_PROJECT') {
             $filterConditions[] = "(project_id = 0 OR project_id IS NULL)";
             $filterConditions[] = "distribution_id IS NULL";
             $filterConditions[] = "has_splits = false";
         } elseif ($this->project_id === 'SPLIT') {
             $filterConditions[] = "has_splits = true";
-        } elseif ($this->project_id && substr($this->project_id, 0, 1) === 'D') {
-            $distributionId = substr($this->project_id, 2);
+        } elseif ($this->project_id && substr($this->project_id, 0, 1) === 'D' && is_numeric(substr($this->project_id, 2))) {
+            $distributionId = (int) substr($this->project_id, 2);
             $filterConditions[] = "distribution_id = {$distributionId}";
         }
-        
+
         // Apply check filter if present (covers both direct check_id and many-to-many pivot)
         if (is_numeric($this->check)) {
-            $filterConditions[] = "check_ids = {$this->check}";
+            $filterConditions[] = "check_ids = " . (int) $this->check;
 
             // Vendor reimbursements deducted by this check render in their own
             // card on checks.show — keep them out of the main expense list.

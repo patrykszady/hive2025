@@ -90,7 +90,20 @@ class MatchVendor extends Component
     #[Computed]
     public function merchantCards(): Collection
     {
+        // transactionsSinVendor() drops Transaction's own tenant scope (it
+        // needs to match against every bank's history), so re-apply it here:
+        // only the signed-in company's own bank accounts. Queried with
+        // withoutGlobalScopes() + an explicit vendor_id filter rather than
+        // BankAccountScope directly — that scope dereferences
+        // auth()->user()->vendor unconditionally and fatals for a guest or a
+        // user with no vendor.
+        $vendorId = auth()->user()?->vendor?->id;
+        $bankAccountIds = $vendorId
+            ? \App\Models\BankAccount::withoutGlobalScopes()->where('vendor_id', $vendorId)->pluck('id')
+            : collect();
+
         return Transaction::transactionsSinVendor()
+            ->whereIn('bank_account_id', $bankAccountIds)
             ->select([
                 'id',
                 'amount',
@@ -134,10 +147,17 @@ class MatchVendor extends Component
     #[Computed]
     public function expenseCards(): Collection
     {
+        $vendorId = auth()->user()?->vendor?->id;
+
+        if (! $vendorId) {
+            return collect();
+        }
+
         return Expense::withoutGlobalScopes()
             ->with(['receipts' => fn ($query) => $query->latest('id')])
             ->whereNull('deleted_at')
             ->where('vendor_id', 0)
+            ->where('belongs_to_vendor_id', $vendorId)
             ->get()
             ->groupBy(function (Expense $expense): string {
                 $receipt = $expense->receipts->first();
@@ -256,9 +276,20 @@ class MatchVendor extends Component
     {
         $company = auth()->user()?->vendor;
 
-        if ($company && is_numeric($vendorId) && (int) $vendorId > 0) {
-            $company->vendors()->syncWithoutDetaching([(int) $vendorId]);
+        if (! $company || ! is_numeric($vendorId) || (int) $vendorId <= 0) {
+            return;
         }
+
+        $vendor = Vendor::withoutGlobalScopes()->find((int) $vendorId);
+
+        // Never silently attach another tenant's own registered company —
+        // $ai_suggestions is client-writable, so existing_vendor_id cannot
+        // be trusted without this check.
+        if (! $vendor || ! $vendor->isLinkableBy($company)) {
+            return;
+        }
+
+        $company->vendors()->syncWithoutDetaching([$vendor->id]);
     }
 
     /**

@@ -84,9 +84,13 @@ class MenardsReceiptIngestController extends Controller
                 continue;
             }
 
-            // Transaction ids contain characters that are not filename-safe
-            // ("3254-12-7316-2026-08-21 11:23:01").
-            $file = 'menards-' . $row['date'] . '-' . Str::slug($row['transactionId']) . '.pdf';
+            // The date comes back as free text ("March 20, 2026 @ 2:07 PM")
+            // and, like transactionId, contains characters that are not
+            // filename-safe. Str::slug() strips it to [a-z0-9-], which also
+            // rules out a "../" traversal segment reaching outside $dir —
+            // the untouched $row['date'] (not this filename) is what
+            // ScrapeMenardsReceipts actually parses as a date.
+            $file = 'menards-' . Str::slug($row['date']) . '-' . Str::slug($row['transactionId']) . '.pdf';
             file_put_contents($dir . '/' . $file, $pdf);
 
             $manifestReceipts[] = [

@@ -2,6 +2,7 @@
 
 namespace App\Scopes;
 
+use App\Models\Project;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
@@ -15,8 +16,21 @@ class PaymentScope implements Scope
         } else {
             $user = auth()->user();
 
-            // Client users or users without a vendor see all payments (filtered by project elsewhere)
+            // A signed-in user with no vendor (a homeowner in the client
+            // portal) may only see payments for projects belonging to the
+            // client record(s) they are personally linked to. ProjectScope
+            // already narrows Project::query() to those same projects.
             if ($user->is_browsing_as_client || !$user->vendor) {
+                $projectIds = Project::query()->pluck('id');
+
+                if ($projectIds->isEmpty()) {
+                    $builder->whereRaw('1 = 0');
+
+                    return;
+                }
+
+                $builder->whereIn('project_id', $projectIds);
+
                 return;
             }
 

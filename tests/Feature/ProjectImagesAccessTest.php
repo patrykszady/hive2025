@@ -153,5 +153,7 @@ it('keeps a stranger out', function () {
 
     $this->actingAs($stranger)
         ->get(route('projects.images', $fx['project']))
-        ->assertForbidden();
+        // The project scope now hides another client's project from a
+        // homeowner entirely, so it is not found rather than forbidden.
+        ->assertNotFound();
 });

@@ -114,17 +114,13 @@ class UserForm extends Form
 
         // Check if user with this email already exists
         $existingUser = User::where('email', $this->email)->first();
-        
+
         if ($existingUser) {
-            // Update existing user with new information if needed
-            $existingUser->update([
-                'first_name' => $this->first_name,
-                'last_name' => $this->last_name,
-                'nickname' => $this->nickname,
-                'preferred_language' => $this->preferred_language ?: 'English',
-                'cell_phone' => $this->component->user_cell ?: $existingUser->cell_phone,
-            ]);
-            
+            // Never overwrite an existing user's identity fields from this
+            // form — the email came from whoever is filling out THIS form,
+            // not from the existing account holder, so name/phone here could
+            // belong to a different person or company entirely. Reuse the
+            // account as-is; editing it requires the authorized edit flow.
             return $existingUser;
         }
 

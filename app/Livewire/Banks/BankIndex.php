@@ -3,10 +3,13 @@
 namespace App\Livewire\Banks;
 
 use App\Models\Bank;
+use App\Models\BankAccount;
+use App\Models\Check;
 use App\Services\PlaidService;
 
 use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 use Livewire\Attributes\Computed;
@@ -29,6 +32,65 @@ class BankIndex extends Component
     public function banks()
     {
         return Bank::whereNotNull('plaid_access_token')->get();
+    }
+
+    /**
+     * Accounts (grouped by account_number then type, latest-per-type, with
+     * their checks) for every bank on this page, batched into 2 queries
+     * total instead of BankShow::mount() running its own accounts query plus
+     * one checks query per account-type group for EACH bank (38 queries for
+     * a handful of banks). Keyed by bank_id, same shape BankShow builds for
+     * itself when rendered standalone — see BankShow::mount().
+     *
+     * @return Collection<int, Collection>
+     */
+    #[Computed]
+    public function accountsByBank(): Collection
+    {
+        $bankIds = $this->banks->pluck('id');
+
+        if ($bankIds->isEmpty()) {
+            return collect();
+        }
+
+        // Grouped, NOT reduced to one representative account yet — a type
+        // group can hold several historical (incl. soft-deleted) accounts,
+        // and BankShow's own logic pulls checks from every one of them, not
+        // just the latest.
+        $groupedByBank = BankAccount::withTrashed()
+            ->whereIn('bank_id', $bankIds)
+            ->get()
+            ->groupBy('bank_id')
+            ->map(fn (Collection $byBank) => $byBank
+                ->groupBy('account_number')
+                ->map(fn (Collection $byNumber) => $byNumber->groupBy('type')));
+
+        $allAccountIds = $groupedByBank
+            ->flatMap(fn (Collection $byNumber) => $byNumber->flatMap(
+                fn (Collection $byType) => $byType->flatMap(fn (Collection $accounts) => $accounts)
+            ))
+            ->pluck('id');
+
+        $checksByAccountId = $allAccountIds->isEmpty()
+            ? collect()
+            : Check::with(['user.vendors', 'vendor'])
+                ->whereIn('bank_account_id', $allAccountIds)
+                ->whereIn('check_type', ['Transfer', 'Check'])
+                ->whereYear('date', '>=', 2024)
+                ->whereDoesntHave('transactions')
+                ->get()
+                ->groupBy('bank_account_id');
+
+        return $groupedByBank->map(fn (Collection $byNumber) => $byNumber->map(
+            fn (Collection $byType) => $byType->map(function (Collection $accountsByType) use ($checksByAccountId) {
+                return [
+                    'account' => $accountsByType->sortByDesc('updated_at')->first(),
+                    'checks' => $accountsByType->flatMap(
+                        fn ($account) => $checksByAccountId->get($account->id, collect())
+                    ),
+                ];
+            })
+        ));
     }
 
     public function plaid_link_token(PlaidService $plaidService)

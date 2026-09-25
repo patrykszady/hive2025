@@ -18,7 +18,7 @@
                 </x-slot:toolbar>
             </x-index-table.placeholder>
         @endplaceholder
-    <x-index-table heading="Email Receipts" subheading="Manage email receipt patterns for automatic expense creation from forwarded emails.">
+    <x-index-table heading="Email Receipts" subheading="Manage email receipt patterns for automatic expense creation from forwarded emails." :paginator="$this->receipts">
         <x-slot:actions>
             @include('livewire.receipts.partials.index-actions')
         </x-slot:actions>

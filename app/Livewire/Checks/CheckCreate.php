@@ -6,10 +6,13 @@ use App\Livewire\Forms\CheckForm;
 use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Vendor;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 
 class CheckCreate extends Component
 {
+    use AuthorizesRequests;
+
     public CheckForm $form;
 
     // public $expense_update = NULL;
@@ -69,6 +72,11 @@ class CheckCreate extends Component
 
     public function editCheck(Check $check)
     {
+        // CheckScope also shows a check to the payee vendor's admin (so they
+        // can see they were paid) — only the company that wrote the check
+        // may open it for editing.
+        $this->authorize('update', $check);
+
         $this->check = $check;
         $this->form->setCheck($check);
 

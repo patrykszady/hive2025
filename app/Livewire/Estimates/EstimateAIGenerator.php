@@ -11,6 +11,7 @@ use App\Services\EstimateAIService;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Http;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -38,7 +39,8 @@ class EstimateAIGenerator extends Component
 
     public string $error = '';
 
-    /** The record of this run in the generator's memory. */
+    /** The record of this run in the generator's memory. Never client-set. */
+    #[Locked]
     public ?int $draftId = null;
 
     public bool $showRules = false;
@@ -92,7 +94,10 @@ class EstimateAIGenerator extends Component
         $this->draftTotal = 0.0;
         $result = null;
 
-        $section = EstimateSection::findOrFail($this->sectionId);
+        // sectionId is a client-writable dropdown value: resolve it through
+        // this estimate's own sections so it can't be swapped for another
+        // tenant's section id.
+        $section = $this->estimate->estimate_sections()->findOrFail($this->sectionId);
 
         try {
             $floorplanData = $this->floorplan ? $this->parseFloorplan() : null;
@@ -225,7 +230,7 @@ class EstimateAIGenerator extends Component
 
         $this->authorize('update', $this->estimate);
 
-        $line = EstimateLineItem::find($this->generatedItems[$index]['id']);
+        $line = $this->estimate->estimate_line_items()->find($this->generatedItems[$index]['id']);
         if ($line === null) {
             return;
         }
@@ -248,7 +253,7 @@ class EstimateAIGenerator extends Component
         $this->authorize('update', $this->estimate);
 
         // Never wanted: gone for good, not parked among the restorable lines.
-        EstimateLineItem::find($this->generatedItems[$index]['id'])?->forceDelete();
+        $this->estimate->estimate_line_items()->find($this->generatedItems[$index]['id'])?->forceDelete();
 
         unset($this->generatedItems[$index]);
         $this->generatedItems = array_values($this->generatedItems);
@@ -261,11 +266,11 @@ class EstimateAIGenerator extends Component
         $this->authorize('update', $this->estimate);
 
         foreach ($this->generatedItems as $row) {
-            EstimateLineItem::find($row['id'])?->forceDelete();
+            $this->estimate->estimate_line_items()->find($row['id'])?->forceDelete();
         }
 
-        EstimateSection::find($this->sectionId)?->forceFill(['ai_inquiry' => null, 'ai_scope' => null])->save();
-        EstimateAiDraft::whereKey($this->draftId)->update(['status' => EstimateAiDraft::DISCARDED]);
+        $this->estimate->estimate_sections()->find($this->sectionId)?->forceFill(['ai_inquiry' => null, 'ai_scope' => null])->save();
+        EstimateAiDraft::whereKey($this->draftId)->where('estimate_id', $this->estimate->id)->update(['status' => EstimateAiDraft::DISCARDED]);
 
         $this->reset(['generatedItems', 'reasoning', 'error', 'showPreview', 'draftId']);
         $this->refreshEstimate();
@@ -281,10 +286,12 @@ class EstimateAIGenerator extends Component
     /** The draft is on the estimate already; this closes up. */
     public function finish(): void
     {
-        $count = count($this->generatedItems);
-        $section = EstimateSection::find($this->sectionId);
+        $this->authorize('update', $this->estimate);
 
-        EstimateAiDraft::whereKey($this->draftId)->update(['status' => EstimateAiDraft::FINISHED]);
+        $count = count($this->generatedItems);
+        $section = $this->estimate->estimate_sections()->find($this->sectionId);
+
+        EstimateAiDraft::whereKey($this->draftId)->where('estimate_id', $this->estimate->id)->update(['status' => EstimateAiDraft::FINISHED]);
 
         $this->modal('estimate-ai-generator-modal')->close();
         $this->refreshEstimate();

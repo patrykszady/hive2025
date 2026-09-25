@@ -7,6 +7,7 @@ use App\Jobs\ProcessPlaidTransactionSync;
 use App\Mail\BankErrorAlert;
 use App\Models\Bank;
 use App\Services\PlaidService;
+use App\Support\PlaidWebhookVerifier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -19,13 +20,22 @@ class PlaidWebhookController extends Controller
 
     /**
      * Handle incoming Plaid webhooks.
-     * 
+     *
      * Webhook types we handle:
      * - TRANSACTIONS: SYNC_UPDATES_AVAILABLE, DEFAULT_UPDATE, TRANSACTIONS_REMOVED, INITIAL_UPDATE, HISTORICAL_UPDATE
      * - ITEM: ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED
      */
     public function handle(Request $request)
     {
+        if (! $this->verificationPassed($request)) {
+            Log::channel('plaid_skips')->warning('Rejected Plaid webhook: signature verification failed', [
+                'ip' => $request->ip(),
+                'has_header' => $request->hasHeader('Plaid-Verification'),
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'invalid signature'], 401);
+        }
+
         $payload = $request->all();
         
         $webhookType = $payload['webhook_type'] ?? null;
@@ -77,7 +87,31 @@ class PlaidWebhookController extends Controller
         
         return response()->json(['status' => 'received']);
     }
-    
+
+    /**
+     * Verify the `Plaid-Verification` JWT (see PlaidWebhookVerifier). Without
+     * this, anyone who knew a bank's `item_id` could POST a forged ITEM
+     * ERROR / USER_PERMISSION_REVOKED webhook and have it marked errored.
+     *
+     * Skipped only in local/testing, and only unless
+     * services.plaid.force_webhook_verification explicitly turns it on there
+     * too (a test that wants to exercise real verification sets that).
+     */
+    private function verificationPassed(Request $request): bool
+    {
+        if (app()->environment(['local', 'testing']) && ! config('services.plaid.force_webhook_verification')) {
+            return true;
+        }
+
+        $jwt = (string) $request->header('Plaid-Verification');
+
+        if ($jwt === '') {
+            return false;
+        }
+
+        return PlaidWebhookVerifier::fromConfig()->verify($jwt, (string) $request->getContent());
+    }
+
     /**
      * Handle TRANSACTIONS webhook events.
      */

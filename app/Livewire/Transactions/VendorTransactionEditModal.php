@@ -3,14 +3,18 @@
 namespace App\Livewire\Transactions;
 
 use App\Models\Bank;
+use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
 class VendorTransactionEditModal extends Component
 {
+    use AuthorizesRequests;
+
     public ?int $transaction_id = null;
 
     public string $vendor_id = '';
@@ -56,6 +60,8 @@ class VendorTransactionEditModal extends Component
     #[On('editVendorTransaction')]
     public function editVendorTransaction(int $id): void
     {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
         $transaction = VendorTransaction::find($id);
         if (! $transaction) {
             return;
@@ -74,6 +80,8 @@ class VendorTransactionEditModal extends Component
 
     public function save(): void
     {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
         if (! $this->transaction_id) {
             return;
         }
@@ -113,6 +121,8 @@ class VendorTransactionEditModal extends Component
 
     public function delete(): void
     {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
         if (! $this->transaction_id) {
             return;
         }

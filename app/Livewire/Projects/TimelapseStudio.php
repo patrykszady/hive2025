@@ -144,7 +144,16 @@ class TimelapseStudio extends Component
             ->orderByRaw("CASE WHEN title = 'Project Images' THEN 0 ELSE 1 END")
             ->orderBy('sort_order')
             ->orderBy('id')
-            ->get();
+            ->get()
+            // The inverse of the `frames` eager load above isn't set
+            // automatically — every frame->timelapse->project chain
+            // (archiveVisibleTo(), the containment check in lightboxFrames())
+            // would otherwise lazy-load twice per frame (2.6k+ queries on a
+            // busy project). Both sides are already in memory.
+            ->each(function (ProjectTimelapse $collection) {
+                $collection->setRelation('project', $this->project);
+                $collection->frames->each(fn ($frame) => $frame->setRelation('timelapse', $collection));
+            });
     }
 
     /** The collection the camera is open on, or null when it's closed. */
@@ -340,8 +349,12 @@ class TimelapseStudio extends Component
     {
         $clientId = $this->project->client_id;
 
+        // client_id can be shared across vendors (a homeowner working with
+        // more than one company) — accessibleTo() keeps a thread that
+        // happens to share this project's client_id, but actually belongs to
+        // a DIFFERENT vendor's conversation, from leaking onto this page.
         $threadIds = \App\Models\SmsGroupThread::query()
-            ->withoutGlobalScopes()
+            ->accessibleTo(auth()->user())
             ->where(fn ($q) => $q->where('project_id', $this->project->id)
                 ->when($clientId, fn ($inner) => $inner->orWhere('client_id', $clientId)))
             ->pluck('id');
@@ -468,8 +481,13 @@ class TimelapseStudio extends Component
         );
     }
 
-    /** Blur-up placeholder for a stored frame. */
-    public function frameMicro(ProjectTimelapseFrame $frame): ?string
+    /**
+     * Blur-up placeholder for a stored frame. Protected: ProjectTimelapseFrame
+     * is unscoped, so a public method taking one by id would let the browser
+     * pull image bytes for any tenant's frame. Only called from the Blade
+     * view (via $this->), on frames that already came from $this->collections.
+     */
+    protected function frameMicro(ProjectTimelapseFrame $frame): ?string
     {
         $disk = \Illuminate\Support\Facades\Storage::disk($frame->disk);
         $path = $frame->aligned_path ?: $frame->path;
@@ -640,7 +658,7 @@ class TimelapseStudio extends Component
      *
      * @return array<int, string>
      */
-    public function frameTakers(ProjectTimelapse $collection): array
+    protected function frameTakers(ProjectTimelapse $collection): array
     {
         return self::firstNames(
             $collection->frames->mapWithKeys(fn ($f) => [$f->id => (string) $f->taker_name])->all()
@@ -688,6 +706,13 @@ class TimelapseStudio extends Component
 
     public function lightboxFrames(ProjectTimelapse $collection): array
     {
+        // ProjectTimelapse is unscoped — a collection id from outside this
+        // page's own $this->project must not hand back another tenant's
+        // frame URLs, GPS and taker names.
+        if ((int) $collection->project_id !== (int) $this->project->id) {
+            return [];
+        }
+
         $takers = $this->frameTakers($collection);
 
         $viewer = auth()->user();
@@ -783,7 +808,13 @@ class TimelapseStudio extends Component
             ->get();
     }
 
-    public function textThreadLabel(\App\Models\SmsGroupThread $thread): string
+    /**
+     * Protected: SmsGroupThread is unscoped, so a public method taking one by
+     * id would let the browser read any tenant's thread name/client/address.
+     * Only called from the Blade view (via $this->), on threads that already
+     * came from the vendor-scoped $this->textableThreads.
+     */
+    protected function textThreadLabel(\App\Models\SmsGroupThread $thread): string
     {
         return $thread->name
             ?: ($thread->client?->name ?: $thread->client?->business_name)

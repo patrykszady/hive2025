@@ -61,7 +61,17 @@ class VendorPolicy
      */
     public function update(User $user, Vendor $vendor): bool
     {
-        return $user->vendor_role === 'Admin';
+        if ($user->vendor_role !== 'Admin' || !$user->vendor) {
+            return false;
+        }
+
+        // The platform admin keeps the shared directory (retail rows used by
+        // every company) correct.
+        if ($user->can('platform-admin')) {
+            return true;
+        }
+
+        return $vendor->isEditableBy($user->vendor);
     }
 
     /**

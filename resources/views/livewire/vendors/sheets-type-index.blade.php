@@ -23,7 +23,7 @@
                     <option value="Materials">Materials</option>
                 </x-forms.row>
 
-                @foreach($vendor->expenses->groupBy('category_id') as $category_id => $vendor_categories_grouped_expenses)
+                @foreach(($this->expenseCategoryCounts[$vendor->id] ?? []) as $category_id => $vendor_categories_grouped_expenses_count)
                     <fieldset>
                         <legend class="sr-only">{{$vendor->name}} Categories</legend>
                         <div class="space-y-5 sm:grid sm:grid-cols-4">
@@ -49,7 +49,7 @@
                                         </label>
                                         <span id="category-description" class="text-gray-500">
                                             <span class="sr-only">No Category</span>
-                                            {{$vendor_categories_grouped_expenses->count()}}
+                                            {{$vendor_categories_grouped_expenses_count}}
                                         </span>
                                     </div>
                                 @else
@@ -69,12 +69,12 @@
                                             for="vendors.{{$vendor_index}}.categories.{{$category_id}}"
                                             class="font-medium text-gray-900"
                                             >
-                                            {{$categories->find($category_id)->friendly_primary}} / <br>
-                                            {{$categories->find($category_id)->friendly_detailed}}
+                                            {{$this->categoryMap[$category_id]->friendly_primary}} / <br>
+                                            {{$this->categoryMap[$category_id]->friendly_detailed}}
                                         </label>
                                         <span id="category-description" class="text-gray-500">
-                                            <span class="sr-only">{{$categories->find($category_id)->friendly_primary}} / {{$categories->find($category_id)->friendly_detailed}}</span>
-                                            {{$vendor_categories_grouped_expenses->count()}}
+                                            <span class="sr-only">{{$this->categoryMap[$category_id]->friendly_primary}} / {{$this->categoryMap[$category_id]->friendly_detailed}}</span>
+                                            {{$vendor_categories_grouped_expenses_count}}
                                         </span>
                                     </div>
                                 @endif
@@ -110,7 +110,7 @@
                                     aria-describedby="permanent_category-description"
                                     name="vendors.{{$vendor_index}}.permanent_category_id"
                                     type="checkbox"
-                                    value="{{$category_id}}"
+                                    value="1"
                                     class="w-4 h-4 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-600"
                                     >
                             </div>

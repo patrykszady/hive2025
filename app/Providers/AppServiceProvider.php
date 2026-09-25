@@ -11,6 +11,7 @@ use App\Models\Expense;
 use App\Models\Lead;
 use App\Models\LineItem;
 use App\Models\Project;
+use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 
@@ -38,6 +39,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
@@ -135,8 +137,14 @@ class AppServiceProvider extends ServiceProvider
         });
 
         LogViewer::auth(function ($request) {
-            // Allow bearer token authentication for remote hosts
-            if ($request->bearerToken() === config('log-viewer.hosts.production.auth.token', env('LOG_VIEWER_PRODUCTION_TOKEN'))) {
+            // Allow bearer token authentication for remote hosts. A blank
+            // configured token must never match a blank (missing) bearer
+            // token — `null === null` used to let every unauthenticated
+            // request in whenever LOG_VIEWER_PRODUCTION_TOKEN was unset.
+            $configuredToken = (string) config('log-viewer.hosts.production.auth.token', env('LOG_VIEWER_PRODUCTION_TOKEN'));
+            $bearerToken = (string) $request->bearerToken();
+
+            if ($configuredToken !== '' && $bearerToken !== '' && hash_equals($configuredToken, $bearerToken)) {
                 return true;
             }
 
@@ -146,6 +154,19 @@ class AppServiceProvider extends ServiceProvider
                     'patryk@gs.construction',
                 ]);
         });
+
+        // The only platform-superadmin check in the app today (see
+        // AgentsIndex::render()). Used to gate shared, cross-tenant
+        // resources — job-trigger endpoints, the single Menards browser
+        // session — that no individual vendor's Admin should control.
+        Gate::define('platform-admin', fn (User $user): bool => $user->id === 1);
+
+        // The shared Menards browser is signed into one company's Menards
+        // account, so it belongs to that company's admins (not to every
+        // tenant's Admin, which the old viewAny-Bank check allowed).
+        Gate::define('menards-browser', fn (User $user): bool => ! $user->is_browsing_as_client
+            && (int) $user->primary_vendor_id === (int) config('services.menards.owner_vendor_id')
+            && $user->can('viewAny', \App\Models\Bank::class));
 
         // Blade::component('mails.base', \App\View\Components\Base::class);
 

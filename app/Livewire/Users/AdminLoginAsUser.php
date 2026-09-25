@@ -26,8 +26,17 @@ class AdminLoginAsUser extends Component
         ];
     }
 
+    public function mount(): void
+    {
+        $this->authorize('admin_login_as_user', User::class);
+    }
+
     public function login_as_user()
     {
+        // render()'s gate alone isn't enough: this is a separate callable
+        // action, and Auth::login must never run before it is re-checked.
+        $this->authorize('admin_login_as_user', User::class);
+
         $this->validate();
 
         $user = User::findOrFail($this->user_id);

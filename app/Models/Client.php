@@ -159,13 +159,16 @@ class Client extends Model
      * The "every client" list the create/duplicate/new-thread dropdowns
      * render (~300 clients + their users on each of those page mounts).
      * Cached per vendor context; ClientObserver busts on any client change.
+     *
+     * ClientScope returns a different set of rows per homeowner (their own
+     * linked client(s) only, not "every client"), so a vendor-less user must
+     * get their own cache entry — a shared "no vendor" bucket would leak one
+     * homeowner's client list to the next homeowner who hits the cache.
      */
     public static function cachedDropdownList()
     {
-        $vendorId = auth()->user()?->vendor?->id ?? 0;
-
         return \Illuminate\Support\Facades\Cache::remember(
-            "clients:dropdown:v{$vendorId}",
+            static::dropdownCacheKey(),
             now()->addMinutes(10),
             fn () => static::with('users')->orderBy('created_at', 'DESC')->get()
         );
@@ -173,8 +176,23 @@ class Client extends Model
 
     public static function bustDropdownCache(): void
     {
-        $vendorId = auth()->user()?->vendor?->id ?? 0;
-        \Illuminate\Support\Facades\Cache::forget("clients:dropdown:v{$vendorId}");
+        \Illuminate\Support\Facades\Cache::forget(static::dropdownCacheKey());
+    }
+
+    /**
+     * A vendor user shares one cache entry per vendor (everyone on that
+     * vendor sees the same "every client" list). A user with no vendor
+     * (a homeowner in the client portal) gets their own list from
+     * ClientScope, so they need their own cache entry, keyed by user id.
+     */
+    protected static function dropdownCacheKey(): string
+    {
+        $user = auth()->user();
+        $vendorId = $user?->vendor?->id;
+
+        return $vendorId
+            ? "clients:dropdown:v{$vendorId}"
+            : "clients:dropdown:u{$user?->id}";
     }
 
     protected function name(): Attribute

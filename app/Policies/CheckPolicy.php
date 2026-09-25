@@ -69,22 +69,24 @@ class CheckPolicy
      */
     public function create(User $user): bool
     {
-        return $user->vendor_role === 'Admin';
+        return $user->vendor_role === 'Admin' && $user->vendor?->business_type !== '1099';
     }
 
     /**
      * Determine whether the user can update the model.
      *
+     * Only the company that wrote the check (belongs_to_vendor_id) may edit
+     * it — CheckScope also shows it to the payee vendor's admin (so they can
+     * see they were paid), but the payee must never be able to rewrite the
+     * payer's own bank/check record.
+     *
      * @return \Illuminate\Auth\Access\Response|bool
      */
     public function update(User $user, Check $check): bool
     {
-        // Admin can update any check
-        if ($user->vendor_role === 'Admin') {
-            return true;
-        }
-        
-        return false;
+        return $user->vendor_role === 'Admin'
+            && $user->vendor
+            && (int) $check->belongs_to_vendor_id === (int) $user->vendor->id;
     }
 
     /**
@@ -94,12 +96,7 @@ class CheckPolicy
      */
     public function delete(User $user, Check $check): bool
     {
-        // Admin can delete check
-        if ($user->vendor_role === 'Admin') {
-            return true;
-        }
-        
-        return false;
+        return $this->update($user, $check);
     }
 
     /**

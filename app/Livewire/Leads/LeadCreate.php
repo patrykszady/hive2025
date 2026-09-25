@@ -1245,7 +1245,12 @@ class LeadCreate extends Component
             ->first();
 
         if ($user) {
-            $client = $user->clients()->withoutGlobalScopes()->first();
+            // Scoped to THIS tenant — otherwise the label below could name a
+            // client that belongs to a different company entirely.
+            $client = $user->clients()
+                ->withoutGlobalScopes()
+                ->whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendorId))
+                ->first();
 
             return [
                 'kind' => $client ? 'client' : 'user',
@@ -1324,6 +1329,7 @@ class LeadCreate extends Component
         $contractor = trim((string) (data_get($vendor?->options, 'short_name') ?: $vendor?->name)) ?: config('app.name');
 
         $thread = \App\Models\SmsGroupThread::query()
+            ->accessibleTo(auth()->user())
             ->whereJsonContains('participants', $e164)
             ->whereJsonLength('participants', 1)
             ->latest('last_activity_at')
@@ -1355,8 +1361,7 @@ class LeadCreate extends Component
             return;
         }
 
-        $clientId = $this->lead->user?->clients()->withoutGlobalScopes()->first()?->id;
-        $sms->sendNewGroup([$e164], $text, null, $clientId, auth()->id(), auth()->user()->vendor?->id);
+        $sms->sendNewGroup([$e164], $text, null, $this->client?->id, auth()->id(), auth()->user()->vendor?->id);
 
         Flux::toast(duration: 7000, position: 'top right', variant: 'success',
             heading: 'Consent request sent',
@@ -1641,6 +1646,7 @@ class LeadCreate extends Component
 
         if ($client) {
             $threads = \App\Models\SmsGroupThread::query()
+                ->accessibleTo(auth()->user())
                 ->where('client_id', $client->id)
                 ->latest('last_activity_at')
                 ->get();
@@ -1654,7 +1660,9 @@ class LeadCreate extends Component
             }
         }
 
-        $query = \App\Models\SmsGroupThread::query()->whereJsonLength('participants', count($numbers));
+        $query = \App\Models\SmsGroupThread::query()
+            ->accessibleTo(auth()->user())
+            ->whereJsonLength('participants', count($numbers));
         foreach ($numbers as $number) {
             $query->whereJsonContains('participants', $number);
         }
@@ -2572,7 +2580,7 @@ class LeadCreate extends Component
         return $contact['name'] ?? $email;
     }
 
-    public function getFromUserDisplayName(string $email): string
+    protected function getFromUserDisplayName(string $email): string
     {
         $user = \App\Models\User::where('email', $email)->first();
         if ($user) {

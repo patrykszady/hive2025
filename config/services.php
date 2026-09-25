@@ -28,6 +28,12 @@ return [
         'env' => env('PLAID_ENV'),
         'client_id' => env('PLAID_CLIENT_ID'),
         'secret' => env('PLAID_SECRET'),
+        // The Plaid-Verification JWT check is always enforced outside
+        // local/testing. Inside local/testing it is skipped unless this is
+        // explicitly turned on (e.g. by a test that wants to exercise it),
+        // since local webhook payloads are usually hand-crafted, not signed
+        // by Plaid.
+        'force_webhook_verification' => (bool) env('PLAID_FORCE_WEBHOOK_VERIFICATION', false),
     ],
 
     'anthropic' => [
@@ -68,6 +74,10 @@ return [
     ],
 
     'menards' => [
+        // The company whose Menards account the shared server browser signs
+        // into. Only that company's admins may see or drive it.
+        'owner_vendor_id' => (int) env('MENARDS_OWNER_VENDOR_ID', 1),
+
         // hCaptcha solving for the Imperva wall (MenardsCaptchaSolver). Read
         // that class before relying on it: the same approach already failed
         // here with a VALID token, because Imperva scores the browser.

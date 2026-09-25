@@ -6,6 +6,7 @@ use App\Models\Vendor;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -17,6 +18,14 @@ class VendorOptions extends Component
     public Vendor $vendor;
     public string $short_name = '';
     public $logo = null;
+
+    /**
+     * Display-only mirror of $vendor->options['logo'] — Locked because
+     * removeLogo()/save() used to delete whatever path this property held,
+     * and an unlocked string property is fully client-writable (any path on
+     * the public disk, including other companies' files).
+     */
+    #[Locked]
     public ?string $existing_logo = null;
     public bool $sms_team_enabled = true;
     public bool $sms_client_enabled = true;
@@ -223,9 +232,12 @@ class VendorOptions extends Component
 
         // Handle logo upload
         if ($this->logo) {
-            // Delete old logo if exists
-            if ($this->existing_logo && Storage::disk('public')->exists($this->existing_logo)) {
-                Storage::disk('public')->delete($this->existing_logo);
+            // Delete old logo if exists — re-read the path from the vendor's
+            // own saved options rather than trusting the property, even
+            // though it is now Locked (defense in depth).
+            $oldLogo = data_get($this->vendor->options, 'logo');
+            if ($oldLogo && Storage::disk('public')->exists($oldLogo)) {
+                Storage::disk('public')->delete($oldLogo);
             }
 
             // Store new logo
@@ -250,8 +262,11 @@ class VendorOptions extends Component
     {
         $this->authorize('viewOptions', Vendor::class);
 
-        if ($this->existing_logo && Storage::disk('public')->exists($this->existing_logo)) {
-            Storage::disk('public')->delete($this->existing_logo);
+        // Re-read from the vendor's own saved options rather than trusting
+        // the property, even though it is now Locked (defense in depth).
+        $logoPath = data_get($this->vendor->options, 'logo');
+        if ($logoPath && Storage::disk('public')->exists($logoPath)) {
+            Storage::disk('public')->delete($logoPath);
         }
 
         $options = (array) ($this->vendor->options ?? []);

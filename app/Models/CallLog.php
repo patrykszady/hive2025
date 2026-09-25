@@ -42,6 +42,13 @@ class CallLog extends Model
      */
     public const STALE_ACTIVE_MINUTES = 240;
 
+    /**
+     * No tenant column existed at all until now — every vendor user could
+     * see every company's calls (see scopeVisibleToMessagesUser). NULL means
+     * "created before this column existed"; see LEGACY_OWNER_VENDOR_ID.
+     */
+    public const LEGACY_OWNER_VENDOR_ID = 1;
+
     protected $fillable = [
         'call_id',
         'call_control_id',
@@ -71,6 +78,7 @@ class CallLog extends Model
         'user_id',
         'client_id',
         'contact_user_id',
+        'vendor_id',
         'metadata',
         'answered_at',
         'ended_at',
@@ -189,6 +197,11 @@ class CallLog extends Model
         return $this->belongsTo(Project::class);
     }
 
+    public function vendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class);
+    }
+
     public function transcript(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(CallTranscript::class);
@@ -228,21 +241,40 @@ class CallLog extends Model
 
     public function scopeVisibleToMessagesUser(Builder $query, User $user): Builder
     {
-        if (! $user->is_browsing_as_client) {
-            return $query;
+        if ($user->is_browsing_as_client) {
+            $phoneVariants = static::phoneVariantsForMatch($user->cell_phone);
+
+            if ($phoneVariants === []) {
+                return $query->whereRaw('1 = 0');
+            }
+
+            return $query->where(function (Builder $visibility) use ($user, $phoneVariants): void {
+                $visibility->where('contact_user_id', $user->id)
+                    ->orWhere('user_id', $user->id)
+                    ->orWhereIn('from_number', $phoneVariants)
+                    ->orWhereIn('to_number', $phoneVariants);
+            });
         }
 
-        $phoneVariants = static::phoneVariantsForMatch($user->cell_phone);
+        // Previously this branch returned the query unfiltered: any vendor
+        // user of any company saw every call, transcript, and recording
+        // platform-wide. Calls carried no vendor_id at all until now — every
+        // existing row belongs to the one company whose Telnyx numbers this
+        // system has served so far (see the "TODO: Multi-vendor support"
+        // note in TelnyxWebhookController), so NULL rows stay visible only
+        // to that vendor.
+        $vendorId = $user->vendor?->id;
 
-        if ($phoneVariants === []) {
+        if (! $vendorId) {
             return $query->whereRaw('1 = 0');
         }
 
-        return $query->where(function (Builder $visibility) use ($user, $phoneVariants): void {
-            $visibility->where('contact_user_id', $user->id)
-                ->orWhere('user_id', $user->id)
-                ->orWhereIn('from_number', $phoneVariants)
-                ->orWhereIn('to_number', $phoneVariants);
+        return $query->where(function (Builder $visibility) use ($vendorId): void {
+            $visibility->where('vendor_id', $vendorId);
+
+            if ($vendorId === self::LEGACY_OWNER_VENDOR_ID) {
+                $visibility->orWhereNull('vendor_id');
+            }
         });
     }
 

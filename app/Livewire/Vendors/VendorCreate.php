@@ -78,8 +78,13 @@ class VendorCreate extends Component
 
     public function editVendor(Vendor $vendor)
     {
+        // VendorScope shows any vendor this company has linked (subs, shared
+        // retailers, another tenant's registered company) — editing must be
+        // narrower than viewing.
+        $this->authorize('update', $vendor);
+
         $this->form->setVendor($vendor);
-    
+
         // Only set user for non-Retail vendors
         if ($vendor->business_type != 'Retail') {
             $this->user = $vendor->users()->first() ?? new User();
@@ -160,8 +165,16 @@ class VendorCreate extends Component
     //used to be addVendorToVendor
     public function addVendorToCompany($vendor_id)
     {
+        $company = auth()->user()->vendor;
+        $vendor = Vendor::withoutGlobalScopes()->findOrFail($vendor_id);
+
+        // Never let a company add another tenant's own registered business
+        // to its vendor list — only directory/retail vendors and unregistered
+        // subs may be linked this way.
+        abort_unless($vendor->isLinkableBy($company), 403);
+
         //add $vendor to currently logged in vendor (company)
-        auth()->user()->vendor->vendors()->syncWithoutDetaching([$vendor_id]);
+        $company->vendors()->syncWithoutDetaching([$vendor->id]);
 
         $this->redirectRoute('vendors.show', ['vendor' => $vendor_id], navigate: true);
         // $this->dispatch('refreshComponent')->to('vendors.vendors-index');

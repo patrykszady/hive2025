@@ -152,7 +152,13 @@ class AutoReceipts extends Component
     {
         $vendorId = auth()->user()?->vendor?->id;
 
+        // Batches carry their own belongs_to_vendor_id (set from the
+        // receiving company_email at ingest time — see
+        // CompanyEmailController), so filtering here means the query loads
+        // only this vendor's batches/items/receipts/expenses instead of
+        // every batch ever ingested system-wide before filtering in PHP.
         $batches = AutoReceiptEmailBatch::query()
+            ->when($vendorId, fn ($q) => $q->where('belongs_to_vendor_id', $vendorId))
             ->with(['items' => function ($q) {
                 $q->orderBy('attachment_index')->orderBy('id');
             }, 'items.expenseReceipt:id,expense_id', 'items.expenseReceipt.expense:id,belongs_to_vendor_id'])

@@ -404,6 +404,10 @@ it('books a homeowner slot into the Meet form via the two-stage picker', functio
         'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
         'belongs_to_vendor_id' => $fx['vendor']->id,
     ]));
+    // withoutEvents() skips ProjectObserver, which normally attaches this
+    // pivot on create — without it ProjectScope can't see the project as
+    // this tenant's, which TaskCreate::homeownerAvailability() now respects.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
 
     $date = now()->addDays(4)->format('Y-m-d');
     $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
@@ -448,6 +452,10 @@ it('offers the whole bookable day of exact times for an Anytime slot', function 
         'address' => '2 Bath St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
         'belongs_to_vendor_id' => $fx['vendor']->id,
     ]));
+    // withoutEvents() skips ProjectObserver, which normally attaches this
+    // pivot on create — without it ProjectScope can't see the project as
+    // this tenant's, which TaskCreate::homeownerAvailability() now respects.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
 
     $date = now()->addDays(4)->format('Y-m-d');
     $fx['lead']->update(['lead_data' => array_merge($fx['lead']->lead_data->toArray(), [
@@ -488,6 +496,10 @@ it('fills the Meet end time 30 minutes after a manually picked start', function 
         'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
         'belongs_to_vendor_id' => $fx['vendor']->id,
     ]));
+    // withoutEvents() skips ProjectObserver, which normally attaches this
+    // pivot on create — without it ProjectScope can't see the project as
+    // this tenant's, which TaskCreate::homeownerAvailability() now respects.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
 
     $date = now()->addDays(3)->format('Y-m-d');
 
@@ -523,6 +535,10 @@ it('upgrades a mirrored end time to the 30-minute block when a Task becomes a Me
         'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
         'belongs_to_vendor_id' => $fx['vendor']->id,
     ]));
+    // withoutEvents() skips ProjectObserver, which normally attaches this
+    // pivot on create — without it ProjectScope can't see the project as
+    // this tenant's, which TaskCreate::homeownerAvailability() now respects.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
 
     $date = now()->addDays(2)->format('Y-m-d');
 
@@ -550,6 +566,10 @@ it('fills a missing Meet end time when opening an older task for edit', function
         'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
         'belongs_to_vendor_id' => $fx['vendor']->id,
     ]));
+    // withoutEvents() skips ProjectObserver, which normally attaches this
+    // pivot on create — without it ProjectScope can't see the project as
+    // this tenant's, which TaskCreate::homeownerAvailability() now respects.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
     $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
 
     $this->actingAs($fx['user']);
@@ -585,6 +605,10 @@ it('keeps a Meet to a single day — a second calendar click moves it', function
         'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
         'belongs_to_vendor_id' => $fx['vendor']->id,
     ]));
+    // withoutEvents() skips ProjectObserver, which normally attaches this
+    // pivot on create — without it ProjectScope can't see the project as
+    // this tenant's, which TaskCreate::homeownerAvailability() now respects.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
 
     $dayOne = now()->addDays(3)->format('Y-m-d');
     $dayTwo = now()->addDays(1)->format('Y-m-d'); // sorts BEFORE dayOne — the diff, not the sort, must decide
@@ -621,6 +645,10 @@ it('lets a booked Meet move to another day and time, always as a single selectio
         'address' => '1 Deck St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
         'belongs_to_vendor_id' => $fx['vendor']->id,
     ]));
+    // withoutEvents() skips ProjectObserver, which normally attaches this
+    // pivot on create — without it ProjectScope can't see the project as
+    // this tenant's, which TaskCreate::homeownerAvailability() now respects.
+    $project->vendors()->attach($fx['vendor']->id, ['client_id' => $client->id]);
 
     $booked = now()->addDays(4)->format('Y-m-d');
     $other = now()->addDays(5)->format('Y-m-d');

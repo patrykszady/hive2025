@@ -185,6 +185,8 @@ class ProjectCreate extends Component
 
     public function edit()
     {
+        $this->authorize('update', $this->project);
+
         $project = $this->form->update();
 
         $this->modal('project_form_modal')->close();

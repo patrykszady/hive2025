@@ -153,12 +153,16 @@ class DistributionProjectsForm extends Component
 
         $profit = (float) data_get($this->project->finances ?? [], 'profit', 0);
 
+        // $this->distributions[*]['id'] is a client-controlled array value:
+        // only ever sync ids DistributionScope says belong to my vendor.
+        $validDistributionIds = Distribution::pluck('id')->all();
+
         $syncData = [];
 
         foreach ($this->distributions as $row) {
             $percent = (int) ($row['percent'] ?? 0);
 
-            if ($percent <= 0) {
+            if ($percent <= 0 || ! in_array((int) $row['id'], $validDistributionIds, true)) {
                 continue;
             }
 
@@ -213,6 +217,10 @@ class DistributionProjectsForm extends Component
 
         $count = 0;
 
+        // $this->distributions[*]['id'] is a client-controlled array value:
+        // only ever sync ids DistributionScope says belong to my vendor.
+        $validDistributionIds = Distribution::pluck('id')->all();
+
         foreach ($projects as $project) {
             $profit = (float) data_get($project->finances ?? [], 'profit', 0);
 
@@ -221,7 +229,7 @@ class DistributionProjectsForm extends Component
             foreach ($this->distributions as $row) {
                 $percent = (int) ($row['percent'] ?? 0);
 
-                if ($percent <= 0) {
+                if ($percent <= 0 || ! in_array((int) $row['id'], $validDistributionIds, true)) {
                     continue;
                 }
 

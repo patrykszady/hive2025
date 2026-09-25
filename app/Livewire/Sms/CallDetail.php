@@ -50,7 +50,11 @@ class CallDetail extends Component
     #[Computed]
     public function blockedNumbers(): array
     {
-        return BlockedCaller::pluck('phone_number')->all();
+        $vendorId = auth()->user()->vendor?->id;
+
+        return BlockedCaller::where(fn ($q) => $q->whereNull('vendor_id')->orWhere('vendor_id', $vendorId))
+            ->pluck('phone_number')
+            ->all();
     }
 
     public function effectiveStatus(CallLog $call): string

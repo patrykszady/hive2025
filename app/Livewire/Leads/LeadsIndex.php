@@ -32,6 +32,9 @@ class LeadsIndex extends Component
 
     public $sortDirection = 'desc';
 
+    /** Columns the client is allowed to sort by — never pass $sortBy straight to orderBy(). */
+    private const SORTABLE_COLUMNS = ['date', 'origin', 'created_at'];
+
     /** @var array<int> Selected lead IDs for bulk actions. */
     public array $selected = [];
 
@@ -271,7 +274,10 @@ class LeadsIndex extends Component
                             ->orWhereRaw('LOWER(notes) like ?', ["%{$term}%"]);
                     });
                 })
-                ->orderBy($this->sortBy, $this->sortDirection)
+                ->orderBy(
+                    in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'date',
+                    $this->sortDirection === 'asc' ? 'asc' : 'desc',
+                )
                 ->paginate(15);
 
         return $leads;
@@ -292,6 +298,10 @@ class LeadsIndex extends Component
 
     public function sort($column)
     {
+        if (! in_array($column, self::SORTABLE_COLUMNS, true)) {
+            return;
+        }
+
         if ($this->sortBy === $column) {
             $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';
         } else {

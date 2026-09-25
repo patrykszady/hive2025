@@ -142,17 +142,16 @@ class Project extends Model
      */
     public function toSearchableArray(): array
     {
-        // Get latest status with all needed data
-        $latestStatus = null;
+        // Get latest status with all needed data. makeAllSearchableUsing()
+        // eager-loads this for a bulk reindex; outside that path the magic
+        // accessor below lazy-loads it same as any other relation (a
+        // previous `relationLoaded()` check here was a no-op — both branches
+        // read $this->latestStatus either way).
         $latestStatusCode = null;
         $latestStatusDate = null;
-        
-        if ($this->relationLoaded('latestStatus')) {
-            $latestStatus = $this->latestStatus;
-        } else {
-            $latestStatus = $this->latestStatus;
-        }
-        
+
+        $latestStatus = $this->latestStatus;
+
         if ($latestStatus) {
             $latestStatusCode = $latestStatus->status_code;
             $latestStatusDate = $latestStatus->start_date?->timestamp ?? 0;
@@ -434,12 +433,45 @@ class Project extends Model
         return $this->hasOne(ProjectStatus::class)->latestOfMany('start_date'); // Automatically picks the latest
     }
 
+    /**
+     * Loads the status history of every project in $projects with one query
+     * so latestVendorStatus() can answer from memory. The projects index calls
+     * it once per page instead of paying two queries per row.
+     *
+     * @param  iterable<int, Project>  $projects
+     */
+    public static function primeLatestVendorStatuses(iterable $projects): void
+    {
+        $projects = collect($projects);
+
+        if ($projects->isEmpty()) {
+            return;
+        }
+
+        $historyByProject = ProjectStatus::withoutGlobalScopes()
+            ->whereIn('project_id', $projects->pluck('id'))
+            ->orderByDesc('start_date')
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('project_id');
+
+        foreach ($projects as $project) {
+            $project->setRelation('statusHistory', $historyByProject->get($project->id, collect()));
+        }
+    }
+
     public function latestVendorStatus(?int $vendorId = null): ?ProjectStatus
     {
         $vendorId ??= auth()->user()?->vendor?->id;
 
         if (! $vendorId) {
             return $this->latestStatus;
+        }
+
+        if ($this->relationLoaded('statusHistory')) {
+            $history = $this->getRelation('statusHistory');
+
+            return $history->firstWhere('belongs_to_vendor_id', $vendorId) ?? $history->first();
         }
 
         $latestForVendor = ProjectStatus::withoutGlobalScopes()

@@ -49,39 +49,32 @@ class LienWaiverPolicy
         return true;
     }
 
+    /**
+     * LienWaiverScope matches EITHER party (issuer or recipient), so being
+     * an Admin somewhere is not enough — only the issuing (owning) vendor's
+     * Admin may change a waiver, never the sub it was issued to.
+     */
     public function update(User $user, LienWaiver $lienWaiver): bool
     {
-        if ($user->vendor_role !== 'Admin') {
-            return false;
-        }
-
-        return true;
+        return $lienWaiver->belongs_to_vendor_id !== null
+            && $user->getRoleForVendor($lienWaiver->belongs_to_vendor_id) === 'Admin';
     }
 
     public function delete(User $user, LienWaiver $lienWaiver): bool
     {
-        if ($user->vendor_role !== 'Admin') {
-            return false;
-        }
-
-        return true;
+        return $lienWaiver->belongs_to_vendor_id !== null
+            && $user->getRoleForVendor($lienWaiver->belongs_to_vendor_id) === 'Admin';
     }
 
     public function restore(User $user, LienWaiver $lienWaiver): bool
     {
-        if ($user->vendor_role !== 'Admin') {
-            return false;
-        }
-
-        return true;
+        return $lienWaiver->belongs_to_vendor_id !== null
+            && $user->getRoleForVendor($lienWaiver->belongs_to_vendor_id) === 'Admin';
     }
 
     public function forceDelete(User $user, LienWaiver $lienWaiver): bool
     {
-        if ($user->vendor_role !== 'Admin') {
-            return false;
-        }
-
-        return true;
+        return $lienWaiver->belongs_to_vendor_id !== null
+            && $user->getRoleForVendor($lienWaiver->belongs_to_vendor_id) === 'Admin';
     }
 }

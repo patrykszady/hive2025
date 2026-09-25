@@ -244,9 +244,13 @@ class TaskCreate extends Component
             $taggedEmails = $taggedEmails->merge($teamContacts->pluck('email'));
         }
 
-        // Selected vendor contact (the sub being scheduled for the meeting)
+        // Selected vendor contact (the sub being scheduled for the meeting).
+        // Scoped (no withoutGlobalScopes): form->vendor_id is a plain
+        // client-writable property, so an unscoped lookup here would let
+        // anyone read any vendor's business email/name by setting vendor_id
+        // to an arbitrary id, without ever saving the task.
         if ($this->form->vendor_id && is_numeric($this->form->vendor_id)) {
-            $selectedVendor = Vendor::withoutGlobalScopes()->find((int) $this->form->vendor_id);
+            $selectedVendor = Vendor::query()->find((int) $this->form->vendor_id);
             $vendorEmail = strtolower(trim((string) ($selectedVendor?->email ?? $selectedVendor?->business_email ?? '')));
 
             if ($vendorEmail !== '' && ! $taggedEmails->contains($vendorEmail)) {
@@ -259,22 +263,12 @@ class TaskCreate extends Component
             }
         }
 
-        // All other users not already tagged
-        $otherUsers = User::query()
-            ->whereNotIn('email', $taggedEmails->all())
-            ->whereNotNull('email')
-            ->where('email', '!=', '')
-            ->orderBy('first_name')
-            ->get()
-            ->map(fn ($user) => [
-                'email' => strtolower(trim($user->email)),
-                'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
-                'group' => '',
-            ])
-            ->filter(fn ($c) => $c['email'] !== '');
-
-        $contacts = $contacts->merge($otherUsers);
-
+        // Deliberately no "every other platform user" fallback here anymore:
+        // this used to list every signed-up user's name and email address
+        // platform-wide (any company's staff, any homeowner) in the "add
+        // participant" autocomplete. Team members, this project's client,
+        // and the assigned vendor above already cover every legitimate
+        // suggestion; anyone else can still be typed in by email.
         return $contacts->unique('email')->values()->all();
     }
 
@@ -931,10 +925,13 @@ class TaskCreate extends Component
         // Straight by client_id — Project::client() is a vendor-scoped
         // HasOneThrough over the pivot, which is the wrong question here:
         // we want THE project's client, not "the client as seen through the
-        // current vendor's pivot rows".
-        $clientId = \App\Models\Project::withoutGlobalScopes()
-            ->find($this->form->project_id)
-            ?->client_id;
+        // current vendor's pivot rows". Scoped (ProjectScope) rather than
+        // withoutGlobalScopes(): form->project_id is client-writable, so an
+        // unscoped lookup here would read another tenant's homeowner
+        // availability by simply setting a foreign project id.
+        $clientId = \App\Models\Project::query()
+            ->whereKey($this->form->project_id)
+            ->value('client_id');
 
         $client = $clientId ? \App\Models\Client::withoutGlobalScopes()->find($clientId) : null;
 
@@ -1624,10 +1621,16 @@ class TaskCreate extends Component
             ->values()
             ->all();
 
+        // prefillTaskFromSms is a registered listener, so the browser can
+        // dispatch it directly with an arbitrary payload — task_id and
+        // project_id are not trustworthy just because this method is also
+        // called (with a server-built payload) from SmsConversation. Task
+        // has no tenant scope, so both must be checked against this vendor's
+        // visible projects before anything is loaded or searched.
         $existingTaskId = isset($payload['task_id']) ? (int) $payload['task_id'] : null;
-        $existingTask = $existingTaskId ? Task::query()->find($existingTaskId) : null;
+        $existingTask = $existingTaskId ? Task::visibleTo($existingTaskId) : null;
 
-        if (! $existingTask && $projectId) {
+        if (! $existingTask && $projectId && Project::query()->whereKey($projectId)->exists()) {
             $existingTask = $this->findSimilarSmsTask($projectId, (string) ($payload['title'] ?? ''), $payload['date'] ?? null);
         }
 
@@ -1942,7 +1945,8 @@ class TaskCreate extends Component
     public function editTask(int $task)
     {
         $this->hydrated = true;
-        $task = Task::withTrashed()->findOrFail($task);
+        $task = Task::visibleTo($task);
+        abort_if(! $task, 404);
 
         $this->handleTaskOperation('start', $task);
         $this->resetFormFields();
@@ -1989,6 +1993,8 @@ class TaskCreate extends Component
             return;
         }
 
+        $this->authorize('delete', $task);
+
         if ($task->trashed()) {
             $task->forceDelete();
         } else {
@@ -2006,6 +2012,8 @@ class TaskCreate extends Component
         if (!$task || !$task->trashed()) {
             return;
         }
+
+        $this->authorize('restore', $task);
 
         $task->restore();
 
@@ -2102,6 +2110,16 @@ class TaskCreate extends Component
                 'required',
                 'exists:tasks,id',
                 function ($attribute, $value, $fail) {
+                    // exists:tasks,id is a bare table check — Task has no
+                    // tenant scope, so without this any other company's task
+                    // id would pass and get pulled into this task's
+                    // dependency list (title and all).
+                    if (! Task::visibleTo((int) $value)) {
+                        $fail('That task is not available.');
+
+                        return;
+                    }
+
                     // An unsaved task has no id, so it cannot be its own
                     // predecessor — the check only applies once saved.
                     if ($this->form->task && $value == $this->form->task->id) {
@@ -2194,8 +2212,29 @@ class TaskCreate extends Component
 
     public function removeDependency($dependencyId)
     {
-        TaskDependency::find($dependencyId)->delete();
-        
+        $task = $this->form->task;
+
+        if (! $task) {
+            return;
+        }
+
+        $this->authorize('update', $task);
+
+        // Must actually belong to this task — dependencyId is otherwise a
+        // bare id the browser can pass for any dependency row.
+        $dependency = TaskDependency::where('id', $dependencyId)
+            ->where(function ($query) use ($task) {
+                $query->where('predecessor_task_id', $task->id)
+                    ->orWhere('successor_task_id', $task->id);
+            })
+            ->first();
+
+        if (! $dependency) {
+            return;
+        }
+
+        $dependency->delete();
+
         // Refresh task data with eager loading
         $this->form->refreshTaskWithDependencies($this->form->task->id);
         
@@ -2214,7 +2253,10 @@ class TaskCreate extends Component
         // user is trying to choose a predecessor.
         $projectId = $this->form->task?->project_id ?? $this->form->project_id ?? null;
 
-        if (! $projectId) {
+        // form->project_id is a plain client-writable property — without this
+        // check, setting it to another tenant's project id would list that
+        // project's task titles and dates here as candidate predecessors.
+        if (! $projectId || ! Project::query()->whereKey($projectId)->exists()) {
             return collect();
         }
 
@@ -2373,6 +2415,13 @@ class TaskCreate extends Component
             return;
         }
 
+        // Only edit() authorized before — addChecklistItem/toggleChecklistItem/
+        // sortChecklistItems all auto-save through here without ever checking
+        // that this task belongs to this company, so anyone who could open a
+        // task visible on a shared project (not necessarily their own) could
+        // write to it.
+        $this->authorize('update', $task);
+
         // Checklist is stored in options JSON column. Re-read it and merge:
         // boxes ticked from a task card (possibly on another device) while this
         // modal sat open must not be reverted by this save.
@@ -2406,6 +2455,8 @@ class TaskCreate extends Component
         if (!$task) {
             return;
         }
+
+        $this->authorize('update', $task);
 
         $task->update([
             'notes' => $this->form->notes,

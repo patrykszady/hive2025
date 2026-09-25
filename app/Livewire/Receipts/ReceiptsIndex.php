@@ -9,10 +9,11 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\WithPagination;
 
 class ReceiptsIndex extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, WithPagination;
 
     public ?int $editing_id = null;
     public ?int $vendor_id = null;
@@ -40,6 +41,11 @@ class ReceiptsIndex extends Component
             // no longer drives the row height — a plain skeleton line matches.
             ['label' => '', 'width' => 'w-[8%]', 'skeletonWidth' => 'w-6'],
         ];
+    }
+
+    public function updating(string $field): void
+    {
+        $this->resetPage();
     }
 
     protected function rules(): array
@@ -84,7 +90,7 @@ class ReceiptsIndex extends Component
             });
         }
 
-        return $query->get();
+        return $query->paginate(25);
     }
 
     #[Computed]
@@ -103,6 +109,8 @@ class ReceiptsIndex extends Component
 
     public function edit(int $id): void
     {
+        abort_unless(auth()->id() === 1, 403);
+
         $receipt = Receipt::findOrFail($id);
         $this->editing_id = $receipt->id;
         $this->vendor_id = $receipt->vendor_id;
@@ -120,6 +128,8 @@ class ReceiptsIndex extends Component
 
     public function store(): void
     {
+        abort_unless(auth()->id() === 1, 403);
+
         $this->validate();
 
         // Determine from_type based on from_address pattern
@@ -143,7 +153,9 @@ class ReceiptsIndex extends Component
         ];
 
         if ($this->editing_id) {
-            Receipt::where('id', $this->editing_id)->update($data);
+            // Through the model so the array casts encode from_subject and
+            // options; a query-builder update() skips casts and fails on them.
+            Receipt::findOrFail($this->editing_id)->update($data);
             $message = 'Receipt Updated';
         } else {
             Receipt::create($data);
@@ -155,6 +167,7 @@ class ReceiptsIndex extends Component
         unset($this->receipts);
 
         Flux::toast(
+            text: $message === 'Receipt Created' ? 'The new receipt pattern is live.' : 'Your changes are saved.',
             variant: 'success',
             heading: $message,
             duration: 3000,
@@ -163,10 +176,13 @@ class ReceiptsIndex extends Component
 
     public function delete(int $id): void
     {
+        abort_unless(auth()->id() === 1, 403);
+
         Receipt::where('id', $id)->delete();
         unset($this->receipts);
 
         Flux::toast(
+            text: 'The receipt pattern was removed.',
             variant: 'success',
             heading: 'Receipt Deleted',
             duration: 3000,

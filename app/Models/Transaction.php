@@ -128,7 +128,13 @@ class Transaction extends Model
         $array = $this->toArray();
         $array['transaction_date'] = $this->transaction_date->timestamp;
         $array['posted_date'] = $this->posted_date ? $this->posted_date->timestamp : null;
-        $array['deposit'] = $this->payments->isNotEmpty()
+        // makeAllSearchableUsing() eager-loads payments for a bulk reindex;
+        // outside that path (a single ->searchable() call) fall back to an
+        // EXISTS check instead of lazy-loading every payment row.
+        $hasPayments = $this->relationLoaded('payments')
+            ? $this->payments->isNotEmpty()
+            : $this->payments()->exists();
+        $array['deposit'] = $hasPayments
             ? 'HAS_PAYMENTS'
             : ($this->deposit ? 'NO_PAYMENTS' : 'NOT_DEPOSIT');
         $array['expenses_count'] = $this->expenses()->count();
@@ -145,6 +151,16 @@ class Transaction extends Model
         unset($array['vendor']);
 
         return $array;
+    }
+
+    /**
+     * Eager-load payments for the whole reindex chunk so
+     * toSearchableArray()'s payments check doesn't lazy-load per row (~936k
+     * lazy loads logged from a full `scout:import` before this).
+     */
+    protected function makeAllSearchableUsing(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query->with('payments:id,transaction_id');
     }
 
     /**

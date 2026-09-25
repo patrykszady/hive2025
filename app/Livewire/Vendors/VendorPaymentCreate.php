@@ -94,6 +94,10 @@ class VendorPaymentCreate extends Component
 
     public function mount()
     {
+        // Writing a payment check must stay Admin-only, same as every other
+        // check-writing entry point — this page had no policy check at all.
+        $this->authorize('create', Check::class);
+
         //09-05-2023 if proejct not active ...add in dropdown
         $projectsCollection = Project::where('created_at', '>', Carbon::now()->subYears(2)->format('Y-m-d'))
             ->status([6, 7, 8]) // Active, Complete, Service Call
@@ -327,6 +331,7 @@ class VendorPaymentCreate extends Component
      */
     public function confirmPayment()
     {
+        $this->authorize('create', Check::class);
         $this->validate();
 
         if (fmod($this->getVendorCheckSumProperty(), 100) == 0) {
@@ -338,6 +343,7 @@ class VendorPaymentCreate extends Component
 
     public function save()
     {
+        $this->authorize('create', Check::class);
         $this->validate();
         $check = $this->form->store();
 

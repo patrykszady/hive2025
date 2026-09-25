@@ -5,22 +5,36 @@ use App\Models\Client;
 use App\Models\BlockedCaller;
 use App\Models\CallLog;
 use App\Models\User;
+use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
+/**
+ * A vendor-context user, matching real usage: CallLog::scopeVisibleToMessagesUser
+ * now requires a vendor for a non-client user (previously it filtered nothing
+ * for vendor users at all).
+ */
 function makeCallListUser(): User
 {
-    return User::query()->create([
+    $vendor = Vendor::factory()->create();
+    $vendor->forceFill(['registration' => ['registered' => true]])->save();
+
+    $user = User::query()->create([
         'first_name' => 'Test',
         'last_name' => 'User',
         'email' => 'call-list-' . Str::random(8) . '@example.test',
         'cell_phone' => '7' . random_int(100000000, 999999999),
         'password' => bcrypt('password'),
         'remember_token' => Str::random(10),
+        'primary_vendor_id' => $vendor->id,
+        'registration' => ['registered' => true],
     ]);
+    $vendor->users()->attach($user->id, ['role_id' => 1]);
+
+    return $user;
 }
 
 it('has loadMore method that increments limit by 25', function () {
@@ -92,6 +106,7 @@ it('marks an incoming call as spam and adds to blocked callers', function () {
         'from_number' => $spamNumber,
         'to_number' => '+12249993880',
         'status' => CallLog::STATUS_COMPLETED,
+        'vendor_id' => $user->vendor->id,
     ]);
 
     Livewire::actingAs($user)
@@ -117,6 +132,7 @@ it('marks an outgoing call as spam using the to_number', function () {
         'from_number' => '+12249993880',
         'to_number' => $spamNumber,
         'status' => CallLog::STATUS_COMPLETED,
+        'vendor_id' => $user->vendor->id,
     ]);
 
     Livewire::actingAs($user)
@@ -135,6 +151,7 @@ it('updates all calls from the spam number to blocked status', function () {
         'from_number' => $spamNumber,
         'to_number' => '+12249993880',
         'status' => CallLog::STATUS_COMPLETED,
+        'vendor_id' => $user->vendor->id,
     ]);
 
     Livewire::actingAs($user)
@@ -154,6 +171,7 @@ it('does not duplicate blocked caller when marking same number twice', function 
         'phone_number' => $spamNumber,
         'reason' => 'Previously blocked',
         'blocked_by_user_id' => $user->id,
+        'vendor_id' => $user->vendor->id,
         'auto_blocked' => false,
     ]);
 
@@ -161,6 +179,7 @@ it('does not duplicate blocked caller when marking same number twice', function 
         'direction' => 'incoming',
         'from_number' => $spamNumber,
         'status' => CallLog::STATUS_COMPLETED,
+        'vendor_id' => $user->vendor->id,
     ]);
 
     Livewire::actingAs($user)
@@ -178,6 +197,7 @@ it('unblocks a blocked number', function () {
         'phone_number' => $blockedNumber,
         'reason' => 'Manually marked as spam',
         'blocked_by_user_id' => $user->id,
+        'vendor_id' => $user->vendor->id,
         'auto_blocked' => false,
     ]);
 
@@ -274,6 +294,7 @@ it('filters the call list by search term', function () {
         'to_number' => '+12249993880',
         'caller_name' => 'Kitchen Remodel Caller',
         'status' => CallLog::STATUS_COMPLETED,
+        'vendor_id' => $user->vendor->id,
     ]);
 
     CallLog::factory()->create([
@@ -282,6 +303,7 @@ it('filters the call list by search term', function () {
         'to_number' => '+12249993880',
         'caller_name' => 'Basement Caller',
         'status' => CallLog::STATUS_COMPLETED,
+        'vendor_id' => $user->vendor->id,
     ]);
 
     Livewire::actingAs($user)
@@ -307,6 +329,7 @@ it('prefers known contact name over stale caller_name in call list display', fun
         'to_number' => '+12249993880',
         'caller_name' => 'WOOD ANDREA',
         'status' => CallLog::STATUS_COMPLETED,
+        'vendor_id' => $user->vendor->id,
     ]);
 
     Livewire::actingAs($user)

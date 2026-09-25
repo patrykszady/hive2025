@@ -6,11 +6,13 @@ use App\Models\Client;
 use App\Models\Estimate;
 use App\Models\EstimateSection;
 use App\Models\EstimateLineItem;
+use App\Models\Project;
 
 use Flux;
 
 use App\Livewire\Projects\ProjectShow;
 
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 use Livewire\Attributes\Computed;
 
@@ -18,6 +20,8 @@ use Illuminate\Support\Facades\Log;
 
 class EstimateDuplicate extends Component
 {
+    use AuthorizesRequests;
+
     public Estimate $estimate;
     public EstimateSection $section;
 
@@ -74,8 +78,12 @@ class EstimateDuplicate extends Component
         $this->modal('estimate_duplicate_modal')->show();
     }
 
-    public function duplicateToEstimateModal(EstimateSection $section)
+    public function duplicateToEstimateModal(int $sectionId)
     {
+        // EstimateSection carries no tenant scope of its own: only accept a
+        // section whose estimate is one EstimateScope says I can see.
+        $section = EstimateSection::whereHas('estimate')->findOrFail($sectionId);
+
         $this->section = $section;
         $this->section_id = $section->id;
 
@@ -117,9 +125,14 @@ class EstimateDuplicate extends Component
     {
         $this->validate();
 
+        // project_id is a plain client-writable property: resolve it through
+        // ProjectScope so it can't be pointed at another tenant's project.
+        $project = Project::query()->findOrFail($this->project_id);
+        $this->authorize('create', [Estimate::class, $project]);
+
         if ($this->estimate_id === 'new') {
             $new_estimate = Estimate::create([
-                'project_id' => $this->project_id,
+                'project_id' => $project->id,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
             ]);
         } else {
@@ -216,9 +229,14 @@ class EstimateDuplicate extends Component
     {
         $this->validate();
 
+        // project_id is a plain client-writable property: resolve it through
+        // ProjectScope so it can't be pointed at another tenant's project.
+        $project = Project::query()->findOrFail($this->project_id);
+        $this->authorize('create', [Estimate::class, $project]);
+
         //get current estimate and duplicate sections and line_items
         $new_estimate = Estimate::create([
-            'project_id' => $this->project_id,
+            'project_id' => $project->id,
             'belongs_to_vendor_id' => auth()->user()->vendor->id,
         ]);
 

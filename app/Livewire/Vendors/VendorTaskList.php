@@ -35,8 +35,12 @@ class VendorTaskList extends Component
      */
     protected function vendorTaskQuery(): Builder
     {
+        // A sub can work for many GCs, so "tasks assigned to this vendor" is
+        // not this tenant's alone — without belongs_to_vendor_id, viewing a
+        // shared sub's profile page showed every company's tasks for them.
         return Task::withTrashed()
             ->where('vendor_id', $this->vendor->id)
+            ->where('belongs_to_vendor_id', auth()->user()->vendor?->id)
             ->where(function (Builder $query): void {
                 $query->where('type', '!=', 'Reminder')->orWhereNull('type');
             });

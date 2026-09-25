@@ -16,6 +16,7 @@ use App\Models\Vendor;
 
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 class UserCreate extends Component
@@ -30,6 +31,13 @@ class UserCreate extends Component
         'form_submit' => 'save',
     ];
 
+    /**
+     * Which company/client this modal is adding to or editing on, and which
+     * id. Server-set only (newMember/editMember/editClientMember) — never
+     * bound in the view — so it must stay Locked: save()/edit() trust it to
+     * decide which vendor/client gets attached or edited.
+     */
+    #[Locked]
     public $model = ['type' => null, 'id' => null];
     public $user_cell = '';
     public $user_form = false;
@@ -149,6 +157,11 @@ class UserCreate extends Component
 
     public function editMember(User $user)
     {
+        // User is unscoped, so this listener can be called with any tenant's
+        // id — only a member of the signed-in company (or the user's own
+        // profile) may be loaded into the edit form.
+        $this->authorize('update', $user);
+
         $this->user_cell = $user->cell_phone ?? '';
         $this->user_form = true;
 
@@ -219,6 +232,11 @@ class UserCreate extends Component
 
     public function removeMember(User $user)
     {
+        // User is unscoped and $user->vendor is their PRIMARY vendor, which
+        // may belong to a different tenant entirely — only an admin of that
+        // exact company may remove them from it.
+        $this->authorize('update', $user->vendor);
+
         $user->vendor->users()->wherePivot('is_employed', '1')
             ->updateExistingPivot($user->id, [
                 'end_date' => today()->format('Y-m-d'),
@@ -263,6 +281,15 @@ class UserCreate extends Component
                 //VendorCreate
                 $this->dispatch('userVendor', $user->toArray());
             } else {
+                // $model is Locked, but re-check directly rather than trust
+                // every caller passed the signed-in company's own id: this
+                // is the only thing standing between "add a user to my
+                // company" and "make myself Admin of any company".
+                abort_unless(
+                    (string) $this->model['id'] === (string) (auth()->user()->vendor?->id),
+                    403
+                );
+
                 // Check if this relationship already exists to prevent duplicates
                 if (!$user->vendors()->where('vendor_id', $this->model['id'])->exists()) {
                     $user->vendors()->attach(
@@ -295,6 +322,12 @@ class UserCreate extends Component
             if ($this->model['id'] == 'NEW') {
                 $this->dispatch('addUser', user: $user->id, client_id: $this->model['id'])->to(ClientCreate::class);
             } else {
+                // Only an accessible client (one the signed-in company already
+                // serves) may receive a new user — the client id comes from a
+                // Locked property, but re-check it against the policy anyway.
+                $client = Client::findOrFail($this->model['id']);
+                $this->authorize('create_client_member', $client);
+
                 //add User to existing/this Client
                 // Check if this relationship already exists to prevent duplicates
                 if (!$user->clients()->where('client_id', $this->model['id'])->exists()) {

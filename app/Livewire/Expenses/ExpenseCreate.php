@@ -645,6 +645,17 @@ class ExpenseCreate extends Component
             'upload_file.max' => 'File must be less than 20MB.',
         ]);
 
+        // upload_belongs_to_vendor_id is client-chosen — whitelist it to the
+        // hub vendor or a vendor already linked to it (same set the "Belongs
+        // To Vendor" dropdown offers), never an arbitrary vendor id. Checked
+        // up front, before the OCR spend, so a tampered id fails fast.
+        if ($this->upload_is_material_order && $this->upload_belongs_to_vendor_id
+            && ! Vendor::whereKey($this->upload_belongs_to_vendor_id)->exists()) {
+            $this->addError('upload_belongs_to_vendor_id', 'Invalid vendor selected for material order.');
+
+            return;
+        }
+
         $docType = $this->upload_file->getClientOriginalExtension();
         $ocrFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.' . $docType;
         $ocrPath = '_temp_ocr/' . $ocrFilename;
@@ -682,12 +693,16 @@ class ExpenseCreate extends Component
 
         $hubVendorId = auth()->user()->vendor->id;
 
+        $ownerVendorId = ($this->upload_is_material_order && $this->upload_belongs_to_vendor_id)
+            ? (int) $this->upload_belongs_to_vendor_id
+            : $hubVendorId;
+
         $expense = Expense::create([
             'amount' => $fields['total'] ?? 0,
             'date' => $fields['transaction_date'] ?? now()->format('Y-m-d'),
             'invoice' => $fields['invoice_number'] ?? null,
             'vendor_id' => $vendorId,
-            'belongs_to_vendor_id' => ($this->upload_is_material_order && $this->upload_belongs_to_vendor_id) ? $this->upload_belongs_to_vendor_id : $hubVendorId,
+            'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => auth()->user()->id,
         ]);
 

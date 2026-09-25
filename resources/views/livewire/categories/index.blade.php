@@ -16,7 +16,7 @@
     </x-island-card>
 
     @foreach($vendors as $vendor)
-        <livewire:categories.vendor-category-card :vendor="$vendor" :year="$year" :key="$vendor->id . '-' . $year" />
+        <livewire:categories.vendor-category-card :vendor="$vendor" :year="$year" :initial-expense-count="$vendor->expense_count" :key="$vendor->id . '-' . $year" />
     @endforeach
 
     @if($hasMore)

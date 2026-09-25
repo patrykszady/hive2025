@@ -5,6 +5,7 @@ namespace App\Livewire\Forms;
 use App\Models\Check;
 use App\Models\Vendor;
 
+use Illuminate\Validation\Rule;
 use Livewire\Form;
 
 class TimesheetPaymentForm extends Form
@@ -22,7 +23,11 @@ class TimesheetPaymentForm extends Form
         return [
             'first_name'      => 'nullable',
             'date'            => 'required|date|before_or_equal:today|after:2017-01-01',
-            'paid_by' => "required_if:bank_account_id,\"\"",
+            'paid_by' => [
+                'nullable',
+                "required_if:bank_account_id,\"\"",
+                Rule::exists('user_vendor', 'user_id')->where('vendor_id', auth()->user()->vendor->id)->where('is_employed', 1),
+            ],
             'invoice' => 'required_with:paid_by',
         ];
     }

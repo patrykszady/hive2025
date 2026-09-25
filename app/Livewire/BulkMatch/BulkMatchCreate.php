@@ -9,11 +9,14 @@ use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use Flux;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class BulkMatchCreate extends Component
 {
+    use AuthorizesRequests;
+
     public BulkMatchForm $form;
 
     public $new_vendor = null;
@@ -167,6 +170,10 @@ class BulkMatchCreate extends Component
 
     public function updateMatch(TransactionBulkMatch $match)
     {
+        // TransactionBulkMatch has no global scope, so this listener can be
+        // called with any tenant's rule id.
+        $this->authorize('update', $match);
+
         $this->new_vendor = null;
         $this->split = false;
         $this->splits_count = 0;
@@ -191,6 +198,8 @@ class BulkMatchCreate extends Component
 
     public function remove()
     {
+        $this->authorize('delete', $this->form->match);
+
         $this->form->match->delete();
 
         $this->dispatch('refreshComponent')->to('bulk-match.bulk-match-index');

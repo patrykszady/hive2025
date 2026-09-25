@@ -32,7 +32,7 @@
         // Skip the component (and its lazy skeleton) entirely for clients with
         // no tracking rows, so no empty card ever flashes on the client page.
         $showEmailTracking = ! auth()->user()->is_browsing_as_client
-            && (! $client_id || \App\Models\EmailTracking::clientFacing()->forClientAndItsLeads($client_id)->exists());
+            && $this->hasEmailTrackingForClient;
     @endphp
 
     @if($showEmailTracking)

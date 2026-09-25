@@ -35,7 +35,21 @@ class MeetingParticipants
             ->values();
 
         if ($ids->isNotEmpty()) {
-            $emails = $emails->merge(User::query()->whereIn('id', $ids->all())->pluck('email'));
+            // $userIds ultimately traces back to a client-writable form
+            // property; restrict to people who actually work for the
+            // project's owning company so a crafted id list can't pull in
+            // and invite an outsider's email address.
+            $ownerVendorId = is_numeric($project?->belongs_to_vendor_id)
+                ? (int) $project->belongs_to_vendor_id
+                : null;
+
+            $employeeQuery = User::query()->whereIn('id', $ids->all());
+
+            if ($ownerVendorId) {
+                $employeeQuery->whereHas('vendors', fn ($q) => $q->where('vendors.id', $ownerVendorId));
+            }
+
+            $emails = $emails->merge($employeeQuery->pluck('email'));
         }
 
         // The client's people — the homeowner. Placeholder addresses are

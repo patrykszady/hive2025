@@ -268,7 +268,7 @@ Route::permanentRedirect('legal/terms', '/welcome/legal/terms');
 // Short URLs for SMS
 Route::permanentRedirect('p', '/welcome/legal/privacy');
 Route::permanentRedirect('t', '/welcome/legal/terms');
-Route::get('l/{code}', ShortLinkController::class)->name('short-links.redirect');
+Route::get('l/{code}', ShortLinkController::class)->name('short-links.redirect')->middleware('throttle:60,1');
 
 // Passkey setup page (requires auth)
 Route::middleware('auth')->group(function () {
@@ -278,7 +278,7 @@ Route::middleware('auth')->group(function () {
 WebAuthnRoutes::register()->withoutMiddleware(VerifyCsrfToken::class);
 
 // Short URL for SMS (redirects to full availability page)
-Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availability.short');
+Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availability.short')->middleware('throttle:60,1');
 
 // Public lead time picker — linked from the consult email when the lead's
 // preferred times have passed (or none were given). The signed URL is the
@@ -294,7 +294,7 @@ Route::get('projects/{project}/reimbursements.pdf', \App\Http\Controllers\Reimbu
     ->middleware('signed');
 
 // Short URL for client schedule SMS
-Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
+Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short')->middleware('throttle:60,1');
 
 // Public lien waiver signing (token-based, no auth)
 
@@ -369,43 +369,56 @@ if(env('APP_ENV') === 'local') {
 
 Route::middleware(['auth', 'registered'])->group(function () {
 
+    // Runs projects:activate-scheduled across every tenant — the console
+    // schedule already runs this artisan command directly, so this URL only
+    // exists for a manual re-run and is not tied to any vendor's own data.
     Route::get('/activate-scheduled-projects', function () {
         \Illuminate\Support\Facades\Artisan::call('projects:activate-scheduled');
 
         return back()->with('success', \Illuminate\Support\Facades\Artisan::output());
-    })->name('projects.activate-scheduled');
+    })->name('projects.activate-scheduled')->middleware('can:platform-admin');
 });
 
-Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
-Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');
+Route::middleware('auth')->group(function () {
+    Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
+    Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');
+});
 
 //1-18-2023 combine the next 3 functions into one. Pass type = original or temp
 // Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->name('leads.leads_in_email');
 
-Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
-Route::get('receipts/home-depot-messages', [ReceiptController::class, 'getHomeDepotMessages'])->name('receipts.home-depot-messages');
-Route::get('receipts/goutte_crawl', [ReceiptController::class, 'goutte_crawl'])->name('goutte_crawl');
-// Route::get('new_ocr_status', [ReceiptController::class, 'new_ocr_status'])->name('new_ocr_status');
+// These GET endpoints run scheduled maintenance/matching jobs across every
+// tenant (Bank/Transaction/Expense queries use withoutGlobalScopes) or start
+// an OAuth grant for a single shared receipt account. The scheduler already
+// runs the same work directly (RunScheduledTask jobs in routes/console.php),
+// not via HTTP, so nothing but a human operator hits these URLs. Restricted
+// to the platform admin — no vendor Admin UI links to any of them.
+Route::middleware(['auth', 'can:platform-admin'])->group(function () {
+    Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
+    Route::get('receipts/home-depot-messages', [ReceiptController::class, 'getHomeDepotMessages'])->name('receipts.home-depot-messages');
+    Route::get('receipts/goutte_crawl', [ReceiptController::class, 'goutte_crawl'])->name('goutte_crawl');
+    // Route::get('new_ocr_status', [ReceiptController::class, 'new_ocr_status'])->name('new_ocr_status');
 
-Route::get('plaid_transactions_sync', [PlaidTransactionSyncController::class, 'syncAllBanks']);
-Route::get('plaid_statements_list', [TransactionController::class, 'plaid_statements_list']);
-Route::get('plaid_transactions_refresh', [TransactionController::class, 'plaid_transactions_refresh']);
-Route::get('plaid_item_status', [TransactionController::class, 'plaid_item_status']);
-Route::get('plaid_transactions_enrich', [TransactionController::class, 'plaid_transactions_enrich']);
-Route::get('add_vendor_to_transactions', [TransactionController::class, 'add_vendor_to_transactions']);
-Route::get('add_expense_to_transactions', [TransactionController::class, 'add_expense_to_transactions']);
-Route::get('add_transaction_to_multi_expenses', [TransactionController::class, 'add_transaction_to_multi_expenses']);
-Route::get('add_check_id_to_transactions', [TransactionController::class, 'add_check_id_to_transactions']);
-Route::get('add_check_deposit_to_transactions', [TransactionController::class, 'add_check_deposit_to_transactions']);
-Route::get('add_payments_to_transaction', [TransactionController::class, 'add_payments_to_transaction']);
-Route::get('add_transaction_to_expenses_sin_vendor', [TransactionController::class, 'add_transaction_to_expenses_sin_vendor']);
-Route::get('find_credit_payments_on_debit', [TransactionController::class, 'find_credit_payments_on_debit']);
-Route::get('transactions_sum_not_expense_amount', [TransactionController::class, 'transactions_sum_not_expense_amount']);
-Route::get('add_category_to_expense', [TransactionController::class, 'add_category_to_expense']);
+    Route::get('plaid_transactions_sync', [PlaidTransactionSyncController::class, 'syncAllBanks']);
+    Route::get('plaid_statements_list', [TransactionController::class, 'plaid_statements_list']);
+    Route::get('plaid_transactions_refresh', [TransactionController::class, 'plaid_transactions_refresh']);
+    Route::get('plaid_item_status', [TransactionController::class, 'plaid_item_status']);
+    Route::get('plaid_transactions_enrich', [TransactionController::class, 'plaid_transactions_enrich']);
+    Route::get('add_vendor_to_transactions', [TransactionController::class, 'add_vendor_to_transactions']);
+    Route::get('add_expense_to_transactions', [TransactionController::class, 'add_expense_to_transactions']);
+    Route::get('add_transaction_to_multi_expenses', [TransactionController::class, 'add_transaction_to_multi_expenses']);
+    Route::get('add_check_id_to_transactions', [TransactionController::class, 'add_check_id_to_transactions']);
+    Route::get('add_check_deposit_to_transactions', [TransactionController::class, 'add_check_deposit_to_transactions']);
+    Route::get('add_payments_to_transaction', [TransactionController::class, 'add_payments_to_transaction']);
+    Route::get('add_transaction_to_expenses_sin_vendor', [TransactionController::class, 'add_transaction_to_expenses_sin_vendor']);
+    Route::get('find_credit_payments_on_debit', [TransactionController::class, 'find_credit_payments_on_debit']);
+    Route::get('transactions_sum_not_expense_amount', [TransactionController::class, 'transactions_sum_not_expense_amount']);
+    Route::get('add_category_to_expense', [TransactionController::class, 'add_category_to_expense']);
 
-Route::get('receipts/amazon_login', [ReceiptController::class, 'amazon_login'])->name('amazon_login');
-Route::get('receipts/amazon_auth_response', [ReceiptController::class, 'amazon_auth_response']);
-Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orders_api']);
+    Route::get('receipts/amazon_login', [ReceiptController::class, 'amazon_login'])->name('amazon_login');
+    Route::get('receipts/amazon_auth_response', [ReceiptController::class, 'amazon_auth_response']);
+    Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orders_api']);
+});
 
 // Plaid webhooks (no auth required - Plaid sends these directly)
 // EWCCV search-session hand-off from the browser extension. ewccv.com's
@@ -431,7 +444,9 @@ Route::post('api/menards/solve-challenge', \App\Http\Controllers\MenardsSolveCha
 // (scripts/nginx-menards-vnc.conf). Deliberately outside the 'auth' group:
 // auth_request treats a redirect as an error, so guests must get a plain 403.
 Route::get('menards-vnc-auth', function () {
-    abort_unless(auth()->check() && auth()->user()->can('viewAny', \App\Models\Bank::class), 403);
+    // Same rule as the menards.browser page: admins of the company that
+    // owns the Menards account the shared browser is signed into.
+    abort_unless(auth()->check() && auth()->user()->can('menards-browser'), 403);
 
     return response()->noContent();
 })->name('menards.vnc-auth');
@@ -618,7 +633,9 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //COMPANY EMAILS
     Route::get('/company_emails', CompanyEmailsIndex::class)->name('company_emails.index');
-    Route::get('/forward-receipt-emails', [CompanyEmailController::class, 'forwardRecentReceiptEmailsToCentral'])->name('forward.receipt.emails');
+    // Forwards receipt emails across every tenant's mailbox; the schedule
+    // already runs this job directly. No UI links to it.
+    Route::get('/forward-receipt-emails', [CompanyEmailController::class, 'forwardRecentReceiptEmailsToCentral'])->name('forward.receipt.emails')->middleware('can:platform-admin');
 
     //VENDOR MATCH
     Route::get('/vendor_match', ReceiptAccountsIndex::class)->name('vendor_match.index');

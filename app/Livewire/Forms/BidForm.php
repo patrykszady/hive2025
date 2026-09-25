@@ -23,7 +23,12 @@ class BidForm extends Form
 
         foreach ($this->component->bids as $index => $bid) {
             if (isset($bid['id'])) {
-                $updated_bid = Bid::withoutGlobalScopes()->findOrFail($bid['id']);
+                // $bid['id'] is a client-controlled array value: resolve it
+                // through this project's own bids for this vendor so it
+                // can't be swapped for another tenant's bid id.
+                $updated_bid = $this->component->project->bids()
+                    ->where('vendor_id', $this->component->vendor->id)
+                    ->findOrFail($bid['id']);
                 $updated_bid->update([
                     'amount' => $bid['amount'],
                     'project_id' => $this->component->project->id,

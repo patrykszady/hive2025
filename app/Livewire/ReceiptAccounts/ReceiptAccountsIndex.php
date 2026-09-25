@@ -42,7 +42,10 @@ class ReceiptAccountsIndex extends Component
     {
         $vendors = Vendor::query()
             ->with(['receipt_account'])
-            ->withCount(['transactions_bulk_match', 'receipts'])
+            ->withCount([
+                'transactions_bulk_match' => fn ($query) => $query->where('belongs_to_vendor_id', auth()->user()->vendor->id),
+                'receipts',
+            ])
             ->where(function ($query) {
                 $query->whereHas('receipt_account')
                     ->orWhereHas('receipts');
@@ -68,9 +71,17 @@ class ReceiptAccountsIndex extends Component
     //6-16-2023 also used in VendorsForm ... COMBINE
     public function addVendorToVendor($vendor_id)
     {
+        $company = auth()->user()->vendor;
+        $vendor = Vendor::withoutGlobalScopes()->findOrFail($vendor_id);
+
+        // Never let a company add another tenant's own registered business
+        // to its vendor list — only directory/retail vendors and unregistered
+        // subs may be linked this way.
+        abort_unless($vendor->isLinkableBy($company), 403);
+
         //Add existing Vendor to the logged-in-vendor
         //add $vendor to currently logged in vendor
-        auth()->user()->vendor->vendors()->syncWithoutDetaching([$vendor_id]);
+        $company->vendors()->syncWithoutDetaching([$vendor->id]);
 
         // $this->dispatchBrowserEvent('notify', [
         //     'type' => 'success',

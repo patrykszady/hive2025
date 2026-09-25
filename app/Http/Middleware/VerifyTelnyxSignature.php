@@ -26,22 +26,24 @@ class VerifyTelnyxSignature
     {
         $publicKeyBase64 = config('services.telnyx.public_key');
 
-        // No key configured → skip (dev/local). Setting the key is all it
-        // takes to enforce verification — no second deploy, no flag.
+        // No key configured → skip, but ONLY in local/testing. Outside those
+        // environments this used to fail OPEN (return $next($request) with
+        // no verification at all): these endpoints start calls, send SMS and
+        // mutate call logs, so anyone who knew the URL could drive them with
+        // no signature. Production has the key set (see services.telnyx),
+        // so failing closed here costs nothing there and closes the hole on
+        // any environment where the key is missing by mistake.
         if (empty($publicKeyBase64)) {
-            // Outside local/testing this is a live hole: these endpoints start
-            // calls, send SMS and mutate call logs, so anyone who knows the URL
-            // can drive them. Say so loudly rather than failing open in
-            // silence. (Not fail-CLOSED: that would take voice down on deploy
-            // if the key hadn't been set yet.)
-            if (! app()->environment(['local', 'testing'])) {
-                Log::channel('telnyx')->error('Telnyx webhook accepted WITHOUT signature verification — TELNYX_PUBLIC_KEY is not set', [
-                    'path' => $request->path(),
-                    'ip' => $request->ip(),
-                ]);
+            if (app()->environment(['local', 'testing'])) {
+                return $next($request);
             }
 
-            return $next($request);
+            Log::channel('telnyx')->error('Rejected Telnyx webhook: TELNYX_PUBLIC_KEY is not set outside local/testing', [
+                'path' => $request->path(),
+                'ip' => $request->ip(),
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'signature verification unavailable'], 403);
         }
 
         if (! function_exists('sodium_crypto_sign_verify_detached')) {

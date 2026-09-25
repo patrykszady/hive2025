@@ -70,11 +70,17 @@ class ProjectPolicy
     /**
      * Determine whether the user can update the model.
      *
+     * ProjectScope also returns projects merely SHARED with this vendor (an
+     * invited sub) — being an Admin somewhere is not being the owner. Judged
+     * at the owning vendor, same as manageImages() above, so a multi-vendor
+     * Admin is judged where it matters rather than by their primary vendor.
+     *
      * @return \Illuminate\Auth\Access\Response|bool
      */
     public function update(User $user, Project $project): bool
     {
-        return $user->vendor_role === 'Admin';
+        return $project->belongs_to_vendor_id !== null
+            && $user->getRoleForVendor($project->belongs_to_vendor_id) === 'Admin';
     }
 
     /**
@@ -84,8 +90,9 @@ class ProjectPolicy
      */
     public function delete(User $user, Project $project): bool
     {
-        // Only admins can delete
-        if ($user->vendor_role !== 'Admin') {
+        // Only the owning vendor's Admins can delete — see update() above.
+        if ($project->belongs_to_vendor_id === null
+            || $user->getRoleForVendor($project->belongs_to_vendor_id) !== 'Admin') {
             return false;
         }
 
@@ -110,7 +117,8 @@ class ProjectPolicy
      */
     public function restore(User $user, Project $project): bool
     {
-        return $user->vendor_role === 'Admin';
+        return $project->belongs_to_vendor_id !== null
+            && $user->getRoleForVendor($project->belongs_to_vendor_id) === 'Admin';
     }
 
     /**
@@ -120,8 +128,9 @@ class ProjectPolicy
      */
     public function forceDelete(User $user, Project $project): bool
     {
-        // Only admins can delete
-        if ($user->vendor_role !== 'Admin') {
+        // Only the owning vendor's Admins can delete — see update() above.
+        if ($project->belongs_to_vendor_id === null
+            || $user->getRoleForVendor($project->belongs_to_vendor_id) !== 'Admin') {
             return false;
         }
 

@@ -3,6 +3,7 @@
 namespace App\Livewire\Projects;
 
 use App\Models\Client;
+use App\Models\EmailTracking;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -144,6 +145,17 @@ class ProjectsIndex extends Component
         }
 
         return Client::cachedDropdownList();
+    }
+
+    /**
+     * Memoized so the blade's "does this client have any email tracking to
+     * show" check runs its `exists()` query once per render.
+     */
+    #[Computed]
+    public function hasEmailTrackingForClient(): bool
+    {
+        return ! $this->client_id
+            || EmailTracking::clientFacing()->forClientAndItsLeads($this->client_id)->exists();
     }
 
     #[Title('Projects')]

@@ -61,7 +61,10 @@ class ClientCreate extends Component
                 'form_submit' => 'add_user_to_client',
             ];
         } else {
-            $this->user_clients = $user->clients()->withoutGlobalScopes()->with('vendors')->get()->keyBy('id');
+            // No withoutGlobalScopes(): ClientScope now restricts this to the
+            // clients this user shares with MY vendor, never another
+            // tenant's private client records.
+            $this->user_clients = $user->clients()->with('vendors')->get()->keyBy('id');
             $this->user_client_id = 'NEW';
         }
 
@@ -150,6 +153,8 @@ class ClientCreate extends Component
 
     public function edit()
     {
+        $this->authorize('update', $this->client);
+
         $client = $this->form->update();
 
         $this->modal('client_form_modal')->close();
@@ -165,6 +170,8 @@ class ClientCreate extends Component
 
     public function add_user_to_client()
     {
+        $this->authorize('update', $this->client);
+
         // Attach the user to the client
         if ($this->form->user && $this->client) {
             $this->client->users()->syncWithoutDetaching([$this->form->user->id]);
@@ -195,6 +202,8 @@ class ClientCreate extends Component
             $this->modal('client_form_modal')->close();
             return $this->redirect('/clients/'.$this->user_client_id, navigate: true);
         }
+
+        $this->authorize('create', Client::class);
 
         $this->modal('client_form_modal')->close();
         $this->dispatch('refreshComponent')->to('clients.clients-show');

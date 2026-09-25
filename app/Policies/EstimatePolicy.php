@@ -116,7 +116,17 @@ class EstimatePolicy
      */
     public function restore(User $user, Estimate $estimate): bool
     {
-        //
+        // First check if user is Admin
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
+        // Then check if user's vendor has business_type of 1099
+        if ($user->vendor && $user->vendor->business_type === '1099') {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -124,6 +134,16 @@ class EstimatePolicy
      */
     public function forceDelete(User $user, Estimate $estimate): bool
     {
-        //
+        // First check if user is Admin
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
+        // Then check if user's vendor has business_type of 1099
+        if ($user->vendor && $user->vendor->business_type === '1099') {
+            return false;
+        }
+
+        return true;
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Livewire\Forms;
 
 use App\Models\Payment;
+use App\Models\Project;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Rule;
 use Livewire\Form;
@@ -10,6 +11,17 @@ use Livewire\Form;
 class PaymentForm extends Form
 {
     use AuthorizesRequests;
+
+    /**
+     * project_id rides in on a client-controlled array (component->projects)
+     * — check it against what this tenant can see (ProjectScope) rather than
+     * trusting it, so a payment can't be recorded against a project outside
+     * the tenant.
+     */
+    protected function isProjectAccessible($projectId): bool
+    {
+        return $projectId && Project::whereKey($projectId)->exists();
+    }
 
     public ?Payment $payment;
 
@@ -60,7 +72,8 @@ class PaymentForm extends Form
         $projects = collect($this->component->projects ?? [])
             ->filter(function ($p) {
                 if (!is_array($p)) { return false; }
-                return $this->parseAmount($p['amount'] ?? null) !== 0.0;
+                return $this->parseAmount($p['amount'] ?? null) !== 0.0
+                    && $this->isProjectAccessible($p['id'] ?? null);
             })
             ->values();
 
@@ -106,7 +119,9 @@ class PaymentForm extends Form
         // Gather selected projects with an amount
         $component = $this->component;
         $selected = collect($component->projects ?? [])
-            ->filter(fn($p) => is_array($p) && $this->parseAmount($p['amount'] ?? null) !== 0.0)
+            ->filter(fn($p) => is_array($p)
+                && $this->parseAmount($p['amount'] ?? null) !== 0.0
+                && $this->isProjectAccessible($p['id'] ?? null))
             ->unique('id')
             ->values();
         $selectedProjectIds = $selected->pluck('id')->all();

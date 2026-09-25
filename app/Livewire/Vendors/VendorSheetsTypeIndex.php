@@ -3,7 +3,10 @@
 namespace App\Livewire\Vendors;
 
 use App\Models\Category;
+use App\Models\Expense;
 use App\Models\Vendor;
+use Illuminate\Support\Collection;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class VendorSheetsTypeIndex extends Component
@@ -27,16 +30,51 @@ class VendorSheetsTypeIndex extends Component
     public function mount()
     {
         $this->categories = Category::all();
+        // No eager-loaded 'expenses' here on purpose — that dehydrated every
+        // expense row for every retail vendor into the page (17MB). The
+        // category checkboxes only need per-category counts, computed in SQL
+        // by expenseCategoryCounts() below.
         $this->vendors =
             Vendor::where('business_type', 'Retail')
-                // ->where('id', 8)
-                ->with('expenses')
-                // ->with(['expenses' => function($query){
-                //     $query->get()->groupBy('category_id');
-                // }])
-                // ->groupBy('expense.category_id')
                 ->orderBy('created_at', 'DESC')
                 ->get();
+    }
+
+    /**
+     * Category lookup built once instead of a Collection::find() call (a
+     * linear scan) per row in the blade.
+     *
+     * @return Collection<int, Category>
+     */
+    #[Computed]
+    public function categoryMap(): Collection
+    {
+        return collect($this->categories)->keyBy('id');
+    }
+
+    /**
+     * Expense counts grouped by vendor and category, aggregated in SQL so
+     * the page never loads (or dehydrates) the underlying expense rows.
+     *
+     * @return array<int, array<int|string, int>>
+     */
+    #[Computed]
+    public function expenseCategoryCounts(): array
+    {
+        $vendorIds = collect($this->vendors)->pluck('id');
+
+        if ($vendorIds->isEmpty()) {
+            return [];
+        }
+
+        return Expense::query()
+            ->selectRaw('vendor_id, category_id, count(*) as aggregate')
+            ->whereIn('vendor_id', $vendorIds)
+            ->groupBy('vendor_id', 'category_id')
+            ->get()
+            ->groupBy('vendor_id')
+            ->map(fn (Collection $rows) => $rows->pluck('aggregate', 'category_id')->all())
+            ->all();
     }
 
     // public function updated($field, $value)
@@ -80,20 +118,15 @@ class VendorSheetsTypeIndex extends Component
                         $category_id = null;
                     }
 
-                    $expenses = $vendor->expenses->where('category_id', $category_id);
-                    // dd($expenses);
+                    $expenses = Expense::where('vendor_id', $vendor->id)
+                        ->where('category_id', $category_id)
+                        ->get();
+
                     foreach ($expenses as $expense) {
                         $expense->timestamps = false;
                         $expense->category_id = $this->vendors[$vendor_index]->category_id;
                         $expense->save();
                     }
-                    // $expenses->each(function($expense, $key) use($vendor) {
-                    //     $expense->update(['category_id' => $vendor->category_id]);
-                    //     $expense->save();
-                    // });
-
-                    //$expenses->timestamps = false;
-                    //$expenses->update(['category_id', $vendor->category_id]);
                 }
             }
         }

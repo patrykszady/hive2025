@@ -28,7 +28,7 @@ class CompanyEmailPolicy
      */
     public function create(User $user): bool
     {
-        //
+        return $user->vendor_role === 'Admin';
     }
 
     /**

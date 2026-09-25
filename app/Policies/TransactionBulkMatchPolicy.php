@@ -47,7 +47,9 @@ class TransactionBulkMatchPolicy
      */
     public function update(User $user, TransactionBulkMatch $transactionBulkMatch): bool
     {
-        return $user->vendor_role === 'Admin';
+        return $user->vendor_role === 'Admin'
+            && $user->vendor
+            && (int) $transactionBulkMatch->belongs_to_vendor_id === (int) $user->vendor->id;
     }
 
     /**
@@ -57,7 +59,7 @@ class TransactionBulkMatchPolicy
      */
     public function delete(User $user, TransactionBulkMatch $transactionBulkMatch): bool
     {
-        //
+        return $this->update($user, $transactionBulkMatch);
     }
 
     /**

@@ -18,6 +18,6 @@
     @endforeach
 
     @foreach($this->banks as $bank)
-        <livewire:banks.bank-show :bank="$bank" wire:key="{{$bank->id}}" />
+        <livewire:banks.bank-show :bank="$bank" :accounts="$this->accountsByBank->get($bank->id, collect())" wire:key="{{$bank->id}}" />
     @endforeach
 </div>

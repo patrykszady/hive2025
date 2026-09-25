@@ -141,14 +141,25 @@ class Lead extends Model
             }
         }
 
-        $client = $this->user?->clients()->withoutGlobalScopes()->first();
+        $vendorId = $this->belongs_to_vendor_id;
 
-        if ($client) {
-            return $client;
+        // Unscoped so this also runs outside a request (queue jobs, console
+        // commands, where auth()->user() — and therefore ClientScope — has
+        // nothing to key off). But it must still be filtered to THIS lead's
+        // own vendor: a contact who is a client of another tenant too must
+        // never resolve to that tenant's client record here.
+        if ($vendorId) {
+            $client = $this->user?->clients()
+                ->withoutGlobalScopes()
+                ->whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendorId))
+                ->first();
+
+            if ($client) {
+                return $client;
+            }
         }
 
         $address = $this->lead_data['address'] ?? null;
-        $vendorId = $this->belongs_to_vendor_id;
 
         if (! $address || ! $vendorId) {
             return null;

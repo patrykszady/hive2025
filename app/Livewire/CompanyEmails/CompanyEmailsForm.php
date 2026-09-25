@@ -15,6 +15,18 @@ class CompanyEmailsForm extends Component
 
     public $email = null;
 
+    /**
+     * Set in mount() but read by the view on every subsequent render. It was
+     * never declared as a property, so Livewire's snapshot dropped it after
+     * the first request — every submit 500'd on "Undefined variable
+     * $view_text" (found while testing the authorize() fix below).
+     */
+    public $view_text = [
+        'card_title' => 'Add Email',
+        'button_text' => 'Add Email',
+        'form_submit' => 'store',
+    ];
+
     protected $listeners = ['addEmail'];
 
     protected function rules()
@@ -51,6 +63,7 @@ class CompanyEmailsForm extends Component
 
     public function store()
     {
+        $this->authorize('create', CompanyEmail::class);
         $this->validate();
 
         CompanyEmail::create([

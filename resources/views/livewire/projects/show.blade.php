@@ -123,7 +123,7 @@
 
             @can('viewFinancials', $project)
                 @can('update', $project)
-                    @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']) && $project->expenses()->exists())
+                    @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']) && $this->hasExpenses)
                         <div class="order-7 lg:order-3">
                             <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
                         </div>
@@ -148,7 +148,7 @@
 
                 @can('update', $project)
                     {{-- EMAIL TRACKING --}}
-                    @if(\App\Models\EmailTracking::clientFacing()->forProjectAndItsLeads($project->id)->exists())
+                    @if($this->hasEmailTracking)
                         <div class="order-5">
                             <livewire:projects.email-tracking-table
                                 :project-id="$project->id"
@@ -179,7 +179,7 @@
                              when there are none, so its skeleton never paints a
                              card that the loaded component then removes (same
                              guard as Email Tracking / Materials). --}}
-                        @if($this->project->distributions()->exists())
+                        @if($this->hasDistributions)
                             <div class="order-9">
                                 <livewire:projects.project-distributions :project="$project" lazy />
                             </div>

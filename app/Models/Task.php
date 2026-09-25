@@ -901,6 +901,28 @@ class Task extends Model
     }
 
     /**
+     * A task the signed-in user may see: one on a project this tenant can
+     * access (ProjectScope). Task carries no global scope of its own, so a
+     * bare Task::find lets any signed-in user read or act on another
+     * vendor's task via a crafted Livewire call. Mirrors
+     * App\Livewire\Planner\CardsIndex::visibleTask() — kept here so every
+     * owner of a Task-touching component can reuse the same rule.
+     *
+     * Includes trashed tasks (visibility, not "still active") so an edit
+     * modal can still open a task pending restore.
+     */
+    public static function visibleTo(int $taskId): ?self
+    {
+        $task = self::withTrashed()->find($taskId);
+
+        if (! $task || ! Project::query()->whereKey($task->project_id)->exists()) {
+            return null;
+        }
+
+        return $task;
+    }
+
+    /**
      * Per-day task-card counts for the loading skeleton, one entry per date
      * block the loaded card paints. Mirrors groupedTasks(): the same 8-day
      * window, the same options.dates / start_date grouping, and the same

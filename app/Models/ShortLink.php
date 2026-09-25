@@ -33,7 +33,14 @@ class ShortLink extends Model
         );
     }
 
-    protected static function generateUniqueCode(int $length = 6): string
+    /**
+     * 6 lowercase-alphanumeric characters is ~31 bits — small enough that,
+     * combined with these links never expiring, brute-forcing one was
+     * plausible. New links get 10 characters (~52 bits); existing 6-char
+     * codes already issued keep resolving (lookup is by the `code` column,
+     * not its length).
+     */
+    protected static function generateUniqueCode(int $length = 10): string
     {
         do {
             $code = Str::lower(Str::random($length));

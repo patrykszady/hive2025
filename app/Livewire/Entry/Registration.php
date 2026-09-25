@@ -26,7 +26,24 @@ class Registration extends Component
 
     private const VERIFIED_CELL_SESSION_KEY = 'registration_verified_cell';
 
+    /** The address the pending email code was sent to. */
+    private const PENDING_EMAIL_SESSION_KEY = 'registration_codes.email_for';
+
+    private const VERIFIED_EMAIL_SESSION_KEY = 'registration_verified_email';
+
     public ?User $user = null;
+
+    /**
+     * The typed email and names. They are plain properties rather than
+     * `user.*` bindings: with legacy model binding off, Livewire refuses to
+     * set model attributes, and an unsaved model reaches the next request as
+     * an empty instance, so a new registrant's details would be lost.
+     */
+    public string $email = '';
+
+    public string $first_name = '';
+
+    public string $last_name = '';
 
     #[Validate]
     public $user_cell = null;
@@ -165,14 +182,14 @@ class Registration extends Component
             //     'digits:10',
             //     Rule::unique('users', 'cell_phone')->ignore($this->user->id),
             // ],
-            'user.email' => [
+            'email' => [
                 'required',
                 'email',
                 'min:6',
-                Rule::unique('users', 'email')->ignore($this->user->id),
+                Rule::unique('users', 'email')->ignore($this->user?->id),
             ],
-            'user.first_name' => 'required|min:2',
-            'user.last_name' => 'required|min:2',
+            'first_name' => 'required|min:2',
+            'last_name' => 'required|min:2',
         ];
     }
 
@@ -437,11 +454,17 @@ class Registration extends Component
 
     public function user_email()
     {
-        $this->validateOnly('user.email');
-        $code = $this->issueCode(self::EMAIL_CODE_SESSION_KEY);
+        if ($this->hasExistingEmail()) {
+            $address = (string) $this->user->email;
+        } else {
+            $this->validateOnly('email');
+            $address = $this->email;
+        }
 
-        //send code to email
-        Mail::to($this->user->email)->send(new EmailVerificationCode($code));
+        $code = $this->issueCode(self::EMAIL_CODE_SESSION_KEY);
+        session()->put(self::PENDING_EMAIL_SESSION_KEY, $address);
+
+        Mail::to($address)->send(new EmailVerificationCode($code));
 
         $this->validate_email = true;
         $this->email_code_sent_at = now()->timestamp;
@@ -455,11 +478,18 @@ class Registration extends Component
     {
         $this->validateOnly('email_verification_code');
 
-        if (! $this->codeMatches(self::EMAIL_CODE_SESSION_KEY, $this->email_verification_code)) {
+        $verifiedEmail = (string) session(self::PENDING_EMAIL_SESSION_KEY, '');
+
+        if ($verifiedEmail === '' || ! $this->codeMatches(self::EMAIL_CODE_SESSION_KEY, $this->email_verification_code)) {
             return $this->addError('email_verification_code', 'Code does not match.');
         }
 
-        session()->forget(self::EMAIL_CODE_SESSION_KEY);
+        session()->forget([self::EMAIL_CODE_SESSION_KEY, self::PENDING_EMAIL_SESSION_KEY]);
+        session()->put(self::VERIFIED_EMAIL_SESSION_KEY, $verifiedEmail);
+
+        if ($this->user->exists && empty($this->user->email)) {
+            $this->user->email = $verifiedEmail;
+        }
 
         $this->validate_email = false;
         $this->show_name = true;
@@ -478,15 +508,17 @@ class Registration extends Component
             return;
         }
 
-        if (!$this->user->email) {
-            $this->addError('user.email', 'Email address is required.');
+        $address = (string) session(self::PENDING_EMAIL_SESSION_KEY, '');
+
+        if ($address === '') {
+            $this->addError('email', 'Email address is required.');
             return;
         }
 
         $code = $this->issueCode(self::EMAIL_CODE_SESSION_KEY);
 
         // Send code to email
-        Mail::to($this->user->email)->send(new EmailVerificationCode($code));
+        Mail::to($address)->send(new EmailVerificationCode($code));
 
         $this->email_code_sent_at = now()->timestamp;
         $this->saveStateToSession();
@@ -504,14 +536,17 @@ class Registration extends Component
             return;
         }
 
+        $this->prefillNamesFromAccount();
+
         $this->validate([
+            'first_name' => 'required|min:2',
+            'last_name' => 'required|min:2',
             'password' => 'required|min:6',
             'password_confirmation' => 'required|same:password',
         ]);
 
-        if (! isset($this->user->id)) {
-            $this->user->cell_phone = $this->user_cell;
-            $this->user->email = $this->user->email;
+        if (! $this->applyRegistrationDetails()) {
+            return;
         }
 
         $this->user->save();
@@ -545,14 +580,15 @@ class Registration extends Component
             return false;
         }
 
+        $this->prefillNamesFromAccount();
+
         $this->validate([
-            'user.first_name' => 'required|min:2',
-            'user.last_name' => 'required|min:2',
+            'first_name' => 'required|min:2',
+            'last_name' => 'required|min:2',
         ]);
 
-        if (! isset($this->user->id)) {
-            $this->user->cell_phone = $this->user_cell;
-            $this->user->email = $this->user->email;
+        if (! $this->applyRegistrationDetails()) {
+            return false;
         }
 
         $this->user->save();
@@ -673,6 +709,9 @@ class Registration extends Component
             'user' => $userData,
             'user_id' => $this->user->id ?? null,
             'user_cell' => $this->user_cell,
+            'email' => $this->email,
+            'first_name' => $this->first_name,
+            'last_name' => $this->last_name,
             'confirmed_user_cell' => $this->confirmed_user_cell,
             'can_confirm_user_cell' => $this->can_confirm_user_cell,
             'validate_number' => $this->validate_number,
@@ -713,6 +752,9 @@ class Registration extends Component
             }
             
             $this->user_cell = $state['user_cell'] ?? null;
+            $this->email = (string) ($state['email'] ?? '');
+            $this->first_name = (string) ($state['first_name'] ?? '');
+            $this->last_name = (string) ($state['last_name'] ?? '');
             $this->confirmed_user_cell = $state['confirmed_user_cell'] ?? null;
             $this->can_confirm_user_cell = $state['can_confirm_user_cell'] ?? $this->isUserCellValid();
             $this->validate_number = $state['validate_number'] ?? false;
@@ -790,6 +832,52 @@ class Registration extends Component
         return true;
     }
 
+    /**
+     * An existing account's names count as typed when the form shows them as
+     * read-only, so validation passes without retyping them.
+     */
+    private function prefillNamesFromAccount(): void
+    {
+        if (! $this->user->exists) {
+            return;
+        }
+
+        if ($this->first_name === '') {
+            $this->first_name = (string) $this->user->first_name;
+        }
+
+        if ($this->last_name === '') {
+            $this->last_name = (string) $this->user->last_name;
+        }
+    }
+
+    /**
+     * Copies the verified phone and email and the typed names onto the
+     * account about to be saved. A new account needs an email verified by
+     * code in this session.
+     */
+    private function applyRegistrationDetails(): bool
+    {
+        if (! $this->user->exists) {
+            $verifiedEmail = (string) session(self::VERIFIED_EMAIL_SESSION_KEY, '');
+
+            if ($verifiedEmail === '') {
+                $this->addError('email', 'Verify your email address first.');
+                $this->redirect(route('registration', ['step' => 'email']), navigate: true);
+
+                return false;
+            }
+
+            $this->user->cell_phone = $this->user_cell;
+            $this->user->email = $verifiedEmail;
+        }
+
+        $this->user->first_name = $this->first_name;
+        $this->user->last_name = $this->last_name;
+
+        return true;
+    }
+
     private function redirectRegisteredToLogin(): void
     {
         session()->flash('error', [
@@ -805,6 +893,7 @@ class Registration extends Component
             'registration_state',
             'registration_codes',
             self::VERIFIED_CELL_SESSION_KEY,
+            self::VERIFIED_EMAIL_SESSION_KEY,
         ]);
     }
 

@@ -6,19 +6,36 @@ use App\Models\Category;
 use App\Models\Expense;
 use App\Models\Vendor;
 use Flux;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 class VendorCategoryCard extends Component
 {
+    use AuthorizesRequests;
+
     public Vendor $vendor;
     public string $year = '';
     public bool $expanded = false;
     public bool $embedded = false;
 
+    /**
+     * Expense count for this vendor computed once by the parent index (a
+     * single grouped query for every card) and handed down here — avoids
+     * this card running its own COUNT query. Locked: it's server-set state,
+     * not a form field.
+     */
+    #[Locked]
+    public ?int $initialExpenseCount = null;
+
     #[Computed]
     public function expenseCount(): int
     {
+        if ($this->initialExpenseCount !== null) {
+            return $this->initialExpenseCount;
+        }
+
         return Expense::where('vendor_id', $this->vendor->id)
             ->when($this->year, fn ($q) => $q->whereYear('date', $this->year))
             ->count();
@@ -63,8 +80,22 @@ class VendorCategoryCard extends Component
         unset($this->vendorExpenses);
     }
 
+    /**
+     * Categorizing is an Admin job on the company's own vendor list, and that
+     * list includes shared retail vendors (the reason this page exists), so
+     * it cannot use VendorPolicy::update, which refuses shared rows. The card
+     * only ever mounts with a vendor from the Admin's scoped list, and the
+     * model property is checksummed, so the row itself is already vetted.
+     */
+    private function authorizeCategorizing(): void
+    {
+        $this->authorize('viewOptions', Vendor::class);
+    }
+
     public function updateSheetsType(?string $sheetsType): void
     {
+        $this->authorizeCategorizing();
+
         $this->vendor->update(['sheets_type' => $sheetsType ?: null]);
 
         Flux::toast(
@@ -76,6 +107,8 @@ class VendorCategoryCard extends Component
 
     public function updateVendorCategory(?string $categoryId): void
     {
+        $this->authorizeCategorizing();
+
         if (! $categoryId) {
             return;
         }
@@ -100,6 +133,8 @@ class VendorCategoryCard extends Component
 
     public function clearVendorCategory(): void
     {
+        $this->authorizeCategorizing();
+
         $this->vendor->update(['category_id' => null]);
         $this->vendor->refresh();
 
@@ -112,6 +147,8 @@ class VendorCategoryCard extends Component
 
     public function reassignExpenseCategory(int $fromCategoryId, int $toCategoryId): void
     {
+        $this->authorizeCategorizing();
+
         $toCategory = Category::findOrFail($toCategoryId);
 
         $count = Expense::where('vendor_id', $this->vendor->id)

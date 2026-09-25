@@ -119,7 +119,10 @@ class BidCreate extends Component
     {
         $bid = $this->bids[$index];
         if (isset($bid['id'])) {
-            $bid = Bid::withoutGlobalScopes()->findOrFail($bid['id']);
+            // $this->bids[$index]['id'] is a client-controlled array value:
+            // resolve it through this project's own bids for this vendor so
+            // it can't be swapped for another tenant's bid id.
+            $bid = $this->project->bids()->where('vendor_id', $this->vendor->id)->findOrFail($bid['id']);
             $bid->delete();
         }
 

@@ -81,6 +81,8 @@ class EstimatesIndex extends Component
 
     public function disableEstimate(Estimate $estimate)
     {
+        $this->authorize('delete', $estimate);
+
         $estimate->delete();
 
         Flux::toast(
@@ -95,9 +97,11 @@ class EstimatesIndex extends Component
     public function removeEstimate($estimate_id)
     {
         $estimate = Estimate::withTrashed()->findOrFail($estimate_id);
-        
+
         // If already soft deleted (disabled), force delete permanently
         if ($estimate->trashed()) {
+            $this->authorize('forceDelete', $estimate);
+
             $estimate->estimate_line_items()->each(function ($lineItem) {
                 $lineItem->allowances()->delete();
                 $lineItem->forceDelete();
@@ -107,6 +111,8 @@ class EstimatesIndex extends Component
             $message = 'Estimate permanently deleted';
         } else {
             // Otherwise, soft delete (disable)
+            $this->authorize('delete', $estimate);
+
             $estimate->delete();
             $message = 'Estimate disabled';
         }
@@ -123,6 +129,9 @@ class EstimatesIndex extends Component
     public function activateEstimate($estimate_id)
     {
         $estimate = Estimate::withTrashed()->findOrFail($estimate_id);
+
+        $this->authorize('restore', $estimate);
+
         $estimate->restore();
 
         Flux::toast(

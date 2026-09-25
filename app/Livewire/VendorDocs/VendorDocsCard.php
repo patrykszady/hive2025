@@ -6,6 +6,7 @@ use App\Models\Vendor;
 use App\Models\VendorDoc;
 
 use Livewire\Attributes\Lazy;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -18,6 +19,15 @@ class VendorDocsCard extends Component
 
     public $vendor_docs = [];
     public $view = false;
+
+    /**
+     * Distinct doc-type count computed once by the parent index (one grouped
+     * query for every card) and handed down here — lets the skeleton skip
+     * its own COUNT query. Null when the card is used standalone (e.g. the
+     * vendor show page), where placeholder() falls back to its own query.
+     */
+    #[Locked]
+    public ?int $docTypeCount = null;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -48,21 +58,28 @@ class VendorDocsCard extends Component
     {
         $vendor = $params['vendor'] ?? null;
         $vendorId = $vendor instanceof Vendor ? $vendor->id : (is_numeric($vendor) ? (int) $vendor : null);
+        $docTypeCount = $params['docTypeCount'] ?? null;
 
         // Cheap COUNT so the skeleton paints the rows that will actually
         // arrive — and none when the vendor has no documents.
         // render() collapses the docs to ONE row per type (latest of each), so
         // the skeleton counts distinct types — counting every document painted
         // 6 shimmer rows for a card that renders 3.
-        $rows = $vendorId
-            ? min(
+        if ($docTypeCount !== null) {
+            // Pre-computed by the parent index (one grouped query for every
+            // card) — skip the skeleton's own COUNT query entirely.
+            $rows = min((int) $docTypeCount, static::placeholderRows());
+        } elseif ($vendorId) {
+            $rows = min(
                 VendorDoc::withoutGlobalScopes()
                     ->where('vendor_id', $vendorId)
                     ->distinct()
                     ->count('type'),
                 static::placeholderRows()
-            )
-            : static::placeholderRows();
+            );
+        } else {
+            $rows = static::placeholderRows();
+        }
 
         return view('livewire.vendor-docs.placeholder', [
             'expanded' => !($params['view'] ?? false),

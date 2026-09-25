@@ -64,6 +64,7 @@ trait HasCallActions
             'to_number' => $phone,
             'status' => CallLog::STATUS_INITIATED,
             'user_id' => $user->id,
+            'vendor_id' => $user->vendor?->id,
             'metadata' => $metadata,
         ]);
 
@@ -120,7 +121,12 @@ trait HasCallActions
 
     public function markAsSpam(int $callId): void
     {
-        $call = CallLog::find($callId);
+        $user = auth()->user();
+        $vendorId = $user->vendor?->id;
+
+        // find($callId) alone had no tenant check at all — any signed-in
+        // vendor user could pass any call id.
+        $call = CallLog::query()->visibleToMessagesUser($user)->find($callId);
         if (! $call) {
             return;
         }
@@ -131,12 +137,19 @@ trait HasCallActions
             return;
         }
 
+        // Scoped to this vendor: the old firstOrCreate() had no vendor_id at
+        // all, which BlockedCaller::isBlocked() treats as a GLOBAL block —
+        // one company's "spam" silently blocked the number for every
+        // company, and the update below reclassified every company's call
+        // history for that number as blocked.
         BlockedCaller::firstOrCreate(
-            ['phone_number' => $phone],
+            ['phone_number' => $phone, 'vendor_id' => $vendorId],
             ['reason' => 'Manually marked as spam', 'blocked_by_user_id' => auth()->id(), 'auto_blocked' => false]
         );
 
-        CallLog::where('from_number', $phone)
+        CallLog::query()
+            ->visibleToMessagesUser($user)
+            ->where('from_number', $phone)
             ->where('status', '!=', CallLog::STATUS_BLOCKED)
             ->update(['status' => CallLog::STATUS_BLOCKED]);
 
@@ -145,7 +158,11 @@ trait HasCallActions
 
     public function unblockNumber(string $phone): void
     {
-        $deleted = BlockedCaller::where('phone_number', $phone)->delete();
+        // Scoped to this vendor's own block so one company can't remove a
+        // block another company (or a global block) put in place.
+        $deleted = BlockedCaller::where('phone_number', $phone)
+            ->where('vendor_id', auth()->user()->vendor?->id)
+            ->delete();
 
         if (! $deleted) {
             Flux::toast(variant: 'warning', heading: 'Not Blocked', text: $this->formatPhone($phone) . ' is not currently blocked.', duration: 4000, position: 'top right');

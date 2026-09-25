@@ -16,8 +16,21 @@ class BidScope implements Scope
         } else {
             $user = auth()->user();
 
-            // Client users or users without a vendor should see all bids for the project
+            // A signed-in user with no vendor (a homeowner in the client
+            // portal) may only see bids for projects belonging to the client
+            // record(s) they are personally linked to. ProjectScope already
+            // narrows Project::query() to those same projects.
             if ($user->is_browsing_as_client || !$user->vendor) {
+                $projectIds = Project::query()->pluck('id');
+
+                if ($projectIds->isEmpty()) {
+                    $builder->whereRaw('1 = 0');
+
+                    return;
+                }
+
+                $builder->whereIn('project_id', $projectIds);
+
                 return;
             }
 

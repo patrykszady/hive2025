@@ -5,6 +5,7 @@ namespace App\Livewire\Auth;
 use App\Models\User;
 use App\Traits\DetectsDeviceType;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
@@ -44,6 +45,20 @@ class Login extends Component
     public function checkEmail(): void
     {
         $this->validate(['identifier' => 'required|string']);
+
+        // checkEmail() answers "does an account exist for this
+        // email/phone?", so it is also a user-enumeration oracle. This
+        // doesn't change that answer (the UX — which identifiers exist is
+        // still revealed) — it only caps how fast one IP can ask, so
+        // enumerating the user table stays slow.
+        $throttleKey = 'login-check-email:'.request()->ip();
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 20)) {
+            $this->addError('identifier', 'Too many attempts. Please wait a minute and try again.');
+            return;
+        }
+
+        RateLimiter::hit($throttleKey, 60);
 
         $identifier = trim($this->identifier);
 

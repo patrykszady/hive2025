@@ -85,7 +85,12 @@ class EstimateLineItemCreate extends Component
     #[Computed]
     public function line_items()
     {
-        return LineItem::orderBy('created_at', 'DESC')->get()->keyBy('id');
+        // LineItem carries no tenant scope of its own: this catalog dropdown
+        // must never surface another vendor's line items.
+        return LineItem::where('belongs_to_vendor_id', auth()->user()->vendor?->id ?? 0)
+            ->orderBy('created_at', 'DESC')
+            ->get()
+            ->keyBy('id');
     }
 
     /**
@@ -293,6 +298,12 @@ class EstimateLineItemCreate extends Component
 
     public function selected_line_item($line_item_id)
     {
+        // $this->line_items is already vendor-scoped: an id outside it is
+        // either bogus or another tenant's, so just ignore it.
+        if (! isset($this->line_items[$line_item_id])) {
+            return;
+        }
+
         $this->line_item_id = $line_item_id;
         $this->form->setLineItem($this->line_items[$line_item_id]);
         $this->form->total = $this->getTotalLineItemProperty();
@@ -451,6 +462,8 @@ class EstimateLineItemCreate extends Component
 
     public function removeFromEstimate()
     {
+        $this->authorize('update', $this->estimate);
+
         $this->estimate_line_item->delete();
         $this->modal('estimate_line_item_form_modal')->close();
         $this->dispatch('refreshComponent')->to('estimates.estimate-show');
@@ -523,7 +536,9 @@ class EstimateLineItemCreate extends Component
 
         $this->form->validate();
 
-        $lineItem = LineItem::query()->findOrFail($this->line_item_id);
+        // LineItem carries no tenant scope of its own.
+        $lineItem = LineItem::where('belongs_to_vendor_id', auth()->user()->vendor?->id ?? 0)
+            ->findOrFail($this->line_item_id);
 
         $lineItem->update([
             'desc' => $this->form->desc,

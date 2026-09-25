@@ -707,9 +707,23 @@ class SmsNewThread extends Component
 
     public function send(GroupSmsService $smsService): void
     {
+        // exists:clients,id bypasses ClientScope (a bare table check), so a
+        // crafted clientId would pass validation for another tenant's
+        // client and get stamped onto the new thread — and the offline/
+        // display presenter's unscoped client fallback would then show that
+        // other company's client to this tenant. vendorId is deliberately
+        // left to the plain exists:vendors,id rule: starting a thread with a
+        // vendor not yet related to this tenant (reaching out to a new sub
+        // for the first time) is how a relationship starts — see "sends a
+        // vendor thread without validating stale client state" in
+        // SmsNewThreadTest.
         $this->validate([
             'recipientType' => 'required|in:client,vendor',
-            'clientId' => 'exclude_unless:recipientType,client|nullable|exists:clients,id',
+            'clientId' => ['exclude_unless:recipientType,client', 'nullable', function ($attribute, $value, $fail) {
+                if ($value && ! Client::query()->whereKey($value)->exists()) {
+                    $fail('The selected client is invalid.');
+                }
+            }],
             'vendorId' => 'exclude_unless:recipientType,vendor|nullable|exists:vendors,id',
             'message' => 'required|string|max:1600',
         ]);

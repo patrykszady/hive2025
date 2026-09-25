@@ -7,6 +7,7 @@ use App\Models\EmailTemplate;
 use App\Models\Estimate;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -14,6 +15,8 @@ use Livewire\Component;
 
 class EstimateAccept extends Component
 {
+    use AuthorizesRequests;
+
     public Estimate $estimate;
 
     public Project $project;
@@ -81,7 +84,10 @@ class EstimateAccept extends Component
 
         $this->bids = $this->project->bids()->vendorBids($this->estimate->vendor->id)->with('estimate_sections')->orderBy('type')->get();
 
-        if ($this->bids->isEmpty()) {
+        // Auto-scaffolding the "Original Bid" is a write: only someone who
+        // could otherwise edit the estimate gets one (never a client-browsing
+        // viewer, who also has no vendor to write it as).
+        if ($this->bids->isEmpty() && auth()->user()?->can('update', $this->estimate)) {
             $bid = Bid::create([
                 'amount' => 0.00,
                 'type' => 1,
@@ -195,7 +201,7 @@ class EstimateAccept extends Component
         // Reload bids to include any newly created change orders
         $this->bids = $this->project->bids()->vendorBids($this->estimate->vendor->id)->with('estimate_sections')->orderBy('type')->get();
 
-        if ($this->bids->isEmpty()) {
+        if ($this->bids->isEmpty() && auth()->user()?->can('update', $this->estimate)) {
             $bid = Bid::create([
                 'amount' => 0.00,
                 'type' => 1,
@@ -233,6 +239,8 @@ class EstimateAccept extends Component
     //new estiamte Bid
     public function newEstimateBid($section_index)
     {
+        $this->authorize('update', $this->estimate);
+
         $bid_index = $this->bids->max('type');
         $bid = Bid::create([
             'amount' => 0.00,
@@ -364,6 +372,8 @@ class EstimateAccept extends Component
 
     public function save()
     {
+        $this->authorize('update', $this->estimate);
+
         if ($this->payments_outstanding < 0) {
             $this->addError('payments_remaining_error', 'Amount Remaining cannot be less than $0.00');
         } else {

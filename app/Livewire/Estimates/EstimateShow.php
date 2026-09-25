@@ -73,18 +73,21 @@ class EstimateShow extends Component
 
     public function mount()
     {
+        $this->authorize('view', $this->estimate);
+
         $this->sections = $this->estimate->estimate_sections->toArray();
         $this->trashedSections = $this->estimate->estimate_sections()->onlyTrashed()->get()->toArray();
         $this->loadTrashedLineItems();
 
         //11-1-2023 MOVE to EstiamteCreate
         //start with one section and an ADD card/button for line items
-        if (empty($this->sections)) {
+        // Auto-scaffolding a first section is a write: only someone who could
+        // otherwise edit the estimate (never a client-browsing viewer) gets one.
+        if (empty($this->sections) && auth()->user()?->can('update', $this->estimate)) {
             $this->create_new_section();
-            $this->estimate_refresh();
-        } else {
-            $this->estimate_refresh();
         }
+
+        $this->estimate_refresh();
     }
 
     public function print_reimbursements(): StreamedResponse
@@ -210,8 +213,10 @@ class EstimateShow extends Component
 
     public function lineItemRestore(int $lineItemId): void
     {
-        $lineItem = EstimateLineItem::onlyTrashed()->findOrFail($lineItemId);
-        $section = EstimateSection::findOrFail($lineItem->section_id);
+        $this->authorize('update', $this->estimate);
+
+        $lineItem = $this->estimate->estimate_line_items()->onlyTrashed()->findOrFail($lineItemId);
+        $section = $this->estimate->estimate_sections()->findOrFail($lineItem->section_id);
 
         // Look up the original order from the activity log recorded on deletion.
         // displace() logs this FIRST (before LogsActivity fires its own 'deleted' entry),
@@ -292,6 +297,8 @@ class EstimateShow extends Component
 
     public function sectionAdd()
     {
+        $this->authorize('update', $this->estimate);
+
         $this->create_new_section();
         $this->estimate_refresh();
         $this->refreshFinancialIslands();
@@ -308,7 +315,9 @@ class EstimateShow extends Component
 
     public function sectionRestore(int $sectionId)
     {
-        $section = EstimateSection::withTrashed()->findOrFail($sectionId);
+        $this->authorize('update', $this->estimate);
+
+        $section = $this->estimate->estimate_sections()->withTrashed()->findOrFail($sectionId);
         $section->restore();
 
         $currentMaxOrder = EstimateSection::query()
@@ -363,8 +372,10 @@ class EstimateShow extends Component
 
     public function sectionDelete($section_index)
     {
+        $this->authorize('update', $this->estimate);
+
         $section_data = $this->sections[$section_index];
-        $section = EstimateSection::findOrFail($section_data['id']);
+        $section = $this->estimate->estimate_sections()->findOrFail($section_data['id']);
 
         // Push deleted sections to the end so restores can be reinserted cleanly.
         $section->order = 999999;
@@ -401,7 +412,9 @@ class EstimateShow extends Component
 
     public function sectionUpdate($section_index)
     {
-        $section = EstimateSection::findOrFail($this->sections[$section_index]['id']);
+        $this->authorize('update', $this->estimate);
+
+        $section = $this->estimate->estimate_sections()->findOrFail($this->sections[$section_index]['id']);
         $section->name = $this->sections[$section_index]['name'];
         $section->save();
         $this->estimate_refresh();
@@ -568,6 +581,8 @@ class EstimateShow extends Component
 
     public function disableEstimate()
     {
+        $this->authorize('delete', $this->estimate);
+
         $projectId = $this->estimate->project->id;
         $this->estimate->delete();
 
@@ -584,6 +599,8 @@ class EstimateShow extends Component
 
     public function removeEstimate()
     {
+        $this->authorize('delete', $this->estimate);
+
         $projectId = $this->estimate->project->id;
         $this->estimate->delete();
 
@@ -600,6 +617,8 @@ class EstimateShow extends Component
 
     public function activateEstimate()
     {
+        $this->authorize('restore', $this->estimate);
+
         $this->estimate->restore();
 
         Flux::toast(
@@ -613,8 +632,10 @@ class EstimateShow extends Component
 
     public function sectionDuplicate($section_index)
     {
+        $this->authorize('update', $this->estimate);
+
         $section_data = $this->sections[$section_index];
-        $section = EstimateSection::findOrFail($section_data['id']);
+        $section = $this->estimate->estimate_sections()->findOrFail($section_data['id']);
         $line_items = $this->estimate->estimate_line_items()->where('section_id', $section->id)->get();
 
         $new_section = $this->create_new_section($section->name.' -Copy');
@@ -700,19 +721,26 @@ class EstimateShow extends Component
 
     public function sort_sections($item, $position): void
     {
-        $section = EstimateSection::findOrFail($item);
+        $this->authorize('update', $this->estimate);
+
+        $section = $this->estimate->estimate_sections()->findOrFail($item);
         $section->move($position);
         $this->estimate_refresh();
     }
 
     public function sort_line_item($item, $position, $sectionId = null): void
     {
-        $line_item = EstimateLineItem::findOrFail($item);
+        $this->authorize('update', $this->estimate);
+
+        $line_item = $this->estimate->estimate_line_items()->findOrFail($item);
 
         $sectionId = $sectionId ? (int) $sectionId : null;
         $oldSectionId = $line_item->section_id;
 
         if ($sectionId && $sectionId !== $oldSectionId) {
+            // The destination must be one of this estimate's own sections too.
+            $this->estimate->estimate_sections()->findOrFail($sectionId);
+
             // Cross-section move: close the gap in the old section
             $line_item->displace();
 

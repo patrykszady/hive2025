@@ -108,10 +108,15 @@ class EstimateLineItemForm extends Form
         $this->authorize('create', LineItem::class);
         $this->validate();
 
+        // section_id is a plain client-writable property: resolve it
+        // through this estimate's own sections so it can't be pointed at
+        // another tenant's (or another estimate's) section.
+        $section = $this->component->estimate->estimate_sections()->findOrFail($this->component->section_id);
+
         $lineItem = EstimateLineItem::create([
             'estimate_id' => $this->component->estimate->id,
             'line_item_id' => $this->line_item->id,
-            'section_id' => $this->component->section_id,
+            'section_id' => $section->id,
             'name' => $this->line_item->name,
             'category' => $this->category,
             'sub_category' => $this->sub_category,
@@ -134,10 +139,15 @@ class EstimateLineItemForm extends Form
         $this->authorize('create', LineItem::class);
         $this->validate();
 
+        // section_id is a plain client-writable property: resolve it
+        // through this estimate's own sections so it can't be pointed at
+        // another tenant's (or another estimate's) section.
+        $section = $this->component->estimate->estimate_sections()->findOrFail($this->component->section_id);
+
         $this->estimate_line_item->update([
             'estimate_id' => $this->component->estimate->id,
             'line_item_id' => $this->estimate_line_item->line_item_id,
-            'section_id' => $this->component->section_id,
+            'section_id' => $section->id,
             'name' => $this->estimate_line_item->name,
             'category' => $this->category,
             'sub_category' => $this->sub_category,
@@ -176,7 +186,10 @@ class EstimateLineItemForm extends Form
             $globalAllowance = $this->resolveGlobalAllowance($lineItem, $description, $pricingMode, $unitAmount, $amount);
 
             if (! empty($entry['id'])) {
-                $allowance = EstimateLineItemAllowance::find($entry['id']);
+                // $entry['id'] is a client-controlled array value: resolve it
+                // through this line item's own allowances so it can't be
+                // swapped for another line item's (or tenant's) allowance id.
+                $allowance = $lineItem->allowances()->find($entry['id']);
                 if ($allowance) {
                     $allowance->update([
                         'line_item_allowance_id' => $globalAllowance?->id,

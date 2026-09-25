@@ -57,13 +57,21 @@ class TimesheetPolicy
             return false;
         }
 
-        // Admins on non-1099 vendors can view payments
-        if ($user->vendor_role === 'Admin') {
+        // Users can always view their own payment page
+        if ($user->id === $paymentUser->id) {
             return true;
         }
 
-        // Otherwise, users can view their own payment page
-        return $user->id === $paymentUser->id;
+        // Admins on non-1099 vendors can view payments — but only for
+        // someone employed by their own company, not any tenant's user.
+        if ($user->vendor_role === 'Admin' && $user->vendor) {
+            return $paymentUser->vendors()
+                ->where('vendors.id', $user->vendor->id)
+                ->wherePivot('is_employed', 1)
+                ->exists();
+        }
+
+        return false;
     }
 
     /**

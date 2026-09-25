@@ -3,7 +3,6 @@
 namespace App\Livewire\Menards;
 
 use App\Http\Controllers\MenardsSyncStatusController;
-use App\Models\Bank;
 use App\Services\MenardsRemoteBrowserService;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -21,12 +20,14 @@ class MenardsBrowserViewer extends Component
 {
     public function mount(): void
     {
-        $this->authorize('viewAny', Bank::class);
+        // One shared, server-side browser signed into one company's Menards
+        // account: only that company's admins may view or retry it.
+        $this->authorize('menards-browser');
     }
 
     public function retrySignin(): void
     {
-        $this->authorize('viewAny', Bank::class);
+        $this->authorize('menards-browser');
 
         dispatch(function () {
             Artisan::call('menards:browser', ['action' => 'ensure']);

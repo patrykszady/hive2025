@@ -570,6 +570,56 @@ class Vendor extends Model
     }
 
     /**
+     * Whether $company may add this vendor to its own vendor list
+     * (vendors_vendor). Directory contacts, retailers and subs that never
+     * signed up are shareable; a vendor that completed its own registration
+     * is another tenant's real company record and must never be linkable
+     * from outside that tenant.
+     */
+    public function isLinkableBy(?self $company): bool
+    {
+        if (! $company) {
+            return false;
+        }
+
+        if ($this->id === $company->id) {
+            return true;
+        }
+
+        return ! data_get($this->registration, 'registered');
+    }
+
+    /**
+     * Whether $company's admin may edit this vendor's business record.
+     * Limited to the company's own profile, or a private directory contact
+     * that no other tenant also references and that never completed its own
+     * registration — never a registered company or a shared retailer row.
+     */
+    public function isEditableBy(?self $company): bool
+    {
+        if (! $company) {
+            return false;
+        }
+
+        if ($this->id === $company->id) {
+            return true;
+        }
+
+        if (data_get($this->registration, 'registered')) {
+            return false;
+        }
+
+        if ($this->business_type === 'Retail') {
+            return false;
+        }
+
+        return ! self::withoutGlobalScopes()
+            ->whereHas('vendors', fn ($query) => $query->where('vendors.id', $this->id))
+            ->where('id', '!=', $company->id)
+            ->exists();
+    }
+
+    /**
      * Accessor for the vendor's registration date as a Carbon instance.
      * Falls back to null if unavailable or unparsable.
      */

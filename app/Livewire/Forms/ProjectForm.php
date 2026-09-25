@@ -2,8 +2,10 @@
 
 namespace App\Livewire\Forms;
 
+use App\Models\Client;
 use App\Models\Project;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Rule;
 use Livewire\Form;
 
@@ -37,9 +39,23 @@ class ProjectForm extends Form
         $this->component->zip_code = $project->zip_code;
     }
 
+    /**
+     * client_id is a client-chosen selector — check it against this tenant's
+     * own clients (ClientScope) rather than trusting whatever id arrives.
+     */
+    protected function assertClientAccessible(): void
+    {
+        if (! Client::whereKey($this->client_id)->exists()) {
+            throw ValidationException::withMessages([
+                'client_id' => 'Invalid client selected.',
+            ]);
+        }
+    }
+
     public function update()
     {
         $this->validate();
+        $this->assertClientAccessible();
 
         $oldClientId = $this->project->client_id;
         $newClientId = $this->client_id;
@@ -101,6 +117,7 @@ class ProjectForm extends Form
         }
 
         $this->validate();
+        $this->assertClientAccessible();
 
         // A double-tapped Create fires two identical requests a breath
         // apart, and both used to mint a project ("Basement Stairs" twins,

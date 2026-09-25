@@ -176,9 +176,18 @@ class ProjectsTable extends Component
 
         $results = Project::scopedSearch($projectSearch, $filters, 'latest_status_date', 'desc')
             ->query(function ($query) {
-                $query->with(['statuses', 'client.users', 'createdByVendor']);
+                // 'statuses' (a project's FULL status history) was eager
+                // loaded here but never read — the Status column renders
+                // from latestVendorStatus(), which queries directly and
+                // ignores eager-loaded relations. Loading it inflated the
+                // page body with every status transition for every row.
+                $query->with(['client.users', 'createdByVendor']);
             })
             ->paginate(20, pageName: $this->getPageName());
+
+        // The Status column asks each row for its latest status; load every
+        // row's history in one query rather than two queries per row.
+        Project::primeLatestVendorStatuses($results->getCollection());
 
         // Filter out projects whose status just changed (Meilisearch may not have indexed yet)
         if (! empty($this->statusChangedProjectIds) && ! empty($statusCodes)) {

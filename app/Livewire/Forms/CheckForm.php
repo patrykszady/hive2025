@@ -23,7 +23,7 @@ class CheckForm extends Form
     // public $paid_by = NULL;
 
     // required_without:check.paid_by
-    #[Validate('required', as: 'bank account')]
+    #[Validate(as: 'bank account')]
     public $bank_account_id = null;
 
     // required_with:check.bank_account_id
@@ -45,7 +45,18 @@ class CheckForm extends Form
 
     public function rules()
     {
+        $vendorId = auth()->user()->vendor->id;
+
         return [
+            'bank_account_id' => [
+                'required',
+                Rule::exists('bank_accounts', 'id')->where('vendor_id', $vendorId),
+            ],
+            'user_id' => [
+                'nullable',
+                Rule::exists('user_vendor', 'user_id')->where('vendor_id', $vendorId)->where('is_employed', 1),
+            ],
+            'vendor_id' => ['nullable', 'exists:vendors,id'],
             'check_number' => [
                 'required_if:check_type,Check',
                 'nullable',
@@ -81,8 +92,7 @@ class CheckForm extends Form
 
     public function update()
     {
-        // dd($this);
-        // $this->authorize('create', Check::class);
+        $this->authorize('update', $this->check);
         $this->validate();
 
         $oldVendorId = $this->check->vendor_id;
@@ -116,6 +126,7 @@ class CheckForm extends Form
 
     public function delete()
     {
+        $this->authorize('delete', $this->check);
         $this->check->delete();
     }
 

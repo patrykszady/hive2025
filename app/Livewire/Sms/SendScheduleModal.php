@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Flux;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
@@ -23,6 +24,13 @@ class SendScheduleModal extends Component
 
     public bool $showModal = false;
 
+    /**
+     * Locked: set only by open(), which checks accessibleTo() first. Every
+     * action here (thread(), send(), …) trusts this id with no further
+     * check, so unlocked it would let anyone open, preview, and text-send a
+     * schedule to another tenant's SMS thread.
+     */
+    #[Locked]
     public ?int $threadId = null;
 
     public string $editableMessage = '';
@@ -48,6 +56,13 @@ class SendScheduleModal extends Component
     #[On('openScheduleModal')]
     public function open(int $threadId): void
     {
+        $allowed = SmsGroupThread::query()
+            ->accessibleTo(auth()->user())
+            ->whereKey($threadId)
+            ->exists();
+
+        abort_unless($allowed, 403);
+
         $this->threadId = $threadId;
         $this->showModal = true;
         $this->scheduleWithoutDate = false;
@@ -182,8 +197,14 @@ class SendScheduleModal extends Component
         }
 
         if ($thread->subject_vendor_id) {
+            // A sub can work for many GCs, so "tasks assigned to this sub"
+            // is not this tenant's alone — without belongs_to_vendor_id this
+            // pulled every company's projects with that sub into the
+            // schedule preview and, via the update below, could flip
+            // another company's task to vendor_status=requested.
             return Task::withoutGlobalScopes()
                 ->where('vendor_id', $thread->subject_vendor_id)
+                ->where('belongs_to_vendor_id', auth()->user()->vendor?->id)
                 ->whereNotNull('project_id')
                 ->whereNull('deleted_at')
                 ->distinct()
@@ -1440,9 +1461,13 @@ class SendScheduleModal extends Component
         );
 
         // Mark vendor tasks as requested only after the SMS is sent.
+        // selectedTaskIds is already derived from the scoped
+        // clientProjectIds() above; belongs_to_vendor_id here is
+        // defense-in-depth against ever flipping another company's task.
         if ($thread->subject_vendor_id && ! $this->scheduleWithoutDate) {
             Task::whereIn('id', $this->selectedTaskIds)
                 ->where('vendor_id', $thread->subject_vendor_id)
+                ->where('belongs_to_vendor_id', auth()->user()->vendor?->id)
                 ->whereNull('vendor_status')
                 ->update([
                     'vendor_status' => Task::VENDOR_STATUS_REQUESTED,

@@ -9,6 +9,7 @@ use App\Models\Project;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -17,6 +18,9 @@ use Livewire\WithPagination;
 class PaymentsIndex extends Component
 {
     use AuthorizesRequests, WithPagination, HasToJsonMethod;
+
+    /** Columns the client is allowed to sort by — never pass $sortBy straight to orderBy(). */
+    private const SORTABLE_COLUMNS = ['amount', 'date', 'reference', 'created_at'];
 
     /**
      * How many skeleton rows the loading placeholder should paint — the card's
@@ -80,6 +84,13 @@ class PaymentsIndex extends Component
 
     public $view = null;
 
+    /**
+     * Set only from server-side code (nothing currently does), never by the
+     * browser — it lifts PaymentScope below, so an unlocked value would let
+     * any client set it to any vendor id and read that vendor's whole
+     * payment ledger.
+     */
+    #[Locked]
     public $vendor_filter = null;
 
     public $sortBy = 'date';
@@ -165,12 +176,20 @@ class PaymentsIndex extends Component
             });
         }
 
-        if ($this->vendor_filter) {
+        // Confined to $this->project regardless of which vendor is asked
+        // for — vendor_filter is #[Locked] (only server-side code can set
+        // it), but this keeps the query itself from ever reaching outside
+        // the current project no matter who ends up setting it. Unlike a
+        // pivot-membership check, this doesn't exclude a sub who has real
+        // checks/payments on the project but was never formally attached via
+        // project_vendor — exactly the legitimate case this filter is for.
+        if ($this->vendor_filter && isset($this->project)) {
             // Payments for a specific (sub) vendor on this project: either recorded
             // under that vendor, or paid to them by check. PaymentScope pins queries
             // to the auth user's vendor, so it must be lifted for this filter.
             $vendorId = (int) $this->vendor_filter;
             $query->withoutGlobalScope(\App\Scopes\PaymentScope::class)
+                ->where('project_id', $this->project->id)
                 ->where(function ($q) use ($vendorId) {
                     $q->where('belongs_to_vendor_id', $vendorId)
                         ->orWhereIn('check_id', function ($sub) use ($vendorId) {
@@ -187,9 +206,10 @@ class PaymentsIndex extends Component
 
         $query->with(['project.client.users:id,first_name,last_name,nickname']);
 
-        // Apply sorting if specified
-        if ($this->sortBy) {
-            $query->orderBy($this->sortBy, $this->sortDirection);
+        // Apply sorting if specified — sortBy/sortDirection are client-set,
+        // so whitelist before handing them to orderBy().
+        if (in_array($this->sortBy, self::SORTABLE_COLUMNS, true)) {
+            $query->orderBy($this->sortBy, $this->sortDirection === 'asc' ? 'asc' : 'desc');
         }
 
         // Apply pagination with different limits based on view
@@ -203,6 +223,10 @@ class PaymentsIndex extends Component
 
     public function sort($column)
     {
+        if (! in_array($column, self::SORTABLE_COLUMNS, true)) {
+            return;
+        }
+
         if ($this->sortBy === $column) {
             // Toggle between asc and desc
             $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';

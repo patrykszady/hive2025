@@ -14,7 +14,29 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+/**
+ * VendorTransactionEditModal now authorizes viewAny(TransactionBulkMatch)
+ * (Admin only) — previously any of its actions could be called by a guest.
+ * Only the tests that actually call the modal need an Admin actor; the
+ * venmo/global-rule test below deliberately runs as a guest (BankAccountScope
+ * is a no-op for guests, which is what it needs to see every bank account),
+ * so this is a helper rather than a blanket beforeEach.
+ */
+function actingAsVendorTransactionModalAdmin(): void
+{
+    $actorVendor = Vendor::factory()->create();
+    $actor = User::query()->create([
+        'first_name' => 'Modal', 'last_name' => 'Admin',
+        'email' => 'vte-modal-admin-'.uniqid().'@example.test',
+        'cell_phone' => '5'.random_int(100000000, 999999999),
+        'password' => bcrypt('password'), 'primary_vendor_id' => $actorVendor->id,
+    ]);
+    $actor->vendors()->attach($actorVendor->id, ['role_id' => 1]);
+    test()->actingAs($actor);
+}
+
 it('reloads vendor transaction rows with the selected vendor relationship', function () {
+    actingAsVendorTransactionModalAdmin();
     $selectedVendor = Vendor::factory()->create([
         'business_name' => 'Selected Vendor LLC',
     ]);
@@ -44,6 +66,7 @@ it('reloads vendor transaction rows with the selected vendor relationship', func
 });
 
 it('maps deposit check values to readable labels for the table', function () {
+    actingAsVendorTransactionModalAdmin();
     $vendorTransaction = VendorTransaction::create([
         'vendor_id' => null,
         'deposit_check' => 3,
@@ -106,6 +129,7 @@ it('sorts vendor transaction rows by vendor business name', function () {
 });
 
 it('links plaid institution ids to banks through the vendor transaction relationship', function () {
+    actingAsVendorTransactionModalAdmin();
     $vendor = Vendor::factory()->create();
 
     $bank = Bank::create([
@@ -232,6 +256,7 @@ it('prevents duplicate vendor transactions from being created in the form', func
 });
 
 it('deletes a vendor transaction from the edit modal', function () {
+    actingAsVendorTransactionModalAdmin();
     $vendorTransaction = VendorTransaction::create([
         'vendor_id' => null,
         'deposit_check' => 3,

@@ -114,7 +114,13 @@ class ReceiptAccountVendorCreate extends Component
         $this->credential_fields = [];
         $this->credential_values = [];
 
-        $this->vendor = $vendor->load(['transactions', 'receipts', 'receipt_account', 'transactions_bulk_match']);
+        $this->vendor = $vendor->load(['transactions', 'receipts', 'receipt_account']);
+        // transactions_bulk_match has no tenant scope of its own — load only
+        // this company's rules, never another tenant's, for the same vendor.
+        $this->vendor->setRelation(
+            'transactions_bulk_match',
+            $vendor->transactions_bulk_match()->where('belongs_to_vendor_id', auth()->user()->vendor->id)->get()
+        );
 
         // Load credential field definitions from the vendor's receipt config
         $this->credential_fields = $this->vendor->receipts->first()?->options['credential_fields'] ?? [];
@@ -294,17 +300,23 @@ class ReceiptAccountVendorCreate extends Component
         $receipt_account->save();
 
         $matches_not_removed = collect($this->transactions_bulk_matches)->pluck('id')->filter()->toArray();
-        $matches_to_remove = $this->vendor->transactions_bulk_match()->whereNotIn('id', $matches_not_removed)->get();
+        $matches_to_remove = $this->vendor->transactions_bulk_match()
+            ->where('belongs_to_vendor_id', auth()->user()->vendor->id)
+            ->whereNotIn('id', $matches_not_removed)
+            ->get();
 
         foreach($matches_to_remove as $remove_match){
             $remove_match->delete();
         }
 
-        //create or update TransactionBulkMatch
+        //create or update TransactionBulkMatch — an id is only ever reused
+        //when it already belongs to this company; a tampered/foreign id
+        //falls back to creating a new rule instead of hijacking theirs.
         foreach($this->transactions_bulk_matches as $bulk_match_data){
-            $bulk_match = $bulk_match_data['id'] 
-                ? TransactionBulkMatch::find($bulk_match_data['id'])
-                : new TransactionBulkMatch();
+            $bulk_match = $bulk_match_data['id']
+                ? TransactionBulkMatch::where('belongs_to_vendor_id', auth()->user()->vendor->id)->find($bulk_match_data['id'])
+                : null;
+            $bulk_match ??= new TransactionBulkMatch();
 
             $bulk_match->vendor_id = $this->vendor->id;
             $bulk_match->amount = $bulk_match_data['amount'];

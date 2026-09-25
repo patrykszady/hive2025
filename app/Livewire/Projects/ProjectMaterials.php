@@ -129,6 +129,15 @@ class ProjectMaterials extends Component
     {
         $this->validate();
 
+        // belongs_to_vendor_id is client-chosen — whitelist it to the hub
+        // vendor or a vendor already linked to it (same set the "Belongs To
+        // Vendor" dropdown offers), never an arbitrary vendor id.
+        if ($this->belongs_to_vendor_id && ! Vendor::whereKey($this->belongs_to_vendor_id)->exists()) {
+            $this->addError('belongs_to_vendor_id', 'Invalid vendor selected.');
+
+            return;
+        }
+
         $docType = $this->file->getClientOriginalExtension();
         $ocrFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.' . $docType;
         $ocrPath = '_temp_ocr/' . $ocrFilename;
@@ -176,9 +185,11 @@ class ProjectMaterials extends Component
             'created_by_user_id' => auth()->user()->id,
         ]);
 
-        // Ensure the matched vendor is in the owner vendor's vendor list
+        // Ensure the matched vendor is in the owner vendor's vendor list.
+        // Scoped: $ownerVendorId was checked above against the hub vendor or
+        // a vendor already linked to it.
         if ($vendorId && $ownerVendorId !== $hubVendorId) {
-            $ownerVendor = Vendor::withoutGlobalScopes()->find($ownerVendorId);
+            $ownerVendor = Vendor::find($ownerVendorId);
             if ($ownerVendor && ! $ownerVendor->vendors()->where('vendor_id', $vendorId)->exists()) {
                 $ownerVendor->vendors()->attach($vendorId);
             }

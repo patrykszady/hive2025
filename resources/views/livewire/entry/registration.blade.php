@@ -109,7 +109,7 @@
                         <flux:field>
                             <flux:label>Email Address</flux:label>
                             <flux:input 
-                                wire:model.live.debounce.1000ms="user.email"
+                                wire:model.live.debounce.1000ms="email"
                                 type="email"
                                 placeholder="email@example.com"
                                 required
@@ -184,7 +184,7 @@
                         />
                     @else
                         <flux:input 
-                            wire:model.live.debounce.1000ms="user.first_name"
+                            wire:model.live.debounce.1000ms="first_name"
                             label="First Name"
                             placeholder="John"
                             required
@@ -199,7 +199,7 @@
                         />
                     @else
                         <flux:input 
-                            wire:model.live.debounce.1000ms="user.last_name"
+                            wire:model.live.debounce.1000ms="last_name"
                             label="Last Name"
                             placeholder="Doe"
                             required

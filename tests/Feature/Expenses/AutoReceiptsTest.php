@@ -217,3 +217,32 @@ it('shows tabs for all receipts on the same expense', function () {
         ->call('next')
         ->assertSee('email-1-attachment-3.pdf');
     });
+
+it('filters batches by vendor in SQL instead of loading every vendor\'s batches', function () {
+    $userA = autoReceiptsUser();
+    $userB = autoReceiptsUser();
+
+    makeReceiptFor($userA, 'mine.pdf', 5, 'msg-mine', 1, now()->subMinutes(5));
+
+    // Other vendors' batches keep growing — the page for A must not.
+    for ($i = 0; $i < 20; $i++) {
+        makeReceiptFor($userB, "other-{$i}.pdf", 10 + $i, "msg-other-{$i}", 1, now()->subMinutes(10 + $i));
+    }
+
+    $this->actingAs($userA);
+
+    \Illuminate\Support\Facades\DB::enableQueryLog();
+    $component = Livewire::test(AutoReceipts::class)
+        ->assertSee('mine.pdf')
+        ->assertDontSee('other-0.pdf');
+    $queries = collect(\Illuminate\Support\Facades\DB::getQueryLog())->pluck('query');
+    \Illuminate\Support\Facades\DB::disableQueryLog();
+
+    // The batch query is scoped by belongs_to_vendor_id — Vendor B's 20
+    // batches never reach the app for Vendor A's render.
+    $batchQuery = $queries->first(fn ($sql) => str_contains($sql, 'auto_receipt_email_batches') && str_contains($sql, 'select'));
+    expect($batchQuery)->not->toBeNull()
+        ->and($batchQuery)->toContain('belongs_to_vendor_id');
+
+    expect($component->get('total'))->toBe(1);
+});

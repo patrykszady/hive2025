@@ -556,6 +556,12 @@ class EstimateDocumentGenerator
                 $value = trim(strip_tags((string) $value)) === ''
                     ? static::paymentScheduleFallbackHtml()
                     : $value;
+            } else {
+                // Every other placeholder is plain text a vendor or client
+                // user ultimately controls (a name, address, date, amount) —
+                // escape it so it can't inject markup into the rendered
+                // contract. payment_schedule alone is generated HTML.
+                $value = e((string) $value);
             }
 
             $body = str_replace($placeholder, (string) $value, $body);

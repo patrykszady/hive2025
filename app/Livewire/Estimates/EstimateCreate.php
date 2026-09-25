@@ -17,7 +17,7 @@ class EstimateCreate extends Component
     {
         //authorize, make sure logged in vendor can create estimates for this project.
         //user can create estiamte for this Project
-        // $this->authorize('create', Estimate::class, $this->project);
+        $this->authorize('create', [Estimate::class, $this->project]);
 
         //create new estimate and send to estimates.show view
         $estimate = Estimate::create([

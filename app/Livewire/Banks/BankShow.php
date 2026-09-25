@@ -28,10 +28,24 @@ class BankShow extends Component
         'refreshComponent' => '$refresh',
     ];
 
-    public function mount(Bank $bank)
+    /**
+     * @param  \Illuminate\Support\Collection|null  $accounts  Pre-computed by
+     *     BankIndex::accountsByBank() when this component is nested on the
+     *     /banks list — batched across every bank instead of this component
+     *     running its own accounts query plus one checks query per
+     *     account-type group. Null when reached standalone (banks.show
+     *     route), where it's built the same way, just for this one bank.
+     */
+    public function mount(Bank $bank, $accounts = null)
     {
         $this->bank = $bank;
-        
+
+        if ($accounts !== null) {
+            $this->accounts = $accounts;
+
+            return;
+        }
+
         // Group accounts by account_number and type, and include account options and checks
         $this->accounts = $this->bank->accounts()->withTrashed()->get()
             ->groupBy('account_number')
@@ -39,7 +53,7 @@ class BankShow extends Component
                 return $accountsByNumber->groupBy('type')->map(function ($accountsByType) {
                     // Find the latest account (most recently updated) to use for this account type
                     $latestAccount = $accountsByType->sortByDesc('updated_at')->first();
-                    
+
                     // Create a result structure with a single representative account
                     $result = [
                         'account' => $latestAccount, // Use the latest account as THE account
@@ -55,7 +69,7 @@ class BankShow extends Component
                                 ->get();
                         })
                     ];
-                    
+
                     return $result;
                 });
             });

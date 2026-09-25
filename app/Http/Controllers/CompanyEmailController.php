@@ -72,12 +72,34 @@ class CompanyEmailController extends Controller
     {
         // Decode state to check if popup mode
         $isPopup = false;
+        $stateCsrf = null;
         if ($request->has('state')) {
             $stateJson = base64_decode($request->query('state'));
             $state = json_decode($stateJson, true);
             $isPopup = $state['popup'] ?? false;
+            $stateCsrf = $state['csrf'] ?? null;
         }
-        
+
+        // NylasService::getAuthUrl() embeds the session's CSRF token in
+        // `state.csrf` but nothing ever checked it coming back, so any
+        // authorization code (including one an attacker generated for their
+        // own Nylas account) was accepted here and, on success, linked to
+        // auth()->user()->vendor — an OAuth-CSRF login link attack. Reject
+        // unless the returned state carries this session's own token.
+        if (! is_string($stateCsrf) || $stateCsrf === '' || ! hash_equals((string) $request->session()->token(), $stateCsrf)) {
+            Log::channel('nylas')->warning('Rejected Nylas auth response: state/CSRF mismatch', [
+                'ip' => $request->ip(),
+            ]);
+
+            $error = 'Your session expired before this could finish. Please try connecting again.';
+
+            if ($isPopup) {
+                return view('nylas.auth-error', ['error' => $error]);
+            }
+
+            return redirect()->back()->withErrors(['error' => $error]);
+        }
+
         if ($request->has('error')) {
             Log::channel('nylas')->error(["Failed to nylasAuthResponse: ", $request->all()]);
             

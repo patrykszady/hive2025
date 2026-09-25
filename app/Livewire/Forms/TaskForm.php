@@ -2,8 +2,10 @@
 
 namespace App\Livewire\Forms;
 
+use App\Models\Project;
 use App\Models\User;
 use App\Models\Task;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Validate;
 use Livewire\Form;
 
@@ -11,6 +13,12 @@ class TaskForm extends Form
 {
     public ?Task $task = null;
 
+    /**
+     * Set only by setTask() (from a task the caller already checked is
+     * visible). Locked so the browser cannot point removeTask()/restoreTask()
+     * at an arbitrary task id when $task itself is not hydrated.
+     */
+    #[Locked]
     public ?int $task_id = null;
 
     #[Validate('required')]
@@ -56,7 +64,7 @@ class TaskForm extends Form
     #[Validate('nullable')]
     public $order = null;
 
-    #[Validate('nullable')]
+    #[Validate('nullable|exists:vendors,id')]
     public $vendor_id = null;
 
     #[Validate('nullable|array')]
@@ -168,10 +176,14 @@ class TaskForm extends Form
     {
         $this->validate();
 
+        if (! $this->assertScopedFieldsAreValid()) {
+            return false;
+        }
+
         // Calculate start and end dates from selected dates array
         $startDate = null;
         $endDate = null;
-        
+
         if (!empty($this->dates)) {
             sort($this->dates); // Ensure dates are in order
             $startDate = $this->dates[0];
@@ -216,10 +228,14 @@ class TaskForm extends Form
     {
         $this->validate();
 
+        if (! $this->assertScopedFieldsAreValid()) {
+            return false;
+        }
+
         // Calculate start and end dates from selected dates array
         $startDate = null;
         $endDate = null;
-        
+
         if (!empty($this->dates)) {
             sort($this->dates); // Ensure dates are in order
             $startDate = $this->dates[0];
@@ -275,6 +291,50 @@ class TaskForm extends Form
         ]);
 
         return $task;
+    }
+
+    /**
+     * project_id, parent_task_id and user_ids are plain public properties,
+     * fully client-writable, and their own #[Validate] rules only check
+     * shape (array) or bare row existence — none of them check that the row
+     * belongs to this tenant. Without this, store()/update() would create or
+     * move a task onto another company's project, hang a parent/child link
+     * across projects, or assign internal team members who don't even work
+     * here. vendor_id is deliberately left to the plain exists:vendors,id
+     * rule above: assigning a task to any vendor in the shared directory
+     * (not just an already-related sub) is how a new sub relationship starts.
+     */
+    protected function assertScopedFieldsAreValid(): bool
+    {
+        if (! Project::query()->whereKey($this->project_id)->exists()) {
+            $this->addError('project_id', 'The selected project is invalid.');
+
+            return false;
+        }
+
+        if ($this->parent_task_id) {
+            $parent = Task::visibleTo((int) $this->parent_task_id);
+
+            if (! $parent || (int) $parent->project_id !== (int) $this->project_id) {
+                $this->addError('parent_task_id', 'The selected parent task is invalid.');
+
+                return false;
+            }
+        }
+
+        if (! empty($this->user_ids)) {
+            $vendor = auth()->user()?->vendor;
+            $employedUserIds = $vendor ? $vendor->users()->pluck('users.id')->all() : [];
+            $requestedUserIds = array_map('intval', $this->user_ids);
+
+            if (array_diff($requestedUserIds, array_map('intval', $employedUserIds)) !== []) {
+                $this->addError('user_ids', 'One or more selected team members are invalid.');
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

@@ -63,7 +63,7 @@ class BulkMatchForm extends Form
 
     public function update()
     {
-        $this->authorize('create', TransactionBulkMatch::class);
+        $this->authorize('update', $this->match);
         $this->validate();
 
         $options = $this->options();

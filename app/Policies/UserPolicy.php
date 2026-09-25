@@ -144,27 +144,24 @@ class UserPolicy
         if ($user->id == $model->id) {
             return true;
         }
-        
+
         // Only admins can update other users
-        if (!$this->hasAdminRole($user)) {
+        if (!$this->hasAdminRole($user) || !$user->vendor) {
             return false;
         }
-        
-        // Check if target user belongs to a client with vendor_id set
-        $clientsWithVendor = $model->clients()->whereNotNull('vendor_id')->get();
-        if ($clientsWithVendor->isNotEmpty()) {
-            // For each client with vendor_id, check if auth user's vendor matches
-            foreach ($clientsWithVendor as $client) {
-                // If auth user's vendor doesn't match client's vendor_id, deny update
-                if ($user->vendor->id != $client->vendor_id) {
-                    // Return false instead of a Response object
-                    return false;
-                }
-            }
+
+        // Admin may update any member of their own company, employed or not
+        // (members flagged not-employed are still on the team page).
+        if ($model->vendors()->where('vendors.id', $user->vendor->id)->exists()) {
+            return true;
         }
-        
-        // Otherwise allow the update
-        return true;
+
+        // Admin may update a client member belonging to one of their own clients.
+        return $model->clients()
+            ->whereHas('vendors', function ($query) use ($user) {
+                $query->where('vendors.id', $user->vendor->id);
+            })
+            ->exists();
     }
 
     /**

@@ -114,6 +114,8 @@ class LineItemForm extends Form
         $this->authorize('create', LineItem::class);
         $this->validate();
 
+        // LineItemObserver::creating() stamps belongs_to_vendor_id from the
+        // authenticated vendor; nothing to add here.
         $lineItem = LineItem::create($this->except('allowances', 'line_item'));
 
         $this->syncAllowances($lineItem);
@@ -124,6 +126,7 @@ class LineItemForm extends Form
     public function update()
     {
         $this->authorize('create', LineItem::class);
+        abort_unless($this->line_item?->belongs_to_vendor_id === auth()->user()->vendor->id, 404);
         $this->validate();
 
         $this->line_item->update($this->except('allowances', 'line_item'));
@@ -164,7 +167,10 @@ class LineItemForm extends Form
                 'belongs_to_vendor_id' => $lineItem->belongs_to_vendor_id,
             ];
 
-            $allowance = ! empty($entry['id']) ? LineItemAllowance::find($entry['id']) : null;
+            // $entry['id'] is a client-controlled array value: resolve it
+            // through this line item's own allowances so it can't be swapped
+            // for another line item's (or tenant's) allowance id.
+            $allowance = ! empty($entry['id']) ? $lineItem->allowances()->find($entry['id']) : null;
 
             if ($allowance) {
                 $allowance->update($attributes);

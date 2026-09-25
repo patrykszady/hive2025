@@ -5,7 +5,7 @@
     <livewire:vendor-docs.audit-index />
 
     @foreach($this->vendors as $vendor)
-        <livewire:vendor-docs.vendor-docs-card :$vendor :key="$vendor->id" />
+        <livewire:vendor-docs.vendor-docs-card :$vendor :doc-type-count="$this->vendorDocTypeCounts[$vendor->id] ?? null" :key="$vendor->id" />
     @endforeach
 
     <livewire:vendor-docs.vendor-doc-create />

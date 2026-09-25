@@ -21,8 +21,14 @@ class AvailabilityIndex extends Component
     public string $message = '';
 
     /**
-     * Task being edited for date proposal.
+     * Task being edited for date proposal. Locked: only openProposeDatesModal()
+     * sets it, and that method already checks the task's vendor_id matches
+     * this page's vendor first. Unlocked, proposedPreferredSlots() and
+     * clearAppliedPreferredSlots() below (which trust this id with no
+     * vendor check of their own) would leak another vendor's homeowner
+     * preferred-time slots to whoever holds this availability link.
      */
+    #[Locked]
     public ?int $proposingTaskId = null;
     public array $proposedDates = [];
     public array $proposedTimeSettings = [];
@@ -570,7 +576,7 @@ class AvailabilityIndex extends Component
             return [];
         }
 
-        $task = Task::with('project')->find($this->proposingTaskId);
+        $task = Task::with('project')->where('vendor_id', $this->vendorId)->find($this->proposingTaskId);
         $project = $task?->project;
 
         if (! $project) {
@@ -643,7 +649,7 @@ class AvailabilityIndex extends Component
             return;
         }
 
-        $task = Task::with('project')->find($this->proposingTaskId);
+        $task = Task::with('project')->where('vendor_id', $this->vendorId)->find($this->proposingTaskId);
         $slots = (array) data_get($task?->project?->service_availability, 'slots', []);
 
         foreach ($slots as $slot) {

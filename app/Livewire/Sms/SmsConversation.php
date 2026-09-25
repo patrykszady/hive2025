@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Isolate;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Renderless;
 use Livewire\Component;
@@ -45,6 +46,15 @@ class SmsConversation extends Component
      */
     private const INITIAL_MESSAGE_LIMIT = 10;
 
+    /**
+     * Locked: every action in this component trusts this id (dozens of raw
+     * SmsGroupThread::find/findOrFail($this->threadId) calls). Only
+     * loadThread()/mount() may set it, and both immediately re-run
+     * authorizeThread() — without Locked the browser could set it directly
+     * to any thread id and read, message, or delete another tenant's SMS
+     * thread.
+     */
+    #[Locked]
     public ?int $threadId = null;
 
     public string $newMessage = '';
@@ -55,6 +65,13 @@ class SmsConversation extends Component
 
     public ?string $lightboxImageUrl = null;
 
+    /**
+     * Locked: set once in mount() from the real auth state and gates every
+     * client-restricted action (delete thread, forward, spam, opt-in, …).
+     * Unlocked, a homeowner could flip it to false via a raw property update
+     * and reach every vendor-only action.
+     */
+    #[Locked]
     public bool $isClientUser = false;
 
     public bool $showOptInModal = false;
@@ -1031,9 +1048,22 @@ class SmsConversation extends Component
             abort(403);
         }
 
+        // exists:clients,id is a bare table check that bypasses ClientScope
+        // — without the closure below, this could assign the thread to
+        // another tenant's client, and the presenter's unscoped fallback
+        // (client not visible under scope, but client_id is set) would then
+        // display that other company's client name/phone to this tenant.
+        // assignVendorId is deliberately left to the plain exists:vendors,id
+        // rule: assigning a thread to a vendor not yet related to this
+        // tenant is how a new sub relationship starts (same directory
+        // pattern SmsNewThread::send() uses).
         $this->validate([
             'assignSubjectType' => 'required|in:client,vendor',
-            'assignClientId' => 'nullable|exists:clients,id',
+            'assignClientId' => ['nullable', function ($attribute, $value, $fail) {
+                if ($value && ! Client::query()->whereKey($value)->exists()) {
+                    $fail('The selected client is invalid.');
+                }
+            }],
             'assignVendorId' => 'nullable|exists:vendors,id',
         ]);
 
@@ -2264,6 +2294,7 @@ class SmsConversation extends Component
             'to_number' => $primaryTarget,
             'status' => CallLog::STATUS_INITIATED,
             'user_id' => $user->id,
+            'vendor_id' => $user->vendor?->id,
             'metadata' => [
                 'type' => $targetCount > 1 ? 'click_to_call_multi' : 'click_to_call',
                 'target_phone' => $primaryTarget,

@@ -33,6 +33,35 @@ class VendorDocsIndex extends Component
             ->get();
     }
 
+    /**
+     * Distinct vendor-doc TYPE count per vendor, in one query instead of the
+     * `SELECT COUNT(DISTINCT type) FROM vendor_docs WHERE vendor_id = ?` each
+     * VendorDocsCard placeholder ran for itself (34 extra queries on this
+     * page). Unscoped like VendorDocsCard::render() — doc sharing across
+     * companies is intentional there, see that file.
+     *
+     * @return array<int, int>
+     */
+    #[Computed]
+    public function vendorDocTypeCounts(): array
+    {
+        $vendorIds = $this->vendors->pluck('id');
+
+        if ($vendorIds->isEmpty()) {
+            return [];
+        }
+
+        return VendorDoc::withoutGlobalScopes()
+            ->whereIn('vendor_id', $vendorIds)
+            ->get(['vendor_id', 'type'])
+            ->groupBy('vendor_id')
+            ->map(fn ($docs) => $docs
+                ->map(fn (VendorDoc $doc) => strtolower((string) ($doc->getRawOriginal('type') ?? $doc->type)))
+                ->unique()
+                ->count())
+            ->all();
+    }
+
     #[Title('Vendor Documents')]
     public function render()
     {

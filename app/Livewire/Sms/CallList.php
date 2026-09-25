@@ -158,8 +158,24 @@ class CallList extends Component
     #[Computed(cache: true, key: 'call-list-contacts', seconds: 300)]
     public function contactUsers(): mixed
     {
+        // Previously unscoped: every signed-up user's name and phone number,
+        // platform-wide, in the "place a new call" contact picker. Limit to
+        // people this company would plausibly call — its own team, its
+        // clients, and its related sub-vendors.
+        $vendor = auth()->user()->vendor;
+
+        if (! $vendor) {
+            return collect();
+        }
+
+        $vendorIds = $vendor->vendors()->pluck('vendors.id')->push($vendor->id)->unique();
+
         return User::whereNotNull('cell_phone')
             ->where('cell_phone', '!=', '')
+            ->where(function ($query) use ($vendorIds, $vendor) {
+                $query->whereHas('vendors', fn ($q) => $q->whereIn('vendors.id', $vendorIds))
+                    ->orWhereHas('clients', fn ($q) => $q->whereHas('vendors', fn ($cq) => $cq->where('vendors.id', $vendor->id)));
+            })
             ->orderBy('first_name')
             ->get();
     }
@@ -185,7 +201,11 @@ class CallList extends Component
     #[Computed]
     public function blockedNumbers(): array
     {
-        return BlockedCaller::pluck('phone_number')->all();
+        $vendorId = auth()->user()->vendor?->id;
+
+        return BlockedCaller::where(fn ($q) => $q->whereNull('vendor_id')->orWhere('vendor_id', $vendorId))
+            ->pluck('phone_number')
+            ->all();
     }
 
     /**
@@ -356,8 +376,14 @@ class CallList extends Component
         return $call->status;
     }
 
+    /**
+     * Seeds example calls for local UI work. Livewire exposes every public
+     * method as an action, so it refuses to run anywhere but local.
+     */
     public function generateDemoCalls(): void
     {
+        abort_unless(app()->environment('local'), 404);
+
         $userId = auth()->id();
 
         $examples = [
@@ -422,6 +448,7 @@ class CallList extends Component
                 'duration_seconds' => $example['duration_seconds'],
                 'has_voicemail' => $example['has_voicemail'] ?? false,
                 'user_id' => $userId,
+                'vendor_id' => auth()->user()?->vendor?->id,
                 'created_at' => $timestamp,
                 'updated_at' => $timestamp,
             ]);

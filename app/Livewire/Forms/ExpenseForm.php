@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Forms;
 
+use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Distribution;
 use App\Models\Expense;
@@ -12,6 +13,7 @@ use App\Models\Vendor;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Validate;
 
 use Illuminate\Support\Facades\Log;
@@ -79,6 +81,50 @@ class ExpenseForm extends Form
     public function rules()
     {
         return [];
+    }
+
+    /**
+     * The "material order" owner vendor is client-chosen (form.belongs_to_vendor_id),
+     * so it must be whitelisted to a vendor the auth tenant can legitimately
+     * attribute an expense to: itself, or a vendor already linked to it
+     * (VendorScope — the same set the "Belongs To Vendor" dropdown offers).
+     * Anything else is refused rather than silently falling back, so a
+     * tampered id surfaces as an error instead of quietly mis-attributing.
+     */
+    protected function resolveOwnerVendorId(int $hubVendorId): int
+    {
+        if (! $this->is_material_order || ! $this->belongs_to_vendor_id) {
+            return $hubVendorId;
+        }
+
+        if (! Vendor::whereKey($this->belongs_to_vendor_id)->exists()) {
+            throw ValidationException::withMessages([
+                'belongs_to_vendor_id' => 'Invalid vendor selected for material order.',
+            ]);
+        }
+
+        return (int) $this->belongs_to_vendor_id;
+    }
+
+    /**
+     * project_id/distribution_id come from a client-chosen selector — check
+     * them against what this tenant can actually see (ProjectScope allows
+     * projects shared with an invited sub, so this stays permissive for
+     * legitimate collaborators while refusing an id from outside that set).
+     */
+    protected function assertProjectAccessible(?int $projectId, ?int $distributionId): void
+    {
+        if ($projectId && ! Project::whereKey($projectId)->exists()) {
+            throw ValidationException::withMessages([
+                'project_id' => 'Invalid project selected.',
+            ]);
+        }
+
+        if ($distributionId && ! Distribution::whereKey($distributionId)->exists()) {
+            throw ValidationException::withMessages([
+                'project_id' => 'Invalid distribution selected.',
+            ]);
+        }
     }
 
     protected $messages = [
@@ -217,6 +263,13 @@ class ExpenseForm extends Form
                     $distribution_id = substr($split['project_id'], 2);
                 }
 
+                // Each split row's project/distribution id is client-supplied —
+                // check it against what this tenant can see before writing it.
+                $this->assertProjectAccessible(
+                    $project_id ? (int) $project_id : null,
+                    $distribution_id ? (int) $distribution_id : null,
+                );
+
                 if (isset($split['id'])) {
                     $update_split = ExpenseSplits::findOrFail($split['id']);
                     $update_split->update([
@@ -310,11 +363,13 @@ class ExpenseForm extends Form
         $this->validate();
 
         $expense_details = $this->expenseDetails();
+        $this->assertProjectAccessible($expense_details['project_id'], $expense_details['distribution_id'] ? (int) $expense_details['distribution_id'] : null);
 
         // Save the original amount before updating
         $originalAmount = $this->expense->amount;
 
         $hubVendorId = auth()->user()->vendor->id;
+        $ownerVendorId = $this->resolveOwnerVendorId($hubVendorId);
 
         $this->expense->update([
             'amount' => $this->amount,
@@ -326,19 +381,22 @@ class ExpenseForm extends Form
             'vendor_id' => $this->vendor_id,
             'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
             'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
-            'belongs_to_vendor_id' => ($this->is_material_order && $this->belongs_to_vendor_id) ? $this->belongs_to_vendor_id : $hubVendorId,
+            'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => auth()->user()->id,
         ]);
 
         // Handle existing check
         $check = $this->expense->check;
         
-        // Only create or update check when bank_account_id is set (required for a check)
-        if (empty($this->paid_by) && 
-            isset($this->component->bank_account_id) && 
-            !empty($this->component->bank_account_id) && 
-            isset($this->component->check_type)) {
-            
+        // Only create or update check when bank_account_id is set (required for a check).
+        // bank_account_id is a client-supplied id — scoped exists() keeps a
+        // tampered value from creating a check against another tenant's account.
+        if (empty($this->paid_by) &&
+            isset($this->component->bank_account_id) &&
+            !empty($this->component->bank_account_id) &&
+            isset($this->component->check_type) &&
+            BankAccount::whereKey($this->component->bank_account_id)->exists()) {
+
             // Calculate distribution user ID if needed
             if ($expense_details['distribution_id']) {
                 $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
@@ -427,7 +485,11 @@ class ExpenseForm extends Form
         $this->authorize('create', Expense::class);
         $this->validate();
 
-        $expense_details = $this->expenseDetails();        
+        $expense_details = $this->expenseDetails();
+        $this->assertProjectAccessible($expense_details['project_id'], $expense_details['distribution_id'] ? (int) $expense_details['distribution_id'] : null);
+        // Resolved up front (before any Check is created below) so a tampered
+        // belongs_to_vendor_id fails clean rather than leaving an orphaned check.
+        $ownerVendorId = $this->resolveOwnerVendorId(auth()->user()->vendor->id);
 
         // Determine if we should create/reuse a check
         // Skip check creation if attaching to an existing check
@@ -457,8 +519,11 @@ class ExpenseForm extends Form
             $checkNumber = $this->transaction->check_number;
         }
 
-        // Validate and create/reuse check when applicable
-        if ($shouldCreateCheck && $bankAccountId && $checkType) {
+        // Validate and create/reuse check when applicable. bank_account_id is
+        // client-supplied (component field or transaction fallback) — scoped
+        // exists() keeps a tampered value from creating a check against
+        // another tenant's account.
+        if ($shouldCreateCheck && $bankAccountId && $checkType && BankAccount::whereKey($bankAccountId)->exists()) {
             // Calculate distribution user if distribution selected
             if ($expense_details['distribution_id']) {
                 $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
@@ -518,7 +583,7 @@ class ExpenseForm extends Form
             'check_id' => ! isset($check) ? null : $check->id,
             'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
             'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
-            'belongs_to_vendor_id' => ($this->is_material_order && $this->belongs_to_vendor_id) ? $this->belongs_to_vendor_id : auth()->user()->vendor->id,
+            'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => auth()->user()->id,
         ]);
 
@@ -627,7 +692,9 @@ class ExpenseForm extends Form
             return;
         }
 
-        $ownerVendor = Vendor::withoutGlobalScopes()->find($ownerVendorId);
+        // Scoped: resolveOwnerVendorId() already checked this id is either the
+        // hub vendor or one already linked to it — never an arbitrary vendor.
+        $ownerVendor = Vendor::find($ownerVendorId);
         if (! $ownerVendor) {
             return;
         }
@@ -637,9 +704,11 @@ class ExpenseForm extends Form
             $ownerVendor->vendors()->attach($expense->vendor_id);
         }
 
-        // Attach the project to the owner vendor with Invited status
+        // Attach the project to the owner vendor with Invited status.
+        // Scoped: assertProjectAccessible() already checked this project is
+        // visible to the auth tenant.
         if ($expense->project_id) {
-            $project = Project::withoutGlobalScopes()->find($expense->project_id);
+            $project = Project::find($expense->project_id);
 
             if ($project && ! $project->vendors()->withoutGlobalScopes()->where('vendor_id', $ownerVendorId)->exists()) {
                 $project->vendors()->withoutGlobalScopes()->attach($ownerVendorId, ['client_id' => $project->client_id]);

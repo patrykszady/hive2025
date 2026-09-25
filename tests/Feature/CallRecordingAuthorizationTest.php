@@ -66,13 +66,23 @@ it('sends guests to the login page', function () {
     $this->get(route('calls.recording', $call))->assertRedirect(route('login'));
 });
 
-it('streams a recording to a vendor user', function () {
-    $call = recordedCall();
+it('streams a recording to a user of the company that took the call', function () {
+    $user = recordingVendorUser();
+    $call = recordedCall(['vendor_id' => $user->primary_vendor_id]);
 
-    $this->actingAs(recordingVendorUser())
+    $this->actingAs($user)
         ->get(route('calls.recording', $call))
         ->assertOk()
         ->assertHeader('Content-Type', 'audio/mpeg');
+});
+
+it('hides another company\'s recording from a vendor user', function () {
+    $owner = recordingVendorUser();
+    $call = recordedCall(['vendor_id' => $owner->primary_vendor_id]);
+
+    $this->actingAs(recordingVendorUser())
+        ->get(route('calls.recording', $call))
+        ->assertNotFound();
 });
 
 it('hides a call that a client user was not part of', function () {

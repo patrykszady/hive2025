@@ -29,7 +29,10 @@ class LineItemsIndex extends Component
     #[Computed]
     public function line_items()
     {
+        // LineItem carries no tenant scope of its own: this catalog must
+        // never surface another vendor's line items.
         return LineItem::query()
+            ->where('belongs_to_vendor_id', auth()->user()->vendor?->id ?? 0)
             ->with(['allowances' => fn ($query) => $query->orderBy('id')])
             ->when($this->search !== '', function ($query) {
                 $term = '%'.$this->search.'%';

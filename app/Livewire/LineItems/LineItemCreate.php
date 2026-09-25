@@ -52,10 +52,15 @@ class LineItemCreate extends Component
     #[Computed]
     public function line_items()
     {
-        return LineItem::orderBy('created_at', 'DESC')
-            ->where('name', 'like', '%'.$this->form->name.'%')
-            ->orWhere('desc', 'like', '%'.$this->form->name.'%')
-            ->orWhere('notes', 'like', '%'.$this->form->name.'%')
+        // LineItem carries no tenant scope of its own: this catalog search
+        // must never surface another vendor's line items.
+        return LineItem::where('belongs_to_vendor_id', auth()->user()->vendor?->id ?? 0)
+            ->where(function ($query) {
+                $query->where('name', 'like', '%'.$this->form->name.'%')
+                    ->orWhere('desc', 'like', '%'.$this->form->name.'%')
+                    ->orWhere('notes', 'like', '%'.$this->form->name.'%');
+            })
+            ->orderBy('created_at', 'DESC')
             ->get();
     }
 
@@ -115,6 +120,10 @@ class LineItemCreate extends Component
 
     public function editItem(LineItem $line_item)
     {
+        // LineItem carries no tenant scope of its own: the route/event
+        // binding above can resolve any tenant's row by id.
+        abort_unless($line_item->belongs_to_vendor_id === auth()->user()->vendor?->id, 404);
+
         $this->resetModal();
         $this->existing_line_item_id = 'NEW';
         $this->view_text = [

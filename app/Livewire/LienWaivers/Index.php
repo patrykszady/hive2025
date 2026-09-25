@@ -756,6 +756,33 @@ class Index extends Component
     }
 
     /**
+     * The vendor ids a draw's rows may legitimately carry: whoever
+     * buildRows() would offer today (has an expense, check-payment or bid on
+     * this project) plus, when editing, whoever is already on that draw's
+     * existing waivers — a vendor can fall out of buildRows() later (its
+     * expense was recategorised, its bid deleted) and must stay editable
+     * rather than be treated as tampering. The contractor's own id is always
+     * allowed (the GC's own row).
+     */
+    protected function allowedSwornStatementVendorIds($contractor): \Illuminate\Support\Collection
+    {
+        $allowed = collect(\App\Support\SwornStatementGenerator::buildRows($this->project, $contractor))
+            ->pluck('vendor_id')
+            ->map(fn ($id) => (int) $id);
+
+        if ($this->editingStatementId) {
+            $existing = LienWaiver::withoutGlobalScopes()
+                ->where('sworn_statement_id', $this->editingStatementId)
+                ->pluck('vendor_id')
+                ->map(fn ($id) => (int) $id);
+
+            $allowed = $allowed->merge($existing);
+        }
+
+        return $allowed->merge([(int) $contractor->id])->unique();
+    }
+
+    /**
      * One-step draw package: render the GC's sworn statement (GCSS) and, for
      * every sub listed on it, create the sub's own Waiver of Lien + affidavit
      * as a draft (skipping any sub that already has an open draft on this
@@ -820,6 +847,18 @@ class Index extends Component
 
             return;
         }
+
+        // ssRows is a public array — its vendor_id values round-trip through
+        // the browser on every request and are not otherwise checksummed.
+        // Drop any row whose vendor wasn't actually offered by buildRows()
+        // (has money/a bid on this project) or already on this draw, so a
+        // tampered id can't create a Bid, rewrite a Vendor, or mail a lien
+        // waiver to an unrelated company.
+        $allowedVendorIds = $this->allowedSwornStatementVendorIds($contractor);
+        $this->ssRows = collect($this->ssRows)
+            ->filter(fn ($row) => $allowedVendorIds->contains((int) ($row['vendor_id'] ?? 0)))
+            ->values()
+            ->all();
 
         // Contract amounts typed here for vendors with no bid on the project are
         // saved as their bid, so the next statement prefills itself. Existing
@@ -1834,7 +1873,10 @@ class Index extends Component
 
     public function sendForSignature(int $waiverId): void
     {
-        $waiver = LienWaiver::find($waiverId);
+        // LienWaiverScope matches EITHER party (issuer or recipient) — these
+        // are writes only the issuing (owning) vendor may make, so the
+        // recipient sub must be excluded explicitly.
+        $waiver = LienWaiver::where('belongs_to_vendor_id', auth()->user()->vendor->id)->find($waiverId);
 
         // Only open waivers can be (re)sent — a signed or cancelled document
         // must never regress to Sent from a stale table.
@@ -1857,7 +1899,9 @@ class Index extends Component
 
     public function cancel(int $waiverId): void
     {
-        $waiver = LienWaiver::find($waiverId);
+        // LienWaiverScope matches EITHER party — only the issuing vendor may
+        // cancel its own waiver, never the recipient sub.
+        $waiver = LienWaiver::where('belongs_to_vendor_id', auth()->user()->vendor->id)->find($waiverId);
 
         if (! $waiver || $waiver->isSigned()) {
             return;
@@ -1872,7 +1916,9 @@ class Index extends Component
 
     public function delete(int $waiverId): void
     {
-        $waiver = LienWaiver::find($waiverId);
+        // LienWaiverScope matches EITHER party — only the issuing vendor may
+        // delete its own waiver, never the recipient sub.
+        $waiver = LienWaiver::where('belongs_to_vendor_id', auth()->user()->vendor->id)->find($waiverId);
 
         if (! $waiver || $waiver->isSigned()) {
             return;

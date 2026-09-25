@@ -337,6 +337,7 @@ class TelnyxWebhookController extends Controller
             // callers can still get through while spam is logged for review.
             $spamCallLog = CallLog::create([
                 'call_id' => $callControlId,
+                'vendor_id' => $vendor?->id,
                 'call_control_id' => $callControlId,
                 'call_session_id' => $payload['call_session_id'] ?? null,
                 'call_leg_id' => $payload['call_leg_id'] ?? null,
@@ -369,6 +370,7 @@ class TelnyxWebhookController extends Controller
         // Log the incoming call
         $callLog = CallLog::create([
             'call_id' => $callControlId,
+            'vendor_id' => $vendor?->id,
             'call_control_id' => $callControlId,
             'call_session_id' => $payload['call_session_id'] ?? null,
             'call_leg_id' => $payload['call_leg_id'] ?? null,

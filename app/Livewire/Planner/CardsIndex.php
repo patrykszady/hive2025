@@ -959,29 +959,64 @@ class CardsIndex extends Component
 
     private function allTaskDatesForProject(int $projectId): \Illuminate\Support\Collection
     {
-        return $this->gapTaskDatesByProject[$projectId] ??= (function () use ($projectId) {
-            // Unfiltered on purpose — the eager-loaded $project->tasks may be
-            // vendor/user-filtered, and gaps must consider ALL tasks.
-            $allTasks = \App\Models\Task::withTrashed()
-                ->where('project_id', $projectId)
-                ->get(['id', 'options', 'start_date']);
+        if (! array_key_exists($projectId, $this->gapTaskDatesByProject)) {
+            // Every empty day cell across every visible project asked for its
+            // own project's dates, each firing its own
+            // `WHERE project_id = ?` query. Batch every active project's
+            // tasks in one query the first time any cell needs one, then
+            // serve the rest from the memo.
+            $this->primeGapTaskDatesForActiveProjects();
+        }
 
-            $allTaskDates = collect();
+        return $this->gapTaskDatesByProject[$projectId]
+            ??= $this->summarizeTaskDates(
+                \App\Models\Task::withTrashed()
+                    ->where('project_id', $projectId)
+                    ->get(['id', 'options', 'start_date'])
+            );
+    }
 
-            foreach ($allTasks as $task) {
-                $selectedDates = $task->options->dates ?? [];
+    /**
+     * Batch-loads task dates for every currently active project in one
+     * query. Unfiltered on purpose — the eager-loaded $project->tasks may be
+     * vendor/user-filtered, and gaps must consider ALL tasks.
+     */
+    private function primeGapTaskDatesForActiveProjects(): void
+    {
+        $projectIds = $this->activeProjects->pluck('id')->all();
 
-                if (!empty($selectedDates)) {
-                    foreach ($selectedDates as $date) {
-                        $allTaskDates->push($date);
-                    }
-                } elseif ($task->start_date) {
-                    $allTaskDates->push(Carbon::parse($task->start_date)->format('Y-m-d'));
+        $tasksByProject = \App\Models\Task::withTrashed()
+            ->whereIn('project_id', $projectIds)
+            ->get(['id', 'project_id', 'options', 'start_date'])
+            ->groupBy('project_id');
+
+        foreach ($projectIds as $projectId) {
+            $this->gapTaskDatesByProject[$projectId] ??= $this->summarizeTaskDates(
+                $tasksByProject->get($projectId, collect())
+            );
+        }
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, \App\Models\Task>  $tasks
+     */
+    private function summarizeTaskDates(\Illuminate\Support\Collection $tasks): \Illuminate\Support\Collection
+    {
+        $allTaskDates = collect();
+
+        foreach ($tasks as $task) {
+            $selectedDates = $task->options->dates ?? [];
+
+            if (!empty($selectedDates)) {
+                foreach ($selectedDates as $date) {
+                    $allTaskDates->push($date);
                 }
+            } elseif ($task->start_date) {
+                $allTaskDates->push(Carbon::parse($task->start_date)->format('Y-m-d'));
             }
+        }
 
-            return $allTaskDates->unique()->sort()->values();
-        })();
+        return $allTaskDates->unique()->sort()->values();
     }
 
     private function calculateTaskGapInfo($project, Carbon $currentDay): ?object

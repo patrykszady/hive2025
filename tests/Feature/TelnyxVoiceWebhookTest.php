@@ -43,6 +43,7 @@ beforeEach(function () {
     if (! Schema::hasTable('call_logs')) {
         Schema::create('call_logs', function (Blueprint $table): void {
             $table->id();
+            $table->unsignedBigInteger('vendor_id')->nullable();
             $table->string('call_id')->nullable();
             $table->string('call_control_id')->nullable()->index();
             $table->string('call_session_id')->nullable()->index();

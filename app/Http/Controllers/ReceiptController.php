@@ -27,6 +27,7 @@ use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
@@ -66,8 +67,15 @@ class ReceiptController extends Controller
     {
         $url = 'https://www.amazon.com/b2b/abws/oauth';
 
+        // A random per-session nonce, not the old fixed 'state' => '100'.
+        // The fixed value meant anyone could call amazon_auth_response
+        // directly with their own authorization code and it would still be
+        // accepted, overwriting the shared Amazon receipt account's tokens.
+        $state = Str::random(40);
+        request()->session()->put('amazon_oauth_state', $state);
+
         $params = [
-            'state' => '100',
+            'state' => $state,
             'redirect_uri' => env('AMAZON_REDIRECT_URI'),
             'applicationId' => env('AMAZON_APPLICATION_ID'),
         ];
@@ -107,6 +115,21 @@ class ReceiptController extends Controller
             ]);
 
             return redirect(route('company_emails.index'));
+        }
+
+        // Verify the nonce amazon_login() put in the session before trusting
+        // this code. Without it, anyone who knew this URL could supply their
+        // own Amazon authorization code and it would still overwrite the
+        // shared receipt account's tokens.
+        $expectedState = (string) request()->session()->pull('amazon_oauth_state');
+        $returnedState = (string) ($query['state'] ?? '');
+
+        if ($expectedState === '' || ! hash_equals($expectedState, $returnedState)) {
+            Log::channel('company_emails_login_error')->warning('Amazon OAuth callback rejected: state mismatch', [
+                'request_host' => request()->getSchemeAndHttpHost(),
+            ]);
+
+            return redirect(route('company_emails.index'))->withErrors(['error' => 'Your session expired before this could finish. Please try connecting again.']);
         }
 
         $guzzle = new Client;

@@ -78,8 +78,9 @@ class VendorForm extends Form
 
     public function update()
     {
+        $this->authorize('update', $this->vendor);
         $this->validate();
-        
+
         $this->vendor->update([
             'business_name' => $this->business_name,
             'business_type' => $this->business_type,
