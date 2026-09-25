@@ -153,24 +153,27 @@ async function main() {
         browser = await puppeteer.connect({
             browserURL: `http://127.0.0.1:${port}`,
             defaultViewport: null,
-            // Leave the extension's workers and every other tab alone. The
-            // browser and "tab" container targets must stay in: Puppeteer
-            // waits on them while connecting and hangs if they are filtered.
-            targetFilter: (target) => {
-                const type = target.type();
-                if (['service_worker', 'shared_worker', 'worker', 'background_page', 'other', 'webview', 'browser_ui'].includes(type)) {
-                    return false;
-                }
-                return type !== 'page' || target.url().includes(pattern);
-            },
+            // Leave the extension's workers and Chrome's own UI alone. Pages
+            // stay in whatever their URL: a tab caught mid-load or mid-reload
+            // is not on login.html yet and would otherwise never be attached.
+            // The browser and "tab" container targets must stay in too:
+            // Puppeteer waits on them while connecting and hangs without them.
+            targetFilter: (target) => !['service_worker', 'shared_worker', 'worker', 'background_page', 'other', 'webview', 'browser_ui'].includes(target.type()),
         });
     } catch (e) {
         return finish({ ok: false, stage: 'connect', error: `Could not reach Chrome's DevTools port ${port}: ${e.message}` });
     }
 
     try {
-        const pages = await browser.pages();
-        const page = pages.find((p) => p.url().includes(pattern));
+        // The tab may still be loading or reloading login.html: give it a moment.
+        let page = null;
+        const findDeadline = Date.now() + 15000;
+        while (!page && Date.now() < findDeadline) {
+            page = (await browser.pages()).find((p) => p.url().includes(pattern)) || null;
+            if (!page) {
+                await pause(500, 800);
+            }
+        }
         if (!page) {
             return finish({ ok: false, stage: 'find_tab', error: 'No tab is on the Menards sign-in page.' });
         }
