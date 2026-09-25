@@ -317,9 +317,12 @@ it('404s for a frame from another project', function () {
     $component = Livewire::actingAs($fx['user'])
         ->test(TimelapseStudio::class, ['project' => $fx['project']]);
 
-    expect(fn () => $component->call('applyManualAlignment', $foreign->id, 1.0, 0.0, 0.0))
-        ->toThrow(\Illuminate\Database\Eloquent\ModelNotFoundException::class)
-        ->and($foreign->fresh()->aligned_path)->toBeNull();
+    // Livewire 4.4.6's test harness turns a ModelNotFoundException into the
+    // 404 response the browser would get, instead of rethrowing it.
+    $component->call('applyManualAlignment', $foreign->id, 1.0, 0.0, 0.0)
+        ->assertStatus(404);
+
+    expect($foreign->fresh()->aligned_path)->toBeNull();
 });
 
 it('clears an alignment back to the original shot', function () {
