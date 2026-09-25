@@ -96,24 +96,32 @@ async function waitForVisible(page, selectors, timeoutMs) {
     return null;
 }
 
-/** The visible button whose text reads "Sign In", nearest the password field's form. */
-async function signInButton(page) {
-    const buttons = await page.$$('button, input[type="submit"]');
-    let fallback = null;
-    for (const button of buttons) {
+/**
+ * The Sign In button that submits the form: the nearest visible "Sign In"
+ * control BELOW the password field. Menards' form has a "Sign In" tab header
+ * above the fields too, and clicking that submits nothing (2026-09-25).
+ */
+async function signInButton(page, passwordField) {
+    const passwordBox = await passwordField.boundingBox();
+    const minY = passwordBox ? passwordBox.y + passwordBox.height : 0;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const button of await page.$$('button, input[type="submit"]')) {
         const box = await button.boundingBox();
-        if (!box || box.width === 0 || box.height === 0) {
+        if (!box || box.width === 0 || box.height === 0 || box.y < minY) {
             continue;
         }
         const label = await button.evaluate((el) => (el.innerText || el.value || '').trim());
-        if (/^sign\s*in$/i.test(label)) {
-            return button;
+        if (!/sign\s*in/i.test(label)) {
+            continue;
         }
-        if (!fallback && /sign\s*in/i.test(label)) {
-            fallback = button;
+        const distance = box.y - minY;
+        if (distance < bestDistance) {
+            best = button;
+            bestDistance = distance;
         }
     }
-    return fallback;
+    return best;
 }
 
 /** Click a field like a person, clear it, and type the value with human-ish pacing. */
@@ -197,7 +205,7 @@ async function main() {
                 await fill(page, passwordField, password);
                 await pause(500, 900);
 
-                const button = await signInButton(page);
+                const button = await signInButton(page, passwordField);
                 submitted = true;
                 if (button) {
                     await button.click({ delay: 70 + Math.floor(Math.random() * 60) });
@@ -230,8 +238,12 @@ async function main() {
         let message = '';
         try {
             message = await page.evaluate(() => {
-                const el = document.querySelector('[role="alert"], .alert, .error, .invalid-feedback, .text-danger');
-                return el ? el.innerText.trim().slice(0, 200) : '';
+                // Real error text only; the form's red "* Required Fields"
+                // hint is always on the page and says nothing.
+                const found = Array.from(document.querySelectorAll('[role="alert"], .alert, .error, .error-message, .invalid-feedback, .text-danger'))
+                    .map((el) => (el.innerText || '').trim())
+                    .find((text) => text !== '' && !/required fields/i.test(text));
+                return found ? found.slice(0, 200) : '';
             });
         } catch (e) {
             // The page may have navigated between checks; nothing to read.
