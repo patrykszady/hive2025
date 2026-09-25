@@ -30,7 +30,7 @@ class CardsIndex extends Component
     #[Url(as: 'view')]
     public string $viewMode = 'table';
 
-    /** Gantt zoom: 'day' (80px/day), 'week' (32px/day), 'month' (14px/day). */
+    /** Gantt zoom: 'day', 'week' or 'month' — pixels per day in GANTT_PX_PER_DAY. */
     #[Url(as: 'zoom')]
     public string $ganttZoom = 'day';
 
@@ -63,7 +63,16 @@ class CardsIndex extends Component
     public int $previousDaysLoaded = 7;
     public int $futureDaysLoaded = 7;
 
-    private const DAYS_PER_LOAD = 14;
+    public const DAYS_PER_LOAD = 14;
+
+    /**
+     * The window never holds more than this many days. Without a cap a long
+     * scrolling session re-rendered, re-sent and re-morphed an ever larger
+     * grid on every load; with it, days fall off the side the user is
+     * scrolling away from. Either counter may go negative, which is how the
+     * window slides past today rather than staying anchored to it.
+     */
+    public const MAX_DAYS_LOADED = 120;
 
     public function toggleMobileFilters(): void
     {
@@ -73,11 +82,41 @@ class CardsIndex extends Component
     public function loadPreviousDays(): void
     {
         $this->previousDaysLoaded += self::DAYS_PER_LOAD;
+        $this->evictFarDays('future');
     }
 
     public function loadFutureDays(): void
     {
         $this->futureDaysLoaded += self::DAYS_PER_LOAD;
+        $this->evictFarDays('previous');
+    }
+
+    /** Trim $side so previous + future stays within MAX_DAYS_LOADED. */
+    private function evictFarDays(string $side): void
+    {
+        $excess = $this->previousDaysLoaded + $this->futureDaysLoaded - self::MAX_DAYS_LOADED;
+
+        if ($excess <= 0) {
+            return;
+        }
+
+        if ($side === 'previous') {
+            $this->previousDaysLoaded -= $excess;
+        } else {
+            $this->futureDaysLoaded -= $excess;
+        }
+    }
+
+    /**
+     * Livewire re-queries the public collections by id on every request and
+     * drops their eager loads, so the toolbar's latestStatus reads cost one
+     * query per project on every update. One query brings the relation back.
+     */
+    public function hydrate(): void
+    {
+        if ($this->projects instanceof \Illuminate\Database\Eloquent\Collection) {
+            $this->projects->loadMissing('latestStatus');
+        }
     }
 
     private const PLANNER_PROJECT_STATUS_CODES = [4, 5, 6, 8]; // Prep, Scheduled, Active, Service Call
@@ -89,17 +128,20 @@ class CardsIndex extends Component
     ];
 
     /**
-     * Lightweight refresh when only task dependencies changed (e.g. from edit-task modal).
-     * Only the gantt arrows depend on dep data; in other views skip the round-trip entirely.
+     * Task dependencies changed in the edit-task modal. Only the gantt draws
+     * them, so in the other views nothing renders at all, and in the gantt
+     * only its island does — the toolbar, agenda and modals stay as they are.
      */
     public function onDependenciesUpdated(): void
     {
+        $this->skipRender();
+
         if ($this->viewMode !== 'gantt') {
-            $this->skipRender();
             return;
         }
 
-        unset($this->ganttDependencyLinks, $this->ganttArrowPaths, $this->criticalPathTaskIds);
+        unset($this->criticalPathTaskIds);
+        $this->renderIsland('gantt');
     }
 
     public function mount()
@@ -1305,12 +1347,17 @@ class CardsIndex extends Component
     }
 
     /**
-     * Compute the critical path: set of task IDs along the longest duration chain
-     * through the dependency DAG across all visible projects. Forward + backward pass.
+     * The critical path: task ids along the longest duration chain through
+     * the dependency graph of the visible projects.
+     *
+     * Computed per request, not persisted: Livewire keys a persisted computed
+     * by component id, so the old 300-second cache missed on every page load
+     * and served stale highlights for up to five minutes inside a session.
+     * Two small queries are cheaper than that.
      *
      * @return array<int>
      */
-    #[Computed(persist: true, seconds: 300)]
+    #[Computed]
     public function criticalPathTaskIds(): array
     {
         $projectIds = $this->activeProjects->pluck('id')->all();
@@ -1332,31 +1379,55 @@ class CardsIndex extends Component
         $deps = TaskDependency::query()
             ->whereIn('predecessor_task_id', array_keys($duration))
             ->whereIn('successor_task_id', array_keys($duration))
-            ->get(['predecessor_task_id', 'successor_task_id', 'lag_days']);
+            ->get(['predecessor_task_id', 'successor_task_id', 'lag_days'])
+            ->map(fn (TaskDependency $d) => [(int) $d->predecessor_task_id, (int) $d->successor_task_id, (int) $d->lag_days])
+            ->all();
 
-        $successors = []; // predecessor_id => [[successor_id, lag], ...]
-        $predecessors = []; // successor_id => [[predecessor_id, lag], ...]
-        foreach ($deps as $d) {
-            $successors[$d->predecessor_task_id][] = [$d->successor_task_id, (int) $d->lag_days];
-            $predecessors[$d->successor_task_id][] = [$d->predecessor_task_id, (int) $d->lag_days];
+        return self::criticalPathFor($duration, $deps);
+    }
+
+    /**
+     * Forward pass (earliest finish per task) then backward pass (which
+     * predecessors that finish depends on), over plain arrays so it can be
+     * tested without a database.
+     *
+     * A cycle in the graph is ignored where it closes instead of recursing
+     * forever: the task modal's own cycle check compared an int against a
+     * string and let cycles through, and one would have taken the whole
+     * planner render down with it.
+     *
+     * @param  array<int, int>  $duration  task id => working days
+     * @param  array<int, array{0:int,1:int,2:int}>  $deps  [predecessor id, successor id, lag days]
+     * @return array<int>
+     */
+    public static function criticalPathFor(array $duration, array $deps): array
+    {
+        $predecessors = []; // successor id => [[predecessor id, lag], ...]
+        foreach ($deps as [$predId, $succId, $lag]) {
+            if (isset($duration[$predId], $duration[$succId])) {
+                $predecessors[$succId][] = [$predId, $lag];
+            }
         }
 
-        // Forward pass: earliest finish per task (topological via memoised DFS).
         $earliestFinish = [];
-        $earliestFinishFn = function (int $id) use (&$earliestFinishFn, &$earliestFinish, $duration, $predecessors): int {
+        $visiting = [];
+        $earliestFinishFn = function (int $id) use (&$earliestFinishFn, &$earliestFinish, &$visiting, $duration, $predecessors): int {
             if (isset($earliestFinish[$id])) {
                 return $earliestFinish[$id];
             }
+            if (isset($visiting[$id])) {
+                return $duration[$id] ?? 1;
+            }
+            $visiting[$id] = true;
             $best = $duration[$id] ?? 1;
             foreach ($predecessors[$id] ?? [] as [$predId, $lag]) {
-                if (! isset($duration[$predId])) {
-                    continue;
-                }
                 $candidate = $earliestFinishFn($predId) + $lag + ($duration[$id] ?? 1);
                 if ($candidate > $best) {
                     $best = $candidate;
                 }
             }
+            unset($visiting[$id]);
+
             return $earliestFinish[$id] = $best;
         };
         foreach (array_keys($duration) as $id) {
@@ -1367,11 +1438,8 @@ class CardsIndex extends Component
             return [];
         }
 
-        // Identify task(s) ending the critical path (max earliest finish).
         $maxFinish = max($earliestFinish);
 
-        // Backward pass: walk back from each terminal task choosing predecessors
-        // that lie on the critical path (earliestFinish[pred] + lag + dur[this] == earliestFinish[this]).
         $critical = [];
         $walk = function (int $id) use (&$walk, &$critical, $earliestFinish, $duration, $predecessors): void {
             if (isset($critical[$id])) {
@@ -1379,9 +1447,6 @@ class CardsIndex extends Component
             }
             $critical[$id] = true;
             foreach ($predecessors[$id] ?? [] as [$predId, $lag]) {
-                if (! isset($earliestFinish[$predId])) {
-                    continue;
-                }
                 if ($earliestFinish[$predId] + $lag + ($duration[$id] ?? 1) === $earliestFinish[$id]) {
                     $walk($predId);
                 }
@@ -1518,19 +1583,25 @@ class CardsIndex extends Component
         int $segmentIndex = 0,
         int $segmentCount = 1,
     ): ?array {
-        // Skip bars completely outside the visible window.
-        if ($end->lt($firstDay) || $start->gt($lastDay)) {
+        // Calendar days, not instants: the window is built in the browser's
+        // timezone while task dates are UTC midnights, so comparing Carbon
+        // objects dropped every bar that ended on the first visible day (a
+        // Chicago 00:00 is five hours after the task's 00:00 UTC) and flagged
+        // bars starting on it as truncated. Y-m-d strings compare correctly.
+        $startYmd = $start->format('Y-m-d');
+        $endYmd = $end->format('Y-m-d');
+        $firstYmd = $firstDay->format('Y-m-d');
+        $lastYmd = $lastDay->format('Y-m-d');
+
+        if ($endYmd < $firstYmd || $startYmd > $lastYmd) {
             return null;
         }
 
-        $renderStart = $start->lt($firstDay) ? $firstDay : $start;
-        $renderEnd = $end->gt($lastDay) ? $lastDay : $end;
+        $renderStartYmd = max($startYmd, $firstYmd);
+        $renderEndYmd = min($endYmd, $lastYmd);
 
-        // Use round() not (int) cast — Carbon 3's diffInDays returns a float,
-        // and DST transitions between two startOfDay() values produce e.g. 16.958
-        // instead of 17, which truncates to a one-column off-by-one.
-        $leftDays = (int) round($firstDay->diffInDays($renderStart));
-        $widthDays = (int) round($renderStart->diffInDays($renderEnd)) + 1;
+        $leftDays = self::daysBetweenYmd($firstYmd, $renderStartYmd);
+        $widthDays = self::daysBetweenYmd($renderStartYmd, $renderEndYmd) + 1;
 
         $depList = [];
         foreach ($taskDeps as $dep) {
@@ -1547,13 +1618,20 @@ class CardsIndex extends Component
             'end_date'        => $end->format('Y-m-d'),
             'left_px'         => $leftDays * $pxPerDay,
             'width_px'        => max($pxPerDay, $widthDays * $pxPerDay),
-            'truncated_left'  => $start->lt($firstDay),
-            'truncated_right' => $end->gt($lastDay),
+            'truncated_left'  => $startYmd < $firstYmd,
+            'truncated_right' => $endYmd > $lastYmd,
             'is_critical'     => in_array($task->id, $criticalIds, true),
             'dependencies'    => $depList,
             'segment_index'   => $segmentIndex,
             'segment_count'   => $segmentCount,
         ];
+    }
+
+    /** Whole days from one Y-m-d to another, counted in UTC so DST never shaves a day off. */
+    public static function daysBetweenYmd(string $from, string $to): int
+    {
+        return (int) Carbon::createFromFormat('!Y-m-d', $from, 'UTC')
+            ->diffInDays(Carbon::createFromFormat('!Y-m-d', $to, 'UTC'), false);
     }
 
     /**
@@ -1631,9 +1709,9 @@ class CardsIndex extends Component
      */
     public function updateTaskDates(int $taskId, string $startDate, string $endDate, ?string $oldStart = null, ?string $oldEnd = null): void
     {
-        $task = Task::find($taskId);
+        $task = $this->visibleTask($taskId);
         if (! $task) {
-            \Log::warning('[gantt] updateTaskDates: task not found', ['taskId' => $taskId]);
+            \Log::warning('[gantt] updateTaskDates: task not found or not visible to this tenant', ['taskId' => $taskId]);
             return;
         }
 
@@ -1692,16 +1770,14 @@ class CardsIndex extends Component
             'options'    => $newOptions,
         ]);
 
-        // SNAPPY DRAG: the gantt bar is already positioned optimistically by Alpine
-        // (see _gantt.blade.php startResize/startDrag handlers). Skipping the
-        // re-render avoids a 200-500ms morph cycle (ganttRows + dependency arrows
-        // + critical path recompute) on every drag/resize. Dependency arrows
-        // become slightly stale until the next real interaction; that's an
-        // acceptable tradeoff for the responsiveness gain.
-        // Invalidate persisted critical-path cache so the next real render
-        // recomputes (date changes can re-route the critical path).
+        // One render per drag. The bar is already where the pointer left it
+        // (Alpine moves it optimistically), and this request, made from inside
+        // the gantt island, renders only that island: the arrows, the
+        // critical path and any re-packed rows arrive together. The old
+        // skipRender saved nothing — the client fired a full-component
+        // refresh for the arrows 350 ms later anyway, the heaviest render
+        // there is, and every following drag queued behind it.
         unset($this->criticalPathTaskIds);
-        $this->skipRender();
 
         Flux::toast(
             duration: 2000,
@@ -1715,6 +1791,23 @@ class CardsIndex extends Component
     public function editTask(int $taskId, ?string $day = null, ?int $projectId = null): void
     {
         $this->dispatch('editTask', task: $taskId)->to('tasks.task-create');
+    }
+
+    /**
+     * A task the signed-in user may move or link: one on a project this
+     * tenant can see (ProjectScope). Task has no global scope of its own, so
+     * a bare Task::find let any signed-in user move or link another vendor's
+     * tasks with a crafted Livewire call.
+     */
+    private function visibleTask(int $taskId): ?Task
+    {
+        $task = Task::find($taskId);
+
+        if (! $task || ! Project::query()->whereKey($task->project_id)->exists()) {
+            return null;
+        }
+
+        return $task;
     }
 
     /**
@@ -1737,6 +1830,11 @@ class CardsIndex extends Component
         $type = $sourceEdge . '_to_' . $targetEdge;
 
         if (! in_array($type, ['finish_to_start', 'start_to_start', 'finish_to_finish', 'start_to_finish'], true)) {
+            return;
+        }
+
+        if (! $this->visibleTask($predecessorId) || ! $this->visibleTask($successorId)) {
+            \Log::warning('[gantt] createDependencyLink: task not found or not visible to this tenant', compact('predecessorId', 'successorId'));
             return;
         }
 
@@ -1791,25 +1889,28 @@ class CardsIndex extends Component
     }
 
     /**
-     * Replace the dates inside [$oldStart, $oldEnd] in $task->options->dates
-     * with the inclusive range [$newStart, $newEnd] (respecting saturday/sunday
-     * flags), then return the merged options array with a sorted, deduped
-     * `dates` list.
+     * Replace the dragged run [$oldStart, $oldEnd] in $task->options->dates
+     * with the new run [$newStart, $newEnd] and return the merged options
+     * with a sorted, deduped `dates` list.
+     *
+     * A bar spans weekends visually (taskDateSegments merges a Mon–Fri run
+     * across Sat/Sun), so the pointer's range is not the day list. Weekend
+     * days join the new run only when the dragged run already had them, or
+     * the task's saturday/sunday flags ask for them: moving a two-week
+     * weekday task used to add four weekend days that then showed up in the
+     * table and cards views. A move (same span) keeps the same number of
+     * working days; a resize fills the eligible days of the new range.
+     * Per-day arrival times (`time_settings`) travel with their days.
      */
     protected function replaceTaskDateSegment(Task $task, Carbon $oldStart, Carbon $oldEnd, Carbon $newStart, Carbon $newEnd): array
     {
-        $options = (array) ($task->options ?? []);
-        $saturday = (bool) ($options['saturday'] ?? false);
-        $sunday   = (bool) ($options['sunday']   ?? false);
+        $options = json_decode(json_encode($task->options ?? []), true) ?: [];
 
         // Seed the existing dates. If empty, fall back to the task's start/end.
         $existing = [];
-        $raw = $options['dates'] ?? null;
-        if (is_array($raw) || is_object($raw)) {
-            foreach ((array) $raw as $d) {
-                if (is_string($d) && $d !== '') {
-                    $existing[] = substr($d, 0, 10);
-                }
+        foreach ((array) ($options['dates'] ?? []) as $d) {
+            if (is_string($d) && $d !== '') {
+                $existing[] = substr($d, 0, 10);
             }
         }
         if (empty($existing) && $task->start_date && $task->end_date) {
@@ -1820,29 +1921,77 @@ class CardsIndex extends Component
                 $cursor->addDay();
             }
         }
+        $existing = array_values(array_unique($existing));
+        sort($existing);
 
-        // Drop the dragged segment.
         $oldStartStr = $oldStart->format('Y-m-d');
         $oldEndStr   = $oldEnd->format('Y-m-d');
-        $kept = array_values(array_filter(
-            $existing,
-            fn (string $d) => $d < $oldStartStr || $d > $oldEndStr,
-        ));
+        $segment = array_values(array_filter($existing, fn (string $d) => $d >= $oldStartStr && $d <= $oldEndStr));
+        $kept = array_values(array_filter($existing, fn (string $d) => $d < $oldStartStr || $d > $oldEndStr));
 
-        // Add the new segment days. We include weekend days unconditionally
-        // here because the user explicitly dragged/resized the bar over them —
-        // they want the task to visibly span those days regardless of the
-        // saturday/sunday auto-extend flags.
-        $cursor = $newStart->copy();
-        while ($cursor->lte($newEnd)) {
-            $kept[] = $cursor->format('Y-m-d');
-            $cursor->addDay();
+        $segmentDays = array_map(fn (string $d) => Carbon::createFromFormat('!Y-m-d', $d, 'UTC'), $segment);
+        $allowSaturday = (bool) ($options['saturday'] ?? false)
+            || collect($segmentDays)->contains(fn (Carbon $d) => $d->isSaturday());
+        $allowSunday = (bool) ($options['sunday'] ?? false)
+            || collect($segmentDays)->contains(fn (Carbon $d) => $d->isSunday());
+        $eligible = fn (Carbon $d): bool => ($allowSaturday || ! $d->isSaturday()) && ($allowSunday || ! $d->isSunday());
+
+        $newStartStr = $newStart->format('Y-m-d');
+        $newEndStr = $newEnd->format('Y-m-d');
+        $isMove = $segment !== []
+            && self::daysBetweenYmd($oldStartStr, $oldEndStr) === self::daysBetweenYmd($newStartStr, $newEndStr);
+
+        $newDates = [];
+        $cursor = Carbon::createFromFormat('!Y-m-d', $newStartStr, 'UTC');
+        if ($isMove) {
+            $needed = count($segment);
+            for ($guard = 0; count($newDates) < $needed && $guard < 400; $guard++) {
+                if ($eligible($cursor)) {
+                    $newDates[] = $cursor->format('Y-m-d');
+                }
+                $cursor->addDay();
+            }
+        } else {
+            $stop = Carbon::createFromFormat('!Y-m-d', $newEndStr, 'UTC');
+            while ($cursor->lte($stop)) {
+                if ($eligible($cursor)) {
+                    $newDates[] = $cursor->format('Y-m-d');
+                }
+                $cursor->addDay();
+            }
+            if ($newDates === []) {
+                // A range of weekend days only: the user asked for them.
+                $cursor = Carbon::createFromFormat('!Y-m-d', $newStartStr, 'UTC');
+                while ($cursor->lte($stop)) {
+                    $newDates[] = $cursor->format('Y-m-d');
+                    $cursor->addDay();
+                }
+            }
         }
 
-        $kept = array_values(array_unique($kept));
-        sort($kept);
+        $timeSettings = (array) ($options['time_settings'] ?? []);
+        $moved = [];
+        foreach ($segment as $i => $oldDate) {
+            if (! array_key_exists($oldDate, $timeSettings)) {
+                continue;
+            }
+            if (isset($newDates[$i])) {
+                $moved[$newDates[$i]] = $timeSettings[$oldDate];
+            }
+            unset($timeSettings[$oldDate]);
+        }
+        foreach ($moved as $date => $settings) {
+            $timeSettings[$date] = $settings;
+        }
+        if ($timeSettings !== [] || array_key_exists('time_settings', $options)) {
+            $options['time_settings'] = $timeSettings;
+        }
 
-        $options['dates'] = $kept;
+        $dates = array_values(array_unique(array_merge($kept, $newDates)));
+        sort($dates);
+
+        $options['dates'] = $dates;
+
         return $options;
     }
 
@@ -1853,6 +2002,32 @@ class CardsIndex extends Component
      *
      * @return array<int, array{title: string, tasks: \Illuminate\Support\Collection<int, \App\Models\Task>}>
      */
+    #[Computed]
+    public function undatedTasksByProject(): array
+    {
+        return $this->buildUndatedTasksByProject();
+    }
+
+    /**
+     * Livewire registers islands during the initial mount only. The gantt
+     * island sits inside the gantt view branch, so a planner opened in the
+     * table view never stores it, and a later renderIsland('gantt') would
+     * silently no-op. Register islands that first appear on an update too
+     * (the same fix SmsConversation carries for its open-thread island).
+     */
+    public function renderIslandDirective($name = null, $token = null, $lazy = false, $defer = false, $always = false, $skip = false, $with = [])
+    {
+        if (! $this->islandIsMounting()) {
+            $known = array_column($this->getIslands(), 'name');
+
+            if (! in_array($name ?? $token, $known, true)) {
+                $this->storeIsland($name ?? $token, $token);
+            }
+        }
+
+        return parent::renderIslandDirective($name, $token, $lazy, $defer, $always, $skip, $with);
+    }
+
     protected function buildUndatedTasksByProject(): array
     {
         $map = [];
@@ -1889,20 +2064,14 @@ class CardsIndex extends Component
         // skip the heavy kanban / lane / undated computations entirely.
         $needsKanban = $isCards;                 // cards view: per-day project columns
         $needsRows = $isTable;                   // table view: day headers + lane rows
-        // Pending-tasks modal: every view whose project sidebar shows the
-        // "N pending" chip — the gantt shares that sidebar, and without the
-        // modal data its chip silently did nothing.
-        $needsUndated = $isCards || $isTable || $isGantt;
 
+        // The gantt and the pending-tasks modal read their data through
+        // computeds inside their islands, so an island-only render (a scroll
+        // load, a drag) never comes through here at all.
         return view('livewire.planner.cards', [
             'kanbanColumns' => $needsKanban ? $this->kanbanColumns : collect(),
             'dayHeaders'    => $needsRows ? $this->dayHeaders : collect(),
             'projectRows'   => $needsRows ? $this->projectRows : collect(),
-            'ganttRows'        => $isGantt ? $this->ganttRows : collect(),
-            'ganttLinks'       => $isGantt ? $this->ganttDependencyLinks : [],
-            'ganttArrowPaths'  => $isGantt ? $this->ganttArrowPaths : [],
-            'pxPerDay'         => $this->ganttPxPerDay,
-            'undatedTasksByProject' => $needsUndated ? $this->buildUndatedTasksByProject() : [],
         ])->layout('components.layouts.app', [
             'title' => 'Planner',
             'fullscreenClasses' => 'h-full overflow-hidden flex flex-col',

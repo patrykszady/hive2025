@@ -2148,7 +2148,7 @@ class TaskCreate extends Component
         }
 
         // Check for circular dependencies
-        if (TaskDependency::wouldCreateCircularDependency($this->selectedPredecessorId, $this->form->task->id)) {
+        if (TaskDependency::wouldCreateCircularDependency((int) $this->selectedPredecessorId, (int) $this->form->task->id)) {
             $this->addError('selectedPredecessorId', 'This would create a circular dependency.');
             return;
         }

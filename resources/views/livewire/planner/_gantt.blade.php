@@ -1,6 +1,9 @@
 {{--
     Gantt View — single source of truth for layout math is $pxPerDay (server-driven).
-    Alpine handles: scroll-to-today, bar drag/resize, dependency arrow drawing.
+    Rendered inside the 'gantt' island (see cards.blade.php): a scroll load, a
+    drag or a new link re-renders this partial alone. Alpine handles
+    scroll-to-today, infinite-scroll compensation, bar drag/resize and the
+    link-drag preview; committed arrows are drawn server-side.
 --}}
 @php
     $rowHeight = 74;              // bar (64) + 10px gap; arrows route through the gap
@@ -16,16 +19,20 @@
 
 @php require resource_path('views/livewire/planner/_day-classes.php'); @endphp
 
+{{-- The x-data expression must stay constant: Alpine compares it on every
+     morph and re-initialises the component when it changes, which is how
+     each infinite-scroll load used to reset the scroll position and the
+     loading state (the day range used to be inlined here). The geometry
+     travels in data attributes and is re-read after every morph. --}}
 <div
-    x-data="plannerGantt({
-        pxPerDay: {{ $pxPerDay }},
-        firstDay: @js($firstDay->format('Y-m-d')),
-        lastDay: @js($days->last()->format('Y-m-d')),
-        projectColumnWidth: {{ $projectColumnWidth }},
-        headerHeight: {{ $headerHeight }},
-        rowHeight: {{ $rowHeight }},
-        rowPadding: {{ $rowPadding }},
-    })"
+    x-data="plannerGantt()"
+    data-px-per-day="{{ $pxPerDay }}"
+    data-first-day="{{ $firstDay->format('Y-m-d') }}"
+    data-last-day="{{ $days->last()->format('Y-m-d') }}"
+    data-project-column-width="{{ $projectColumnWidth }}"
+    data-header-height="{{ $headerHeight }}"
+    data-row-height="{{ $rowHeight }}"
+    data-row-padding="{{ $rowPadding }}"
     @gantt-link-start="startLinkDrag($event.detail)"
     @gantt-bar-hover="hoveredTaskId = $event.detail.taskId"
     class="flex-1 min-h-0 flex flex-col bg-white dark:bg-zinc-900"
@@ -72,7 +79,7 @@
 
         <div
             class="relative"
-            :style="`width: {{ $projectColumnWidth + $timelineWidth }}px;`"
+            style="width: {{ $projectColumnWidth + $timelineWidth }}px;"
             x-ref="grid"
         >
             {{-- Sticky top header: day labels --}}
@@ -453,77 +460,130 @@
 
 @script
 <script>
-    Alpine.data('plannerGantt', (config) => ({
+    Alpine.data('plannerGantt', () => ({
         ...window.plannerInfiniteScroll('scroller'),
 
-        pxPerDay: config.pxPerDay,
-        firstDay: config.firstDay,           // 'YYYY-MM-DD'
-        lastDay: config.lastDay,
-        projectColumnWidth: config.projectColumnWidth,
-        headerHeight: config.headerHeight,
-        rowHeight: config.rowHeight,
-        rowPadding: config.rowPadding,
+        // The scroller's first child is a loading spinner, not the grid, so the
+        // mixin's ResizeObserver measured the wrong element and every prepend
+        // jumped the view two weeks back. Loads are compensated from the known
+        // day delta in _triggerLoad below instead.
+        _infUseResizeObserver: false,
+
+        // Geometry comes from the root's data attributes (see the markup) and
+        // is re-read after every morph, so the x-data expression never changes
+        // and Alpine never re-initialises this component mid-session.
+        pxPerDay: 0,
+        firstDay: '',           // 'YYYY-MM-DD'
+        lastDay: '',
+        projectColumnWidth: 0,
+        headerHeight: 0,
+        rowHeight: 0,
+        rowPadding: 0,
         totalWidth: 0,
         totalHeight: 0,
         _saveScrollTimer: 0,
+        _measureRaf: 0,
+        _gridObserver: null,
         hoveredArrowKey: null,
         hoveredTaskId: null,
 
-        // sessionStorage key for the horizontal scroll position. Persisting per-zoom
-        // ensures the viewport returns to where the user was — even after a full
-        // Livewire morph re-instantiates this Alpine component.
-        _scrollKey() {
-            return `gantt-scroll-left:${this.pxPerDay}`;
+        // The remembered position is a DATE, not a pixel offset: the window
+        // the page reloads with is smaller than the one it was scrolled in, so
+        // a stored scrollLeft landed on the wrong day.
+        _anchorKey() {
+            return `gantt-anchor-date:${this.pxPerDay}`;
         },
 
         init() {
+            this._syncConfig();
             this._initInfiniteScroll();
+
             this.$nextTick(() => {
                 this.measure();
                 this.updateArrowClip();
 
-                // Restore prior scroll position if we have one; otherwise center on today.
-                const saved = sessionStorage.getItem(this._scrollKey());
-                if (saved !== null && this.$refs.scroller) {
-                    this.$refs.scroller.scrollLeft = parseInt(saved, 10) || 0;
+                const anchor = sessionStorage.getItem(this._anchorKey());
+                if (anchor && anchor >= this.firstDay && anchor <= this.lastDay && this.$refs.scroller) {
+                    this.$refs.scroller.scrollLeft = this._daysBetween(this.firstDay, anchor) * this.pxPerDay;
                 } else {
                     this.scrollToToday();
                 }
             });
 
-            // After every server commit, re-measure (bars may have moved) and
-            // re-apply the sidebar clip. Scroll preservation for infinite-load
-            // prepends is now handled by the ResizeObserver in the mixin —
-            // there's nothing to do here for that.
-            this._commitHook = window.Livewire?.hook?.('commit', ({ component, succeed }) => {
-                if (!this.$wire || component.id !== this.$wire.$id) return;
-                succeed(() => {
-                    this.measure();
-                    this.updateArrowClip();
-                });
-            });
+            // Bars move, rows re-pack and arrows re-route on every island
+            // render; re-measure once per frame whenever the grid changes.
+            if (this.$refs.grid && 'MutationObserver' in window) {
+                this._gridObserver = new MutationObserver(() => this._scheduleMeasure());
+                this._gridObserver.observe(this.$refs.grid, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'd'] });
+            }
         },
 
         destroy() {
             this._destroyInfiniteScroll?.();
-            if (typeof this._commitHook === 'function') this._commitHook();
+            this._gridObserver?.disconnect();
+            this._gridObserver = null;
             if (this._saveScrollTimer) clearTimeout(this._saveScrollTimer);
+            if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
         },
 
-        // Called by the shared infinite-scroll mixin after a load completes.
-        onInfiniteLoad() {
-            this._syncRangeFromDom();
-            this.measure();
-            this.updateArrowClip();
+        _scheduleMeasure() {
+            if (this._measureRaf) return;
+            this._measureRaf = requestAnimationFrame(() => {
+                this._measureRaf = 0;
+                this._syncConfig();
+                this.measure();
+                this.updateArrowClip();
+            });
         },
 
-        // Read the actual first/last day cells so g.firstDay stays in sync with the
-        // server-rendered range after loadPreviousDays / loadFutureDays.
-        _syncRangeFromDom() {
-            const cells = this.$refs.scroller?.querySelectorAll('[data-date]');
-            if (!cells || cells.length === 0) return;
-            this.firstDay = cells[0].dataset.date;
-            this.lastDay  = cells[cells.length - 1].dataset.date;
+        // Read the server-rendered geometry off the root element.
+        _syncConfig() {
+            const d = this.$root?.dataset ?? {};
+            this.pxPerDay = parseInt(d.pxPerDay, 10) || this.pxPerDay || 140;
+            this.firstDay = d.firstDay || this.firstDay;
+            this.lastDay = d.lastDay || this.lastDay;
+            this.projectColumnWidth = parseInt(d.projectColumnWidth, 10) || this.projectColumnWidth;
+            this.headerHeight = parseInt(d.headerHeight, 10) || this.headerHeight;
+            this.rowHeight = parseInt(d.rowHeight, 10) || this.rowHeight;
+            this.rowPadding = parseInt(d.rowPadding, 10) || this.rowPadding;
+        },
+
+        // Whole days from one YYYY-MM-DD to another (negative when b is earlier).
+        _daysBetween(a, b) {
+            const toUtc = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+            return Math.round((toUtc(b) - toUtc(a)) / 86400000);
+        },
+
+        // Extend the window in one direction and keep the viewport on the same
+        // day. The server may also evict days from the far side (the window is
+        // capped), so the shift is the change of the first day, whichever way
+        // it went: prepended days push the content right, evicted ones pull it
+        // left. Replaces the mixin's ResizeObserver-based compensation.
+        async _triggerLoad(direction) {
+            const scroller = this._infiniteScrollContainer();
+            if (!scroller) return;
+
+            const flag = direction === 'start' ? 'isLoadingPrevious' : 'isLoadingFuture';
+            if (this[flag]) return;
+
+            this[flag] = true;
+            this._lastLoadAt = performance.now();
+            const oldFirstDay = this.firstDay;
+            const oldScrollLeft = scroller.scrollLeft;
+
+            try {
+                await (direction === 'start' ? this.$wire.loadPreviousDays() : this.$wire.loadFutureDays());
+                await this.$nextTick();
+                this._syncConfig();
+                const shift = this._daysBetween(this.firstDay, oldFirstDay);
+                scroller.scrollLeft = oldScrollLeft + shift * this.pxPerDay;
+                this.measure();
+                this.updateArrowClip();
+            } finally {
+                this[flag] = false;
+                this._lastLoadAt = performance.now();
+                requestAnimationFrame(() => this._ensureScrollable());
+            }
         },
 
         measure() {
@@ -532,18 +592,26 @@
             this.totalHeight = this.$refs.grid.scrollHeight;
         },
 
-        // Persist scroll position + keep the sidebar clip in sync as the user scrolls.
-        // Runs at most once per animation frame (mixin coalesces scroll events via rAF),
-        // and the sessionStorage write is debounced so momentum scroll doesn't thrash it.
+        // Keep the sidebar clip in sync as the user scrolls and remember the day
+        // at the left edge. Runs at most once per animation frame (the mixin
+        // coalesces scroll events via rAF); the sessionStorage write is
+        // debounced so momentum scroll doesn't thrash it.
         onInfiniteScrollFrame() {
             this.updateArrowClip();
             if (this._saveScrollTimer) clearTimeout(this._saveScrollTimer);
             this._saveScrollTimer = setTimeout(() => {
                 this._saveScrollTimer = 0;
-                if (this.$refs.scroller) {
-                    sessionStorage.setItem(this._scrollKey(), String(this.$refs.scroller.scrollLeft));
-                }
+                const scroller = this.$refs.scroller;
+                if (!scroller || !this.firstDay || !this.pxPerDay) return;
+                const index = Math.max(0, Math.floor(scroller.scrollLeft / this.pxPerDay));
+                sessionStorage.setItem(this._anchorKey(), this._addDaysYmd(this.firstDay, index));
             }, 150);
+        },
+
+        _addDaysYmd(ymd, n) {
+            const [y, m, d] = ymd.split('-').map(Number);
+            const dt = new Date(Date.UTC(y, m - 1, d + n));
+            return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
         },
 
         // Clip the SVG arrow layer so it never paints under the sticky project sidebar.
@@ -891,22 +959,13 @@
             }
 
 
+            // One round trip: the server renders the gantt island with the bar
+            // where it now belongs, the arrows and the critical path. The old
+            // follow-up `dependenciesUpdated` dispatch re-rendered the whole
+            // component 350 ms later — the heaviest render there is — and every
+            // following drag queued behind it.
             this.saving = true;
             this.$wire.updateTaskDates(this._taskId, newStart, newEnd, oldStart, oldEnd)
-                .then(() => {
-                    // Server skipped render so dependency arrows still point to the
-                    // OLD bar positions. Schedule a debounced arrow-only refresh
-                    // (targets the parent's onDependenciesUpdated listener, which
-                    // unsets just the arrow computeds). If another drag starts
-                    // within the window we cancel and reschedule.
-                    if (window.__ganttArrowRefreshTimer) {
-                        clearTimeout(window.__ganttArrowRefreshTimer);
-                    }
-                    window.__ganttArrowRefreshTimer = setTimeout(() => {
-                        window.__ganttArrowRefreshTimer = null;
-                        Livewire.dispatch('dependenciesUpdated');
-                    }, 350);
-                })
                 .finally(() => { this.saving = false; });
         },
         _addDays(ymd, n) {

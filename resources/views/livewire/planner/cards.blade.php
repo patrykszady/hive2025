@@ -992,15 +992,21 @@
     </div>
     @endif
 
-    {{-- Gantt View --}}
+    {{-- Gantt View. Its own island: a scroll load, a drag or a new link made
+         inside it re-renders this block alone, not the toolbar, the agenda
+         and the modals with it. always: true so a filter change from the
+         toolbar (outside the island) still refreshes it. An island rendered
+         on its own sees the component's properties and computeds, not
+         render()'s view data, hence the $this-> reads. --}}
     @if ($viewMode === 'gantt')
-        @include('livewire.planner._gantt', [
-            'ganttRows' => $ganttRows,
-            'ganttLinks' => $ganttLinks,
-            'ganttArrowPaths' => $ganttArrowPaths,
-            'pxPerDay' => $pxPerDay,
-            'days' => $this->days,
-        ])
+        @island(name: 'gantt', always: true)
+            @include('livewire.planner._gantt', [
+                'ganttRows' => $this->ganttRows,
+                'ganttArrowPaths' => $this->ganttArrowPaths,
+                'pxPerDay' => $this->ganttPxPerDay,
+                'days' => $this->days,
+            ])
+        @endisland
     @endif
 
     </div>
@@ -1009,21 +1015,33 @@
     {{-- ============================================================= --}}
     {{-- Mobile agenda view (below lg) \u2014 vertical, day-grouped list --}}
     {{-- ============================================================= --}}
+    {{-- Lazy island: on a desktop this block is display:none and never
+         intersects, so it is no longer computed and shipped on every page
+         load and every gantt scroll or drag. always: true keeps it current
+         after a filter change on a phone, where it is the view. --}}
     <div class="lg:hidden flex flex-1 flex-col min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-y-auto">
         <div class="p-3">
-            <x-upcoming-tasks-list
-                :grouped-tasks="$this->mobileGroupedTasks"
-                :unscheduled-tasks="$this->mobileUnscheduledTasks"
-                :task-count="$this->mobileTaskCount"
-                :show-avatars="true"
-                :clickable="true"
-                :show-project-info="true"
-                :show-vendor-info="true"
-                :show-notifications="false"
-                :pending-tasks-expanded="false"
-                title="Tasks"
-                empty-message="No tasks found for the selected filters."
-            />
+            @island(name: 'mobile-agenda', lazy: island_lazy(), always: true)
+                @placeholder
+                    <div class="flex items-center justify-center gap-2 py-10 text-sm text-zinc-500 dark:text-zinc-400">
+                        <flux:icon.arrow-path class="size-4 animate-spin" />
+                        Loading tasks…
+                    </div>
+                @endplaceholder
+                <x-upcoming-tasks-list
+                    :grouped-tasks="$this->mobileGroupedTasks"
+                    :unscheduled-tasks="$this->mobileUnscheduledTasks"
+                    :task-count="$this->mobileTaskCount"
+                    :show-avatars="true"
+                    :clickable="true"
+                    :show-project-info="true"
+                    :show-vendor-info="true"
+                    :show-notifications="false"
+                    :pending-tasks-expanded="false"
+                    title="Tasks"
+                    empty-message="No tasks found for the selected filters."
+                />
+            @endisland
         </div>
     </div>
     {{-- /Mobile agenda --}}
@@ -1043,7 +1061,10 @@
 
             <flux:separator variant="subtle" class="my-3" />
 
-            @foreach ($undatedTasksByProject as $projectId => $entry)
+            {{-- Its own island so a gantt scroll or drag does not re-render
+                 every pending card; always: true so filter changes still do. --}}
+            @island(name: 'pending-tasks', always: true)
+            @foreach ($this->undatedTasksByProject as $projectId => $entry)
                 <div
                     data-undated-project="{{ $projectId }}"
                     data-project-title="{{ $entry['title'] }}"
@@ -1070,6 +1091,7 @@
                     @endforeach
                 </div>
             @endforeach
+            @endisland
         </flux:modal>
     </div>
     </div>

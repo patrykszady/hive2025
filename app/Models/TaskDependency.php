@@ -33,13 +33,15 @@ class TaskDependency extends Model
     // Validation method to prevent circular dependencies
     public static function wouldCreateCircularDependency($predecessorId, $successorId): bool
     {
-        return static::hasPath($successorId, $predecessorId);
+        // Ids arrive as strings from wire:model; hasPath compares strictly,
+        // so an uncast id never matched and every cycle got through.
+        return static::hasPath((int) $successorId, (int) $predecessorId);
     }
 
     /**
      * Check if there's a path from one task to another through dependencies
      */
-    private static function hasPath($fromTaskId, $toTaskId, $visited = []): bool
+    private static function hasPath(int $fromTaskId, int $toTaskId, array $visited = []): bool
     {
         // If we've reached the target, we found a path
         if ($fromTaskId === $toTaskId) {
@@ -59,7 +61,7 @@ class TaskDependency extends Model
 
         // Check each successor to see if there's a path to the target
         foreach ($dependencies as $dependency) {
-            if (static::hasPath($dependency->successor_task_id, $toTaskId, $visited)) {
+            if (static::hasPath((int) $dependency->successor_task_id, $toTaskId, $visited)) {
                 return true;
             }
         }

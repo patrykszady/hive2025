@@ -30,6 +30,11 @@ window.plannerInfiniteScroll = function (refName) {
         // doesn't auto-inflate right back to the old 90-day cost.
         _infThreshold: 600,
         _infMinLoadIntervalMs: 600,
+        // The ResizeObserver below compensates a prepend by measuring the
+        // grid's growth. A view whose scroller's first child is not the grid
+        // (the gantt puts its loading spinners first) turns it off and
+        // compensates from the known day delta instead — see _gantt.blade.php.
+        _infUseResizeObserver: true,
         isLoadingPrevious: false,
         isLoadingFuture: false,
         _pendingPrependScrollWidth: null,
@@ -46,7 +51,7 @@ window.plannerInfiniteScroll = function (refName) {
                 // a prepend/append morph commits to layout. The callback fires
                 // before paint, which is exactly when we need to fix scrollLeft.
                 const grid = container.firstElementChild;
-                if (grid && 'ResizeObserver' in window) {
+                if (this._infUseResizeObserver && grid && 'ResizeObserver' in window) {
                     this._resizeObserver = new ResizeObserver(() => this._onGridResize());
                     this._resizeObserver.observe(grid);
                 }
