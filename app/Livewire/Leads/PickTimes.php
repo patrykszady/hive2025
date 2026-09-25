@@ -176,11 +176,20 @@ class PickTimes extends Component
         return (bool) ($lead?->hasRescheduled() || $lead?->hasBookedConsult());
     }
 
+    /**
+     * A first contact normally waits MIN_LEAD_HOURS. The lead's own
+     * Lead::consultNoticeHours() (set by the "Consult within the hour" office
+     * toggle) can only shrink that wait, never stretch it past the standard —
+     * `min()` is what enforces that direction. Rescheduling ignores both and
+     * stays at MIN_LEAD_HOURS_RESCHEDULE.
+     */
     public static function minLeadHours(?Lead $lead = null): int
     {
-        return static::isRescheduling($lead)
-            ? self::MIN_LEAD_HOURS_RESCHEDULE
-            : self::MIN_LEAD_HOURS;
+        if (static::isRescheduling($lead)) {
+            return self::MIN_LEAD_HOURS_RESCHEDULE;
+        }
+
+        return min(self::MIN_LEAD_HOURS, $lead?->consultNoticeHours() ?? self::MIN_LEAD_HOURS);
     }
 
     /**
@@ -192,9 +201,13 @@ class PickTimes extends Component
     {
         $hours = static::minLeadHours($this->lead);
 
-        return $hours > 0
-            ? "Please pick a later {$noun} — we need at least {$hours} hours notice."
-            : "That {$noun} has already passed — please pick a later one.";
+        if ($hours <= 0) {
+            return "That {$noun} has already passed — please pick a later one.";
+        }
+
+        $unit = $hours === 1 ? 'hour' : 'hours';
+
+        return "Please pick a later {$noun} — we need at least {$hours} {$unit} notice.";
     }
 
     public static function earliestStart(?Lead $lead = null): \Illuminate\Support\Carbon

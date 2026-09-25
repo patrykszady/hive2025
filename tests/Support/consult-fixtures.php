@@ -8,11 +8,30 @@
  * the parallel run.
  */
 
+use App\Livewire\Leads\LeadCreate;
 use App\Models\Client;
 use App\Models\CompanyEmail;
 use App\Models\Lead;
 use App\Models\User;
 use App\Models\Vendor;
+use Livewire\Livewire;
+
+/**
+ * The consult composer opened on the fixture's lead, addressed and ready to
+ * send. Shared here (not in a test file) so every parallel worker has it:
+ * a helper defined in one test file is missing in workers that never load
+ * that file.
+ */
+function consultComposer(array $fx)
+{
+    return Livewire::actingAs($fx['admin'])
+        ->test(LeadCreate::class)
+        ->call('editLead', $fx['lead']->id)
+        ->set('to', [$fx['contact']->email])
+        ->set('from', $fx['admin']->email)
+        ->set('subject', 'Consultation')
+        ->set('emailBody', '<p>See you soon</p>');
+}
 
 function makeConsultFixture(?array $slot = null): array
 {

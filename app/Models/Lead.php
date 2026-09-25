@@ -367,6 +367,28 @@ class Lead extends Model
     }
 
     /**
+     * Notice required before this lead's homeowner may book a consult on the
+     * public picker, in hours. Normally the standard
+     * PickTimes::MIN_LEAD_HOURS; an office toggle on a hot lead (the "Consult
+     * within the hour" switch in the lead modal) stores a shorter number here
+     * so PickTimes::minLeadHours() can loosen — never tighten — the notice it
+     * asks of a first contact.
+     */
+    public function consultNoticeHours(): int
+    {
+        return (int) ($this->lead_data['consult_notice_hours'] ?? \App\Livewire\Leads\PickTimes::MIN_LEAD_HOURS);
+    }
+
+    /**
+     * Has the office flagged this lead so its homeowner can pick a consult
+     * slot as soon as an hour from now, instead of the usual three days?
+     */
+    public function allowsConsultWithinTheHour(): bool
+    {
+        return $this->consultNoticeHours() <= 1;
+    }
+
+    /**
      * The lead that speaks for a client — for showing the times its
      * homeowner picked on the scheduling page.
      *

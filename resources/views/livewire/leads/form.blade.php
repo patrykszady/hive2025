@@ -102,6 +102,14 @@
                     <flux:error name="proposeDate" />
                 </flux:field>
 
+                {{-- Hot lead: let their own picker offer times starting an hour
+                     from now instead of the usual three days. --}}
+                <flux:switch
+                    wire:model.live="consultWithinTheHour"
+                    label="Consult within the hour"
+                    description="Lets the homeowner pick a time as soon as an hour from now instead of three days."
+                />
+
                 @if (! empty($availability))
                     <flux:field>
                         <flux:label>Availability</flux:label>

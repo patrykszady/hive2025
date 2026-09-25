@@ -51,17 +51,6 @@ function bookableWeekdays(Lead $lead, int $count = 2): array
     return $days;
 }
 
-function consultComposer(array $fx)
-{
-    return Livewire::actingAs($fx['admin'])
-        ->test(LeadCreate::class)
-        ->call('editLead', $fx['lead']->id)
-        ->set('to', [$fx['contact']->email])
-        ->set('from', $fx['admin']->email)
-        ->set('subject', 'Consultation')
-        ->set('emailBody', '<p>See you soon</p>');
-}
-
 it('creates the project and the Meet task when sending with a slot and exact time', function () {
     Queue::fake();
     $fx = makeConsultFixture();

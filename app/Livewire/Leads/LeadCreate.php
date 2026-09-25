@@ -92,6 +92,15 @@ class LeadCreate extends Component
      */
     public string $consultMeetingType = 'in_person';
 
+    /**
+     * Office override for a hot lead: lets THIS lead's homeowner pick a
+     * consult slot as soon as an hour from now on the public picker, instead
+     * of the usual three days. Persisted as lead_data.consult_notice_hours
+     * (see Lead::consultNoticeHours()/allowsConsultWithinTheHour()), which
+     * PickTimes::minLeadHours() reads directly.
+     */
+    public bool $consultWithinTheHour = false;
+
     public bool $showLeadDelete = false;
 
     /** A matching existing contact found while creating a lead by hand. */
@@ -187,7 +196,7 @@ class LeadCreate extends Component
             'message', 'origin', 'availability', 'selectedAvailability',
             'selectedExactTime', 'proposeDate', 'projectName', 'to', 'subject', 'emailBody',
             'selectedTemplateId', 'nylasMessageId', 'nylasReferences',
-            'duplicateMatch', 'createAnyway', 'consultMeetingType', 'attachUserId', 'selectedUserId', 'user', 'client',
+            'duplicateMatch', 'createAnyway', 'consultMeetingType', 'consultWithinTheHour', 'attachUserId', 'selectedUserId', 'user', 'client',
         ]);
         $this->view_text = [
             'card_title' => 'New Lead',
@@ -247,6 +256,7 @@ class LeadCreate extends Component
                 'phone' => preg_replace('/\D/', '', (string) $this->phone) ?: null,
                 'address' => $this->address,
                 'message' => $this->message,
+                'consult_notice_hours' => $this->consultWithinTheHour ? 1 : null,
             ], fn ($v) => $v !== null && $v !== ''),
             'belongs_to_vendor_id' => $vendorId,
             'created_by_user_id' => auth()->id(),
@@ -309,6 +319,7 @@ class LeadCreate extends Component
         $this->consultMeetingType = in_array($this->lead->lead_data['meeting_preference'] ?? null, ['in_person', 'virtual'], true)
             ? $this->lead->lead_data['meeting_preference']
             : 'in_person';
+        $this->consultWithinTheHour = $this->lead->allowsConsultWithinTheHour();
         $rawAvailability = $this->lead->lead_data['availability'] ?? [];
         $this->availability = is_array($rawAvailability) || $rawAvailability instanceof \Traversable
             ? collect($rawAvailability)->map(fn ($slot) => (array) $slot)->values()->all()
@@ -2038,6 +2049,32 @@ class LeadCreate extends Component
             // about a NEW time, not confirm the old one.
             'past' => Carbon::parse($task->start_date, $tz)->startOfDay()->lt(Carbon::now($tz)->startOfDay()),
         ];
+    }
+
+    /**
+     * Flipping the switch stores (or clears) the notice override on the lead
+     * right away — no separate save step — so the public picker honours it
+     * the moment the office turns it on. A lead not yet created (still in the
+     * "New Lead" form) has nothing to persist to yet; save() writes the flag
+     * into the lead's lead_data the moment the record is first created.
+     */
+    public function updatedConsultWithinTheHour(bool $value): void
+    {
+        if (! $this->lead?->exists) {
+            return;
+        }
+
+        $data = $this->lead->lead_data;
+
+        if ($value) {
+            $data['consult_notice_hours'] = 1;
+        } else {
+            unset($data['consult_notice_hours']);
+        }
+
+        $this->lead->lead_data = $data;
+        $this->lead->saveQuietly();
+        $this->lead = $this->lead->fresh(['user.clients.users', 'last_status', 'feedback']);
     }
 
     /**
