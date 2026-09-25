@@ -32,6 +32,11 @@ use Illuminate\Support\Facades\Log;
  * by an extension rather than over CDP, so there is no automation surface to
  * disguise. If Menards declines to serve this server, that is their answer.
  *
+ * ONE NARROW EXCEPTION: the sign-in form. scripts/menards-signin.cjs attaches
+ * over a loopback DevTools port for the few seconds it takes to type the
+ * credentials (real keyboard/mouse input, never Runtime.enable), then
+ * detaches. Chrome itself is still launched by start(), never by Puppeteer.
+ *
  * ONE-TIME SETUP: start(), open the noVNC URL, sign in to menards.com by hand.
  * The persistent profile keeps that session across restarts; the extension's
  * alarm does the rest.
@@ -188,11 +193,12 @@ class MenardsRemoteBrowserService
             // are answered by the extension, since --proxy-server takes none.
             'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s %s --user-data-dir=%s '
             . '--no-first-run --no-default-browser-check --disable-session-crashed-bubble '
-            . '--window-size=1280,900 --start-maximized %s %s',
+            . '--window-size=1280,900 --start-maximized %s %s %s',
             escapeshellarg(self::DISPLAY),
             escapeshellarg($cfg['chromium']),
             escapeshellarg($profile),
             \App\Support\MenardsProxy::fromConfig()?->chromeArguments() ?? '',
+            $this->devToolsArgument(),
             escapeshellarg(self::PARK_URL)
         );
 
@@ -375,6 +381,132 @@ class MenardsRemoteBrowserService
                 . ($this->windowTitle() ?: '(none)')];
         }
 
+        // Puppeteer first: it finds the fields in the page instead of clicking
+        // fixed coordinates, so a moved form or a focus problem cannot send the
+        // keystrokes nowhere (the xdotool path typed nothing after a restart on
+        // 2026-09-23). A rejected sign-in is not retried by xdotool — typing the
+        // same credentials twice only brings Menards' lockout closer.
+        $filled = $this->fillSignInFormWithPuppeteer($email, $password);
+
+        if ($filled !== null && ! $filled['ok'] && ($filled['stage'] ?? null) === 'still_on_login') {
+            Log::channel('menards')->error('Menards browser: sign-in form rejected', ['error' => $filled['error'] ?? null]);
+            $this->flagNeedsSignin('login_failed');
+
+            return ['ok' => false, 'error' => $filled['error'] ?? 'Menards kept the sign-in page open.', 'url' => $filled['url'] ?? null];
+        }
+
+        if ($filled === null || ! $filled['ok']) {
+            $this->typeSignInFormWithXdotool($email, $password);
+        }
+
+        // Wait for the submission to actually navigate before touching the
+        // browser again. A fixed sleep here either wastes time or, on a slow
+        // response, yanks the tab away mid-POST and loses the sign-in.
+        $this->waitForTitleGone('Sign In at Menards');
+
+        // Menards lands on Account Overview first and forwards to the receipt
+        // page a moment later. Judging immediately catches the intermediate
+        // page and calls a successful sign-in a failure.
+        $this->waitForTitle(['Receipt Lookup at Menards', 'Account Overview at Menards'], 15);
+
+        if ($this->signedIn()) {
+            Log::channel('menards')->info('Menards browser: signed in', ['title' => $this->windowTitle(), 'filled_by' => ($filled['ok'] ?? false) ? 'puppeteer' : 'xdotool']);
+            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
+
+            return ['ok' => true, 'url' => $this->windowTitle()];
+        }
+
+        $title = $this->windowTitle();
+
+        Log::channel('menards')->error('Menards browser: sign-in did not take', ['title' => $title]);
+        $this->flagNeedsSignin('login_failed');
+
+        return [
+            'ok' => false,
+            'error' => 'The receipt page is still not reachable after submitting. The credentials may be '
+                . 'wrong, or the sign-in form moved. Last page seen: ' . ($title ?: '(none)'),
+            'url' => $title,
+        ];
+    }
+
+    /**
+     * The flag that opens Chrome's DevTools port on loopback for the
+     * Puppeteer sign-in, or nothing when that sign-in is switched off.
+     * Chrome only honours it with a non-default --user-data-dir, which
+     * start() always passes.
+     */
+    public function devToolsArgument(): string
+    {
+        if (! config('services.menards.puppeteer_signin', true)) {
+            return '';
+        }
+
+        return '--remote-debugging-port=' . (int) config('services.menards.cdp_port', 9298);
+    }
+
+    /**
+     * Fills and submits the sign-in form through scripts/menards-signin.cjs.
+     * Returns the script's result ({ok, stage, url?, error?}), or null when
+     * the Puppeteer path is off or Chrome's DevTools port is not listening
+     * (a browser started before the port existed), so the caller falls back.
+     * Credentials go over stdin, never the command line.
+     *
+     * @return array{ok: bool, stage?: string, url?: string, error?: string}|null
+     */
+    public function fillSignInFormWithPuppeteer(string $email, string $password): ?array
+    {
+        if (! config('services.menards.puppeteer_signin', true)) {
+            return null;
+        }
+
+        $port = (int) config('services.menards.cdp_port', 9298);
+        $socket = @fsockopen('127.0.0.1', $port, $errno, $errstr, 1.0);
+
+        if (! $socket) {
+            Log::channel('menards')->warning('Menards browser: DevTools port not listening — restart the browser to enable the Puppeteer sign-in', ['port' => $port]);
+
+            return null;
+        }
+        fclose($socket);
+
+        $result = \Illuminate\Support\Facades\Process::path(base_path())
+            ->timeout(90)
+            ->input(json_encode([
+                'email' => $email,
+                'password' => $password,
+                'port' => $port,
+                'timeoutMs' => 45000,
+            ]))
+            ->run([(string) config('services.menards.node_binary', 'node'), base_path('scripts/menards-signin.cjs')]);
+
+        $lines = array_values(array_filter(array_map('trim', explode("\n", $result->output()))));
+        $decoded = $lines === [] ? null : json_decode(end($lines), true);
+
+        if (! is_array($decoded) || ! array_key_exists('ok', $decoded)) {
+            Log::channel('menards')->error('Menards browser: Puppeteer sign-in script gave no result', [
+                'exit_code' => $result->exitCode(),
+                'stderr' => mb_substr($result->errorOutput(), 0, 500),
+            ]);
+
+            return ['ok' => false, 'stage' => 'script', 'error' => 'The sign-in script produced no result.'];
+        }
+
+        Log::channel('menards')->info('Menards browser: Puppeteer sign-in', [
+            'ok' => $decoded['ok'],
+            'stage' => $decoded['stage'] ?? null,
+            'url' => $decoded['url'] ?? null,
+            'error' => $decoded['error'] ?? null,
+        ]);
+
+        return $decoded;
+    }
+
+    /**
+     * The original sign-in: xdotool keystrokes at fixed coordinates. Kept as
+     * the fallback when the Puppeteer path is off or cannot attach.
+     */
+    protected function typeSignInFormWithXdotool(string $email, string $password): void
+    {
         // The title arrives with the document, about a second in; the form is
         // rendered by Vue several seconds later. Typing between those two moments
         // sends every keystroke into a page that has no fields yet — which is
@@ -409,44 +541,16 @@ class MenardsRemoteBrowserService
         if (! $this->waitForTitleGone('Sign In at Menards', 12)) {
             $this->xdo('key --clearmodifiers Return');
         }
-
-        // Wait for the submission to actually navigate before touching the
-        // browser again. A fixed sleep here either wastes time or, on a slow
-        // response, yanks the tab away mid-POST and loses the sign-in.
-        $this->waitForTitleGone('Sign In at Menards');
-
-        // Menards lands on Account Overview first and forwards to the receipt
-        // page a moment later. Judging immediately catches the intermediate
-        // page and calls a successful sign-in a failure.
-        $this->waitForTitle(['Receipt Lookup at Menards', 'Account Overview at Menards'], 15);
-
-        if ($this->signedIn()) {
-            Log::channel('menards')->info('Menards browser: signed in', ['title' => $this->windowTitle()]);
-            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
-
-            return ['ok' => true, 'url' => $this->windowTitle()];
-        }
-
-        $title = $this->windowTitle();
-
-        Log::channel('menards')->error('Menards browser: sign-in did not take', ['title' => $title]);
-        $this->flagNeedsSignin('login_failed');
-
-        return [
-            'ok' => false,
-            'error' => 'The receipt page is still not reachable after submitting. The credentials may be '
-                . 'wrong, or the sign-in form moved. Last page seen: ' . ($title ?: '(none)'),
-            'url' => $title,
-        ];
     }
 
     /**
      * Collapse the window to exactly one tab, left on the receipt page.
      *
      * Session restore resurrects every previous tab on each start and appends
-     * one more, and years of that turns the tab strip into confetti. There is
-     * no CDP here (deliberately — nothing may drive this browser but its own
-     * extension and a human), so this works the strip by keyboard: mark tab 1
+     * one more, and years of that turns the tab strip into confetti. CDP is
+     * kept to the sign-in form alone (the fewer DevTools sessions this browser
+     * sees, the less there is for Imperva to notice), so this works the strip
+     * by keyboard: mark tab 1
      * with chrome://version — a local page whose "About Version" title nothing
      * on menards.com or Hive can collide with, loaded with zero network — then
      * close from the far end until only the marker is left, and finally point

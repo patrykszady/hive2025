@@ -129,6 +129,13 @@ return [
         // out of its way: a token landing under a click reset the widget.
         'solver_extension' => (bool) env('MENARDS_SOLVER_EXTENSION', false),
         'solver_extension_id' => env('MENARDS_SOLVER_EXTENSION_ID', 'ifibfemgeogfhoebkmokieepdoobkbpo'),
+        // Sign-in form filled by scripts/menards-signin.cjs, which attaches to
+        // the running Chrome over a loopback DevTools port for a few seconds
+        // (real keyboard/mouse input, no Runtime.enable) and detaches. Off,
+        // sign-in falls back to xdotool keystrokes at fixed coordinates.
+        'puppeteer_signin' => (bool) env('MENARDS_PUPPETEER_SIGNIN', true),
+        'cdp_port' => (int) env('MENARDS_CDP_PORT', 9298),
+        'node_binary' => env('MENARDS_NODE_BINARY', 'node'),
     ],
 
     'azure_cu' => [
