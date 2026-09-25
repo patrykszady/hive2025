@@ -411,17 +411,47 @@ class MenardsRemoteBrowserService
         // keystrokes nowhere (the xdotool path typed nothing after a restart on
         // 2026-09-23). A rejected sign-in is not retried by xdotool — typing the
         // same credentials twice only brings Menards' lockout closer.
-        $filled = $this->fillSignInFormWithPuppeteer($email, $password);
+        // Imperva often challenges the credential check itself: the submit
+        // lands on checkcredentials.html with "Additional security check is
+        // required" (2026-09-25). Judging straight away navigated off that
+        // wall and threw the sign-in away. Clear it the same way as the wall
+        // before login.html, and if Imperva drops the submitted form while
+        // doing so, submit it once more.
+        $filled = null;
 
-        if ($filled !== null && ! $filled['ok'] && ($filled['stage'] ?? null) === 'still_on_login') {
-            Log::channel('menards')->error('Menards browser: sign-in form rejected', ['error' => $filled['error'] ?? null]);
-            $this->flagNeedsSignin('login_failed');
+        for ($submission = 1; $submission <= 2; $submission++) {
+            $filled = $this->fillSignInFormWithPuppeteer($email, $password);
 
-            return ['ok' => false, 'error' => $filled['error'] ?? 'Menards kept the sign-in page open.', 'url' => $filled['url'] ?? null];
-        }
+            if ($filled !== null && ! $filled['ok'] && ($filled['stage'] ?? null) === 'still_on_login') {
+                Log::channel('menards')->error('Menards browser: sign-in form rejected', ['error' => $filled['error'] ?? null]);
+                $this->flagNeedsSignin('login_failed');
 
-        if ($filled === null || ! $filled['ok']) {
-            $this->typeSignInFormWithXdotool($email, $password);
+                return ['ok' => false, 'error' => $filled['error'] ?? 'Menards kept the sign-in page open.', 'url' => $filled['url'] ?? null];
+            }
+
+            if ($filled === null || ! $filled['ok']) {
+                $this->typeSignInFormWithXdotool($email, $password);
+            }
+
+            if (! $this->challengeFollowedSubmit()) {
+                break;
+            }
+
+            Log::channel('menards')->info('Menards browser: security check after submitting the sign-in', ['submission' => $submission]);
+            $this->captureChallengeScreenshot();
+
+            if (! $this->clearChallengeWall()) {
+                $this->flagNeedsSignin('challenge');
+
+                return ['ok' => false, 'error' => 'Imperva asked for a security check after the sign-in was submitted, and it was not cleared. '
+                    . 'Click "I am human" over noVNC, or leave it — ensure retries later.'];
+            }
+
+            if (! str_contains($this->windowTitle(), 'Sign In at Menards')) {
+                break;
+            }
+
+            Log::channel('menards')->info('Menards browser: security check cleared and the form came back — submitting it again');
         }
 
         // Wait for the submission to actually navigate before touching the
@@ -452,6 +482,45 @@ class MenardsRemoteBrowserService
                 . 'wrong, or the sign-in form moved. Last page seen: ' . ($title ?: '(none)'),
             'url' => $title,
         ];
+    }
+
+    /**
+     * Watches the seconds after a submit: true once Imperva's wall has shown
+     * steadily (a wall page is titled with its bare URL, never "... at
+     * Menards"), false as soon as a Menards page other than the sign-in form
+     * is up, or when the time runs out without a wall.
+     */
+    protected function challengeFollowedSubmit(int $seconds = 12): bool
+    {
+        $deadline = time() + $seconds;
+        $wallSightings = 0;
+
+        do {
+            $title = $this->windowTitle();
+
+            if (str_contains($title, 'at Menards') && ! str_contains($title, 'Sign In at Menards')) {
+                return false;
+            }
+
+            $onWall = str_contains($title, 'menards.com/') && ! str_contains($title, 'at Menards');
+            $wallSightings = $onWall ? $wallSightings + 1 : 0;
+
+            // Three sightings in a row: a page on its way to Account Overview
+            // shows its bare URL for a moment too, and that is not a wall.
+            if ($wallSightings >= 3) {
+                return true;
+            }
+
+            $this->pauseMicroseconds(700000);
+        } while (time() < $deadline);
+
+        return false;
+    }
+
+    /** A pause the tests can skip. */
+    protected function pauseMicroseconds(int $microseconds): void
+    {
+        usleep($microseconds);
     }
 
     /**
