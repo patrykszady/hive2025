@@ -308,7 +308,32 @@ class MenardsRemoteBrowserService
      *
      * @return array{ok: bool, error?: string, url?: string, already?: bool}
      */
+    /** Held for the whole of one sign-in, so two never drive the browser at once. */
+    public const SIGNIN_LOCK = 'menards-browser-signin';
+
+    /**
+     * Signs in, one attempt at a time. A deploy starts `ensure` in the
+     * background, the schedule and the viewer's Retry button start it too,
+     * and `login` can be run by hand; on 2026-09-25 a manual run and the
+     * deploy's run typed into the same page within 18 seconds of each other
+     * and each judged the other's result. A second caller now steps aside.
+     */
     public function login(string $email, string $password): array
+    {
+        $lock = \Illuminate\Support\Facades\Cache::lock(self::SIGNIN_LOCK, 240);
+
+        if (! $lock->get()) {
+            return ['ok' => false, 'busy' => true, 'error' => 'Another sign-in is already running — leaving it to finish.'];
+        }
+
+        try {
+            return $this->loginLocked($email, $password);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function loginLocked(string $email, string $password): array
     {
         if (! $this->xdotoolAvailable()) {
             return ['ok' => false, 'error' => 'xdotool is not installed — apt install xdotool'];

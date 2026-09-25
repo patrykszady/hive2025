@@ -106,3 +106,17 @@ it('treats a script that printed nothing usable as a failed attempt', function (
 
     fclose($server);
 });
+
+it('lets only one sign-in drive the browser at a time', function () {
+    $held = \Illuminate\Support\Facades\Cache::lock(MenardsRemoteBrowserService::SIGNIN_LOCK, 60);
+    expect($held->get())->toBeTrue();
+
+    Process::fake();
+
+    $result = app(MenardsRemoteBrowserService::class)->login('a@b.test', 'x');
+
+    expect($result)->toMatchArray(['ok' => false, 'busy' => true]);
+    Process::assertNothingRan();
+
+    $held->release();
+});

@@ -427,6 +427,12 @@ class MenardsBrowser extends Command
 
         $result = $browser->login($email, $password);
 
+        if ($result['busy'] ?? false) {
+            $this->info($result['error']);
+
+            return self::SUCCESS;
+        }
+
         if (! $result['ok']) {
             $this->error($result['error'] ?? 'Sign-in failed.');
 
