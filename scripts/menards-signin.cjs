@@ -47,15 +47,38 @@ function finish(result) {
 
 const pause = (min, max) => new Promise((r) => setTimeout(r, min + Math.floor(Math.random() * (max - min))));
 
+/**
+ * The page navigated or reloaded under us (Imperva and Menards both reload
+ * login.html once shortly after it loads). Transient: find the fields again.
+ */
+function isNavigationError(e) {
+    return /Execution context was destroyed|Cannot find context|detached|Target closed|navigat|Node is either not visible|not attached|same JavaScript world|Cannot find object with id|No node with given id/i.test(String(e && e.message));
+}
+
 /** First visible element matching any selector, or null. */
 async function firstVisible(page, selectors) {
     for (const selector of selectors) {
-        for (const handle of await page.$$(selector)) {
-            const box = await handle.boundingBox();
-            if (box && box.width > 0 && box.height > 0) {
-                return handle;
+        let handles = [];
+        try {
+            handles = await page.$$(selector);
+        } catch (e) {
+            if (isNavigationError(e)) {
+                return null;
             }
-            await handle.dispose();
+            throw e;
+        }
+        for (const handle of handles) {
+            try {
+                const box = await handle.boundingBox();
+                if (box && box.width > 0 && box.height > 0) {
+                    return handle;
+                }
+            } catch (e) {
+                if (!isNavigationError(e)) {
+                    throw e;
+                }
+            }
+            await handle.dispose().catch(() => {});
         }
     }
     return null;
@@ -135,7 +158,7 @@ async function main() {
             // waits on them while connecting and hangs if they are filtered.
             targetFilter: (target) => {
                 const type = target.type();
-                if (['service_worker', 'shared_worker', 'worker', 'background_page', 'other', 'webview'].includes(type)) {
+                if (['service_worker', 'shared_worker', 'worker', 'background_page', 'other', 'webview', 'browser_ui'].includes(type)) {
                     return false;
                 }
                 return type !== 'page' || target.url().includes(pattern);
@@ -152,25 +175,43 @@ async function main() {
             return finish({ ok: false, stage: 'find_tab', error: 'No tab is on the Menards sign-in page.' });
         }
 
-        const emailField = await waitForVisible(page, EMAIL_SELECTORS, Math.min(20000, timeoutMs));
-        if (!emailField) {
-            return finish({ ok: false, stage: 'form', url: page.url(), error: 'The email field never appeared on the sign-in page.' });
-        }
-        const passwordField = await waitForVisible(page, PASSWORD_SELECTORS, 5000);
-        if (!passwordField) {
-            return finish({ ok: false, stage: 'form', url: page.url(), error: 'The password field is missing from the sign-in page.' });
-        }
+        // Up to three passes: a reload mid-way (the page's own, not ours)
+        // throws away the typing, so find the fields again and start over.
+        let submitted = false;
+        for (let attempt = 1; attempt <= 3 && !submitted; attempt++) {
+            try {
+                const emailField = await waitForVisible(page, EMAIL_SELECTORS, Math.min(20000, timeoutMs));
+                if (!emailField) {
+                    return finish({ ok: false, stage: 'form', url: page.url(), error: 'The email field never appeared on the sign-in page.' });
+                }
+                const passwordField = await waitForVisible(page, PASSWORD_SELECTORS, 5000);
+                if (!passwordField) {
+                    return finish({ ok: false, stage: 'form', url: page.url(), error: 'The password field is missing from the sign-in page.' });
+                }
 
-        await fill(page, emailField, email);
-        await pause(400, 800);
-        await fill(page, passwordField, password);
-        await pause(500, 900);
+                await fill(page, emailField, email);
+                await pause(400, 800);
+                await fill(page, passwordField, password);
+                await pause(500, 900);
 
-        const button = await signInButton(page);
-        if (button) {
-            await button.click({ delay: 70 + Math.floor(Math.random() * 60) });
-        } else {
-            await page.keyboard.press('Enter');
+                const button = await signInButton(page);
+                submitted = true;
+                if (button) {
+                    await button.click({ delay: 70 + Math.floor(Math.random() * 60) });
+                } else {
+                    await page.keyboard.press('Enter');
+                }
+            } catch (e) {
+                if (submitted && isNavigationError(e)) {
+                    break; // the click itself navigated: that is the submission
+                }
+                if (!isNavigationError(e) || attempt === 3) {
+                    throw e;
+                }
+                submitted = false;
+                process.stderr.write(`[menards-signin] page navigated during attempt ${attempt}; retrying\n`);
+                await pause(1500, 2500);
+            }
         }
 
         // Wait for the browser to leave the sign-in page (a sign-in navigates;
