@@ -8,22 +8,41 @@ use App\Traits\DetectsDeviceType;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
+/**
+ * Email one-time-code sign-in. The code lives only in the cache, keyed by the
+ * address it was mailed to: nothing the browser can read or rewrite decides
+ * whether a sign-in succeeds.
+ */
 class OneTimeCodeLogin extends Component
 {
     use DetectsDeviceType;
+
+    /** Wrong guesses allowed before the code is thrown away. */
+    private const MAX_ATTEMPTS = 5;
+
+    /** How long a mailed code stays valid, in seconds. */
+    private const CODE_TTL = 600;
+
     #[Url]
     public string $email = '';
 
+    #[Locked]
     public string $step = 'request'; // request, verify_code
+
     public string $verification_code = '';
-    public string $generated_code = '';
+
+    #[Locked]
     public ?User $user = null;
+
     public int $resend_countdown = 0;
+
     public bool $can_resend = false;
+
     public string $success_message = '';
 
     public function mount(): void
@@ -46,9 +65,7 @@ class OneTimeCodeLogin extends Component
                 return;
             }
 
-            $cachedCode = Cache::get($this->codeCacheKey());
-            if (is_string($cachedCode) && $cachedCode !== '') {
-                $this->generated_code = $cachedCode;
+            if ($this->pendingCode() !== null) {
                 $this->step = 'verify_code';
                 $this->setResendCooldownFromCache();
             }
@@ -68,16 +85,10 @@ class OneTimeCodeLogin extends Component
             return;
         }
 
-        $this->generated_code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-
-        try {
-            Mail::to($this->user->email)->send(new EmailVerificationCode($this->generated_code));
-        } catch (\Throwable $exception) {
-            $this->addError('email', 'Unable to send the email right now. Please try again.');
+        if (! $this->mailFreshCode()) {
             return;
         }
 
-        $this->storeVerificationCode();
         $this->step = 'verify_code';
         $this->startResendCooldown();
         $this->success_message = 'Verification code sent to your email!';
@@ -104,18 +115,32 @@ class OneTimeCodeLogin extends Component
             return;
         }
 
-        $this->generated_code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-
-        try {
-            Mail::to($this->user->email)->send(new EmailVerificationCode($this->generated_code));
-        } catch (\Throwable $exception) {
-            $this->addError('email', 'Unable to send the email right now. Please try again.');
+        if (! $this->mailFreshCode()) {
             return;
         }
 
-        $this->storeVerificationCode();
         $this->startResendCooldown();
         $this->success_message = 'New verification code sent!';
+    }
+
+    /**
+     * Generates a code, mails it and stores it for verification. False when
+     * the mail could not go out (the error is already on the form).
+     */
+    private function mailFreshCode(): bool
+    {
+        $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        try {
+            Mail::to($this->user->email)->send(new EmailVerificationCode($code));
+        } catch (\Throwable $exception) {
+            $this->addError('email', 'Unable to send the email right now. Please try again.');
+            return false;
+        }
+
+        $this->storeVerificationCode($code);
+
+        return true;
     }
 
     private function startResendCooldown(): void
@@ -155,15 +180,32 @@ class OneTimeCodeLogin extends Component
         return (now()->timestamp - $lastSent) < 60;
     }
 
-    private function storeVerificationCode(): void
+    private function storeVerificationCode(string $code): void
     {
-        Cache::put($this->codeCacheKey(), $this->generated_code, 600);
+        Cache::put($this->codeCacheKey(), $code, self::CODE_TTL);
+        Cache::forget($this->attemptsCacheKey());
         Cache::put($this->hasSentCacheKey(), true, 86400);
+    }
+
+    /**
+     * The code currently waiting for this address, if one was mailed and has
+     * not expired or been used up.
+     */
+    private function pendingCode(): ?string
+    {
+        $code = Cache::get($this->codeCacheKey());
+
+        return is_string($code) && $code !== '' ? $code : null;
     }
 
     private function codeCacheKey(): string
     {
         return 'otp_login_code:' . $this->email;
+    }
+
+    private function attemptsCacheKey(): string
+    {
+        return 'otp_login_attempts:' . $this->email;
     }
 
     private function lastSentCacheKey(): string
@@ -209,17 +251,30 @@ class OneTimeCodeLogin extends Component
             return;
         }
 
-        if ($this->generated_code === '') {
-            $cachedCode = Cache::get($this->codeCacheKey());
-            if (is_string($cachedCode)) {
-                $this->generated_code = $cachedCode;
-            }
+        $expected = $this->pendingCode();
+
+        if ($expected === null) {
+            $this->addError('verification_code', 'That code has expired. Please request a new one.');
+            return;
         }
 
-        if ($this->verification_code !== $this->generated_code) {
+        if (! hash_equals($expected, $this->verification_code)) {
+            $attempts = (int) Cache::get($this->attemptsCacheKey(), 0) + 1;
+
+            if ($attempts >= self::MAX_ATTEMPTS) {
+                Cache::forget($this->codeCacheKey());
+                Cache::forget($this->attemptsCacheKey());
+                $this->addError('verification_code', 'Too many wrong codes. Please request a new one.');
+                return;
+            }
+
+            Cache::put($this->attemptsCacheKey(), $attempts, self::CODE_TTL);
             $this->addError('verification_code', 'Invalid verification code.');
             return;
         }
+
+        Cache::forget($this->codeCacheKey());
+        Cache::forget($this->attemptsCacheKey());
 
         // Log the user in
         Auth::login($this->user, remember: true);

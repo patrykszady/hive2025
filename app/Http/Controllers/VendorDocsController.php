@@ -14,6 +14,7 @@ use File;
 use Response;
 use Exception;
 use App\Support\ApiErrorFormatter;
+use App\Support\StoredFile;
 
 use Ilovepdf\Ilovepdf;
 use Intervention\Image\Facades\Image;
@@ -245,26 +246,13 @@ class VendorDocsController extends Controller
             return redirect()->route('login');
         }
 
-        // Try multiple case variants to cope with mixed-case extensions or names
-        $candidates = [
-            $filename,
-            strtolower($filename),
-            strtoupper($filename),
-        ];
-
-        $resolvedPath = null;
-        foreach ($candidates as $name) {
-            $try = storage_path('files/vendor_docs/'.$name);
-            if (file_exists($try)) {
-                $resolvedPath = $try;
-                $filename = $name; // normalize for extension check
-                break;
-            }
-        }
+        $resolvedPath = StoredFile::resolve(storage_path('files/vendor_docs'), (string) $filename);
 
         if (! $resolvedPath) {
             return response('File not found', 404);
         }
+
+        $filename = $resolvedPath;
 
         $ext = strtolower(File::extension($filename));
         if ($ext === 'pdf') {
@@ -307,42 +295,31 @@ class VendorDocsController extends Controller
      */
     protected function streamSmsMedia($filename)
     {
-        // If filename includes sms-media/ or sms-attachments/ prefix, use as-is
-        // Otherwise, assume it's within sms-media/
-        $basePath = 'sms-media/';
-        if (str_starts_with($filename, 'sms-attachments/')) {
-            $basePath = '';
-        } elseif (str_starts_with($filename, 'sms-media/')) {
-            $basePath = '';
-        }
+        // A name may carry its folder (sms-attachments/… or sms-media/…);
+        // otherwise it lives in sms-media/. Nothing outside those two folders
+        // is ever served, whatever the name says.
+        $relative = ltrim(str_replace('\\', '/', (string) $filename), '/');
+        $folder = 'sms-media';
 
-        $candidates = [
-            $basePath . $filename,
-            strtolower($basePath . $filename),
-            strtoupper($basePath . $filename),
-        ];
-
-        $resolvedPath = null;
-        $resolvedFilename = null;
-        foreach ($candidates as $name) {
-            $try = storage_path('files/'.$name);
-            if (file_exists($try)) {
-                $resolvedPath = $try;
-                $resolvedFilename = $name;
+        foreach (['sms-attachments', 'sms-media'] as $known) {
+            if (str_starts_with($relative, $known.'/')) {
+                $folder = $known;
+                $relative = substr($relative, strlen($known) + 1);
                 break;
             }
         }
 
-        if (! $resolvedPath) {
-            foreach ($candidates as $name) {
-                $try = storage_path('app/public/'.$name);
-                if (file_exists($try)) {
-                    $resolvedPath = $try;
-                    $resolvedFilename = $name;
-                    break;
-                }
+        $resolvedPath = null;
+
+        foreach ([storage_path('files/'.$folder), storage_path('app/public/'.$folder)] as $baseDir) {
+            $resolvedPath = StoredFile::resolve($baseDir, $relative, allowSubdirectories: true);
+
+            if ($resolvedPath) {
+                break;
             }
         }
+
+        $resolvedFilename = $resolvedPath;
 
         if (! $resolvedPath) {
             return response('File not found', 404);

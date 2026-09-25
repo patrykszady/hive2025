@@ -34,6 +34,7 @@ use Intervention\Image\Facades\Image;
 use setasign\Fpdi\Fpdi;
 use Symfony\Component\DomCrawler\Crawler;
 use App\Support\ApiErrorFormatter;
+use App\Support\StoredFile;
 use App\Support\AmazonOAuthPayload;
 use App\Support\AmazonTokenRefreshRecovery;
 
@@ -2767,51 +2768,51 @@ class ReceiptController extends Controller
 
     //1-18-2023 combine the next 2 functions into one. Pass type = original or temp
     //Show full-size receipt to anyone with a link
+    /**
+     * Folders under storage/files that the receipt routes may serve. Anything
+     * else, and any name that leaves its folder, is a 404.
+     *
+     * @var array<int, string>
+     */
+    public const SERVED_FOLDERS = ['receipts', 'checks', 'checks/files', 'vendor_docs'];
+
     public function original_receipt($folder, $filename)
     {
-        // Build candidate paths preserving case and with common fallbacks
-        $candidates = [
-            $filename,
-            strtolower($filename),
-            strtoupper($filename),
-        ];
-
-        $resolvedPath = null;
-        foreach ($candidates as $name) {
-            $try = storage_path('files/'.$folder.'/'.$name);
-            if (file_exists($try)) {
-                $resolvedPath = $try;
-                $filename = $name; // normalize for extension checks
-                break;
-            }
+        if (! in_array((string) $folder, self::SERVED_FOLDERS, true)) {
+            return response('File not found', 404);
         }
+
+        $resolvedPath = StoredFile::resolve(storage_path('files/'.$folder), (string) $filename);
 
         if (! $resolvedPath) {
             return response('File not found', 404);
         }
 
-        $ext = strtolower(File::extension($filename));
-        if ($ext === 'pdf') {
+        return $this->fileResponse($resolvedPath);
+    }
+
+    public function temp_receipt($filename)
+    {
+        $resolvedPath = StoredFile::resolve(storage_path('files/_temp_ocr'), (string) $filename);
+
+        if (! $resolvedPath) {
+            return response('File not found', 404);
+        }
+
+        return $this->fileResponse($resolvedPath);
+    }
+
+    /**
+     * A PDF as-is, anything else through Intervention as before.
+     */
+    private function fileResponse(string $resolvedPath)
+    {
+        if (strtolower(File::extension($resolvedPath)) === 'pdf') {
             return Response::make(file_get_contents($resolvedPath), 200, [
                 'Content-Type' => 'application/pdf',
             ]);
         }
 
         return Image::make($resolvedPath)->response();
-    }
-
-    public function temp_receipt($filename)
-    {
-        $path = storage_path('files/_temp_ocr/'.$filename);
-
-        if (strtolower(File::extension($filename)) === 'pdf') {
-            $response = Response::make(file_get_contents($path), 200, [
-                'Content-Type' => 'application/pdf',
-            ]);
-        } else {
-            $response = Image::make($path)->response();
-        }
-
-        return $response;
     }
 }

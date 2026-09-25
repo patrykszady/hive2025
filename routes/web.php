@@ -384,11 +384,6 @@ Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nyla
 
 Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
 Route::get('receipts/home-depot-messages', [ReceiptController::class, 'getHomeDepotMessages'])->name('receipts.home-depot-messages');
-Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_receipt'])->name('expenses.original_receipt');
-Route::get('files/checks/files/{filename}', fn (string $filename) => app(ReceiptController::class)->original_receipt('checks/files', $filename))->name('checks.statement_pdf');
-
-Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_receipt'])->name('receipts.temp_receipt');
-
 Route::get('receipts/goutte_crawl', [ReceiptController::class, 'goutte_crawl'])->name('goutte_crawl');
 // Route::get('new_ocr_status', [ReceiptController::class, 'new_ocr_status'])->name('new_ocr_status');
 
@@ -522,6 +517,16 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     Route::get('files/sms_media/{filename}', [VendorDocsController::class, 'smsMedia'])
         ->where('filename', '.*')
         ->name('sms.media');
+
+    // Receipts, check images and statement PDFs. Signed-in vendor users only;
+    // the folder is an allowlist and the controller keeps the name inside it.
+    Route::get('files/checks/files/{filename}', fn (string $filename) => app(ReceiptController::class)->original_receipt('checks/files', $filename))
+        ->name('checks.statement_pdf');
+    Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_receipt'])
+        ->where('folder', 'receipts|checks|vendor_docs')
+        ->name('expenses.original_receipt');
+    Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_receipt'])
+        ->name('receipts.temp_receipt');
 
     //USERS
     //Log In As User for Admins (User id # 1 right now only)
@@ -663,6 +668,11 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // built-in `php artisan serve` dev server does not support Range on
     // /storage/* static files, so the browser shows 0:00 there).
     Route::get('/calls/{call}/recording', function (\App\Models\CallLog $call) {
+        // The same visibility rule the calls list and call detail apply.
+        abort_unless(
+            \App\Models\CallLog::query()->visibleToMessagesUser(auth()->user())->whereKey($call->id)->exists(),
+            404
+        );
         abort_unless($call->recording_path && $call->recording_disk, 404);
         $disk = \Illuminate\Support\Facades\Storage::disk($call->recording_disk);
         abort_unless($disk->exists($call->recording_path), 404);
