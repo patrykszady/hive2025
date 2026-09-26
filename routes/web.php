@@ -215,12 +215,12 @@ $hubRoutes = function () {
 
 //if guests go to '/', if logged in go to dashboard (or to /account/selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
-    // 302 while the app and the marketing site share this host: '/' is the
-    // welcome page only for a guest, and a browser keeps a 301 (sent here
-    // with no cache header) for good, so someone who once opened '/' signed
-    // out would keep landing on the welcome page after signing in. It
-    // becomes a 301 when the app moves to hub.hive.contractors and '/' here
-    // is the marketing site for everyone.
+    // 302, never 301: the app and the marketing site share this host (the
+    // move to hub.hive.contractors was declined on 2026-09-26), so '/' is
+    // the welcome page only for a guest. A browser keeps a 301 (sent here
+    // with no cache header) for good: someone who once opened '/' signed
+    // out would keep landing on the welcome page after signing in, and so
+    // would the installed home-screen app, whose start_url is '/'.
     Route::get('/', function () {
         return redirect()->route('welcome', ['locale' => config('locales.default', 'en')]);
     })->name('home');
@@ -843,8 +843,7 @@ $hubRoutes();
 | so 'pulse' is exempted in App\Http\Middleware\VerifyCsrfToken's $except.
 |
 | Top level, not inside the locale-prefixed marketing group or any
-| guest/auth group, so it answers on every host this app is served from
-| (hive.contractors today, hub.hive.contractors once the app moves there).
+| guest/auth group, so it answers every public page whoever is signed in.
 | /pulse rather than the kit's usual /t: this app's /t is the SMS short
 | link to the Terms page (Route::permanentRedirect, every method), and two
 | routes on one URI would leave the beacon depending on registration order.

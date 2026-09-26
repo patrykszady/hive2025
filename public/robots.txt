@@ -13,13 +13,10 @@ Allow: /es/welcome/
 Allow: /welcome/legal/
 Allow: /sitemap.xml
 
-# This file is served for every host on this Forge site — the public
-# marketing host (hive.contractors) and the logged-in app host(s)
-# (hub.hive.contractors, dashboard.hive.contractors) alike — so the private
-# areas below are blocked regardless of which host answers the request. The
-# app host additionally ships "X-Robots-Tag: noindex" on every response
-# (config('app.noindex_hosts'), App\Http\Middleware\NoIndexSubdomains) as a
-# second, independent layer.
+# The app and the marketing pages share hive.contractors (its aliases,
+# dashboard. and hub., 301 there), so the app's own areas are blocked
+# below. Every non-public page also ships "X-Robots-Tag: noindex"
+# (App\Http\Middleware\NoIndexNonPublic) as a second, independent layer.
 #
 # Real top-level prefixes from routes/web.php — not an invented list.
 Disallow: /account

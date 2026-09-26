@@ -130,9 +130,9 @@ it('does not shadow sitemap.xml with a catch-all route', function () {
 */
 
 it('redirects a guest on the home page to the marketing page temporarily', function () {
-    // 302 while the app shares this host: '/' leads a signed-in user to the
-    // dashboard, and a browser would keep a 301 from a signed-out visit for
-    // good (routes/web.php). A 301 once the app lives on hub.hive.contractors.
+    // 302, never 301: the app shares this host, '/' leads a signed-in user
+    // (and the installed app, whose start_url is '/') to the dashboard, and
+    // a browser would keep a 301 from a signed-out visit for good.
     $this->get('/')->assertRedirect('/en/welcome')->assertStatus(302);
 });
 
