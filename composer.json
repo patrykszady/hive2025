@@ -56,6 +56,7 @@
         "spatie/image": "^3.0",
         "spatie/laravel-activitylog": "^4.12",
         "spatie/simple-excel": "^3.6",
+        "ss-systems/platform-kit": "^0.10.0",
         "symfony/dom-crawler": "^7.0",
         "symfony/http-client": "*",
         "symfony/mailgun-mailer": "^7.0",
@@ -123,9 +124,16 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "repositories": {
+        "ss-platform-kit": {
+            "type": "artifact",
+            "url": "packages"
+        },
         "flux-pro": {
             "type": "composer",
             "url": "https://composer.fluxui.dev"
         }
+    },
+    "provide": {
+        "intervention/image": "^3.0|^4.0"
     }
 }

@@ -33,6 +33,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Public Marketing Site URL
+    |--------------------------------------------------------------------------
+    |
+    | The host the public marketing pages (the /{locale}/welcome tree) are
+    | canonically reached on — hive.contractors, kept separate from APP_URL
+    | now that the logged-in app and the marketing site are split across
+    | hosts (APP_URL points at the app host, e.g. hub.hive.contractors).
+    | Every absolute URL the marketing pages emit about themselves — the
+    | sitemap, canonical tags, hreflang alternates — is rooted here, never on
+    | APP_URL or the ambient request host, so they stay correct no matter
+    | which host actually served the request.
+    |
+    */
+
+    'marketing_url' => env('MARKETING_URL', 'https://hive.contractors'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

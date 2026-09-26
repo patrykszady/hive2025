@@ -1,0 +1,95 @@
+User-agent: *
+
+# Public marketing site — one entry per supported locale (config/locales.php:
+# en, pl, es). Longest match wins (Google's robots.txt spec), so these Allow
+# rules take precedence over the private-area Disallow rules below wherever
+# they overlap.
+Allow: /en/welcome
+Allow: /en/welcome/
+Allow: /pl/welcome
+Allow: /pl/welcome/
+Allow: /es/welcome
+Allow: /es/welcome/
+Allow: /welcome/legal/
+Allow: /sitemap.xml
+
+# This file is served for every host on this Forge site — the public
+# marketing host (hive.contractors) and the logged-in app host(s)
+# (hub.hive.contractors, dashboard.hive.contractors) alike — so the private
+# areas below are blocked regardless of which host answers the request. The
+# app host additionally ships "X-Robots-Tag: noindex" on every response
+# (config('app.noindex_hosts'), App\Http\Middleware\NoIndexSubdomains) as a
+# second, independent layer.
+#
+# Real top-level prefixes from routes/web.php — not an invented list.
+Disallow: /account
+Disallow: /agents
+Disallow: /api
+Disallow: /audit
+Disallow: /banks
+Disallow: /broadcasting
+Disallow: /calls
+Disallow: /cant-login
+Disallow: /checks
+Disallow: /client
+Disallow: /clients
+Disallow: /clockwork
+Disallow: /company-email
+Disallow: /company_emails
+Disallow: /dashboard
+Disallow: /distributions
+Disallow: /estimate
+Disallow: /estimates
+Disallow: /expenses
+Disallow: /files
+Disallow: /horizon
+Disallow: /hours
+Disallow: /hub
+Disallow: /lead
+Disallow: /leads
+Disallow: /legal
+Disallow: /lien-waivers
+Disallow: /line_items
+Disallow: /log-viewer
+Disallow: /login
+Disallow: /messages
+Disallow: /notifications
+Disallow: /one-time-login
+Disallow: /options
+Disallow: /passkey
+Disallow: /payments
+Disallow: /planner
+Disallow: /projects
+Disallow: /push
+Disallow: /receipts
+Disallow: /registration
+Disallow: /sanctum
+Disallow: /sheet_show
+Disallow: /sheets
+Disallow: /sworn-statements
+Disallow: /telnyx-audio
+Disallow: /templates
+Disallow: /timelapse
+Disallow: /timesheets
+Disallow: /transaction_vendor_bulk_match
+Disallow: /transactions
+Disallow: /users
+Disallow: /vendor
+Disallow: /vendor_docs
+Disallow: /vendor_match
+Disallow: /vendors
+Disallow: /verify-reset-code
+Disallow: /webhooks
+
+# No catch-all "Disallow: /", and /flux and /livewire stay crawlable: the
+# marketing pages load their CSS, scripts, favicons and screenshots from
+# paths outside /{locale}/welcome (build/, css/, favicons/, flux/,
+# livewire-*/, *.png), and Google renders a page with everything it may
+# fetch — block those and it indexes an unstyled, script-less page and none
+# of its images. The fail-safe for a private route added later is the
+# X-Robots-Tag noindex every non-public response carries
+# (App\Http\Middleware\NoIndexNonPublic, NoIndexSubdomains), and that only
+# works on a URL Google is allowed to fetch: a Disallowed URL is never read,
+# so its noindex is never seen and a link to it can still be indexed.
+
+Sitemap: https://hive.contractors/sitemap.xml

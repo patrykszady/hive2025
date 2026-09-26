@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ca3391f21f68cd2f2544bbc0dff7633d",
+    "content-hash": "44551d402064d11f8a59858ff80df1c6",
     "packages": [
         {
             "name": "2captcha/2captcha",
@@ -4950,6 +4950,67 @@
                 }
             ],
             "time": "2025-02-28T09:04:55+00:00"
+        },
+        {
+            "name": "lsolesen/pel",
+            "version": "0.9.12",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/pel/pel.git",
+                "reference": "b95fe29cdacf9d36330da277f10910a13648c84c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/pel/pel/zipball/b95fe29cdacf9d36330da277f10910a13648c84c",
+                "reference": "b95fe29cdacf9d36330da277f10910a13648c84c",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.1.0"
+            },
+            "require-dev": {
+                "ext-exif": "*",
+                "ext-gd": "*",
+                "php-coveralls/php-coveralls": ">2.4",
+                "squizlabs/php_codesniffer": ">3.5",
+                "symfony/phpunit-bridge": "^4 || ^5"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "lsolesen\\pel\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "GPL-2.0"
+            ],
+            "authors": [
+                {
+                    "name": "Lars Olesen",
+                    "email": "lars@intraface.dk",
+                    "homepage": "http://intraface.dk",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Martin Geisler",
+                    "email": "martin@geisler.net",
+                    "homepage": "http://geisler.net",
+                    "role": "Developer"
+                }
+            ],
+            "description": "PHP Exif Library. A library for reading and writing Exif headers in JPEG and TIFF images using PHP.",
+            "homepage": "http://pel.github.com/pel/",
+            "keywords": [
+                "exif",
+                "image"
+            ],
+            "support": {
+                "issues": "https://github.com/pel/pel/issues",
+                "source": "https://github.com/pel/pel/tree/0.9.12"
+            },
+            "abandoned": true,
+            "time": "2022-02-18T13:20:54+00:00"
         },
         {
             "name": "maennchen/zipstream-php",
@@ -11630,6 +11691,47 @@
                 }
             ],
             "time": "2026-09-12T19:02:49+00:00"
+        },
+        {
+            "name": "ss-systems/platform-kit",
+            "version": "0.10.0",
+            "dist": {
+                "type": "zip",
+                "url": "packages/ss-systems-platform-kit-0.10.0.zip",
+                "shasum": "d601580b8137e2baabfbbd919fe41a91ec8b704e"
+            },
+            "require": {
+                "illuminate/database": "^12.0|^13.0",
+                "illuminate/http": "^12.0|^13.0",
+                "illuminate/support": "^12.0|^13.0",
+                "intervention/image": "^3.0|^4.0",
+                "lsolesen/pel": "^0.9.12",
+                "php": "^8.3",
+                "psr/simple-cache": "^2.0|^3.0"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^11.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "SsSystems\\Platform\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "SsSystems\\Platform\\Tests\\": "tests/Unit/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "node --test tests/js/*.test.mjs && vendor/bin/phpunit"
+                ]
+            },
+            "license": [
+                "proprietary"
+            ],
+            "description": "Backend shared by the sites the ss.systems admin drives — one copy, run inside each site."
         },
         {
             "name": "staabm/side-effects-detector",

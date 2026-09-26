@@ -262,9 +262,15 @@ if (! function_exists('marketing')) {
 if (! function_exists('locale_alternate_url')) {
     /**
      * The current request's path rendered under a different locale prefix —
-     * used by the language switcher and hreflang tags. The default locale is
-     * un-prefixed (/welcome); others carry their code (/pl/welcome). Query
-     * string is preserved.
+     * used by the language switcher and hreflang tags. Every locale,
+     * including the default, carries its own code (/en/welcome,
+     * /pl/welcome). Query string is preserved.
+     *
+     * Rooted on config('app.marketing_url') — the public marketing host —
+     * never url()/APP_URL or the ambient request host: the app and the
+     * marketing site are split across hosts, and a hreflang/language-switcher
+     * link must always point at the marketing host regardless of which host
+     * actually served this request.
      */
     function locale_alternate_url(string $targetLocale): string
     {
@@ -282,7 +288,33 @@ if (! function_exists('locale_alternate_url')) {
 
         $query = $request->getQueryString();
 
-        return url($path).($query ? '?'.$query : '');
+        return marketing_url($path).($query ? '?'.$query : '');
+    }
+}
+
+if (! function_exists('marketing_url')) {
+    /**
+     * An absolute URL on the public marketing host
+     * (config('app.marketing_url'), never APP_URL/the ambient request host)
+     * for a path relative to it, e.g. marketing_url('en/welcome').
+     */
+    function marketing_url(string $path = ''): string
+    {
+        $base = rtrim(config('app.marketing_url', 'https://hive.contractors'), '/');
+        $path = ltrim($path, '/');
+
+        return $path === '' ? $base : $base.'/'.$path;
+    }
+}
+
+if (! function_exists('marketing_canonical_url')) {
+    /**
+     * The current request's own path, rooted on the marketing host — the
+     * self-canonical for the public marketing pages.
+     */
+    function marketing_canonical_url(): string
+    {
+        return marketing_url(request()->path());
     }
 }
 

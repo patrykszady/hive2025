@@ -87,14 +87,22 @@
          emptied the app name out of every browser tab title. --}}
     <title>{{ isset($title) ? $title.' | '.config('app.name') : config('app.name') }}</title>
 
-    {{-- hreflang alternates for the public marketing site: tells search engines
-         this page exists in each language and how to reach it. Only emitted on
-         localizable public routes (those under the SetLocale middleware). --}}
+    {{-- Self-canonical + hreflang alternates for the public marketing site:
+         tells search engines the one canonical URL for this page and where
+         to find it in each language. Only emitted on localizable public
+         routes (those under the SetLocale middleware). Both are rooted on
+         the marketing host (marketing_url()/locale_alternate_url()), never
+         APP_URL or the ambient request host — see config('app.marketing_url'). --}}
     @if (Route::current() && collect(Route::current()->gatherMiddleware())->contains(\App\Http\Middleware\SetLocale::class))
+        <link rel="canonical" href="{{ marketing_canonical_url() }}">
         @foreach (config('locales.supported', []) as $code => $meta)
             <link rel="alternate" hreflang="{{ $meta['hreflang'] ?? $code }}" href="{{ locale_alternate_url($code) }}">
         @endforeach
-        <link rel="alternate" hreflang="x-default" href="{{ locale_alternate_url(config('locales.default', 'en')) }}">
+        {{-- x-default is explicitly English, not "whichever locale is
+             configured as default" — they happen to coincide today, but the
+             x-default alternate is a promise to search engines, not a
+             mirror of config('locales.default'). --}}
+        <link rel="alternate" hreflang="x-default" href="{{ locale_alternate_url('en') }}">
     @endif
     {{-- Favicon: ICO for legacy browsers, SVG for modern, PNG fallback --}}
     <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="48x48">

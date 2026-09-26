@@ -37,6 +37,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -47,6 +48,10 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
+use SsSystems\Platform\Pulse\BeaconController;
+use SsSystems\Platform\Pulse\Recorder;
+use SsSystems\Platform\Pulse\SnapshotBuilder;
+use SsSystems\Platform\Pulse\Storage\DatabaseTableStorage;
 
 use Laravel\Scout\Builder;
 
@@ -66,7 +71,35 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-
+        // ss-systems/platform-kit's Pulse — first-party usage telemetry
+        // behind the central admin's "Site Pulse" card (see docs/PULSE.md
+        // in the kit and App\Http\Controllers\Api\Admin\V1\
+        // SeoSnapshotController::pulseSnapshot()). This app is single-tenant,
+        // so DatabaseTableStorage gets no tenant column/resolver — both the
+        // Recorder and the SnapshotBuilder must scope the same way (none),
+        // or the Recorder would write rows the SnapshotBuilder's reads never
+        // see. The marketing site has no search feature, so SnapshotBuilder's
+        // `search_event` stays null (its default) — searches/searched_cities/
+        // filters are correctly omitted from the pulse payload rather than
+        // sent as zero. `signup` is a click on a marketing page's sign-up
+        // call to action (links to route('registration')), fired by the
+        // delegated listener in components/layouts/guest.blade.php.
+        $this->app->singleton(Recorder::class, fn () => new Recorder(
+            storage: new DatabaseTableStorage(DB::connection()),
+            events: ['page', 'call', 'email', 'jserr', 'signup'],
+        ));
+        $this->app->singleton(SnapshotBuilder::class, fn () => new SnapshotBuilder(
+            storage: new DatabaseTableStorage(DB::connection()),
+            events: ['page', 'call', 'email', 'jserr', 'signup'],
+            options: [
+                'timezone' => 'America/Chicago',
+                'feature_labels' => ['signup' => 'Sign-up clicks'],
+            ],
+        ));
+        $this->app->bind(BeaconController::class, fn ($app) => new BeaconController(
+            $app->make(Recorder::class),
+            (string) config('app.key'),
+        ));
     }
 
     /**

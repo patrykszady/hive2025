@@ -83,3 +83,14 @@ function kotVendors(): array
 }
 
 require_once __DIR__.'/Support/consult-fixtures.php';
+
+/**
+ * Shared by the /api/admin/v1 tests (AdminPingTest, AdminDashboardStatsTest,
+ * AdminSeoSnapshotTest, AdminPlatformsStatusTest): the bearer header every
+ * request needs, once services.admin_api.token is configured per-test.
+ * Ported from gsc's/dawnsellshomes' WithAdminApiAuth trait.
+ */
+function adminApiHeaders(): array
+{
+    return ['Authorization' => 'Bearer test-admin-api-token'];
+}

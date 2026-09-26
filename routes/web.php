@@ -77,17 +77,24 @@ use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
 use App\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Laragear\WebAuthn\Http\Routes as WebAuthnRoutes;
 use App\Livewire\Auth\PasskeySetup;
 use App\Livewire\Notifications\NotificationIndex;
 use Illuminate\Support\Facades\Log;
+use SsSystems\Platform\Pulse\BeaconController;
 
-Route::get('robots.txt', function () {
-    $content = "User-agent: *\nDisallow: /\nAllow: /welcome\nAllow: /welcome/\n";
-
-    return response($content, 200, ['Content-Type' => 'text/plain']);
-})->name('robots');
+// robots.txt is a STATIC file (public/robots.txt): both nginx in production
+// and server.php's file_exists() short-circuit under `artisan serve` serve it
+// directly and never reach the router, so a Route::get('robots.txt', ...)
+// here is unreachable dead code in every environment — removed rather than
+// kept in sync with a file nothing ever routes to. Edit public/robots.txt.
+//
+// sitemap.xml has no static counterpart, so it IS a real route — registered
+// here, above any wildcard/catch-all route further down, so nothing can ever
+// shadow it.
+Route::get('sitemap.xml', \App\Http\Controllers\SitemapController::class)->name('sitemap');
 
 // Public signed-URL stream of an SMS media file (used in outbound SMS so recipients
 // can view full-quality video/audio/image without authentication, but the link
@@ -169,10 +176,51 @@ Route::post('api/passkey-debug-log', function () {
     return response()->json(['ok' => true]);
 })->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
 
+/*
+| /admin belongs to the CENTRAL admin now: a transparent proxy relaying
+| every request byte-for-byte to ss-systems (see AdminProxyController —
+| ported from gsc's/dawnsellshomes' working contract, see
+| ss-systems/CLAUDE.md's proxy architecture section). This app has no
+| admin of its own for ss-systems to shadow, so unlike gsc there is no
+| /admin-legacy split — this route is the whole story.
+|
+| MUST be registered here, at the top level, BEFORE $hubRoutes() runs
+| below — none of its routes are a catch-all that would ever match
+| /admin/*, but registering the proxy first keeps that guarantee true
+| regardless of what $hubRoutes grows into. withoutMiddleware strips this
+| app's whole session/cookie/CSRF stack (the session and CSRF token in
+| play are ss-systems', not this app's) plus LoadAuthVendor (auth-only,
+| appended to the 'web' group in bootstrap/app.php) — SetLocale/
+| CachePublicPage never apply here (they sit behind the {locale} prefix
+| group's own where() clause, which 'admin' never matches) and
+| RedirectLegacyDomains only fires for the dashboard/hub alias hosts, not
+| this one, so both are left alone.
+*/
+Route::any('/admin/{path?}', [\App\Http\Controllers\AdminProxyController::class, 'handle'])
+    ->where('path', '.*')
+    // 2000/min: an admin page load rides this route several times (HTML +
+    // Livewire endpoints + proxied assets) — matches gsc's/dawnsellshomes'
+    // throttle on this same route.
+    ->middleware('throttle:2000,1')
+    ->withoutMiddleware([
+        \Illuminate\Cookie\Middleware\EncryptCookies::class,
+        \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+        \Illuminate\Session\Middleware\StartSession::class,
+        \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+        \App\Http\Middleware\VerifyCsrfToken::class,
+        \App\Http\Middleware\LoadAuthVendor::class,
+    ]);
+
 $hubRoutes = function () {
 
 //if guests go to '/', if logged in go to dashboard (or to /account/selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
+    // 302 while the app and the marketing site share this host: '/' is the
+    // welcome page only for a guest, and a browser keeps a 301 (sent here
+    // with no cache header) for good, so someone who once opened '/' signed
+    // out would keep landing on the welcome page after signing in. It
+    // becomes a 301 when the app moves to hub.hive.contractors and '/' here
+    // is the marketing site for everyone.
     Route::get('/', function () {
         return redirect()->route('welcome', ['locale' => config('locales.default', 'en')]);
     })->name('home');
@@ -787,5 +835,22 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 };
 
 $hubRoutes();
+
+/*
+| ss-systems/platform-kit's Pulse beacon (see docs/PULSE.md in the kit and
+| App\Providers\AppServiceProvider for the Recorder/SnapshotBuilder/
+| BeaconController bindings). navigator.sendBeacon cannot set a CSRF header,
+| so 'pulse' is exempted in App\Http\Middleware\VerifyCsrfToken's $except.
+|
+| Top level, not inside the locale-prefixed marketing group or any
+| guest/auth group, so it answers on every host this app is served from
+| (hive.contractors today, hub.hive.contractors once the app moves there).
+| /pulse rather than the kit's usual /t: this app's /t is the SMS short
+| link to the Terms page (Route::permanentRedirect, every method), and two
+| routes on one URI would leave the beacon depending on registration order.
+*/
+Route::post('/pulse', fn (Request $request) => app(BeaconController::class)($request))
+    ->middleware('throttle:120,1')
+    ->name('pulse-beacon');
 
 

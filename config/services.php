@@ -310,4 +310,26 @@ return [
         'url' => env('GSC_API_URL'),
         'token' => env('GSC_ADMIN_API_TOKEN'),
     ],
+
+    /*
+    | Central admin (ss.systems). This app has no admin of its own — /admin/*
+    | is a transparent proxy to ss-systems (AdminProxyController), which
+    | calls back into THIS app's /api/admin/v1/* with admin_api.token.
+    | Named exactly as gsc/dawnsellshomes name them — the working contract
+    | these were ported from.
+    */
+    'ss' => [
+        'url' => env('SS_URL', 'http://127.0.0.1:8001'),
+        'admin_prefix' => env('SS_ADMIN_PREFIX', 'admin'),
+        'site_key' => env('SS_SITE_KEY', 'hive'),
+        'service_secret' => env('SS_SERVICE_SECRET'),
+        'timeout' => (int) env('SS_TIMEOUT', 30),
+        'connect_timeout' => (int) env('SS_CONNECT_TIMEOUT', 5),
+    ],
+
+    // Bearer token ss-systems authenticates with when it calls this app's
+    // own /api/admin/v1/* endpoints (App\Http\Middleware\AuthenticateAdminApi).
+    'admin_api' => [
+        'token' => env('ADMIN_API_TOKEN'),
+    ],
 ];

@@ -58,6 +58,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'vendor.own-redirect' => \App\Http\Middleware\RedirectOwnVendorToDashboard::class,
             'registered' => \App\Http\Middleware\EnsureUserRegistered::class,
             'telnyx.signature' => \App\Http\Middleware\VerifyTelnyxSignature::class,
+            // /api/admin/v1's bearer-token guard (ss-systems is the only caller).
+            'admin.api.auth' => \App\Http\Middleware\AuthenticateAdminApi::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
