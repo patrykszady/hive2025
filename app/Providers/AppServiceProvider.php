@@ -69,8 +69,14 @@ use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
 use Psr\SimpleCache\CacheInterface;
+use App\Models\Citation;
+use App\Support\Citations\SiteKnownListingsSource;
+use SsSystems\Platform\Citations\CitationsAdminActions;
 use SsSystems\Platform\Citations\Contracts\CitationSession;
+use SsSystems\Platform\Citations\KnownListingsReconciler;
+use SsSystems\Platform\Citations\UnavailableBatchRunner;
 use SsSystems\Platform\Citations\UnavailableSession;
+use SsSystems\Platform\Citations\UnavailableVerificationInbox;
 use SsSystems\Platform\Pulse\BeaconController;
 use SsSystems\Platform\Pulse\Contracts\PulseStorage;
 use SsSystems\Platform\Pulse\JsErrorGroups;
@@ -203,6 +209,27 @@ class AppServiceProvider extends ServiceProvider
         // UnavailableSession docblock). This host has no Xvfb/Chromium/
         // x11vnc pipeline at all, unlike gsc's/jpeterson's RemoteBrowserSession.
         $this->app->bind(CitationSession::class, UnavailableSession::class);
+        // The Citations admin API's own service (kit 0.13.0, ported from
+        // gsc's/jpeterson's former Api/Admin/V1/CitationsController — see
+        // vendor/ss-systems/platform-kit's Citations\CitationsAdminActions
+        // docblock). This host has no batch runner or verification inbox
+        // at all, so both null objects are bound instead of the real kit
+        // classes gsc/jpeterson use; $dispatchBatch is supplied but never
+        // called (batch() always refuses before reaching it, since
+        // UnavailableBatchRunner::isAvailable() is always false) — the
+        // throw is a deliberate "this should be unreachable" guard, not a
+        // real code path (this host has no batch Job class to dispatch).
+        // NOT a singleton, on purpose — every other citations binding
+        // above is `bind`, not `singleton`.
+        $this->app->bind(CitationsAdminActions::class, fn ($app) => new CitationsAdminActions(
+            $app->make(CitationSession::class),
+            new UnavailableBatchRunner($app->make(CitationSession::class)),
+            new UnavailableVerificationInbox,
+            new KnownListingsReconciler(new SiteKnownListingsSource, fn () => Citation::query(), 'Social Media'),
+            fn () => Citation::query(),
+            fn () => ['provider' => 'citations'],
+            fn (array $slugs) => throw new \LogicException('This host has no citations batch Job to dispatch.'),
+        ));
 
         // Meta (Facebook Page + Instagram Business) credential storage (kit
         // 0.13.0): this app's own individual encrypted platform_settings
