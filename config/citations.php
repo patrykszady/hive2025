@@ -10,8 +10,8 @@
 | canonical payload (App\Support\Citations\ListingPayload), and hands the
 | browser to the admin (noVNC) for whatever a human must do.
 |
-| That browser automation is NOT installed here (see
-| App\Services\Citations\CitationSessionService::checkRequirements) and,
+| That browser automation is NOT installed here (see the kit's Citations\
+| UnavailableSession::checkRequirements, bound in AppServiceProvider) and,
 | unlike gsc/dawnsellshomes, this port does not stand up the Xvfb/x11vnc/
 | websockify/Puppeteer machinery at all — it only reports plainly what is
 | missing. The board, the canonical payload and manual status/URL/note
@@ -42,6 +42,14 @@ return [
         'xvfb_binary' => env('CITATIONS_REMOTE_XVFB', 'Xvfb'),
         'x11vnc_binary' => env('CITATIONS_REMOTE_X11VNC', 'x11vnc'),
         'websockify_binary' => env('CITATIONS_REMOTE_WEBSOCKIFY', 'websockify'),
+        // Kit 0.11.0: the puppeteer check that used to be hardcoded inside
+        // App\Services\Citations\CitationSessionService::checkRequirements()
+        // now reads this list (SsSystems\Platform\Citations\
+        // UnavailableSession, config('citations.session.node_packages', []))
+        // — unchanged set, same reason it was never installed (see that
+        // class's docblock: listed in package.json for the unrelated
+        // Menards remote-browser feature, `npm install` never run here).
+        'node_packages' => ['puppeteer', 'puppeteer-extra', 'puppeteer-extra-plugin-stealth'],
     ],
 
     /*

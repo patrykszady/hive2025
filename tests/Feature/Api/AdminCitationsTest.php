@@ -2,7 +2,7 @@
 
 use App\Models\Citation;
 use App\Models\PlatformSetting;
-use App\Services\Citations\CitationSessionService;
+use SsSystems\Platform\Citations\Contracts\CitationSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -10,8 +10,8 @@ uses(RefreshDatabase::class);
 /**
  * /api/admin/v1/citations — the directory board ss-systems' shared
  * Citations screen (App\Livewire\Admin\Citations) reads and edits. This
- * app has no remote-browser pipeline at all (see
- * CitationSessionService's docblock), so start/poll/resume/stop/batch are
+ * app has no remote-browser pipeline at all (see the kit's Citations\
+ * UnavailableSession docblock), so start/poll/resume/stop/batch are
  * exercised for their honest "not available" answers, never a faked
  * success — there is nothing to fake.
  */
@@ -39,7 +39,7 @@ it('requires a bearer token', function () {
 });
 
 it('reports plainly what browser automation is missing on this host', function () {
-    $requirements = app(CitationSessionService::class)->checkRequirements(headless: true);
+    $requirements = app(CitationSession::class)->checkRequirements(headless: true);
 
     expect($requirements['ok'])->toBeFalse();
     foreach (['puppeteer', 'puppeteer-extra', 'puppeteer-extra-plugin-stealth'] as $package) {

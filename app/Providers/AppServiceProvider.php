@@ -68,6 +68,8 @@ use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
 use Psr\SimpleCache\CacheInterface;
+use SsSystems\Platform\Citations\Contracts\CitationSession;
+use SsSystems\Platform\Citations\UnavailableSession;
 use SsSystems\Platform\Pulse\BeaconController;
 use SsSystems\Platform\Pulse\Recorder;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
@@ -158,6 +160,12 @@ class AppServiceProvider extends ServiceProvider
 
             return new BingWebmasterApi($settings->apiKey(), $settings->siteUrl(), $app->make(HttpFactory::class));
         });
+        // The citation builder's remote-browser session (kit 0.11.0, ported
+        // verbatim from this file's own former App\Services\Citations\
+        // CitationSessionService — see the kit's Citations\
+        // UnavailableSession docblock). This host has no Xvfb/Chromium/
+        // x11vnc pipeline at all, unlike gsc's/jpeterson's RemoteBrowserSession.
+        $this->app->bind(CitationSession::class, UnavailableSession::class);
 
         $this->app->bind(CacheInterface::class, fn ($app) => $app->make('cache')->store());
 

@@ -13,10 +13,10 @@ use Illuminate\Console\Command;
  *
  * The source version also reconciles rows left "running" by a session
  * that ended without anyone polling, and bot-wall/busy-slot failure
- * notes, back onto the board — neither can ever happen here, since
- * CitationSessionService::start() always refuses before a row is ever
- * marked running (see that class's docblock), so that cleanup is not
- * ported.
+ * notes, back onto the board — neither can ever happen here, since the
+ * kit's Citations\UnavailableSession::start() always refuses before a
+ * row is ever marked running (see that class's docblock), so that
+ * cleanup is not ported.
  *
  *   php artisan citations:sync
  *   php artisan citations:sync --list
