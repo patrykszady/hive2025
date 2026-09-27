@@ -49,6 +49,7 @@ Disallow: /lien-waivers
 Disallow: /line_items
 Disallow: /log-viewer
 Disallow: /login
+Disallow: /lp
 Disallow: /messages
 Disallow: /notifications
 Disallow: /one-time-login

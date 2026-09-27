@@ -211,6 +211,35 @@ Route::any('/admin/{path?}', [\App\Http\Controllers\AdminProxyController::class,
         \App\Http\Middleware\LoadAuthVendor::class,
     ]);
 
+/*
+| Public ad-campaign landing pages — /lp/{slug}. Hand-created through
+| ss-systems' Landing Pages screen (App\Models\LandingPage, App\Http\
+| Controllers\Api\Admin\V1\LandingPageController) — the same /lp/
+| contract as dawnsellshomes.com, the reference this was ported from.
+| Hive has no home-improvement Projects/proof domain at all, so there is
+| no draft-preview mode (no session-backed admin of its own to gate a
+| ?preview=1 check on) — previewing a draft means checking it in
+| ss-systems before hitting Publish.
+|
+| Registered at the TOP LEVEL, not under the {locale} prefix group below:
+| these pages exist to receive paid traffic, never to rank, so they carry
+| no hreflang/canonical machinery and no locale switching.
+|
+| Only PUBLISHED pages are public; a draft or unknown slug 404s for
+| everyone. Always noindex via the 'web' group's own NoIndexNonPublic
+| middleware (bootstrap/app.php) — /lp is outside that middleware's
+| isPublicPage() allowlist, so this route needs no noindex header of its
+| own — and see public/robots.txt's matching "Disallow: /lp". Never added
+| to App\Support\MarketingSitemap either (see LandingPage::shouldIndex()).
+*/
+Route::get('lp/{slug}', function (string $slug) {
+    $page = \App\Models\LandingPage::published()->where('slug', $slug)->first();
+
+    abort_unless($page, 404);
+
+    return view('landing-page', ['page' => $page]);
+})->where('slug', '[a-z0-9\-]+')->name('landing.show');
+
 $hubRoutes = function () {
 
 //if guests go to '/', if logged in go to dashboard (or to /account/selection if not set and User has multiple)
