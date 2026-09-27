@@ -85,6 +85,21 @@ function kotVendors(): array
 require_once __DIR__.'/Support/consult-fixtures.php';
 
 /**
+ * Shared by every /api/admin/v1 test: the one literal the bearer-token
+ * guard checks against. Every test file that used to repeat the
+ * 'test-admin-api-token' string in its own config(['services.admin_api.token'
+ * => ...]) call reads this constant instead (kit 0.11.0 cleanup) — the value
+ * itself is unchanged, so no test's behaviour changes.
+ *
+ * hive2025 stays a bare Pest global function/constant pair rather than
+ * adopting the kit's SsSystems\Platform\Testing\WithAdminApiAuth trait
+ * gsc/jpeterson/dawnsellshomes now compose: this is a Pest closure-bound
+ * helper at ~230 call sites, not a class, and forcing a trait-based rewrite
+ * onto it carries unverified closure-scoping risk for no behaviour gain.
+ */
+const ADMIN_API_TEST_TOKEN = 'test-admin-api-token';
+
+/**
  * Shared by the /api/admin/v1 tests (AdminPingTest, AdminDashboardStatsTest,
  * AdminSeoSnapshotTest, AdminPlatformsStatusTest): the bearer header every
  * request needs, once services.admin_api.token is configured per-test.
@@ -92,5 +107,5 @@ require_once __DIR__.'/Support/consult-fixtures.php';
  */
 function adminApiHeaders(): array
 {
-    return ['Authorization' => 'Bearer test-admin-api-token'];
+    return ['Authorization' => 'Bearer '.ADMIN_API_TEST_TOKEN];
 }

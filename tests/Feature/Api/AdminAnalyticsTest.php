@@ -12,7 +12,7 @@ uses(RefreshDatabase::class);
  * controller's docblock for the phone/email/cta/form mapping.
  */
 beforeEach(function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
 function seedSiteEvent(string $event, array $overrides = []): void

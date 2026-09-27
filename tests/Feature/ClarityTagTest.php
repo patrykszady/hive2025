@@ -51,7 +51,7 @@ it('does not require an API token for the tag to render, only a project id', fun
 });
 
 it('forgets every locale\'s cached welcome page when the project id is saved, so the tag shows at once', function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 
     // Warm the cache for every locale with no id configured yet.
     foreach (array_keys(config('locales.supported')) as $locale) {

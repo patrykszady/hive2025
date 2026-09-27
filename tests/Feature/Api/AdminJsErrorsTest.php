@@ -14,7 +14,7 @@ uses(RefreshDatabase::class);
  * grouped live by App\Support\JsErrorGroups.
  */
 beforeEach(function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
 function seedJsError(string $message, string $source, array $overrides = []): void

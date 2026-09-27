@@ -13,7 +13,7 @@ uses(RefreshDatabase::class);
  * general contractor's own CRM).
  */
 beforeEach(function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
 function signedUpUser(array $overrides = []): User

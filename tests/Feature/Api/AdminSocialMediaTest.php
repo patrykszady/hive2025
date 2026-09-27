@@ -11,7 +11,7 @@ uses(RefreshDatabase::class);
  * SocialMediaController's docblock for the subject/automation choices.
  */
 beforeEach(function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
 it('sends the full roster with automation present but empty and no posting configured', function () {
