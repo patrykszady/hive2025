@@ -1,7 +1,10 @@
 <?php
 
 use App\Support\MarketingSitemap;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
+
+uses(RefreshDatabase::class);
 
 /**
  * SitemapSource over App\Support\MarketingSitemap — the same route/config

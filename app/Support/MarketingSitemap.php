@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Http\Middleware\SetLocale;
 use App\Models\BlogPost;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Route as RouteFacade;
 use Throwable;
@@ -75,7 +76,11 @@ class MarketingSitemap
                 // areas') above — blog.preview shares this route's exact
                 // param shape (locale, slug) but is skipped below since its
                 // NAME never matches this branch.
-                foreach (BlogPost::published()->get() as $post) {
+                // No table (a test without a database, a fresh install before
+                // migrate) means no posts, never an exception in the sitemap.
+                $posts = Schema::hasTable('blog_posts') ? BlogPost::published()->get() : collect();
+
+                foreach ($posts as $post) {
                     $entries[] = $this->localizedEntry($locales, $name, ['slug' => $post->slug], $post->updated_at);
                 }
 
