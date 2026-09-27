@@ -8,6 +8,7 @@ use App\Models\Client;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSignature;
 use App\Models\Expense;
+use App\Models\JsErrorState;
 use App\Models\Lead;
 use App\Models\LineItem;
 use App\Models\Project;
@@ -69,6 +70,8 @@ use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
 use Psr\SimpleCache\CacheInterface;
 use SsSystems\Platform\Pulse\BeaconController;
+use SsSystems\Platform\Pulse\Contracts\PulseStorage;
+use SsSystems\Platform\Pulse\JsErrorGroups;
 use SsSystems\Platform\Pulse\Recorder;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
 use SsSystems\Platform\Pulse\Storage\DatabaseTableStorage;
@@ -138,6 +141,15 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(BeaconController::class, fn ($app) => new BeaconController(
             $app->make(Recorder::class),
             (string) config('app.key'),
+        ));
+        // The JS Errors board (Api\Admin\V1\JsErrorController) reads jserr
+        // events through the same PulseStorage seam as Recorder/
+        // SnapshotBuilder above, rather than a hardcoded DB::table() scan —
+        // see SsSystems\Platform\Pulse\JsErrorGroups' own docblock.
+        $this->app->singleton(PulseStorage::class, fn () => new DatabaseTableStorage(DB::connection()));
+        $this->app->singleton(JsErrorGroups::class, fn ($app) => new JsErrorGroups(
+            $app->make(PulseStorage::class),
+            JsErrorState::class,
         ));
 
         // ss-systems/platform-kit's Search Console contracts. GoogleSearch

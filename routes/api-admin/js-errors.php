@@ -5,8 +5,8 @@ use App\Support\AdminApi;
 use Illuminate\Support\Facades\Route;
 
 // JS Errors board: SsSystems\Platform\Pulse's `jserr` site_events rows,
-// grouped live by App\Support\JsErrorGroups — the ss.systems platform
-// dashboard's JS errors board reads this across every connected site.
+// grouped live by SsSystems\Platform\Pulse\JsErrorGroups — the ss.systems
+// platform dashboard's JS errors board reads this across every connected site.
 // summary/resolve-all before {jsError} so neither is ever read as a group id.
 AdminApi::declare('js-errors');
 
