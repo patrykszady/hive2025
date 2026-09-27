@@ -399,3 +399,115 @@ Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()
     ->name('horizon-snapshot')
     ->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| SEO capability — shared ss-systems/platform-kit syncs
+|--------------------------------------------------------------------------
+|
+| Staggered, overnight. Each no-ops cleanly (SUCCESS, a plain message)
+| until its credential is set: seo:bing-sync until BING_WMT_KEY (or the
+| admin-saved key) is present, seo:gsc-sync and seo:gsc-inspect-bulk until
+| GSC_CREDENTIALS + GSC_PROPERTY are both set AND the service account has
+| been added as a user on the property.
+*/
+Schedule::command('seo:bing-sync')
+    ->dailyAt('03:00')
+    ->name('seo-bing-sync')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-bing-sync.log'));
+
+Schedule::command('seo:gsc-sync')
+    ->dailyAt('03:30')
+    ->name('seo-gsc-sync')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-gsc-sync.log'));
+
+// The admin's "Pages Google Is Having Trouble With" card otherwise reads
+// zeros/"never checked" forever, since nothing else calls URL Inspection.
+// The kit rotates stale-first under its own daily/per-minute quota
+// (UrlInspectionQuota), so a --limit here only bounds one run's slice.
+Schedule::command('seo:gsc-inspect-bulk --limit=600 --markdown')
+    ->dailyAt('04:00')
+    ->name('seo-gsc-inspect-bulk')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-gsc-inspect-bulk.log'));
+
+/*
+|--------------------------------------------------------------------------
+| SEO capability — shared report library
+|--------------------------------------------------------------------------
+|
+| Only the seven reports App\Support\Seo\Reports\ReportCapabilities marks
+| available here (cwv-template/area-pages-audit/clarity-health need
+| capabilities this marketing site has no adapter for — scheduling them
+| would only ever log a refusal). WEEKLY, not daily: these are deeper
+| analyses than the daily sync/inspection jobs above. Sunday night,
+| Chicago, staggered a comfortable distance after the 04:00 GSC inspection
+| sweep — content-decay/content-gap read only gsc_query_metrics (seconds),
+| gbp-parity fetches 3 landing pages (seconds), the two self-crawl reports
+| cap --limit well below their kit defaults so "nothing fetches hundreds of
+| pages at once" holds even in the worst case, and health reads only DB +
+| the ledger file (seconds) so it runs last.
+*/
+Schedule::command('seo:content-decay --markdown')
+    ->weeklyOn(0, '04:30')
+    ->name('seo-content-decay')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-content-decay.log'));
+
+Schedule::command('seo:content-gap --markdown')
+    ->weeklyOn(0, '04:35')
+    ->name('seo-content-gap')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-content-gap.log'));
+
+Schedule::command('seo:gbp-parity --markdown')
+    ->weeklyOn(0, '04:40')
+    ->name('seo-gbp-parity')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-gbp-parity.log'));
+
+Schedule::command('seo:internal-link-suggest --limit=25 --markdown')
+    ->weeklyOn(0, '04:45')
+    ->name('seo-internal-link-suggest')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-internal-link-suggest.log'));
+
+Schedule::command('seo:schema-audit --limit=25 --markdown')
+    ->weeklyOn(0, '05:00')
+    ->name('seo-schema-audit')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-schema-audit.log'));
+
+Schedule::command('seo:health-check --limit=25 --min-score=0 --markdown')
+    ->weeklyOn(0, '05:15')
+    ->name('seo-health-check')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-health-check.log'));
+
+Schedule::command('seo:health --markdown')
+    ->weeklyOn(0, '05:30')
+    ->name('seo-health')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-health.log'));
