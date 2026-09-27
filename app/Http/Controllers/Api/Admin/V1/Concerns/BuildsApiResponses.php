@@ -7,14 +7,17 @@ use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 /**
- * Shared response/query shaping for a paginated /api/admin/v1 endpoint, so
- * the envelope matches what ss-systems' HttpSiteApiClient::paginate()
- * reads (meta.current_page/per_page/total). Ported from gsc's/
- * dawnsellshomes' BuildsApiResponses (the working contract).
+ * Shared response/query shaping for every /api/admin/v1 controller, so the
+ * envelope stays identical across endpoints. Ported from gsc's/
+ * dawnsellshomes' BuildsApiResponses (the working contract) — the Analytics,
+ * JS Errors and Leads domains all need it and none of the three existing
+ * controllers (Ping/DashboardStats/Platforms/SeoSnapshot) did yet.
  */
 trait BuildsApiResponses
 {
-    /** {"data": [...], "meta": {current_page, per_page, total, last_page}} */
+    /**
+     * {"data": [...], "meta": {current_page, per_page, total, last_page}}
+     */
     protected function paginatedResponse(LengthAwarePaginator $paginator, callable $transform): JsonResponse
     {
         return response()->json([
