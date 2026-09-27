@@ -86,6 +86,9 @@
          every env() call outside config/ returns null — which silently
          emptied the app name out of every browser tab title. --}}
     <title>{{ isset($title) ? $title.' | '.config('app.name') : config('app.name') }}</title>
+    @if (isset($description) && $description)
+        <meta name="description" content="{{ $description }}">
+    @endif
 
     {{-- Self-canonical + hreflang alternates for the public marketing site:
          tells search engines the one canonical URL for this page and where

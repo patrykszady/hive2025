@@ -33,6 +33,7 @@
                 ['label' => __('Create your Hive'), 'route' => 'registration'],
                 ['label' => __('Sign in'),           'route' => 'login'],
                 ['label' => __('FAQ'),               'route' => 'welcome.faq'],
+                ['label' => __('Blog'),              'route' => 'blog.index'],
                 ['label' => __('Homeowner portal'),  'route' => 'welcome.homeowners'],
             ],
         ],

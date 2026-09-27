@@ -12,7 +12,14 @@ class NoIndexNonPublic
     {
         $response = $next($request);
 
-        if (! $this->isPublicPage($request) && ! $request->is('robots.txt') && ! $request->is('sitemap.xml')) {
+        // A path-shaped match alone isn't enough for the blog: a draft's
+        // slug lives at the exact same /{locale}/blog/{slug} shape as a
+        // published one, and only 404s there — so a non-200 response
+        // (that 404, but also any future redirect/error under a public
+        // path) is never treated as public either.
+        $public = $this->isPublicPage($request) && $response->getStatusCode() === 200;
+
+        if (! $public && ! $request->is('robots.txt') && ! $request->is('sitemap.xml')) {
             $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
         }
 
@@ -22,7 +29,10 @@ class NoIndexNonPublic
     /**
      * The marketing site's own public paths: the root redirect, the bare
      * (un-prefixed, pre-locale-migration) /welcome/* legacy redirects and
-     * legal pages, and every locale's /{locale}/welcome tree.
+     * legal pages, every locale's /{locale}/welcome tree, and the blog
+     * index/post pages (/{locale}/blog, /{locale}/blog/{slug} — a single
+     * segment after "blog" only, so the signed /{locale}/blog/{slug}/
+     * preview draft link never matches and always ships noindex).
      *
      * This used to check only 'welcome' / 'welcome/*' — written before the
      * marketing pages moved under a required {locale} prefix (routes/web.php)
@@ -42,7 +52,9 @@ class NoIndexNonPublic
             array_keys(config('locales.supported', ['en' => []]))
         );
 
-        $pattern = '#^('.implode('|', $locales).')/welcome(/.*)?$#';
+        $localeGroup = implode('|', $locales);
+
+        $pattern = '#^('.$localeGroup.')/(welcome(/.*)?|blog(/[^/]+)?)$#';
 
         return (bool) preg_match($pattern, $request->path());
     }
