@@ -16,7 +16,7 @@ uses(RefreshDatabase::class);
  * admin's 15s wait — so the whole SEO screen failed every half hour.
  */
 beforeEach(function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
 function connectDataForSeo(): void

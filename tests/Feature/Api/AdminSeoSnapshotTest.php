@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Storage;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
     // Reports live on the local disk; a production pull fills the real one,
     // so this test counts its own, empty one.
     Storage::fake('local');

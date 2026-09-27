@@ -16,7 +16,7 @@ uses(RefreshDatabase::class);
  * success — there is nothing to fake.
  */
 beforeEach(function () {
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
 it('lists every configured directory, syncing on first load', function () {

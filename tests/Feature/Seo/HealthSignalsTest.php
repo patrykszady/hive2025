@@ -18,7 +18,7 @@ uses(RefreshDatabase::class);
  */
 beforeEach(function () {
     Storage::fake('local');
-    config(['services.admin_api.token' => 'test-admin-api-token']);
+    config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
 it('reads rankings from the saved daily check, one position per tracked search', function () {
