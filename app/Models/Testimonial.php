@@ -36,6 +36,33 @@ class Testimonial extends Model
         ];
     }
 
+    /**
+     * The name the public page shows: "First L" (last-name initial only),
+     * the same rule as gs.construction's — the admin's review form promises
+     * exactly that ("Public pages will show 'First L' only"). "First & First
+     * Last" becomes "First & First L"; a single word, or one already ending
+     * in an initial, is left alone. The admin API still carries the full name.
+     */
+    public function getDisplayNameAttribute(): string
+    {
+        $name = trim((string) $this->name);
+        $parts = preg_split('/\s+/', $name) ?: [];
+
+        if (count($parts) < 2) {
+            return $name;
+        }
+
+        $last = end($parts);
+
+        if (mb_strlen($last) === 1) {
+            return $name;
+        }
+
+        array_pop($parts);
+
+        return implode(' ', $parts).' '.mb_strtoupper(mb_substr($last, 0, 1));
+    }
+
     public function scopePublished(Builder $query): Builder
     {
         return $query->where('is_published', true);

@@ -23,7 +23,9 @@ it('shows a published testimonial with its rating, quote and role', function () 
     $html = $this->get('/en/welcome')->assertOk()->getContent();
 
     expect($html)->toContain('What contractors say')
-        ->and($html)->toContain('Jane Doe')
+        // The public page abbreviates to "First L", as the admin's form promises.
+        ->and($html)->toContain('Jane D')
+        ->and($html)->not->toContain('Jane Doe')
         ->and($html)->toContain('Owner, Doe Roofing')
         ->and($html)->toContain('Hive keeps my books straight without an accountant.');
 });
@@ -76,7 +78,7 @@ it('forgets every locale\'s cached welcome page when a testimonial is saved, so 
 
     foreach (['en', 'pl', 'es'] as $locale) {
         $html = $this->get("/{$locale}/welcome")->assertOk()->getContent();
-        expect($html)->toContain('Fresh Reviewer');
+        expect($html)->toContain('Fresh R');
     }
 });
 
@@ -91,13 +93,13 @@ it('forgets the cached welcome page when a testimonial is deleted, so a removed 
 
     // Warm the cache with the review still present.
     foreach (['en', 'pl', 'es'] as $locale) {
-        $this->get("/{$locale}/welcome")->assertOk()->assertSee('Going Away');
+        $this->get("/{$locale}/welcome")->assertOk()->assertSee('Going A');
     }
 
     $testimonial->delete();
 
     foreach (['en', 'pl', 'es'] as $locale) {
         $html = $this->get("/{$locale}/welcome")->assertOk()->getContent();
-        expect($html)->not->toContain('Going Away');
+        expect($html)->not->toContain('Going A');
     }
 });

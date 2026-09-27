@@ -767,7 +767,7 @@
                             <p>&ldquo;{{ $testimonial->body }}&rdquo;</p>
                         </blockquote>
                         <figcaption class="mt-6">
-                            <div class="text-sm font-semibold text-gray-900 dark:text-white">{{ $testimonial->name }}</div>
+                            <div class="text-sm font-semibold text-gray-900 dark:text-white">{{ $testimonial->display_name }}</div>
                             @if ($testimonial->role)
                                 <div class="text-sm text-gray-500 dark:text-gray-400">{{ $testimonial->role }}</div>
                             @endif
