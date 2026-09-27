@@ -19,12 +19,13 @@ it('sends the full roster with automation present but empty and no posting confi
         ->assertOk()
         ->json('data');
 
-    expect($data['subject'])->toBe('listings');
+    expect($data['subject'])->toBe('none');
+    expect($data['note'])->toContain('does not post to social media automatically');
     expect($data['configured'])->toBe(['instagram' => false, 'facebook' => false, 'google_business' => false, 'any' => false]);
     expect($data['publishing_off'])->toBe(['instagram' => false, 'facebook' => false, 'google_business' => false]);
     expect($data)->toHaveKey('automation');
     expect($data['automation']['items'])->toBe([]);
-    expect($data['listing_photos_note'])->toBeString()->not->toBeEmpty();
+    expect($data['note'])->toBeString()->not->toBeEmpty();
     expect($data['uploaded_posts'])->toBe([]);
     expect($data['remaining_images'])->toBe([]);
     expect($data['gbp_images'])->toBe([]);

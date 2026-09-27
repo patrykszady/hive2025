@@ -24,18 +24,8 @@ use Illuminate\Support\Facades\Validator;
  * section as a quiet heading with nothing under it rather than that
  * warning.
  *
- * `subject: 'listings'` is borrowed from dawnsellshomes' realtor
- * adaptation of this same screen. Neither of the screen's two subject
- * modes ('projects', the default, or 'listings') is a perfect fit for a
- * software company with no posting pipeline at all: 'projects' would add
- * Google Business Profile/Yelp tiles and a "photos publish automatically"
- * line that is simply untrue here, so 'listings' is the closer fit — it
- * hides those two sections and gives us `listing_photos_note` to say
- * plainly that posting is not set up, calmly, in the roster's own words
- * rather than a project/photo one. The remaining cosmetic mismatch
- * ("Total Listings", "Remaining Listings") is a wart worth fixing on the
- * ss-systems side with a third, subject-neutral mode; noted rather than
- * hacked around here.
+ * `subject: 'none'` is the central admin's profiles-only mode: it renders the
+ * note and the Social Profile URLs card and none of the posting anatomy.
  *
  * No automation or posting endpoints (PUT social-media/automation/{p},
  * POST social-media/post) are declared: with every automation item empty
@@ -53,7 +43,9 @@ class SocialMediaController extends Controller
     {
         return response()->json([
             'data' => [
-                'subject' => 'listings',
+                // 'none': the central admin's profiles-only mode (2026-09-27) —
+                // this site posts nothing itself, so only the addresses render.
+                'subject' => 'none',
                 'stats' => [
                     'total_eligible' => 0,
                     'remaining_instagram' => 0,
@@ -77,7 +69,7 @@ class SocialMediaController extends Controller
                     'timezone' => null,
                     'items' => [],
                 ],
-                'listing_photos_note' => 'This site does not post to social media automatically. Use the links below to keep every profile current by hand.',
+                'note' => 'This site does not post to social media automatically. Use the links below to keep every profile current by hand.',
                 'uploaded_posts' => [],
                 'remaining_images' => [],
                 'gbp_images' => [],
