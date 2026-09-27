@@ -5,10 +5,10 @@ namespace App\Support\Seo;
 use App\Models\PlatformSetting;
 
 /**
- * Copies BING_WMT_KEY (if present and nothing is stored yet) into the
- * encrypted platform_settings table. Adapted from dawnsellshomes' identical
- * class — this site has neither Clarity, PageSpeed nor DataForSEO
- * integrations, so SOURCES is `['bing']` alone.
+ * Copies every present env/config value for the four global SEO-source
+ * credentials (Bing, Clarity, PageSpeed, DataForSEO) into the encrypted
+ * platform_settings table. Adapted from dawnsellshomes'/jpeterson-design's
+ * identical class.
  *
  * The one caller: POST platforms/seo-credentials/import
  * (App\Http\Controllers\Api\Admin\V1\PlatformsController::
@@ -16,21 +16,22 @@ use App\Models\PlatformSetting;
  * "Move here" button.
  *
  * Never logs or returns a credential VALUE — only which of three things
- * happened to the field:
- *   - imported:       nothing was stored yet, and BING_WMT_KEY was found
- *                      and written.
+ * happened to each field:
+ *   - imported:       nothing was stored yet, and an env/config value was
+ *                      found and written.
  *   - already stored: an admin-saved value already exists — never
  *                      overwritten by this class.
- *   - absent:         no env value to import (a blank, or whitespace-only,
- *                      env var counts as absent, same as an unset one).
+ *   - absent:         no env/config value to import (a blank, or
+ *                      whitespace-only, env var counts as absent, same as
+ *                      an unset one).
  */
 class SeoCredentialsImport
 {
     /** Every source this import knows how to copy — the default when $sources is empty. */
-    public const SOURCES = ['bing'];
+    public const SOURCES = ['bing', 'clarity', 'pagespeed', 'dataforseo'];
 
     /**
-     * @param  list<string>  $sources  Which of 'bing' to import; empty (the default) means all (just 'bing').
+     * @param  list<string>  $sources  Which of 'bing'/'clarity'/'pagespeed'/'dataforseo' to import; empty (the default) means all four.
      * @param  bool  $dryRun  Report what WOULD happen without writing anything.
      * @return array{imported: list<string>, already_stored: list<string>, absent: list<string>}
      */
@@ -72,10 +73,24 @@ class SeoCredentialsImport
             'bing' => [
                 ['label' => 'Bing API key', 'key' => BingSettings::SETTING_API_KEY, 'env' => config('services.bing_wmt.key')],
             ],
+            'clarity' => [
+                ['label' => 'Clarity project ID', 'key' => ClaritySettings::SETTING_PROJECT_ID, 'env' => config('services.microsoft.clarity.project_id')],
+                ['label' => 'Clarity API token', 'key' => ClaritySettings::SETTING_API_TOKEN, 'env' => config('services.microsoft.clarity.api_token')],
+            ],
+            'pagespeed' => [
+                ['label' => 'PageSpeed API key', 'key' => PsiSettings::SETTING_API_KEY, 'env' => config('services.pagespeed.api_key')],
+            ],
+            'dataforseo' => [
+                ['label' => 'DataForSEO login', 'key' => DataForSeoSettings::SETTING_LOGIN, 'env' => config('services.dataforseo.login')],
+                ['label' => 'DataForSEO password', 'key' => DataForSeoSettings::SETTING_PASSWORD, 'env' => config('services.dataforseo.password')],
+            ],
         ];
 
         $rows = [];
 
+        // Iterate SOURCES' own fixed order rather than $sources' order, so
+        // the report is always bing/clarity/pagespeed/dataforseo no matter
+        // what order the caller listed them in.
         foreach (self::SOURCES as $source) {
             if (! in_array($source, $sources, true)) {
                 continue;

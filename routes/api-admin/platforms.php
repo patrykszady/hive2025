@@ -15,6 +15,17 @@ AdminApi::declare('platforms');
 Route::get('platforms/status', [PlatformsController::class, 'status'])->name('platforms.status');
 Route::post('platforms/bing/credentials', [PlatformsController::class, 'saveBingCredentials'])->name('platforms.bing.save');
 Route::delete('platforms/bing/credentials', [PlatformsController::class, 'clearBingCredentials'])->name('platforms.bing.clear');
+
+// The other three global SEO-source credentials the Connect Services modal
+// drives — see PlatformsController's clarityStatus()/pagespeedStatus()/
+// dataForSeoStatus() docblocks.
+Route::post('platforms/clarity/credentials', [PlatformsController::class, 'saveClarityCredentials'])->name('platforms.clarity.save');
+Route::delete('platforms/clarity/credentials', [PlatformsController::class, 'clearClarityCredentials'])->name('platforms.clarity.clear');
+Route::post('platforms/pagespeed/credentials', [PlatformsController::class, 'savePagespeedCredentials'])->name('platforms.pagespeed.save');
+Route::delete('platforms/pagespeed/credentials', [PlatformsController::class, 'clearPagespeedCredentials'])->name('platforms.pagespeed.clear');
+Route::post('platforms/dataforseo/credentials', [PlatformsController::class, 'saveDataForSeoCredentials'])->name('platforms.dataforseo.save');
+Route::delete('platforms/dataforseo/credentials', [PlatformsController::class, 'clearDataForSeoCredentials'])->name('platforms.dataforseo.clear');
+
 Route::post('platforms/seo-credentials/import', [PlatformsController::class, 'importSeoCredentialsFromEnv'])->name('platforms.seo-credentials.import');
 
 // This app's own Google OAuth client (Business Profile sign-in only —

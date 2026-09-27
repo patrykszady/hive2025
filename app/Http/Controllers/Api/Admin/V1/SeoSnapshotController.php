@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\Admin\V1\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Jobs\RunSeoChannelSyncJob;
 use App\Models\GscCoverageState;
+use App\Services\DataForSeoService;
+use App\Support\Seo\DataForSeoSettings;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
 use App\Support\SeoReportRun;
 use Illuminate\Database\Query\Builder;
@@ -79,6 +81,7 @@ class SeoSnapshotController extends Controller
                 'search' => $search,
                 'trend' => $this->trendChartData($search),
                 'trend_through' => $search['through'] ?? null,
+                'rankings' => $this->rankingsSnapshot(),
                 'gsc_errors' => $this->gscErrorSnapshot(),
                 'sitemaps' => SitemapStatus::snapshot((string) config('services.google.search_console_property')),
                 // hive.contractors must NEVER get the shared autopilot: it
@@ -636,6 +639,38 @@ class SeoSnapshotController extends Controller
         return [$dimension => (string) $r->dim] + $shape($r) + [
             'prior' => ($p = $prior->get((string) $r->dim)) ? $shape($p) : null,
         ];
+    }
+
+    /**
+     * The SEO screen's "Where you rank" panel reads this top-level
+     * `rankings` key (ss-systems' seo-reports.blade.php: `$rk['live_serp']`
+     * for the split, per-engine shape). Absent entirely — `[]` — until
+     * DataForSEO is configured (App\Support\Seo\DataForSeoSettings), which
+     * ss-systems already renders as "No data for this check yet." rather
+     * than an error; unavailable must read calmly, never crash. A failed
+     * live check (see App\Services\DataForSeoService::checkRankings()'s
+     * docblock) reads exactly the same as "not configured" here, never a
+     * fabricated zero. Cached 30 minutes — DataForSEO bills per query, and
+     * this screen is read far more often than rankings realistically move.
+     */
+    protected function rankingsSnapshot(): array
+    {
+        if (! app(DataForSeoSettings::class)->isConfigured()) {
+            return [];
+        }
+
+        return Cache::remember('admin.seo-reports.rankings-snapshot', now()->addMinutes(30), function (): array {
+            $current = app(DataForSeoService::class)->checkRankings();
+
+            if ($current === null) {
+                return [];
+            }
+
+            return [
+                'live_serp' => ['current' => $current],
+                'as_of' => now()->toDateString(),
+            ];
+        });
     }
 
     /** The "Pages Google Is Having Trouble With" card's embedded summary. */

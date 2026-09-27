@@ -8,11 +8,15 @@ use SsSystems\Platform\Reports\CwvTemplateReport;
 /**
  * Thin wrapper over the kit's CwvTemplateReport — ported verbatim from
  * dawnsellshomes' identical command. See App\Console\Commands\Seo\
- * KitReportCommand. Not available on this site (no psi_snapshots table —
- * see App\Support\Seo\Reports\ReportCapabilities): the admin's "Run"
- * button never calls this, and a direct `php artisan seo:cwv-template`
- * fails to resolve PsiSnapshotReader from the container, since nothing
- * binds it here.
+ * KitReportCommand. PsiSnapshotReader is bound (App\Support\Seo\Reports\
+ * EloquentPsiSnapshotReader, over the psi_snapshots table
+ * App\Console\Commands\SeoPsiSync fills), so this resolves and runs
+ * directly; the admin's "Run" button calls it once App\Support\Seo\
+ * Reports\ReportCapabilities lists 'psi_snapshots' as provided — which
+ * happens once a PageSpeed key is saved from the SEO screen's Connect
+ * Services modal (the same key SeoPsiSync waits for before writing any
+ * rows). Run before the table has any rows, it still generates a report —
+ * just one with zero samples in every bucket.
  */
 class SeoCwvTemplate extends KitReportCommand
 {

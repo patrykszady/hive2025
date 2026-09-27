@@ -16,7 +16,7 @@ it('reads unconfigured/not-connected calmly when nothing is set up', function ()
         ->assertOk()
         ->json('data');
 
-    expect($data['services'])->toBe(['gsc', 'bing']);
+    expect($data['services'])->toBe(['gsc', 'bing', 'clarity', 'pagespeed', 'dataforseo']);
     expect($data['google'])->toBe([
         'configured' => false,
         'source' => null,
@@ -70,6 +70,9 @@ it('reads unconfigured/not-connected calmly when nothing is set up', function ()
         'sync_stale' => null,
     ]);
     expect($data['bing'])->toBe(['configured' => false, 'source' => null]);
+    expect($data['clarity'])->toBe(['configured' => false, 'source' => null]);
+    expect($data['pagespeed'])->toBe(['configured' => false, 'using_own_key' => false, 'source' => null]);
+    expect($data['dataforseo'])->toBe(['configured' => false, 'source' => null]);
 });
 
 it('reads back the last sync bookkeeping regardless of live configuration state', function () {

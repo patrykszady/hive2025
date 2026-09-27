@@ -38,8 +38,10 @@ use App\Support\Seo\Inspection\EloquentCoverageStore;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
 use App\Support\Seo\Inspection\NoTrackedPaths;
 use App\Support\Seo\Inspection\SearchConsoleUrlInspector;
+use App\Support\Seo\Reports\ClaritySettingsMetricsReader;
 use App\Support\Seo\Reports\ConfigSiteIdentity;
 use App\Support\Seo\Reports\EloquentHealthDataReader;
+use App\Support\Seo\Reports\EloquentPsiSnapshotReader;
 use App\Support\Seo\Reports\EloquentQueryMetricsReader;
 use App\Support\Seo\Reports\EmptyAreaCatalog;
 use App\Support\Seo\Reports\HttpPageFetcher;
@@ -71,8 +73,10 @@ use SsSystems\Platform\Pulse\Recorder;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
 use SsSystems\Platform\Pulse\Storage\DatabaseTableStorage;
 use SsSystems\Platform\Reports\Contracts\AreaCatalog;
+use SsSystems\Platform\Reports\Contracts\ClarityMetricsReader;
 use SsSystems\Platform\Reports\Contracts\HealthDataReader;
 use SsSystems\Platform\Reports\Contracts\PageFetcher;
+use SsSystems\Platform\Reports\Contracts\PsiSnapshotReader;
 use SsSystems\Platform\Reports\Contracts\QueryMetricsReader;
 use SsSystems\Platform\Reports\Contracts\SiteCatalog;
 use SsSystems\Platform\Reports\Contracts\SiteIdentity;
@@ -181,15 +185,20 @@ class AppServiceProvider extends ServiceProvider
         // Reports\ReportCapabilities for which of these are actually
         // PROVIDED on this site. AreaCatalog is bound to EmptyAreaCatalog
         // (not provided — see that class's docblock) so HealthReport/
-        // AreaPagesAuditReport can still be resolved directly;
-        // ClarityMetricsReader/PsiSnapshotReader have NO binding at all,
-        // since this site has neither integration.
+        // AreaPagesAuditReport can still be resolved directly.
+        // ClarityMetricsReader/PsiSnapshotReader are bound the same way
+        // (always, so `php artisan seo:clarity-health`/`seo:cwv-template`
+        // resolve directly) but only listed in ReportCapabilities::
+        // provided() once their credential is saved — see that class's
+        // docblock.
         $this->app->bind(SiteCatalog::class, MarketingSiteCatalog::class);
         $this->app->bind(SiteIdentity::class, ConfigSiteIdentity::class);
         $this->app->bind(QueryMetricsReader::class, EloquentQueryMetricsReader::class);
         $this->app->bind(HealthDataReader::class, EloquentHealthDataReader::class);
         $this->app->bind(PageFetcher::class, HttpPageFetcher::class);
         $this->app->bind(AreaCatalog::class, EmptyAreaCatalog::class);
+        $this->app->bind(ClarityMetricsReader::class, ClaritySettingsMetricsReader::class);
+        $this->app->bind(PsiSnapshotReader::class, EloquentPsiSnapshotReader::class);
     }
 
     /**

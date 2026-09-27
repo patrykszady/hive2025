@@ -231,4 +231,13 @@
     @vite(['resources/js/app.js'])
 
     @fluxAppearance
+
+    {{-- A layout composed via @include (guest.blade.php's marketing pages)
+         cannot append into <head> the normal @extends/@section way, since
+         this partial finishes rendering before the parent template resumes
+         — @push before the @include still lands here because Blade's
+         stack storage lives on the shared view Factory, not per-view. See
+         guest.blade.php's own Clarity block for the one thing pushed here
+         today. --}}
+    @stack('head-appended')
 </head>

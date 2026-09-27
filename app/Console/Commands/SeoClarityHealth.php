@@ -9,12 +9,14 @@ use SsSystems\Platform\Reports\ReportResult;
 /**
  * Thin wrapper over the kit's ClarityHealthReport — ported verbatim from
  * dawnsellshomes' identical command. See App\Console\Commands\Seo\
- * KitReportCommand. Not available on this site: no Microsoft Clarity
- * integration at all — no ClarityMetricsReader binding exists (see
- * App\Support\Seo\Reports\ReportCapabilities). The admin's "Run" button
- * never calls this, and a direct `php artisan seo:clarity-health` fails to
- * resolve ClarityMetricsReader from the container, same as
- * App\Console\Commands\SeoCwvTemplate's psi_snapshots gap.
+ * KitReportCommand. ClarityMetricsReader is bound (App\Support\Seo\Reports\
+ * ClaritySettingsMetricsReader), so this resolves and runs directly; the
+ * admin's "Run" button calls it once App\Support\Seo\Reports\
+ * ReportCapabilities lists 'clarity_metrics' as provided — which happens
+ * once a Clarity project id and API token are saved from the SEO screen's
+ * Connect Services modal. Run without a credential saved, it still
+ * generates a report — just one that says "Configured: no" rather than
+ * refusing outright.
  */
 class SeoClarityHealth extends KitReportCommand
 {

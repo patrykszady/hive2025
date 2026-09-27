@@ -13,11 +13,15 @@ use App\Support\GoogleBusinessListing;
 use App\Support\GoogleOAuthApp;
 use App\Support\OAuthState;
 use App\Support\Seo\BingSettings;
+use App\Support\Seo\ClaritySettings;
+use App\Support\Seo\DataForSeoSettings;
+use App\Support\Seo\PsiSettings;
 use App\Support\Seo\SeoCredentialsImport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 use SsSystems\Platform\Seo\SearchConsoleSyncRule;
 
@@ -67,7 +71,7 @@ class PlatformsController extends Controller
                 // absent list (an older site) keeps every section instead.
                 // 'meta' is intentionally NOT in this list — that modal is
                 // SEO-only; Meta lives on the Platforms screen's own card.
-                'services' => ['gsc', 'bing'],
+                'services' => ['gsc', 'bing', 'clarity', 'pagespeed', 'dataforseo'],
                 // Google sign-in (Business Profile only) + the Business
                 // Profile card itself.
                 'google' => GoogleOAuthApp::status(),
@@ -75,6 +79,12 @@ class PlatformsController extends Controller
                 'gsc' => $this->gscStatus(),
                 'bing' => $this->bingStatus(),
                 'meta' => $this->metaStatus(),
+                // The four global SEO-source credentials the Connect
+                // Services modal drives — see clarityStatus()/
+                // pagespeedStatus()/dataForSeoStatus()'s docblocks.
+                'clarity' => $this->clarityStatus(),
+                'pagespeed' => $this->pagespeedStatus(),
+                'dataforseo' => $this->dataForSeoStatus(),
             ],
         ]);
     }
@@ -213,6 +223,70 @@ class PlatformsController extends Controller
     }
 
     /**
+     * configured: BOTH the project id and the API token are set (admin or
+     * env) — the tag itself only needs the project id (see
+     * App\Support\Seo\ClaritySettings::projectId(), read directly by the
+     * guest layout), but the health report also needs the API token, so
+     * "configured" here means the whole integration, not just the tag.
+     */
+    protected function clarityStatus(): array
+    {
+        $settings = app(ClaritySettings::class);
+
+        return [
+            'configured' => $settings->isConfigured(),
+            'source' => $settings->source(),
+        ];
+    }
+
+    /**
+     * PageSpeed has no hard connected/disconnected state (it runs keyless
+     * too) — 'configured' here means "using your own key", not "working".
+     * ss.systems' Connect Services modal reads 'using_own_key' (not
+     * 'configured') to decide the PageSpeed card's state.
+     */
+    protected function pagespeedStatus(): array
+    {
+        $settings = app(PsiSettings::class);
+
+        return [
+            'configured' => $settings->usingOwnKey(),
+            'using_own_key' => $settings->usingOwnKey(),
+            'source' => $settings->source(),
+        ];
+    }
+
+    /**
+     * DataForSEO is the one source where a stored value means ss.systems
+     * provisioned this tenant (see DataForSeoSettings's docblock), so
+     * source() reports 'platform' rather than 'admin'.
+     */
+    protected function dataForSeoStatus(): array
+    {
+        $settings = app(DataForSeoSettings::class);
+
+        return [
+            'configured' => $settings->isConfigured(),
+            'source' => $settings->source(),
+        ];
+    }
+
+    /**
+     * The /{locale}/welcome marketing pages are full-page cached
+     * (App\Http\Middleware\CachePublicPage, key 'public-page:'.md5(path),
+     * 60 min) and the Clarity tag reads ClaritySettings::projectId()
+     * straight off the page render — a saved/cleared project id must show
+     * (or stop showing) on the very next visit, not up to an hour later.
+     * Same pattern as App\Observers\TestimonialObserver::forgetWelcomePages().
+     */
+    protected function forgetWelcomePages(): void
+    {
+        foreach (array_keys(config('locales.supported', ['en' => []])) as $locale) {
+            Cache::forget('public-page:'.md5("{$locale}/welcome"));
+        }
+    }
+
+    /**
      * POST platforms/bing/credentials {api_key} — a blank re-submit keeps
      * whatever key is already stored (never overwrites with empty), same
      * as the other kit sites' saveBingCredentials(). The response is
@@ -239,11 +313,12 @@ class PlatformsController extends Controller
 
     /**
      * POST platforms/seo-credentials/import {sources?: string[]} —
-     * ss.systems' Connect Services modal's "Move here": copies BING_WMT_KEY
-     * into the encrypted platform_settings row without an ssh session. Only
-     * 'bing' is a valid source on this site (App\Support\Seo\
-     * SeoCredentialsImport::SOURCES). Never returns a credential value,
-     * only presence/absence and the fresh status block.
+     * ss.systems' Connect Services modal's "Move here": copies each of
+     * BING_WMT_KEY/CLARITY_PROJECT_ID+CLARITY_API_TOKEN/PAGESPEED_API_KEY/
+     * DATAFORSEO_LOGIN+DATAFORSEO_PASSWORD into the encrypted
+     * platform_settings row without an ssh session
+     * (App\Support\Seo\SeoCredentialsImport::SOURCES). Never returns a
+     * credential value, only presence/absence and the fresh status block.
      */
     public function importSeoCredentialsFromEnv(Request $request): JsonResponse
     {
@@ -252,7 +327,15 @@ class PlatformsController extends Controller
             'sources.*' => ['string', Rule::in(SeoCredentialsImport::SOURCES)],
         ]);
 
-        $result = app(SeoCredentialsImport::class)->run($data['sources'] ?? [], false);
+        $sources = $data['sources'] ?? [];
+        $result = app(SeoCredentialsImport::class)->run($sources, false);
+
+        // Same reasoning as saveClarityCredentials(): an id imported from
+        // env must be live on the very next page load, not wait out the
+        // welcome pages' hour-long cache.
+        if ($sources === [] || in_array('clarity', $sources, true)) {
+            $this->forgetWelcomePages();
+        }
 
         return response()->json(['data' => [
             'imported' => $result['imported'],
@@ -260,8 +343,104 @@ class PlatformsController extends Controller
             'absent' => $result['absent'],
             'status' => [
                 'bing' => $this->bingStatus(),
+                'clarity' => $this->clarityStatus(),
+                'pagespeed' => $this->pagespeedStatus(),
+                'dataforseo' => $this->dataForSeoStatus(),
             ],
         ]]);
+    }
+
+    /**
+     * POST platforms/clarity/credentials {project_id, api_token} — a blank
+     * re-submit never overwrites a stored secret, same as
+     * saveBingCredentials(). The token is a JWT — Clarity's run to ~700
+     * characters (2026-09-23), so a 255 cap would silently refuse a real
+     * one.
+     */
+    public function saveClarityCredentials(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'project_id' => ['nullable', 'string', 'max:255'],
+            'api_token' => ['nullable', 'string', 'max:4096'],
+        ]);
+
+        if (! empty($data['project_id'])) {
+            PlatformSetting::put(ClaritySettings::SETTING_PROJECT_ID, $data['project_id']);
+        }
+        if (! empty($data['api_token'])) {
+            PlatformSetting::put(ClaritySettings::SETTING_API_TOKEN, $data['api_token']);
+        }
+
+        // The marketing pages are full-page cached for an hour
+        // (App\Http\Middleware\CachePublicPage) and read the project id
+        // straight from ClaritySettings on every render — without this the
+        // tag would not appear until the cache aged out.
+        $this->forgetWelcomePages();
+
+        return response()->json(['data' => ['clarity' => $this->clarityStatus()]]);
+    }
+
+    /** DELETE platforms/clarity/credentials */
+    public function clearClarityCredentials(): JsonResponse
+    {
+        PlatformSetting::put(ClaritySettings::SETTING_PROJECT_ID, null);
+        PlatformSetting::put(ClaritySettings::SETTING_API_TOKEN, null);
+        $this->forgetWelcomePages();
+
+        return response()->json(['data' => ['clarity' => $this->clarityStatus()]]);
+    }
+
+    /** POST platforms/pagespeed/credentials {api_key} — optional; PSI runs keyless too. */
+    public function savePagespeedCredentials(Request $request): JsonResponse
+    {
+        $data = $request->validate(['api_key' => ['nullable', 'string', 'max:255']]);
+
+        if (! empty($data['api_key'])) {
+            PlatformSetting::put(PsiSettings::SETTING_API_KEY, $data['api_key']);
+        }
+
+        return response()->json(['data' => ['pagespeed' => $this->pagespeedStatus()]]);
+    }
+
+    /** DELETE platforms/pagespeed/credentials — back to Google's shared quota. */
+    public function clearPagespeedCredentials(): JsonResponse
+    {
+        PlatformSetting::put(PsiSettings::SETTING_API_KEY, null);
+
+        return response()->json(['data' => ['pagespeed' => $this->pagespeedStatus()]]);
+    }
+
+    /**
+     * POST platforms/dataforseo/credentials {login, password} — called by
+     * ss.systems alone (same design as jpeterson-design's/gs.construction's
+     * identical endpoint): DataForSEO is the platform's own metered
+     * account, provisioned per tenant; this site has no owner-facing field
+     * for it.
+     */
+    public function saveDataForSeoCredentials(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'login' => ['nullable', 'string', 'max:255'],
+            'password' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        if (! empty($data['login'])) {
+            PlatformSetting::put(DataForSeoSettings::SETTING_LOGIN, $data['login']);
+        }
+        if (! empty($data['password'])) {
+            PlatformSetting::put(DataForSeoSettings::SETTING_PASSWORD, $data['password']);
+        }
+
+        return response()->json(['data' => ['dataforseo' => $this->dataForSeoStatus()]]);
+    }
+
+    /** DELETE platforms/dataforseo/credentials — ss.systems switching this tenant back off. */
+    public function clearDataForSeoCredentials(): JsonResponse
+    {
+        PlatformSetting::put(DataForSeoSettings::SETTING_LOGIN, null);
+        PlatformSetting::put(DataForSeoSettings::SETTING_PASSWORD, null);
+
+        return response()->json(['data' => ['dataforseo' => $this->dataForSeoStatus()]]);
     }
 
     // ---- Google sign-in (Business Profile OAuth client) ---------------

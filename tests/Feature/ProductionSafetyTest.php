@@ -1,10 +1,21 @@
 <?php
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
 /**
  * Guards against the two things that took production down on 2026-08-15.
  * Both were invisible locally and only appeared once the deploy cached
  * things, which is exactly why they need tests rather than vigilance.
+ *
+ * RefreshDatabase (2026-09-27): the "keeps Livewire assets" test below
+ * renders the guest layout over HTTP, which now reads platform_settings
+ * for the Clarity tag (App\Support\Seo\ClaritySettings) on every page —
+ * without a migrated schema this fails with "no such table" in a worker
+ * process where nothing else has migrated yet. Every other test in this
+ * file is DB-free, so this only adds a one-time migration + a transaction
+ * wrapper, never real data setup.
  */
+uses(RefreshDatabase::class);
 
 it('never calls env() in a blade view', function () {
     // Once `php artisan config:cache` has run — any deploy may do it —
