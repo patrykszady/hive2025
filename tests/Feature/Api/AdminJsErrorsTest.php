@@ -11,7 +11,7 @@ uses(RefreshDatabase::class);
  * ss-systems' JsErrorsBoard/PlatformJsErrors read. This app has no
  * dedicated ingest table; every fixture below is a `jserr` site_events row,
  * exactly how SsSystems\Platform\Pulse\BeaconScript's beacon writes one,
- * grouped live by App\Support\JsErrorGroups.
+ * grouped live by SsSystems\Platform\Pulse\JsErrorGroups (kit 0.11.0).
  */
 beforeEach(function () {
     config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
