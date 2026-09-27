@@ -14,6 +14,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Hub token
+    |--------------------------------------------------------------------------
+    |
+    | The central admin (ss.systems/admin/log-viewer) reads this app's logs
+    | server-to-server with this dedicated token, separate from the
+    | production token the dev viewer uses, so either can be rotated alone.
+    | Stored on ss.systems with `sites:log-viewer-token hive` (2026-09-27).
+    |
+    */
+
+    'hub_token' => env('LOG_VIEWER_HUB_TOKEN'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Log Viewer Domain
     |--------------------------------------------------------------------------
     | You may change the domain where Log Viewer should be active.

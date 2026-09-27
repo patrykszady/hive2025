@@ -43,7 +43,24 @@ class PingController extends Controller
                     // same two colours the app itself uses.
                     'logo' => asset('images/hive-mark.svg'),
                     'logo_dark' => asset('images/hive-mark-dark.svg'),
-                    'accent' => null,
+                    // The admin recolours itself from this ramp ([step => hex],
+                    // Tailwind's indigo — the app's own --color-accent is
+                    // indigo-500/600 and the mark is indigo-900), so
+                    // hive.contractors/admin reads indigo like the app, not
+                    // the stock sky every site without a ramp gets (2026-09-27).
+                    'accent' => [
+                        50 => '#eef2ff',
+                        100 => '#e0e7ff',
+                        200 => '#c7d2fe',
+                        300 => '#a5b4fc',
+                        400 => '#818cf8',
+                        500 => '#6366f1',
+                        600 => '#4f46e5',
+                        700 => '#4338ca',
+                        800 => '#3730a3',
+                        900 => '#312e81',
+                        950 => '#1e1b4b',
+                    ],
                 ],
             ],
         ]);

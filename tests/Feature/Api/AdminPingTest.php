@@ -25,5 +25,6 @@ it('reports the site, domains and brand shape', function () {
     expect($data['brand']['name'])->toBe('Hive Contractors');
     expect($data['brand']['logo'])->toEndWith('/images/hive-mark.svg');
     expect($data['brand']['logo_dark'])->toEndWith('/images/hive-mark-dark.svg');
-    expect($data['brand']['accent'])->toBeNull();
+    expect($data['brand']['accent'])->toBeArray()->toHaveCount(11);
+    expect($data['brand']['accent'][500])->toBe('#6366f1');
 });

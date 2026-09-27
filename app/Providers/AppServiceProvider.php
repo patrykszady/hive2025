@@ -309,6 +309,15 @@ class AppServiceProvider extends ServiceProvider
                 return true;
             }
 
+            // The central admin (ss.systems) reads these logs with its own
+            // token (config log-viewer.hub_token), never the production one
+            // above — same blank-never-matches rule.
+            $hubToken = trim((string) config('log-viewer.hub_token', ''));
+
+            if ($hubToken !== '' && $bearerToken !== '' && hash_equals($hubToken, $bearerToken)) {
+                return true;
+            }
+
             // Allow specific users via web authentication
             return $request->user()
                 && in_array($request->user()->email, [
