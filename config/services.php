@@ -371,6 +371,34 @@ return [
         'site_url' => env('BING_WMT_SITE_URL', env('MARKETING_URL', 'https://hive.contractors')),
     ],
 
+    // Microsoft Clarity — heatmaps/session recordings of the marketing
+    // pages. Admin-writable (App\Support\Seo\ClaritySettings/
+    // PlatformSettingCredential); these two stay only as the env fallback
+    // for a project not yet moved into the admin's Connect Services modal.
+    'microsoft' => [
+        'clarity' => [
+            'project_id' => env('CLARITY_PROJECT_ID'),
+            'api_token' => env('CLARITY_API_TOKEN'),
+        ],
+    ],
+
+    // PageSpeed Insights — never required (it runs keyless on Google's
+    // shared quota), a key here only raises the daily limit. Admin-writable
+    // (App\Support\Seo\PsiSettings/PlatformSettingCredential); this is only
+    // the env fallback for a key not yet moved into the admin.
+    'pagespeed' => [
+        'api_key' => env('PAGESPEED_API_KEY'),
+    ],
+
+    // DataForSEO — ss.systems' own metered account, provisioned per tenant
+    // through the admin (App\Support\Seo\DataForSeoSettings/
+    // PlatformSettingCredential); these two stay only as the env fallback
+    // for a login/password pair not yet moved into the admin.
+    'dataforseo' => [
+        'login' => env('DATAFORSEO_LOGIN'),
+        'password' => env('DATAFORSEO_PASSWORD'),
+    ],
+
     /*
     | Meta (Facebook Page + Instagram Business) — Platforms screen card
     | (2026-09-26). The admin (central admin, via PlatformsController)
