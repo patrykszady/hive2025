@@ -21,7 +21,7 @@ it('reports the site, domains and brand shape', function () {
 
     expect($data['site'])->toBe('Hive Contractors');
     expect($data['platform_kit'])->toBe(\SsSystems\Platform\Kit::VERSION);
-    expect($data['domains'])->toEqualCanonicalizing(['dashboard-stats', 'seo', 'social-media']);
+    expect($data['domains'])->toEqualCanonicalizing(['dashboard-stats', 'seo', 'social-media', 'citations']);
     expect($data['brand']['name'])->toBe('Hive Contractors');
     expect($data['brand']['logo'])->toEndWith('/images/hive-mark.svg');
     expect($data['brand']['logo_dark'])->toEndWith('/images/hive-mark-dark.svg');
