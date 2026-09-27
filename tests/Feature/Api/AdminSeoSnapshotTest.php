@@ -20,6 +20,7 @@ it('answers the full snapshot shape with automated_actions off and empty tables 
     expect($data)->toHaveKeys([
         'generated_at', 'automated_actions', 'pulse', 'health', 'report_stats',
         'search', 'trend', 'trend_through', 'gsc_errors', 'sitemaps',
+        'top_queries', 'top_pages', 'search_appearance', 'clarity',
     ]);
     expect($data['automated_actions'])->toBeFalse();
     expect(fn () => \Illuminate\Support\Carbon::parse($data['generated_at']))->not->toThrow(\Exception::class);
@@ -51,6 +52,57 @@ it('answers the full snapshot shape with automated_actions off and empty tables 
     // 'unconfigured', never an error.
     expect($data['sitemaps']['state'])->toBe('unconfigured');
     expect($data['sitemaps']['connected'])->toBeFalse();
+
+    // top_queries/top_pages: no gsc_query_metrics rows yet, empty-honest.
+    expect($data['top_queries'])->toBe([]);
+    expect($data['top_pages'])->toBe([]);
+
+    // search_appearance: table exists (this app's own migration) but is
+    // empty, so `available` reads false rather than a fabricated shape.
+    expect($data['search_appearance'])->toBe([
+        'available' => false, 'days' => 28, 'rows' => [], 'total_impressions' => 0, 'total_clicks' => 0,
+    ]);
+
+    // clarity: this site has never synced Microsoft Clarity into a
+    // database table (see ClaritySettingsMetricsReader's own docblock) —
+    // the honest "not synced" shape, never a fabricated zero week.
+    expect($data['clarity'])->toBe([
+        'available' => false, 'latest' => null, 'week' => [], 'prior' => [], 'scroll' => null, 'days' => 7, 'pages' => [],
+    ]);
+});
+
+it('fills top_queries/top_pages and search_appearance from real rows once they exist', function () {
+    $today = now();
+
+    \Illuminate\Support\Facades\DB::table('gsc_query_metrics')->insert([
+        'date' => $today->copy()->subDay()->toDateString(), 'site_url' => 'sc-domain:hive.contractors',
+        'query' => 'project management for contractors', 'page' => '/pricing', 'country' => 'usa', 'device' => 'DESKTOP',
+        'impressions' => 100, 'clicks' => 12, 'ctr' => 0.12, 'position' => 4.2,
+        'dim_hash' => \Illuminate\Support\Str::random(40), 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('gsc_search_appearance_metrics')->insert([
+        'date' => $today->copy()->subDay()->toDateString(), 'appearance' => 'REVIEW_SNIPPET',
+        'clicks' => 3, 'impressions' => 50, 'ctr' => 0.06, 'position' => 2.1,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $data = $this->getJson('/api/admin/v1/seo/snapshot', adminApiHeaders())
+        ->assertOk()
+        ->json('data');
+
+    expect($data['top_queries'])->toHaveCount(1);
+    expect($data['top_queries'][0]['query'])->toBe('project management for contractors');
+    expect($data['top_queries'][0]['clicks'])->toBe(12);
+
+    expect($data['top_pages'])->toHaveCount(1);
+    expect($data['top_pages'][0]['page'])->toBe('/pricing');
+
+    expect($data['search_appearance']['available'])->toBeTrue();
+    expect($data['search_appearance']['rows'][0])->toMatchArray([
+        'appearance' => 'REVIEW_SNIPPET', 'label' => 'Star ratings', 'clicks' => 3, 'impressions' => 50,
+    ]);
+    expect($data['search_appearance']['total_impressions'])->toBe(50);
 });
 
 it('regenerates content-decay for real once gsc_query_metrics has rows, and the search block picks it up', function () {

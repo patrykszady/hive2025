@@ -39,6 +39,20 @@ use SsSystems\Platform\Seo\SitemapStatus;
  *     product with no page-title/meta-description content for the shared
  *     autopilot to rewrite, so it must never get it.
  *
+ * 2026-09-27: `top_queries`/`top_pages`/`search_appearance`/`clarity` were
+ * added — this site holds the exact same `gsc_query_metrics`/
+ * `gsc_search_appearance_metrics` rows gs.construction does, and the SEO
+ * screen's cards for them (Top Queries/Pages tables read a separate
+ * paginated endpoint, but "How Your Results Look on Google" and "Website
+ * Experience" read the snapshot directly) sat empty for no reason but a
+ * missing method call — all four are now the kit's own
+ * `BuildsSeoSnapshot::topTenRows()`/`searchAppearanceSnapshot()`/
+ * `claritySnapshot()`, no site-only logic needed. `clarity` reads honestly
+ * `available: false` (this site has never synced Microsoft Clarity into a
+ * database table — see `App\Support\Seo\Reports\ClaritySettingsMetricsReader`'s
+ * own docblock, which is a DIFFERENT reader for the seo:clarity-health
+ * REPORT, not this snapshot card).
+ *
  * The four BuildsSeoSnapshot hooks below (gscCoverageStateModel/
  * seoReportControllerClass/dispatchChannelSync/formatDuration) exist so the
  * kit trait never names an App\* class — see its own docblock.
@@ -62,6 +76,7 @@ class SeoSnapshotController extends Controller
     public function __invoke(Request $request): JsonResponse
     {
         $trendDays = $this->normalizeTrendDays((int) $request->integer('trend_days', 14));
+        $topDays = $this->normalizeTopDays((int) $request->integer('top_days', 28));
         $search = $this->searchSnapshot($trendDays);
 
         return response()->json([
@@ -73,9 +88,29 @@ class SeoSnapshotController extends Controller
                 'search' => $search,
                 'trend' => $this->trendChartData($search),
                 'trend_through' => $search['through'] ?? null,
+                // Embedded top-ten (2026-09-27, parity with gsc's shape) —
+                // the SEO screen's own Top Queries/Top Pages tables page
+                // through GET seo/top-rows instead; this is for any other
+                // consumer still reading the snapshot directly.
+                'top_queries' => $this->topTenRows('query', $topDays),
+                'top_pages' => $this->topTenRows('page', $topDays),
                 'rankings' => $this->rankingsSnapshot(),
                 'gsc_errors' => $this->gscErrorSnapshot(),
                 'sitemaps' => SitemapStatus::snapshot((string) config('services.google.search_console_property')),
+                // How our results LOOK on Google — this site holds the same
+                // gsc_search_appearance_metrics rows gsc/jpeterson do (see
+                // database/migrations), just never had this key wired.
+                'search_appearance' => $this->searchAppearanceSnapshot(
+                    $this->normalizeTopDays((int) $request->integer('appearance_days', 28))
+                ),
+                // Honestly `available: false` — this site has never synced
+                // Microsoft Clarity into a database table (see
+                // ClaritySettingsMetricsReader's own docblock); the "Website
+                // Experience" card already reads that as "no visitor-behavior
+                // data synced yet" rather than an error.
+                'clarity' => $this->claritySnapshot(
+                    $this->normalizeWindowDays((int) $request->integer('clarity_days', 7))
+                ),
                 // hive.contractors must NEVER get the shared autopilot: it
                 // rewrites page titles/descriptions, and this app's marketing
                 // copy is hand-written product messaging, not local-SEO
