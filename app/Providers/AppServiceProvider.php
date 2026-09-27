@@ -47,6 +47,7 @@ use App\Support\Seo\Reports\EloquentQueryMetricsReader;
 use App\Support\Seo\Reports\EmptyAreaCatalog;
 use App\Support\Seo\Reports\HttpPageFetcher;
 use App\Support\Seo\Reports\MarketingSiteCatalog;
+use App\Support\Seo\Reports\ReportPathStorage;
 use App\Support\Seo\SearchConsoleWriter;
 use Carbon\Carbon;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -83,6 +84,7 @@ use SsSystems\Platform\Reports\Contracts\HealthDataReader;
 use SsSystems\Platform\Reports\Contracts\PageFetcher;
 use SsSystems\Platform\Reports\Contracts\PsiSnapshotReader;
 use SsSystems\Platform\Reports\Contracts\QueryMetricsReader;
+use SsSystems\Platform\Reports\Contracts\ReportStorage;
 use SsSystems\Platform\Reports\Contracts\SiteCatalog;
 use SsSystems\Platform\Reports\Contracts\SiteIdentity;
 use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
@@ -219,6 +221,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AreaCatalog::class, EmptyAreaCatalog::class);
         $this->app->bind(ClarityMetricsReader::class, ClaritySettingsMetricsReader::class);
         $this->app->bind(PsiSnapshotReader::class, EloquentPsiSnapshotReader::class);
+
+        // KitReportCommand::maybeSaveMarkdown() (App\Console\Commands\Seo*'s
+        // shared base, ss-platform-kit 0.12.0) resolves this to decide where
+        // a report's markdown lands — App\Support\Seo\Reports\
+        // ReportPathStorage just forwards to the existing SeoStorage::path().
+        $this->app->bind(ReportStorage::class, ReportPathStorage::class);
     }
 
     /**

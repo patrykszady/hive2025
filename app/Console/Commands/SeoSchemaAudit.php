@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Console\Commands\Seo\KitReportCommand;
+use SsSystems\Platform\Reports\Console\KitReportCommand;
 use SsSystems\Platform\Reports\SchemaAuditReport;
 
 /**
@@ -10,7 +10,7 @@ use SsSystems\Platform\Reports\SchemaAuditReport;
  * dawnsellshomes' identical command (minus --sitemap: the kit's
  * SiteCatalog::sitemapUrls() always crawls this site's own catalog with no
  * override — see App\Support\Seo\Reports\MarketingSiteCatalog). See
- * App\Console\Commands\Seo\KitReportCommand. --limit is capped low on this
+ * SsSystems\Platform\Reports\Console\KitReportCommand. --limit is capped low on this
  * site's SCHEDULED run (routes/console.php).
  */
 class SeoSchemaAudit extends KitReportCommand

@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Console\Commands\Seo\KitReportCommand;
+use SsSystems\Platform\Reports\Console\KitReportCommand;
 use SsSystems\Platform\Reports\ContentGapReport;
 
 /**
