@@ -241,5 +241,18 @@ return [
             'level' => 'debug',
             'days' => 30,
         ],
+
+        // Every "Run"/"Refresh metrics" on the central admin's SEO screen,
+        // both ends — App\Support\SeoReportRun and SeoSnapshotController::
+        // refreshSnapshot() — including the X-Admin-User/X-Admin-Screen
+        // headers ss-systems' SiteApiConnection sends. Ported from
+        // dawnsellshomes' identical channel; see ss-systems/CLAUDE.md's
+        // "Every Run and Refresh metrics is logged at both ends".
+        'seo-reports' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/seo-reports.log'),
+            'level' => 'debug',
+            'days' => 90,
+        ],
     ],
 ];
