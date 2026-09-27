@@ -38,10 +38,40 @@ class ServiceAccountToken
         return new self(config('services.google.search_console_credentials'), $scope);
     }
 
-    /** The service-account file exists — cheap, no network call. */
+    /** A credential is present — a readable file, or the key itself — cheap, no network call. */
     public function isConfigured(): bool
     {
-        return filled($this->credentialsPath) && is_file($this->credentialsPath);
+        return $this->rawCredential() !== null;
+    }
+
+    /**
+     * GSC_CREDENTIALS holds either a path to the service-account JSON file
+     * or the JSON itself (plain, or base64-encoded so it fits on one .env
+     * line). The inline forms exist so production never needs a key file
+     * placed on the server by hand: the environment is already private,
+     * a command log that copied a file there would not be.
+     */
+    protected function rawCredential(): ?string
+    {
+        $value = trim((string) $this->credentialsPath);
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (is_file($value)) {
+            $raw = @file_get_contents($value);
+
+            return $raw === false ? null : $raw;
+        }
+
+        if (str_starts_with($value, '{')) {
+            return $value;
+        }
+
+        $decoded = base64_decode($value, true);
+
+        return is_string($decoded) && str_starts_with(ltrim($decoded), '{') ? $decoded : null;
     }
 
     /**
@@ -87,11 +117,11 @@ class ServiceAccountToken
      */
     protected function fetch(): ?array
     {
-        $raw = @file_get_contents((string) $this->credentialsPath);
-        $sa = $raw !== false ? json_decode($raw, true) : null;
+        $raw = $this->rawCredential();
+        $sa = $raw !== null ? json_decode($raw, true) : null;
 
         if (! is_array($sa) || empty($sa['client_email']) || empty($sa['private_key'])) {
-            $this->lastError = 'The service-account file at GSC_CREDENTIALS is missing client_email or private_key.';
+            $this->lastError = 'The service account in GSC_CREDENTIALS is missing client_email or private_key.';
 
             return null;
         }
