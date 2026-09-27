@@ -2,14 +2,14 @@
 
 namespace App\Console\Commands;
 
-use App\Console\Commands\Seo\KitReportCommand;
+use SsSystems\Platform\Reports\Console\KitReportCommand;
 use SsSystems\Platform\Reports\HealthCheckReport;
 use SsSystems\Platform\Reports\ReportResult;
 
 /**
  * Thin wrapper over the kit's HealthCheckReport — ported verbatim from
  * dawnsellshomes' identical command (minus --sitemap, same reasoning as
- * SeoSchemaAudit). See App\Console\Commands\Seo\KitReportCommand.
+ * SeoSchemaAudit). See SsSystems\Platform\Reports\Console\KitReportCommand.
  *
  * Exit code: a complete result whose worst-scoring URL falls below
  * --min-score is STATUS_DEGRADED (data['missing'] lists the URLs below
