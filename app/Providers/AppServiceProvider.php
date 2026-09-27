@@ -13,6 +13,7 @@ use App\Models\Expense;
 use App\Models\JsErrorState;
 use App\Models\Lead;
 use App\Models\LineItem;
+use App\Models\PlatformSetting;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Vendor;
@@ -100,6 +101,8 @@ use SsSystems\Platform\Seo\Inspection\UrlInspectionQuota;
 use SsSystems\Platform\Seo\SearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncClient;
 use SsSystems\Platform\Seo\SearchConsoleWriter as KitSearchConsoleWriter;
+use SsSystems\Platform\Social\Adapters\PlatformSettingCredentialStore;
+use SsSystems\Platform\Social\Contracts\MetaCredentialStore;
 
 use Laravel\Scout\Builder;
 
@@ -182,6 +185,25 @@ class AppServiceProvider extends ServiceProvider
         // UnavailableSession docblock). This host has no Xvfb/Chromium/
         // x11vnc pipeline at all, unlike gsc's/jpeterson's RemoteBrowserSession.
         $this->app->bind(CitationSession::class, UnavailableSession::class);
+
+        // Meta (Facebook Page + Instagram Business) credential storage (kit
+        // 0.13.0): this app's own individual encrypted platform_settings
+        // rows, one per field, same as before the port (see
+        // PlatformSettingCredentialStore's docblock — this app's
+        // oauth_tokens table exists only for Google Business Profile). Not
+        // a singleton: each resolution re-reads services.meta.* fresh, same
+        // as the pre-port class did on every call.
+        $this->app->bind(MetaCredentialStore::class, fn () => new PlatformSettingCredentialStore(
+            settingModel: PlatformSetting::class,
+            prefix: 'meta',
+            envFallback: [
+                'token' => trim((string) config('services.meta.page_access_token', '')) ?: null,
+                'page_id' => trim((string) config('services.meta.facebook_page_id', '')) ?: null,
+                'ig_id' => trim((string) config('services.meta.instagram_account_id', '')) ?: null,
+                'page_name' => null,
+                'ig_username' => null,
+            ],
+        ));
 
         $this->app->bind(CacheInterface::class, fn ($app) => $app->make('cache')->store());
 
