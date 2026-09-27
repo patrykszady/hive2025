@@ -1,5 +1,8 @@
 <?php
 
+use App\Models\PlatformSetting;
+use App\Support\Seo\ClaritySettings;
+use App\Support\Seo\PsiSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -10,10 +13,12 @@ use Illuminate\Support\Str;
 /**
  * The shared ss-systems/platform-kit report library's admin surface — see
  * App\Support\Seo\Reports\ReportCapabilities for which of the ten reports
- * this site can actually run: 7 of 10 — cwv-template (no psi_snapshots),
- * area-pages-audit (no area_catalog: hive.contractors has no per-area
- * landing pages) and clarity-health (no Clarity integration at all) need
- * capabilities this site has no honest adapter for.
+ * this site can actually run. area-pages-audit needs area_catalog
+ * (hive.contractors has no per-area landing pages at all) and is always
+ * unavailable. cwv-template (psi_snapshots) and clarity-health
+ * (clarity_metrics) are unavailable by DEFAULT but flip to available the
+ * moment a PageSpeed key / Clarity project id + API token is saved from
+ * the SEO screen's Connect Services modal — see the dedicated test below.
  */
 uses(RefreshDatabase::class);
 
@@ -61,7 +66,7 @@ it('reports seven available and three unavailable, with owner-facing reasons and
     expect($byKey['area-pages-audit']['unavailable_reason'])->toBe('Needs the service area pages this site does not have.');
 
     expect($byKey['clarity-health']['available'])->toBeFalse();
-    expect($byKey['clarity-health']['unavailable_reason'])->toBe('Needs visitor behaviour data this site does not collect.');
+    expect($byKey['clarity-health']['unavailable_reason'])->toBe('Needs visitor behaviour data. Connect it under Connect Services.');
 
     foreach ($byKey as $row) {
         expect($row['unavailable_reason'] ?? '')->not->toContain('Clarity');
@@ -160,4 +165,82 @@ it('shows a specific report and includes rendered html', function () {
 it('answers 404 for an unknown report key', function () {
     $this->getJson('/api/admin/v1/seo/reports/not-a-real-report', adminApiHeaders())
         ->assertNotFound();
+});
+
+it('flips cwv-template to available once a PageSpeed key is saved, and back once cleared', function () {
+    Storage::fake('local');
+
+    PlatformSetting::put(PsiSettings::SETTING_API_KEY, 'a-real-key');
+
+    $byKey = collect(
+        $this->getJson('/api/admin/v1/seo/reports', adminApiHeaders())->assertOk()->json('data.reports')
+    )->keyBy('key');
+    expect($byKey['cwv-template']['available'])->toBeTrue();
+    expect($byKey['cwv-template']['status'])->toBe('missing');
+
+    PlatformSetting::put(PsiSettings::SETTING_API_KEY, null);
+
+    $byKey = collect(
+        $this->getJson('/api/admin/v1/seo/reports', adminApiHeaders())->assertOk()->json('data.reports')
+    )->keyBy('key');
+    expect($byKey['cwv-template']['available'])->toBeFalse();
+});
+
+it('flips clarity-health to available once both Clarity fields are saved, and back once either is cleared', function () {
+    Storage::fake('local');
+
+    PlatformSetting::put(ClaritySettings::SETTING_PROJECT_ID, 'proj123');
+    // Only one of the two fields: still not configured, still unavailable.
+    $byKey = collect(
+        $this->getJson('/api/admin/v1/seo/reports', adminApiHeaders())->assertOk()->json('data.reports')
+    )->keyBy('key');
+    expect($byKey['clarity-health']['available'])->toBeFalse();
+
+    PlatformSetting::put(ClaritySettings::SETTING_API_TOKEN, 'tok123');
+    $byKey = collect(
+        $this->getJson('/api/admin/v1/seo/reports', adminApiHeaders())->assertOk()->json('data.reports')
+    )->keyBy('key');
+    expect($byKey['clarity-health']['available'])->toBeTrue();
+    expect($byKey['clarity-health']['status'])->toBe('missing');
+
+    PlatformSetting::put(ClaritySettings::SETTING_PROJECT_ID, null);
+    $byKey = collect(
+        $this->getJson('/api/admin/v1/seo/reports', adminApiHeaders())->assertOk()->json('data.reports')
+    )->keyBy('key');
+    expect($byKey['clarity-health']['available'])->toBeFalse();
+});
+
+it('runs clarity-health directly, refusing (capability missing) unconfigured and running for real once configured', function () {
+    // Unconfigured: ClaritySettingsMetricsReader::isConfigured() is false,
+    // so the kit report itself returns STATUS_UNAVAILABLE with
+    // missing=['clarity_metrics'] — KitReportCommand::respond() exits
+    // FAILURE for a missing capability, same as any other report.
+    $exitCode = Artisan::call('seo:clarity-health --markdown');
+    expect($exitCode)->toBe(1);
+    expect(Artisan::output())->toContain('Clarity is not configured.');
+
+    // Configured: the report runs for real against the live Data Export
+    // API call this adapter makes — proving ClaritySettingsMetricsReader
+    // actually feeds it real data, not just unblocking the capability
+    // gate. (It still reports a non-zero exit in steady state — this site
+    // has no clarity_daily_metrics table, so "stored data" reads as
+    // permanently stale, same as every other kit site without a metrics
+    // sync — the console output below is what this test pins.)
+    PlatformSetting::put(ClaritySettings::SETTING_PROJECT_ID, 'proj123');
+    PlatformSetting::put(ClaritySettings::SETTING_API_TOKEN, 'tok123');
+    Http::fake(['*' => Http::response([], 200)]);
+
+    Artisan::call('seo:clarity-health --markdown');
+    $output = Artisan::output();
+    expect($output)->toContain('Configured: yes');
+    expect($output)->toContain('API reachable: yes');
+});
+
+it('runs cwv-template directly with zero samples before any PSI snapshot exists', function () {
+    PlatformSetting::put(PsiSettings::SETTING_API_KEY, 'a-real-key');
+
+    $exitCode = Artisan::call('seo:cwv-template --markdown');
+
+    expect($exitCode)->toBe(0);
+    expect(Artisan::output())->toContain('0 regression alert(s).');
 });
