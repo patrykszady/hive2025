@@ -409,7 +409,9 @@ Schedule::command('horizon:snapshot')
 | until its credential is set: seo:bing-sync until BING_WMT_KEY (or the
 | admin-saved key) is present, seo:gsc-sync and seo:gsc-inspect-bulk until
 | GSC_CREDENTIALS + GSC_PROPERTY are both set AND the service account has
-| been added as a user on the property.
+| been added as a user on the property, seo:psi-sync until a PageSpeed key
+| is saved from the SEO screen's Connect Services modal (see that
+| command's own docblock for why it waits rather than running keyless).
 */
 Schedule::command('seo:bing-sync')
     ->dailyAt('03:00')
@@ -439,22 +441,37 @@ Schedule::command('seo:gsc-inspect-bulk --limit=600 --markdown')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-gsc-inspect-bulk.log'));
 
+Schedule::command('seo:psi-sync')
+    ->dailyAt('04:15')
+    ->name('seo-psi-sync')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-psi-sync.log'));
+
 /*
 |--------------------------------------------------------------------------
 | SEO capability — shared report library
 |--------------------------------------------------------------------------
 |
-| Only the seven reports App\Support\Seo\Reports\ReportCapabilities marks
-| available here (cwv-template/area-pages-audit/clarity-health need
-| capabilities this marketing site has no adapter for — scheduling them
-| would only ever log a refusal). WEEKLY, not daily: these are deeper
-| analyses than the daily sync/inspection jobs above. Sunday night,
-| Chicago, staggered a comfortable distance after the 04:00 GSC inspection
-| sweep — content-decay/content-gap read only gsc_query_metrics (seconds),
-| gbp-parity fetches 3 landing pages (seconds), the two self-crawl reports
-| cap --limit well below their kit defaults so "nothing fetches hundreds of
-| pages at once" holds even in the worst case, and health reads only DB +
-| the ledger file (seconds) so it runs last.
+| Only the reports App\Support\Seo\Reports\ReportCapabilities marks
+| available here. area-pages-audit alone needs a capability (area_catalog)
+| this marketing site has no adapter for at all — scheduling it would only
+| ever log a refusal, so it stays out. clarity-health and cwv-template ARE
+| scheduled below (both now have real adapters — App\Support\Seo\Reports\
+| ClaritySettingsMetricsReader/EloquentPsiSnapshotReader), but each reads
+| calmly as "not configured"/no rows until its credential is saved, same
+| spirit as the syncs above.
+|
+| WEEKLY, not daily: these are deeper analyses than the daily sync/
+| inspection jobs above. Sunday night, Chicago, staggered a comfortable
+| distance after the 04:00 GSC inspection sweep — content-decay/
+| content-gap read only gsc_query_metrics (seconds), gbp-parity fetches 3
+| landing pages (seconds), the two self-crawl reports cap --limit well
+| below their kit defaults so "nothing fetches hundreds of pages at once"
+| holds even in the worst case, clarity-health/cwv-template are one API
+| round trip each, and health reads only DB + the ledger file (seconds) so
+| it runs last.
 */
 Schedule::command('seo:content-decay --markdown')
     ->weeklyOn(0, '04:30')
@@ -503,6 +520,22 @@ Schedule::command('seo:health-check --limit=25 --min-score=0 --markdown')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-health-check.log'));
+
+Schedule::command('seo:clarity-health --markdown')
+    ->weeklyOn(0, '05:20')
+    ->name('seo-clarity-health')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-clarity-health.log'));
+
+Schedule::command('seo:cwv-template --markdown')
+    ->weeklyOn(0, '05:25')
+    ->name('seo-cwv-template')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-cwv-template.log'));
 
 Schedule::command('seo:health --markdown')
     ->weeklyOn(0, '05:30')
