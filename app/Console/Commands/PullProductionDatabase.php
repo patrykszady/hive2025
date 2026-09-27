@@ -3,6 +3,11 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Encryption\Encrypter;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
 
 /**
@@ -19,6 +24,19 @@ class PullProductionDatabase extends Command
         {--remote-path=hive.contractors : App directory on the server (holds the .env with DB creds)}';
 
     protected $description = 'Overwrite the local database with a fresh copy of production';
+
+    /**
+     * Every column stored through Crypt::encryptString — table => [columns].
+     * These arrive encrypted with PRODUCTION's APP_KEY, which this machine does
+     * not have, so they are re-encrypted with the local key after the import
+     * (see reencryptProductionSecrets). Keep in step with the models:
+     * PlatformSetting::\$casts, OAuthToken's token accessors, Citation::\$casts.
+     */
+    protected const ENCRYPTED_COLUMNS = [
+        'platform_settings' => ['value'],
+        'oauth_tokens' => ['access_token', 'refresh_token'],
+        'citations' => ['account_password'],
+    ];
 
     public function handle(): int
     {
@@ -78,6 +96,12 @@ class PullProductionDatabase extends Command
         $tables = \DB::select('SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ?', [$local['database']])[0]->n;
         $this->info("Done. {$tables} tables in {$local['database']}.");
 
+        // Settings, OAuth tokens and citation passwords arrive sealed with
+        // production's key: re-seal them with this machine's, or the first
+        // read here deletes them (PlatformSetting::get purges what it cannot
+        // decrypt) and the Platforms screen reads as never set up.
+        $this->reencryptProductionSecrets($host, $remotePath);
+
         // The local cache was built from the database this command just
         // replaced (jpeterson's SEO snapshot is cached for 15 minutes, for
         // one), so a pull that left it in place kept showing the old
@@ -92,5 +116,129 @@ class PullProductionDatabase extends Command
         $this->call('menards:mirror-prod-flags', ['--host' => $host, '--remote-path' => $remotePath]);
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Re-encrypt production's secrets with THIS machine's key.
+     *
+     * platform_settings values, OAuth tokens and citation passwords are stored
+     * with Crypt::encryptString, so they arrive bound to production's APP_KEY.
+     * Without this pass they are not merely unreadable — PlatformSetting::get()
+     * treats an unreadable row as corrupt and DELETES it, so simply opening the
+     * admin wiped every connected platform and the screen reported a site that
+     * had never been set up.
+     *
+     * Production's key is read over the same ssh channel already used for its
+     * database credentials, held only for this pass, and never written to disk
+     * or printed. Rows already readable here are left untouched, so running the
+     * command twice is harmless, and nothing is ever written to production.
+     */
+    protected function reencryptProductionSecrets(string $host, string $remotePath): void
+    {
+        $tables = array_filter(
+            self::ENCRYPTED_COLUMNS,
+            fn (string $table) => Schema::hasTable($table),
+            ARRAY_FILTER_USE_KEY
+        );
+
+        if ($tables === []) {
+            return;
+        }
+
+        $remoteKey = $this->fetchProductionAppKey($host, $remotePath);
+
+        if ($remoteKey === null) {
+            $this->warn('Could not read production\'s APP_KEY, so encrypted rows were left as they arrived.');
+
+            return;
+        }
+
+        $production = $this->encrypterFor($remoteKey);
+
+        if ($production === null) {
+            $this->warn('Production\'s APP_KEY is not in a format this app understands; encrypted rows left as they arrived.');
+
+            return;
+        }
+
+        $rewritten = 0;
+        $unreadable = [];
+
+        foreach ($tables as $table => $columns) {
+            foreach (DB::table($table)->get() as $row) {
+                $updates = [];
+
+                foreach ($columns as $column) {
+                    $value = $row->{$column} ?? null;
+
+                    if (! is_string($value) || $value === '') {
+                        continue;
+                    }
+
+                    // Already ours (same key, or a second run) — leave it alone.
+                    try {
+                        Crypt::decryptString($value);
+
+                        continue;
+                    } catch (DecryptException) {
+                        // falls through to the re-encrypt below
+                    }
+
+                    try {
+                        $updates[$column] = Crypt::encryptString($production->decryptString($value));
+                    } catch (\Throwable $e) {
+                        // Neither key opens it. Say which row, and why: a row
+                        // left like this is purged by the first read on this
+                        // machine (PlatformSetting::get), and that used to
+                        // happen silently.
+                        $unreadable[] = sprintf('%s#%s %s (%s): %s', $table, $row->id, $column, $row->key ?? '', $e->getMessage());
+                    }
+                }
+
+                if ($updates !== []) {
+                    DB::table($table)->where('id', $row->id)->update($updates);
+                    $rewritten += count($updates);
+                }
+            }
+        }
+
+        foreach ($unreadable as $line) {
+            $this->warn('Could not re-encrypt '.$line);
+        }
+        if ($rewritten > 0) {
+            $this->info("Re-encrypted {$rewritten} secret(s) with this machine's key — connected platforms work here too.");
+        }
+    }
+
+    /** Production's APP_KEY, read over ssh and never persisted. Null if unreachable. */
+    protected function fetchProductionAppKey(string $host, string $remotePath): ?string
+    {
+        $process = Process::fromShellCommandline(sprintf(
+            'ssh -o ConnectTimeout=10 -o BatchMode=yes %s %s',
+            escapeshellarg($host),
+            escapeshellarg('cd ~/'.escapeshellarg($remotePath).' && grep "^APP_KEY=" .env | head -1 | cut -d= -f2- | tr -d \'"\''),
+        ), timeout: 60);
+
+        $process->run();
+
+        $key = trim($process->getOutput());
+
+        return $process->isSuccessful() && $key !== '' ? $key : null;
+    }
+
+    /** An Encrypter for a base64:-prefixed (or raw) APP_KEY, or null if unusable. */
+    protected function encrypterFor(string $key): ?Encrypter
+    {
+        $raw = str_starts_with($key, 'base64:') ? base64_decode(substr($key, 7), true) : $key;
+
+        if (! is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        try {
+            return new Encrypter($raw, (string) config('app.cipher'));
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }
