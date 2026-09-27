@@ -1,14 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\BlogPostController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // This site's Blog screen (ss-systems' App\Livewire\Admin\BlogPostList/
 // BlogPostForm, App\Services\BlogExtApiClient there) — see
 // BlogPostController's docblock. Same route shape as dawnsellshomes.com's
 // no-projects Blog screen.
-AdminApi::declare('blog');
+CapabilityRegistry::declare('blog');
 
     Route::get('blog-posts', [BlogPostController::class, 'index'])->name('blog-posts.index');
     Route::post('blog-posts', [BlogPostController::class, 'store'])->name('blog-posts.store');

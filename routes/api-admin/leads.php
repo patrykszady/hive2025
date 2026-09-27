@@ -1,14 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\LeadController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // Leads screen = Hive's sign-up funnel. See LeadController's docblock for
 // why a User row (not App\Models\Lead) is the right source, and why
 // status-update/destroy are refused. stats before {lead} so it's never
 // read as a lead id.
-AdminApi::declare('leads');
+CapabilityRegistry::declare('leads');
 
 Route::get('leads/stats', [LeadController::class, 'stats'])->name('leads.stats');
 Route::get('leads', [LeadController::class, 'index'])->name('leads.index');

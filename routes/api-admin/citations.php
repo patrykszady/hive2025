@@ -1,14 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\CitationsController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // The Citations screen: the directory board, the canonical listing
 // payload, and the manual status/URL/note edit. See
 // CitationsController's docblock for why start/poll/resume/stop/batch
 // exist but never produce a real browser session.
-AdminApi::declare('citations');
+CapabilityRegistry::declare('citations');
 
 Route::get('citations', [CitationsController::class, 'index'])->name('citations.index');
 Route::get('citations/payload', [CitationsController::class, 'payload'])->name('citations.payload');

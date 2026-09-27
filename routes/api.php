@@ -50,9 +50,10 @@ Route::middleware(['auth:sanctum', 'throttle:api'])
 */
 Route::prefix('admin/v1')->name('api.admin.v1.')->middleware(['throttle:6000,1', 'admin.api.auth'])->group(function () {
     // One file per domain (routes/api-admin/*.php), each declaring the
-    // capabilities it serves through App\Support\AdminApi — the same layout
-    // gsc and jpeterson-design use, so a screen's API is one self-contained
-    // file and two screens never edit the same one.
+    // capabilities it serves through SsSystems\Platform\Http\Admin\
+    // CapabilityRegistry — the same registry gsc, jpeterson-design and
+    // ss-systems itself declare through, so a screen's API is one
+    // self-contained file and two screens never edit the same one.
     foreach (glob(__DIR__.'/api-admin/*.php') as $file) {
         require $file;
     }

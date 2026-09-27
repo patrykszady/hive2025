@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\LandingPageController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // Hand-created ad-campaign pages for Hive's own marketing site
@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Route;
 // this site's rows unchanged (see App\Models\LandingPage's docblock: no
 // Projects-proof domain here either, so the screen drops its Proof column
 // for this site, same as it does for dawnsellshomes.com).
-AdminApi::declare('landing-pages');
+CapabilityRegistry::declare('landing-pages');
 
 Route::get('landing-pages', [LandingPageController::class, 'index'])->name('landing-pages.index');
 Route::get('landing-pages/services', [LandingPageController::class, 'services'])->name('landing-pages.services');

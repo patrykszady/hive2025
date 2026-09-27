@@ -1,14 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\PageController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // ss-systems' Pages screen (App\Livewire\Admin\PageList) — the marketing
 // site's Blade views, listed the way App\Support\MarketingPages enumerates
 // them. See App\Http\Controllers\Api\Admin\V1\PageController's docblock for
 // why store()/destroy() always refuse.
-AdminApi::declare('pages');
+CapabilityRegistry::declare('pages');
 
 Route::get('pages', [PageController::class, 'index'])->name('pages.index');
 Route::get('pages/types', [PageController::class, 'types'])->name('pages.types');

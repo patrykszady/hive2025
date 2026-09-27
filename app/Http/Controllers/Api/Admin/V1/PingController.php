@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Admin\V1;
 
 use App\Http\Controllers\Controller;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Http\JsonResponse;
 use SsSystems\Platform\Kit;
 
@@ -33,8 +33,8 @@ class PingController extends Controller
             'data' => [
                 'site' => config('app.name', 'Hive Contractors'),
                 'platform_kit' => class_exists(Kit::class) ? Kit::VERSION : null,
-                // Declared by each routes/api-admin/*.php file (App\Support\AdminApi).
-                'domains' => AdminApi::domains(),
+                // Declared by each routes/api-admin/*.php file (CapabilityRegistry).
+                'domains' => CapabilityRegistry::domains(),
                 'brand' => [
                     'name' => config('app.name', 'Hive Contractors'),
                     // The hive mark the app draws inline (components/hive-logo),

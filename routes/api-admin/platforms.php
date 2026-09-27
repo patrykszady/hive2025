@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\PlatformsController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // The Platforms screen: a read-only, server-managed Search Console status
@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Route;
 // apply to a software company — Google sign-in (this app's own OAuth
 // client), Google Business Profile (connect, one listing, reviews) and
 // Meta (Facebook + Instagram). See PlatformsController's docblock.
-AdminApi::declare('platforms');
+CapabilityRegistry::declare('platforms');
 
 Route::get('platforms/status', [PlatformsController::class, 'status'])->name('platforms.status');
 Route::post('platforms/bing/credentials', [PlatformsController::class, 'saveBingCredentials'])->name('platforms.bing.save');
