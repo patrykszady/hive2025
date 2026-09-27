@@ -220,7 +220,7 @@ Route::get('/admin-oauth/{provider}/callback', function (\Illuminate\Http\Reques
 
     $result = match ($provider) {
         'gbp' => app(\App\Services\GoogleBusinessProfileService::class)->exchangeCodeAndStore($code, $redirectUri),
-        'meta' => app(\App\Services\MetaSocialService::class)->exchangeCodeAndStore($code, $redirectUri),
+        'meta' => app(\App\Services\MetaSocialService::class)->exchangeCodeAndStore($code, $redirectUri, \App\Services\MetaSocialService::OAUTH_SCOPES),
     };
 
     if ($result['success'] ?? false) {

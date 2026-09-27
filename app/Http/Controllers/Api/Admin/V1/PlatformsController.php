@@ -106,7 +106,7 @@ class PlatformsController extends Controller
 
         $url = match ($provider) {
             'gbp' => app(GoogleBusinessProfileService::class)->getOAuthUrl($redirectUri, $state),
-            'meta' => app(MetaSocialService::class)->getOAuthUrl($redirectUri, $state),
+            'meta' => app(MetaSocialService::class)->getOAuthUrl($redirectUri, MetaSocialService::OAUTH_SCOPES, $state),
         };
 
         return response()->json(['data' => ['url' => $url]]);
