@@ -1,8 +1,11 @@
 <?php
 
+use App\Models\Testimonial;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use SsSystems\Platform\Pulse\Recorder;
 
 uses(RefreshDatabase::class);
 
@@ -64,7 +67,8 @@ it('sends the common tile shape for new companies and new users', function () {
 
     $byKey = collect($tiles)->keyBy('key');
 
-    expect($byKey->keys()->all())->toEqualCanonicalizing(['signups', 'users']);
+    // The four shared tiles first (the admin's rule), then this site's own two.
+    expect($byKey->keys()->all())->toBe(['leads', 'contacts', 'search_clicks', 'reviews', 'signups', 'users']);
 
     $expectedVendorCurrent = $baseline['vendor_recent'] + 2;
     $expectedVendorPrior = $baseline['vendor_prior'] + 1;
@@ -106,4 +110,63 @@ it('counts every vendor regardless of who is signed in (no session on this route
     $expectedTotal = $baseline['vendor_total'] + 3;
 
     expect(collect($tiles)->firstWhere('key', 'signups')['note'])->toBe(number_format($expectedTotal).' total');
+});
+
+it('fills the four shared tiles from sign-ups, Site Pulse clicks and published reviews', function () {
+    $now = now();
+    $registered = fn () => User::query()->whereNotNull('registration');
+    $base = [
+        'total' => $registered()->count(),
+        'recent' => $registered()->where('created_at', '>=', (clone $now)->subDays(7))->count(),
+        'prior' => $registered()->where('created_at', '>=', (clone $now)->subDays(14))->where('created_at', '<', (clone $now)->subDays(7))->count(),
+    ];
+
+    // Sign-ups: two this week, one the week before; a team member added by
+    // hand (no registration) is an account, never a lead.
+    User::factory()->create(['registration' => ['registered' => true], 'created_at' => (clone $now)->subDays(1)]);
+    User::factory()->create(['registration' => ['registered' => true], 'created_at' => (clone $now)->subDays(3)]);
+    User::factory()->create(['registration' => ['registered' => true], 'created_at' => (clone $now)->subDays(10)]);
+    User::factory()->create(['registration' => null, 'created_at' => (clone $now)->subDays(1)]);
+
+    // Calls and emails recorded by Site Pulse: three this week, one the week
+    // before; a plain page view never counts as a contact.
+    $recorder = app(Recorder::class);
+    $browser = 'Mozilla/5.0 (X11; Linux x86_64) Chrome/140 Safari/537.36';
+    foreach (['email', 'call', 'email', 'call', 'page'] as $event) {
+        $recorder->track($event, [], '/en/welcome', '203.0.113.5', $browser, config('app.key'));
+    }
+    DB::table('site_events')->where('event', 'email')->orderBy('id')->limit(1)->update(['created_at' => (clone $now)->subDays(10)]);
+
+    // Reviews: two published (one older than 30 days), one hidden.
+    Testimonial::create(['name' => 'Jane Doe', 'body' => 'Great.', 'is_published' => true]);
+    Testimonial::create(['name' => 'Old Fan', 'body' => 'Still great.', 'is_published' => true]);
+    Testimonial::query()->where('name', 'Old Fan')->update(['created_at' => (clone $now)->subDays(45)]);
+    Testimonial::create(['name' => 'Hidden', 'body' => 'Not yet.', 'is_published' => false]);
+
+    $byKey = collect($this->getJson('/api/admin/v1/dashboard-stats', adminApiHeaders())->assertOk()->json('data.tiles'))->keyBy('key');
+
+    $leads = $byKey['leads'];
+    expect($leads['label'])->toBe('Sign-ups (7 days)');
+    expect($leads['value'])->toBe($base['recent'] + 2);
+    expect($leads['note'])->toBe(number_format($base['total'] + 3).' total');
+    expect($leads['delta_pct'])->toEqual(expectedDeltaPct($base['recent'] + 2, $base['prior'] + 1));
+    expect($leads['href'])->toBe('leads');
+
+    $contacts = $byKey['contacts'];
+    expect($contacts['label'])->toBe('Calls & emails (7 days)');
+    expect($contacts['value'])->toBe(3);
+    expect($contacts['delta_pct'])->toEqual(200.0);
+    expect($contacts['href'])->toBe('analytics');
+
+    // No search data yet: zero, never an error.
+    $search = $byKey['search_clicks'];
+    expect($search['value'])->toBe(0);
+    expect($search['note'])->toBe('0 impressions');
+    expect($search['delta_pct'])->toBeNull();
+    expect($search['href'])->toBe('seo');
+
+    $reviews = $byKey['reviews'];
+    expect($reviews['value'])->toBe(2);
+    expect($reviews['note'])->toBe('+1 in 30 days');
+    expect($reviews['href'])->toBe('reviews');
 });
