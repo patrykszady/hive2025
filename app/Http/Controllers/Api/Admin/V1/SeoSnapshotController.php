@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers\Api\Admin\V1;
 
+use App\Console\Commands\SeoRankCheck;
 use App\Http\Controllers\Api\Admin\V1\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Jobs\RunSeoChannelSyncJob;
 use App\Models\GscCoverageState;
-use App\Services\DataForSeoService;
+use App\Models\SeoSyncRun;
 use App\Support\Seo\DataForSeoSettings;
-use SsSystems\Platform\Pulse\SnapshotBuilder;
 use App\Support\SeoReportRun;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use SsSystems\Platform\Pulse\SnapshotBuilder;
 use SsSystems\Platform\Reports\Contracts\HealthDataReader;
 use SsSystems\Platform\Seo\SitemapStatus;
 
@@ -648,10 +649,12 @@ class SeoSnapshotController extends Controller
      * DataForSEO is configured (App\Support\Seo\DataForSeoSettings), which
      * ss-systems already renders as "No data for this check yet." rather
      * than an error; unavailable must read calmly, never crash. A failed
-     * live check (see App\Services\DataForSeoService::checkRankings()'s
-     * docblock) reads exactly the same as "not configured" here, never a
-     * fabricated zero. Cached 30 minutes — DataForSEO bills per query, and
-     * this screen is read far more often than rankings realistically move.
+     * check reads exactly the same as "not configured" here, never a
+     * fabricated zero. The check itself runs on a schedule
+     * (App\Console\Commands\SeoRankCheck, daily) and this reads its saved
+     * result — never DataForSEO live inside the request: three live queries
+     * took 21.6s, past the admin's 15s wait, so the whole SEO screen read
+     * "Couldn't reach" every half hour (2026-09-27).
      */
     protected function rankingsSnapshot(): array
     {
@@ -659,18 +662,16 @@ class SeoSnapshotController extends Controller
             return [];
         }
 
-        return Cache::remember('admin.seo-reports.rankings-snapshot', now()->addMinutes(30), function (): array {
-            $current = app(DataForSeoService::class)->checkRankings();
+        $saved = SeoSyncRun::summary(SeoRankCheck::SYNC_KEY);
 
-            if ($current === null) {
-                return [];
-            }
+        if (! is_array($saved['current'] ?? null)) {
+            return [];
+        }
 
-            return [
-                'live_serp' => ['current' => $current],
-                'as_of' => now()->toDateString(),
-            ];
-        });
+        return [
+            'live_serp' => ['current' => $saved['current']],
+            'as_of' => isset($saved['checked_at']) ? Carbon::parse($saved['checked_at'])->toDateString() : null,
+        ];
     }
 
     /** The "Pages Google Is Having Trouble With" card's embedded summary. */

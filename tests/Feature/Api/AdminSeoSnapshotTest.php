@@ -1,11 +1,15 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config(['services.admin_api.token' => 'test-admin-api-token']);
+    // Reports live on the local disk; a production pull fills the real one,
+    // so this test counts its own, empty one.
+    Storage::fake('local');
 });
 
 it('answers the full snapshot shape with automated_actions off and empty tables reading calmly', function () {

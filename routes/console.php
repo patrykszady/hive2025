@@ -441,6 +441,14 @@ Schedule::command('seo:gsc-inspect-bulk --limit=600 --markdown')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-gsc-inspect-bulk.log'));
 
+Schedule::command('seo:rank-check')
+    ->dailyAt('04:10')
+    ->name('seo-rank-check')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-rank-check.log'));
+
 Schedule::command('seo:psi-sync')
     ->dailyAt('04:15')
     ->name('seo-psi-sync')
