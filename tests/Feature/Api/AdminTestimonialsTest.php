@@ -209,6 +209,23 @@ it('sorts by the requested column and direction', function () {
     expect($asc[0]['reviewer_name'])->toBe('Older');
 });
 
+it('falls back to review_date for a sort column that is not on the whitelist', function () {
+    // This app's own local applySort() override (now the kit's
+    // ServesTestimonials::sortable() hook) whitelists sortable columns —
+    // unlike gsc/jpeterson-design, which take any `sort` value as-is. A
+    // non-existent column proves the fallback is real, not just
+    // documented: if the whitelist were ever dropped, orderBy() would run
+    // straight into a "no such column" database error here instead of a
+    // 200.
+    makeTestimonial(['name' => 'Older', 'review_date' => '2026-01-01']);
+    makeTestimonial(['name' => 'Newer', 'review_date' => '2026-06-01']);
+
+    $response = $this->getJson('/api/admin/v1/testimonials?sort=nonexistent_column', adminApiHeaders())
+        ->assertOk();
+
+    expect($response->json('data.0.reviewer_name'))->toBe('Older');
+});
+
 it('requires the admin api bearer token', function () {
     $this->getJson('/api/admin/v1/testimonials')->assertUnauthorized();
 });

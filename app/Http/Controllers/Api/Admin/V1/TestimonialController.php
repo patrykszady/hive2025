@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers\Api\Admin\V1;
 
-use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Models\Testimonial;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
+use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
+use SsSystems\Platform\Reviews\Http\Concerns\ServesTestimonials;
 
 /**
  * The central admin's Reviews screen (ss-systems' App\Livewire\Admin\
@@ -31,10 +31,18 @@ use Illuminate\Http\Response;
  * call, regardless of which sites declare the real pivot — its one entry
  * maps onto this row's own platform/review_url/external_id columns, same
  * as dawnsellshomes.com's identical port.
+ *
+ * index()/filters()/show()/destroy() now come from the kit's
+ * ServesTestimonials (2026-09-27, see docs/audit-2026-09-27/
+ * admin-api-skeleton.md §10) — this class's own former local applySort()
+ * override (the real column whitelist BuildsApiResponses' own pass-
+ * anything-through applySort() doesn't have) is replaced by the sortable()
+ * hook below, reproducing the exact same whitelist/fallback behaviour.
  */
 class TestimonialController extends Controller
 {
     use BuildsApiResponses;
+    use ServesTestimonials;
 
     /** Request field => testimonials column, for both store() and update(). */
     protected const FIELD_MAP = [
@@ -48,10 +56,24 @@ class TestimonialController extends Controller
         'platform' => 'platform',
     ];
 
-    public function index(Request $request): JsonResponse
+    protected function testimonialModel(): string
     {
-        $query = Testimonial::query();
+        return Testimonial::class;
+    }
 
+    /** The real, narrower column whitelist this app's own applySort() override always had. */
+    protected function sortable(): ?array
+    {
+        return ['name', 'rating', 'review_date', 'platform', 'created_at', 'updated_at', 'id'];
+    }
+
+    protected function defaultSort(): string
+    {
+        return '-review_date';
+    }
+
+    protected function applyIndexFilters(Builder $query, Request $request): void
+    {
         if ($search = $request->string('search')->toString()) {
             $query->where('name', 'like', "%{$search}%");
         }
@@ -69,22 +91,17 @@ class TestimonialController extends Controller
         if ($platform = $request->string('platform')->toString()) {
             $query->where('platform', $platform);
         }
-
-        $this->applySort($query, $request->string('sort')->toString() ?: null, '-review_date');
-
-        $paginator = $query->paginate($this->perPage($request));
-
-        return $this->paginatedResponse($paginator, fn (Testimonial $t) => $t->toApiArray());
     }
 
     /**
      * Distinct platforms for the list's filter dropdown. No project types
-     * here (this app has none), so that half of the shared contract is
-     * always empty — the admin's Type filter simply doesn't render.
+     * here (this app has none), so that half of the shared contract stays
+     * the trait's default empty array — the admin's Type filter simply
+     * doesn't render.
      */
-    public function filters(): JsonResponse
+    protected function platformOptions(): array
     {
-        $platforms = Testimonial::query()
+        return Testimonial::query()
             ->whereNotNull('platform')
             ->where('platform', '!=', '')
             ->distinct()
@@ -97,11 +114,6 @@ class TestimonialController extends Controller
             ])
             ->values()
             ->all();
-
-        return $this->itemResponse([
-            'project_types' => [],
-            'platforms' => $platforms,
-        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -117,13 +129,6 @@ class TestimonialController extends Controller
         return $this->itemResponse($testimonial->fresh()->toApiArray(), 201);
     }
 
-    public function show(int $testimonial): JsonResponse
-    {
-        $model = Testimonial::findOrFail($testimonial);
-
-        return $this->itemResponse($model->toApiArray());
-    }
-
     public function update(Request $request, int $testimonial): JsonResponse
     {
         $model = Testimonial::findOrFail($testimonial);
@@ -133,13 +138,6 @@ class TestimonialController extends Controller
         $model->update($this->mapToColumns($data));
 
         return $this->itemResponse($model->fresh()->toApiArray());
-    }
-
-    public function destroy(int $testimonial): Response
-    {
-        Testimonial::findOrFail($testimonial)->delete();
-
-        return response()->noContent();
     }
 
     /**
@@ -185,20 +183,6 @@ class TestimonialController extends Controller
         }
 
         return $out;
-    }
-
-    /** '-field' / 'field' sort (leading '-' = descending), whitelisted to real columns. */
-    protected function applySort(Builder $query, ?string $sort, string $default): void
-    {
-        $spec = $sort ?: $default;
-        $direction = str_starts_with($spec, '-') ? 'desc' : 'asc';
-        $column = ltrim($spec, '-');
-
-        if (! in_array($column, ['name', 'rating', 'review_date', 'platform', 'created_at', 'updated_at', 'id'], true)) {
-            $column = 'review_date';
-        }
-
-        $query->orderBy($column, $direction);
     }
 
     /**
