@@ -85,7 +85,24 @@
          production deploy may), Laravel stops loading .env at runtime and
          every env() call outside config/ returns null — which silently
          emptied the app name out of every browser tab title. --}}
-    <title>{{ isset($title) ? $title.' | '.config('app.name') : config('app.name') }}</title>
+    @php
+        // ss-systems' Pages/Services screens (App\Support\PageSeo,
+        // App\Models\PageSeoOverride): an admin edit to a marketing/legal
+        // page's title or meta description, applied here so it actually
+        // shows on the site rather than just being saved. A meta_title
+        // override wins over a title override (it's the more specific,
+        // SEO-purposed field) which wins over this view's own $title; no
+        // override on a route this doesn't apply to (most of the app)
+        // costs nothing — see PageSeo::current()'s null-fast guard.
+        $pageSeoOverride = \App\Support\PageSeo::current();
+        $effectiveTitle = $pageSeoOverride['meta_title']
+            ?? $pageSeoOverride['title']
+            ?? ($title ?? null);
+    @endphp
+    <title>{{ $effectiveTitle ? $effectiveTitle.' | '.config('app.name') : config('app.name') }}</title>
+    @if($pageSeoOverride['meta_description'] ?? null)
+        <meta name="description" content="{{ $pageSeoOverride['meta_description'] }}">
+    @endif
 
     {{-- Self-canonical + hreflang alternates for the public marketing site:
          tells search engines the one canonical URL for this page and where
