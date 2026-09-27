@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Admin\V1;
 use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Support\Seo\Reports\ReportCapabilities;
-use App\Support\SeoReportRun;
 use App\Support\SeoStorage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +13,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use League\CommonMark\GithubFlavoredMarkdownConverter;
+use SsSystems\Platform\Reports\Console\ReportRun;
 
 /**
  * GET seo/reports, GET seo/reports/{report}, POST seo/reports/{report}/
@@ -90,7 +90,10 @@ class SeoReportController extends Controller
 
         $trendDays = (int) $request->integer('trend_days', 14);
 
-        $run = SeoReportRun::run($report, $reports[$report], $request, $trendDays);
+        // Kit 0.12.0: SsSystems\Platform\Reports\Console\ReportRun replaces
+        // this app's own SeoReportRun (single-tenant, so no ReportStorage
+        // binding needed — the kit's IdentityReportStorage default applies).
+        $run = ReportRun::run($report, $reports[$report], $request, $trendDays);
 
         Cache::forget('admin.seo-reports.health-snapshot');
         Cache::forget(SeoSnapshotController::SEARCH_SNAPSHOT_CACHE_PREFIX.$trendDays);

@@ -4,13 +4,13 @@ namespace App\Http\Controllers\Api\Admin\V1;
 
 use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
-use App\Jobs\RunGscInspectBulkJob;
 use App\Models\GscCoverageState;
 use App\Support\MarketingSitemap;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -18,10 +18,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * coverage rows + stats), refresh (queue a full sweep), prune-retired and
  * export. Ported from dawnsellshomes' identical controller.
  *
- * refresh() dispatches RunGscInspectBulkJob; its underlying
- * 'seo:gsc-inspect-bulk' command does real work once GSC_CREDENTIALS +
- * GSC_PROPERTY are set and the service account has permission on the
- * property.
+ * refresh() dispatches the kit's RunArtisanCommandDetached (this app's own
+ * RunGscInspectBulkJob, a thin wrapper that only ever picked this one
+ * command name, is gone — kit 0.12.0); its underlying 'seo:gsc-inspect-bulk'
+ * command does real work once GSC_CREDENTIALS + GSC_PROPERTY are set and
+ * the service account has permission on the property.
  */
 class GscErrorController extends Controller
 {
@@ -45,7 +46,7 @@ class GscErrorController extends Controller
     public function refresh(Request $request): JsonResponse
     {
         try {
-            RunGscInspectBulkJob::dispatch();
+            RunArtisanCommandDetached::dispatch('seo:gsc-inspect-bulk', ['--limit' => 0, '--markdown' => true]);
 
             return $this->itemResponse(['message' => 'Queued full sitemap inspection in background. Data will update as the job writes new results.']);
         } catch (\Throwable $e) {

@@ -5,17 +5,17 @@ namespace App\Http\Controllers\Api\Admin\V1;
 use App\Console\Commands\SeoRankCheck;
 use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
-use App\Jobs\RunSeoChannelSyncJob;
 use App\Models\GscCoverageState;
 use App\Models\SeoSyncRun;
 use App\Support\Seo\DataForSeoSettings;
-use App\Support\SeoReportRun;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
+use SsSystems\Platform\Reports\Console\ReportRun;
+use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
 use SsSystems\Platform\Seo\Http\Concerns\BuildsSeoSnapshot;
 use SsSystems\Platform\Seo\SitemapStatus;
 
@@ -197,11 +197,11 @@ class SeoSnapshotController extends Controller
 
     protected function dispatchChannelSync(string $command): void
     {
-        RunSeoChannelSyncJob::dispatch($command);
+        RunArtisanCommandDetached::dispatch($command);
     }
 
     protected function formatDuration(int $milliseconds): string
     {
-        return SeoReportRun::formatSeconds($milliseconds);
+        return ReportRun::formatSeconds($milliseconds);
     }
 }
