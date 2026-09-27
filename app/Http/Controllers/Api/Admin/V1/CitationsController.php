@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Admin\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Citation;
-use App\Services\Citations\CitationSessionService;
+use SsSystems\Platform\Citations\Contracts\CitationSession;
 use App\Support\Citations\KnownListings;
 use App\Support\Citations\ListingPayload;
 use Illuminate\Http\JsonResponse;
@@ -14,8 +14,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Ported from gsc's/dawnsellshomes' Api/Admin/V1/CitationsController.php,
- * simplified for a host with no remote-browser pipeline at all — see
- * App\Services\Citations\CitationSessionService's docblock. Management
+ * simplified for a host with no remote-browser pipeline at all — see the
+ * kit's Citations\UnavailableSession docblock (bound to Citations\
+ * Contracts\CitationSession in AppServiceProvider). Management
  * API for the citation board consumed by ss-systems'
  * App\Livewire\Admin\Citations (+ blade): the directory board, the
  * canonical listing payload (so the admin can copy any field by hand),
@@ -28,7 +29,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class CitationsController extends Controller
 {
-    public function index(CitationSessionService $sessions): JsonResponse
+    public function index(CitationSession $sessions): JsonResponse
     {
         $this->ensureSynced();
         KnownListings::reconcile();
@@ -50,7 +51,7 @@ class CitationsController extends Controller
     }
 
     /** "Run all automatically" — always refused, with the reason, since there is no browser to run it in. */
-    public function batch(CitationSessionService $sessions): JsonResponse
+    public function batch(CitationSession $sessions): JsonResponse
     {
         $this->ensureSynced();
         $req = $sessions->checkRequirements(true);
@@ -61,7 +62,7 @@ class CitationsController extends Controller
         ]]);
     }
 
-    public function start(string $slug, CitationSessionService $sessions): JsonResponse
+    public function start(string $slug, CitationSession $sessions): JsonResponse
     {
         $citation = $this->find($slug);
         $result = $sessions->start($citation);
@@ -71,7 +72,7 @@ class CitationsController extends Controller
         return response()->json(['data' => ['ok' => false, 'error' => $result['error'], 'citation' => $this->row($citation)]]);
     }
 
-    public function poll(CitationSessionService $sessions): JsonResponse
+    public function poll(CitationSession $sessions): JsonResponse
     {
         return response()->json(['data' => [
             'session' => $this->emptySession(),
@@ -80,7 +81,7 @@ class CitationsController extends Controller
         ]]);
     }
 
-    public function resume(string $slug, CitationSessionService $sessions): JsonResponse
+    public function resume(string $slug, CitationSession $sessions): JsonResponse
     {
         $citation = $this->find($slug);
         $sessions->resume($citation);
@@ -88,7 +89,7 @@ class CitationsController extends Controller
         return response()->json(['data' => ['ok' => false, 'error' => 'Browser automation is not set up on this host. Continue this one by hand.', 'citation' => $this->row($citation)]]);
     }
 
-    public function stop(CitationSessionService $sessions): JsonResponse
+    public function stop(CitationSession $sessions): JsonResponse
     {
         $sessions->stop();
 
@@ -123,7 +124,7 @@ class CitationsController extends Controller
         return response()->json(['data' => ['ok' => true, 'citation' => $this->row($citation)]]);
     }
 
-    public function screenshot(string $slug, string $file, CitationSessionService $sessions): BinaryFileResponse
+    public function screenshot(string $slug, string $file, CitationSession $sessions): BinaryFileResponse
     {
         $citation = $this->find($slug);
         abort_unless(preg_match('/^[a-z0-9._-]+\.(png|jpg)$/i', $file), 404);

@@ -3,12 +3,12 @@
 namespace App\Console\Commands;
 
 use App\Models\Citation;
-use App\Support\Citations\LinkCheck;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
+use SsSystems\Platform\Citations\LinkCheck;
 
 /**
- * The one caller of App\Support\Citations\LinkCheck on this app: for every
+ * The one caller of SsSystems\Platform\Citations\LinkCheck on this app: for every
  * directory with a listing URL, fetch it like a visitor and record
  * whether it links back to this site. Not scheduled anywhere yet (no
  * cron entry in routes/console.php) — run by hand, or wire it to a
