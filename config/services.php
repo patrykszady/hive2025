@@ -332,4 +332,27 @@ return [
     'admin_api' => [
         'token' => env('ADMIN_API_TOKEN'),
     ],
+
+    /*
+    | Google Search Console — server-managed, like dawnsellshomes: a
+    | service-account credential (App\Support\Google\ServiceAccountToken),
+    | never a per-owner OAuth grant, since this app has no
+    | /admin/{site}/platforms Google sign-in screen of its own. The service
+    | account (GSC_CREDENTIALS) must be added as a user on the property
+    | itself with Full permission — Restricted cannot use URL Inspection.
+    | Named 'google', deliberately NOT 'gsc': that key already means
+    | gs.construction's admin API above.
+    */
+    'google' => [
+        'search_console_credentials' => env('GSC_CREDENTIALS'),
+        'search_console_property' => env('GSC_PROPERTY', 'sc-domain:hive.contractors'),
+    ],
+
+    // Bing Webmaster Tools — a free API key, admin-writable
+    // (App\Support\Seo\BingSettings/PlatformSettingCredential) with this as
+    // the env fallback for a key not yet moved into the admin.
+    'bing_wmt' => [
+        'key' => env('BING_WMT_KEY'),
+        'site_url' => env('BING_WMT_SITE_URL', env('MARKETING_URL', 'https://hive.contractors')),
+    ],
 ];

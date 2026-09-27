@@ -28,9 +28,24 @@ use App\Observers\VendorDocObserver;
 use App\Observers\VendorObserver;
 
 use App\Mail\Transport\NylasTransport;
+use App\Services\GoogleSearchConsoleService;
 use App\Services\NylasService;
+use App\Support\Seo\BingSettings;
+use App\Support\Seo\BingWriter;
+use App\Support\Seo\Inspection\EloquentCoverageStore;
+use App\Support\Seo\Inspection\MarketingSitemapSource;
+use App\Support\Seo\Inspection\NoTrackedPaths;
+use App\Support\Seo\Inspection\SearchConsoleUrlInspector;
+use App\Support\Seo\Reports\ConfigSiteIdentity;
+use App\Support\Seo\Reports\EloquentHealthDataReader;
+use App\Support\Seo\Reports\EloquentQueryMetricsReader;
+use App\Support\Seo\Reports\EmptyAreaCatalog;
+use App\Support\Seo\Reports\HttpPageFetcher;
+use App\Support\Seo\Reports\MarketingSiteCatalog;
+use App\Support\Seo\SearchConsoleWriter;
 use Carbon\Carbon;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Request;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -48,10 +63,28 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
+use Psr\SimpleCache\CacheInterface;
 use SsSystems\Platform\Pulse\BeaconController;
 use SsSystems\Platform\Pulse\Recorder;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
 use SsSystems\Platform\Pulse\Storage\DatabaseTableStorage;
+use SsSystems\Platform\Reports\Contracts\AreaCatalog;
+use SsSystems\Platform\Reports\Contracts\HealthDataReader;
+use SsSystems\Platform\Reports\Contracts\PageFetcher;
+use SsSystems\Platform\Reports\Contracts\QueryMetricsReader;
+use SsSystems\Platform\Reports\Contracts\SiteCatalog;
+use SsSystems\Platform\Reports\Contracts\SiteIdentity;
+use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
+use SsSystems\Platform\Seo\Bing\BingWebmasterClient;
+use SsSystems\Platform\Seo\Bing\BingWriter as KitBingWriter;
+use SsSystems\Platform\Seo\Inspection\Contracts\CoverageStore;
+use SsSystems\Platform\Seo\Inspection\Contracts\SitemapSource;
+use SsSystems\Platform\Seo\Inspection\Contracts\TrackedPaths;
+use SsSystems\Platform\Seo\Inspection\Contracts\UrlInspector;
+use SsSystems\Platform\Seo\Inspection\UrlInspectionQuota;
+use SsSystems\Platform\Seo\SearchConsoleClient;
+use SsSystems\Platform\Seo\SearchConsoleSyncClient;
+use SsSystems\Platform\Seo\SearchConsoleWriter as KitSearchConsoleWriter;
 
 use Laravel\Scout\Builder;
 
@@ -100,6 +133,61 @@ class AppServiceProvider extends ServiceProvider
             $app->make(Recorder::class),
             (string) config('app.key'),
         ));
+
+        // ss-systems/platform-kit's Search Console contracts. GoogleSearch
+        // ConsoleService is authenticated with the GSC_CREDENTIALS service
+        // account (App\Support\Google\ServiceAccountToken), not an OAuth
+        // grant — this app has no /admin/{site}/platforms Google sign-in
+        // screen for Search Console (see PingController).
+        $this->app->bind(SearchConsoleClient::class, GoogleSearchConsoleService::class);
+        $this->app->bind(SearchConsoleSyncClient::class, GoogleSearchConsoleService::class);
+        $this->app->bind(KitSearchConsoleWriter::class, SearchConsoleWriter::class);
+
+        // Bing Webmaster Tools: the kit's sync, this app's writer, and a
+        // client built from the admin-writable/env-fallback BING_WMT_KEY
+        // (App\Support\Seo\BingSettings).
+        $this->app->bind(KitBingWriter::class, BingWriter::class);
+        $this->app->bind(BingWebmasterClient::class, function ($app) {
+            $settings = $app->make(BingSettings::class);
+
+            return new BingWebmasterApi($settings->apiKey(), $settings->siteUrl(), $app->make(HttpFactory::class));
+        });
+
+        $this->app->bind(CacheInterface::class, fn ($app) => $app->make('cache')->store());
+
+        // The kit's URL Inspection sweep (SsSystems\Platform\Seo\Inspection\
+        // UrlInspectionSweep) — see App\Console\Commands\SeoGscInspectBulk
+        // and each adapter's own docblock for what it mirrors.
+        $this->app->bind(UrlInspector::class, SearchConsoleUrlInspector::class);
+        $this->app->bind(SitemapSource::class, MarketingSitemapSource::class);
+        $this->app->bind(CoverageStore::class, EloquentCoverageStore::class);
+        $this->app->bind(TrackedPaths::class, NoTrackedPaths::class);
+
+        // Same daily/per-minute ceiling and Pacific reset as the other kit
+        // sites' UrlInspectionQuota binding — one counter (keyed
+        // 'gsc.url-inspection') shared across the nightly sweep and any
+        // future admin inspect-this-URL button.
+        $this->app->singleton(UrlInspectionQuota::class, fn ($app) => new UrlInspectionQuota(
+            $app->make(CacheInterface::class),
+            'gsc.url-inspection',
+            2000,
+            600,
+        ));
+
+        // The shared SEO report library (ss-systems/platform-kit's
+        // SsSystems\Platform\Reports namespace) — see App\Support\Seo\
+        // Reports\ReportCapabilities for which of these are actually
+        // PROVIDED on this site. AreaCatalog is bound to EmptyAreaCatalog
+        // (not provided — see that class's docblock) so HealthReport/
+        // AreaPagesAuditReport can still be resolved directly;
+        // ClarityMetricsReader/PsiSnapshotReader have NO binding at all,
+        // since this site has neither integration.
+        $this->app->bind(SiteCatalog::class, MarketingSiteCatalog::class);
+        $this->app->bind(SiteIdentity::class, ConfigSiteIdentity::class);
+        $this->app->bind(QueryMetricsReader::class, EloquentQueryMetricsReader::class);
+        $this->app->bind(HealthDataReader::class, EloquentHealthDataReader::class);
+        $this->app->bind(PageFetcher::class, HttpPageFetcher::class);
+        $this->app->bind(AreaCatalog::class, EmptyAreaCatalog::class);
     }
 
     /**
