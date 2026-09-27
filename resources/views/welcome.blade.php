@@ -738,6 +738,47 @@
         </div>
     </div>
 
+    {{-- ============================ WHAT CONTRACTORS SAY ============================ --}}
+    {{-- Published reviews only (App\Models\Testimonial::published(), passed
+         in from the 'welcome' route) — the whole section is skipped, no
+         empty heading, when there are none. Names/roles/quotes render
+         as-is: they are English-only and unchanged on every locale, unlike
+         the rest of this page. --}}
+    @if ($testimonials->isNotEmpty())
+    <div class="py-24 bg-white dark:bg-zinc-950 sm:py-32">
+        <div class="px-6 mx-auto max-w-7xl lg:px-8">
+            <div class="max-w-2xl mx-auto lg:text-center">
+                <h2 class="text-base font-semibold leading-7 text-indigo-600 dark:text-indigo-400">{{ __('What contractors say') }}</h2>
+                <p class="mt-2 text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl text-balance">
+                    {{ __('Real feedback from the businesses running on Hive') }}
+                </p>
+            </div>
+            <div class="grid max-w-2xl grid-cols-1 mx-auto mt-16 gap-6 sm:mt-20 lg:max-w-none lg:grid-cols-3">
+                @foreach ($testimonials as $testimonial)
+                    <figure class="flex flex-col p-8 bg-gray-50 dark:bg-zinc-900 rounded-2xl ring-1 ring-gray-200 dark:ring-zinc-800">
+                        @if ($testimonial->rating)
+                            <div class="flex gap-0.5" aria-hidden="true">
+                                @for ($i = 1; $i <= 5; $i++)
+                                    <flux:icon name="star" variant="{{ $i <= $testimonial->rating ? 'solid' : 'outline' }}" class="w-4 h-4 {{ $i <= $testimonial->rating ? 'text-amber-400' : 'text-gray-300 dark:text-zinc-700' }}" />
+                                @endfor
+                            </div>
+                        @endif
+                        <blockquote class="flex-1 mt-4 text-base leading-7 text-gray-700 dark:text-gray-300">
+                            <p>&ldquo;{{ $testimonial->body }}&rdquo;</p>
+                        </blockquote>
+                        <figcaption class="mt-6">
+                            <div class="text-sm font-semibold text-gray-900 dark:text-white">{{ $testimonial->name }}</div>
+                            @if ($testimonial->role)
+                                <div class="text-sm text-gray-500 dark:text-gray-400">{{ $testimonial->role }}</div>
+                            @endif
+                        </figcaption>
+                    </figure>
+                @endforeach
+            </div>
+        </div>
+    </div>
+    @endif
+
     {{-- ============================ FAQ ============================ --}}
     <div class="py-24 bg-white dark:bg-zinc-950 sm:py-32 scroll-mt-24" id="faq">
         <div class="px-6 mx-auto max-w-4xl lg:px-8">

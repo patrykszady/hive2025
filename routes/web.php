@@ -248,7 +248,19 @@ Route::prefix('{locale}')
     // guests get the cached HTML, authenticated visits always render fresh.
     ->middleware([\App\Http\Middleware\SetLocale::class, \App\Http\Middleware\CachePublicPage::class])
     ->group(function () {
-        Route::view('welcome', 'welcome')->name('welcome');
+        // A closure rather than Route::view(): the "What contractors say"
+        // section needs the published testimonials, and this is the one
+        // place that can hand them to the view (CachePublicPage still
+        // caches the rendered HTML per locale — see App\Observers\
+        // TestimonialObserver for the cache-bust on save/delete).
+        Route::get('welcome', function () {
+            return view('welcome', [
+                'testimonials' => \App\Models\Testimonial::published()
+                    ->orderByDesc('review_date')
+                    ->orderByDesc('id')
+                    ->get(),
+            ]);
+        })->name('welcome');
 
         Route::prefix('welcome')->name('welcome.')->group(function () {
             Route::view('finances', 'welcome.finances')->name('finances');
