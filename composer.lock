@@ -11698,7 +11698,7 @@
             "dist": {
                 "type": "zip",
                 "url": "packages/ss-systems-platform-kit-0.12.0.zip",
-                "shasum": "fade853a50ec8cd4699330c946a110273774cb5a"
+                "shasum": "aaffc92e20bb3bfc0076dc813620bfccd8dcea27"
             },
             "require": {
                 "illuminate/bus": "^12.0|^13.0",
