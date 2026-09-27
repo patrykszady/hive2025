@@ -4,6 +4,7 @@ namespace App\Support\Citations;
 
 use App\Models\Citation;
 use App\Models\PlatformSetting;
+use SsSystems\Platform\Citations\KnownListingsReconciler;
 
 /**
  * Adapted from gsc's/dawnsellshomes' app/Support/Citations/
@@ -16,15 +17,20 @@ use App\Models\PlatformSetting;
  * citations roster (config/citations.php) is `linkedin`, so that is the
  * only slug reconciled here. Any wider match would be inventing a
  * relationship the two rosters don't actually share.
+ *
+ * `reconcile()`'s loop moved to the kit's `Citations\
+ * KnownListingsReconciler` (citations-admin-actions, 2026-09-27 —
+ * verbatim; see that class's own docblock and citations.md #5). This
+ * static method is now a one-line wrapper so `citations:sync`'s existing
+ * `KnownListings::reconcile()` call keeps working unchanged;
+ * `CitationsAdminActions` (the API's own path) constructs its own
+ * `KnownListingsReconciler` instance the same way, with the same
+ * "Social Media" source label. `forCurrentSite()` — genuinely per-site
+ * content — is unchanged below; `SiteKnownListingsSource` is the thin
+ * adapter that hands it to the kit.
  */
 class KnownListings
 {
-    /** Statuses a match may move to live — never a run in progress, a submission awaiting verification, or a deliberate decline. */
-    protected const MOVABLE = [
-        Citation::STATUS_PLANNED, Citation::STATUS_FAILED, Citation::STATUS_NEEDS_HUMAN,
-        Citation::STATUS_UNREACHABLE, Citation::STATUS_NO_MECHANISM,
-    ];
-
     /**
      * @return array<string, array{url: string, source: string}> keyed by citation slug
      */
@@ -49,33 +55,6 @@ class KnownListings
      */
     public static function reconcile(): int
     {
-        $changed = 0;
-
-        foreach (self::forCurrentSite() as $slug => $known) {
-            $row = Citation::query()->where('slug', $slug)->first();
-            if (! $row) {
-                continue;
-            }
-
-            $dirty = false;
-            if (blank($row->listing_url)) {
-                $row->listing_url = $known['url'];
-                $dirty = true;
-            }
-            if (in_array($row->status, self::MOVABLE, true)) {
-                $row->status = Citation::STATUS_LIVE;
-                $row->live_at ??= now();
-                $row->human_reason = null;
-                $row->note = 'Listed already — '.$known['source'].'.';
-                $dirty = true;
-            }
-            if ($dirty) {
-                $row->addLog('Matched from what Social Media already knows: '.$known['source'], 'sync');
-                $row->save();
-                $changed++;
-            }
-        }
-
-        return $changed;
+        return (new KnownListingsReconciler(new SiteKnownListingsSource, fn () => Citation::query(), 'Social Media'))->reconcile();
     }
 }
