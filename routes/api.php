@@ -1,9 +1,5 @@
 <?php
 
-use App\Http\Controllers\Api\Admin\V1\DashboardStatsController;
-use App\Http\Controllers\Api\Admin\V1\PingController;
-use App\Http\Controllers\Api\Admin\V1\PlatformsController;
-use App\Http\Controllers\Api\Admin\V1\SeoSnapshotController;
 use App\Http\Controllers\Api\LeadsController;
 use App\Http\Controllers\Api\MailboxesController;
 use App\Http\Controllers\Api\ProjectZipCountsController;
@@ -53,8 +49,11 @@ Route::middleware(['auth:sanctum', 'throttle:api'])
 | gsc's/dawnsellshomes' throttle on this same route group.
 */
 Route::prefix('admin/v1')->name('api.admin.v1.')->middleware(['throttle:6000,1', 'admin.api.auth'])->group(function () {
-    Route::get('ping', PingController::class)->name('ping');
-    Route::get('dashboard-stats', DashboardStatsController::class)->name('dashboard-stats');
-    Route::get('seo/snapshot', SeoSnapshotController::class)->name('seo.snapshot');
-    Route::get('platforms/status', [PlatformsController::class, 'status'])->name('platforms.status');
+    // One file per domain (routes/api-admin/*.php), each declaring the
+    // capabilities it serves through App\Support\AdminApi — the same layout
+    // gsc and jpeterson-design use, so a screen's API is one self-contained
+    // file and two screens never edit the same one.
+    foreach (glob(__DIR__.'/api-admin/*.php') as $file) {
+        require $file;
+    }
 });

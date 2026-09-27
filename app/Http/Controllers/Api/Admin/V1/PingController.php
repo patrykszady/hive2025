@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin\V1;
 
 use App\Http\Controllers\Controller;
+use App\Support\AdminApi;
 use Illuminate\Http\JsonResponse;
 use SsSystems\Platform\Kit;
 
@@ -32,14 +33,16 @@ class PingController extends Controller
             'data' => [
                 'site' => config('app.name', 'Hive Contractors'),
                 'platform_kit' => class_exists(Kit::class) ? Kit::VERSION : null,
-                'domains' => [
-                    'dashboard-stats',
-                    'seo',
-                ],
+                // Declared by each routes/api-admin/*.php file (App\Support\AdminApi).
+                'domains' => AdminApi::domains(),
                 'brand' => [
                     'name' => config('app.name', 'Hive Contractors'),
-                    'logo' => null,
-                    'logo_dark' => null,
+                    // The hive mark the app draws inline (components/hive-logo),
+                    // served as files so the central admin's sidebar can show
+                    // it: indigo-900 strokes on light, indigo-300 on dark, the
+                    // same two colours the app itself uses.
+                    'logo' => asset('images/hive-mark.svg'),
+                    'logo_dark' => asset('images/hive-mark-dark.svg'),
                     'accent' => null,
                 ],
             ],
