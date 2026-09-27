@@ -7,6 +7,8 @@ use App\Models\CallLog;
 use App\Models\Client;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSignature;
+use App\Models\GscCoverageState;
+use App\Models\GscRichResultIssue;
 use App\Models\Expense;
 use App\Models\JsErrorState;
 use App\Models\Lead;
@@ -35,10 +37,7 @@ use App\Support\GoogleBusinessListing;
 use App\Support\GoogleOAuthApp;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\BingWriter;
-use App\Support\Seo\Inspection\EloquentCoverageStore;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
-use App\Support\Seo\Inspection\NoTrackedPaths;
-use App\Support\Seo\Inspection\SearchConsoleUrlInspector;
 use App\Support\Seo\Reports\ClaritySettingsMetricsReader;
 use App\Support\Seo\Reports\ConfigSiteIdentity;
 use App\Support\Seo\Reports\EloquentHealthDataReader;
@@ -94,6 +93,9 @@ use SsSystems\Platform\Seo\Inspection\Contracts\CoverageStore;
 use SsSystems\Platform\Seo\Inspection\Contracts\SitemapSource;
 use SsSystems\Platform\Seo\Inspection\Contracts\TrackedPaths;
 use SsSystems\Platform\Seo\Inspection\Contracts\UrlInspector;
+use SsSystems\Platform\Seo\Inspection\EloquentCoverageStore;
+use SsSystems\Platform\Seo\Inspection\NoTrackedPaths;
+use SsSystems\Platform\Seo\Inspection\SearchConsoleUrlInspector;
 use SsSystems\Platform\Seo\Inspection\UrlInspectionQuota;
 use SsSystems\Platform\Seo\SearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncClient;
@@ -184,11 +186,26 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(CacheInterface::class, fn ($app) => $app->make('cache')->store());
 
         // The kit's URL Inspection sweep (SsSystems\Platform\Seo\Inspection\
-        // UrlInspectionSweep) — see App\Console\Commands\SeoGscInspectBulk
-        // and each adapter's own docblock for what it mirrors.
-        $this->app->bind(UrlInspector::class, SearchConsoleUrlInspector::class);
+        // UrlInspectionSweep) — see App\Console\Commands\SeoGscInspectBulk.
+        // UrlInspector/CoverageStore/TrackedPaths now bind straight to the
+        // kit's own Inspection\{SearchConsoleUrlInspector,
+        // EloquentCoverageStore,NoTrackedPaths} (kit/search-console-contract)
+        // instead of this site's former local copies, which were nothing but
+        // thin wrappers over the same GoogleSearchConsoleService/
+        // GscCoverageState/GscRichResultIssue models the kit classes take as
+        // constructor arguments — the kit's SearchConsoleUrlInspector now
+        // takes the generic SearchConsoleSyncClient contract (not this
+        // site's concrete service), delegating isReady()/siteUrl() to
+        // whichever client is bound, so this swap needed
+        // GoogleSearchConsoleService::isReady() (added above) to stay
+        // behaviour-identical. This site has no gsc_coverage_state_history
+        // table, so EloquentCoverageStore gets only the two required model
+        // class-strings. SitemapSource stays this site's own
+        // MarketingSitemapSource — a per-site sitemap source, same as every
+        // other adopter.
+        $this->app->bind(UrlInspector::class, fn ($app) => new SearchConsoleUrlInspector($app->make(SearchConsoleSyncClient::class)));
         $this->app->bind(SitemapSource::class, MarketingSitemapSource::class);
-        $this->app->bind(CoverageStore::class, EloquentCoverageStore::class);
+        $this->app->bind(CoverageStore::class, fn () => new EloquentCoverageStore(GscCoverageState::class, GscRichResultIssue::class));
         $this->app->bind(TrackedPaths::class, NoTrackedPaths::class);
 
         // Same daily/per-minute ceiling and Pacific reset as the other kit

@@ -45,6 +45,19 @@ class GoogleSearchConsoleService implements SearchConsoleSyncClient
         return $this->token()->isConfigured() && $this->siteUrl() !== '';
     }
 
+    /**
+     * SearchConsoleClient's DISTINCT isReady() — whether a call could reach
+     * Google right now. This site has no separate OAuth grant to check the
+     * way gs.construction's/jpeterson-design's isReady() does (a stored
+     * refresh token) — a service account has no such intermediate state, so
+     * isConfigured() itself already answers the same question: the
+     * credential file is present and a property is set.
+     */
+    public function isReady(): bool
+    {
+        return $this->isConfigured();
+    }
+
     public function siteUrl(): string
     {
         return (string) config('services.google.search_console_property');
@@ -112,6 +125,55 @@ class GoogleSearchConsoleService implements SearchConsoleSyncClient
         }
 
         return $resp->json('sitemap', []);
+    }
+
+    /**
+     * Ask Google to (re)fetch a sitemap. Idempotent: submitting an
+     * already-registered sitemap just schedules a re-fetch.
+     *
+     * send('PUT') and NOT ->put(): put() attaches an empty JSON array as
+     * the body and Google rejects it with 400 "Root element must be a
+     * message". sitemaps.submit requires a bodiless PUT (returns 204).
+     * This site has never wired direct sitemap submission before (there is
+     * no seo:gsc-submit-sitemaps command here yet) — added now because the
+     * kit's SearchConsoleClient contract requires it of every implementor.
+     */
+    public function submitSitemap(string $siteUrl, string $sitemapUrl): bool
+    {
+        $token = $this->getAccessToken();
+        if (! $token) {
+            return false;
+        }
+
+        $resp = Http::withToken($token)->timeout(20)->send(
+            'PUT',
+            self::API_BASE.'/sites/'.rawurlencode($siteUrl).'/sitemaps/'.rawurlencode($sitemapUrl)
+        );
+
+        if (! $resp->successful()) {
+            $this->lastError = $this->describeFailure($resp->status(), (string) $resp->body(), $siteUrl);
+
+            return false;
+        }
+
+        $this->lastError = null;
+
+        return true;
+    }
+
+    /**
+     * SearchConsoleClient's isAuthStandingCondition() hook. This client has
+     * no separate OAuth grant to lapse — every failure describeFailure()
+     * above produces (401/403: add the service account as a user on the
+     * property; 404: the property isn't verified on this account yet) is
+     * already an owner-facing setup instruction, exactly the "someone has
+     * to go fix something outside this run" case SsSystems\Platform\Seo\
+     * SitemapSubmitter stops on. Anything else (a 5xx, a malformed
+     * response) counts against the run like any ordinary failure.
+     */
+    public function isAuthStandingCondition(?array $error): bool
+    {
+        return in_array($error['status'] ?? null, [401, 403, 404], true);
     }
 
     /**
