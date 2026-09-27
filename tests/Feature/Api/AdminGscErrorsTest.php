@@ -1,6 +1,6 @@
 <?php
 
-use App\Jobs\RunGscInspectBulkJob;
+use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
 use App\Models\GscCoverageState;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -64,7 +64,8 @@ it('queues the inspection sweep on refresh without touching the queue synchronou
         ->assertOk()
         ->assertJsonPath('data.message', 'Queued full sitemap inspection in background. Data will update as the job writes new results.');
 
-    Queue::assertPushed(RunGscInspectBulkJob::class);
+    Queue::assertPushed(RunArtisanCommandDetached::class, fn ($job) => $job->command === 'seo:gsc-inspect-bulk'
+        && $job->options === ['--limit' => 0, '--markdown' => true]);
 });
 
 it('prunes coverage rows for URLs no longer in the marketing sitemap', function () {
