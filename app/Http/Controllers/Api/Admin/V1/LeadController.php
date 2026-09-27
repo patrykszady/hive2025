@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Admin\V1;
 
-use App\Http\Controllers\Api\Admin\V1\Concerns\BuildsApiResponses;
+use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -132,16 +132,6 @@ class LeadController extends Controller
     }
 
     /** 'all' (default, no-op) | 'today' | 'week' | 'month'. */
-    protected function applyDateRange(Builder $query, string $range): void
-    {
-        match ($range) {
-            'today' => $query->whereDate('created_at', today()),
-            'week' => $query->where('created_at', '>=', now()->subWeek()),
-            'month' => $query->where('created_at', '>=', now()->subMonth()),
-            default => null,
-        };
-    }
-
     /**
      * users.cell_phone is normalized to digits-only by User's own cellPhone()
      * mutator — format it back to (XXX) XXX-XXXX for display, the same shape

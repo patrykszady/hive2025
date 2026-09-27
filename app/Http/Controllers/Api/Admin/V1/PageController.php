@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Admin\V1;
 
-use App\Http\Controllers\Api\Admin\V1\Concerns\BuildsApiResponses;
+use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Models\PageSeoOverride;
 use App\Support\MarketingPages;
