@@ -38,7 +38,8 @@ class MarketingPages
 
             $name = $route->getName();
 
-            if ($name === null) {
+            // The blog's index and posts belong to the Blog screen, not here.
+            if ($name === null || Str::startsWith($name, 'blog.')) {
                 continue;
             }
 

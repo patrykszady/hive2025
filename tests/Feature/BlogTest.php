@@ -74,7 +74,8 @@ it('renders a published post with its title, date, body and meta tags', function
 
     $response->assertSee('Winter Job Site Prep')
         ->assertSee('Cover your', false)
-        ->assertSee('<title>Winter Job Site Prep — Guide — Hive Contractors | Hive Contractors</title>', false)
+        // The layout appends the app name only when the title lacks it — never "… — Hive Contractors | Hive Contractors".
+        ->assertSee('<title>Winter Job Site Prep — Guide — Hive Contractors</title>', false)
         ->assertSee('<meta name="description" content="How to prep a job site for winter.">', false);
 });
 
