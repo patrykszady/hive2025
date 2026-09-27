@@ -152,7 +152,8 @@ class GoogleBusinessProfileService
             scopes: array_values(array_filter(explode(' ', (string) ($data['scope'] ?? self::SCOPES)))),
         );
 
-        Cache::forget('google_business_profile_access_token');
+        // Clear any cooldown from previous invalid_grant errors.
+        $this->clearInvalidGrantCooldown();
 
         Log::info('GBP: OAuth tokens stored via web flow', ['email' => $email]);
 
@@ -164,10 +165,38 @@ class GoogleBusinessProfileService
     {
         OAuthToken::where('provider', self::PROVIDER)->delete();
         Cache::forget('google_business_profile_access_token');
+        $this->clearInvalidGrantCooldown();
         Log::info('GBP: Disconnected (tokens removed)');
     }
 
-    /** Cache -> valid DB access token -> refresh via the token endpoint. */
+    /**
+     * Clear invalid_grant cooldown caches. Ported from gsc's identical
+     * method — see getAccessToken()'s docblock for why this exists.
+     */
+    protected function clearInvalidGrantCooldown(): void
+    {
+        $refreshToken = $this->getRefreshToken();
+        if ($refreshToken) {
+            $hash = sha1($refreshToken);
+            Cache::forget("google_business_profile_invalid_grant:{$hash}");
+            Cache::forget("google_business_profile_invalid_grant_logged:{$hash}");
+        }
+        Cache::forget('google_business_profile_access_token');
+    }
+
+    /**
+     * Full port of gsc's getAccessToken() (2026-09-27): cache -> valid DB
+     * access token -> refresh via the token endpoint, persisting the
+     * refreshed access token (and a rotated refresh_token, if Google
+     * returns one) back to the oauth_tokens row, and backing off for 6
+     * hours after an invalid_grant response instead of retrying a refresh
+     * token already known to be dead. Previously this dropped both: the
+     * refreshed token lived only in cache (a cache clear forced a full
+     * refresh round-trip every time), and a rotated refresh_token was
+     * silently discarded — if Google ever rotated this grant's refresh
+     * token, the site would keep using the stale one until it failed with
+     * no automatic recovery.
+     */
     protected function getAccessToken(): ?string
     {
         $cacheKey = 'google_business_profile_access_token';
@@ -193,6 +222,21 @@ class GoogleBusinessProfileService
             return null;
         }
 
+        $refreshTokenHash = sha1($refreshToken);
+        $invalidGrantCooldownKey = "google_business_profile_invalid_grant:{$refreshTokenHash}";
+
+        if (Cache::get($invalidGrantCooldownKey)) {
+            $this->lastError = [
+                'message' => 'Token refresh blocked: re-authorization required',
+                'status' => 400,
+                'error' => 'invalid_grant',
+                'error_description' => 'Refresh token has expired or been revoked.',
+                'reauthorization_required' => true,
+            ];
+
+            return null;
+        }
+
         $response = Http::asForm()->timeout(20)->post(self::TOKEN_ENDPOINT, [
             'client_id' => config('services.google.business_profile.client_id'),
             'client_secret' => config('services.google.business_profile.client_secret'),
@@ -202,13 +246,33 @@ class GoogleBusinessProfileService
 
         if (! $response->successful()) {
             $errorPayload = $response->json() ?: [];
+            $errorCode = $errorPayload['error'] ?? null;
+            $errorDescription = $errorPayload['error_description'] ?? null;
+            $isInvalidGrant = $response->status() === 400 && $errorCode === 'invalid_grant';
+
             $this->lastError = [
                 'message' => 'Token refresh failed',
                 'status' => $response->status(),
-                'error' => $errorPayload['error'] ?? null,
-                'error_description' => $errorPayload['error_description'] ?? null,
+                'error' => $errorCode,
+                'error_description' => $errorDescription,
+                'reauthorization_required' => $isInvalidGrant,
             ];
-            Log::warning('GBP: Access token refresh failed', $this->lastError);
+
+            if ($isInvalidGrant) {
+                Cache::forget($cacheKey);
+                Cache::put($invalidGrantCooldownKey, true, now()->addHours(6));
+
+                $invalidGrantLoggedKey = "google_business_profile_invalid_grant_logged:{$refreshTokenHash}";
+                if (Cache::add($invalidGrantLoggedKey, true, now()->addHours(6))) {
+                    Log::error('GBP: Refresh token invalid_grant (expired/revoked). Reconnect from the Platforms screen.', [
+                        'status' => $response->status(),
+                        'error' => $errorCode,
+                        'error_description' => $errorDescription,
+                    ]);
+                }
+            } else {
+                Log::warning('GBP: Access token refresh failed', $this->lastError);
+            }
 
             return null;
         }
@@ -218,7 +282,15 @@ class GoogleBusinessProfileService
         $expiresIn = (int) ($data['expires_in'] ?? 3600);
 
         if ($accessToken) {
+            Cache::forget($invalidGrantCooldownKey);
+            Cache::forget("google_business_profile_invalid_grant_logged:{$refreshTokenHash}");
             Cache::put($cacheKey, $accessToken, now()->addSeconds(max(60, $expiresIn - 120)));
+
+            // Persist the refreshed access token to DB so it survives cache clears.
+            $dbToken?->update([
+                'access_token' => $accessToken,
+                'access_token_expires_at' => now()->addSeconds($expiresIn - 120),
+            ]);
         }
 
         if (! empty($data['scope']) && $dbToken) {
@@ -227,6 +299,20 @@ class GoogleBusinessProfileService
             if ($granted !== [] && $granted !== (array) $dbToken->scopes) {
                 $dbToken->forceFill(['scopes' => $granted])->save();
             }
+        }
+
+        // If Google returned a rotated refresh token, persist it.
+        if (! empty($data['refresh_token']) && $data['refresh_token'] !== $refreshToken) {
+            $stored = $dbToken ?? OAuthToken::storeTokens(
+                provider: self::PROVIDER,
+                refreshToken: $data['refresh_token'],
+                accessToken: $accessToken,
+                expiresIn: $expiresIn,
+            );
+            if ($dbToken) {
+                $dbToken->update(['refresh_token' => $data['refresh_token']]);
+            }
+            Log::info('GBP: Refresh token rotated and persisted to DB.');
         }
 
         return $accessToken;
