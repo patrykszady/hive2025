@@ -2,6 +2,9 @@
 
 namespace App\Support\Seo\Reports;
 
+use App\Console\Commands\SeoRankCheck;
+use App\Models\BingDailyTotal;
+use App\Models\SeoSyncRun;
 use App\Support\SeoStorage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
@@ -32,8 +35,20 @@ class EloquentHealthDataReader implements HealthDataReader
         return ['total' => 0, 'with_alt' => 0];
     }
 
+    /**
+     * When the internal-link report last ran: its saved report file (written
+     * by every run, scheduled or started from the admin), the log only as a
+     * fallback — a run started by hand never writes the schedule's log.
+     */
     public function internalLinkAuditLastRunAt(): ?\DateTimeInterface
     {
+        $disk = Storage::disk('local');
+        $report = SeoStorage::path('reports/internal-link-suggest.md');
+
+        if ($disk->exists($report)) {
+            return Carbon::createFromTimestamp($disk->lastModified($report));
+        }
+
         return $this->fileMtime(storage_path('logs/seo-internal-link-suggest.log'));
     }
 
@@ -49,27 +64,40 @@ class EloquentHealthDataReader implements HealthDataReader
         ];
     }
 
+    /**
+     * The daily ranking check's saved positions (seo:rank-check), one per
+     * tracked search; a search not found in the results is a null position,
+     * which the health score counts as not ranking. Empty until the first
+     * check has run.
+     */
     public function latestRankSnapshots(): array
     {
-        // No rank tracker on this site.
-        return [];
+        $queries = SeoSyncRun::summary(SeoRankCheck::SYNC_KEY)['current']['queries'] ?? [];
+
+        return array_values(array_map(
+            fn (array $q) => ['engine' => 'google', 'position' => isset($q['position']) ? (float) $q['position'] : null],
+            is_array($queries) ? $queries : [],
+        ));
     }
 
     /**
-     * 'sitemap.xml' is honestly null: this site's sitemap has no static
-     * file to stat (rendered on the fly by SitemapController from
-     * App\Support\MarketingSitemap, cached in the `marketing-sitemap-xml`
-     * cache key) — there is no filesystem mtime to read. 'gsc-sync log' is
-     * real: seo:gsc-sync's schedule entry appends its output to this exact
-     * path. 'gbp-metrics-sync log' has no equivalent command on this site
-     * (see gbpActivity()'s docblock).
+     * How recently each pipeline this site actually has last delivered:
+     * the sitemap is built on every request from the live routes
+     * (App\Support\MarketingSitemap), so it is always current; Search
+     * Console from its last successful sync run; Bing from its newest daily
+     * total. No Google Business Profile line: this site has no listing
+     * pipeline, and the health score would count a missing one as stale.
      */
     public function freshnessSignals(): array
     {
+        $gsc = SeoSyncRun::summary('search_console') ?? [];
+        $gscAt = ($gsc['status'] ?? null) === 'ok' && ! empty($gsc['finished_at']) ? Carbon::parse($gsc['finished_at']) : null;
+        $bingAt = BingDailyTotal::query()->max('updated_at');
+
         return [
-            'sitemap.xml' => null,
-            'gsc-sync log' => $this->fileMtime(storage_path('logs/seo-gsc-sync.log')),
-            'gbp-metrics-sync log' => null,
+            'sitemap.xml' => now(),
+            'search-console sync' => $gscAt,
+            'bing sync' => $bingAt ? Carbon::parse($bingAt) : null,
         ];
     }
 

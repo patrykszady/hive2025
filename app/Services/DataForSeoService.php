@@ -59,7 +59,11 @@ class DataForSeoService
      * when ANY query's request fails outright — a partial result would
      * misrepresent "tracked" as smaller than it really is.
      *
-     * @return array{tracked:int,top3:int,top10:int,top20:int,below20:int}|null
+     * Also returns each tracked search's own position (`queries`), which the
+     * SEO health score's rankings measure reads (EloquentHealthDataReader::
+     * latestRankSnapshots()).
+     *
+     * @return array{tracked:int,top3:int,top10:int,top20:int,below20:int,queries:list<array{query:string,position:?int}>}|null
      */
     public function checkRankings(): ?array
     {
@@ -73,15 +77,17 @@ class DataForSeoService
         }
 
         $positions = [];
+        $queries = [];
         foreach (self::TRACKED_QUERIES as $query) {
             $position = $this->livePosition($query, $domain);
             if ($position === false) {
                 return null;
             }
             $positions[] = $position;
+            $queries[] = ['query' => $query, 'position' => $position];
         }
 
-        return $this->bucket($positions);
+        return $this->bucket($positions) + ['queries' => $queries];
     }
 
     /**

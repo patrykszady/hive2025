@@ -29,6 +29,11 @@ class DashboardStatsController extends Controller
     {
         return response()->json([
             'data' => [
+                // The summary the platform dashboard's card reads (ss-systems'
+                // SiteOverview: leads today / this week / pending / total),
+                // from the same sign-ups the Leads screen lists — without it
+                // the card showed 0 leads beside 43 sign-ups.
+                'leads' => $this->leadsSummary(),
                 'tiles' => Cache::remember('admin.dashboard.tiles', now()->addMinutes(5), fn () => [
                     $this->leadsTile(),
                     $this->contactsTile(),
@@ -39,6 +44,20 @@ class DashboardStatsController extends Controller
                 ]),
             ],
         ]);
+    }
+
+    /** @return array{total: int, today: int, this_week: int, pending: int} */
+    protected function leadsSummary(): array
+    {
+        $signups = fn () => User::query()->whereNotNull('registration');
+
+        return [
+            'total' => $signups()->count(),
+            'today' => $signups()->whereDate('created_at', now()->toDateString())->count(),
+            'this_week' => $signups()->where('created_at', '>=', now()->subWeek())->count(),
+            // Sign-ups are accounts: there is nothing to review or mark.
+            'pending' => 0,
+        ];
     }
 
     /** Sign-ups: the users who came through the public registration flow (LeadController's exact marker). */

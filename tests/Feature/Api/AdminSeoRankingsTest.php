@@ -68,7 +68,9 @@ it('saves a completed check and keeps the last good one when a check fails', fun
     $this->artisan('seo:rank-check')->assertSuccessful();
     $saved = SeoSyncRun::summary(SeoRankCheck::SYNC_KEY);
     expect($saved['current']['tracked'])->toBeGreaterThan(0)
-        ->and($saved['last_error'])->toBeNull();
+        ->and($saved['last_error'])->toBeNull()
+        // Each search's own position, for the health score's rankings measure.
+        ->and($saved['current']['queries'][0])->toBe(['query' => App\Services\DataForSeoService::TRACKED_QUERIES[0], 'position' => 2]);
 
     $this->artisan('seo:rank-check')->assertFailed();
 
