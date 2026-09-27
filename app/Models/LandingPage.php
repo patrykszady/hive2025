@@ -108,33 +108,6 @@ class LandingPage extends Model
         return url('/lp/'.$this->slug);
     }
 
-    /**
-     * Slug for a new page, deduplicated with a numeric suffix — mirrors
-     * dawnsellshomes'/jpeterson-design's LandingPage::generateUniqueSlug().
-     * Never 422s on a repeat city+campaign combination; a second "Free
-     * Trial" campaign for the same city just gets a second page.
-     */
-    public static function generateUniqueSlug(string $base, ?int $ignoreId = null): string
-    {
-        $slug = Str::slug($base);
-        $original = $slug;
-        $count = 1;
-
-        $exists = function (string $candidate) use ($ignoreId) {
-            $query = static::where('slug', $candidate);
-            if ($ignoreId) {
-                $query->where('id', '!=', $ignoreId);
-            }
-
-            return $query->exists();
-        };
-
-        while ($exists($slug)) {
-            $slug = $original.'-'.++$count;
-        }
-
-        return $slug;
-    }
 
     /**
      * Management-API shape — same key set as gs.construction's/
