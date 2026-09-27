@@ -183,7 +183,7 @@ Route::post('api/passkey-debug-log', function () {
 | session-less /admin proxy (AdminProxyController, below) never has a
 | chance to swallow it. In place of an admin session (the whole /admin
 | surface is a stateless proxy to ss-systems), the request is authenticated
-| by the signed, short-lived 'state' value App\Support\OAuthState mints and
+| by the signed, short-lived 'state' value SsSystems\Platform\Auth\OAuthState mints and
 | the provider echoes back.
 |
 | No 'gsc' provider: Search Console on this app runs on a server-held
@@ -202,7 +202,7 @@ Route::get('/admin-oauth/{provider}/callback', function (\Illuminate\Http\Reques
 
     $platforms = '/admin/'.config('services.ss.site_key', 'hive').'/platforms';
 
-    if (! \App\Support\OAuthState::verify($request->query('state'), $provider)) {
+    if (! \SsSystems\Platform\Auth\OAuthState::verify($request->query('state'), $provider)) {
         return redirect($platforms.'?error='.urlencode(
             'Sign-in link expired or was invalid. Try connecting again.'
         ));

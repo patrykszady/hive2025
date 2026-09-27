@@ -3,7 +3,7 @@
 use App\Models\OAuthToken;
 use App\Models\PlatformSetting;
 use App\Services\MetaSocialService;
-use App\Support\OAuthState;
+use SsSystems\Platform\Auth\OAuthState;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);

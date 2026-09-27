@@ -11,7 +11,7 @@ use App\Services\GoogleSearchConsoleService;
 use App\Services\MetaSocialService;
 use App\Support\GoogleBusinessListing;
 use App\Support\GoogleOAuthApp;
-use App\Support\OAuthState;
+use SsSystems\Platform\Auth\OAuthState;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\ClaritySettings;
 use App\Support\Seo\DataForSeoSettings;
@@ -92,7 +92,7 @@ class PlatformsController extends Controller
     /**
      * GET platforms/{provider}/oauth-url — the callback is this app's own
      * /admin-oauth/{provider}/callback (routes/web.php), carrying a signed
-     * App\Support\OAuthState value as 'state' so that session-less
+     * SsSystems\Platform\Auth\OAuthState value as 'state' so that session-less
      * callback can verify the request — see that route's docblock for why
      * (this app's whole /admin surface is a stateless proxy, so there is
      * no admin session here).

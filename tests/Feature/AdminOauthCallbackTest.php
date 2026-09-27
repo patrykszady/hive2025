@@ -2,7 +2,7 @@
 
 use App\Models\OAuthToken;
 use App\Services\GoogleBusinessProfileService;
-use App\Support\OAuthState;
+use SsSystems\Platform\Auth\OAuthState;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 

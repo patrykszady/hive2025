@@ -80,7 +80,7 @@ class GoogleBusinessProfileService
 
     /**
      * Generate the Google OAuth consent URL for the admin to authorise.
-     * $state carries this app's signed App\Support\OAuthState value — see
+     * $state carries this app's signed SsSystems\Platform\Auth\OAuthState value — see
      * that class's docblock for why this app needs one (no local admin
      * session to protect the callback with).
      */
