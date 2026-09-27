@@ -3,6 +3,8 @@
 namespace App\Support\Seo;
 
 use App\Models\PlatformSetting;
+use SsSystems\Platform\Seo\Credentials\Contracts\CredentialStore;
+use SsSystems\Platform\Seo\Credentials\CredentialEnvImport;
 
 /**
  * Copies every present env/config value for the four global SEO-source
@@ -15,15 +17,18 @@ use App\Models\PlatformSetting;
  * importSeoCredentialsFromEnv()), ss.systems' Connect Services modal's
  * "Move here" button.
  *
- * Never logs or returns a credential VALUE — only which of three things
- * happened to each field:
- *   - imported:       nothing was stored yet, and an env/config value was
- *                      found and written.
- *   - already stored: an admin-saved value already exists — never
- *                      overwritten by this class.
- *   - absent:         no env/config value to import (a blank, or
- *                      whitespace-only, env var counts as absent, same as
- *                      an unset one).
+ * The loop itself (never overwrite a stored value, trim env before judging
+ * blank, never log/return a credential VALUE — only which of three buckets
+ * a label fell into) now lives once in the kit
+ * (SsSystems\Platform\Seo\Credentials\CredentialEnvImport) — every site ran
+ * the identical logic, only the table of fields below ever differed. This
+ * class stays local because the config KEY NAMES genuinely differ per site
+ * (this site's own `services.bing_wmt.*`/`services.pagespeed.*`, unlike
+ * gsc/jpeterson-design's `services.bing.*`/`services.google.pagespeed.*` —
+ * see BingSettings/PsiSettings' own docblocks). Unlike gsc/jpeterson-
+ * design, this site has no Clarity project-id cache to bust on import
+ * (ClaritySettings::projectId() here reads storage directly every time),
+ * so there is no onImported callback to wire.
  */
 class SeoCredentialsImport
 {
@@ -39,33 +44,29 @@ class SeoCredentialsImport
     {
         $sources = $sources === [] ? self::SOURCES : $sources;
 
-        $result = ['imported' => [], 'already_stored' => [], 'absent' => []];
+        return (new CredentialEnvImport($this->store()))->run($this->fields($sources), $dryRun);
+    }
 
-        foreach ($this->fields($sources) as $row) {
-            // Raw stored check — deliberately NOT PlatformSettingCredential::get()
-            // with a default, which would mask "nothing stored yet" behind
-            // the env fallback and make the key look "already stored".
-            $alreadyStored = filled(PlatformSetting::get($row['key']));
-            $envValue = filled($row['env']) ? trim((string) $row['env']) : '';
-
-            if ($alreadyStored) {
-                $result['already_stored'][] = $row['label'];
-            } elseif ($envValue !== '') {
-                $result['imported'][] = $row['label'];
-                if (! $dryRun) {
-                    PlatformSetting::put($row['key'], $envValue);
-                }
-            } else {
-                $result['absent'][] = $row['label'];
+    /** This site's PlatformSetting table as the kit's CredentialStore seam — never falls back to config()/env(). */
+    protected function store(): CredentialStore
+    {
+        return new class implements CredentialStore
+        {
+            public function get(string $key): ?string
+            {
+                return PlatformSetting::get($key);
             }
-        }
 
-        return $result;
+            public function put(string $key, string $value): void
+            {
+                PlatformSetting::put($key, $value);
+            }
+        };
     }
 
     /**
      * @param  list<string>  $sources
-     * @return list<array{label:string,key:string,env:string|null}>
+     * @return list<array{label: string, key: string, env: mixed}>
      */
     protected function fields(array $sources): array
     {
