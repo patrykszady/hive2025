@@ -333,6 +333,14 @@ return [
         'token' => env('ADMIN_API_TOKEN'),
     ],
 
+    // The Analytics screen's day-boundary/trend-chart/cache-bucket zone —
+    // this site's own effective timezone (kit 0.13.0's BuildsAnalyticsScreen
+    // takes it as a per-site value, never a hardcoded constant). Matches
+    // Pulse's own SnapshotBuilder timezone.
+    'analytics' => [
+        'timezone' => env('ANALYTICS_TIMEZONE', 'America/Chicago'),
+    ],
+
     /*
     | Google Search Console — server-managed, like dawnsellshomes: a
     | service-account credential (SsSystems\Platform\Google\ServiceAccountToken),
