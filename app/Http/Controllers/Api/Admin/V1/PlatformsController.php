@@ -7,7 +7,6 @@ use App\Models\PlatformSetting;
 use App\Models\SeoSyncRun;
 use App\Models\Testimonial;
 use App\Services\GoogleBusinessProfileService;
-use App\Services\GoogleSearchConsoleService;
 use App\Services\MetaSocialService;
 use App\Support\GoogleBusinessListing;
 use App\Support\GoogleOAuthApp;
@@ -23,6 +22,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
+use SsSystems\Platform\Seo\Google\ServiceAccountSearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncRule;
 
 /**
@@ -179,14 +179,14 @@ class PlatformsController extends Controller
 
     /**
      * connected/configured: the service-account file exists AND a property
-     * is set — see GoogleSearchConsoleService::isConfigured()'s docblock
-     * for why that is a cheap, offline check rather than a live probe.
-     * managed is always 'server': there is no per-owner OAuth grant here,
-     * just a server-held credential.
+     * is set — see ServiceAccountSearchConsoleClient::isConfigured()'s
+     * docblock (ss-systems/platform-kit) for why that is a cheap, offline
+     * check rather than a live probe. managed is always 'server': there is
+     * no per-owner OAuth grant here, just a server-held credential.
      */
     protected function gscStatus(): array
     {
-        $service = app(GoogleSearchConsoleService::class);
+        $service = app(ServiceAccountSearchConsoleClient::class);
         $configured = $service->isConfigured();
         $summary = SeoSyncRun::summary('search_console');
 

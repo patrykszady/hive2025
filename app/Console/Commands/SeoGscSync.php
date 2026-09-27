@@ -12,11 +12,12 @@ use SsSystems\Platform\Seo\SearchConsoleWriter;
  * Sync Google Search Console search-analytics data — a thin wrapper around
  * the kit's SsSystems\Platform\Seo\SearchConsoleSync::run(), ported from
  * dawnsellshomes' identical command. This command's only job is reading
- * the CLI options, handing them to run() through this site's own
- * SearchConsoleSyncClient (App\Services\GoogleSearchConsoleService,
- * authenticated with the GSC_CREDENTIALS service account rather than an
- * OAuth grant) and SearchConsoleWriter (App\Support\Seo\
- * SearchConsoleWriter), and printing what happened.
+ * the CLI options, handing them to run() through this site's
+ * SearchConsoleSyncClient (ss-systems/platform-kit's Seo\Google\
+ * ServiceAccountSearchConsoleClient, authenticated with the GSC_CREDENTIALS
+ * service account rather than an OAuth grant — see
+ * App\Providers\AppServiceProvider) and SearchConsoleWriter
+ * (App\Support\Seo\SearchConsoleWriter), and printing what happened.
  *
  * No numeric defaults on --days/--lag-days: the kit's
  * SearchConsoleSyncRule::DEFAULT_DAYS/DEFAULT_LAG_DAYS constants are the
@@ -28,8 +29,8 @@ use SsSystems\Platform\Seo\SearchConsoleWriter;
  * setup state, not a failure. Any other failure (the service account
  * lacking permission on the property, a network error, ...) is printed as
  * a clear owner-facing message and exits FAILURE — never a stack trace,
- * since SearchConsoleSync/GoogleSearchConsoleService already turn every
- * Google error into a plain-English reason before it reaches here.
+ * since SearchConsoleSync/ServiceAccountSearchConsoleClient already turn
+ * every Google error into a plain-English reason before it reaches here.
  */
 class SeoGscSync extends Command
 {

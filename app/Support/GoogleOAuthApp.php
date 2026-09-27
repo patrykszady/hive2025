@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * Trimmed port of dawnsellshomes.com's/jpeterson-design's identical class:
  * only ONE config path here. Search Console on this app runs on a
- * server-held service account (App\Support\Google\ServiceAccountToken),
+ * server-held service account (SsSystems\Platform\Google\ServiceAccountToken),
  * not OAuth, so unlike jpeterson-design/gsc there is no
  * services.google.search_console overlay and redirectUris() carries only
  * 'gbp'. No JSON-upload parsing either — the admin screen only ever sends

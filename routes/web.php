@@ -187,7 +187,7 @@ Route::post('api/passkey-debug-log', function () {
 | the provider echoes back.
 |
 | No 'gsc' provider: Search Console on this app runs on a server-held
-| service account (App\Support\Google\ServiceAccountToken), never OAuth.
+| service account (SsSystems\Platform\Google\ServiceAccountToken), never OAuth.
 | Redirect URIs to register, exactly:
 |   Google Cloud OAuth client: https://hive.contractors/admin-oauth/gbp/callback
 |   Meta app (Facebook Login):  https://hive.contractors/admin-oauth/meta/callback

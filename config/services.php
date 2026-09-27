@@ -335,7 +335,7 @@ return [
 
     /*
     | Google Search Console — server-managed, like dawnsellshomes: a
-    | service-account credential (App\Support\Google\ServiceAccountToken),
+    | service-account credential (SsSystems\Platform\Google\ServiceAccountToken),
     | never a per-owner OAuth grant, since this app has no
     | /admin/{site}/platforms Google sign-in screen of its own for it. The
     | service account (GSC_CREDENTIALS) must be added as a user on the

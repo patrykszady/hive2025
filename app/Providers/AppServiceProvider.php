@@ -32,7 +32,6 @@ use App\Observers\VendorDocObserver;
 use App\Observers\VendorObserver;
 
 use App\Mail\Transport\NylasTransport;
-use App\Services\GoogleSearchConsoleService;
 use App\Services\NylasService;
 use App\Support\GoogleBusinessListing;
 use App\Support\GoogleOAuthApp;
@@ -90,13 +89,13 @@ use SsSystems\Platform\Reports\Contracts\SiteIdentity;
 use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
 use SsSystems\Platform\Seo\Bing\BingWebmasterClient;
 use SsSystems\Platform\Seo\Bing\BingWriter as KitBingWriter;
+use SsSystems\Platform\Seo\Google\ServiceAccountSearchConsoleClient;
 use SsSystems\Platform\Seo\Inspection\Contracts\CoverageStore;
 use SsSystems\Platform\Seo\Inspection\Contracts\SitemapSource;
 use SsSystems\Platform\Seo\Inspection\Contracts\TrackedPaths;
 use SsSystems\Platform\Seo\Inspection\Contracts\UrlInspector;
 use SsSystems\Platform\Seo\Inspection\EloquentCoverageStore;
 use SsSystems\Platform\Seo\Inspection\NoTrackedPaths;
-use SsSystems\Platform\Seo\Inspection\SearchConsoleUrlInspector;
 use SsSystems\Platform\Seo\Inspection\UrlInspectionQuota;
 use SsSystems\Platform\Seo\SearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncClient;
@@ -161,13 +160,32 @@ class AppServiceProvider extends ServiceProvider
             JsErrorState::class,
         ));
 
-        // ss-systems/platform-kit's Search Console contracts. GoogleSearch
-        // ConsoleService is authenticated with the GSC_CREDENTIALS service
-        // account (App\Support\Google\ServiceAccountToken), not an OAuth
-        // grant — this app has no /admin/{site}/platforms Google sign-in
-        // screen for Search Console (see PingController).
-        $this->app->bind(SearchConsoleClient::class, GoogleSearchConsoleService::class);
-        $this->app->bind(SearchConsoleSyncClient::class, GoogleSearchConsoleService::class);
+        // ss-systems/platform-kit's Search Console contracts, service-
+        // account flavor (kit 0.12.0, gsc-kit-client unit): this app has no
+        // /admin/{site}/platforms Google sign-in screen of its own for
+        // Search Console (see PingController) — the property is read
+        // through the GSC_CREDENTIALS service account instead of a
+        // per-owner OAuth grant. This app's own former App\Support\Google\
+        // ServiceAccountToken and App\Services\GoogleSearchConsoleService
+        // (byte-identical logic, ported from dawnsellshomes' originals) are
+        // gone: ONE singleton of the kit's Seo\Google\
+        // ServiceAccountSearchConsoleClient satisfies SearchConsoleClient,
+        // SearchConsoleSyncClient AND Inspection\Contracts\UrlInspector at
+        // once (see the kit's docs/SEARCH-CONSOLE-SERVICE-ACCOUNT.md) — the
+        // class needs no separate inspection adapter, so the UrlInspector
+        // bind that used to wrap App\Support\Seo\Inspection\
+        // SearchConsoleUrlInspector, then the kit's own generic adapter of
+        // the same name, lives here too (see below, where CoverageStore/
+        // SitemapSource/TrackedPaths are bound).
+        $this->app->singleton(ServiceAccountSearchConsoleClient::class, fn ($app) => new ServiceAccountSearchConsoleClient(
+            property: (string) config('services.google.search_console_property'),
+            credential: config('services.google.search_console_credentials'),
+            cache: $app->make(CacheInterface::class),
+            http: $app->make(HttpFactory::class),
+        ));
+        foreach ([SearchConsoleClient::class, SearchConsoleSyncClient::class, UrlInspector::class] as $contract) {
+            $this->app->bind($contract, fn ($app) => $app->make(ServiceAccountSearchConsoleClient::class));
+        }
         $this->app->bind(KitSearchConsoleWriter::class, SearchConsoleWriter::class);
 
         // Bing Webmaster Tools: the kit's sync, this app's writer, and a
@@ -209,23 +227,17 @@ class AppServiceProvider extends ServiceProvider
 
         // The kit's URL Inspection sweep (SsSystems\Platform\Seo\Inspection\
         // UrlInspectionSweep) — see App\Console\Commands\SeoGscInspectBulk.
-        // UrlInspector/CoverageStore/TrackedPaths now bind straight to the
-        // kit's own Inspection\{SearchConsoleUrlInspector,
-        // EloquentCoverageStore,NoTrackedPaths} (kit/search-console-contract)
-        // instead of this site's former local copies, which were nothing but
-        // thin wrappers over the same GoogleSearchConsoleService/
-        // GscCoverageState/GscRichResultIssue models the kit classes take as
-        // constructor arguments — the kit's SearchConsoleUrlInspector now
-        // takes the generic SearchConsoleSyncClient contract (not this
-        // site's concrete service), delegating isReady()/siteUrl() to
-        // whichever client is bound, so this swap needed
-        // GoogleSearchConsoleService::isReady() (added above) to stay
-        // behaviour-identical. This site has no gsc_coverage_state_history
+        // UrlInspector is bound above, straight to the service-account
+        // client. CoverageStore/TrackedPaths bind to the kit's own
+        // Inspection\{EloquentCoverageStore,NoTrackedPaths}
+        // (kit/search-console-contract) instead of this site's former local
+        // copies, which were nothing but thin wrappers over the same
+        // GscCoverageState/GscRichResultIssue models the kit class takes as
+        // constructor arguments. This site has no gsc_coverage_state_history
         // table, so EloquentCoverageStore gets only the two required model
         // class-strings. SitemapSource stays this site's own
         // MarketingSitemapSource — a per-site sitemap source, same as every
         // other adopter.
-        $this->app->bind(UrlInspector::class, fn ($app) => new SearchConsoleUrlInspector($app->make(SearchConsoleSyncClient::class)));
         $this->app->bind(SitemapSource::class, MarketingSitemapSource::class);
         $this->app->bind(CoverageStore::class, fn () => new EloquentCoverageStore(GscCoverageState::class, GscRichResultIssue::class));
         $this->app->bind(TrackedPaths::class, NoTrackedPaths::class);

@@ -13,11 +13,11 @@ use SsSystems\Platform\Seo\Inspection\UrlInspectionSweep;
  * resolution, prioritization, persistence, the markdown report) is
  * entirely SsSystems\Platform\Seo\Inspection\UrlInspectionSweep::run();
  * this class only turns its SweepOptions/SweepResult into console output,
- * a saved markdown file and an exit code. See App\Support\Seo\Inspection\
- * {SearchConsoleUrlInspector,MarketingSitemapSource,EloquentCoverageStore,
- * NoTrackedPaths} for the site-specific reads/writes the sweep drives, and
- * App\Providers\AppServiceProvider for how they (and UrlInspectionQuota)
- * are bound.
+ * a saved markdown file and an exit code. UrlInspector is the kit's own
+ * Seo\Google\ServiceAccountSearchConsoleClient (this site has no separate
+ * inspection adapter); App\Support\Seo\Inspection\MarketingSitemapSource is
+ * the one site-specific read left. See App\Providers\AppServiceProvider
+ * for how these (and UrlInspectionQuota) are bound.
  *
  * Exit code: SweepResult carries no status field of its own — the one real
  * FAILURE case is an empty resolved pool ("Nothing to inspect.") or no

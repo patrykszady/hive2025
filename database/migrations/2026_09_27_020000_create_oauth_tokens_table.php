@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Schema;
  * too, so `provider` alone is unique — no site_id. Only ever holds a
  * 'google_business_profile' row (App\Services\GoogleBusinessProfileService)
  * — Search Console runs on a server-held service account
- * (App\Support\Google\ServiceAccountToken), never OAuth, so there is no
+ * (SsSystems\Platform\Google\ServiceAccountToken), never OAuth, so there is no
  * 'google_search_console' row here. Meta's grant lives in `platform_settings`
  * instead (App\Services\MetaSocialService's docblock explains why), so it
  * never gets a row in this table either.
