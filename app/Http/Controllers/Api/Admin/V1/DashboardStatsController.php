@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use SsSystems\Platform\Dashboard\Delta;
 
 /**
  * GET /api/admin/v1/dashboard-stats — the central admin's dashboard tiles,
@@ -77,7 +78,7 @@ class DashboardStatsController extends Controller
             'label' => 'Sign-ups (7 days)',
             'value' => $current,
             'note' => number_format($query()->count()).' total',
-            'delta_pct' => $this->deltaPct($current, $prior),
+            'delta_pct' => Delta::pct($current, $prior),
             'href' => 'leads',
         ];
     }
@@ -99,7 +100,7 @@ class DashboardStatsController extends Controller
             'label' => 'Calls & emails (7 days)',
             'value' => $current,
             'note' => null,
-            'delta_pct' => $this->deltaPct($current, $prior),
+            'delta_pct' => Delta::pct($current, $prior),
             'href' => 'analytics',
         ];
     }
@@ -146,7 +147,7 @@ class DashboardStatsController extends Controller
             'label' => 'Search clicks (7 days)',
             'value' => $clicks,
             'note' => number_format($impressions).' impressions',
-            'delta_pct' => $this->deltaPct($clicks, $priorClicks),
+            'delta_pct' => Delta::pct($clicks, $priorClicks),
             'href' => 'seo',
         ];
     }
@@ -195,7 +196,7 @@ class DashboardStatsController extends Controller
             'label' => 'Reviews',
             'value' => $total,
             'note' => '+'.number_format($new).' in 30 days',
-            'delta_pct' => $this->deltaPct($new, $priorNew),
+            'delta_pct' => Delta::pct($new, $priorNew),
             'href' => 'reviews',
         ];
     }
@@ -216,7 +217,7 @@ class DashboardStatsController extends Controller
             'label' => 'New companies (7 days)',
             'value' => $current,
             'note' => number_format($total).' total',
-            'delta_pct' => $this->deltaPct($current, $prior),
+            'delta_pct' => Delta::pct($current, $prior),
             'href' => null,
         ];
     }
@@ -237,17 +238,8 @@ class DashboardStatsController extends Controller
             'label' => 'New users (7 days)',
             'value' => $current,
             'note' => number_format($total).' total',
-            'delta_pct' => $this->deltaPct($current, $prior),
+            'delta_pct' => Delta::pct($current, $prior),
             'href' => null,
         ];
-    }
-
-    protected function deltaPct(int|float $current, int|float $previous): ?float
-    {
-        if ($previous <= 0) {
-            return null;
-        }
-
-        return round((($current - $previous) / $previous) * 100, 1);
     }
 }
