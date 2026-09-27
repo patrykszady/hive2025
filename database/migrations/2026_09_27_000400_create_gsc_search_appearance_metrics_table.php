@@ -12,11 +12,12 @@ use Illuminate\Support\Facades\Schema;
  * for alongside another dimension in one call, which is why this exists as
  * its own table rather than a column on gsc_query_metrics.
  *
- * Not surfaced in this site's seo/snapshot (no admin card reads it here) —
- * the table exists purely so App\Support\Seo\SearchConsoleWriter::
- * upsertSearchAppearance() has somewhere to write, keeping the kit's sync
- * algorithm intact rather than special-cased per site. Ported from
- * dawnsellshomes' identical table.
+ * Surfaced on this site's seo/snapshot as `search_appearance` (2026-09-27,
+ * kit's BuildsSeoSnapshot::searchAppearanceSnapshot()) — the "How Your
+ * Results Look on Google" card. Filled by App\Support\Seo\
+ * SearchConsoleWriter::upsertSearchAppearance() on every seo:gsc-sync run,
+ * keeping the kit's sync algorithm intact rather than special-cased per
+ * site. Ported from dawnsellshomes' identical table.
  */
 return new class extends Migration
 {
