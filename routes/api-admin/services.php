@@ -1,14 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\ServiceController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // ss-systems' Services screen (App\Livewire\Admin\ServiceList/ServiceForm)
 // — hive's 9 top-level marketing feature areas. See
 // App\Http\Controllers\Api\Admin\V1\ServiceController's docblock for why
 // store()/destroy() refuse and why there's no reorder/generate route.
-AdminApi::declare('services');
+CapabilityRegistry::declare('services');
 
 Route::get('services', [ServiceController::class, 'index'])->name('services.index');
 Route::get('services/{service}', [ServiceController::class, 'show'])->name('services.show');

@@ -1,13 +1,13 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\TestimonialController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // The Reviews screen: customer quotes about Hive itself, editable here and
 // shown (published only) on the marketing home page's "What contractors
 // say" section.
-AdminApi::declare('testimonials');
+CapabilityRegistry::declare('testimonials');
 
 // filters before {testimonial} so it's never read as an id.
 Route::get('testimonials/filters', [TestimonialController::class, 'filters'])->name('testimonials.filters');

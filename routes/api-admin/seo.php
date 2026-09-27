@@ -3,14 +3,14 @@
 use App\Http\Controllers\Api\Admin\V1\GscErrorController;
 use App\Http\Controllers\Api\Admin\V1\SeoReportController;
 use App\Http\Controllers\Api\Admin\V1\SeoSnapshotController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // The SEO screen: the live snapshot (Site Pulse, health, search
 // performance, GSC coverage, sitemaps), the shared report library, and the
 // dedicated GSC Errors screen. See SeoSnapshotController's docblock for
 // the full shape.
-AdminApi::declare('seo');
+CapabilityRegistry::declare('seo');
 
 Route::get('seo/snapshot', SeoSnapshotController::class)->name('seo.snapshot');
 Route::post('seo/snapshot/refresh', [SeoSnapshotController::class, 'refreshSnapshot'])->name('seo.snapshot.refresh');

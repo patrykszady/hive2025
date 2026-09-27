@@ -1,14 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\JsErrorController;
-use App\Support\AdminApi;
+use SsSystems\Platform\Http\Admin\CapabilityRegistry;
 use Illuminate\Support\Facades\Route;
 
 // JS Errors board: SsSystems\Platform\Pulse's `jserr` site_events rows,
 // grouped live by SsSystems\Platform\Pulse\JsErrorGroups — the ss.systems
 // platform dashboard's JS errors board reads this across every connected site.
 // summary/resolve-all before {jsError} so neither is ever read as a group id.
-AdminApi::declare('js-errors');
+CapabilityRegistry::declare('js-errors');
 
 Route::get('js-errors', [JsErrorController::class, 'index'])->name('js-errors.index');
 Route::get('js-errors/summary', [JsErrorController::class, 'summary'])->name('js-errors.summary');
