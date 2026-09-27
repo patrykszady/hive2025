@@ -6,6 +6,7 @@ use App\Observers\TestimonialObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use SsSystems\Platform\Reviews\DisplayName;
 
 /**
  * Customer reviews of Hive itself — the central admin's Reviews screen and
@@ -42,25 +43,16 @@ class Testimonial extends Model
      * exactly that ("Public pages will show 'First L' only"). "First & First
      * Last" becomes "First & First L"; a single word, or one already ending
      * in an initial, is left alone. The admin API still carries the full name.
+     *
+     * The rule itself now lives in the kit (SsSystems\Platform\Reviews\
+     * DisplayName) — this app's own copy trimmed the name up front where
+     * gsc/jpeterson's early-return branches did not; nothing here (or on any
+     * other site) ever depended on that difference, so this now calls the
+     * shared, gsc-sourced version.
      */
     public function getDisplayNameAttribute(): string
     {
-        $name = trim((string) $this->name);
-        $parts = preg_split('/\s+/', $name) ?: [];
-
-        if (count($parts) < 2) {
-            return $name;
-        }
-
-        $last = end($parts);
-
-        if (mb_strlen($last) === 1) {
-            return $name;
-        }
-
-        array_pop($parts);
-
-        return implode(' ', $parts).' '.mb_strtoupper(mb_substr($last, 0, 1));
+        return DisplayName::from((string) $this->name);
     }
 
     public function scopePublished(Builder $query): Builder
