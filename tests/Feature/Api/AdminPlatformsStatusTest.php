@@ -17,6 +17,48 @@ it('reads unconfigured/not-connected calmly when nothing is set up', function ()
         ->json('data');
 
     expect($data['services'])->toBe(['gsc', 'bing']);
+    expect($data['google'])->toBe([
+        'configured' => false,
+        'source' => null,
+        'client_id_hint' => null,
+        'project_id' => null,
+        'redirect_uris' => ['gbp' => route('admin-oauth.callback', ['provider' => 'gbp'])],
+    ]);
+    expect($data['gbp'])->toBe([
+        'connected' => false,
+        'source' => null,
+        'email' => null,
+        'granted_at' => null,
+        'updated_at' => null,
+        'access_token_expires_at' => null,
+        'scopes' => null,
+        'app_credentials_configured' => false,
+        'fully_configured' => false,
+        'client_id_configured' => false,
+        'client_secret_configured' => false,
+        'account_id_configured' => false,
+        'location_id_configured' => false,
+        'refresh_token_present' => false,
+        'business_scope_granted' => false,
+        'listing_source' => null,
+        'reviews_count' => 0,
+        'latest_review_date' => null,
+    ]);
+    expect($data['meta'])->toBe([
+        'enabled' => false,
+        'connected' => false,
+        'source' => null,
+        'page_id' => null,
+        'page_name' => null,
+        'instagram_id' => null,
+        'instagram_username' => null,
+        'instagram_configured' => false,
+        'facebook_configured' => false,
+        'granted_by' => null,
+        'granted_at' => null,
+        'updated_at' => null,
+        'app_credentials_configured' => false,
+    ]);
     expect($data['gsc'])->toBe([
         'connected' => false,
         'configured' => false,

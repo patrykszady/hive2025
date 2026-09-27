@@ -212,3 +212,19 @@ it('sorts by the requested column and direction', function () {
 it('requires the admin api bearer token', function () {
     $this->getJson('/api/admin/v1/testimonials')->assertUnauthorized();
 });
+
+it('maps the gbp review importer review_urls shape onto the flat platform/review_url/external_id columns', function () {
+    $response = $this->postJson('/api/admin/v1/testimonials', [
+        'reviewer_name' => 'Jane Doe',
+        'review_description' => 'Left a 5-star review.',
+        'review_urls' => [['platform' => 'google', 'url' => 'https://www.google.com/maps/reviews?reviewid=abc', 'external_id' => 'abc']],
+    ], adminApiHeaders())->assertCreated();
+
+    expect($response->json('data.review_url'))->toBe('https://www.google.com/maps/reviews?reviewid=abc');
+    expect($response->json('data.external_id'))->toBe('abc');
+
+    $stored = Testimonial::first();
+    expect($stored->platform)->toBe('google');
+    expect($stored->review_url)->toBe('https://www.google.com/maps/reviews?reviewid=abc');
+    expect($stored->external_id)->toBe('abc');
+});

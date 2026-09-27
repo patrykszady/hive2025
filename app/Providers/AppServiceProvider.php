@@ -30,6 +30,8 @@ use App\Observers\VendorObserver;
 use App\Mail\Transport\NylasTransport;
 use App\Services\GoogleSearchConsoleService;
 use App\Services\NylasService;
+use App\Support\GoogleBusinessListing;
+use App\Support\GoogleOAuthApp;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\BingWriter;
 use App\Support\Seo\Inspection\EloquentCoverageStore;
@@ -195,6 +197,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // This app's own Google OAuth client (Business Profile sign-in)
+        // and its single linked listing — see App\Support\GoogleOAuthApp
+        // and App\Support\GoogleBusinessListing's docblocks. Applied at
+        // boot so every request's config() reads reflect what was saved
+        // from the central admin's Platforms screen, the same pattern
+        // BingSettings::apiKey() reads through PlatformSettingCredential.
+        GoogleOAuthApp::apply();
+        GoogleBusinessListing::apply();
+
         // Dev guardrail: a relation accessed without being eager-loaded throws
         // here instead of quietly becoming an N+1 in production. Logs rather
         // than throws so an unlucky path can't break local work outright —

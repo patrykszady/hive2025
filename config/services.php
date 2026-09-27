@@ -337,15 +337,30 @@ return [
     | Google Search Console — server-managed, like dawnsellshomes: a
     | service-account credential (App\Support\Google\ServiceAccountToken),
     | never a per-owner OAuth grant, since this app has no
-    | /admin/{site}/platforms Google sign-in screen of its own. The service
-    | account (GSC_CREDENTIALS) must be added as a user on the property
-    | itself with Full permission — Restricted cannot use URL Inspection.
-    | Named 'google', deliberately NOT 'gsc': that key already means
-    | gs.construction's admin API above.
+    | /admin/{site}/platforms Google sign-in screen of its own for it. The
+    | service account (GSC_CREDENTIALS) must be added as a user on the
+    | property itself with Full permission — Restricted cannot use URL
+    | Inspection. Named 'google', deliberately NOT 'gsc': that key already
+    | means gs.construction's admin API above.
+    |
+    | ONE google block — a duplicate key here silently clobbers the earlier
+    | one. business_profile (2026-09-26) is the Platforms screen's Google
+    | sign-in: this app's own OAuth client (App\Support\GoogleOAuthApp,
+    | admin-writable with these two as the env fallback) plus the single
+    | linked listing (App\Support\GoogleBusinessListing, account_id/
+    | location_id — admin-writable too, these two only an env fallback for
+    | a server that sets them directly).
     */
     'google' => [
         'search_console_credentials' => env('GSC_CREDENTIALS'),
         'search_console_property' => env('GSC_PROPERTY', 'sc-domain:hive.contractors'),
+
+        'business_profile' => [
+            'client_id' => env('GOOGLE_CLIENT_ID'),
+            'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+            'account_id' => env('GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID'),
+            'location_id' => env('GOOGLE_BUSINESS_PROFILE_LOCATION_ID'),
+        ],
     ],
 
     // Bing Webmaster Tools — a free API key, admin-writable
@@ -354,5 +369,23 @@ return [
     'bing_wmt' => [
         'key' => env('BING_WMT_KEY'),
         'site_url' => env('BING_WMT_SITE_URL', env('MARKETING_URL', 'https://hive.contractors')),
+    ],
+
+    /*
+    | Meta (Facebook Page + Instagram Business) — Platforms screen card
+    | (2026-09-26). The admin (central admin, via PlatformsController)
+    | drives the OAuth dance and stores the resulting grant in
+    | platform_settings (App\Services\MetaSocialService — this app has no
+    | posting pipeline, so there is no page_access_token/facebook_page_id/
+    | instagram_account_id env fallback the way jpeterson-design's/gsc's
+    | block has one; connect at /admin/hive/platforms).
+    |
+    | 'enabled' is the same kill switch the other kit sites use — off here
+    | by default, since this app never posts to Meta.
+    */
+    'meta' => [
+        'enabled' => env('META_ENABLED', false),
+        'app_id' => env('META_APP_ID'),
+        'app_secret' => env('META_APP_SECRET'),
     ],
 ];

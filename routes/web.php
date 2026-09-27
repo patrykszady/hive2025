@@ -178,6 +178,59 @@ Route::post('api/passkey-debug-log', function () {
 })->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
 
 /*
+| Ported from dawnsellshomes.com's/jpeterson-design's identical block — a
+| sibling /admin-oauth/... path, not nested under /admin/..., so this app's
+| session-less /admin proxy (AdminProxyController, below) never has a
+| chance to swallow it. In place of an admin session (the whole /admin
+| surface is a stateless proxy to ss-systems), the request is authenticated
+| by the signed, short-lived 'state' value App\Support\OAuthState mints and
+| the provider echoes back.
+|
+| No 'gsc' provider: Search Console on this app runs on a server-held
+| service account (App\Support\Google\ServiceAccountToken), never OAuth.
+| Redirect URIs to register, exactly:
+|   Google Cloud OAuth client: https://hive.contractors/admin-oauth/gbp/callback
+|   Meta app (Facebook Login):  https://hive.contractors/admin-oauth/meta/callback
+|
+| The outcome travels back to the central admin as a query param
+| (?connected={provider} / ?error={message}): session flash can't cross
+| apps, since this callback and the Platforms screen (ss.systems) are
+| different Laravel apps with different sessions.
+*/
+Route::get('/admin-oauth/{provider}/callback', function (\Illuminate\Http\Request $request, string $provider) {
+    abort_unless(in_array($provider, ['gbp', 'meta'], true), 404);
+
+    $platforms = '/admin/'.config('services.ss.site_key', 'hive').'/platforms';
+
+    if (! \App\Support\OAuthState::verify($request->query('state'), $provider)) {
+        return redirect($platforms.'?error='.urlencode(
+            'Sign-in link expired or was invalid. Try connecting again.'
+        ));
+    }
+
+    $code = $request->query('code');
+    if (! $code) {
+        $err = $request->query('error_description') ?? $request->query('error')
+            ?? 'Authorization cancelled or failed — no code returned.';
+
+        return redirect($platforms.'?error='.urlencode((string) $err));
+    }
+
+    $redirectUri = route('admin-oauth.callback', ['provider' => $provider]);
+
+    $result = match ($provider) {
+        'gbp' => app(\App\Services\GoogleBusinessProfileService::class)->exchangeCodeAndStore($code, $redirectUri),
+        'meta' => app(\App\Services\MetaSocialService::class)->exchangeCodeAndStore($code, $redirectUri),
+    };
+
+    if ($result['success'] ?? false) {
+        return redirect($platforms."?connected={$provider}");
+    }
+
+    return redirect($platforms.'?error='.urlencode('OAuth failed: '.($result['error'] ?? 'Unknown error')));
+})->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class])->whereIn('provider', ['gbp', 'meta'])->name('admin-oauth.callback');
+
+/*
 | /admin belongs to the CENTRAL admin now: a transparent proxy relaying
 | every request byte-for-byte to ss-systems (see AdminProxyController —
 | ported from gsc's/dawnsellshomes' working contract, see
