@@ -27,7 +27,7 @@ it('lists every marketing/legal page exactly once, in English, never a hand-type
     expect($finances['type'])->toBe('area');
     expect($finances['title'])->toBe('Finances — Hive Contractors');
     expect($finances['status'])->toBe('published');
-    expect($finances['in_sitemap'])->toBeTrue();
+    expect($finances['in_sitemap'])->toBeNull(); // nothing to switch: the admin hides the sitemap toggle
     expect($finances['url'])->toBe('https://hive.contractors/en/welcome/finances');
     expect($finances['meta_title'])->toBeNull();
     expect($finances['meta_description'])->toBeNull();

@@ -95,11 +95,19 @@
         // override on a route this doesn't apply to (most of the app)
         // costs nothing — see PageSeo::current()'s null-fast guard.
         $pageSeoOverride = \App\Support\PageSeo::current();
+        // The marketing pages set their title with @section('title', …), a
+        // section this layout never yielded: every one of them shipped as a
+        // bare "Hive" (found 2026-09-27). Read the section as the fallback
+        // behind a $title prop, and append the app name only when the title
+        // does not already carry it ("Finances — Hive Contractors").
+        $sectionTitle = trim($__env->yieldContent('title'));
         $effectiveTitle = $pageSeoOverride['meta_title']
             ?? $pageSeoOverride['title']
-            ?? ($title ?? null);
+            ?? ($title ?? null)
+            ?? ($sectionTitle !== '' ? $sectionTitle : null);
+        $appName = config('app.name');
     @endphp
-    <title>{{ $effectiveTitle ? $effectiveTitle.' | '.config('app.name') : config('app.name') }}</title>
+    <title>{{ $effectiveTitle ? (str_contains($effectiveTitle, $appName) ? $effectiveTitle : $effectiveTitle.' | '.$appName) : $appName }}</title>
     @if($pageSeoOverride['meta_description'] ?? null)
         <meta name="description" content="{{ $pageSeoOverride['meta_description'] }}">
     @endif

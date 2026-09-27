@@ -180,3 +180,19 @@ it('does not mark the un-prefixed legal pages noindex', function () {
     $response = $this->get('/welcome/legal/privacy');
     expect($response->headers->get('X-Robots-Tag'))->toBeNull();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Title tags
+|--------------------------------------------------------------------------
+*/
+
+it('gives every marketing page its own title tag, not the bare app name', function () {
+    // The pages set @section('title', …); the layout never yielded it, so
+    // production shipped "<title>Hive</title>" on every page (2026-09-27).
+    $html = $this->get('/en/welcome/finances')->assertOk()->getContent();
+
+    expect($html)->toMatch('#<title>Finances — Hive Contractors</title>#')
+        ->and($html)->not->toContain('<title>Hive</title>')
+        ->and($html)->not->toContain('<title>Hive Contractors</title>');
+});

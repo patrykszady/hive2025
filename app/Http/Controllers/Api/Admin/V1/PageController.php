@@ -172,7 +172,7 @@ class PageController extends Controller
             'url' => marketing_url($path),
             'type' => $entry['type'],
             'status' => 'published',
-            'in_sitemap' => true,
+            'in_sitemap' => null, // no per-page sitemap setting here: the admin shows no switch
             'updated_at' => $mtime ? Carbon::createFromTimestamp($mtime)->toIso8601String() : null,
         ];
     }
