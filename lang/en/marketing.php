@@ -22,6 +22,7 @@ return [
         'contractors' => 'Contractors',
         'homeowners' => 'Homeowners',
         'faq' => 'FAQ',
+        'blog' => 'Blog',
         'sign_in' => 'Sign in',
         'get_started' => 'Get started',
         'menu' => 'Menu',

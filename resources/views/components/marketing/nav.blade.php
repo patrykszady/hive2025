@@ -55,6 +55,11 @@
                 :current="$active === 'faq'"
                 wire:navigate.hover
             >{{ __('marketing.nav.faq') }}</flux:navbar.item>
+            <flux:navbar.item
+                href="{{ route('blog.index') }}"
+                :current="$active === 'blog'"
+                wire:navigate.hover
+            >{{ __('marketing.nav.blog') }}</flux:navbar.item>
         </flux:navbar>
     </div>
 
@@ -83,6 +88,7 @@
                     </flux:navmenu.item>
                 @endforeach
                 <flux:navmenu.item href="{{ route('welcome.faq') }}" icon="question-mark-circle" wire:navigate.hover>{{ __('marketing.nav.faq') }}</flux:navmenu.item>
+                <flux:navmenu.item href="{{ route('blog.index') }}" icon="newspaper" :current="$active === 'blog'" wire:navigate.hover>{{ __('marketing.nav.blog') }}</flux:navmenu.item>
                 <flux:navmenu.separator />
                 <flux:navmenu.item href="{{ route('login') }}" icon="arrow-right-end-on-rectangle" wire:navigate.hover>{{ __('marketing.nav.sign_in') }}</flux:navmenu.item>
                 <flux:navmenu.item href="{{ route('registration') }}" icon="sparkles" wire:navigate.hover>{{ __('marketing.nav.get_started') }}</flux:navmenu.item>

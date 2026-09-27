@@ -11,6 +11,12 @@ Allow: /pl/welcome/
 Allow: /es/welcome
 Allow: /es/welcome/
 Allow: /welcome/legal/
+Allow: /en/blog
+Allow: /en/blog/
+Allow: /pl/blog
+Allow: /pl/blog/
+Allow: /es/blog
+Allow: /es/blog/
 Allow: /sitemap.xml
 
 # The app and the marketing pages share hive.contractors (its aliases,

@@ -75,11 +75,12 @@ it('serves a valid sitemap with every marketing route x every locale, rooted on 
 
     // 1 (welcome) + 10 top-level area/homeowners pages + 9 homeowner
     // subpages + 66 feature cards (config('marketing.areas')) + 1 (faq)
-    // = 87 distinct pages, each in 3 locales.
+    // + 1 (blog index) + one per published App\Models\BlogPost (none in
+    // this test) = 88 distinct pages, each in 3 locales.
     $distinctPages = 1 + 10 + 9 + array_sum(array_map(
         fn (array $area) => count($area['cards'] ?? []),
         config('marketing.areas')
-    )) + 1;
+    )) + 1 + 1 + \App\Models\BlogPost::published()->count();
 
     expect(count($xml->url))->toBe($distinctPages * 3);
 

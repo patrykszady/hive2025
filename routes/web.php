@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\BlogController;
 use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\ExpenseAutoMatchController;
 use App\Http\Controllers\LeadController;
@@ -333,6 +334,27 @@ Route::prefix('{locale}')
 
         // Standalone FAQ page
         Route::view('welcome/faq', 'welcome.faq')->name('welcome.faq');
+
+        // Public blog — plain DB rows (App\Models\BlogPost), never behind
+        // CachePublicPage: pagination and a draft's 404 both need a fresh
+        // render every request, unlike the static /{locale}/welcome set.
+        // App\Support\MarketingSitemap expands blog.show against every
+        // published post, the same way it expands welcome.feature against
+        // config('marketing.areas').
+        Route::withoutMiddleware(\App\Http\Middleware\CachePublicPage::class)->group(function () {
+            Route::get('blog', [BlogController::class, 'index'])->name('blog.index');
+            Route::get('blog/{slug}', [BlogController::class, 'show'])->name('blog.show');
+
+            // Opened only from BlogPost::previewUrl() — signed RELATIVE
+            // (never absolute): the link is rooted on the marketing host
+            // (marketing_url()), which can differ from APP_URL, and a
+            // relative signature verifies against the path the browser
+            // actually requested rather than against whichever host
+            // generated the link.
+            Route::get('blog/{slug}/preview', [BlogController::class, 'preview'])
+                ->name('blog.preview')
+                ->middleware(\Illuminate\Routing\Middleware\ValidateSignature::relative());
+        });
     });
 
 // Legal pages (public, no auth required) — un-prefixed, registered before the

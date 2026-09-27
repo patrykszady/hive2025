@@ -108,8 +108,10 @@
         $appName = config('app.name');
     @endphp
     <title>{{ $effectiveTitle ? (str_contains($effectiveTitle, $appName) ? $effectiveTitle : $effectiveTitle.' | '.$appName) : $appName }}</title>
-    @if($pageSeoOverride['meta_description'] ?? null)
-        <meta name="description" content="{{ $pageSeoOverride['meta_description'] }}">
+    {{-- An admin override first, then a $description the page passed (the blog). --}}
+    @php $effectiveDescription = $pageSeoOverride['meta_description'] ?? ($description ?? null); @endphp
+    @if($effectiveDescription)
+        <meta name="description" content="{{ $effectiveDescription }}">
     @endif
 
     {{-- Self-canonical + hreflang alternates for the public marketing site:

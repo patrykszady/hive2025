@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Http\Middleware\SetLocale;
+use App\Models\BlogPost;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Route as RouteFacade;
 use Throwable;
@@ -63,6 +64,19 @@ class MarketingSitemap
                             $lastmod
                         );
                     }
+                }
+
+                continue;
+            }
+
+            if ($name === 'blog.show') {
+                // Expanded against the actual published rows, the same way
+                // welcome.feature is expanded against config('marketing.
+                // areas') above — blog.preview shares this route's exact
+                // param shape (locale, slug) but is skipped below since its
+                // NAME never matches this branch.
+                foreach (BlogPost::published()->get() as $post) {
+                    $entries[] = $this->localizedEntry($locales, $name, ['slug' => $post->slug], $post->updated_at);
                 }
 
                 continue;
