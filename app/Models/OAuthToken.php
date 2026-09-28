@@ -9,9 +9,12 @@ use Illuminate\Support\Facades\Crypt;
 /**
  * Ported verbatim from dawnsellshomes.com's app/Models/OAuthToken.php — this
  * app is single-tenant too, so `provider` alone is unique. Only ever holds a
- * 'google_business_profile' row (see App\Services\GoogleBusinessProfileService
- * ::PROVIDER) — Search Console runs on a server-held service account, never
- * OAuth, and Meta's grant lives in `platform_settings` (see
+ * 'google_business_profile' row (ss-platform-kit's
+ * SsSystems\Platform\Google\BusinessProfile\Client::PROVIDER, read and
+ * written through the kit's Google\Adapters\EloquentTokenStore, which keeps
+ * the OAuth client that issued the grant in metadata.oauth_client_id) —
+ * Search Console runs on a server-held service account, never OAuth, and
+ * Meta's grant lives in `platform_settings` (see
  * App\Services\MetaSocialService's docblock).
  */
 class OAuthToken extends Model

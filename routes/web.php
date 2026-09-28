@@ -84,6 +84,10 @@ use Laragear\WebAuthn\Http\Routes as WebAuthnRoutes;
 use App\Livewire\Auth\PasskeySetup;
 use App\Livewire\Notifications\NotificationIndex;
 use Illuminate\Support\Facades\Log;
+use App\Services\MetaSocialService;
+use SsSystems\Platform\Google\BusinessProfile\Client as GbpClient;
+use SsSystems\Platform\Google\Http\OAuthCallback;
+use SsSystems\Platform\Google\OAuthClient;
 use SsSystems\Platform\Pulse\BeaconController;
 
 // robots.txt is a STATIC file (public/robots.txt): both nginx in production
@@ -189,46 +193,28 @@ Route::post('api/passkey-debug-log', function () {
 | No 'gsc' provider: Search Console on this app runs on a server-held
 | service account (SsSystems\Platform\Google\ServiceAccountToken), never OAuth.
 | Redirect URIs to register, exactly:
-|   Google Cloud OAuth client: https://hive.contractors/admin-oauth/gbp/callback
+|   The SHARED Google OAuth client (kit 0.14.0 — gs.construction's Cloud
+|   project 31627704418, the one every tenant signs in through):
+|                               https://hive.contractors/admin-oauth/gbp/callback
 |   Meta app (Facebook Login):  https://hive.contractors/admin-oauth/meta/callback
 |
 | The outcome travels back to the central admin as a query param
 | (?connected={provider} / ?error={message}): session flash can't cross
 | apps, since this callback and the Platforms screen (ss.systems) are
-| different Laravel apps with different sessions.
+| different Laravel apps with different sessions. The handling itself is
+| the kit's hardened SsSystems\Platform\Google\Http\OAuthCallback (state
+| verified before any code is exchanged, query values taken as strings
+| only, a provider that did not answer is a calm line), shared by every
+| tenant; only the two code exchanges below are this app's.
 */
-Route::get('/admin-oauth/{provider}/callback', function (\Illuminate\Http\Request $request, string $provider) {
-    abort_unless(in_array($provider, ['gbp', 'meta'], true), 404);
-
-    $platforms = '/admin/'.config('services.ss.site_key', 'hive').'/platforms';
-
-    if (! \SsSystems\Platform\Auth\OAuthState::verify($request->query('state'), $provider)) {
-        return redirect($platforms.'?error='.urlencode(
-            'Sign-in link expired or was invalid. Try connecting again.'
-        ));
-    }
-
-    $code = $request->query('code');
-    if (! $code) {
-        $err = $request->query('error_description') ?? $request->query('error')
-            ?? 'Authorization cancelled or failed — no code returned.';
-
-        return redirect($platforms.'?error='.urlencode((string) $err));
-    }
-
-    $redirectUri = route('admin-oauth.callback', ['provider' => $provider]);
-
-    $result = match ($provider) {
-        'gbp' => app(\App\Services\GoogleBusinessProfileService::class)->exchangeCodeAndStore($code, $redirectUri),
-        'meta' => app(\App\Services\MetaSocialService::class)->exchangeCodeAndStore($code, $redirectUri, \App\Services\MetaSocialService::OAUTH_SCOPES),
-    };
-
-    if ($result['success'] ?? false) {
-        return redirect($platforms."?connected={$provider}");
-    }
-
-    return redirect($platforms.'?error='.urlencode('OAuth failed: '.($result['error'] ?? 'Unknown error')));
-})->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class])->whereIn('provider', ['gbp', 'meta'])->name('admin-oauth.callback');
+Route::get('/admin-oauth/{provider}/callback', fn (Request $request, string $provider) => (new OAuthCallback(
+    '/admin/'.config('services.ss.site_key', 'hive').'/platforms',
+    Log::channel(config('logging.channels.gbp') ? 'gbp' : null),
+))->handle($request, $provider, route(OAuthClient::CALLBACK_ROUTE, ['provider' => $provider]), [
+    'gbp' => fn (string $code, string $redirectUri) => app(GbpClient::class)->exchangeCodeAndStore($code, $redirectUri),
+    'meta' => fn (string $code, string $redirectUri) => app(MetaSocialService::class)
+        ->exchangeCodeAndStore($code, $redirectUri, MetaSocialService::OAUTH_SCOPES),
+]))->withoutMiddleware([VerifyCsrfToken::class])->whereIn('provider', ['gbp', 'meta'])->name(OAuthClient::CALLBACK_ROUTE);
 
 /*
 | /admin belongs to the CENTRAL admin now: a transparent proxy relaying

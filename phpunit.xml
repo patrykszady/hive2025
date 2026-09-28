@@ -21,10 +21,13 @@
     <env name="URL_SHORTENER_ENABLED" value="false"/>
     <!-- Blank every credential scripts/pull-prod-env.sh brings from production:
          tests must never see (or call Google/Bing/Meta with) real keys. -->
-    <env name="GOOGLE_CLIENT_ID" value="" force="true"/>
-    <env name="GOOGLE_CLIENT_SECRET" value="" force="true"/>
+    <env name="GOOGLE_OAUTH_CLIENT_ID" value="" force="true"/>
+    <env name="GOOGLE_OAUTH_CLIENT_SECRET" value="" force="true"/>
+    <env name="GOOGLE_OAUTH_PROJECT_ID" value="" force="true"/>
     <env name="GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID" value="" force="true"/>
     <env name="GOOGLE_BUSINESS_PROFILE_LOCATION_ID" value="" force="true"/>
+    <env name="GOOGLE_BUSINESS_PROFILE_PLACE_ID" value="" force="true"/>
+    <env name="GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN" value="" force="true"/>
     <env name="GSC_CREDENTIALS" value="" force="true"/>
     <env name="BING_WMT_KEY" value="" force="true"/>
     <env name="CLARITY_PROJECT_ID" value="" force="true"/>

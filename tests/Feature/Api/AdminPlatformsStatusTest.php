@@ -17,9 +17,14 @@ it('reads unconfigured/not-connected calmly when nothing is set up', function ()
         ->json('data');
 
     expect($data['services'])->toBe(['gsc', 'bing', 'clarity', 'pagespeed', 'dataforseo']);
+    // The kit's (0.14.0) google/gbp blocks: the shared sign-in client, and
+    // the grant + listing + reviews — the keys the old per-site blocks had,
+    // plus shared/legacy_config, reconnect_required and maps_url.
     expect($data['google'])->toBe([
         'configured' => false,
         'source' => null,
+        'shared' => true,
+        'legacy_config' => false,
         'client_id_hint' => null,
         'project_id' => null,
         'redirect_uris' => ['gbp' => route('admin-oauth.callback', ['provider' => 'gbp'])],
@@ -32,15 +37,17 @@ it('reads unconfigured/not-connected calmly when nothing is set up', function ()
         'updated_at' => null,
         'access_token_expires_at' => null,
         'scopes' => null,
+        'business_scope_granted' => false,
+        'refresh_token_present' => false,
         'app_credentials_configured' => false,
-        'fully_configured' => false,
         'client_id_configured' => false,
         'client_secret_configured' => false,
+        'reconnect_required' => false,
+        'fully_configured' => false,
         'account_id_configured' => false,
         'location_id_configured' => false,
-        'refresh_token_present' => false,
-        'business_scope_granted' => false,
         'listing_source' => null,
+        'maps_url' => null,
         'reviews_count' => 0,
         'latest_review_date' => null,
     ]);

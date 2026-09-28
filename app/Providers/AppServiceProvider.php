@@ -32,9 +32,8 @@ use App\Observers\VendorDocObserver;
 use App\Observers\VendorObserver;
 
 use App\Mail\Transport\NylasTransport;
+use App\Models\OAuthToken;
 use App\Services\NylasService;
-use App\Support\GoogleBusinessListing;
-use App\Support\GoogleOAuthApp;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\BingWriter;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
@@ -77,6 +76,12 @@ use SsSystems\Platform\Citations\KnownListingsReconciler;
 use SsSystems\Platform\Citations\UnavailableBatchRunner;
 use SsSystems\Platform\Citations\UnavailableSession;
 use SsSystems\Platform\Citations\UnavailableVerificationInbox;
+use SsSystems\Platform\Google\Adapters\EloquentTokenStore;
+use SsSystems\Platform\Google\BusinessProfile\Adapters\PlatformSettingListingStore;
+use SsSystems\Platform\Google\BusinessProfile\Client as GbpClient;
+use SsSystems\Platform\Google\BusinessProfile\Contracts\ListingStore;
+use SsSystems\Platform\Google\Contracts\TokenStore;
+use SsSystems\Platform\Google\OAuthClient;
 use SsSystems\Platform\Pulse\BeaconController;
 use SsSystems\Platform\Pulse\Contracts\PulseStorage;
 use SsSystems\Platform\Pulse\JsErrorGroups;
@@ -252,6 +257,39 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->bind(CacheInterface::class, fn ($app) => $app->make('cache')->store());
 
+        // Google — ONE sign-in client and ONE Business Profile client for
+        // every tenant (kit 0.14.0, "one Google", the kit's docs/GOOGLE.md).
+        // The client is server configuration (services.google.oauth, the
+        // shared GOOGLE_OAUTH_* values), never a per-site row: this app's
+        // former App\Support\GoogleOAuthApp overlay, App\Support\
+        // GoogleBusinessListing and App\Services\GoogleBusinessProfileService
+        // are gone. The grant stays in this app's own oauth_tokens row
+        // (OAuthToken, which now also records the issuing client in
+        // metadata.oauth_client_id) and the chosen listing in its own gbp.*
+        // platform_settings keys, with the env ids only as a fallback. No
+        // 'gbp' log channel is defined here, so the client logs to the
+        // default one, as the old service did. `bind`, not `singleton`, as
+        // the kit asks of every site.
+        $this->app->bind(OAuthClient::class, fn ($app) => OAuthClient::fromConfig(
+            (array) config('services.google'),
+            $app->make(HttpFactory::class),
+        ));
+        $this->app->bind(TokenStore::class, fn () => new EloquentTokenStore(OAuthToken::class));
+        $this->app->bind(ListingStore::class, fn () => new PlatformSettingListingStore(
+            PlatformSetting::class,
+            config('services.google.business_profile.account_id'),
+            config('services.google.business_profile.location_id'),
+            config('services.google.business_profile.place_id'),
+        ));
+        $this->app->bind(GbpClient::class, fn ($app) => new GbpClient(
+            $app->make(OAuthClient::class),
+            $app->make(TokenStore::class),
+            $app->make(CacheInterface::class),
+            $app->make(HttpFactory::class),
+            Log::channel(config('logging.channels.gbp') ? 'gbp' : null),
+            config('services.google.business_profile.refresh_token'),
+        ));
+
         // The kit's URL Inspection sweep (SsSystems\Platform\Seo\Inspection\
         // UrlInspectionSweep) — see App\Console\Commands\SeoGscInspectBulk.
         // UrlInspector is bound above, straight to the service-account
@@ -312,15 +350,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // This app's own Google OAuth client (Business Profile sign-in)
-        // and its single linked listing — see App\Support\GoogleOAuthApp
-        // and App\Support\GoogleBusinessListing's docblocks. Applied at
-        // boot so every request's config() reads reflect what was saved
-        // from the central admin's Platforms screen, the same pattern
-        // BingSettings::apiKey() reads through PlatformSettingCredential.
-        GoogleOAuthApp::apply();
-        GoogleBusinessListing::apply();
-
         // Dev guardrail: a relation accessed without being eager-loaded throws
         // here instead of quietly becoming an N+1 in production. Logs rather
         // than throws so an unlucky path can't break local work outright —
