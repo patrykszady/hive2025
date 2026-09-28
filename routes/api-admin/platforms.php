@@ -7,9 +7,10 @@ use Illuminate\Support\Facades\Route;
 // The Platforms screen: a read-only, server-managed Search Console status
 // card, the admin-writable Bing Webmaster Tools key the SEO screen's
 // Connect Services modal drives, and (2026-09-26) the connections that
-// apply to a software company — Google sign-in (this app's own OAuth
-// client), Google Business Profile (connect, one listing, reviews) and
-// Meta (Facebook + Instagram). See PlatformsController's docblock.
+// apply to a software company — Google sign-in (the one shared OAuth
+// client, kit 0.14.0), Google Business Profile (connect, one listing,
+// reviews) and Meta (Facebook + Instagram). See PlatformsController's
+// docblock; every gbp/google endpoint below is the kit's ServesGbpPlatform.
 CapabilityRegistry::declare('platforms');
 
 Route::get('platforms/status', [PlatformsController::class, 'status'])->name('platforms.status');
@@ -28,15 +29,17 @@ Route::delete('platforms/dataforseo/credentials', [PlatformsController::class, '
 
 Route::post('platforms/seo-credentials/import', [PlatformsController::class, 'importSeoCredentialsFromEnv'])->name('platforms.seo-credentials.import');
 
-// This app's own Google OAuth client (Business Profile sign-in only —
-// Search Console runs on the server-held service account). Per app, never
-// shared — see App\Support\GoogleOAuthApp.
+// The Google sign-in client is ONE shared client set in the server
+// configuration (GOOGLE_OAUTH_CLIENT_ID/_SECRET — kit 0.14.0, "one
+// Google"), so both of these refuse in a sentence and store nothing; kept
+// routed so ss.systems' card gets that answer rather than a 404.
 Route::post('platforms/google/credentials', [PlatformsController::class, 'saveGoogleCredentials'])->name('platforms.google.save');
 Route::delete('platforms/google/credentials', [PlatformsController::class, 'clearGoogleCredentials'])->name('platforms.google.clear');
 
 // Which Business Profile listing this app's grant reads reviews from — the
 // ids only exist after the OAuth grant, so they are discovered here and
-// stored via App\Support\GoogleBusinessListing.
+// stored in platform_settings' gbp.* keys (the kit's
+// PlatformSettingListingStore).
 Route::get('platforms/gbp/listings', [PlatformsController::class, 'gbpListings'])->name('platforms.gbp.listings');
 Route::post('platforms/gbp/listing', [PlatformsController::class, 'saveGbpListing'])->name('platforms.gbp.listing.save');
 
@@ -44,8 +47,9 @@ Route::post('platforms/gbp/listing', [PlatformsController::class, 'saveGbpListin
 // `testimonials` — see TestimonialController's review_urls mapping.
 Route::get('platforms/gbp/reviews', [PlatformsController::class, 'gbpReviews'])->name('platforms.gbp.reviews');
 
-// Media: read-only pass-through; POST/DELETE/ledger refuse — this app has
-// no project photos (see PlatformsController::uploadGbpMedia()'s docblock).
+// Media: read-only pass-through; POST/DELETE/ledger refuse with a 405 —
+// this app has no project photos (see PlatformsController::
+// gbpMediaRefusal()).
 Route::get('platforms/gbp/media', [PlatformsController::class, 'gbpListMedia'])->name('platforms.gbp.media.index');
 Route::post('platforms/gbp/media', [PlatformsController::class, 'uploadGbpMedia'])->name('platforms.gbp.media.store');
 Route::delete('platforms/gbp/media', [PlatformsController::class, 'deleteGbpMedia'])->name('platforms.gbp.media.destroy');

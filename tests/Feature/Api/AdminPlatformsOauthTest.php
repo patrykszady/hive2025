@@ -5,15 +5,21 @@ use App\Models\PlatformSetting;
 use App\Services\MetaSocialService;
 use SsSystems\Platform\Auth\OAuthState;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use SsSystems\Platform\Google\BusinessProfile\Client;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
+    Http::preventStrayRequests();
 });
 
-it('builds a gbp oauth url carrying a signed, verifiable state', function () {
-    config(['services.google.business_profile.client_id' => 'client-id']);
+it('builds a gbp oauth url through the shared client, carrying a signed, verifiable state', function () {
+    config([
+        'services.google.oauth.client_id' => '31627704418-shared.apps.googleusercontent.com',
+        'services.google.oauth.client_secret' => 'shared-secret',
+    ]);
 
     $url = $this->getJson('/api/admin/v1/platforms/gbp/oauth-url', adminApiHeaders())
         ->assertOk()
@@ -22,8 +28,20 @@ it('builds a gbp oauth url carrying a signed, verifiable state', function () {
     expect($url)->toContain('accounts.google.com');
 
     parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+    expect($query['client_id'])->toBe('31627704418-shared.apps.googleusercontent.com');
+    expect($query['redirect_uri'])->toBe(route('admin-oauth.callback', ['provider' => 'gbp']));
+    expect(explode(' ', $query['scope']))->toContain(Client::BUSINESS_SCOPE);
+    expect($query['access_type'])->toBe('offline');
     expect(OAuthState::verify($query['state'], 'gbp'))->toBeTrue();
     expect(OAuthState::verify($query['state'], 'meta'))->toBeFalse();
+    expect($url)->not->toContain('shared-secret');
+});
+
+it('answers a sentence instead of a google error page when the server has no sign-in client', function () {
+    $this->getJson('/api/admin/v1/platforms/gbp/oauth-url', adminApiHeaders())
+        ->assertOk()
+        ->assertJsonPath('data.url', null)
+        ->assertJsonPath('data.message', fn (string $message) => str_contains($message, 'not set up on the server'));
 });
 
 it('builds a meta oauth url carrying a signed, verifiable state', function () {

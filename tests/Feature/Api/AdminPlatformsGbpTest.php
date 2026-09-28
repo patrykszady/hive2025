@@ -3,15 +3,16 @@
 use App\Models\OAuthToken;
 use App\Models\PlatformSetting;
 use App\Models\Testimonial;
-use App\Services\GoogleBusinessProfileService;
-use App\Support\GoogleBusinessListing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use SsSystems\Platform\Google\BusinessProfile\Adapters\PlatformSettingListingStore;
+use SsSystems\Platform\Google\BusinessProfile\Client;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
+    Http::preventStrayRequests();
 });
 
 it('refuses listings, reviews, and media lookups before a grant exists', function () {
@@ -29,7 +30,7 @@ it('reports business scope missing when the grant only covers sign-in', function
 });
 
 it('lists accounts and locations discovered through the grant', function () {
-    OAuthToken::storeTokens('google_business_profile', 'refresh-token', 'access-token', 3600, null, [GoogleBusinessProfileService::BUSINESS_SCOPE]);
+    OAuthToken::storeTokens('google_business_profile', 'refresh-token', 'access-token', 3600, null, [Client::BUSINESS_SCOPE]);
 
     Http::fake([
         'mybusinessaccountmanagement.googleapis.com/*' => Http::response(['accounts' => [
@@ -47,8 +48,20 @@ it('lists accounts and locations discovered through the grant', function () {
     expect($data['accounts'][0]['locations'][0]['location_id'])->toBe('456');
 });
 
-it('saves the chosen listing and reflects it in status', function () {
-    OAuthToken::storeTokens('google_business_profile', 'refresh-token');
+it('saves the chosen listing, remembers its public links, and reflects it in status', function () {
+    OAuthToken::storeTokens('google_business_profile', 'refresh-token', 'access-token', 3600, null, [Client::BUSINESS_SCOPE]);
+
+    Http::fake([
+        'mybusinessbusinessinformation.googleapis.com/*' => Http::response([
+            'name' => 'locations/456',
+            'title' => 'Hive HQ',
+            'metadata' => [
+                'placeId' => 'ChIJ456',
+                'mapsUri' => 'https://maps.google.com/?cid=456',
+                'newReviewUri' => 'https://search.google.com/local/writereview?placeid=ChIJ456',
+            ],
+        ], 200),
+    ]);
 
     $data = $this->postJson('/api/admin/v1/platforms/gbp/listing', [
         'account_id' => 'accounts/123',
@@ -57,8 +70,30 @@ it('saves the chosen listing and reflects it in status', function () {
 
     expect($data['account_id_configured'])->toBeTrue();
     expect($data['location_id_configured'])->toBeTrue();
-    expect(PlatformSetting::get(GoogleBusinessListing::SETTING_ACCOUNT_ID))->toBe('123');
-    expect(PlatformSetting::get(GoogleBusinessListing::SETTING_LOCATION_ID))->toBe('456');
+    expect($data['listing_source'])->toBe('admin');
+    expect($data['maps_url'])->toBe('https://maps.google.com/?cid=456');
+    expect(PlatformSetting::get(PlatformSettingListingStore::ACCOUNT_ID))->toBe('123');
+    expect(PlatformSetting::get(PlatformSettingListingStore::LOCATION_ID))->toBe('456');
+    expect(PlatformSetting::get(PlatformSettingListingStore::PLACE_ID))->toBe('ChIJ456');
+});
+
+it('still links the listing when google will not describe it', function () {
+    OAuthToken::storeTokens('google_business_profile', 'refresh-token', 'access-token', 3600, null, [Client::BUSINESS_SCOPE]);
+
+    Http::fake([
+        'mybusinessbusinessinformation.googleapis.com/*' => Http::response(['error' => ['code' => 403, 'status' => 'PERMISSION_DENIED']], 403),
+    ]);
+
+    $this->postJson('/api/admin/v1/platforms/gbp/listing', [
+        'account_id' => '123',
+        'location_id' => '456',
+    ], adminApiHeaders())
+        ->assertOk()
+        ->assertJsonPath('data.location_id_configured', true)
+        ->assertJsonPath('data.maps_url', null);
+
+    expect(PlatformSetting::get(PlatformSettingListingStore::LOCATION_ID))->toBe('456');
+    Http::assertSentCount(1);
 });
 
 it('marks a review imported when a testimonial already carries its external_id', function () {
@@ -87,7 +122,27 @@ it('marks a review imported when a testimonial already carries its external_id',
     expect($data['reviews'])->toHaveCount(2);
     expect(collect($data['reviews'])->firstWhere('id', 'review-1')['imported'])->toBeTrue();
     expect(collect($data['reviews'])->firstWhere('id', 'review-2')['imported'])->toBeFalse();
+    expect(collect($data['reviews'])->firstWhere('id', 'review-1')['rating'])->toBe(5);
     expect($data['total_review_count'])->toBe(2);
+});
+
+it('counts the google reviews held as testimonials in the gbp status block', function () {
+    Testimonial::create([
+        'name' => 'Jane', 'body' => 'Great', 'platform' => 'google',
+        'external_id' => 'review-1', 'is_published' => true, 'review_date' => '2026-03-04',
+    ]);
+    Testimonial::create([
+        'name' => 'Bob', 'body' => 'Good', 'platform' => 'google',
+        'external_id' => 'review-2', 'is_published' => true, 'review_date' => '2026-05-06',
+    ]);
+    Testimonial::create([
+        'name' => 'Ann', 'body' => 'Fine', 'platform' => 'houzz', 'is_published' => true, 'review_date' => '2026-07-08',
+    ]);
+
+    $gbp = $this->getJson('/api/admin/v1/platforms/status', adminApiHeaders())->assertOk()->json('data.gbp');
+
+    expect($gbp['reviews_count'])->toBe(2);
+    expect($gbp['latest_review_date'])->toBe('2026-05-06');
 });
 
 it('lists google media as a read-only pass-through', function () {
@@ -111,8 +166,17 @@ it('lists google media as a read-only pass-through', function () {
 
 it('refuses to upload, delete, or reconcile a media ledger — this site has no project photos', function () {
     OAuthToken::storeTokens('google_business_profile', 'refresh-token', 'access-token', 3600);
+    Http::fake();
 
-    $this->postJson('/api/admin/v1/platforms/gbp/media', [], adminApiHeaders())->assertStatus(405);
-    $this->deleteJson('/api/admin/v1/platforms/gbp/media', [], adminApiHeaders())->assertStatus(405);
-    $this->putJson('/api/admin/v1/platforms/gbp/media/ledger', ['uploads' => []], adminApiHeaders())->assertStatus(405);
+    $this->postJson('/api/admin/v1/platforms/gbp/media', [], adminApiHeaders())
+        ->assertStatus(405)
+        ->assertJsonPath('message', 'This site has no project photos to send to Google.');
+    $this->deleteJson('/api/admin/v1/platforms/gbp/media', [], adminApiHeaders())
+        ->assertStatus(405)
+        ->assertJsonPath('message', 'This site has no project photos to remove from Google.');
+    $this->putJson('/api/admin/v1/platforms/gbp/media/ledger', ['uploads' => []], adminApiHeaders())
+        ->assertStatus(405)
+        ->assertJsonPath('message', 'This site has no project photos to send to Google.');
+
+    Http::assertNothingSent();
 });

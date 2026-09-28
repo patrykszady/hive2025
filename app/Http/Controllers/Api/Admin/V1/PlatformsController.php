@@ -6,10 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PlatformSetting;
 use App\Models\SeoSyncRun;
 use App\Models\Testimonial;
-use App\Services\GoogleBusinessProfileService;
 use App\Services\MetaSocialService;
-use App\Support\GoogleBusinessListing;
-use App\Support\GoogleOAuthApp;
 use SsSystems\Platform\Auth\OAuthState;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\ClaritySettings;
@@ -22,6 +19,10 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
+use SsSystems\Platform\Google\BusinessProfile\Client;
+use SsSystems\Platform\Google\BusinessProfile\Contracts\ListingStore;
+use SsSystems\Platform\Google\BusinessProfile\Http\Concerns\ServesGbpPlatform;
+use SsSystems\Platform\Google\OAuthClient;
 use SsSystems\Platform\Seo\Google\ServiceAccountSearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncRule;
 
@@ -34,32 +35,39 @@ use SsSystems\Platform\Seo\SearchConsoleSyncRule;
  * Console).
  *
  * The connections that apply to a software company (2026-09-26): Google
- * sign-in (this app's own OAuth client, Business Profile scope only),
- * Google Business Profile (connect, one listing, reviews) and Meta
- * (Facebook Page + Instagram Business). This app has no projects/listings/
- * photos of its own, so unlike jpeterson-design/gsc there is no photo
- * upload pipeline anywhere in this controller — see gbpListMedia()'s
- * siblings below, which refuse outright rather than port dead code. Search
- * Console keeps running on the server-held service account (see
- * gscStatus()'s docblock) and is untouched by this change.
+ * sign-in (Business Profile scope only), Google Business Profile (connect,
+ * one listing, reviews) and Meta (Facebook Page + Instagram Business).
+ * Search Console keeps running on the server-held service account (see
+ * gscStatus()'s docblock).
+ *
+ * Google (kit 0.14.0, "one Google", 2026-09-28): every platforms/gbp/* and
+ * platforms/google/* endpoint, the gbp half of the {provider} dispatch and
+ * the `google`/`gbp` status blocks come from the kit's ServesGbpPlatform —
+ * one implementation for every tenant, signing in through the ONE shared
+ * Google OAuth client (services.google.oauth). This class supplies only
+ * the two required hooks and hive's own: the imported-review flags and
+ * counts over `testimonials` (platform='google', external_id). This app has
+ * no project photos, so every media write stays a 405 (the trait's default)
+ * with this app's own wording (gbpMediaRefusal()); the media list is a
+ * read-only pass-through. POST/DELETE platforms/google/credentials refuse:
+ * the client is shared server configuration, never a per-site value.
  *
  * Key names match the other kit sites' PlatformsController shapes exactly
- * (gscStatus() plus `managed: 'server'`/`property`, gbpStatus(),
- * metaStatus()) so ss-systems' shared Platforms screen renders and behaves
- * identically here — see dawnsellshomes.com's PlatformsController, the
- * closest reference (also single-tenant, also no project photos).
+ * (gscStatus() plus `managed: 'server'`/`property`, metaStatus()) so
+ * ss-systems' shared Platforms screen renders and behaves identically here
+ * — see dawnsellshomes.com's PlatformsController, the closest reference
+ * (also single-tenant, also no project photos).
  */
 class PlatformsController extends Controller
 {
+    use ServesGbpPlatform;
+
     /**
      * Providers this controller drives an OAuth dance for: Google Business
      * Profile ('gbp') and Meta ('meta'). Search Console runs on a
      * server-held service account here, never OAuth (see gscStatus()).
      */
     protected const OAUTH_PROVIDERS = ['gbp', 'meta'];
-
-    /** Google's review star enum, as the central admin stores a rating. */
-    protected const GBP_STAR_RATINGS = ['ONE' => 1, 'TWO' => 2, 'THREE' => 3, 'FOUR' => 4, 'FIVE' => 5];
 
     public function status(): JsonResponse
     {
@@ -72,9 +80,9 @@ class PlatformsController extends Controller
                 // 'meta' is intentionally NOT in this list — that modal is
                 // SEO-only; Meta lives on the Platforms screen's own card.
                 'services' => ['gsc', 'bing', 'clarity', 'pagespeed', 'dataforseo'],
-                // Google sign-in (Business Profile only) + the Business
-                // Profile card itself.
-                'google' => GoogleOAuthApp::status(),
+                // Google sign-in (the shared client, Business Profile
+                // only) + the Business Profile card itself — both the kit's.
+                'google' => $this->googleStatus(),
                 'gbp' => $this->gbpStatus(),
                 'gsc' => $this->gscStatus(),
                 'bing' => $this->bingStatus(),
@@ -95,21 +103,22 @@ class PlatformsController extends Controller
      * SsSystems\Platform\Auth\OAuthState value as 'state' so that session-less
      * callback can verify the request — see that route's docblock for why
      * (this app's whole /admin surface is a stateless proxy, so there is
-     * no admin session here).
+     * no admin session here). 'gbp' is the kit's gbpOauthUrl(): with no
+     * shared client on the server it answers `url: null` and a sentence
+     * rather than a link to a Google error page.
      */
     public function oauthUrl(string $provider): JsonResponse
     {
         abort_unless(in_array($provider, self::OAUTH_PROVIDERS, true), 404);
 
-        $redirectUri = route('admin-oauth.callback', ['provider' => $provider]);
-        $state = OAuthState::make($provider);
-
-        $url = match ($provider) {
-            'gbp' => app(GoogleBusinessProfileService::class)->getOAuthUrl($redirectUri, $state),
-            'meta' => app(MetaSocialService::class)->getOAuthUrl($redirectUri, MetaSocialService::OAUTH_SCOPES, $state),
+        return match ($provider) {
+            'gbp' => $this->gbpOauthUrl(),
+            'meta' => response()->json(['data' => ['url' => app(MetaSocialService::class)->getOAuthUrl(
+                route(OAuthClient::CALLBACK_ROUTE, ['provider' => 'meta']),
+                MetaSocialService::OAUTH_SCOPES,
+                OAuthState::make('meta'),
+            )]]),
         };
-
-        return response()->json(['data' => ['url' => $url]]);
     }
 
     /** DELETE platforms/{provider} — forgets that provider's stored grant (Google: oauth_tokens; Meta: platform_settings). */
@@ -117,10 +126,11 @@ class PlatformsController extends Controller
     {
         abort_unless(in_array($provider, self::OAUTH_PROVIDERS, true), 404);
 
-        match ($provider) {
-            'gbp' => app(GoogleBusinessProfileService::class)->disconnect(),
-            'meta' => app(MetaSocialService::class)->disconnect(),
-        };
+        if ($provider === 'gbp') {
+            return $this->disconnectGbp();
+        }
+
+        app(MetaSocialService::class)->disconnect();
 
         return response()->noContent();
     }
@@ -443,278 +453,68 @@ class PlatformsController extends Controller
         return response()->json(['data' => ['dataforseo' => $this->dataForSeoStatus()]]);
     }
 
-    // ---- Google sign-in (Business Profile OAuth client) ---------------
+    // ---- Google Business Profile: the kit's ServesGbpPlatform hooks -----
 
-    /**
-     * POST platforms/google/credentials {client_id, client_secret} — this
-     * app's own Google OAuth client, stored encrypted. Mirrors
-     * dawnsellshomes.com's/jpeterson-design's saveGoogleCredentials() shape
-     * — ss.systems' Platforms screen only ever sends the two values (see
-     * App\Support\GoogleOAuthApp's docblock). The secret is never returned.
-     */
-    public function saveGoogleCredentials(Request $request): JsonResponse
+    /** The one Business Profile client (AppServiceProvider binds it per resolution). */
+    protected function gbpClient(): Client
     {
-        $data = $request->validate([
-            'client_id' => ['required', 'string', 'max:255'],
-            'client_secret' => ['required', 'string', 'max:255'],
-        ]);
-
-        GoogleOAuthApp::save($data['client_id'], $data['client_secret']);
-
-        return response()->json(['data' => [
-            'google' => GoogleOAuthApp::status(),
-            'gbp' => $this->gbpStatus(),
-        ]]);
+        return app(Client::class);
     }
 
-    /** DELETE platforms/google/credentials — back to whatever the server's env provides (usually nothing). */
-    public function clearGoogleCredentials(): JsonResponse
+    /** This app's single linked listing: platform_settings' gbp.* keys, env ids as the fallback. */
+    protected function gbpListingStore(): ListingStore
     {
-        GoogleOAuthApp::clear();
-
-        return response()->json(['data' => [
-            'google' => GoogleOAuthApp::status(),
-            'gbp' => $this->gbpStatus(),
-        ]]);
+        return app(ListingStore::class);
     }
 
     /**
-     * GET platforms/gbp/listings — the Business Profile accounts and
-     * listings this authorisation can see, so the admin can offer them
-     * instead of asking for ids nobody has. Verbatim port of
-     * dawnsellshomes.com's gbpListings() (this app is single-tenant too, so
-     * there is no "belongs to another site" filtering to do).
-     */
-    public function gbpListings(): JsonResponse
-    {
-        $service = app(GoogleBusinessProfileService::class);
-
-        if (! $service->hasRefreshToken()) {
-            return response()->json(['message' => 'Connect Google Business Profile first.'], 422);
-        }
-
-        if (! $service->hasBusinessScope()) {
-            return response()->json([
-                'message' => 'This authorisation only covers signing in. Reconnect and allow Business Profile access.',
-                'data' => ['business_scope_granted' => false, 'accounts' => []],
-            ], 422);
-        }
-
-        $accounts = [];
-
-        foreach ($service->listAccounts() as $account) {
-            $accountId = GoogleBusinessListing::bareId((string) ($account['name'] ?? ''));
-
-            if ($accountId === '') {
-                continue;
-            }
-
-            $accounts[] = [
-                'account_id' => $accountId,
-                'name' => $account['accountName'] ?? $account['name'] ?? $accountId,
-                'type' => $account['type'] ?? null,
-                'locations' => array_map(fn (array $location) => [
-                    'location_id' => GoogleBusinessListing::bareId((string) ($location['name'] ?? '')),
-                    'title' => $location['title'] ?? null,
-                    'website' => $location['websiteUri'] ?? null,
-                    'maps_url' => $location['metadata']['mapsUri'] ?? null,
-                    'place_id' => $location['metadata']['placeId'] ?? null,
-                    'address' => implode(', ', array_filter([
-                        implode(' ', (array) ($location['storefrontAddress']['addressLines'] ?? [])),
-                        $location['storefrontAddress']['locality'] ?? null,
-                        $location['storefrontAddress']['administrativeArea'] ?? null,
-                    ])) ?: null,
-                ], $service->listLocations($accountId)),
-            ];
-        }
-
-        if ($accounts === [] && $service->getLastError()) {
-            return response()->json([
-                'message' => 'Google refused the listing lookup: '.($service->getLastError()['message'] ?? 'unknown error'),
-            ], 422);
-        }
-
-        return response()->json(['data' => [
-            'business_scope_granted' => true,
-            'accounts' => $accounts,
-            'selected' => [
-                'account_id' => config(GoogleBusinessListing::CONFIG_PATH.'.account_id'),
-                'location_id' => config(GoogleBusinessListing::CONFIG_PATH.'.location_id'),
-            ],
-        ]]);
-    }
-
-    /** POST platforms/gbp/listing — which listing this app's grant reads reviews from. */
-    public function saveGbpListing(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'account_id' => ['required', 'string', 'max:191'],
-            'location_id' => ['required', 'string', 'max:191'],
-        ]);
-
-        GoogleBusinessListing::link($data['account_id'], $data['location_id']);
-        GoogleBusinessListing::apply();
-
-        return response()->json(['data' => $this->gbpStatus()]);
-    }
-
-    /**
-     * GET platforms/gbp/reviews?account_id=&location_id=[&page_token=]
+     * Of these Google review ids, the ones already held as a testimonial
+     * (platform='google' carrying the id in external_id — this app has no
+     * review_urls pivot, unlike jpeterson-design/gsc, see
+     * App\Models\Testimonial's docblock), so ss.systems' import creates only
+     * the new ones.
      *
-     * One listing's Google reviews for the central admin, which imports
-     * them as testimonials. Each review says whether this app already
-     * holds it (a `testimonials` row with platform='google' carrying its
-     * external_id — this app has no review_urls pivot, unlike
-     * jpeterson-design/gsc, see App\Models\Testimonial's docblock), so the
-     * admin creates only the new ones. A pass-through to Google with this
-     * app's grant; the import itself lives in ss.systems.
+     * @param  list<string>  $reviewIds
+     * @return list<string>
      */
-    public function gbpReviews(Request $request): JsonResponse
+    protected function gbpImportedReviewIds(array $reviewIds): array
     {
-        $data = $request->validate([
-            'account_id' => ['required', 'string', 'max:191'],
-            'location_id' => ['required', 'string', 'max:191'],
-            'page_token' => ['sometimes', 'nullable', 'string', 'max:2048'],
-        ]);
-
-        $service = app(GoogleBusinessProfileService::class);
-
-        if (! $service->hasRefreshToken()) {
-            return response()->json(['message' => 'Connect Google Business Profile first.'], 422);
-        }
-
-        $page = $service->fetchReviewsFor(
-            GoogleBusinessListing::bareId($data['account_id']),
-            GoogleBusinessListing::bareId($data['location_id']),
-            $data['page_token'] ?? null,
-        );
-
-        if ($page === null) {
-            $message = 'Google refused the review lookup: '.($service->getLastError()['message'] ?? 'unknown error');
-
-            return response()->json(['message' => $message, 'errors' => ['google' => [$message]]], 422);
-        }
-
-        $reviews = collect($page['reviews'])
-            ->map(fn (array $r) => ['id' => GoogleBusinessListing::bareId((string) ($r['name'] ?? '')), 'raw' => $r])
-            ->filter(fn (array $r) => $r['id'] !== '')
-            ->values();
-
-        $held = Testimonial::query()
+        return Testimonial::query()
             ->where('platform', 'google')
-            ->whereIn('external_id', $reviews->pluck('id')->all())
+            ->whereIn('external_id', $reviewIds)
             ->pluck('external_id')
+            ->map(fn ($id) => (string) $id)
+            ->values()
             ->all();
-
-        return response()->json(['data' => [
-            'reviews' => $reviews->map(fn (array $r) => [
-                'id' => $r['id'],
-                'reviewer' => $r['raw']['reviewer']['displayName'] ?? 'Google Reviewer',
-                'rating' => self::GBP_STAR_RATINGS[$r['raw']['starRating'] ?? ''] ?? null,
-                'comment' => (string) ($r['raw']['comment'] ?? ''),
-                'created_at' => $r['raw']['createTime'] ?? null,
-                'url' => 'https://www.google.com/maps/reviews?reviewid='.$r['id'],
-                'imported' => in_array($r['id'], $held, true),
-            ])->all(),
-            'next_page_token' => $page['nextPageToken'],
-            'total_review_count' => $page['totalReviewCount'],
-            'average_rating' => $page['averageRating'],
-        ]]);
     }
 
     /**
-     * GET platforms/gbp/media?account_id=&location_id= — a read-only
-     * pass-through to Google's media list, for parity with the other kit
-     * sites' Platforms screens. This app has no project photos of any
-     * kind, so uploadGbpMedia()/deleteGbpMedia()/saveGbpMediaLedger() below
-     * refuse outright instead of porting a pipeline nothing here would
-     * ever drive (see ss-systems' `gbp_photos_managed`, which stays off
-     * for this site).
+     * Google reviews held as testimonials (platform='google'), the same two
+     * numbers gsc/jpeterson-design report for Houzz/Angi.
+     *
+     * @return array{count: int, latest: ?string}
      */
-    public function gbpListMedia(Request $request): JsonResponse
+    protected function gbpReviewStats(): array
     {
-        $data = $request->validate([
-            'account_id' => ['required', 'string', 'max:191'],
-            'location_id' => ['required', 'string', 'max:191'],
-        ]);
-
-        $service = app(GoogleBusinessProfileService::class);
-
-        if (! $service->hasRefreshToken()) {
-            return response()->json(['message' => 'Connect Google Business Profile first.'], 422);
-        }
-
-        $items = $service->listMediaFor(
-            GoogleBusinessListing::bareId($data['account_id']),
-            GoogleBusinessListing::bareId($data['location_id']),
-        );
-
-        if ($items === null) {
-            $message = 'Google refused the media lookup: '.($service->getLastError()['message'] ?? 'unknown error');
-
-            return response()->json(['message' => $message, 'errors' => ['google' => [$message]]], 422);
-        }
-
-        return response()->json(['data' => ['items' => $items, 'count' => count($items)]]);
-    }
-
-    /** POST platforms/gbp/media — refused: this site has no project photos to send to Google. */
-    public function uploadGbpMedia(): JsonResponse
-    {
-        return response()->json(['message' => 'This site has no project photos to send to Google.'], 405);
-    }
-
-    /** DELETE platforms/gbp/media — refused: this site has no project photos to remove from Google. */
-    public function deleteGbpMedia(): JsonResponse
-    {
-        return response()->json(['message' => 'This site has no project photos to remove from Google.'], 405);
-    }
-
-    /** PUT platforms/gbp/media/ledger — refused: there is no upload ledger to reconcile on this site. */
-    public function saveGbpMediaLedger(): JsonResponse
-    {
-        return response()->json(['message' => 'This site has no project photos to send to Google.'], 405);
-    }
-
-    /**
-     * The gbp status block — see this class's docblock and ss.systems'
-     * PlatformsSettings render for the exact fields the Platforms screen
-     * reads. Same shape as jpeterson-design's/dawnsellshomes.com's
-     * gbpStatus(), minus jpeterson's 'markets' key — this app has no
-     * markets/areas concept (see App\Support\GoogleBusinessListing's
-     * docblock), so there is no per-market routing to report.
-     */
-    protected function gbpStatus(): array
-    {
-        $service = app(GoogleBusinessProfileService::class);
-        $token = $service->getStoredToken();
-        $config = config('services.google.business_profile');
+        $googleReviews = Testimonial::query()->where('platform', 'google');
+        $latest = (clone $googleReviews)->max('review_date');
 
         return [
-            'connected' => $service->hasRefreshToken(),
-            'source' => $token?->refresh_token ? 'oauth' : ($service->hasRefreshToken() ? 'env' : null),
-            'email' => $token?->granted_by_email,
-            'granted_at' => $token?->created_at?->toIso8601String(),
-            'updated_at' => $token?->updated_at?->toIso8601String(),
-            'access_token_expires_at' => $token?->access_token_expires_at?->toIso8601String(),
-            'scopes' => $token?->scopes,
-            'app_credentials_configured' => ! empty($config['client_id']) && ! empty($config['client_secret']),
-            'fully_configured' => $service->isConfigured(),
-            'client_id_configured' => ! empty($config['client_id']),
-            'client_secret_configured' => ! empty($config['client_secret']),
-            'account_id_configured' => ! empty($config['account_id']),
-            'location_id_configured' => ! empty($config['location_id']),
-            'refresh_token_present' => $service->hasRefreshToken(),
-            // A connection can exist and still be useless: Google's consent
-            // screen lets the user approve sign-in while declining Business
-            // Profile, which yields a token that can name the user and do
-            // nothing else.
-            'business_scope_granted' => $service->hasBusinessScope(),
-            'listing_source' => PlatformSetting::get(GoogleBusinessListing::SETTING_LOCATION_ID) ? 'admin' : (! empty($config['location_id']) ? 'env' : null),
-            // Google reviews held as testimonials (platform='google'), the
-            // same two numbers gsc/jpeterson-design report for Houzz/Angi.
-            'reviews_count' => ($googleReviews = Testimonial::query()->where('platform', 'google'))->count(),
-            'latest_review_date' => ($latestGoogle = (clone $googleReviews)->max('review_date')) ? Carbon::parse($latestGoogle)->toDateString() : null,
+            'count' => $googleReviews->count(),
+            'latest' => $latest ? Carbon::parse($latest)->toDateString() : null,
         ];
+    }
+
+    /**
+     * Every media write answers 405 here (the trait's default for a site
+     * that sends no photos — ss-systems' `gbp_photos_managed` stays off for
+     * this site), in this app's own words: it has no project photos of any
+     * kind.
+     */
+    protected function gbpMediaRefusal(): string
+    {
+        return request()->isMethod('DELETE')
+            ? 'This site has no project photos to remove from Google.'
+            : 'This site has no project photos to send to Google.';
     }
 }

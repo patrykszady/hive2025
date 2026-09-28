@@ -352,22 +352,35 @@ return [
     | means gs.construction's admin API above.
     |
     | ONE google block — a duplicate key here silently clobbers the earlier
-    | one. business_profile (2026-09-26) is the Platforms screen's Google
-    | sign-in: this app's own OAuth client (App\Support\GoogleOAuthApp,
-    | admin-writable with these two as the env fallback) plus the single
-    | linked listing (App\Support\GoogleBusinessListing, account_id/
-    | location_id — admin-writable too, these two only an env fallback for
-    | a server that sets them directly).
+    | one. `oauth` (kit 0.14.0, "one Google", 2026-09-28) is THE Google
+    | sign-in client every tenant shares — gs.construction's Cloud project
+    | 31627704418, the same values on every site, read by
+    | SsSystems\Platform\Google\OAuthClient::fromConfig() (bound in
+    | AppServiceProvider; see the kit's docs/GOOGLE.md). Server
+    | configuration only: nothing is stored per site any more, and
+    | POST platforms/google/credentials refuses. Business Profile is the only
+    | thing in this app that signs in with Google, so the old per-site pair
+    | (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET) is no longer read at all.
+    | business_profile holds only the single linked listing's env fallback
+    | (the listing the admin picks lives in platform_settings' gbp.* keys —
+    | the kit's PlatformSettingListingStore — and wins over these) and an
+    | optional server-held grant, used only while no grant is stored.
     */
     'google' => [
         'search_console_credentials' => env('GSC_CREDENTIALS'),
         'search_console_property' => env('GSC_PROPERTY', 'sc-domain:hive.contractors'),
 
+        'oauth' => [
+            'client_id' => env('GOOGLE_OAUTH_CLIENT_ID'),
+            'client_secret' => env('GOOGLE_OAUTH_CLIENT_SECRET'),
+            'project_id' => env('GOOGLE_OAUTH_PROJECT_ID'),
+        ],
+
         'business_profile' => [
-            'client_id' => env('GOOGLE_CLIENT_ID'),
-            'client_secret' => env('GOOGLE_CLIENT_SECRET'),
             'account_id' => env('GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID'),
             'location_id' => env('GOOGLE_BUSINESS_PROFILE_LOCATION_ID'),
+            'place_id' => env('GOOGLE_BUSINESS_PROFILE_PLACE_ID'),
+            'refresh_token' => env('GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN'),
         ],
     ],
 
