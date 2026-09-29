@@ -120,6 +120,19 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
         'remember_token',
     ];
 
+    /**
+     * Most users sign in with a one-time code or a passkey and have no
+     * password. Laravel's remember-me check hands this straight to
+     * hash_equals(), which throws on null: a returning visitor whose cookie
+     * no longer matched got a 500 on every page, public ones included
+     * (Erin Abbey on her schedule link, 2026-09-29). An empty string never
+     * verifies a password and still matches cookies issued while it was null.
+     */
+    public function getAuthPassword(): string
+    {
+        return (string) $this->password;
+    }
+
     protected function casts(): array
     {
         return [

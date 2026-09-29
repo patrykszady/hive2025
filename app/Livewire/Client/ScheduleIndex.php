@@ -8,6 +8,7 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Notifications\ClientServiceAvailabilityNotification;
 use App\Notifications\VendorClientTimesRequestNotification;
+use App\Scopes\ProjectScope;
 use App\Services\SmsScheduleService;
 use Carbon\Carbon;
 use Flux;
@@ -85,15 +86,12 @@ class ScheduleIndex extends Component
 
     public function mount(string $token): void
     {
-        // Logged-in users go straight to the dashboard
-        if (auth()->check()) {
-            $this->redirect(url('/'));
-            return;
-        }
-
+        // The token is the credential, whoever is signed in (the vendor
+        // schedule at /v/ works the same way): no redirect to the dashboard,
+        // and the signed-in user's project scope doesn't hide the project.
         $this->token = $token;
 
-        $project = Project::where('schedule_token', $token)->first();
+        $project = Project::withoutGlobalScope(ProjectScope::class)->where('schedule_token', $token)->first();
 
         if (! $project) {
             $this->valid = false;
@@ -191,7 +189,7 @@ class ScheduleIndex extends Component
     public function clientProjectIds(): array
     {
         if ($this->clientId) {
-            return Project::where('client_id', $this->clientId)->pluck('id')->all();
+            return Project::withoutGlobalScope(ProjectScope::class)->where('client_id', $this->clientId)->pluck('id')->all();
         }
 
         return $this->projectId ? [$this->projectId] : [];
@@ -203,7 +201,7 @@ class ScheduleIndex extends Component
             return null;
         }
 
-        return Project::with(['client', 'createdByVendor', 'latestStatus'])->find($this->projectId);
+        return Project::withoutGlobalScope(ProjectScope::class)->with(['client', 'createdByVendor', 'latestStatus'])->find($this->projectId);
     }
 
     /**
@@ -310,7 +308,7 @@ class ScheduleIndex extends Component
             ->whereNotNull('end_date')
             // Card bodies read project address, owner (ICS), vendor and the
             // preferred-time indicator (latestStatus) per task.
-            ->with(['project.latestStatus', 'owner', 'vendor'])
+            ->with(['project' => fn ($query) => $query->withoutGlobalScope(ProjectScope::class), 'project.latestStatus', 'owner', 'vendor'])
             ->where(function ($query) use ($startDateStr, $endDateStr) {
                 // Task overlaps with the display range
                 $query->whereDate('start_date', '<=', $endDateStr)
@@ -357,7 +355,7 @@ class ScheduleIndex extends Component
     {
         return Task::withTrashed()
             ->whereIn('project_id', $this->clientProjectIds)
-            ->with(['project.latestStatus', 'owner'])
+            ->with(['project' => fn ($query) => $query->withoutGlobalScope(ProjectScope::class), 'project.latestStatus', 'owner'])
             ->whereNotNull('start_date')
             ->whereNotNull('end_date');
     }
@@ -424,7 +422,7 @@ class ScheduleIndex extends Component
         // struck through on its DAY still communicates; a deleted task that
         // never had a date is not "pending" anything — it's just gone.
         return Task::query()
-            ->with('project')
+            ->with(['project' => fn ($query) => $query->withoutGlobalScope(ProjectScope::class)])
             ->whereIn('project_id', $projectIds)
             ->whereNull('start_date')
             ->orderBy('created_at')
@@ -768,7 +766,7 @@ class ScheduleIndex extends Component
             ->where('project_id', $project->id)
             ->whereNull('start_date')
             ->whereNotNull('vendor_id')
-            ->with(['vendor', 'project', 'owner'])
+            ->with(['vendor', 'project' => fn ($query) => $query->withoutGlobalScope(ProjectScope::class), 'owner'])
             ->get();
 
         $sendAt = $this->serviceAvailabilitySmsSendAt($project);
