@@ -202,6 +202,7 @@ it('signs in before requesting a sync when the extension last reported a dead se
     $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
         $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => ACCOUNT_TITLE]);
         $mock->shouldReceive('extensionReportsExpiredSession')->andReturn(true);
+        $mock->shouldReceive('automaticSignInPausedSince')->andReturn(null);
         $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret')->andReturn(['ok' => true, 'already' => true, 'url' => RECEIPT_TITLE]);
         // An Imperva report: the API's own wall is cleared after the sign-in check, before the sync.
         $mock->shouldReceive('clearApiWall')->once()->andReturn(['ok' => true, 'clicked' => true]);
@@ -221,6 +222,7 @@ it('does not touch the API wall when the dead session was a lapsed login rather 
     $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
         $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => ACCOUNT_TITLE]);
         $mock->shouldReceive('extensionReportsExpiredSession')->andReturn(true);
+        $mock->shouldReceive('automaticSignInPausedSince')->andReturn(null);
         $mock->shouldReceive('login')->once()->andReturn(['ok' => true, 'already' => true, 'url' => RECEIPT_TITLE]);
         $mock->shouldReceive('clearApiWall')->never();
         $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
@@ -237,6 +239,7 @@ it('skips the sync and flags the sidebar when the wall still needs a human', fun
     $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
         $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => 'menards.com/main/login.html - Google Chrome']);
         $mock->shouldReceive('extensionReportsExpiredSession')->andReturn(true);
+        $mock->shouldReceive('automaticSignInPausedSince')->andReturn(null);
         $mock->shouldReceive('login')->once()->andReturn(['ok' => false, 'error' => 'Imperva is showing a security challenge (hCaptcha).']);
         $mock->shouldReceive('requestSync')->never();
     });

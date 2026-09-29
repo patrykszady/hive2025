@@ -223,8 +223,8 @@ write_policy() {
     POLICY_FILE="$POLICY_DIR/menards-receipt-sync.json"
     local url; url=$(manifest_url)
 
-    # The official 2captcha Solver extension rides the same policy when
-    # MENARDS_SOLVER_EXTENSION is on: it clears the wall's hCaptcha in place.
+    # The 2captcha Solver extension rides the same policy: force-installed
+    # while MENARDS_SOLVER_EXTENSION is on, marked removed while it is off.
     # Its API key and proxy are typed into its own settings once over noVNC.
     local solver_on solver_id solver_force="" solver_allow="" solver_settings=""
     solver_on=$(env_value MENARDS_SOLVER_EXTENSION)
@@ -237,6 +237,15 @@ write_policy() {
     \"$solver_id\": {
       \"installation_mode\": \"force_installed\",
       \"update_url\": \"https://clients2.google.com/service/update2/crx\"
+    }"
+            ;;
+        *)
+            # Off: uninstall it rather than just stop forcing it. Dropped from
+            # the forcelist alone, a once-forced extension can linger with
+            # access to every page (2026-09-29: it never solved an hCaptcha).
+            solver_settings=",
+    \"$solver_id\": {
+      \"installation_mode\": \"removed\"
     }"
             ;;
     esac

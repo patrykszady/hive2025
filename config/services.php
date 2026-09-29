@@ -116,18 +116,24 @@ return [
         // while the credentials stay set — for a pool whose exits are not yet
         // pinned to the US (Menards 403s a Russian or Brazilian exit outright).
         'proxy_enabled' => (bool) env('MENARDS_PROXY', true),
-        'proxy_host' => env('CAPTCHA_PROXY_HOST'),
-        'proxy_username' => env('CAPTCHA_PROXY_USERNAME'),
-        'proxy_password' => env('CAPTCHA_PROXY_PASSWORD'),
+        // MENARDS_PROXY_* win over the shared CAPTCHA_PROXY_* names: a fixed
+        // (static residential / ISP) IP for Menards alone. The pool rotates
+        // its exit at least every two hours, and each new address loses the
+        // Menards session (2026-09-29). For a fixed IP, blank
+        // MENARDS_PROXY_REGION and MENARDS_PROXY_SESSION: those are the
+        // pool's username options.
+        'proxy_host' => env('MENARDS_PROXY_HOST', env('CAPTCHA_PROXY_HOST')),
+        'proxy_username' => env('MENARDS_PROXY_USERNAME', env('CAPTCHA_PROXY_USERNAME')),
+        'proxy_password' => env('MENARDS_PROXY_PASSWORD', env('CAPTCHA_PROXY_PASSWORD')),
         'proxy_session' => env('MENARDS_PROXY_SESSION', 'menards'),
         // `-region-us` is the only geo parameter this pool honours (sampled
         // 5/5 US exits on 2026-09-23); `-country-` and `-state-` are ignored
         // and hand out Brazilian or Russian exits, which Menards 403s outright.
         'proxy_region' => env('MENARDS_PROXY_REGION', 'us'),
-        // The official 2captcha Solver extension (force-installed next to the
-        // receipt extension by scripts/provision-menards-browser.sh) clears
-        // the wall's hCaptcha. While it is on, the blind checkbox click stays
-        // out of its way: a token landing under a click reset the widget.
+        // The 2captcha Solver extension. OFF (2026-09-29): its current version
+        // (3.7.4) has no hCaptcha support, so it never cleared the Imperva
+        // wall, and it could read every page. With it off the policy script
+        // marks it removed and the calibrated checkbox click is used instead.
         'solver_extension' => (bool) env('MENARDS_SOLVER_EXTENSION', false),
         'solver_extension_id' => env('MENARDS_SOLVER_EXTENSION_ID', 'ifibfemgeogfhoebkmokieepdoobkbpo'),
         // Sign-in form filled by scripts/menards-signin.cjs, which attaches to

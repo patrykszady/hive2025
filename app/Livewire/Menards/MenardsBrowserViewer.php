@@ -30,7 +30,8 @@ class MenardsBrowserViewer extends Component
         $this->authorize('menards-browser');
 
         dispatch(function () {
-            Artisan::call('menards:browser', ['action' => 'ensure']);
+            // A person asked: sign in even while automatic sign-ins are paused.
+            Artisan::call('menards:browser', ['action' => 'ensure', '--manual' => true]);
         })->onQueue('background');
 
         session()->flash('menards-retry', 'Sign-in retry queued — the status below updates on its own.');

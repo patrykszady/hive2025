@@ -343,7 +343,9 @@ foreach (['08:00', '12:00', '16:00', '20:00'] as $menardsSyncTime) {
 // above all — it sends a push notification to admins, throttled to once per
 // reason per 12 hours. That is the part that matters: the original scraper
 // failed into a log nobody read and stayed broken for two weeks.
-Schedule::command('menards:browser ensure')
+// --signin: the daily pass may sign in (a plain ensure, the deploy's, never
+// does); an uncleared security check pauses that for 12 hours.
+Schedule::command('menards:browser ensure --signin')
     ->dailyAt('07:30')
     ->timezone('America/Chicago')
     ->environments(['production'])

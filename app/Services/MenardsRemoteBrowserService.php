@@ -53,6 +53,14 @@ class MenardsRemoteBrowserService
     public const NEEDS_SIGNIN_CACHE_KEY = 'menards:needs_signin';
 
     /**
+     * An uncleared security check, or a rejected sign-in, pauses AUTOMATIC
+     * sign-ins this long. Every attempt shows Imperva another challenge and
+     * repeated ones escalate to picture puzzles: on 2026-09-29 five deploys
+     * meant five walls in an afternoon. A person's Retry sign-in skips it.
+     */
+    public const AUTO_SIGNIN_PAUSE_HOURS = 12;
+
+    /**
      * Where the browser sits between syncs. A signed-in page — so its title
      * still answers "are we signed in?" — but NOT the receipt page: the
      * extension opens its own receipt tab for each sync and closes it after,
@@ -349,7 +357,7 @@ class MenardsRemoteBrowserService
         // password into whatever control happened to be under those coordinates
         // on the page it landed on instead.
         if ($this->signedIn()) {
-            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
+            $this->markSignedIn();
 
             return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
         }
@@ -373,7 +381,7 @@ class MenardsRemoteBrowserService
         if (! $loaded && $this->onSignedInPage()) {
             Log::channel('menards')->info('Menards browser: already signed in — login page redirected', ['title' => $this->windowTitle()]);
             $this->retireExpiredReport();
-            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
+            $this->markSignedIn();
 
             return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
         }
@@ -466,7 +474,7 @@ class MenardsRemoteBrowserService
 
         if ($this->signedIn()) {
             Log::channel('menards')->info('Menards browser: signed in', ['title' => $this->windowTitle(), 'filled_by' => ($filled['ok'] ?? false) ? 'puppeteer' : 'xdotool']);
-            \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
+            $this->markSignedIn();
 
             return ['ok' => true, 'url' => $this->windowTitle()];
         }
@@ -803,6 +811,63 @@ class MenardsRemoteBrowserService
             ['reason' => $reason, 'at' => now()->toIso8601String()],
             now()->addMonth(),
         );
+
+        if (in_array($reason, ['challenge', 'login_failed'], true)) {
+            @file_put_contents($this->signInPausePath(), json_encode(['reason' => $reason, 'at' => now()->toIso8601String()]));
+        }
+    }
+
+    /** A live session: the "needs a sign-in" alert and any pause are over. */
+    protected function markSignedIn(): void
+    {
+        \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
+        $this->resumeAutomaticSignIn();
+    }
+
+    /** A file, not the cache: every deploy's optimize:clear empties the cache. */
+    public function signInPausePath(): string
+    {
+        return storage_path('app/menards-signin-paused.json');
+    }
+
+    /** When automatic sign-ins were paused, while the pause lasts; null otherwise. */
+    public function automaticSignInPausedSince(): ?\Carbon\CarbonInterface
+    {
+        $pause = $this->signInPause();
+
+        if ($pause === null) {
+            return null;
+        }
+
+        $at = \Carbon\Carbon::parse($pause['at']);
+
+        return $at->gt(now()->subHours(self::AUTO_SIGNIN_PAUSE_HOURS)) ? $at : null;
+    }
+
+    public function resumeAutomaticSignIn(): void
+    {
+        @unlink($this->signInPausePath());
+    }
+
+    /**
+     * Put the "needs a human" alert back from the pause file. The deploy that
+     * just ran emptied the cache, and the Menards page reads the alert from it.
+     */
+    public function flagPausedSignIn(): void
+    {
+        $pause = $this->signInPause();
+
+        if ($pause !== null) {
+            \Illuminate\Support\Facades\Cache::put(self::NEEDS_SIGNIN_CACHE_KEY, $pause, now()->addMonth());
+        }
+    }
+
+    /** @return array{reason: string, at: string}|null */
+    protected function signInPause(): ?array
+    {
+        $pause = json_decode((string) @file_get_contents($this->signInPausePath()), true);
+
+        return is_array($pause) && ! empty($pause['at']) ? ['reason' => (string) ($pause['reason'] ?? 'challenge'), 'at' => (string) $pause['at']] : null;
     }
 
     /**

@@ -73,6 +73,7 @@ class MenardsSyncStatusController extends Controller
         // retire any standing "needs sign-in" alert.
         if ($status['ok']) {
             Cache::forget(\App\Services\MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY);
+            app(\App\Services\MenardsRemoteBrowserService::class)->resumeAutomaticSignIn();
         }
 
         // A dead session is the event worth seeing in the log — it is the one

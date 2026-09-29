@@ -16,7 +16,12 @@ use Illuminate\Console\Command;
 class MenardsBrowser extends Command
 {
     protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync|tidy}
-        {--reset-profile : Wipe the browser profile — this signs you out}';
+        {--reset-profile : Wipe the browser profile — this signs you out}
+        {--signin : ensure: also sign in when signed out (the daily pass). A plain ensure — the deploy runs one — only keeps the browser up}
+        {--manual : A person asked (Retry sign-in): sign in even while automatic sign-ins are paused after an uncleared security check}';
+
+    /** login() outcome: skipped, automatic sign-ins are paused. Never an exit code. */
+    protected const SIGNIN_PAUSED = 3;
 
     protected $description = 'Manage the server-side signed-in browser used to sync Menards receipts';
 
@@ -24,7 +29,8 @@ class MenardsBrowser extends Command
     {
         return match ($this->argument('action')) {
             'check' => $this->check($browser),
-            'login' => $this->login($browser),
+            // Run by hand: a person is at the keyboard, so the pause is theirs to skip.
+            'login' => $this->login($browser, manual: true),
             'ensure' => $this->ensure($browser),
             'sync' => $this->sync($browser),
             'start' => $this->start($browser),
@@ -172,9 +178,20 @@ class MenardsBrowser extends Command
         // session works" for the rest of the day while four scheduled syncs
         // failed. If the extension has since told us the session expired, that
         // is newer and more direct evidence than the batch, and it wins.
+        $manual = (bool) $this->option('manual');
+
         if ($this->recentBatchArrived() && ! $this->extensionReportsExpiredSession()) {
             $this->line('A receipt batch arrived within the last day — the session works; not touching the browser.');
-        } elseif ($this->login($browser) !== self::SUCCESS) {
+        } elseif (! $this->option('signin') && ! $manual) {
+            // Every deploy runs a plain ensure, and signing in from it put a
+            // security check in front of Imperva after each of five deploys on
+            // 2026-09-29. The 07:30 pass, the syncs and Retry sign-in sign in.
+            $this->line('The browser is up. Not signing in: a plain ensure only keeps the browser alive.');
+
+            return self::SUCCESS;
+        } elseif (($signin = $this->login($browser, $manual)) === self::SIGNIN_PAUSED) {
+            return self::SUCCESS;
+        } elseif ($signin !== self::SUCCESS) {
             // Imperva asked for a human. That is not a command failure — it
             // is the expected state this command exists to detect, and it is
             // already surfaced twice over (the sidebar error and the
@@ -271,7 +288,15 @@ class MenardsBrowser extends Command
         if ($this->extensionReportsExpiredSession()) {
             $this->line('The extension last reported a dead session — checking the sign-in before asking for a sync.');
 
-            if ($this->login($browser) !== self::SUCCESS) {
+            $signin = $this->login($browser, (bool) $this->option('manual'));
+
+            if ($signin === self::SIGNIN_PAUSED) {
+                $this->warn('Skipping this sync: automatic sign-ins are paused until a person clears the security check.');
+
+                return self::SUCCESS;
+            }
+
+            if ($signin !== self::SUCCESS) {
                 if (\Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
                     $this->notifyAttention($browser->status(), false);
                     $this->warn('Menards wants a human at the sign-in wall — flagged in the sidebar; skipping this sync.');
@@ -413,8 +438,19 @@ class MenardsBrowser extends Command
      * a person established only until Menards expires it; without this the next
      * expiry means someone tunnels in over noVNC and types a password.
      */
-    protected function login(MenardsRemoteBrowserService $browser): int
+    protected function login(MenardsRemoteBrowserService $browser, bool $manual = false): int
     {
+        if (! $manual && ($since = $browser->automaticSignInPausedSince())) {
+            $browser->flagPausedSignIn();
+            $this->warn('Not signing in automatically: the security check from '.$since->toDateTimeString().' UTC is waiting for a person. '
+                .'Click "I am human" at /menards/browser, then Retry sign-in.');
+            \Illuminate\Support\Facades\Log::channel('menards')->info('Menards browser: automatic sign-in skipped — paused after an uncleared security check', [
+                'since' => $since->toIso8601String(),
+            ]);
+
+            return self::SIGNIN_PAUSED;
+        }
+
         [$email, $password] = $this->credentials();
 
         if (! $email || ! $password) {
