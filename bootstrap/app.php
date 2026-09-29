@@ -51,6 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexSubdomains::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexNonPublic::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\LoadAuthVendor::class);
+        $middleware->appendToGroup('web', \App\Http\Middleware\LogForbiddenResponses::class);
 
         $middleware->alias([
             'admin.access' => \App\Http\Middleware\AdminAccess::class,

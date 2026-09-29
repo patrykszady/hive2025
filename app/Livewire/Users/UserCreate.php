@@ -325,8 +325,10 @@ class UserCreate extends Component
                 // Only an accessible client (one the signed-in company already
                 // serves) may receive a new user — the client id comes from a
                 // Locked property, but re-check it against the policy anyway.
+                // The ability lives on UserPolicy: passing the Client alone
+                // resolves ClientPolicy, which has no such method and denies.
                 $client = Client::findOrFail($this->model['id']);
-                $this->authorize('create_client_member', $client);
+                $this->authorize('create_client_member', [User::class, $client]);
 
                 //add User to existing/this Client
                 // Check if this relationship already exists to prevent duplicates
