@@ -13,6 +13,7 @@
        never draw a line under the header — chrome is fixed, content varies)
      - badge   — header badge area (e.g. bulk-select controls)
      - actions — header buttons
+     - subheading_actions — right side of the subheading row, under the buttons
      - toolbar — controls above the table (e.g. a search input); padded to line
                  up with the table's own text edges
      - before  — content that must precede the flush wrapper (modal hosts:
@@ -76,6 +77,11 @@
          comments, and would otherwise render an empty actions area. --}}
     @if(isset($actions) && trim(preg_replace('/<!--.*?-->/s', '', (string) $actions)) !== '')
         <x-slot:actions>{{ $actions }}</x-slot:actions>
+    @endif
+    {{-- Right side of the subheading row, under the header buttons (e.g. a
+         bank's "updated 48 minutes ago"). Same emptiness guard. --}}
+    @if(isset($subheading_actions) && trim(preg_replace('/<!--.*?-->/s', '', (string) $subheading_actions)) !== '')
+        <x-slot:subheading_actions>{{ $subheading_actions }}</x-slot:subheading_actions>
     @endif
 
     {{ $before ?? '' }}

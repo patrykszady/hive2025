@@ -4,12 +4,15 @@ namespace App\Livewire\Banks;
 
 use App\Models\Bank;
 use App\Models\BankAccount;
+use App\Models\Transaction;
 use App\Services\PlaidService;
 use Flux;
 
 use Carbon\Carbon;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 use Livewire\Attributes\Title;
@@ -22,8 +25,31 @@ class BankShow extends Component
     public Bank $bank;
     public $accounts = [];
 
+    /**
+     * Days of history a reconnected Item asks Plaid for. Plaid only honors
+     * this when the Item is created, and it has to reach back past the day
+     * the old connection last synced (PSFCU: 06/23, reconnected 09/29).
+     */
+    public const RELINK_DAYS_REQUESTED = 180;
+
+    /**
+     * Columns of the bank card's table: one row per account, then its
+     * uncleared checks beneath it.
+     *
+     * @return list<array{label: string, width: string, align?: string}>
+     */
+    public static function columnDefs(): array
+    {
+        return [
+            ['label' => 'Account', 'width' => 'w-[37%] min-w-0'],
+            ['label' => 'Details', 'width' => 'w-[40%] min-w-0'],
+            ['label' => 'Amount', 'width' => 'w-[23%]', 'align' => 'end'],
+        ];
+    }
+
     protected $listeners = [
         'plaidLinkItemUpdate' => 'plaid_link_item_update',
+        'plaidLinkItemRelink' => 'plaid_link_item_relink',
         'plaidError' => 'handlePlaidError',
         'refreshComponent' => '$refresh',
     ];
@@ -266,6 +292,191 @@ class BankShow extends Component
         $this->render();
 
         $this->dispatch('confirmProcessStep', 'banks_registered')->to('entry.vendor-registration');
+    }
+
+    /**
+     * Start Link for a brand-new Item at this bank, for when update mode
+     * can't repair the old one. Transactions only: an institution that
+     * doesn't offer statements (PSFCU) is hidden from Link when the token
+     * asks for them.
+     */
+    public function plaid_link_token_relink(PlaidService $plaidService): void
+    {
+        $this->authorize('update', $this->bank);
+
+        $result = $plaidService->createLinkToken([
+            'client_id' => config('services.plaid.client_id'),
+            'secret' => config('services.plaid.secret'),
+            'client_name' => config('app.name'),
+            'user' => ['client_user_id' => (string) auth()->id()],
+            'country_codes' => ['US'],
+            'language' => 'en',
+            'webhook' => config('services.plaid.webhook'),
+            'products' => ['transactions'],
+            'transactions' => ['days_requested' => self::RELINK_DAYS_REQUESTED],
+        ]);
+
+        if (empty($result['link_token'])) {
+            Flux::toast(
+                text: $result['error_message'] ?? 'Plaid did not return a link token.',
+                heading: 'Could not start the reconnect',
+                variant: 'danger',
+            );
+
+            return;
+        }
+
+        $this->dispatch('linkTokenRelink', [
+            'exchangeToken' => $result['link_token'],
+            'bankId' => $this->bank->id,
+        ]);
+    }
+
+    /**
+     * Link finished for the new Item: move this bank and its accounts onto
+     * it, so history, checks and expense links stay on the same records,
+     * then remove the old Item at Plaid. The sync skips what the old Item
+     * already imported (plaid_options.relinked_through).
+     *
+     * @param  array<string, mixed>|null  $institution
+     * @param  array<int, array<string, mixed>>|null  $accounts
+     */
+    public function plaid_link_item_relink($public_token = null, $institution = null, $accounts = null, $bank_id = null): void
+    {
+        // Every BankShow on the page hears this event; only the one whose
+        // bank started Link acts on it.
+        if ((int) $bank_id !== $this->bank->id) {
+            return;
+        }
+
+        $this->authorize('update', $this->bank);
+
+        if (empty($public_token)) {
+            Flux::toast(text: 'Plaid did not return a token.', heading: 'Reconnect failed', variant: 'danger');
+
+            return;
+        }
+
+        $plaidService = app(PlaidService::class);
+        $exchange = $plaidService->exchangePublicToken($public_token);
+
+        if (empty($exchange['access_token'])) {
+            Flux::toast(
+                text: $exchange['error_message'] ?? 'Plaid did not return an access token.',
+                heading: 'Reconnect failed',
+                variant: 'danger',
+            );
+
+            return;
+        }
+
+        if (($institution['institution_id'] ?? null) !== $this->bank->plaid_ins_id) {
+            // Don't leave the wrong bank's new Item connected (and billed).
+            $plaidService->removeItem($exchange['access_token']);
+
+            Flux::toast(
+                text: 'That login was for '.($institution['name'] ?? 'a different bank').', not '.$this->bank->name.'. Nothing changed.',
+                heading: 'Different bank',
+                variant: 'danger',
+            );
+
+            return;
+        }
+
+        $oldAccessToken = $this->bank->plaid_access_token;
+        $oldItemId = $this->bank->plaid_item_id;
+        $relinkedThrough = $this->relinkedThroughDate();
+
+        DB::transaction(function () use ($exchange, $accounts, $oldItemId, $relinkedThrough) {
+            foreach ($accounts ?? [] as $account) {
+                $this->attachRelinkedAccount($account);
+            }
+
+            $options = $this->bank->plaid_options ?? [];
+            unset($options['next_cursor']);
+            $options['error'] = false;
+            $options['relinked_at'] = now()->toIso8601String();
+            $options['relinked_through'] = $relinkedThrough;
+            $options['previous_plaid_item_id'] = $oldItemId;
+
+            $this->bank->forceFill([
+                'plaid_access_token' => $exchange['access_token'],
+                'plaid_item_id' => $exchange['item_id'] ?? null,
+                'plaid_options' => $options,
+            ])->save();
+        });
+
+        $removal = filled($oldAccessToken) ? $plaidService->removeItem($oldAccessToken) : null;
+
+        Log::channel('plaid_adds')->info('Bank reconnected as a new Plaid Item', [
+            'bank_id' => $this->bank->id,
+            'previous_item_id' => $oldItemId,
+            'item_id' => $exchange['item_id'] ?? null,
+            'relinked_through' => $relinkedThrough,
+            'accounts' => collect($accounts ?? [])->map(fn ($account) => ($account['mask'] ?? '').' '.($account['subtype'] ?? ''))->all(),
+            'old_item_removed' => isset($removal['request_id']) && empty($removal['error']),
+            'old_item_removal_error' => $removal['error_message'] ?? null,
+        ]);
+
+        Flux::toast(
+            text: 'New transactions will sync shortly. Anything the old connection already imported is skipped.',
+            heading: $this->bank->name.' reconnected',
+            variant: 'success',
+        );
+
+        $this->redirect(route('banks.show', $this->bank), navigate: true);
+    }
+
+    /**
+     * Point this bank's matching account (same last four and type) at the
+     * new Item's account id, or add it when the login shows a new account.
+     *
+     * @param  array<string, mixed>  $account
+     */
+    protected function attachRelinkedAccount(array $account): void
+    {
+        $type = ucwords((string) ($account['subtype'] ?? ''));
+
+        $bankAccount = $this->bank->accounts()->withTrashed()
+            ->where('account_number', $account['mask'] ?? null)
+            ->where('type', $type)
+            ->orderByRaw('deleted_at IS NULL DESC')
+            ->latest('updated_at')
+            ->first();
+
+        if (! $bankAccount) {
+            $bankAccount = new BankAccount;
+            $bankAccount->bank_id = $this->bank->id;
+            $bankAccount->account_number = $account['mask'] ?? null;
+            $bankAccount->vendor_id = $this->bank->vendor_id;
+            $bankAccount->type = $type;
+        }
+
+        if ($bankAccount->trashed()) {
+            $bankAccount->restore();
+        }
+
+        $bankAccount->plaid_account_id = $account['id'] ?? null;
+        $bankAccount->save();
+    }
+
+    /**
+     * The last day the old Item delivered transactions: Plaid's last
+     * successful transactions update, else the newest imported transaction.
+     */
+    protected function relinkedThroughDate(): ?string
+    {
+        $lastSuccessfulUpdate = $this->bank->plaid_options['status']['transactions']['last_successful_update'] ?? null;
+
+        if ($lastSuccessfulUpdate) {
+            return Carbon::parse($lastSuccessfulUpdate)->toDateString();
+        }
+
+        $newest = Transaction::query()
+            ->whereIn('bank_account_id', $this->bank->accounts()->withTrashed()->pluck('id'))
+            ->max('transaction_date');
+
+        return $newest ? Carbon::parse($newest)->toDateString() : null;
     }
 
     //plaidError

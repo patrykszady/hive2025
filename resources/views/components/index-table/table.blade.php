@@ -4,14 +4,15 @@
      when the table sizes to `auto`), and no inner padding/spacing of its own —
      the card owns that.
 
-     Columns come from a component's static columnDefs(); rows are the slot. --}}
+     Columns come from a component's static columnDefs() (optional 'align' =>
+     'end' for money columns); rows are the slot. --}}
 @props([
     'columns' => [],
 ])
 <flux:table {{ $attributes->class('table-fixed min-w-0 w-full [:where(&)]:p-0 [:where(&)]:space-y-0') }}>
     <flux:table.columns>
         @foreach($columns as $column)
-            <flux:table.column class="{{ $column['width'] }}">{{ $column['label'] }}</flux:table.column>
+            <flux:table.column class="{{ $column['width'] }}" :align="$column['align'] ?? null">{{ $column['label'] }}</flux:table.column>
         @endforeach
     </flux:table.columns>
 

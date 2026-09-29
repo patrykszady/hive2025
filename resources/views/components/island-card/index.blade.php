@@ -25,6 +25,7 @@
     // isset() alone would paint a header for a card that has none.
     $hasBadge = isset($badge) && trim(preg_replace('/<!--.*?-->/s', '', (string) $badge)) !== '';
     $hasActions = isset($actions) && trim(preg_replace('/<!--.*?-->/s', '', (string) $actions)) !== '';
+    $hasSubheadingActions = isset($subheading_actions) && trim(preg_replace('/<!--.*?-->/s', '', (string) $subheading_actions)) !== '';
 
     if ($attributes->whereStartsWith('wire:transition')->isEmpty()) {
         $attributes = $attributes->merge(['wire:transition.opacity.duration.200ms' => '']);
@@ -36,7 +37,7 @@
      opacity, and loaded content replaces them with no animation — identical
      size means the swap is invisible, which is what killed the flash. --}}
 <flux:card {{ $attributes->class('space-y-1 !px-5 !py-2') }} style="--flux-card-px: calc(var(--spacing) * 5);">
-    @if($heading || $hasBadge || $hasActions)
+    @if($heading || $hasBadge || $hasActions || $hasSubheadingActions)
     <x-island-card.header
         :heading="$heading"
         :href="$href"
@@ -50,6 +51,9 @@
         @endif
         @if($hasActions)
             <x-slot:actions>{{ $actions }}</x-slot:actions>
+        @endif
+        @if($hasSubheadingActions)
+            <x-slot:subheading_actions>{{ $subheading_actions }}</x-slot:subheading_actions>
         @endif
     </x-island-card.header>
     @endif

@@ -28,6 +28,7 @@ return [
         'env' => env('PLAID_ENV'),
         'client_id' => env('PLAID_CLIENT_ID'),
         'secret' => env('PLAID_SECRET'),
+        'webhook' => env('PLAID_WEBHOOK'),
         // The Plaid-Verification JWT check is always enforced outside
         // local/testing. Inside local/testing it is skipped unless this is
         // explicitly turned on (e.g. by a test that wants to exercise it),

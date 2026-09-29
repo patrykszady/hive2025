@@ -17,6 +17,18 @@ document.addEventListener('livewire:initialized', () => {
 
         initializePlaidLink(exchangeToken, 'plaidLinkItemUpdate', bankId);
     });
+
+    // Reconnect as a new Item: the server moves the bank onto it.
+    Livewire.on('linkTokenRelink', (payload) => {
+        const data = Array.isArray(payload) ? payload[0] : payload;
+
+        if (!data?.exchangeToken) {
+            console.error('Error: exchangeToken is missing or invalid.');
+            return;
+        }
+
+        initializePlaidLink(data.exchangeToken, 'plaidLinkItemRelink', data.bankId);
+    });
 });
 
 function initializePlaidLink(exchangeToken, eventName, bankId = null) {

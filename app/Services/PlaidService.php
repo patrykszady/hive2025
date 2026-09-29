@@ -233,6 +233,35 @@ class PlaidService
     }
 
     /**
+     * Exchange a Link public_token for the Item's access_token and item_id.
+     *
+     * @return array{access_token?: string, item_id?: string, error?: bool, error_message?: string}
+     */
+    public function exchangePublicToken(string $publicToken): array
+    {
+        return $this->makeRequest($this->baseUrl.'/item/public_token/exchange', [
+            'client_id' => $this->clientId,
+            'secret' => $this->secret,
+            'public_token' => $publicToken,
+        ], ['source' => 'exchangePublicToken'], 'Plaid public token exchange failed.');
+    }
+
+    /**
+     * Remove an Item at Plaid: its access_token stops working and billing for
+     * it ends. Used when a bank is reconnected as a new Item.
+     *
+     * @return array{removed?: bool, request_id?: string, error?: bool, error_message?: string}
+     */
+    public function removeItem(string $accessToken): array
+    {
+        return $this->makeRequest($this->baseUrl.'/item/remove', [
+            'client_id' => $this->clientId,
+            'secret' => $this->secret,
+            'access_token' => $accessToken,
+        ], ['source' => 'removeItem'], 'Plaid item removal failed.');
+    }
+
+    /**
      * Fire a sandbox test webhook for an Item.
      * Only works in sandbox environment.
      * 

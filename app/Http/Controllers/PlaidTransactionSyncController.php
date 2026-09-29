@@ -13,6 +13,9 @@ use App\Support\ApiErrorFormatter;
 
 class PlaidTransactionSyncController extends Controller
 {
+    /** Days either side of a reconnect's last delivered day that the new Item may repeat. */
+    private const RELINK_OVERLAP_DAYS = 3;
+
     public function __construct(private PlaidService $plaidService) {}
 
     public function syncAllBanks(): void
@@ -113,6 +116,14 @@ class PlaidTransactionSyncController extends Controller
                             ? $oneYearAgo->toDateString()
                             : $regDate->toDateString();
                     }
+                }
+
+                // A bank reconnected as a new Item gets its history again
+                // under new transaction ids: never reach back past the few
+                // days the old Item may not have delivered in full.
+                $relinkFloor = $this->relinkFloor($bank);
+                if ($relinkFloor && $transactionsStartDate < $relinkFloor) {
+                    $transactionsStartDate = $relinkFloor;
                 }
             }
 
@@ -255,6 +266,19 @@ class PlaidTransactionSyncController extends Controller
                     $newTransaction
                 );
                 if ($heuristic) { $candidates = collect([$heuristic]); }
+            }
+            if ($candidates->count() === 0 && ($relinkDuplicate = $this->findRelinkDuplicate($bank, $institutionAccountIds, $newTransaction))) {
+                $this->adoptRelinkDuplicate($relinkDuplicate, $plaidTransactionId, $bank, $requestId);
+
+                return $this->buildAggregate(
+                    status: 'matched_relink',
+                    transactionId: $relinkDuplicate->id,
+                    plaidTransactionId: $plaidTransactionId,
+                    pendingPlaidTransactionId: $pendingPlaidTransactionId,
+                    amount: $amount,
+                    payload: $newTransaction,
+                    matchVia: 'relink'
+                );
             }
             $match = $this->evaluateDeterministicMatch($candidates, $amount, $plaidTransactionId, $pendingPlaidTransactionId, $bank->id, 'ADD', $requestId, true, $newTransaction);
             // If ambiguous, fall through to insert as a new transaction (previous behavior)
@@ -884,6 +908,87 @@ class PlaidTransactionSyncController extends Controller
             $bankAccount->options = $options;
             $bankAccount->save();
         }
+    }
+
+    /**
+     * First date a reconnected bank's new Item may import: a few days before
+     * the old Item's last delivery, so nothing in between is missed. The
+     * overlap is de-duplicated by findRelinkDuplicate().
+     */
+    private function relinkFloor(Bank $bank): ?string
+    {
+        $relinkedThrough = $bank->plaid_options['relinked_through'] ?? null;
+
+        return $relinkedThrough
+            ? Carbon::parse($relinkedThrough)->subDays(self::RELINK_OVERLAP_DAYS)->toDateString()
+            : null;
+    }
+
+    /**
+     * On a reconnected bank, the new Item re-delivers the last few days the
+     * old Item already imported, under new transaction ids. The existing row
+     * (same account and amount, within the overlap, imported before the
+     * reconnect, not already claimed) is the same charge.
+     */
+    private function findRelinkDuplicate(Bank $bank, $institutionAccountIds, array $tx): ?Transaction
+    {
+        $relinkedThrough = $bank->plaid_options['relinked_through'] ?? null;
+        $relinkedAt = $bank->plaid_options['relinked_at'] ?? null;
+        $date = $tx['date'] ?? $tx['authorized_date'] ?? null;
+
+        if (! $relinkedThrough || ! $relinkedAt || ! $date || ! isset($tx['amount'])) {
+            return null;
+        }
+
+        if ($date > Carbon::parse($relinkedThrough)->addDays(self::RELINK_OVERLAP_DAYS)->toDateString()) {
+            return null;
+        }
+
+        return Transaction::withoutGlobalScopes()
+            ->whereIn('bank_account_id', $institutionAccountIds)
+            ->whereNull('deleted_at')
+            ->where('amount', (float) $tx['amount'])
+            ->whereBetween('transaction_date', [
+                Carbon::parse($date)->subDays(self::RELINK_OVERLAP_DAYS)->toDateString(),
+                Carbon::parse($date)->addDays(self::RELINK_OVERLAP_DAYS)->toDateString(),
+            ])
+            ->where('created_at', '<', Carbon::parse($relinkedAt))
+            ->get()
+            ->reject(fn (Transaction $existing) => filled($this->detailsArray($existing)['relinked_from_plaid_transaction_id'] ?? null))
+            ->sortBy(fn (Transaction $existing) => abs($existing->transaction_date->diffInDays(Carbon::parse($date))))
+            ->first();
+    }
+
+    private function adoptRelinkDuplicate(Transaction $existing, string $plaidTransactionId, Bank $bank, string $requestId): void
+    {
+        $details = $this->detailsArray($existing);
+        $details['relinked_from_plaid_transaction_id'] = $existing->plaid_transaction_id;
+
+        Log::channel('plaid_adds')->info('Reconnected bank: new Item re-delivered an imported transaction; keeping the existing row', [
+            'bank_id' => $bank->id,
+            'transaction_id' => $existing->id,
+            'old_plaid_transaction_id' => $existing->plaid_transaction_id,
+            'new_plaid_transaction_id' => $plaidTransactionId,
+            'request_id' => $requestId,
+        ]);
+
+        $existing->plaid_transaction_id = $plaidTransactionId;
+        $existing->details = $details;
+        $existing->save();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function detailsArray(Transaction $transaction): array
+    {
+        $details = $transaction->details;
+
+        if (is_string($details)) {
+            return json_decode($details, true) ?: [];
+        }
+
+        return json_decode(json_encode($details ?? []), true) ?: [];
     }
 
     private function filterTransactionsByStartDate(array $transactions, string $startDate): array
