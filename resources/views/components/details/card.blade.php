@@ -26,9 +26,12 @@
     $useInlineToggle = isset($details) && $details_text === false && $accordion;
 @endphp
 
-@if($useInlineToggle)
-<div x-data="{ open: @js($expanded) }">
-@endif
+{{-- Echoed, never wrapped in @if: Livewire takes the first tag at the start
+     of a line as a component's root, and inside @if this wrapper lands right
+     after Livewire's <!--[if BLOCK]> marker. wire:id then went onto the inner
+     card, and every round trip of a component whose root is this card failed
+     with "Snapshot missing" (Add Member on /clients/* never opened). --}}
+{!! $useInlineToggle ? '<div x-data="{ open: '.\Illuminate\Support\Js::from($expanded)->toHtml().' }">' : '' !!}
 
 {{-- wire:transition — cards that appear/disappear from server renders fade smoothly --}}
 <flux:card wire:transition.opacity.duration.200ms class="!px-5 !py-2" style="--flux-card-px: calc(var(--spacing) * 5);">
@@ -105,6 +108,4 @@
     @endif
 </flux:card>
 
-@if($useInlineToggle)
-</div>
-@endif
+{!! $useInlineToggle ? '</div>' : '' !!}
