@@ -410,9 +410,14 @@
             @endif
         </flux:button.group>
 
-        <livewire:line-items.estimate-line-item-create :estimate="$estimate"/>
-        <livewire:estimates.estimate-a-i-generator :estimate="$estimate"/>
-        <livewire:estimates.estimate-email />
+        {{-- Explicit keys: the automatic ones picked up the last key of the
+             line-item loop above, so every change to the lines (a draft
+             landing, a quantity typed in the AI draft) re-keyed these, and the
+             refresh re-mounted them — the AI Generate modal closed and lost
+             its draft mid-edit. --}}
+        <livewire:line-items.estimate-line-item-create :estimate="$estimate" wire:key="estimate-line-item-create-{{ $estimate->id }}"/>
+        <livewire:estimates.estimate-a-i-generator :estimate="$estimate" wire:key="estimate-ai-generator-{{ $estimate->id }}"/>
+        <livewire:estimates.estimate-email wire:key="estimate-email-{{ $estimate->id }}"/>
         @endcan
     </div>
 </div>
