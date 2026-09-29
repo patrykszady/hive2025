@@ -483,6 +483,18 @@ Schedule::command('seo:psi-sync')
 | round trip each, and health reads only DB + the ledger file (seconds) so
 | it runs last.
 */
+// The report library counts a report as up to date for 24 hours; the weekly
+// runs below left it reading "needs a refresh" six days in seven. Hourly, only
+// the stale ones, one after another (a report it could not refresh waits six
+// hours before the next try) — each report is rewritten about once a day.
+Schedule::command('seo:reports-refresh --stale --automatic')
+    ->hourlyAt(17)
+    ->name('seo-reports-refresh')
+    ->environments(['production'])
+    ->withoutOverlapping(60)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-reports-refresh.log'));
+
 Schedule::command('seo:content-decay --markdown')
     ->weeklyOn(0, '04:30')
     ->name('seo-content-decay')

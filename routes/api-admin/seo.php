@@ -17,6 +17,7 @@ Route::post('seo/snapshot/refresh', [SeoSnapshotController::class, 'refreshSnaps
 Route::get('seo/top-rows', [SeoSnapshotController::class, 'topRows'])->name('seo.top-rows');
 
 Route::get('seo/reports', [SeoReportController::class, 'index'])->name('seo.reports.index');
+Route::post('seo/reports/refresh', [SeoReportController::class, 'refresh'])->name('seo.reports.refresh');
 Route::get('seo/reports/{report}', [SeoReportController::class, 'show'])->name('seo.reports.show');
 Route::post('seo/reports/{report}/regenerate', [SeoReportController::class, 'regenerate'])->name('seo.reports.regenerate');
 

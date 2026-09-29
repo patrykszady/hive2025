@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin\V1;
 use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Support\Seo\Reports\ReportCapabilities;
+use App\Support\Seo\Reports\ReportRefresh;
 use App\Support\SeoStorage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use League\CommonMark\GithubFlavoredMarkdownConverter;
 use SsSystems\Platform\Reports\Console\ReportRun;
+use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
 
 /**
  * GET seo/reports, GET seo/reports/{report}, POST seo/reports/{report}/
@@ -43,7 +45,38 @@ class SeoReportController extends Controller
         return $this->itemResponse([
             'reports' => $files,
             'stats' => $this->reportStats($files),
+            'batch' => ReportRefresh::progress(),
         ]);
+    }
+
+    /**
+     * POST seo/reports/refresh — refresh every report that needs it (or all
+     * of them with only_stale=false) in the background and answer at once:
+     * the slow reports take longer than a web request may run. Progress
+     * comes back as `batch` on GET seo/reports.
+     */
+    public function refresh(Request $request): JsonResponse
+    {
+        if (ReportRefresh::running()) {
+            return $this->itemResponse(['ok' => true, 'queued' => false, 'running' => true, 'keys' => [], 'batch' => ReportRefresh::progress()]);
+        }
+
+        $onlyStale = $request->boolean('only_stale', true);
+        $keys = ReportRefresh::keysToRun($onlyStale);
+
+        if ($keys === []) {
+            return $this->itemResponse(['ok' => true, 'queued' => false, 'running' => false, 'keys' => [], 'message' => 'Every report is up to date.', 'batch' => ReportRefresh::progress()]);
+        }
+
+        Log::channel('seo-reports')->info('report library refresh requested', [
+            'reports' => $keys,
+            'requested_by' => $request->header('X-Admin-User'),
+        ]);
+
+        $batch = ReportRefresh::markQueued($keys);
+        RunArtisanCommandDetached::dispatch('seo:reports-refresh', ['--keys' => implode(',', $keys)]);
+
+        return $this->itemResponse(['ok' => true, 'queued' => true, 'running' => true, 'keys' => $keys, 'batch' => $batch]);
     }
 
     public function show(Request $request, string $report): JsonResponse
