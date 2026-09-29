@@ -7,7 +7,6 @@ use App\Models\PlatformSetting;
 use App\Models\SeoSyncRun;
 use App\Models\Testimonial;
 use App\Services\MetaSocialService;
-use SsSystems\Platform\Auth\OAuthState;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\ClaritySettings;
 use App\Support\Seo\DataForSeoSettings;
@@ -19,10 +18,12 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
+use SsSystems\Platform\Auth\OAuthState;
 use SsSystems\Platform\Google\BusinessProfile\Client;
 use SsSystems\Platform\Google\BusinessProfile\Contracts\ListingStore;
 use SsSystems\Platform\Google\BusinessProfile\Http\Concerns\ServesGbpPlatform;
 use SsSystems\Platform\Google\OAuthClient;
+use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
 use SsSystems\Platform\Seo\Google\ServiceAccountSearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncRule;
 
@@ -516,5 +517,24 @@ class PlatformsController extends Controller
         return request()->isMethod('DELETE')
             ? 'This site has no project photos to remove from Google.'
             : 'This site has no project photos to send to Google.';
+    }
+
+    /**
+     * POST platforms/gsc/sync — ss.systems asks this site to pull Search
+     * Console now instead of at the nightly run: its Platforms screen's
+     * Refresh does, so an owner who has just added our service account to
+     * the property sees the answer in a minute (2026-09-29). Queues the kit's
+     * RunArtisanCommandDetached and returns at once: a full pull takes
+     * minutes, far longer than ss.systems' 15-second client waits. The result
+     * shows on platforms/status's gsc block (last_synced_at, last_sync_error).
+     */
+    public function syncGsc(Request $request): JsonResponse
+    {
+        $days = max(1, min(90, (int) ($request->input('days') ?? SearchConsoleSyncRule::DEFAULT_DAYS)));
+        $lag = max(0, min(7, (int) ($request->input('lag_days') ?? SearchConsoleSyncRule::DEFAULT_LAG_DAYS)));
+
+        RunArtisanCommandDetached::dispatch('seo:gsc-sync', ['--days' => $days, '--lag-days' => $lag]);
+
+        return response()->json(['data' => ['queued' => true]]);
     }
 }

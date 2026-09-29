@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Route;
 CapabilityRegistry::declare('platforms');
 
 Route::get('platforms/status', [PlatformsController::class, 'status'])->name('platforms.status');
+// ss.systems' Platforms Refresh: pull Search Console now (PlatformsController::syncGsc).
+Route::post('platforms/gsc/sync', [PlatformsController::class, 'syncGsc'])->name('platforms.gsc.sync');
 Route::post('platforms/bing/credentials', [PlatformsController::class, 'saveBingCredentials'])->name('platforms.bing.save');
 Route::delete('platforms/bing/credentials', [PlatformsController::class, 'clearBingCredentials'])->name('platforms.bing.clear');
 
