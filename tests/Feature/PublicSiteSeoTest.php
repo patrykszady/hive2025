@@ -44,10 +44,24 @@ it('robots.txt leaves the files a marketing page renders with crawlable', functi
     // catch-all "Disallow: /" or a blocked /flux or /livewire script would
     // leave it an unstyled, script-less page with no indexable images. A
     // private route added later is covered by NoIndexNonPublic's header.
-    $content = file_get_contents(public_path('robots.txt'));
+    // Only the rules Google and every other crawler obey: the "User-agent: *"
+    // group. The AI-training group further down names its own crawlers and
+    // is meant to say "Disallow: /" (2026-09-29).
+    $everyone = '';
+    $inStar = false;
+    foreach (preg_split('/\R/', (string) file_get_contents(public_path('robots.txt'))) as $line) {
+        if (preg_match('/^User-agent:\s*(.+)$/i', trim($line), $m)) {
+            $inStar = trim($m[1]) === '*';
+            continue;
+        }
+        if ($inStar) {
+            $everyone .= strtolower(trim($line))."\n";
+        }
+    }
 
-    expect($content)->not->toMatch('#^Disallow: /\s*$#m')
-        ->and($content)->not->toMatch('#^Disallow: /(flux|livewire|build|css|js|img|images|fonts|favicon)#m');
+    expect($everyone)->toContain('allow: /en/welcome')
+        ->not->toMatch('#^disallow: /\s*$#m')
+        ->not->toMatch('#^disallow: /(flux|livewire|build|css|js|img|images|fonts|favicon)#m');
 });
 
 it('has no reachable robots.txt route — the static file is what serves it', function () {
