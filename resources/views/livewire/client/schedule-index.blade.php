@@ -65,12 +65,20 @@
                     :public-view="true"
                 />
 
-                {{-- Registration CTA --}}
-                @guest
-                    <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
-                        <a href="{{ route('welcome.homeowners') }}" target="_blank" rel="noopener noreferrer" class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
-                            <x-hive-logo class="size-7" />
-                        </a>
+                {{-- Registration CTA; signed-in people get a way back to their dashboard instead --}}
+                <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
+                    <a href="{{ route('welcome.homeowners') }}" target="_blank" rel="noopener noreferrer" class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
+                        <x-hive-logo class="size-7" />
+                    </a>
+                    @auth
+                        <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Your Project Hive</flux:heading>
+                        <flux:text class="mt-1 text-sm text-indigo-700 dark:text-indigo-300">Schedule updates, notifications, and project details are all in your dashboard.</flux:text>
+                        <div class="mt-4 flex items-center justify-center gap-3">
+                            <flux:button variant="primary" href="{{ $this->dashboardUrl }}">
+                                Show my dashboard
+                            </flux:button>
+                        </div>
+                    @else
                         <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Join your Project Hive</flux:heading>
                         <flux:text class="mt-1 text-sm text-indigo-700 dark:text-indigo-300">Register a Hive account to get schedule updates, notifications, and project details.</flux:text>
                         <div class="mt-4 flex items-center justify-center gap-3">
@@ -81,8 +89,8 @@
                                 Login
                             </flux:button>
                         </div>
-                    </div>
-                @endguest
+                    @endauth
+                </div>
             @endif
         @endif
 

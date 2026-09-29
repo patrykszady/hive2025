@@ -195,6 +195,29 @@ class ScheduleIndex extends Component
         return $this->projectId ? [$this->projectId] : [];
     }
 
+    /**
+     * Where "Show my dashboard" goes for a signed-in visitor: the same place
+     * signing in lands them (bootstrap/app.php redirectUsersTo) — a client's
+     * own client page, everyone else the hub.
+     */
+    #[Computed]
+    public function dashboardUrl(): ?string
+    {
+        $user = auth()->user();
+
+        if (! $user) {
+            return null;
+        }
+
+        if ($user->is_browsing_as_client) {
+            $client = $user->primary_client;
+
+            return $client ? route('clients.show', $client) : route('clients.index');
+        }
+
+        return route('dashboard');
+    }
+
     public function getProject()
     {
         if (! $this->projectId) {

@@ -102,3 +102,23 @@ test('the schedule link works for a signed-in person outside the project', funct
         ->assertSet('valid', true)
         ->assertSet('projectId', $project->id);
 });
+
+test('a signed-in person gets the Project Hive card with a way back to their dashboard', function (): void {
+    ['project' => $project, 'vendor' => $vendor] = clientScheduleFixture('dashboard-card-token');
+    $project->vendors()->attach($vendor->id, ['client_id' => $project->client_id]);
+
+    $this->actingAs(signedInVendorUser($vendor));
+
+    Livewire::test(ScheduleIndex::class, ['token' => $project->schedule_token])
+        ->assertSee('Show my dashboard')
+        ->assertSee(route('dashboard'))
+        ->assertDontSee('Register a Hive account');
+});
+
+test('a guest still gets the register card on the client schedule', function (): void {
+    ['project' => $project] = clientScheduleFixture('guest-card-token');
+
+    Livewire::test(ScheduleIndex::class, ['token' => $project->schedule_token])
+        ->assertSee('Register a Hive account')
+        ->assertDontSee('Show my dashboard');
+});
