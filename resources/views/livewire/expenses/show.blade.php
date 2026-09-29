@@ -148,6 +148,13 @@
                     :title="$expense->transactions()->exists() ? $transaction_word : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check ' . $transaction_word : $transaction_word)"
                 />
             @endif
+
+            {{-- No charge linked and no check: offer to link one by hand (amounts may differ). --}}
+            @if($all_transactions->isEmpty() && ! $expense->check && $expense->checks->isEmpty())
+                @can('update', $expense)
+                    <livewire:expenses.link-transaction :expense="$expense" :key="'link-transaction-'.$expense->id" />
+                @endcan
+            @endif
     </x-page.column>
 
     <x-page.column :span="2">

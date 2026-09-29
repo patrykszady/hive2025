@@ -2902,6 +2902,9 @@ function cascadeRecipients(): array
 }
 
 it('rings only the first recipient at first, for the 20-second window, and queues the rest', function () {
+    // Inbound calls only ring anyone during business hours; pin a weekday morning.
+    $this->travelTo(\Carbon\Carbon::parse('2026-09-23 10:00:00', 'America/Chicago'));
+
     [$patryk, $greg] = cascadeRecipients();
 
     // Configured order beats id order: flip it and expect Greg to ring first.
@@ -3162,6 +3165,9 @@ it('hangs up a dial-in join politely when the live call ended before the answer'
 });
 
 it('skips the caller\'s own phone when a recipient calls in and nothing is live', function () {
+    // Inbound calls only ring anyone during business hours; pin a weekday morning.
+    $this->travelTo(\Carbon\Carbon::parse('2026-09-23 10:00:00', 'America/Chicago'));
+
     [$patryk, $greg] = cascadeRecipients();
 
     // Greg calls the line with no live call: Patryk rings, never Greg himself.
