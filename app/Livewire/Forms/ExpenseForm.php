@@ -606,6 +606,7 @@ class ExpenseForm extends Form
             } else {
                 // Only when no check is involved, associate the transaction directly to the expense.
                 $this->transaction->expense_id = $expense->id;
+                $this->transaction->manualExpenseLink = true;
             }
 
             if (isset($this->vendor_id)) {

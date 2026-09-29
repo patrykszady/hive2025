@@ -125,6 +125,7 @@ class BulkMatchIndex extends Component
                     ]);
 
                     $transaction->expense_id = $expense->id;
+                    $transaction->manualExpenseLink = true;
                     $transaction->save();
                 }
             }

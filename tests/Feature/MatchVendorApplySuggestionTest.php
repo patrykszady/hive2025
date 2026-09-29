@@ -144,12 +144,24 @@ it('keeps a hand-typed pattern exactly as typed', function () {
 });
 
 it('leaves a bare trailing number alone', function () {
+    $vendor = Vendor::factory()->create(['business_name' => 'Village Permits']);
+
+    // Stripping digits here would collapse every permit onto one rule.
+    applyAndIgnoreToast(makeComponent(suggestionFor($vendor, null), '', 'VILLAGE PERMIT 1378', $vendor));
+
+    expect(VendorTransaction::where('vendor_id', $vendor->id)->value('desc'))->toBe('VILLAGE PERMIT 1378');
+});
+
+it('does not offer a paper check for vendor matching', function () {
     $vendor = Vendor::factory()->create(['business_name' => 'Checks']);
 
-    // Stripping digits here would collapse every cheque onto one rule.
+    // "CHECK 1378" is check 1378 even with no check number from the bank; it
+    // takes its payee from its check record, not from a vendor rule
+    // (2026-09-28: a "CHECK 2658" labelled JC Licht was matched that way).
     applyAndIgnoreToast(makeComponent(suggestionFor($vendor, null), '', 'CHECK 1378', $vendor));
 
-    expect(VendorTransaction::where('vendor_id', $vendor->id)->value('desc'))->toBe('CHECK 1378');
+    expect(VendorTransaction::where('vendor_id', $vendor->id)->exists())->toBeFalse()
+        ->and(Transaction::withoutGlobalScopes()->where('plaid_merchant_description', 'CHECK 1378')->value('check_number'))->toBe('1378');
 });
 
 it('recovers when the suggested vendor id no longer exists', function () {

@@ -442,6 +442,13 @@ class TransactionController extends Controller
         $transaction->owner = $new_transaction['account_owner'];
         $transaction->details = $new_transaction;
         
+        // "CHECK 2658" with an empty check_number is still a check: fill the
+        // number in before the check link and the vendor guess below, or the
+        // guess runs on a check (2026-09-08: "Jc Licht" on CHECK 2658).
+        if (empty($transaction->check_number)) {
+            $transaction->check_number = \App\Support\CheckCharge::numberFrom($transaction->plaid_merchant_description) ?? $transaction->check_number;
+        }
+
         // Auto-link to a Check by check_number + bank_account + amount.
         // Plaid sometimes also stamps a merchant_name on a check transaction (e.g. low-confidence
         // category matches), so we run this independently of vendor logic. The check wins.
@@ -1913,6 +1920,25 @@ class TransactionController extends Controller
         ]);
     }
 
+    /**
+     * Attaches a bank charge to its check. A direct expense link on a paper
+     * check's charge is dropped (and logged): the check carries the expenses.
+     */
+    protected function attachChargeToCheck(Transaction $transaction, Check $check): void
+    {
+        if ($transaction->expense_id) {
+            Log::warning('Check charge was linked straight to an expense; moved onto its check', [
+                'transaction_id' => $transaction->id,
+                'expense_id' => $transaction->expense_id,
+                'check_id' => $check->id,
+                'check_number' => $check->check_number,
+            ]);
+            $transaction->expense_id = null;
+        }
+
+        $transaction->check()->associate($check)->save();
+    }
+
     public function add_check_id_to_transactions()
     {
         // Match checks to transactions automatically
@@ -1963,10 +1989,15 @@ class TransactionController extends Controller
             }
 
             //$transactions match the check amount.
+            // A real paper check's charge is claimed even if something already
+            // linked it straight to an expense: that link is the mistake (a
+            // $3,075 "CHECK 2658" sat on a $425.16 receipt on 2026-09-08 and
+            // this job skipped it). Transfer and Cash use placeholder numbers,
+            // so their charges still have to be unlinked.
             $transactions = Transaction::withoutGlobalScopes()
                 ->whereNull('deleted_at')
                 ->whereNull('check_id')
-                ->whereNull('expense_id')
+                ->when($check->check_type !== 'Check', fn ($query) => $query->whereNull('expense_id'))
                 ->where('check_number', $check_number)
                 // Exclude returned checks - they are reversals, not the original check
                 ->where(function ($query) {
@@ -1987,7 +2018,7 @@ class TransactionController extends Controller
             //if amount matches and is only one, that's the one
             if ($transactions->count() === 1) {
                 $matchedTransaction = $transactions->first();
-                $matchedTransaction->check()->associate($check)->save();
+                $this->attachChargeToCheck($matchedTransaction, $check);
             } elseif ($transactions->count() > 1) {
                 // Pick the closest-by-days without mutating attributes
                 // NOTE: Carbon 3 returns SIGNED values from diffInDays($other); pass true for absolute,
@@ -1998,7 +2029,7 @@ class TransactionController extends Controller
                     ->first();
 
                 if ($closest) {
-                    $closest->check()->associate($check)->save();
+                    $this->attachChargeToCheck($closest, $check);
                 }
                 continue; // done with this check
             } else {

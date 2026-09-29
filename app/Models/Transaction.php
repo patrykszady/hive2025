@@ -34,9 +34,68 @@ class Transaction extends Model
         ];
     }
 
+    /**
+     * Set by screens where a person links this charge to an expense on
+     * purpose; automatic matching never sets it.
+     */
+    public bool $manualExpenseLink = false;
+
+    /**
+     * The first app class and method on the stack outside this model: the
+     * job or screen that tried to save the link.
+     */
+    protected static function automationCaller(): ?string
+    {
+        foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 40) as $frame) {
+            $class = $frame['class'] ?? '';
+
+            if (str_starts_with($class, 'App\\') && $class !== self::class) {
+                return $class . '::' . ($frame['function'] ?? '?');
+            }
+        }
+
+        return null;
+    }
+
     protected static function booted()
     {
         static::addGlobalScope(new TransactionScope);
+
+        // A paper check keeps its check number even when the bank left the
+        // field empty ("CHECK 2658" with no check_number): the vendor matcher
+        // skips check charges only when it can see that number.
+        static::saving(function ($transaction) {
+            if (trim((string) $transaction->check_number) === '') {
+                $number = \App\Support\CheckCharge::numberFrom($transaction->plaid_merchant_description);
+
+                if ($number !== null) {
+                    $transaction->check_number = $number;
+                }
+            }
+        });
+
+        // A check charge belongs to its Check record, never straight to an
+        // expense — unless a person links it by hand ($manualExpenseLink).
+        // On 2026-09-08 a $3,075 check charge ended up on a $425.16 receipt.
+        // Whatever automation tries it is refused here and named in the log.
+        static::saving(function ($transaction) {
+            if (
+                $transaction->isDirty('expense_id')
+                && $transaction->expense_id !== null
+                && ! $transaction->manualExpenseLink
+                && \App\Support\CheckCharge::isCheck($transaction->check_number, $transaction->plaid_merchant_description)
+            ) {
+                Log::warning('Blocked automatic check charge → expense link', [
+                    'transaction_id' => $transaction->id,
+                    'check_number' => $transaction->check_number,
+                    'amount' => $transaction->amount,
+                    'expense_id' => $transaction->expense_id,
+                    'caller' => self::automationCaller(),
+                ]);
+
+                $transaction->expense_id = $transaction->getOriginal('expense_id');
+            }
+        });
 
         // Prevent linking a transaction to an expense with a different vendor
         static::saving(function ($transaction) {

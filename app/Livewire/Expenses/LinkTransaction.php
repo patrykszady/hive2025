@@ -102,6 +102,7 @@ class LinkTransaction extends Component
         abort_unless($transaction, 404);
 
         $transaction->expense_id = $this->expense->id;
+        $transaction->manualExpenseLink = true;
         $transaction->save();
         $this->expense->searchable();
 

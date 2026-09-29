@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use App\Services\PlaidService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use App\Support\CheckCharge;
 use App\Support\ApiErrorFormatter;
 
 class PlaidTransactionSyncController extends Controller
@@ -255,9 +256,16 @@ class PlaidTransactionSyncController extends Controller
                 );
                 if ($heuristic) { $candidates = collect([$heuristic]); }
             }
-            $match = $this->evaluateDeterministicMatch($candidates, $amount, $plaidTransactionId, $pendingPlaidTransactionId, $bank->id, 'ADD', $requestId);
+            $match = $this->evaluateDeterministicMatch($candidates, $amount, $plaidTransactionId, $pendingPlaidTransactionId, $bank->id, 'ADD', $requestId, true, $newTransaction);
             // If ambiguous, fall through to insert as a new transaction (previous behavior)
             if ($match === 'AMBIGUOUS' || $match === 'AMOUNT_MISMATCH') { /* fall-through to insert */ }
+            if ($match === 'KIND_MISMATCH') {
+                // Insert it as its own charge WITHOUT the pending pointer: while
+                // a posted row names the pending id, the removal step keeps the
+                // stale pending purchase (and its expense link) alive forever.
+                $newTransaction['refused_pending_transaction_id'] = $pendingPlaidTransactionId;
+                $newTransaction['pending_transaction_id'] = null;
+            }
             if ($match instanceof Transaction) {
                 if (method_exists($match, 'trashed') && $match->trashed()) {
                     // Bring back the soft-deleted pending record to upgrade it
@@ -336,7 +344,7 @@ class PlaidTransactionSyncController extends Controller
                 );
                 if ($heuristic) { $candidates = collect([$heuristic]); }
             }
-            $match = $this->evaluateDeterministicMatch($candidates, $amount, $plaidTransactionId, $pendingPlaidTransactionId, $bank->id, 'MODIFIED', $requestId, false);
+            $match = $this->evaluateDeterministicMatch($candidates, $amount, $plaidTransactionId, $pendingPlaidTransactionId, $bank->id, 'MODIFIED', $requestId, false, $modTransaction);
             if (!($match instanceof Transaction)) { return null; }
             if (method_exists($match, 'trashed') && $match->trashed()) {
                 $match->restore();
@@ -498,10 +506,31 @@ class PlaidTransactionSyncController extends Controller
         return [$candidates, $candidateIds];
     }
 
-    private function evaluateDeterministicMatch($candidates, float $incomingAmount, string $plaidTransactionId, ?string $pendingPlaidTransactionId, int $bankId, string $type, string $requestId, bool $allowInsertOnNoMatch = true)
+    private function evaluateDeterministicMatch($candidates, float $incomingAmount, string $plaidTransactionId, ?string $pendingPlaidTransactionId, int $bankId, string $type, string $requestId, bool $allowInsertOnNoMatch = true, ?array $payload = null)
     {
         if ($candidates->count() === 1) {
             $candidate = $candidates->first();
+
+            // A card purchase never "posts" as a paper check, or the other way
+            // round. On 2026-09-10 Plaid named a pending $425.16 JC Licht
+            // purchase as the pending side of "CHECK 2658" ($3,075), and the
+            // upgrade below turned the linked purchase into the check.
+            if ($payload !== null && $this->changesKind($candidate, $payload)) {
+                Log::channel('plaid_skips')->warning(($type === 'ADD' ? 'ADD' : 'MODIFIED') . ' refused: check vs purchase upgrade', [
+                    'bank_id' => $bankId,
+                    'candidate_id' => $candidate->id,
+                    'candidate_amount' => $candidate->amount,
+                    'candidate_description' => $candidate->plaid_merchant_description,
+                    'new_amount' => $incomingAmount,
+                    'new_description' => $payload['name'] ?? $payload['original_description'] ?? null,
+                    'plaid_transaction_id' => $plaidTransactionId,
+                    'pending_transaction_id' => $pendingPlaidTransactionId,
+                    'request_id' => $requestId,
+                ]);
+
+                return 'KIND_MISMATCH';
+            }
+
             if ((float) $candidate->amount === (float) $incomingAmount) {
                 return $candidate;
             }
@@ -541,6 +570,18 @@ class PlaidTransactionSyncController extends Controller
         return null;
     }
 
+    /**
+     * Whether upgrading $candidate with $payload would turn a card purchase
+     * into a paper check or a check into a purchase.
+     */
+    private function changesKind(Transaction $candidate, array $payload): bool
+    {
+        $candidateIsCheck = CheckCharge::isCheck($candidate->check_number, $candidate->plaid_merchant_description);
+        $incomingIsCheck = CheckCharge::isCheck($payload['check_number'] ?? null, $payload['name'] ?? $payload['original_description'] ?? null);
+
+        return $candidateIsCheck !== $incomingIsCheck;
+    }
+
     private function determineMatchVia(Transaction $matchedTransaction, string $plaidTransactionId, ?string $pendingPlaidTransactionId): string
     {
         if ($matchedTransaction->plaid_transaction_id === $plaidTransactionId) { return 'posted_id_match'; }
@@ -558,6 +599,19 @@ class PlaidTransactionSyncController extends Controller
         }
         // Always update amount to incoming amount on upgrade (pending -> posted can change amount)
         if (isset($payload['amount']) && (float) $matchedTransaction->amount !== (float) $payload['amount']) {
+            // The expense link was made for the old amount. Drop it and let
+            // matching run again on what was actually charged, instead of
+            // silently carrying a $425.16 receipt onto a $3,075 charge.
+            if ($matchedTransaction->expense_id) {
+                Log::channel('plaid_adds')->warning('Upgrade changed the amount; expense link dropped so matching re-runs', [
+                    'transaction_id' => $matchedTransaction->id,
+                    'expense_id' => $matchedTransaction->expense_id,
+                    'old_amount' => $matchedTransaction->amount,
+                    'new_amount' => $payload['amount'],
+                ]);
+                $matchedTransaction->expense_id = null;
+            }
+
             $matchedTransaction->amount = $payload['amount'];
         }
         $matchedTransaction->plaid_transaction_id = $newPlaidTransactionId;
