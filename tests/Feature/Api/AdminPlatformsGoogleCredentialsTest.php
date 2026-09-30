@@ -27,7 +27,7 @@ it('refuses to save a per-site google client, on the client_id field', function 
         'client_secret' => 'shh',
     ], adminApiHeaders())
         ->assertStatus(422)
-        ->assertJsonPath('errors.client_id.0', fn (string $message) => str_contains($message, 'GOOGLE_OAUTH_CLIENT_ID'));
+        ->assertJsonPath('errors.client_id.0', fn (string $message) => str_contains($message, 'ss.systems provides to each site'));
 
     expect(PlatformSetting::get('google.oauth.client_id'))->toBeNull();
     expect(PlatformSetting::get('google.oauth.client_secret'))->toBeNull();

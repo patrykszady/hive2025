@@ -81,6 +81,7 @@ use SsSystems\Platform\Google\BusinessProfile\Adapters\PlatformSettingListingSto
 use SsSystems\Platform\Google\BusinessProfile\Client as GbpClient;
 use SsSystems\Platform\Google\BusinessProfile\Contracts\ListingStore;
 use SsSystems\Platform\Google\Contracts\TokenStore;
+use SsSystems\Platform\Google\Adapters\PlatformSettingSharedClient;
 use SsSystems\Platform\Google\OAuthClient;
 use SsSystems\Platform\Pulse\BeaconController;
 use SsSystems\Platform\Pulse\Contracts\PulseStorage;
@@ -270,9 +271,13 @@ class AppServiceProvider extends ServiceProvider
         // 'gbp' log channel is defined here, so the client logs to the
         // default one, as the old service did. `bind`, not `singleton`, as
         // the kit asks of every site.
+        // The one Google client as ss.systems provisions it (kit 0.15.0):
+        // stored in platform_settings and preferred over any .env value.
+        $this->app->bind(PlatformSettingSharedClient::class, fn () => new PlatformSettingSharedClient(PlatformSetting::class));
         $this->app->bind(OAuthClient::class, fn ($app) => OAuthClient::fromConfig(
             (array) config('services.google'),
             $app->make(HttpFactory::class),
+            $app->make(PlatformSettingSharedClient::class)->get(),
         ));
         $this->app->bind(TokenStore::class, fn () => new EloquentTokenStore(OAuthToken::class));
         $this->app->bind(ListingStore::class, fn () => new PlatformSettingListingStore(

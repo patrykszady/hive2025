@@ -37,6 +37,9 @@ Route::post('platforms/seo-credentials/import', [PlatformsController::class, 'im
 // routed so ss.systems' card gets that answer rather than a 404.
 Route::post('platforms/google/credentials', [PlatformsController::class, 'saveGoogleCredentials'])->name('platforms.google.save');
 Route::delete('platforms/google/credentials', [PlatformsController::class, 'clearGoogleCredentials'])->name('platforms.google.clear');
+// ss.systems provisions the one Google client here (kit 0.15.0; google:provision-shared-client).
+Route::put('platforms/google/shared-client', [PlatformsController::class, 'saveSharedGoogleClient'])->name('platforms.google.shared-client.save');
+Route::delete('platforms/google/shared-client', [PlatformsController::class, 'forgetSharedGoogleClient'])->name('platforms.google.shared-client.forget');
 
 // Which Business Profile listing this app's grant reads reviews from — the
 // ids only exist after the OAuth grant, so they are discovered here and
