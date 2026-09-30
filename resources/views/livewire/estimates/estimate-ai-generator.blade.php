@@ -2,7 +2,7 @@
     <flux:modal name="estimate-ai-generator-modal" class="w-full max-w-5xl space-y-6" :dismissible="false">
         <div>
             <flux:heading size="lg">AI Estimate Generator</flux:heading>
-            <flux:text class="mt-2">Describe the work and optionally upload a floorplan. Claude drafts line items from your catalog and your past estimates straight onto the estimate for you to review — leave out the client's contact details.</flux:text>
+            <flux:text class="mt-2">Describe the work and optionally upload floorplans, one layout per floor. Claude drafts line items from your catalog and your past estimates straight onto the estimate for you to review — leave out the client's contact details.</flux:text>
         </div>
 
         @if($showRules)
@@ -90,24 +90,33 @@
                         <flux:text variant="danger">{{ $message }}</flux:text>
                     @enderror
 
-                    {{-- Floorplan Upload --}}
+                    {{-- Floorplan uploads: one layout per floor, each named (2026-09-30) --}}
                     <div>
-                        <flux:label>Floorplan (Optional, CSV preferred)</flux:label>
+                        <flux:label>Floorplans (Optional, CSV preferred)</flux:label>
+                        <flux:text size="sm" class="mt-1">Add one layout per floor (a second floor, a basement); each is measured and the numbers are added up.</flux:text>
                         <div class="mt-2">
                             <input
                                 type="file"
-                                wire:model="floorplan"
+                                wire:model="newFloorplans"
+                                multiple
                                 accept=".pdf,.jpg,.jpeg,.png,.csv"
                                 class="block w-full text-sm text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-100 file:text-zinc-700 hover:file:bg-zinc-200 dark:file:bg-zinc-800 dark:file:text-zinc-300 dark:hover:file:bg-zinc-700"
                             />
                         </div>
-                        @if($floorplan)
-                            <flux:text class="mt-2 text-green-600 dark:text-green-400">
-                                <flux:icon.check class="inline w-4 h-4" />
-                                {{ $floorplan->getClientOriginalName() }} uploaded
-                            </flux:text>
-                        @endif
-                        @error('floorplan')
+                        <flux:text wire:loading wire:target="newFloorplans" size="sm" class="mt-2">Uploading…</flux:text>
+                        @foreach($floorplans as $index => $layout)
+                            <div class="mt-2 flex items-end gap-2" wire:key="floorplan-{{ $index }}-{{ $layout->getFilename() }}">
+                                <div class="w-40 shrink-0">
+                                    <flux:input wire:model.blur="floorplanLabels.{{ $index }}" size="sm" aria-label="Layout name" />
+                                </div>
+                                <flux:text class="min-w-0 flex-1 truncate pb-1.5" title="{{ $layout->getClientOriginalName() }}">
+                                    <flux:icon.check class="inline size-4 text-green-600 dark:text-green-400" />
+                                    {{ $layout->getClientOriginalName() }}
+                                </flux:text>
+                                <flux:button size="sm" variant="ghost" icon="x-mark" wire:click="removeFloorplan({{ $index }})" aria-label="Remove {{ $layout->getClientOriginalName() }}" />
+                            </div>
+                        @endforeach
+                        @error('newFloorplans.*')
                             <flux:text variant="danger">{{ $message }}</flux:text>
                         @enderror
                     </div>

@@ -27,7 +27,20 @@ class EstimateAIGenerator extends Component
 
     public string $inquiry = '';
 
-    public $floorplan = null;
+    /**
+     * The layout files for this draft, one per floor (or basement,
+     * 2026-09-30): each is measured and the numbers are added up, with each
+     * floor's own kept beside the totals.
+     *
+     * @var list<\Livewire\Features\SupportFileUploads\TemporaryUploadedFile>
+     */
+    public array $floorplans = [];
+
+    /** @var list<string> A name per layout, same index as $floorplans ("Floor 1", "Basement"). */
+    public array $floorplanLabels = [];
+
+    /** The file picker: whatever it receives joins $floorplans, so a second floor can be added after the first. */
+    public $newFloorplans = [];
 
     public array $generatedItems = [];
 
@@ -54,7 +67,7 @@ class EstimateAIGenerator extends Component
     {
         return [
             'inquiry' => 'required|min:10',
-            'floorplan' => 'nullable|file|mimes:pdf,jpg,jpeg,png,csv|max:10240',
+            'floorplans.*' => 'file|mimes:pdf,jpg,jpeg,png,csv|max:10240',
             'sectionId' => 'required|exists:estimate_sections,id',
         ];
     }
@@ -67,13 +80,33 @@ class EstimateAIGenerator extends Component
         }
     }
 
+    /** Files picked in the upload box join the list, each named "Floor N" until renamed. */
+    public function updatedNewFloorplans(): void
+    {
+        $this->validate(['newFloorplans.*' => 'file|mimes:pdf,jpg,jpeg,png,csv|max:10240']);
+
+        foreach ((array) $this->newFloorplans as $file) {
+            $this->floorplans[] = $file;
+            $this->floorplanLabels[] = 'Floor '.count($this->floorplans);
+        }
+
+        $this->newFloorplans = [];
+    }
+
+    public function removeFloorplan(int $index): void
+    {
+        unset($this->floorplans[$index], $this->floorplanLabels[$index]);
+        $this->floorplans = array_values($this->floorplans);
+        $this->floorplanLabels = array_values($this->floorplanLabels);
+    }
+
     #[On('openAIGenerator')]
     public function openModal(?int $sectionId = null): void
     {
         if ($sectionId) {
             $this->sectionId = $sectionId;
         }
-        $this->reset(['inquiry', 'floorplan', 'generatedItems', 'reasoning', 'error', 'showPreview', 'draftId', 'showRules', 'newRule']);
+        $this->reset(['inquiry', 'floorplans', 'floorplanLabels', 'newFloorplans', 'generatedItems', 'reasoning', 'error', 'showPreview', 'draftId', 'showRules', 'newRule']);
         $this->modal('estimate-ai-generator-modal')->show();
     }
 
@@ -100,7 +133,7 @@ class EstimateAIGenerator extends Component
         $section = $this->estimate->estimate_sections()->findOrFail($this->sectionId);
 
         try {
-            $floorplanData = $this->floorplan ? $this->parseFloorplan() : null;
+            $floorplanData = $this->floorplans !== [] ? $this->parseFloorplans() : null;
 
             $service = app(EstimateAIService::class);
             $result = $service->generateEstimate(
@@ -304,7 +337,7 @@ class EstimateAIGenerator extends Component
             text: $count.' line '.($count === 1 ? 'item' : 'items').' added to '.($section?->name ?: 'section'),
         );
 
-        $this->reset(['inquiry', 'floorplan', 'generatedItems', 'reasoning', 'error', 'showPreview', 'draftId']);
+        $this->reset(['inquiry', 'floorplans', 'floorplanLabels', 'newFloorplans', 'generatedItems', 'reasoning', 'error', 'showPreview', 'draftId']);
     }
 
     // ---- The company's estimating rules: read on every draft, written here. ----
@@ -379,21 +412,100 @@ class EstimateAIGenerator extends Component
         $this->dispatch('refresh')->to('projects.project-finances');
     }
 
-    protected function parseFloorplan(): ?array
+    /**
+     * Every layout measured; one is returned as it is, several are added up
+     * (combineFloorplans) with each floor's own numbers kept.
+     */
+    protected function parseFloorplans(): ?array
     {
-        // Basic floorplan parsing - in a real implementation you might use
-        // OCR or a specialized service to extract dimensions from PDFs
-        // For now, we return basic metadata
+        $layouts = [];
 
-        if (! $this->floorplan) {
-            return null;
+        foreach ($this->floorplans as $index => $file) {
+            $data = $this->parseFloorplanFile($file);
+
+            if ($data !== null) {
+                $label = trim((string) ($this->floorplanLabels[$index] ?? ''));
+                $layouts[] = ['label' => $label !== '' ? $label : 'Floor '.($index + 1), 'data' => $data];
+            }
         }
 
-        $extension = $this->floorplan->getClientOriginalExtension();
-        $filename = $this->floorplan->getClientOriginalName();
+        return match (count($layouts)) {
+            0 => null,
+            1 => $layouts[0]['data'],
+            default => self::combineFloorplans($layouts),
+        };
+    }
+
+    /**
+     * Several layouts as one: the totals summed, the tallest ceiling, each
+     * room named with its floor, the appliances counted across them, and
+     * `floors` keeping each layout's own numbers.
+     *
+     * @param  list<array{label: string, data: array<string, mixed>}>  $layouts
+     * @return array<string, mixed>
+     */
+    public static function combineFloorplans(array $layouts): array
+    {
+        $summed = ['floor_sqft', 'wall_sqft', 'cement_board_sqft', 'perimeter_ft', 'window_area_sqft', 'window_casing_lf', 'door_casing_lf',
+            'cabinet_count', 'base_cabinet_lf', 'upper_cabinet_lf', 'tall_cabinet_lf', 'countertop_lf'];
+        $data = array_column($layouts, 'data');
+
+        $combined = [
+            'filename' => implode(', ', array_map(fn (array $layout) => $layout['data']['filename'] ?? $layout['label'], $layouts)),
+            'type' => 'layouts',
+            'source' => 'layouts',
+        ];
+
+        foreach ($summed as $key) {
+            $values = array_filter(array_column($data, $key), 'is_numeric');
+            if ($values !== []) {
+                $combined[$key] = round(array_sum($values), 2);
+            }
+        }
+
+        $heights = array_filter(array_column($data, 'ceiling_height_ft'), 'is_numeric');
+        if ($heights !== []) {
+            $combined['ceiling_height_ft'] = max($heights);
+        }
+
+        $rooms = [];
+        $appliances = [];
+        $notes = [];
+        $floors = [];
+
+        foreach ($layouts as $layout) {
+            foreach ((array) ($layout['data']['rooms'] ?? []) as $room) {
+                if (is_array($room) && filled($room['name'] ?? null)) {
+                    $rooms[] = ['name' => $layout['label'].' · '.$room['name']] + $room;
+                }
+            }
+
+            foreach ((array) ($layout['data']['appliances'] ?? []) as $appliance => $count) {
+                $appliances[$appliance] = ($appliances[$appliance] ?? 0) + (int) $count;
+            }
+
+            if (filled($layout['data']['note'] ?? null)) {
+                $notes[] = $layout['label'].': '.$layout['data']['note'];
+            }
+
+            $floors[] = ['label' => $layout['label']] + array_intersect_key($layout['data'], array_flip([...$summed, 'ceiling_height_ft']));
+        }
+
+        return array_filter($combined + [
+            'rooms' => $rooms,
+            'appliances' => $appliances,
+            'note' => $notes !== [] ? implode(' ', $notes) : null,
+            'floors' => $floors,
+        ], fn ($value) => $value !== null && $value !== []);
+    }
+
+    protected function parseFloorplanFile(\Livewire\Features\SupportFileUploads\TemporaryUploadedFile $file): ?array
+    {
+        $extension = $file->getClientOriginalExtension();
+        $filename = $file->getClientOriginalName();
 
         if (strtolower($extension) === 'csv') {
-            $metrics = $this->extractCsvFloorplanMetrics(file_get_contents($this->floorplan->getRealPath()));
+            $metrics = $this->extractCsvFloorplanMetrics(file_get_contents($file->getRealPath()));
 
             return array_merge([
                 'filename' => $filename,
@@ -413,7 +525,7 @@ class EstimateAIGenerator extends Component
             ];
         }
 
-        $fileContents = file_get_contents($this->floorplan->getRealPath());
+        $fileContents = file_get_contents($file->getRealPath());
 
         $response = Http::timeout(90)
             ->attach('file', $fileContents, $filename)

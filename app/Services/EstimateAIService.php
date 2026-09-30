@@ -299,6 +299,20 @@ class EstimateAIService
             $metrics['appliances'] = $appliances;
         }
 
+        // Several layouts (two floors, a basement, 2026-09-30): the totals
+        // above are summed across them; this keeps each one's own numbers.
+        $floors = collect((array) ($floorplanData['floors'] ?? []))
+            ->filter(fn ($f) => is_array($f) && filled($f['label'] ?? null))
+            ->map(fn (array $f) => ['label' => Str::limit((string) $f['label'], 40, '')] + array_map(
+                fn ($v) => (float) $v,
+                array_filter(array_intersect_key($f, array_flip($numbers)), fn ($v) => is_numeric($v)),
+            ))
+            ->values()
+            ->all();
+        if (count($floors) > 1) {
+            $metrics['floors'] = $floors;
+        }
+
         return $metrics === [] ? null : $metrics;
     }
 
@@ -575,6 +589,9 @@ PROMPT;
                 ."- floor_sqft sizes flooring and floor tile; wall_sqft sizes paint, drywall and wall tile; perimeter_ft sizes baseboard.\n"
                 ."- window_casing_lf and door_casing_lf size casings; base_cabinet_lf, upper_cabinet_lf and tall_cabinet_lf are the cabinet runs in linear feet; countertop_lf is the counter run.\n"
                 ."- appliances are what is there now: one hookup or install per unit that is replaced or moved.\n"
+                .(isset($floorplanData['floors'])
+                    ? "- This job has several layouts (floors): the totals are summed across all of them, room names start with their floor, and floors gives each one's own numbers. Size work on one floor from that floor's numbers.\n"
+                    : '')
                 .json_encode($floorplanData, JSON_PRETTY_PRINT)."\n\n";
         }
 
