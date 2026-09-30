@@ -11694,11 +11694,11 @@
         },
         {
             "name": "ss-systems/platform-kit",
-            "version": "0.14.0",
+            "version": "0.14.1",
             "dist": {
                 "type": "zip",
-                "url": "packages/ss-systems-platform-kit-0.14.0.zip",
-                "shasum": "3d54c31672b27d3b24fdc0a50d47e4591bb19414"
+                "url": "packages/ss-systems-platform-kit-0.14.1.zip",
+                "shasum": "24e88733046a02a351b352f9c3605221ae1a5a8e"
             },
             "require": {
                 "illuminate/bus": "^12.0|^13.0",
