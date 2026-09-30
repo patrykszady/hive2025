@@ -11,7 +11,6 @@ use App\Services\EstimateAIService;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -256,20 +255,6 @@ class EstimateAIGenerator extends Component
      */
     public function updatedGeneratedItems(mixed $value, string $key): void
     {
-        // TEMPORARY (2026-09-30): Patryk sees every quantity box jump to the
-        // number typed in one, every time, on production only. One line per
-        // update this request carries, to tell a client that sends every row
-        // from one that sends one. Remove once found.
-        Log::info('ai-draft-qty update', [
-            'user' => auth()->id(),
-            'estimate' => $this->estimate->id,
-            'key' => $key,
-            'value' => $value,
-            'rows' => count($this->generatedItems),
-            'quantities' => array_column($this->generatedItems, 'quantity'),
-            'request' => getmypid().'-'.request()->server('REQUEST_TIME_FLOAT'),
-        ]);
-
         [$index, $field] = array_pad(explode('.', $key, 2), 2, null);
 
         if ($field !== 'quantity' || ! isset($this->generatedItems[$index])) {
