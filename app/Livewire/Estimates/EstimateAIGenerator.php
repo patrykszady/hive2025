@@ -251,10 +251,18 @@ class EstimateAIGenerator extends Component
 
     /**
      * A quantity typed in the table is saved to its line straight away; a
-     * blank or zero counts as one.
+     * blank or zero counts as one. A browser that sends the whole list at
+     * once ($key null — 2026-10-01 on production, after rows had shifted)
+     * changes nothing: the rows are re-read from the estimate instead.
      */
-    public function updatedGeneratedItems(mixed $value, string $key): void
+    public function updatedGeneratedItems(mixed $value, ?string $key = null): void
     {
+        if ($key === null) {
+            $this->reloadDraftLines();
+
+            return;
+        }
+
         [$index, $field] = array_pad(explode('.', $key, 2), 2, null);
 
         if ($field !== 'quantity' || ! isset($this->generatedItems[$index])) {
@@ -277,9 +285,18 @@ class EstimateAIGenerator extends Component
         $this->refreshEstimate();
     }
 
-    public function removeItem(int $index): void
+    /**
+     * The button passes its line's id as well as its position, and the id
+     * wins: removing a line shifts every later position, and this deletes
+     * for good (2026-09-30: totals and quantities landing on the next line).
+     */
+    public function removeItem(int $index, ?int $lineId = null): void
     {
-        if (! isset($this->generatedItems[$index])) {
+        if ($lineId !== null) {
+            $index = array_search($lineId, array_map('intval', array_column($this->generatedItems, 'id')), true);
+        }
+
+        if ($index === false || ! isset($this->generatedItems[$index])) {
             return;
         }
 
@@ -397,7 +414,7 @@ class EstimateAIGenerator extends Component
             return;
         }
 
-        $lines = EstimateLineItem::query()->whereIn('id', array_column($this->generatedItems, 'id'))->get()->keyBy('id');
+        $lines = $this->estimate->estimate_line_items()->whereIn('id', array_column($this->generatedItems, 'id'))->get()->keyBy('id');
 
         $this->generatedItems = collect($this->generatedItems)
             ->filter(fn (array $row) => $lines->has($row['id']))
