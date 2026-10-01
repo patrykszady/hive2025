@@ -115,14 +115,41 @@
                     </flux:radio.group>
 
                     {{-- TITLE --}}
-                    <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
+                    {{-- An explicit field (not the autocomplete's own label prop) so it
+                         keeps the same spacing as the fields around it. --}}
+                    <flux:field>
+                        <flux:label>Title</flux:label>
+                        <flux:autocomplete wire:model.blur="form.title" placeholder="Task Title" autofocus>
+                            @foreach($this->titleSuggestions as $titleSuggestion)
+                                <flux:autocomplete.item
+                                    wire:key="title-suggestion-{{ $loop->index }}"
+                                    wire:click="selectTitleSuggestion(@js($titleSuggestion))"
+                                >{{ $titleSuggestion }}</flux:autocomplete.item>
+                            @endforeach
+                        </flux:autocomplete>
+                        <flux:error name="form.title" />
+                    </flux:field>
 
                     {{-- PROJECT --}}
                     <x-forms.project-select
                         :projects="$projects"
                         model="form.project_id"
                         placeholder="Assign project..."
-                    />
+                    >
+                        @if($this->selectedProject)
+                            <x-slot name="labelSuffix">
+                                <a
+                                    wire:navigate.hover
+                                    href="{{ route('projects.show', $this->selectedProject) }}"
+                                    aria-label="Open project"
+                                    title="Open project"
+                                    class="text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+                                >
+                                    <flux:icon.arrow-top-right-on-square variant="micro" class="size-4" />
+                                </a>
+                            </x-slot>
+                        @endif
+                    </x-forms.project-select>
 
                     {{-- VENDOR --}}
                     <flux:select

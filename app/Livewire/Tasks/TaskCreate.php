@@ -9,6 +9,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\TaskDependency;
+use App\Services\TaskTitleSuggestions;
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Planner\CardsIndex;
 use App\Livewire\Planner\PlannerTaskCard;
@@ -203,6 +204,36 @@ class TaskCreate extends Component
         }
 
         return $vendor->users()->employed()->get();
+    }
+
+    /**
+     * Previously used task titles for the Title autocomplete, most-used
+     * first and de-duplicated case-insensitively. Scoped to tasks on
+     * projects this tenant can see and cached briefly — see
+     * TaskTitleSuggestions.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function titleSuggestions(): array
+    {
+        return TaskTitleSuggestions::titlesForCurrentUser();
+    }
+
+    /**
+     * The currently selected project, for the "open project" link next to
+     * the Project field. Scoped (plain Project::query(), not
+     * withoutGlobalScopes) so the link never points at a project outside
+     * this tenant's visibility.
+     */
+    #[Computed]
+    public function selectedProject(): ?Project
+    {
+        if (! $this->form->project_id) {
+            return null;
+        }
+
+        return Project::query()->whereKey($this->form->project_id)->first();
     }
 
     /**
@@ -801,6 +832,58 @@ class TaskCreate extends Component
     public function clearAllTimes()
     {
         $this->form->time_settings = [];
+    }
+
+    /**
+     * Picking a title suggestion from the autocomplete dropdown: fill the
+     * title immediately (rather than waiting for blur) and apply the same
+     * remembered-vendor rule as blurring onto a matching title.
+     */
+    public function selectTitleSuggestion(string $title): void
+    {
+        $this->form->title = $title;
+        $this->applyRememberedVendorFromTitle($title);
+    }
+
+    /**
+     * Blurring the Title field: when the typed title exactly matches
+     * (case-insensitively) a title used before, apply the same
+     * remembered-vendor rule picking a suggestion does.
+     *
+     * Only fires from a real wire:model sync (a user-driven edit), never
+     * from setTask()/copyTaskData() assigning form.title directly — so
+     * loading a task to edit never touches its vendor on its own.
+     */
+    public function updatedFormTitle(): void
+    {
+        $this->applyRememberedVendorFromTitle((string) $this->form->title);
+    }
+
+    /**
+     * Fill the Vendor field with whichever vendor is overwhelmingly used
+     * alongside $title — e.g. "Plumbing" fills Accomplished J Plumbing —
+     * but only when nothing is selected yet. A vendor the user already
+     * picked (or that an edited task already has) is never overwritten,
+     * and a title split across several vendors fills nothing.
+     */
+    private function applyRememberedVendorFromTitle(string $title): void
+    {
+        if (trim($title) === '' || ! empty($this->form->vendor_id)) {
+            return;
+        }
+
+        // The modal's Vendor select is scoped the same way $this->vendors is
+        // (VendorScope, Vendor's own global scope) — queried directly here
+        // rather than through $this->vendors itself, since that computed
+        // goes through Scout and a remembered vendor id should not go stale
+        // just because the search index hasn't caught up.
+        $selectableVendorIds = Vendor::query()->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+        $vendorId = TaskTitleSuggestions::dominantVendorId($title, $selectableVendorIds);
+
+        if ($vendorId !== null) {
+            $this->form->vendor_id = $vendorId;
+        }
     }
 
     /**

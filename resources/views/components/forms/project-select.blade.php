@@ -60,10 +60,18 @@
 @else
     <flux:field>
         @if($showLabel)
-            <flux:label>{{ $label }}</flux:label>
+            {{-- The suffix (e.g. the task modal's "open project" icon) sits
+                 inside the label: the field's spacing rules in app.css need
+                 the label as the field's direct child. --}}
+            <flux:label class="gap-1.5">
+                {{ $label }}
+                @isset($labelSuffix)
+                    {{ $labelSuffix }}
+                @endisset
+            </flux:label>
         @endif
-        
-        <flux:select 
+
+        <flux:select
             wire:model.live="{{ $model }}" 
             variant="listbox" 
             placeholder="{{ $placeholder }}"

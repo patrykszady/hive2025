@@ -11,6 +11,12 @@ use Livewire\Livewire;
 uses(RefreshDatabase::class);
 
 it('stores sms image urls on task options when prefilling from sms', function (): void {
+    // TaskCreate::findSimilarSmsTask() matches titles with MySQL's REGEXP,
+    // absent from the sqlite test DB.
+    if (\DB::connection()->getDriverName() !== 'mysql') {
+        $this->markTestSkipped('SMS task matching requires MySQL (REGEXP).');
+    }
+
     $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
 
     $user = User::query()->create([
@@ -55,7 +61,14 @@ it('stores sms image urls on task options when prefilling from sms', function ()
         ])
         ->assertSet('form.title', 'Fix Electrical Outlet')
         ->assertSet('form.checklist.0.text', 'First item')
-        ->assertSet('form.checklist.1.text', 'Second item');
+        ->assertSet('form.checklist.1.text', 'Second item')
+        // The task is a draft pending review — nothing is persisted until
+        // Save, so the SMS images ride along on the component until then.
+        ->assertSet('pendingSmsMediaUrls', [
+            '/files/sms_media/sms-media/example-one.jpg',
+            '/files/sms_media/sms-media/example-two.jpg',
+        ])
+        ->call('save');
 
     $task = \App\Models\Task::query()->latest('id')->first();
 
