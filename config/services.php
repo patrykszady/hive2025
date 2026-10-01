@@ -119,17 +119,19 @@ return [
         // MENARDS_PROXY_* win over the shared CAPTCHA_PROXY_* names: a fixed
         // (static residential / ISP) IP for Menards alone. The pool rotates
         // its exit at least every two hours, and each new address loses the
-        // Menards session (2026-09-29). For a fixed IP, blank
-        // MENARDS_PROXY_REGION and MENARDS_PROXY_SESSION: those are the
-        // pool's username options.
+        // Menards session (2026-09-29). With MENARDS_PROXY_HOST set, the
+        // region and session below default to blank: they are the pool's
+        // username options, and a fixed-IP provider refuses a username that
+        // carries them (IPRoyal did on gsc's Yelp stack, surfacing in Chrome
+        // as ERR_TUNNEL_CONNECTION_FAILED).
         'proxy_host' => env('MENARDS_PROXY_HOST', env('CAPTCHA_PROXY_HOST')),
         'proxy_username' => env('MENARDS_PROXY_USERNAME', env('CAPTCHA_PROXY_USERNAME')),
         'proxy_password' => env('MENARDS_PROXY_PASSWORD', env('CAPTCHA_PROXY_PASSWORD')),
-        'proxy_session' => env('MENARDS_PROXY_SESSION', 'menards'),
+        'proxy_session' => env('MENARDS_PROXY_SESSION', env('MENARDS_PROXY_HOST') ? '' : 'menards'),
         // `-region-us` is the only geo parameter this pool honours (sampled
         // 5/5 US exits on 2026-09-23); `-country-` and `-state-` are ignored
         // and hand out Brazilian or Russian exits, which Menards 403s outright.
-        'proxy_region' => env('MENARDS_PROXY_REGION', 'us'),
+        'proxy_region' => env('MENARDS_PROXY_REGION', env('MENARDS_PROXY_HOST') ? '' : 'us'),
         // The 2captcha Solver extension. OFF (2026-09-29): its current version
         // (3.7.4) has no hCaptcha support, so it never cleared the Imperva
         // wall, and it could read every page. With it off the policy script

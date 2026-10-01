@@ -71,3 +71,61 @@ it('uses the bare username when neither region nor session is configured', funct
 
     expect(MenardsProxy::fromConfig()->username)->toBe('user-zone-custom');
 });
+
+/**
+ * config/services.php's menards block, read with the given environment
+ * variables set (null leaves one unset).
+ *
+ * @param  array<string, string|null>  $env
+ * @return array<string, mixed>
+ */
+function menards_proxyConfigWith(array $env): array
+{
+    foreach ($env as $key => $value) {
+        if ($value !== null) {
+            $_SERVER[$key] = $_ENV[$key] = $value;
+        }
+    }
+
+    try {
+        return (require config_path('services.php'))['menards'];
+    } finally {
+        foreach (array_keys($env) as $key) {
+            unset($_SERVER[$key], $_ENV[$key]);
+        }
+    }
+}
+
+it('sends a fixed MENARDS_PROXY_HOST the bare username, without the pool options', function () {
+    $menards = menards_proxyConfigWith([
+        'MENARDS_PROXY_HOST' => '203.0.113.7:12323',
+        'MENARDS_PROXY_USERNAME' => 'fixed-user',
+        'MENARDS_PROXY_PASSWORD' => 'fixed-secret',
+        'MENARDS_PROXY_REGION' => null,
+        'MENARDS_PROXY_SESSION' => null,
+    ]);
+
+    expect($menards['proxy_region'])->toBe('')
+        ->and($menards['proxy_session'])->toBe('');
+
+    config([
+        'services.menards.proxy_host' => $menards['proxy_host'],
+        'services.menards.proxy_username' => $menards['proxy_username'],
+        'services.menards.proxy_password' => $menards['proxy_password'],
+        'services.menards.proxy_region' => $menards['proxy_region'],
+        'services.menards.proxy_session' => $menards['proxy_session'],
+    ]);
+
+    expect(MenardsProxy::fromConfig()->label())->toBe('203.0.113.7:12323 as fixed-user');
+});
+
+it('keeps the US region and one session on the shared pool', function () {
+    $menards = menards_proxyConfigWith([
+        'MENARDS_PROXY_HOST' => null,
+        'MENARDS_PROXY_REGION' => null,
+        'MENARDS_PROXY_SESSION' => null,
+    ]);
+
+    expect($menards['proxy_region'])->toBe('us')
+        ->and($menards['proxy_session'])->toBe('menards');
+});
