@@ -39,6 +39,9 @@ it('caps the window and evicts days from the side being scrolled away from', fun
 
 it('builds the day range from the counters even when the window starts after today', function (): void {
     $component = new CardsIndex();
+    // The counters drive the Timeline/Grid window; the Week view (the
+    // default) adds its own fortnight on top.
+    $component->viewMode = 'gantt';
     $component->previousDaysLoaded = -3;
     $component->futureDaysLoaded = 10;
 

@@ -5,20 +5,22 @@
 <div class="flex flex-col h-full min-h-0">
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden bg-zinc-100 dark:bg-zinc-800">
         {{-- Top toolbar: filters (left) + view controls (right) --}}
-        <div class="shrink-0 flex items-center gap-3 px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
-        {{-- Desktop filters (horizontal) --}}
-        <div class="hidden lg:flex items-center gap-3 flex-1 min-w-0 overflow-x-auto">
+        <div class="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
+        {{-- Desktop filters (wrap onto a second row rather than scroll out of sight) --}}
+        <div class="hidden lg:flex flex-wrap items-center gap-2 flex-1 min-w-0">
             {{-- Filters (hidden in list view — they live inside the table column headers) --}}
             @if($viewMode !== 'list')
             {{-- Project Filter (Multi-select) --}}
             <flux:select
                 wire:model.live.debounce.400ms="filterProjectIds"
-                placeholder="All Projects"
+                placeholder="All"
+                prefix="Project"
+                selected-suffix="projects"
                 variant="listbox"
                 searchable
                 multiple
                 size="sm"
-                class="min-w-48"
+                class="w-auto max-w-52 min-w-40"
             >
                 @foreach($projects as $project)
                     <flux:select.option value="{{ $project->id }}">
@@ -37,11 +39,13 @@
             {{-- Status Filter (Multi-select with badges) --}}
             <flux:select
                 wire:model.live.debounce.400ms="filterStatusCodes"
-                placeholder="All Statuses"
+                placeholder="All"
+                prefix="Status"
+                selected-suffix="statuses"
                 variant="listbox"
                 multiple
                 size="sm"
-                class="min-w-40"
+                class="w-auto max-w-52 min-w-40"
             >
                 @foreach($this->statusOptions as $status)
                     <flux:select.option value="{{ $status['code'] }}">
@@ -55,12 +59,14 @@
             {{-- Vendor Filter (with avatars) --}}
             <flux:select
                 wire:model.live.debounce.400ms="filterVendorId"
-                placeholder="All Vendors"
+                placeholder="All"
+                prefix="Vendor"
                 variant="listbox"
                 searchable
                 clearable
                 size="sm"
-                class="min-w-48"
+                class="w-auto max-w-52 min-w-40"
+                options:class="min-w-64"
             >
                 @foreach($vendors as $vendor)
                     <flux:select.option value="{{ $vendor->id }}">
@@ -75,12 +81,14 @@
             {{-- Team Member Filter (Multi-select with avatars) --}}
             <flux:select
                 wire:model.live.debounce.400ms="filterUserIds"
-                placeholder="All Team Members"
+                placeholder="All"
+                prefix="Team"
+                selected-suffix="people"
                 variant="listbox"
                 searchable
                 multiple
                 size="sm"
-                class="min-w-48"
+                class="w-auto max-w-52 min-w-40"
             >
                 @foreach($employees as $employee)
                     <flux:select.option value="{{ $employee->id }}">
@@ -92,6 +100,18 @@
                 @endforeach
             </flux:select>
             @endif
+
+            {{-- Only my own tasks (my name is on them) — works in every view. --}}
+            <flux:button
+                wire:click="$toggle('onlyMine')"
+                size="sm"
+                icon="user"
+                :variant="$onlyMine ? 'primary' : 'outline'"
+                aria-pressed="{{ $onlyMine ? 'true' : 'false' }}"
+                class="shrink-0"
+            >
+                Mine
+            </flux:button>
 
             {{-- Clear Filters Button --}}
             @if($this->hasActiveFilters)
@@ -122,41 +142,46 @@
         </div>
 
         {{-- View controls --}}
-        <div class="flex items-center gap-1 shrink-0">
-        {{-- View Toggle (desktop only — mobile uses the agenda view) --}}
-        <div class="hidden lg:flex items-center gap-1 p-1 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg">
+        <div class="flex items-center gap-2 shrink-0 ml-auto">
+        {{-- New task, from anywhere on the page --}}
+        <div class="hidden lg:block shrink-0">
             <flux:button
-                wire:click="$set('viewMode', 'cards')"
-                variant="subtle"
-                square
-                icon="view-columns"
-                :class="$viewMode === 'cards' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
-                aria-label="Card view"
-            />
-            <flux:button
-                wire:click="$set('viewMode', 'table')"
-                variant="subtle"
-                square
-                icon="table-cells"
-                :class="$viewMode === 'table' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
-                aria-label="Table view"
-            />
-            <flux:button
-                wire:click="$set('viewMode', 'list')"
-                variant="subtle"
-                square
-                icon="list-bullet"
-                :class="$viewMode === 'list' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
-                aria-label="List view"
-            />
-            <flux:button
-                wire:click="$set('viewMode', 'gantt')"
-                variant="subtle"
-                square
-                icon="chart-bar"
-                :class="$viewMode === 'gantt' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
-                aria-label="Gantt view"
-            />
+                wire:click="$dispatchTo('tasks.task-create', 'addTask', {})"
+                variant="primary"
+                size="sm"
+                icon="plus"
+            >
+                New task
+            </flux:button>
+        </div>
+
+        {{-- View Toggle (desktop only — mobile uses the agenda view). Words,
+             not bare icons: five views read the same as icons alone. --}}
+        @php
+            $plannerViews = [
+                'week' => ['label' => 'Week', 'icon' => 'calendar-days', 'hint' => 'This week and next, day by day, with the tasks still to schedule'],
+                'table' => ['label' => 'Grid', 'icon' => 'table-cells', 'hint' => 'Projects down the side, days across'],
+                'cards' => ['label' => 'Board', 'icon' => 'view-columns', 'hint' => 'One column per day'],
+                'list' => ['label' => 'List', 'icon' => 'list-bullet', 'hint' => 'Every task in one sortable list'],
+                'gantt' => ['label' => 'Timeline', 'icon' => 'chart-bar', 'hint' => 'Gantt timeline with dependencies'],
+            ];
+        @endphp
+        <div class="hidden lg:flex items-center gap-0.5 p-1 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg">
+            @foreach ($plannerViews as $mode => $view)
+                <flux:tooltip :content="$view['hint']" position="bottom">
+                    <flux:button
+                        wire:click="$set('viewMode', '{{ $mode }}')"
+                        variant="subtle"
+                        size="sm"
+                        :icon="$view['icon']"
+                        :class="$viewMode === $mode ? 'bg-zinc-200/80 dark:bg-zinc-700/80 !text-zinc-900 dark:!text-white' : ''"
+                        aria-pressed="{{ $viewMode === $mode ? 'true' : 'false' }}"
+                    >
+                        <span class="hidden xl:inline">{{ $view['label'] }}</span>
+                        <span class="sr-only xl:hidden">{{ $view['label'] }}</span>
+                    </flux:button>
+                </flux:tooltip>
+            @endforeach
         </div>
 
 
@@ -278,6 +303,8 @@
                 </flux:select>
             </flux:field>
 
+            <flux:switch wire:model.live="onlyMine" label="Only my tasks" description="Tasks with your name on them." />
+
             <div class="flex gap-2 pt-2">
                 @if($this->hasActiveFilters)
                     <flux:button wire:click="clearFilters" variant="subtle" class="flex-1">
@@ -295,6 +322,10 @@
     {{-- Desktop views (cards / table / list / gantt) \u2014 lg and up only --}}
     {{-- ============================================================= --}}
     <div class="hidden lg:flex flex-1 flex-col min-h-0">
+
+    @if ($viewMode === 'week')
+        @include('livewire.planner._agenda')
+    @endif
 
     <!-- Planner Cards - 14 Day Kanban View -->
     @if ($viewMode === 'cards')
@@ -741,10 +772,28 @@
                 @empty
                     <tr>
                         <td colspan="{{ $dayHeaders->count() + 1 }}" class="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-                            No projects found
+                            {{ $quietProjectCount > 0 ? 'Nothing scheduled on these days.' : 'No projects found' }}
                         </td>
                     </tr>
                 @endforelse
+                {{-- Projects with nothing booked here and nothing to book fold away. --}}
+                @if ($quietProjectCount > 0)
+                    <tr wire:key="table-quiet-projects">
+                        <td class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-3 py-3 border-b {{ $dayBorderClass }}" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
+                            <flux:button
+                                size="xs"
+                                variant="ghost"
+                                wire:click="$toggle('showQuietProjects')"
+                                :icon="$showQuietProjects ? 'chevron-up' : 'chevron-down'"
+                            >
+                                {{ $showQuietProjects ? 'Hide' : 'Show' }} {{ $quietProjectCount }} quiet {{ Str::plural('project', $quietProjectCount) }}
+                            </flux:button>
+                        </td>
+                        <td colspan="{{ $dayHeaders->count() }}" class="border-b {{ $dayBorderClass }} px-3 text-xs text-zinc-400">
+                            Nothing scheduled here and nothing waiting to be scheduled.
+                        </td>
+                    </tr>
+                @endif
             </tbody>
         </table>
     </div>
@@ -796,6 +845,7 @@
                         <flux:select
                             wire:model.live.debounce.400ms="filterStatusCodes"
                             placeholder="All Statuses"
+                            selected-suffix="statuses"
                             variant="listbox"
                             multiple
                             size="sm"
@@ -902,7 +952,11 @@
 
                         {{-- Project (address) --}}
                         <flux:table.cell class="whitespace-normal {{ $vline }}">
-                            <span class="truncate text-zinc-700 dark:text-zinc-300">{{ $row->project->short_address }}</span>
+                            <a
+                                href="{{ route('projects.show', $row->project) }}"
+                                x-on:click.stop
+                                class="truncate text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:underline underline-offset-2"
+                            >{{ $row->project->short_address }}</a>
                         </flux:table.cell>
 
                         {{-- Status (project status) --}}
@@ -1099,6 +1153,48 @@
 
 @script
 <script>
+// Week view: drag a "To schedule" task onto a day, or pick a date for it.
+Alpine.data('plannerAgenda', () => ({
+    dragging: null,
+    over: null,
+    pickFor: null,
+    pickTitle: '',
+
+    start(event, taskId) {
+        this.dragging = taskId;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', String(taskId));
+    },
+
+    end() {
+        this.dragging = null;
+        this.over = null;
+    },
+
+    drop(event, date) {
+        const id = parseInt(event.dataTransfer.getData('text/plain') || this.dragging, 10);
+        this.end();
+        if (id) {
+            this.$wire.scheduleTask(id, date);
+        }
+    },
+
+    pickDate(taskId, title) {
+        this.pickFor = taskId;
+        this.pickTitle = title;
+        this.$flux.modal('planner-schedule-date').show();
+    },
+
+    choose(date) {
+        if (! this.pickFor || ! /^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+            return;
+        }
+        this.$wire.scheduleTask(this.pickFor, date);
+        this.pickFor = null;
+        this.$flux.modal('planner-schedule-date').close();
+    },
+}));
+
 Alpine.data('plannerUndatedTasksModal', () => ({
     title: '',
     selectedProjectId: null,

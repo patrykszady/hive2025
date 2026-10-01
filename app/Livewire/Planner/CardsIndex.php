@@ -26,9 +26,24 @@ class CardsIndex extends Component
     public $employees = [];
     public $projects = [];
 
-    // View mode: 'cards' | 'table' | 'gantt'
+    /**
+     * View mode: 'week' (the agenda, default since 2026-10-01: days down the
+     * page with a "To schedule" tray beside them), 'table' (Grid), 'cards'
+     * (Board), 'list' or 'gantt' (Timeline).
+     */
     #[Url(as: 'view')]
-    public string $viewMode = 'table';
+    public string $viewMode = 'week';
+
+    /** The Monday the Week view starts on (two weeks shown); '' = this week. */
+    #[Url(as: 'from')]
+    public string $agendaStart = '';
+
+    /** Only the signed-in person's own tasks (their name is on them). */
+    #[Url(as: 'mine')]
+    public bool $onlyMine = false;
+
+    /** Grid view: also list projects with nothing scheduled and nothing to schedule. */
+    public bool $showQuietProjects = false;
 
     /** Gantt zoom: 'day', 'week' or 'month' — pixels per day in GANTT_PX_PER_DAY. */
     #[Url(as: 'zoom')]
@@ -177,7 +192,56 @@ class CardsIndex extends Component
         $startDate = $today->copy()->subDays($this->previousDaysLoaded);
         $endDate = $today->copy()->addDays($this->futureDaysLoaded - 1);
 
+        // The Week view's fortnight joins the usual window rather than
+        // replacing it: the phone agenda reads the same window and must not
+        // follow the desktop's week arrows.
+        if ($this->viewMode === 'week') {
+            $agenda = $this->agendaPeriod();
+            $startDate = $startDate->min($agenda->getStartDate());
+            $endDate = $endDate->max($agenda->getEndDate());
+        }
+
         return collect(CarbonPeriod::create($startDate, '1 day', $endDate));
+    }
+
+    /** The two weeks the Week view shows, Monday to Sunday. */
+    private function agendaPeriod(): CarbonPeriod
+    {
+        $start = $this->agendaStartDate();
+
+        return CarbonPeriod::create($start, '1 day', $start->copy()->addDays(self::AGENDA_DAYS - 1));
+    }
+
+    /** Days the Week view shows at once: this week and next. */
+    public const AGENDA_DAYS = 14;
+
+    /** The Monday the Week view starts on. */
+    public function agendaStartDate(): Carbon
+    {
+        if ($this->agendaStart !== '') {
+            try {
+                return Carbon::createFromFormat('!Y-m-d', $this->agendaStart)->startOfWeek(Carbon::MONDAY);
+            } catch (\Throwable) {
+                // A hand-edited ?from= falls back to this week.
+            }
+        }
+
+        return browser_today()->copy()->startOfWeek(Carbon::MONDAY);
+    }
+
+    public function agendaPreviousWeek(): void
+    {
+        $this->agendaStart = $this->agendaStartDate()->subWeek()->format('Y-m-d');
+    }
+
+    public function agendaNextWeek(): void
+    {
+        $this->agendaStart = $this->agendaStartDate()->addWeek()->format('Y-m-d');
+    }
+
+    public function agendaThisWeek(): void
+    {
+        $this->agendaStart = '';
     }
 
     /**
@@ -199,6 +263,7 @@ class CardsIndex extends Component
         $this->filterUserIds = [];
         $this->filterStatusCodes = self::DEFAULT_STATUS_CODES;
         $this->filterDateRange = 'upcoming';
+        $this->onlyMine = false;
     }
 
     /**
@@ -214,7 +279,8 @@ class CardsIndex extends Component
             || $this->filterVendorId !== null
             || !empty($this->filterUserIds)
             || $statusCodes !== self::DEFAULT_STATUS_CODES
-            || $this->filterDateRange !== 'upcoming';
+            || $this->filterDateRange !== 'upcoming'
+            || $this->onlyMine;
     }
 
     /**
@@ -427,6 +493,165 @@ class CardsIndex extends Component
     }
 
     /**
+     * The Week view's days, each with its tasks grouped by project. A task
+     * shows on every day it is booked: its picked dates, else every day
+     * from its start to its end. Undated tasks live in toScheduleByProject().
+     *
+     * @return Collection<int, array{date: string, carbon: Carbon, isToday: bool, isPast: bool, isWeekend: bool, groups: Collection<int, array{project: Project, tasks: Collection<int, Task>}>}>
+     */
+    #[Computed]
+    public function agendaDays(): Collection
+    {
+        $today = browser_today()->format('Y-m-d');
+        $byDate = [];
+
+        foreach ($this->mobileTaskPairs as [$project, $task]) {
+            foreach ($this->taskBookedDates($task) as $date) {
+                $byDate[$date][$project->id]['project'] = $project;
+                $byDate[$date][$project->id]['tasks'][] = $task;
+            }
+        }
+
+        return collect($this->agendaPeriod())->map(function (Carbon $day) use ($byDate, $today): array {
+            $date = $day->format('Y-m-d');
+
+            $groups = collect($byDate[$date] ?? [])
+                ->map(fn (array $group): array => [
+                    'project' => $group['project'],
+                    'tasks' => collect($group['tasks'])->sortBy(function (Task $task) use ($date): string {
+                        $startTime = (string) data_get($task->options, "time_settings.$date.start_time", '');
+                        $usesTime = (bool) data_get($task->options, "time_settings.$date.use_time", false);
+
+                        return $usesTime && $startTime !== '' ? '0_'.$startTime : '1_'.mb_strtolower((string) $task->title);
+                    })->values(),
+                ])
+                ->values();
+
+            return [
+                'date' => $date,
+                'carbon' => $day->copy(),
+                'isToday' => $date === $today,
+                'isPast' => $date < $today,
+                'isWeekend' => $day->isWeekend(),
+                'groups' => $groups,
+            ];
+        })->values();
+    }
+
+    /**
+     * Undated tasks across the filtered projects, grouped by project — the
+     * Week view's "To schedule" tray. Deleted tasks never show.
+     *
+     * @return Collection<int, array{project: Project, tasks: Collection<int, Task>}>
+     */
+    #[Computed]
+    public function toScheduleByProject(): Collection
+    {
+        return $this->mobileTaskPairs
+            ->filter(fn (array $pair): bool => $this->taskPlannerDates($pair[1])[0] === null)
+            ->groupBy(fn (array $pair): int => $pair[0]->id)
+            ->map(fn (Collection $pairs): array => [
+                'project' => $pairs->first()[0],
+                'tasks' => $pairs->map(fn (array $pair): Task => $pair[1])->values(),
+            ])
+            ->values();
+    }
+
+    /**
+     * Every day a dated task is booked on, as Y-m-d strings: its picked
+     * dates when it has them, else each day from its start to its end
+     * (capped, so a mistyped year never builds a decade of days).
+     *
+     * @return array<int, string>
+     */
+    private function taskBookedDates(Task $task): array
+    {
+        $picked = collect($task->options->dates ?? [])
+            ->filter()
+            ->map(fn ($date): string => substr((string) $date, 0, 10))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        if ($picked !== []) {
+            return $picked;
+        }
+
+        [$first, $last] = $this->taskPlannerDates($task);
+
+        if ($first === null) {
+            return [];
+        }
+
+        $dates = [];
+        $cursor = Carbon::createFromFormat('!Y-m-d', $first);
+        $stop = Carbon::createFromFormat('!Y-m-d', $last ?? $first);
+
+        for ($guard = 0; $cursor->lte($stop) && $guard < 120; $guard++) {
+            $dates[] = $cursor->format('Y-m-d');
+            $cursor->addDay();
+        }
+
+        return $dates;
+    }
+
+    /**
+     * Book an unscheduled task on one day — the "To schedule" tray's date
+     * menu, or a task dragged from the tray onto a day. Saved like any other
+     * date change, so the same vendor and client notifications follow (see
+     * TaskObserver::updated). A task that already has dates is left alone:
+     * moving booked work belongs to the edit modal and the Timeline.
+     */
+    public function scheduleTask(int $taskId, string $date): void
+    {
+        $task = $this->visibleTask($taskId);
+
+        if (! $task || $task->trashed() || $this->taskPlannerDates($task)[0] !== null) {
+            return;
+        }
+
+        try {
+            $day = Carbon::createFromFormat('!Y-m-d', $date);
+        } catch (\Throwable) {
+            return;
+        }
+
+        if ($day->format('Y-m-d') !== $date) {
+            return;
+        }
+
+        if ($task->wouldOverlapWithSiblings($day, $day)) {
+            Flux::toast(
+                duration: 4000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Cannot schedule task',
+                text: 'This would overlap with a sibling task.',
+            );
+
+            return;
+        }
+
+        $options = json_decode(json_encode($task->options ?? []), true) ?: [];
+        $options['dates'] = [$date];
+
+        $task->update([
+            'start_date' => $date,
+            'end_date' => $date,
+            'options' => $options,
+        ]);
+
+        Flux::toast(
+            duration: 2500,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Scheduled',
+            text: $task->title.' · '.$day->format('D, M j'),
+        );
+    }
+
+    /**
      * Get active projects with their tasks
      */
     #[Computed]
@@ -472,6 +697,11 @@ class CardsIndex extends Component
                     $taskQuery->where('vendor_id', $this->filterVendorId);
                 }
                 
+                // Only the signed-in person's own tasks
+                if ($this->onlyMine) {
+                    $taskQuery->whereJsonContains('user_ids', (string) auth()->id());
+                }
+
                 // Filter tasks by user(s) if set
                 if (!empty($this->filterUserIds)) {
                     $taskQuery->where(function ($q) {
@@ -2103,10 +2333,21 @@ class CardsIndex extends Component
         // The gantt and the pending-tasks modal read their data through
         // computeds inside their islands, so an island-only render (a scroll
         // load, a drag) never comes through here at all.
+        // Grid: a project with nothing booked in the window and nothing
+        // waiting to be booked is a blank row; those fold behind a "show"
+        // button so the rows that matter come first.
+        $projectRows = $needsRows ? $this->projectRows : collect();
+        $isQuiet = fn (object $row): bool => ! $row->hasTasksInRange && $row->undated_tasks_count === 0;
+        $quietProjectCount = $projectRows->filter($isQuiet)->count();
+        if (! $this->showQuietProjects) {
+            $projectRows = $projectRows->reject($isQuiet)->values();
+        }
+
         return view('livewire.planner.cards', [
             'kanbanColumns' => $needsKanban ? $this->kanbanColumns : collect(),
             'dayHeaders'    => $needsRows ? $this->dayHeaders : collect(),
-            'projectRows'   => $needsRows ? $this->projectRows : collect(),
+            'projectRows'   => $projectRows,
+            'quietProjectCount' => $quietProjectCount,
         ])->layout('components.layouts.app', [
             'title' => 'Planner',
             'fullscreenClasses' => 'h-full overflow-hidden flex flex-col',
