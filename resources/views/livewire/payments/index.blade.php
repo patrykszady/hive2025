@@ -28,7 +28,7 @@
         @if($view !== 'estimate.pdf')
             @can('create', App\Models\Payment::class)
                 @if($view === 'projects.show' && $project->finances['balance'] > 0 && $project->latestStatus?->title !== 'VIEW ONLY')
-                    <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
+                    <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}, project: {{$project->id}} })">Create Payment</flux:button>
                 @elseif($view !== 'projects.show' && $this->hasClientsWithProjects)
                     <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
                 @endif

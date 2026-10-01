@@ -64,7 +64,12 @@
                     <flux:field wire:key="payment-project-{{$project['id']}}">
                         <div class="grid gap-2 grid-cols-2">
                             <div>
-                                <flux:label>{{$project['address']}}</flux:label>
+                                <flux:label class="gap-2">
+                                    {{$project['address']}}
+                                    @if($openedFromProjectId === $project['id'])
+                                        <flux:badge size="sm" color="indigo" inset="top bottom">This project</flux:badge>
+                                    @endif
+                                </flux:label>
                                 <flux:description><i>{{$project['project_name']}}</i></flux:description>
                             </div>
                             <div>
@@ -78,6 +83,7 @@
                                         placeholder="0.00"
                                     />
                                 </flux:input.group>
+                                <flux:error name="projects.{{$index}}.amount" />
                             </div>
                         </div>
                     </flux:field>

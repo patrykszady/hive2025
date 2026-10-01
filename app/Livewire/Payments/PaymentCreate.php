@@ -34,6 +34,14 @@ class PaymentCreate extends Component
 
     public $from_project = false;
 
+    /**
+     * The project page the window was opened from. It is listed first and
+     * marked "This project": a client with two bathrooms on one address got
+     * a Primary Bath payment typed into the Hall Bath row above it
+     * (2026-10-01, 215 W Huron).
+     */
+    public ?int $openedFromProjectId = null;
+
     public $view_text = [
         'card_title' => 'Create Client Payment',
         'button_text' => 'Add Payment',
@@ -102,6 +110,7 @@ class PaymentCreate extends Component
                 return true;
             })
             ->sortBy([
+                fn ($a, $b) => (int) ($b->id === $this->openedFromProjectId) <=> (int) ($a->id === $this->openedFromProjectId),
                 ['latestStatus.status_code', 'asc'],
                 ['latestStatus.start_date', 'desc'],
             ])
@@ -120,6 +129,7 @@ class PaymentCreate extends Component
     public function editPayment(Payment $payment)
     {
         $this->payment = $payment;
+        $this->openedFromProjectId = $payment->project_id;
         $this->client = $payment->project->client;
         $this->client_id = $payment->project->client->id;
         $this->updatedClientId($this->client);
@@ -161,8 +171,10 @@ class PaymentCreate extends Component
     }
 
     // 8-31-2022 | 9-10-2023 similar on VendorPaymentForm
-    public function addProject(?Client $client = null)
+    public function addProject(?Client $client = null, ?int $project = null)
     {
+        $this->openedFromProjectId = $project;
+
         $this->view_text = [
             'card_title' => 'Create Client Payment',
             'button_text' => 'Add Payment',
@@ -186,12 +198,15 @@ class PaymentCreate extends Component
     {
         $this->normalizeProjectAmounts();
         $this->validate();
-        //validate payment total is greater than $0
-        //if less than or equal to 0... send back with error
-        if ($this->getClientPaymentSumProperty() === 0) {
+
+        if (! $this->hasPaymentTotal()) {
             return $this->addError('payment_total_min', 'Payment total needs to include at least 1 project and not equal $0.00');
-        } else {
-            $payment = $this->form->store();
+        }
+
+        // Nothing stored (no project here accepts the amounts): say so and
+        // keep the window open rather than closing as if it had saved.
+        if ($this->form->store() === null) {
+            return $this->addError('payment_total_min', 'The payment could not be saved to these projects. Check the amounts and try again.');
         }
 
         $this->modal('payment_form_modal')->close();
@@ -205,7 +220,7 @@ class PaymentCreate extends Component
         $this->normalizeProjectAmounts();
         $this->validate();
         // Optional: allow zero if editing? Keep same validation as save for consistency
-        if ($this->getClientPaymentSumProperty() === 0) {
+        if (! $this->hasPaymentTotal()) {
             return $this->addError('payment_total_min', 'Payment total needs to include at least 1 project and not equal $0.00');
         }
 
@@ -213,6 +228,16 @@ class PaymentCreate extends Component
 
         $this->modal('payment_form_modal')->close();
         $this->dispatch('refreshComponent')->to('payments.payment-show');
+    }
+
+    /**
+     * Whether the amounts add up to something other than $0.00. The sum is a
+     * float, so the old `=== 0` check never matched (2026-10-01): a payment
+     * with no amount closed the window as if saved while storing nothing.
+     */
+    private function hasPaymentTotal(): bool
+    {
+        return round((float) $this->getClientPaymentSumProperty(), 2) != 0.0;
     }
 
     private function normalizeProjectAmounts(): void
