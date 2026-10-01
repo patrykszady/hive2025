@@ -2731,18 +2731,17 @@ class TransactionController extends Controller
 
     public function add_payments_to_transaction()
     {
+        $this->moveCombinedPaymentsToExactDeposits();
+
         //where doesnt have clientpayment
         //1-26-2023 why does 2019/older transactions/client_payments not work?
-        $transactions = Transaction::where('transaction_date', '>', '2019-01-01')
-            ->whereDoesntHave('payments')
-            ->whereNull('expense_id')
-            ->where(function ($q) {
-                // Negative (debit) transactions OR positive deposits (returned checks)
-                $q->where('amount', 'LIKE', '-%')
-                  ->orWhere('deposit', 1);
-            })
+        $transactions = $this->openDepositsQuery()
             ->orderBy('transaction_date', 'DESC')
             ->get();
+
+        // Deposits still without a payment, for closestExactDeposit(); each
+        // leaves as soon as this pass links it.
+        $open = $transactions->keyBy('id');
 
         foreach ($transactions as $transaction) {
             $vendor_id = $transaction->bank_account->bank->vendor_id;
@@ -2758,7 +2757,11 @@ class TransactionController extends Controller
             // ->groupBy('parent_client_payment_id');
 
             // if first character is -
-            $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->get();
+            // A payment whose amount was deposited closer to its own date
+            // belongs to that deposit. Newest deposits run first, so a later
+            // deposit of the same amount used to claim it.
+            $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->get()
+                ->filter(fn (Payment $payment) => $this->closestExactDeposit($payment, $open)?->is($transaction) ?? true);
 
             if ($single_payments->isNotEmpty()) {
                 // Choose the payment whose date is CLOSEST (absolute diff) to the transaction date.
@@ -2779,12 +2782,19 @@ class TransactionController extends Controller
 
                 // Trigger Searchable / indexing side-effects
                 $transaction->save();
+                $open->forget($transaction->id);
             } else {
                 $payments = Payment::whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])
                     //where bank_id belongs_to same vendor_id as this payment
                     ->where('belongs_to_vendor_id', $vendor_id)
                     ->where('transaction_id', null)
-                    ->get();
+                    ->get()
+                    // Nor is such a payment summed into a combination here.
+                    ->reject(fn (Payment $payment) => ($deposit = $this->closestExactDeposit($payment, $open)) !== null && ! $deposit->is($transaction))
+                    // Zero amounts go here, not through array_filter below,
+                    // which dropped them from the amounts but not the ids.
+                    ->filter(fn (Payment $payment) => (float) $payment->amount != 0)
+                    ->values();
                 // dd($payments);
                 if (! $payments->isEmpty()) {
                     //try any of $payments->payment_total ($payment->sum('amount')) == $transaction->amount? if so and only one result..that's our guy.
@@ -2812,11 +2822,11 @@ class TransactionController extends Controller
                     // dd($results);
 
                     foreach ($results as $key => $result) {
-                        $sum = number_format($result['sum'], 2, '.', '');
                         //this can happen multiple of times.. eg transaction_id 6230
 
-                        //is this Transaction a RETURN CHECK "DEPOSIT"?
-                        if ($sum === substr($transaction->amount, 1) or $sum === '-'.$transaction->amount) {
+                        //is this Transaction a RETURN CHECK "DEPOSIT"? Either
+                        //way the payments sum to the transaction negated.
+                        if (round((float) $result['sum'], 2) === round(-(float) $transaction->amount, 2)) {
                             $payment_results[] = $result;
                         } else {
                             //06/10/2021 if not found... create json array for $transaction with all parent_client_payment_id s so that we dont have to run this heavy program for those payments again.
@@ -2839,10 +2849,120 @@ class TransactionController extends Controller
                             $transaction->save();
                             // $payments->fresh();
                         }
+
+                        $open->forget($transaction->id);
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Money in that no payment or expense has claimed: deposits, and debits
+     * coming back (returned checks).
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<Transaction>
+     */
+    protected function openDepositsQuery()
+    {
+        return Transaction::where('transaction_date', '>', '2019-01-01')
+            ->whereDoesntHave('payments')
+            ->whereNull('expense_id')
+            ->where(function ($q) {
+                // Negative (debit) transactions OR positive deposits (returned checks)
+                $q->where('amount', 'LIKE', '-%')
+                  ->orWhere('deposit', 1);
+            })
+            ->with('bank_account.bank');
+    }
+
+    /**
+     * A payment summed into a combined deposit moves to a deposit of its own
+     * exact amount that turns up later, closer to its date. PSFCU's feed came
+     * back on 2026-09-29 after three silent months; by then Bates' $6,000 and
+     * Harvey's $4,000 had been summed into a $10,000 Citibank ATM deposit,
+     * and both checks' own PSFCU deposits sat unmatched. The rest of such a
+     * combination no longer adds up, so it is released for the main pass to
+     * match again. A check split across projects is left alone.
+     */
+    protected function moveCombinedPaymentsToExactDeposits(): void
+    {
+        $combinations = Transaction::query()
+            ->where('transaction_date', '>=', now()->subYear()->toDateString())
+            ->has('payments', '>', 1)
+            ->with('payments')
+            ->get();
+
+        if ($combinations->isEmpty()) {
+            return;
+        }
+
+        $open = $this->openDepositsQuery()->get()->keyBy('id');
+
+        foreach ($combinations as $combination) {
+            $paymentIds = $combination->payments->pluck('id');
+            $isSplitCheck = $combination->payments->contains(fn (Payment $payment) => $payment->parent_client_payment_id !== null)
+                || Payment::whereIn('parent_client_payment_id', $paymentIds)->exists();
+
+            if ($isSplitCheck) {
+                continue;
+            }
+
+            foreach ($combination->payments as $payment) {
+                $deposit = $this->closestExactDeposit($payment, $open);
+
+                if (! $deposit || $this->daysApart($payment->date, $deposit->transaction_date) >= $this->daysApart($payment->date, $combination->transaction_date)) {
+                    continue;
+                }
+
+                $payment->update(['transaction_id' => $deposit->id]);
+                $combination->payments->reject(fn (Payment $other) => $other->is($payment))->each->update(['transaction_id' => null]);
+                $open->forget($deposit->id);
+
+                // So Searchable re-sends both to Scout/Typesense.
+                $deposit->save();
+                $combination->save();
+
+                Log::info('Payments: moved a payment out of a combined deposit to its own', [
+                    'payment_id' => $payment->id,
+                    'from_transaction_id' => $combination->id,
+                    'to_transaction_id' => $deposit->id,
+                    'released_payment_ids' => $paymentIds->reject(fn (int $id) => $id === $payment->id)->values()->all(),
+                ]);
+
+                break;
+            }
+        }
+    }
+
+    /**
+     * The open deposit of exactly this payment's amount, at the payment's
+     * company, nearest the payment's date, inside the window in which a
+     * deposit may claim a payment (21 days after it to 4 days before). Ties
+     * go to a deposit on or after the payment date, then the earlier one.
+     *
+     * @param  \Illuminate\Support\Collection<int, Transaction>  $openDeposits
+     */
+    protected function closestExactDeposit(Payment $payment, \Illuminate\Support\Collection $openDeposits): ?Transaction
+    {
+        $amount = round(abs((float) $payment->amount), 2);
+
+        return $openDeposits
+            ->filter(fn (Transaction $deposit) => round(abs((float) $deposit->amount), 2) === $amount
+                && (int) $deposit->bank_account?->bank?->vendor_id === (int) $payment->belongs_to_vendor_id
+                && $payment->date->between($deposit->transaction_date->copy()->subDays(21), $deposit->transaction_date->copy()->addDays(4)))
+            ->sortBy(fn (Transaction $deposit) => sprintf(
+                '%05d-%d-%s',
+                $this->daysApart($payment->date, $deposit->transaction_date),
+                $deposit->transaction_date->lt($payment->date) ? 1 : 0,
+                $deposit->transaction_date->toDateString(),
+            ))
+            ->first();
+    }
+
+    protected function daysApart(Carbon $a, Carbon $b): int
+    {
+        return (int) round(abs($a->diffInDays($b)));
     }
 
     //find expenses with NO VENDOR that match transactions
