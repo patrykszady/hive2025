@@ -651,6 +651,26 @@ class PlaidTransactionSyncController extends Controller
         // transaction leaves a stale name on (e.g. a $12 "Laravel Forge" pending
         // inherited onto a $12 "FEE-DEP CK RTN" returned-check fee).
         $incomingDescription = $payload['name'] ?? $payload['original_description'] ?? '';
+
+        // A pending purchase that Plaid "posts" as a different merchant is not
+        // the same charge: 2026-09-01 a pending $14.99 Prime Video charge became
+        // a $15.00 INCOMING WIRE FEE, still tagged Amazon and linked to the
+        // Amazon receipt; 09-11 an Amazon charge became a Lyft ride; 04-01 a
+        // DigitalOcean charge became a Menards purchase. The vendor and the
+        // expense link were made from the pending description, so drop both
+        // and let vendor and expense matching run on what actually posted.
+        if ($this->merchantChanged($matchedTransaction, $payload, (string) $incomingDescription)) {
+            Log::channel('plaid_adds')->warning('Upgrade changed the merchant; vendor and expense link dropped so matching re-runs', [
+                'transaction_id' => $matchedTransaction->id,
+                'expense_id' => $matchedTransaction->expense_id,
+                'vendor_id' => $matchedTransaction->vendor_id,
+                'old_description' => $matchedTransaction->plaid_merchant_description,
+                'new_description' => $incomingDescription,
+            ]);
+            $matchedTransaction->expense_id = null;
+            $matchedTransaction->vendor_id = null;
+        }
+
         $isTransfer = preg_match('/\b(ZELLE|WIRE|ACH|TRANSFER|PAYROLL)\b/i', $incomingDescription);
         $isBankFee = (($payload['personal_finance_category']['primary'] ?? null) === 'BANK_FEES')
             || preg_match('/\bFEE\b|RETURNED|SERVICE CHARGE|ACCT ANALYSIS|OVERDRAFT|\bNSF\b/i', $incomingDescription);
@@ -665,6 +685,40 @@ class PlaidTransactionSyncController extends Controller
         
         $matchedTransaction->plaid_merchant_description = $payload['name'] ?? $payload['original_description'] ?? $matchedTransaction->plaid_merchant_description;
         $matchedTransaction->save();
+    }
+
+    /**
+     * Did this pending→posted upgrade turn the charge into another merchant?
+     * True when the two descriptions share no meaningful word and Plaid does
+     * not name the same merchant for both. Card-network words, dates and
+     * numbers carry no meaning ("DEBIT PURCHASE Aug 28 4849 …"). A false
+     * alarm only costs a re-match: "Prime Video" maps back to Amazon.
+     */
+    private function merchantChanged(Transaction $pending, array $payload, string $incomingDescription): bool
+    {
+        $pendingMerchant = strtolower(trim((string) $pending->plaid_merchant_name));
+        $postedMerchant = strtolower(trim((string) ($payload['merchant_name'] ?? '')));
+        if ($pendingMerchant !== '' && $pendingMerchant === $postedMerchant) {
+            return false;
+        }
+
+        $before = self::merchantWords((string) $pending->plaid_merchant_description);
+        $after = self::merchantWords($incomingDescription);
+
+        return $before !== [] && $after !== [] && array_intersect($before, $after) === [];
+    }
+
+    /** @return array<int, string> */
+    private static function merchantWords(string $description): array
+    {
+        $generic = ['debit', 'credit', 'purchase', 'pin', 'pos', 'card', 'ach', 'electronic', 'recurring', 'payment',
+            'pmt', 'pmts', 'mobile', 'wallet', 'other', 'decrease', 'increase', 'online', 'web', 'inc', 'llc', 'com',
+            'www', 'the', 'and', 'usa', 'store', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct',
+            'nov', 'dec', 'ilus', 'return', 'reversal', 'adjustment'];
+
+        preg_match_all('/[a-z]{3,}/', strtolower($description), $m);
+
+        return array_values(array_unique(array_diff($m[0], $generic)));
     }
 
     private function insertNewTransaction(Bank $bank, array $payload, float $amount, string $accountType, $institutionAccountIds, string $plaidTransactionId): Transaction
