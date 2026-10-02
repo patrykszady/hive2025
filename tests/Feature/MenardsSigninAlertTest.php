@@ -179,3 +179,45 @@ it('lets a second admin of the owning company use the Menards browser', function
         ->get('/menards-vnc-auth')
         ->assertNoContent();
 });
+
+/**
+ * 2026-10-02: the 08:00 sign-in met the hCaptcha, a person solved it, and
+ * Menards answered the stale sign-in with its error page; the account then
+ * sat signed out for hours because nobody pressed "Retry sign-in". The page
+ * now resumes the sign-in itself once the wall it saw is gone.
+ */
+it('signs in again by itself once a person clears the wall on screen', function (): void {
+    config(['services.menards.chromium_binary' => '/usr/bin/chromium']);
+    Cache::put(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY, ['reason' => 'challenge', 'at' => now()->toIso8601String()], 600);
+    Illuminate\Support\Facades\Queue::fake();
+    $this->mock(MenardsRemoteBrowserService::class)->shouldReceive('securityCheckShowing')->andReturn(true, true, false, false);
+
+    $viewer = Livewire::actingAs(menardsAlertAdmin())->test(MenardsBrowserViewer::class)
+        ->assertSee('once it clears, the sign-in starts again by itself');
+    $viewer->call('$refresh');
+    Illuminate\Support\Facades\Queue::assertNotPushed(Illuminate\Queue\CallQueuedClosure::class);
+
+    $viewer->call('$refresh')->assertSee('The security check is cleared — signing in again.');
+    $viewer->call('$refresh');
+
+    Illuminate\Support\Facades\Queue::assertPushed(Illuminate\Queue\CallQueuedClosure::class, 1);
+});
+
+it('does not sign in by itself when it never saw the wall go away', function (string $reason, ?bool $showing): void {
+    config(['services.menards.chromium_binary' => '/usr/bin/chromium']);
+    Cache::put(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY, ['reason' => $reason, 'at' => now()->toIso8601String()], 600);
+    Illuminate\Support\Facades\Queue::fake();
+    $this->mock(MenardsRemoteBrowserService::class)->shouldReceive('securityCheckShowing')->andReturn($showing);
+
+    $viewer = Livewire::actingAs(menardsAlertAdmin())->test(MenardsBrowserViewer::class);
+    $viewer->call('$refresh');
+
+    if ($reason === 'challenge' && $showing === false) {
+        $viewer->assertSee('Hit “Retry sign-in” to finish signing in.');
+    }
+    Illuminate\Support\Facades\Queue::assertNotPushed(Illuminate\Queue\CallQueuedClosure::class);
+})->with([
+    'the wall was already gone when the page opened' => ['challenge', false],
+    'no browser window' => ['challenge', null],
+    'a rejected sign-in, not a wall' => ['login_failed', false],
+]);

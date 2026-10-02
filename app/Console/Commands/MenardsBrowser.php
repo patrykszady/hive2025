@@ -178,9 +178,17 @@ class MenardsBrowser extends Command
         // session works" for the rest of the day while four scheduled syncs
         // failed. If the extension has since told us the session expired, that
         // is newer and more direct evidence than the batch, and it wins.
+        // So does a sign-in that failed since (the "needs a human" flag), and
+        // a person's Retry sign-in always signs in: on 2026-10-02 the 13:00
+        // attempt cleared the extension's expired-session report before it
+        // met the wall, the 01:01 batch was all that was left, and Retry
+        // sign-in did nothing for hours.
         $manual = (bool) $this->option('manual');
 
-        if ($this->recentBatchArrived() && ! $this->extensionReportsExpiredSession()) {
+        if (! $manual
+            && $this->recentBatchArrived()
+            && ! $this->extensionReportsExpiredSession()
+            && ! \Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
             $this->line('A receipt batch arrived within the last day — the session works; not touching the browser.');
         } elseif (! $this->option('signin') && ! $manual) {
             // Every deploy runs a plain ensure, and signing in from it put a

@@ -1240,6 +1240,23 @@ class MenardsRemoteBrowserService
      * the omnibox instead would be more precise and would cost an xclip
      * dependency for no gain.
      */
+    /**
+     * Whether Imperva's wall is on screen right now, from the window title
+     * alone — it never navigates. A wall page is titled with its bare URL;
+     * every real Menards page, and Menards' own error page, is not. Null
+     * when no browser window is up.
+     */
+    public function securityCheckShowing(): ?bool
+    {
+        $title = $this->windowTitle();
+
+        if ($title === '') {
+            return null;
+        }
+
+        return str_contains($title, 'menards.com/') && ! str_contains($title, 'at Menards');
+    }
+
     protected function windowTitle(): string
     {
         return trim((string) shell_exec(sprintf(

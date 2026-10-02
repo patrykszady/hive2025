@@ -23,8 +23,12 @@
         <flux:callout color="red" icon="exclamation-triangle">
             <flux:callout.heading>Menards needs a human</flux:callout.heading>
             <flux:callout.text>
-                @if(($needsSignin['reason'] ?? null) === 'challenge')
-                    Imperva is showing its security challenge. Click the hCaptcha in the browser below, then hit “Retry sign-in”.
+                @if(($needsSignin['reason'] ?? null) === 'challenge' && $wallShowing === false && $autoResumed)
+                    The security check is cleared — signing in again. The status below updates on its own.
+                @elseif(($needsSignin['reason'] ?? null) === 'challenge' && $wallShowing === false)
+                    The security check is no longer on screen. Hit “Retry sign-in” to finish signing in.
+                @elseif(($needsSignin['reason'] ?? null) === 'challenge')
+                    Imperva is showing its security challenge. Click the hCaptcha in the browser below — once it clears, the sign-in starts again by itself.
                 @elseif($needsSignin !== null)
                     The automated sign-in failed. Finish signing in below, or fix what the page shows and hit “Retry sign-in”.
                 @else
