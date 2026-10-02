@@ -15,10 +15,14 @@ use Illuminate\Console\Command;
  */
 class MenardsBrowser extends Command
 {
-    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync|tidy}
+    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync|tidy|keepalive}
+        {--jitter=0 : keepalive: wait a random 0..N seconds first, so the calls do not land on the clock}
         {--reset-profile : Wipe the browser profile — this signs you out}
         {--signin : ensure: also sign in when signed out (the daily pass). A plain ensure — the deploy runs one — only keeps the browser up}
         {--manual : A person asked (Retry sign-in): sign in even while automatic sign-ins are paused after an uncleared security check}';
+
+    /** The keep-alive's last answer: {state, status, at}. Logged only when the state changes. */
+    public const KEEPALIVE_STATE_KEY = 'menards:keepalive';
 
     /** login() outcome: skipped, automatic sign-ins are paused. Never an exit code. */
     protected const SIGNIN_PAUSED = 3;
@@ -36,8 +40,100 @@ class MenardsBrowser extends Command
             'start' => $this->start($browser),
             'stop' => $this->stop($browser),
             'tidy' => $this->tidy($browser),
+            'keepalive' => $this->keepalive($browser),
             default => $this->status($browser),
         };
+    }
+
+    /**
+     * Keep the signed-in session from idling out between syncs. Menards drops
+     * an idle session within about an hour (2026-10-01: signed in at 23:21,
+     * the 00:31 sync got 401), and every new sign-in draws Imperva's hCaptcha,
+     * which needs a person. One receipt-API call from inside the parked tab,
+     * every 15 minutes, never a navigation. Steps aside while a sign-in is
+     * owed or running, while a sync runs (the sync is activity itself) and
+     * while the wall is on screen.
+     */
+    protected function keepalive(MenardsRemoteBrowserService $browser): int
+    {
+        if (! config('services.menards.keepalive', true)) {
+            $this->line('Keep-alive is off (MENARDS_KEEPALIVE=false).');
+
+            return self::SUCCESS;
+        }
+
+        if (\Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
+            $this->line('A sign-in is owed — nothing to keep alive.');
+
+            return self::SUCCESS;
+        }
+
+        if ($jitter = max(0, (int) $this->option('jitter'))) {
+            sleep(random_int(0, $jitter));
+        }
+
+        if (\Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY)) {
+            $this->line('A sync is running — it keeps the session alive itself.');
+
+            return self::SUCCESS;
+        }
+
+        $lock = \Illuminate\Support\Facades\Cache::lock(MenardsRemoteBrowserService::SIGNIN_LOCK, 120);
+
+        if (! $lock->get()) {
+            $this->line('A sign-in is running — leaving the browser to it.');
+
+            return self::SUCCESS;
+        }
+
+        try {
+            if ($browser->looksLikeChallengeWall()) {
+                $this->line('The security check is on screen — not touching the browser.');
+
+                return self::SUCCESS;
+            }
+
+            $result = $browser->keepSessionAlive();
+        } finally {
+            $lock->release();
+        }
+
+        if ($result === null) {
+            $this->line('The DevTools port is not available — restart the browser to enable the keep-alive.');
+
+            return self::SUCCESS;
+        }
+
+        $status = (int) ($result['status'] ?? 0);
+        $state = match (true) {
+            ! ($result['ok'] ?? false) => 'error',
+            $status === 200 && ($result['json'] ?? false) => 'alive',
+            $status === 401 => 'expired',
+            default => 'blocked',
+        };
+
+        $previous = \Illuminate\Support\Facades\Cache::get(self::KEEPALIVE_STATE_KEY);
+        \Illuminate\Support\Facades\Cache::put(self::KEEPALIVE_STATE_KEY, ['state' => $state, 'status' => $status, 'at' => now()->toIso8601String()], now()->addDay());
+
+        $message = match ($state) {
+            'alive' => 'Session alive — the receipt API answered.',
+            'expired' => 'Session expired (401) — the next sync signs in.',
+            'blocked' => "The receipt API did not answer with data (HTTP {$status}) — Imperva may be challenging it.",
+            default => 'Keep-alive failed: '.($result['error'] ?? $result['stage'] ?? 'unknown'),
+        };
+
+        if (($previous['state'] ?? null) !== $state) {
+            \Illuminate\Support\Facades\Log::channel('menards')->{$state === 'alive' ? 'info' : 'warning'}('Menards keep-alive: '.$state, [
+                'status' => $status,
+                'stage' => $result['stage'] ?? null,
+                'url' => $result['url'] ?? null,
+                'error' => $result['error'] ?? null,
+            ]);
+        }
+
+        $this->line($message);
+
+        return self::SUCCESS;
     }
 
     /** Collapse the browser to a single receipt-page tab. */
@@ -346,10 +442,26 @@ class MenardsBrowser extends Command
             return self::FAILURE;
         }
 
-        // Fire and forget. The extension walks every card and downloads a PDF
-        // per receipt, which takes minutes; holding the scheduler open for it
-        // would just risk overlapping the next window. Its outcome lands in the
-        // menards log via the ingest endpoint.
+        // The extension walks every card and downloads a PDF per receipt,
+        // which takes minutes, so this does not wait for the outcome (it lands
+        // in the menards log via the ingest endpoint). It does wait to see the
+        // run START: a request the background worker never took fails silently
+        // otherwise, as the 17:00 UTC sync did on 2026-10-02. Asked once more.
+        if ($browser->waitForSyncToStart() === false) {
+            \Illuminate\Support\Facades\Log::channel('menards')->warning('Menards sync: the extension did not start — asking again');
+            $this->warn('The extension did not start the sync — asking again.');
+
+            $browser->requestSync();
+
+            if ($browser->waitForSyncToStart() === false) {
+                \Illuminate\Support\Facades\Log::channel('menards')->error('Menards sync: the extension did not start after a second request');
+                \Illuminate\Support\Facades\Cache::forget(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY);
+                $this->error('The extension did not start the sync after a second request.');
+
+                return self::FAILURE;
+            }
+        }
+
         $this->info('Sync requested — the extension is fetching in the background.');
 
         return self::SUCCESS;

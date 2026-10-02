@@ -54,6 +54,7 @@ it('asks for a sync once the last one has reported, and marks it in flight', fun
     $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
         $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => '']);
         $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->andReturn(true);
     });
 
     $this->artisan('menards:browser', ['action' => 'sync'])->assertSuccessful();
@@ -61,3 +62,44 @@ it('asks for a sync once the last one has reported, and marks it in flight', fun
     expect(Cache::has(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY))->toBeTrue()
         ->and(Cache::get(MenardsSyncStatusController::CACHE_KEY)['ok'] ?? null)->toBeTrue();
 });
+
+/**
+ * 2026-10-02 17:00 UTC: the sync page opened and "sync requested" was
+ * logged, but the extension's background worker never took the message —
+ * no receipt page, no report — and the window passed with nothing fetched.
+ */
+it('asks once more when the extension never starts the sync', function () {
+    $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
+        $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => '']);
+        $mock->shouldReceive('requestSync')->twice()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->twice()->andReturn(false, true);
+    });
+
+    $this->artisan('menards:browser', ['action' => 'sync'])
+        ->expectsOutputToContain('The extension did not start the sync — asking again.')
+        ->assertSuccessful();
+
+    expect(Cache::has(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY))->toBeTrue();
+});
+
+it('fails loudly and frees the next sync when the extension never starts', function () {
+    $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
+        $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => '']);
+        $mock->shouldReceive('requestSync')->twice()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->twice()->andReturn(false);
+    });
+
+    $this->artisan('menards:browser', ['action' => 'sync'])->assertFailed();
+
+    expect(Cache::has(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY))->toBeFalse();
+});
+
+it('sees a sync start by its receipt page in Chrome\'s tab list', function (array $targets, ?bool $open) {
+    Illuminate\Support\Facades\Http::fake(['127.0.0.1:*/json/list' => Illuminate\Support\Facades\Http::response($targets)]);
+
+    expect(app(MenardsRemoteBrowserService::class)->receiptTabOpen())->toBe($open);
+})->with([
+    'parked, no sync' => [[['type' => 'page', 'url' => 'https://www.menards.com/main/accountoverview.html']], false],
+    'a sync running' => [[['type' => 'page', 'url' => 'https://www.menards.com/main/accountoverview.html'], ['type' => 'page', 'url' => 'https://www.menards.com/main/receiptLookup.html']], true],
+    'only a frame on it' => [[['type' => 'iframe', 'url' => 'https://www.menards.com/main/receiptLookup.html']], false],
+]);

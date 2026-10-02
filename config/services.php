@@ -145,6 +145,10 @@ return [
         'puppeteer_signin' => (bool) env('MENARDS_PUPPETEER_SIGNIN', true),
         'cdp_port' => (int) env('MENARDS_CDP_PORT', 9298),
         'node_binary' => env('MENARDS_NODE_BINARY', 'node'),
+        // `menards:browser keepalive` (every 15 minutes): one receipt-API call
+        // from inside the parked tab, so the session does not idle out between
+        // syncs and need a new sign-in (and its hCaptcha). Off with false.
+        'keepalive' => (bool) env('MENARDS_KEEPALIVE', true),
     ],
 
     'azure_cu' => [

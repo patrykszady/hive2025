@@ -366,6 +366,19 @@ Schedule::command('menards:browser ensure --signin')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/menards-ensure.log'));
 
+// Keep-alive: Menards drops an idle session within about an hour, and every
+// new sign-in draws Imperva's hCaptcha, which needs a person. One receipt-API
+// call from inside the parked tab every 15 minutes (a random 0-3 minutes late,
+// so the calls do not land on the clock) — never a navigation, which is what
+// draws the challenge. Logs only when the answer changes. MENARDS_KEEPALIVE=false
+// turns it off.
+Schedule::command('menards:browser keepalive --jitter=180')
+    ->everyFifteenMinutes()
+    ->environments(['production'])
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->runInBackground();
+
 // Retry scraping product images for material-order receipt items that are missing them
 // Covers items where the initial scrape failed (API timeout, bad search query, etc.)
 Schedule::job(new DispatchIncompleteReceiptImageScrapesJob)

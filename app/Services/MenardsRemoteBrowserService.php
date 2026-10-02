@@ -616,6 +616,43 @@ class MenardsRemoteBrowserService
     }
 
     /**
+     * One receipt-API call from inside the parked Menards tab, through
+     * scripts/menards-keepalive.cjs, so the session does not idle out between
+     * syncs. Never navigates. Null when the DevTools path is off or its port
+     * is not listening.
+     *
+     * @return array{ok: bool, stage?: string, url?: string, status?: int, json?: bool, error?: string|null}|null
+     */
+    public function keepSessionAlive(): ?array
+    {
+        if (! config('services.menards.puppeteer_signin', true)) {
+            return null;
+        }
+
+        $port = (int) config('services.menards.cdp_port', 9298);
+        $socket = @fsockopen('127.0.0.1', $port, $errno, $errstr, 1.0);
+
+        if (! $socket) {
+            return null;
+        }
+        fclose($socket);
+
+        $result = \Illuminate\Support\Facades\Process::path(base_path())
+            ->timeout(60)
+            ->input(json_encode(['port' => $port, 'timeoutMs' => 30000]))
+            ->run([(string) config('services.menards.node_binary', 'node'), base_path('scripts/menards-keepalive.cjs')]);
+
+        $lines = array_values(array_filter(array_map('trim', explode("\n", $result->output()))));
+        $decoded = $lines === [] ? null : json_decode(end($lines), true);
+
+        if (! is_array($decoded) || ! array_key_exists('ok', $decoded)) {
+            return ['ok' => false, 'stage' => 'script', 'error' => mb_substr($result->errorOutput(), 0, 300) ?: 'The keep-alive script produced no result.'];
+        }
+
+        return $decoded;
+    }
+
+    /**
      * The original sign-in: xdotool keystrokes at fixed coordinates. Kept as
      * the fallback when the Puppeteer path is off or cannot attach.
      */
@@ -1456,13 +1493,64 @@ class MenardsRemoteBrowserService
 
         // The page's only job is chrome.runtime.sendMessage({action:'run'}) to
         // the background worker (options.js) — once loaded it is done. Close
-        // it, or one of these piles up per scheduled sync, forever.
-        sleep(4);
+        // it, or one of these piles up per scheduled sync, forever. Eight
+        // seconds, not four: a background worker Chrome had put to sleep has
+        // to wake up to take the message (see waitForSyncToStart()).
+        sleep(8);
         $this->xdo('key ctrl+w');
 
         Log::channel('menards')->info('Menards: sync requested', ['extension' => $id]);
 
         return ['ok' => true];
+    }
+
+    /**
+     * Whether a receipt page is open, from Chrome's DevTools tab list — a
+     * loopback HTTP read that attaches to nothing. The extension opens one
+     * the moment a sync starts and closes it when done. Null when the port
+     * is not listening.
+     */
+    public function receiptTabOpen(): ?bool
+    {
+        try {
+            $targets = \Illuminate\Support\Facades\Http::timeout(2)
+                ->get('http://127.0.0.1:'.(int) config('services.menards.cdp_port', 9298).'/json/list')
+                ->json();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_array($targets)) {
+            return null;
+        }
+
+        return collect($targets)->contains(fn ($target) => ($target['type'] ?? null) === 'page'
+            && str_contains((string) ($target['url'] ?? ''), '/main/receiptLookup.html'));
+    }
+
+    /**
+     * Did the extension start the sync requestSync() asked for? 2026-10-02
+     * 17:00: the sync page opened and logged "sync requested", but the
+     * background worker never took the message — no receipt page, no report,
+     * not even an error — and the window passed with nothing fetched. A run
+     * opens its receipt page within a second or two (16:19 that day: one).
+     * Null when that cannot be seen (no DevTools port).
+     */
+    public function waitForSyncToStart(int $seconds = 30): ?bool
+    {
+        $deadline = time() + $seconds;
+
+        do {
+            $open = $this->receiptTabOpen();
+
+            if ($open !== false) {
+                return $open;
+            }
+
+            $this->pauseMicroseconds(1000000);
+        } while (time() < $deadline);
+
+        return false;
     }
 
     public function extensionInstalled(): bool

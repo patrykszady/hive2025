@@ -208,6 +208,7 @@ it('signs in before requesting a sync when the extension last reported a dead se
         // An Imperva report: the API's own wall is cleared after the sign-in check, before the sync.
         $mock->shouldReceive('clearApiWall')->once()->andReturn(['ok' => true, 'clicked' => true]);
         $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->andReturn(true);
     });
 
     $this->artisan('menards:browser', ['action' => 'sync'])
@@ -227,6 +228,7 @@ it('does not touch the API wall when the dead session was a lapsed login rather 
         $mock->shouldReceive('login')->once()->andReturn(['ok' => true, 'already' => true, 'url' => RECEIPT_TITLE]);
         $mock->shouldReceive('clearApiWall')->never();
         $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->andReturn(true);
     });
 
     $this->artisan('menards:browser', ['action' => 'sync'])->assertSuccessful();
@@ -261,6 +263,7 @@ it('requests the sync straight away when the last report was healthy', function 
         $mock->shouldReceive('extensionReportsExpiredSession')->andReturn(false);
         $mock->shouldReceive('login')->never();
         $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->andReturn(true);
     });
 
     $this->artisan('menards:browser', ['action' => 'sync'])->assertSuccessful();
