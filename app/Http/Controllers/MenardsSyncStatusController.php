@@ -78,6 +78,7 @@ class MenardsSyncStatusController extends Controller
         ];
 
         Cache::put(self::CACHE_KEY, $status, now()->addMonth());
+        Cache::forget(\App\Services\MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY);
 
         // The session lapsed between syncs (Menards keeps a sign-in for about
         // an hour): sign in and fetch again now instead of waiting for the

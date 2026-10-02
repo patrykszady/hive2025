@@ -319,6 +319,9 @@ class MenardsRemoteBrowserService
     /** Held for the whole of one sign-in, so two never drive the browser at once. */
     public const SIGNIN_LOCK = 'menards-browser-signin';
 
+    /** Set while an extension run asked for by `menards:browser sync` has not reported back. */
+    public const SYNC_IN_FLIGHT_KEY = 'menards:sync_in_flight';
+
     /**
      * Signs in, one attempt at a time. A deploy starts `ensure` in the
      * background, the schedule and the viewer's Retry button start it too,

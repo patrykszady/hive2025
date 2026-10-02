@@ -15,6 +15,13 @@ uses(RefreshDatabase::class);
  * (the deploy's) never signs in, an uncleared check pauses automatic
  * sign-ins for 12 hours, and a person's Retry sign-in skips the pause.
  */
+
+// ensure treats a batch folder written in the last day as proof the session
+// works, and reads storage_path() for it: a developer machine holding the
+// latest prod batches took that branch and skipped the code under test.
+beforeEach(function () {
+    $this->app->useStoragePath(sys_get_temp_dir().'/menards-pause-test-'.getmypid());
+});
 function pausedBrowserWithTempFile(): MenardsRemoteBrowserService
 {
     $path = tempnam(sys_get_temp_dir(), 'menards-pause-');

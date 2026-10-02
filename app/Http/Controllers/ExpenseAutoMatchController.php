@@ -70,7 +70,7 @@ class ExpenseAutoMatchController extends Controller
 
             $projects = Project::withoutGlobalScopes()
                 ->where('belongs_to_vendor_id', $hiveVendor->id)
-                ->select(['id', 'project_name', 'address', 'created_at'])
+                ->select(['id', 'project_name', 'address', 'city', 'created_at'])
                 ->get();
 
             $projectDisplayById = $projects
@@ -240,263 +240,16 @@ class ExpenseAutoMatchController extends Controller
                         'created_at' => (int) $createdAt,
                         'statuses' => $statusesByProjectId[$projectId] ?? [],
                         'variants' => $variants,
+                        // Street-name comparisons run against these only: a
+                        // client's first name is not a street ("park" scored
+                        // 0.75 against "Mark", 2026-10-02).
+                        'address_variants' => array_values(array_filter([$normalizedAddress, $normalizedFull], fn (string $v) => $v !== '' && $normalizedAddress !== '')),
+                        'city' => $this->normalizeText((string) ($project->city ?? '')),
                     ];
                 })
                 ->filter()
                 ->values()
                 ->all();
-
-            $projectStatusAtDate = static function (array $statuses, string $date): ?array {
-                $best = null;
-
-                foreach ($statuses as $status) {
-                    if (($status['start_date'] ?? '') === '' || ($status['code'] ?? null) === null) {
-                        continue;
-                    }
-
-                    if ($status['start_date'] > $date) {
-                        continue;
-                    }
-
-                    if ($best === null || $status['start_date'] >= $best['start_date']) {
-                        $best = $status;
-                    }
-                }
-
-                return $best;
-            };
-
-            $projectStatusPriority = static function (int $statusCode): int {
-                return match ($statusCode) {
-                    6 => 60,
-                    8 => 55,
-                    5 => 50,
-                    4 => 40,
-                    3 => 30,
-                    2 => 20,
-                    1 => 10,
-                    7 => 5,
-                    default => 0,
-                };
-            };
-
-            $isBetterProjectCandidate = static function (float $score, int $priority, ?string $statusStartDate, int $createdAt, int $projectId, array $currentBest): bool {
-                if ($score !== ($currentBest['score'] ?? null)) {
-                    return $score > (float) ($currentBest['score'] ?? 0);
-                }
-
-                if ($priority !== ($currentBest['priority'] ?? null)) {
-                    return $priority > (int) ($currentBest['priority'] ?? 0);
-                }
-
-                $bestStatusStart = $currentBest['status_start_date'] ?? null;
-                if (($statusStartDate ?? '') !== ($bestStatusStart ?? '')) {
-                    return ($statusStartDate ?? '') > ($bestStatusStart ?? '');
-                }
-
-                if ($createdAt !== (int) ($currentBest['created_at'] ?? 0)) {
-                    return $createdAt > (int) ($currentBest['created_at'] ?? 0);
-                }
-
-                return $projectId > (int) ($currentBest['project_id'] ?? 0);
-            };
-
-            $matchPurchaseOrderToProjectAtDate = function (string $purchaseOrder, $expenseDate) use ($projectCandidates, $projectStatusAtDate, $projectStatusPriority, $isBetterProjectCandidate): ?array {
-                $po = $this->normalizeText($purchaseOrder);
-                if ($po === '' || $projectCandidates === []) {
-                    return null;
-                }
-
-                $poStreetToken = $this->hasHouseNumberPrefix($po) ? $this->extractStreetToken($po) : '';
-
-                $expenseDateString = null;
-                if (is_string($expenseDate) && $expenseDate !== '') {
-                    $expenseDateString = substr($expenseDate, 0, 10);
-                } elseif ($expenseDate && method_exists($expenseDate, 'format')) {
-                    $expenseDateString = $expenseDate->format('Y-m-d');
-                }
-
-                if (! $expenseDateString) {
-                    return null;
-                }
-
-                $expenseDateObj = \DateTimeImmutable::createFromFormat('Y-m-d', $expenseDateString);
-                if (! $expenseDateObj) {
-                    return null;
-                }
-
-                $windowStart = $expenseDateObj->modify('-2 months')->format('Y-m-d');
-                $windowEnd = $expenseDateObj->modify('+2 months')->format('Y-m-d');
-
-                $isActiveWithinWindow = static function (array $statuses, string $startDate, string $endDate): bool {
-                    if ($statuses === []) {
-                        return false;
-                    }
-
-                    $count = count($statuses);
-                    for ($i = 0; $i < $count; $i++) {
-                        $status = $statuses[$i];
-                        $code = (int) ($status['code'] ?? 0);
-                        $segmentStart = (string) ($status['start_date'] ?? '');
-
-                        if ($segmentStart === '') {
-                            continue;
-                        }
-
-                        $segmentEnd = '9999-12-31';
-                        if ($i + 1 < $count) {
-                            $nextStart = (string) ($statuses[$i + 1]['start_date'] ?? '');
-                            if ($nextStart !== '') {
-                                $nextStartObj = \DateTimeImmutable::createFromFormat('Y-m-d', $nextStart);
-                                if ($nextStartObj) {
-                                    $segmentEnd = $nextStartObj->modify('-1 day')->format('Y-m-d');
-                                }
-                            }
-                        }
-
-                        // Treat any status except Cancelled (10) and VIEW ONLY (11) as
-                        // "work-in-progress" for window qualification.  Projects may go through
-                        // Estimate → Prep → Scheduled without ever being marked Active (6) yet
-                        // still have legitimate expenses placed before or during those phases.
-                        // The score threshold (≥0.70) is the real guard against false matches.
-                        if (in_array($code, [10, 11], true)) {
-                            continue;
-                        }
-
-                        // Cap terminal statuses (7=Complete, 8=Service Call) so a long-finished
-                        // project doesn't keep matching expenses years after it ended. Allow a
-                        // 1-year tail past start_date for legitimate trailing receipts/refunds,
-                        // then expire the segment.
-                        if (in_array($code, [7, 8], true)) {
-                            $segStartObj = \DateTimeImmutable::createFromFormat('Y-m-d', $segmentStart);
-                            if ($segStartObj) {
-                                $cap = $segStartObj->modify('+1 year')->format('Y-m-d');
-                                if ($cap < $segmentEnd) {
-                                    $segmentEnd = $cap;
-                                }
-                            }
-                        }
-
-                        // Overlap check: [segmentStart, segmentEnd] overlaps [startDate, endDate].
-                        if ($segmentStart <= $endDate && $segmentEnd >= $startDate) {
-                            return true;
-                        }
-                    }
-
-                    return false;
-                };
-
-                $bestActive = null;
-                $secondActive = null;
-                $bestAny = null;
-                $secondAny = null;
-
-                $updateBestSecond = function (&$best, &$second, float $score, int $priority, ?string $statusStart, int $createdAt, int $projectId) use ($isBetterProjectCandidate): void {
-                    if ($best === null || $isBetterProjectCandidate($score, $priority, $statusStart, $createdAt, $projectId, $best)) {
-                        $second = $best;
-                        $best = [
-                            'project_id' => $projectId,
-                            'score' => $score,
-                            'priority' => $priority,
-                            'status_start_date' => $statusStart,
-                            'created_at' => $createdAt,
-                        ];
-                        return;
-                    }
-
-                    if ($second === null || $isBetterProjectCandidate($score, $priority, $statusStart, $createdAt, $projectId, $second)) {
-                        $second = [
-                            'project_id' => $projectId,
-                            'score' => $score,
-                            'priority' => $priority,
-                            'status_start_date' => $statusStart,
-                            'created_at' => $createdAt,
-                        ];
-                    }
-                };
-
-                foreach ($projectCandidates as $candidate) {
-                    // Hard requirement: project must be active near the expense date.
-                    if (! $isActiveWithinWindow($candidate['statuses'] ?? [], $windowStart, $windowEnd)) {
-                        continue;
-                    }
-
-                    $statusAtDate = $projectStatusAtDate($candidate['statuses'] ?? [], $expenseDateString);
-                    $statusCode = $statusAtDate['code'] ?? null;
-
-                    // Exclude Cancelled / View-only (per existing business rules).
-                    if (in_array($statusCode, [10, 11], true)) {
-                        continue;
-                    }
-
-                    $priority = $projectStatusPriority((int) ($statusCode ?? 0));
-                    $statusStart = $statusAtDate['start_date'] ?? null;
-                    $isActiveAtDate = ((int) ($statusCode ?? 0)) === 6;
-
-                    $score = 0.0;
-                    foreach (($candidate['variants'] ?? []) as $variant) {
-                        $variant = (string) $variant;
-
-                        $score = max($score, $this->similarityScore($po, $variant));
-
-                        $score = max($score, $this->houseNumberOcrBoostScore($po, $variant, $poStreetToken));
-
-                        if ($poStreetToken !== '') {
-                            $variantStreetToken = $this->extractStreetToken($variant);
-                            if ($variantStreetToken !== '') {
-                                $score = max($score, $this->similarityScoreWithOcrFixes($poStreetToken, $variantStreetToken));
-                            }
-                        }
-
-                        // Also compare individual significant PO tokens against variant's street token.
-                        // This handles cases like "M MARCELA" matching "17 N Marcella Rd" where
-                        // "marcela" should match "marcella" even without a house number prefix.
-                        $variantStreetToken = $this->extractStreetToken($variant);
-                        if ($variantStreetToken !== '') {
-                            $poTokens = array_filter(explode(' ', $po), fn ($t) => mb_strlen(trim($t)) >= 3);
-                            foreach ($poTokens as $poToken) {
-                                $score = max($score, $this->similarityScoreWithOcrFixes(trim($poToken), $variantStreetToken));
-                            }
-                        }
-                    }
-
-                    $candidateProjectId = (int) ($candidate['id'] ?? 0);
-                    $candidateCreatedAt = (int) ($candidate['created_at'] ?? 0);
-
-                    if ($candidateProjectId <= 0) {
-                        continue;
-                    }
-
-                    if ($isActiveAtDate) {
-                        $updateBestSecond($bestActive, $secondActive, $score, $priority, $statusStart, $candidateCreatedAt, $candidateProjectId);
-                    }
-
-                    $updateBestSecond($bestAny, $secondAny, $score, $priority, $statusStart, $candidateCreatedAt, $candidateProjectId);
-                }
-
-                $minScore = 0.70;
-
-                $choose = static function (?array $best, ?array $second) use ($minScore): ?array {
-                    if (! $best || ((float) ($best['score'] ?? 0)) < $minScore) {
-                        return null;
-                    }
-
-                    $ambiguous = false;
-                    if ($second && (((float) ($best['score'] ?? 0)) - ((float) ($second['score'] ?? 0))) < 0.06) {
-                        if (($best['priority'] ?? null) === ($second['priority'] ?? null) && ($best['status_start_date'] ?? null) === ($second['status_start_date'] ?? null)) {
-                            $ambiguous = true;
-                        }
-                    }
-
-                    return [
-                        'project_id' => (int) ($best['project_id'] ?? 0),
-                        'score' => (float) ($best['score'] ?? 0),
-                        'ambiguous' => $ambiguous,
-                    ];
-                };
-
-                return $choose($bestActive, $secondActive) ?? $choose($bestAny, $secondAny);
-            };
 
             $statsByExpenseVendorId = [];
 
@@ -666,7 +419,7 @@ class ExpenseAutoMatchController extends Controller
                         $distributionMatch = $distributionIndex !== []
                             ? $this->matchPurchaseOrderToDistribution($purchaseOrder, $distributionIndex)
                             : null;
-                        $projectMatch = $matchPurchaseOrderToProjectAtDate($purchaseOrder, $expense->date);
+                        $projectMatch = $this->matchPurchaseOrderToProjectAtDate($purchaseOrder, $expense->date, $projectCandidates);
 
                         $candidateBest = $this->pickBestMatch($distributionMatch, $projectMatch);
 
@@ -1603,6 +1356,336 @@ class ExpenseAutoMatchController extends Controller
             'score' => (float) $best['score'],
             'ambiguous' => $ambiguous,
         ];
+    }
+
+    /**
+     * The status a project was in on $date (the latest one started by then).
+     *
+     * @param  array<int, array{code: int, start_date: string}>  $statuses
+     * @return array{code: int, start_date: string}|null
+     */
+    protected function projectStatusAtDate(array $statuses, string $date): ?array
+    {
+        $best = null;
+
+        foreach ($statuses as $status) {
+            if (($status['start_date'] ?? '') === '' || ($status['code'] ?? null) === null) {
+                continue;
+            }
+
+            if ($status['start_date'] > $date) {
+                continue;
+            }
+
+            if ($best === null || $status['start_date'] >= $best['start_date']) {
+                $best = $status;
+            }
+        }
+
+        return $best;
+    }
+
+    protected function projectStatusPriority(int $statusCode): int
+    {
+        return match ($statusCode) {
+            6 => 60,
+            8 => 55,
+            5 => 50,
+            4 => 40,
+            3 => 30,
+            2 => 20,
+            1 => 10,
+            7 => 5,
+            default => 0,
+        };
+    }
+
+    protected function isBetterProjectCandidate(float $score, int $priority, ?string $statusStartDate, int $createdAt, int $projectId, array $currentBest): bool
+    {
+        if ($score !== ($currentBest['score'] ?? null)) {
+            return $score > (float) ($currentBest['score'] ?? 0);
+        }
+
+        if ($priority !== ($currentBest['priority'] ?? null)) {
+            return $priority > (int) ($currentBest['priority'] ?? 0);
+        }
+
+        $bestStatusStart = $currentBest['status_start_date'] ?? null;
+        if (($statusStartDate ?? '') !== ($bestStatusStart ?? '')) {
+            return ($statusStartDate ?? '') > ($bestStatusStart ?? '');
+        }
+
+        if ($createdAt !== (int) ($currentBest['created_at'] ?? 0)) {
+            return $createdAt > (int) ($currentBest['created_at'] ?? 0);
+        }
+
+        return $projectId > (int) ($currentBest['project_id'] ?? 0);
+    }
+
+    /**
+     * Was the project being worked on at any point between the two dates?
+     *
+     * @param  array<int, array{code: int, start_date: string}>  $statuses
+     */
+    protected function isActiveWithinWindow(array $statuses, string $startDate, string $endDate): bool
+    {
+        if ($statuses === []) {
+            return false;
+        }
+
+        $count = count($statuses);
+        for ($i = 0; $i < $count; $i++) {
+            $status = $statuses[$i];
+            $code = (int) ($status['code'] ?? 0);
+            $segmentStart = (string) ($status['start_date'] ?? '');
+
+            if ($segmentStart === '') {
+                continue;
+            }
+
+            $segmentEnd = '9999-12-31';
+            if ($i + 1 < $count) {
+                $nextStart = (string) ($statuses[$i + 1]['start_date'] ?? '');
+                if ($nextStart !== '') {
+                    $nextStartObj = \DateTimeImmutable::createFromFormat('Y-m-d', $nextStart);
+                    if ($nextStartObj) {
+                        $segmentEnd = $nextStartObj->modify('-1 day')->format('Y-m-d');
+                    }
+                }
+            }
+
+            // Treat any status except Cancelled (10) and VIEW ONLY (11) as
+            // "work-in-progress" for window qualification.  Projects may go through
+            // Estimate → Prep → Scheduled without ever being marked Active (6) yet
+            // still have legitimate expenses placed before or during those phases.
+            // The score threshold (≥0.70) is the real guard against false matches.
+            if (in_array($code, [10, 11], true)) {
+                continue;
+            }
+
+            // Cap terminal statuses (7=Complete, 8=Service Call) so a long-finished
+            // project doesn't keep matching expenses years after it ended. Allow a
+            // 1-year tail past start_date for legitimate trailing receipts/refunds,
+            // then expire the segment.
+            if (in_array($code, [7, 8], true)) {
+                $segStartObj = \DateTimeImmutable::createFromFormat('Y-m-d', $segmentStart);
+                if ($segStartObj) {
+                    $cap = $segStartObj->modify('+1 year')->format('Y-m-d');
+                    if ($cap < $segmentEnd) {
+                        $segmentEnd = $cap;
+                    }
+                }
+            }
+
+            // Overlap check: [segmentStart, segmentEnd] overlaps [startDate, endDate].
+            if ($segmentStart <= $endDate && $segmentEnd >= $startDate) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function updateBestSecond(?array &$best, ?array &$second, float $score, int $priority, ?string $statusStart, int $createdAt, int $projectId): void
+    {
+        if ($best === null || $this->isBetterProjectCandidate($score, $priority, $statusStart, $createdAt, $projectId, $best)) {
+            $second = $best;
+            $best = [
+                'project_id' => $projectId,
+                'score' => $score,
+                'priority' => $priority,
+                'status_start_date' => $statusStart,
+                'created_at' => $createdAt,
+            ];
+            return;
+        }
+
+        if ($second === null || $this->isBetterProjectCandidate($score, $priority, $statusStart, $createdAt, $projectId, $second)) {
+            $second = [
+                'project_id' => $projectId,
+                'score' => $score,
+                'priority' => $priority,
+                'status_start_date' => $statusStart,
+                'created_at' => $createdAt,
+            ];
+        }
+    }
+
+    /**
+     * The project a purchase order names, among the company's project
+     * candidates (built in runNoProjectExpenseAutoMatch), as of the expense
+     * date: a project being worked on in the city the PO names, or the best
+     * address / name / client match at or above 0.70.
+     *
+     * @param  array<int, array{id: int, created_at: int, statuses: array, variants: array<int, string>, address_variants?: array<int, string>, city?: string}>  $projectCandidates
+     * @return array{project_id: int, score: float, ambiguous: bool}|null
+     */
+    protected function matchPurchaseOrderToProjectAtDate(string $purchaseOrder, $expenseDate, array $projectCandidates): ?array
+    {
+        $po = $this->normalizeText($purchaseOrder);
+        if ($po === '' || $projectCandidates === []) {
+            return null;
+        }
+
+        $poStreetToken = $this->hasHouseNumberPrefix($po) ? $this->extractStreetToken($po) : '';
+
+        $expenseDateString = null;
+        if (is_string($expenseDate) && $expenseDate !== '') {
+            $expenseDateString = substr($expenseDate, 0, 10);
+        } elseif ($expenseDate && method_exists($expenseDate, 'format')) {
+            $expenseDateString = $expenseDate->format('Y-m-d');
+        }
+
+        if (! $expenseDateString) {
+            return null;
+        }
+
+        $expenseDateObj = \DateTimeImmutable::createFromFormat('Y-m-d', $expenseDateString);
+        if (! $expenseDateObj) {
+            return null;
+        }
+
+        $windowStart = $expenseDateObj->modify('-2 months')->format('Y-m-d');
+        $windowEnd = $expenseDateObj->modify('+2 months')->format('Y-m-d');
+
+        $bestActive = null;
+        $secondActive = null;
+        $bestAny = null;
+        $secondAny = null;
+
+        // A PO naming a city ("oak park") matches the one project in that
+        // city that is being worked on at the expense date (Scheduled,
+        // Active or Service Call). Two or more such projects is
+        // ambiguous, and a PO that is only a city never falls through to
+        // fuzzy name matching: that is how "oak park" became the client
+        // "Mark" Brodson's Northbrook job (2026-10-02).
+        if ($poStreetToken === '') {
+            $poIsOnlyACity = false;
+            $workingInCity = [];
+
+            foreach ($projectCandidates as $candidate) {
+                $city = (string) ($candidate['city'] ?? '');
+                if (mb_strlen($city) < 3 || ! str_contains(' '.$po.' ', ' '.$city.' ')) {
+                    continue;
+                }
+
+                $poIsOnlyACity = $poIsOnlyACity || $po === $city;
+                $statusCode = (int) ($this->projectStatusAtDate($candidate['statuses'] ?? [], $expenseDateString)['code'] ?? 0);
+
+                if (in_array($statusCode, [5, 6, 8], true)) {
+                    $workingInCity[] = (int) $candidate['id'];
+                }
+            }
+
+            if (count($workingInCity) === 1) {
+                return ['project_id' => $workingInCity[0], 'score' => 0.95, 'ambiguous' => false];
+            }
+
+            if (count($workingInCity) > 1) {
+                return ['project_id' => $workingInCity[0], 'score' => 0.95, 'ambiguous' => true];
+            }
+
+            if ($poIsOnlyACity) {
+                return null;
+            }
+        }
+
+        foreach ($projectCandidates as $candidate) {
+            // Hard requirement: project must be active near the expense date.
+            if (! $this->isActiveWithinWindow($candidate['statuses'] ?? [], $windowStart, $windowEnd)) {
+                continue;
+            }
+
+            $statusAtDate = $this->projectStatusAtDate($candidate['statuses'] ?? [], $expenseDateString);
+            $statusCode = $statusAtDate['code'] ?? null;
+
+            // Exclude Cancelled / View-only (per existing business rules).
+            if (in_array($statusCode, [10, 11], true)) {
+                continue;
+            }
+
+            $priority = $this->projectStatusPriority((int) ($statusCode ?? 0));
+            $statusStart = $statusAtDate['start_date'] ?? null;
+            $isActiveAtDate = ((int) ($statusCode ?? 0)) === 6;
+
+            $score = 0.0;
+            foreach (($candidate['variants'] ?? []) as $variant) {
+                $variant = (string) $variant;
+
+                $score = max($score, $this->similarityScore($po, $variant));
+            }
+
+            foreach (($candidate['address_variants'] ?? []) as $variant) {
+                $variant = (string) $variant;
+
+                $score = max($score, $this->houseNumberOcrBoostScore($po, $variant, $poStreetToken));
+
+                if ($poStreetToken !== '') {
+                    $variantStreetToken = $this->extractStreetToken($variant);
+                    if ($variantStreetToken !== '') {
+                        $score = max($score, $this->similarityScoreWithOcrFixes($poStreetToken, $variantStreetToken));
+                    }
+                }
+
+                // Also compare individual significant PO tokens against variant's street token.
+                // This handles cases like "M MARCELA" matching "17 N Marcella Rd" where
+                // "marcela" should match "marcella" even without a house number prefix.
+                $variantStreetToken = $this->extractStreetToken($variant);
+                if ($variantStreetToken !== '') {
+                    $poTokens = array_filter(explode(' ', $po), fn ($t) => mb_strlen(trim($t)) >= 3);
+                    foreach ($poTokens as $poToken) {
+                        $poToken = trim($poToken);
+
+                        // One letter is the whole difference between two
+                        // short words (park/mark, elm/elk): under five
+                        // letters only an exact street name counts.
+                        if (mb_strlen($poToken) < 5 || mb_strlen($variantStreetToken) < 5) {
+                            $score = max($score, $poToken === $variantStreetToken ? 1.0 : 0.0);
+
+                            continue;
+                        }
+
+                        $score = max($score, $this->similarityScoreWithOcrFixes($poToken, $variantStreetToken));
+                    }
+                }
+            }
+
+            $candidateProjectId = (int) ($candidate['id'] ?? 0);
+            $candidateCreatedAt = (int) ($candidate['created_at'] ?? 0);
+
+            if ($candidateProjectId <= 0) {
+                continue;
+            }
+
+            if ($isActiveAtDate) {
+                $this->updateBestSecond($bestActive, $secondActive, $score, $priority, $statusStart, $candidateCreatedAt, $candidateProjectId);
+            }
+
+            $this->updateBestSecond($bestAny, $secondAny, $score, $priority, $statusStart, $candidateCreatedAt, $candidateProjectId);
+        }
+
+        $minScore = 0.70;
+
+        $choose = static function (?array $best, ?array $second) use ($minScore): ?array {
+            if (! $best || ((float) ($best['score'] ?? 0)) < $minScore) {
+                return null;
+            }
+
+            $ambiguous = false;
+            if ($second && (((float) ($best['score'] ?? 0)) - ((float) ($second['score'] ?? 0))) < 0.06) {
+                if (($best['priority'] ?? null) === ($second['priority'] ?? null) && ($best['status_start_date'] ?? null) === ($second['status_start_date'] ?? null)) {
+                    $ambiguous = true;
+                }
+            }
+
+            return [
+                'project_id' => (int) ($best['project_id'] ?? 0),
+                'score' => (float) ($best['score'] ?? 0),
+                'ambiguous' => $ambiguous,
+            ];
+        };
+
+        return $choose($bestActive, $secondActive) ?? $choose($bestAny, $secondAny);
     }
 
     protected function similarityScore(string $a, string $b): float

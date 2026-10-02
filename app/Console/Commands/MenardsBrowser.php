@@ -276,6 +276,16 @@ class MenardsBrowser extends Command
             return self::FAILURE;
         }
 
+        // One extension run at a time. A sync asked for by hand at 01:00:30
+        // on 2026-10-02 ran alongside the scheduled one and posted the same
+        // five receipts twice. Cleared when the extension reports back, and
+        // after five minutes in case a run never does.
+        if (! \Illuminate\Support\Facades\Cache::add(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY, now()->toIso8601String(), now()->addMinutes(5))) {
+            $this->info('A sync was asked for in the last five minutes and has not reported yet — leaving it to finish.');
+
+            return self::SUCCESS;
+        }
+
         // A sync against a session the extension already reported dead is a
         // guaranteed failure — three of them a day, every day, while the one
         // daily ensure ran at 07:30 and nothing else ever tried to repair the
@@ -322,6 +332,7 @@ class MenardsBrowser extends Command
         $result = $browser->requestSync();
 
         if (! ($result['ok'] ?? false)) {
+            \Illuminate\Support\Facades\Cache::forget(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY);
             $this->error($result['error'] ?? 'Could not request a sync.');
 
             return self::FAILURE;

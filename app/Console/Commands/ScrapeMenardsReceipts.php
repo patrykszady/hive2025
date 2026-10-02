@@ -9,6 +9,8 @@ use App\Models\ReceiptAccount;
 use App\Models\Vendor;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -23,11 +25,45 @@ class ScrapeMenardsReceipts extends Command
         {--force : Overwrite existing Menards receipts (re-run OCR)}
         {--vendor-id= : Menards vendor ID (auto-detected if omitted)}
         {--skip-scrape : No-op. Importing is the only mode; the flag is kept so existing callers keep working}
-        {--output-dir= : Custom output directory (default: storage/files/_temp_menards)}';
+        {--output-dir= : Custom output directory (default: storage/files/_temp_menards)}
+        {--lock-wait=1500 : Seconds to wait for another import to finish}';
 
     protected $description = 'Import Menards receipts that the browser extension collected, matching them to expenses';
 
+    /** Held for the whole of one import; see handle(). */
+    public const IMPORT_LOCK = 'menards-receipt-import';
+
+    /**
+     * One import at a time. On 2026-10-02 two batches of the same receipts
+     * (a sync asked for by hand and the scheduled one) were imported side by
+     * side: the second found the expense the first had just created, before
+     * its receipt was attached, and each attached a copy. The second batch
+     * now waits for the first, then finds the receipt and skips it.
+     */
     public function handle(): int
+    {
+        if ($this->option('dry-run')) {
+            return $this->import();
+        }
+
+        $lock = Cache::lock(self::IMPORT_LOCK, 1800);
+
+        try {
+            $lock->block((int) $this->option('lock-wait'));
+        } catch (LockTimeoutException) {
+            $this->error('Another Menards import is still running — try again when it finishes.');
+
+            return self::FAILURE;
+        }
+
+        try {
+            return $this->import();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function import(): int
     {
         $this->line(str_repeat('═', 60));
         $this->info('menards:scrape-receipts — ' . now()->format('Y-m-d H:i:s T'));
@@ -253,6 +289,15 @@ class ScrapeMenardsReceipts extends Command
                     $this->warn("    OCR error for {$filename}: {$e->getMessage()}");
                     $ocrData = null;
                 }
+            }
+
+            // Last look before attaching: never a second receipt on one expense.
+            if ($expense && ! $force && ExpenseReceipts::where('expense_id', $expense->id)->exists()) {
+                $this->line("  <comment>EXISTS</comment> Expense #{$expense->id} got its receipt meanwhile — skipping");
+                $linkedExpenseIds[] = $expense->id;
+                $skipped++;
+
+                continue;
             }
 
             if ($expense) {
