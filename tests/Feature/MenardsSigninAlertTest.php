@@ -221,3 +221,17 @@ it('does not sign in by itself when it never saw the wall go away', function (st
     'no browser window' => ['challenge', null],
     'a rejected sign-in, not a wall' => ['login_failed', false],
 ]);
+
+it('tells the wall from Menards\' own error page by the window title', function (string $title, ?bool $wall): void {
+    $browser = Mockery::mock(MenardsRemoteBrowserService::class)->makePartial()->shouldAllowMockingProtectedMethods();
+    $browser->shouldReceive('windowTitle')->andReturn($title);
+
+    expect($browser->securityCheckShowing())->toBe($wall)
+        ->and($browser->looksLikeChallengeWall())->toBe((bool) $wall);
+})->with([
+    'the hCaptcha on the sign-in' => ['menards.com/main/checkcredentials.html - Google Chrome', true],
+    'the error page after solving it (2026-10-02)' => ['menards.com/main/error500handled.html - Google Chrome', false],
+    'the error page, titled' => ['Internal Service Error 500 - Google Chrome', false],
+    'signed in' => ['Account Overview at Menards® - Google Chrome', false],
+    'no browser window' => ['', null],
+]);

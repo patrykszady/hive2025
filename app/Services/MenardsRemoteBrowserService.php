@@ -522,7 +522,7 @@ class MenardsRemoteBrowserService
                 return false;
             }
 
-            $onWall = str_contains($title, 'menards.com/') && ! str_contains($title, 'at Menards');
+            $onWall = $this->isWallTitle($title);
             $wallSightings = $onWall ? $wallSightings + 1 : 0;
 
             // Three sightings in a row: a page on its way to Account Overview
@@ -976,9 +976,21 @@ class MenardsRemoteBrowserService
      */
     public function looksLikeChallengeWall(): bool
     {
-        $title = $this->windowTitle();
+        return $this->isWallTitle($this->windowTitle());
+    }
 
-        return str_contains($title, 'menards.com/') && ! str_contains($title, 'at Menards');
+    /**
+     * The wall's signature, above. Menards' own error page carries no title
+     * either, so it shows its bare URL too — "menards.com/main/error500handled.html"
+     * — and is not a wall: on 2026-10-02 it is where a person landed after
+     * solving the hCaptcha, and reading it as the wall kept the sign-in from
+     * resuming.
+     */
+    protected function isWallTitle(string $title): bool
+    {
+        return str_contains($title, 'menards.com/')
+            && ! str_contains($title, 'at Menards')
+            && ! str_contains($title, 'menards.com/main/error');
     }
 
     /**
@@ -1254,7 +1266,7 @@ class MenardsRemoteBrowserService
             return null;
         }
 
-        return str_contains($title, 'menards.com/') && ! str_contains($title, 'at Menards');
+        return $this->isWallTitle($title);
     }
 
     protected function windowTitle(): string
