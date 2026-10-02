@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -33,6 +34,9 @@ class MenardsSyncStatusController extends Controller
     /** Key the browser service reads. Kept a month: far longer than any gap that matters. */
     public const CACHE_KEY = 'menards:last_sync_status';
 
+    /** Held for half an hour after a signed-out report queues a sign-in and a second sync. */
+    public const RESYNC_KEY = 'menards:resync_after_signed_out';
+
     public function __invoke(Request $request): JsonResponse
     {
         $expected = (string) config('services.menards.bridge_token');
@@ -53,8 +57,14 @@ class MenardsSyncStatusController extends Controller
             'receipts' => 'nullable|integer|min:0',
         ]);
 
-        $sessionExpired = ! $validated['ok']
-            && str_contains(mb_strtolower((string) ($validated['error'] ?? '')), 'session has expired');
+        $error = mb_strtolower((string) ($validated['error'] ?? ''));
+
+        // "session has expired" is the extension's own phrase for a dead
+        // session. A 401 from the receipt API, and the receipt page bouncing
+        // to login.html, mean the same and were not counted: every sync from
+        // 2026-09-27 failed with HTTP 401 while nothing ever signed in again.
+        $signedOut = ! $validated['ok'] && (str_contains($error, 'http 401') || str_contains($error, 'not signed in'));
+        $sessionExpired = ! $validated['ok'] && (str_contains($error, 'session has expired') || $signedOut);
 
         $status = [
             'ok' => (bool) $validated['ok'],
@@ -68,6 +78,15 @@ class MenardsSyncStatusController extends Controller
         ];
 
         Cache::put(self::CACHE_KEY, $status, now()->addMonth());
+
+        // The session lapsed between syncs (Menards keeps a sign-in for about
+        // an hour): sign in and fetch again now instead of waiting for the
+        // next window. Once per half hour, so a sign-in that does not hold
+        // cannot loop.
+        if ($signedOut && Cache::add(self::RESYNC_KEY, now()->toIso8601String(), now()->addMinutes(30))) {
+            Log::channel('menards')->info('Menards sync: signed out — signing in and syncing again');
+            dispatch(fn () => Artisan::call('menards:browser', ['action' => 'sync']))->onQueue('background');
+        }
 
         // A successful authenticated fetch is live proof the session works —
         // retire any standing "needs sign-in" alert.

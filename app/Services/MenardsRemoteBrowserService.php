@@ -326,7 +326,16 @@ class MenardsRemoteBrowserService
      * deploy's run typed into the same page within 18 seconds of each other
      * and each judged the other's result. A second caller now steps aside.
      */
-    public function login(string $email, string $password): array
+    /**
+     * $force skips the "already signed in?" shortcut. After the receipt API
+     * answers 401 the account pages still render on Menards' 30-day
+     * remember-me cookie, so every title-based check says signed in while the
+     * real session is gone, and nothing re-signed in for days (2026-10-01:
+     * the session lapsed within ~70 minutes of a sign-in on the fixed IP).
+     * login.html shows the form in that state; a visitor who really is signed
+     * in is bounced to an account page, still reported as already signed in.
+     */
+    public function login(string $email, string $password, bool $force = false): array
     {
         $lock = \Illuminate\Support\Facades\Cache::lock(self::SIGNIN_LOCK, 240);
 
@@ -335,13 +344,13 @@ class MenardsRemoteBrowserService
         }
 
         try {
-            return $this->loginLocked($email, $password);
+            return $this->loginLocked($email, $password, $force);
         } finally {
             $lock->release();
         }
     }
 
-    protected function loginLocked(string $email, string $password): array
+    protected function loginLocked(string $email, string $password, bool $force = false): array
     {
         if (! $this->xdotoolAvailable()) {
             return ['ok' => false, 'error' => 'xdotool is not installed — apt install xdotool'];
@@ -356,7 +365,7 @@ class MenardsRemoteBrowserService
         // because we are already signed in, and then type an email address and a
         // password into whatever control happened to be under those coordinates
         // on the page it landed on instead.
-        if ($this->signedIn()) {
+        if (! $force && $this->signedIn()) {
             $this->markSignedIn();
 
             return ['ok' => true, 'url' => $this->windowTitle(), 'already' => true];
@@ -1120,11 +1129,25 @@ class MenardsRemoteBrowserService
     }
 
     /** "… at Menards®" and not the sign-in page: a page only a signed-in visitor gets. */
+    /**
+     * Titles of pages only a signed-in visitor is shown. "… at Menards®"
+     * alone is not enough: the home page ("Home at Menards®") renders signed
+     * out, and counting it made `login` answer "Already signed in" to a
+     * browser showing a Sign In link (2026-10-02).
+     */
+    public const ACCOUNT_PAGE_TITLES = ['Account Overview at Menards', 'Receipt Lookup at Menards', 'View Orders at Menards'];
+
     protected function onSignedInPage(): bool
     {
         $title = $this->windowTitle();
 
-        return str_contains($title, 'at Menards') && ! str_contains($title, 'Sign In at Menards');
+        foreach (self::ACCOUNT_PAGE_TITLES as $accountPage) {
+            if (str_contains($title, $accountPage)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Has the extension's last fetch reported the session dead? */

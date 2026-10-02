@@ -203,7 +203,8 @@ it('signs in before requesting a sync when the extension last reported a dead se
         $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => ACCOUNT_TITLE]);
         $mock->shouldReceive('extensionReportsExpiredSession')->andReturn(true);
         $mock->shouldReceive('automaticSignInPausedSince')->andReturn(null);
-        $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret')->andReturn(['ok' => true, 'already' => true, 'url' => RECEIPT_TITLE]);
+        // A dead-session report forces a real sign-in (true): the page title cannot be trusted.
+        $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret', true)->andReturn(['ok' => true, 'already' => true, 'url' => RECEIPT_TITLE]);
         // An Imperva report: the API's own wall is cleared after the sign-in check, before the sync.
         $mock->shouldReceive('clearApiWall')->once()->andReturn(['ok' => true, 'clicked' => true]);
         $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);

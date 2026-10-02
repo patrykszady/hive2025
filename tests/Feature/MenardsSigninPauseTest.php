@@ -112,7 +112,8 @@ it('signs in on Retry even while paused', function () {
     $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
         upBrowserMock($mock, ['signed_in' => true, 'page' => 'Account Overview at Menards® - Google Chrome']);
         $mock->shouldReceive('automaticSignInPausedSince')->never();
-        $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret')->andReturn(['ok' => true, 'url' => 'Account Overview at Menards® - Google Chrome']);
+        // A person asked: a real sign-in, not a guess from the page title.
+        $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret', true)->andReturn(['ok' => true, 'url' => 'Account Overview at Menards® - Google Chrome']);
     });
 
     $this->artisan('menards:browser', ['action' => 'ensure', '--manual' => true])

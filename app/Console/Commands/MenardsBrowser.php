@@ -461,7 +461,10 @@ class MenardsBrowser extends Command
 
         $this->line("Signing in as {$email}…");
 
-        $result = $browser->login($email, $password);
+        // A person asked, or the extension's last fetch was refused: the
+        // pages may still greet us by name on the remember-me cookie, so
+        // sign in for real rather than trust them.
+        $result = $browser->login($email, $password, force: $manual || $this->extensionReportsExpiredSession());
 
         if ($result['busy'] ?? false) {
             $this->info($result['error']);
