@@ -899,7 +899,11 @@ it('warns and does not dispatch when the message has no schedulable task', funct
         ->assertNotDispatched('prefillTaskFromSms');
 });
 
-it('creates the task and opens the full editor in edit mode from an sms extraction payload', function (): void {
+// An AI-extracted task is a draft: it opens for review and is written only
+// when the user presses Save (TaskCreate::prefillTaskFromSms, "do NOT persist
+// yet"). These two tests still expected the old save-on-open flow; a missing
+// REGEXP in the SQLite test database had hidden that until 2026-10-02.
+it('opens an sms extraction as a draft and creates the task on save', function (): void {
     $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
 
     $user = User::query()->create([
@@ -941,16 +945,15 @@ it('creates the task and opens the full editor in edit mode from an sms extracti
         ->assertSet('form.title', 'Tile/Grout Repair')
         ->assertSet('form.type', 'Task')
         ->assertSet('form.project_id', $project->id)
-        ->assertSet('view_text.form_submit', 'edit')
-        // Checklist items carry a generated uid now (Task::normalizeChecklist),
-        // so assert the meaningful fields rather than exact array shape.
+        ->assertSet('view_text.form_submit', 'save')
+        // The draft's checklist gets its uids when it is saved
+        // (Task::normalizeChecklist), so assert the meaningful fields.
         ->assertSet('form.checklist', function ($value) {
             $items = json_decode(json_encode($value), true);
 
             return count($items) === 1
                 && $items[0]['text'] === 'Adjust Ring cameras'
-                && $items[0]['completed'] === false
-                && ! empty($items[0]['uid']);
+                && $items[0]['completed'] === false;
         })
         ->assertSet('form.dates', ['2026-06-30'])
         ->assertSet('form.time_settings', [
@@ -959,7 +962,9 @@ it('creates the task and opens the full editor in edit mode from an sms extracti
                 'start_time' => '07:00',
                 'end_time' => '08:00',
             ],
-        ]);
+        ])
+        ->tap(fn () => expect(\App\Models\Task::query()->where('project_id', $project->id)->exists())->toBeFalse())
+        ->call('save');
 
     $task = \App\Models\Task::query()->where('project_id', $project->id)->first();
 
@@ -972,7 +977,7 @@ it('creates the task and opens the full editor in edit mode from an sms extracti
         ->toBe([['text' => 'Adjust Ring cameras', 'completed' => false]]);
 });
 
-it('creates secondary tasks from a multi-task SMS prefill', function (): void {
+it('reviews and saves each task of a multi-task SMS prefill in turn', function (): void {
     $vendor = Vendor::factory()->create();
 
     $user = User::query()->create([
@@ -1020,15 +1025,19 @@ it('creates secondary tasks from a multi-task SMS prefill', function (): void {
             ]],
         ]);
 
-    // The primary task is created and the second is queued, not yet persisted.
-    expect(\App\Models\Task::query()->where('project_id', $project->id)->count())->toBe(1)
+    // Both are drafts: the first is open for review, the second queued.
+    expect(\App\Models\Task::query()->where('project_id', $project->id)->count())->toBe(0)
         ->and($component->get('pendingSmsTasks'))->toHaveCount(1)
         ->and($component->get('form.title'))->toBe('Materials Delivery');
 
-    // Clicking "Update" on the first task opens the second one for review.
-    $component->call('edit')
+    // Saving the first writes it and opens the second for review.
+    $component->call('save')
         ->assertSet('form.title', 'Drywall Install')
         ->assertSet('pendingSmsTasks', []);
+
+    expect(\App\Models\Task::query()->where('project_id', $project->id)->count())->toBe(1);
+
+    $component->call('save');
 
     $tasks = \App\Models\Task::query()->where('project_id', $project->id)->get();
 

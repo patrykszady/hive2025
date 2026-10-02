@@ -88,9 +88,14 @@ it('stores an AI suggestion for the descriptor card', function () {
         ->assertSee('Rocket Fizz');
 });
 
-it('fills the form when accepting an existing-vendor suggestion', function () {
+// Accepting a suggestion saves at once (MatchVendor::applySuggestion): the
+// vendor is reused or created, the match rule written and the card's
+// transactions linked. These tests still expected the older fill-the-form /
+// redirect flow; a missing REGEXP in the SQLite test database had hidden that
+// until 2026-10-02.
+it('matches the card to an existing vendor when accepting its suggestion', function () {
     [$user, $account] = aiSuggestionActor();
-    rocketTransaction($account);
+    $transaction = rocketTransaction($account);
     $existing = Vendor::factory()->create([
         'business_name' => 'Rocket Fizz',
         'business_type' => 'Retail',
@@ -110,10 +115,11 @@ it('fills the form when accepting an existing-vendor suggestion', function () {
             'reasoning' => 'Existing vendor.',
         ]])
         ->call('applySuggestion', 0)
-        ->assertSet('match_merchant_names.0.vendor_id', (string) $existing->id)
-        ->assertSet('match_merchant_names.0.match_desc', 'ROCKET ');
+        ->assertHasNoErrors();
 
-    expect(Vendor::withoutGlobalScopes()->where('business_name', 'Rocket Fizz')->count())->toBe(1);
+    expect(Vendor::withoutGlobalScopes()->where('business_name', 'Rocket Fizz')->count())->toBe(1)
+        ->and(VendorTransaction::where('vendor_id', $existing->id)->where('desc', 'ROCKET')->exists())->toBeTrue()
+        ->and($transaction->refresh()->vendor_id)->toBe($existing->id);
 });
 
 it('creates the vendor, alias, and links transactions when accepting a new-vendor suggestion', function () {
@@ -134,7 +140,7 @@ it('creates the vendor, alias, and links transactions when accepting a new-vendo
             'reasoning' => 'Candy shop.',
         ]])
         ->call('applySuggestion', 0)
-        ->assertRedirect(route('transactions.match_vendor'));
+        ->assertHasNoErrors();
 
     $vendor = Vendor::withoutGlobalScopes()->where('business_name', 'like', 'Rocket Fizz')->first();
 
