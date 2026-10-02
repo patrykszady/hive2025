@@ -26,7 +26,9 @@ class VendorSuggestionService
      */
     public function suggest(string $descriptor, Collection $transactions, Collection $vendors): ?array
     {
-        $cacheKey = 'vendor-suggest:'.md5($descriptor);
+        // v2 (2026-10-02): the prompt now carries location evidence; answers
+        // given without it are not reused.
+        $cacheKey = 'vendor-suggest:v2:'.md5($descriptor);
 
         $suggestion = Cache::get($cacheKey);
 
@@ -96,8 +98,8 @@ class VendorSuggestionService
     {
         $transactionLines = $transactions->take(10)->map(function ($t) {
             $details = is_array($t->details) ? $t->details : [];
-            $location = collect(data_get($details, 'location', []))
-                ->only(['address', 'city', 'region', 'postal_code'])->filter()->implode(', ');
+            $location = collect(['address', 'city', 'region', 'postal_code', 'store_number'])
+                ->map(fn (string $field) => data_get($details, 'location.'.$field))->filter()->implode(', ');
             $category = implode(' > ', (array) data_get($details, 'category', []));
             $pfc = data_get($details, 'personal_finance_category.detailed');
             $channel = data_get($details, 'payment_channel');
@@ -111,11 +113,16 @@ class VendorSuggestionService
                 $category ? ' | category: '.$category : '',
                 $pfc ? ' | plaid_pfc: '.$pfc.' (may be wrong)' : '',
                 $channel ? ' | channel: '.$channel : '',
-                $location ? ' | location: '.$location : ' | location: none (bank strips it)',
+                $location ? ' | LOCATION: '.$location : ' | location: none on this charge',
             );
         })->implode("\n");
 
         $merchantName = $transactions->first()?->plaid_merchant_name;
+        $counterparty = collect((array) data_get($transactions->first()?->details, 'counterparties', []))->firstWhere('type', 'merchant');
+        $plaidMatch = $counterparty
+            ? sprintf('"%s" (Plaid confidence: %s%s)', $counterparty['name'] ?? $merchantName, $counterparty['confidence_level'] ?? 'unknown', ! empty($counterparty['website']) ? ', website '.$counterparty['website'] : '')
+            : '"'.$merchantName.'"';
+        $sameCard = $this->sameCardContext($transactions);
 
         // Prescreen candidates: vendors sharing a distinctive token with the
         // descriptor — the full list is too long for a prompt.
@@ -135,18 +142,25 @@ class VendorSuggestionService
         ))->implode("\n");
 
         return <<<PROMPT
-You identify merchants from bank/credit-card statement descriptors for a construction company based in Mount Prospect, IL (Chicago northwest suburbs). Most in-store charges happen in the Chicagoland area. Some banks (Capital One) truncate descriptors and strip location data, and Plaid's category guesses are frequently wrong for small local businesses.
+You identify merchants from bank/credit-card statement descriptors for a construction company based in Mount Prospect, IL (Chicago northwest suburbs). Its people also travel. Decide WHERE the merchant is from the evidence, in this order:
+1. A LOCATION on one of the transactions below: the merchant is there. Search there.
+2. Where the same card was used around that date (below): out-of-state places, airlines, airport shuttles or hotels mean the card was travelling, and the merchant is likely at that destination.
+3. Only when neither points elsewhere, assume the Chicagoland area.
+A match outside Illinois is not doubtful in itself when the evidence puts the card there. Some banks (Capital One) truncate descriptors and drop the location, and Plaid's category guesses are often wrong for small local businesses.
 
 Descriptor: "{$descriptor}"
-Plaid merchant name guess: "{$merchantName}"
+Plaid's merchant match: {$plaidMatch}
 
 Transactions with this descriptor:
 {$transactionLines}
 
+Same card, the day before to the day after (in-person charges with a place, and travel):
+{$sameCard}
+
 Existing vendors that might match (id: name):
 {$candidateLines}
 
-Search the web for this descriptor (e.g. "{$descriptor} charge", the merchant name plus Chicagoland) to identify the actual business. Trailing numbers/codes in descriptors are usually store or terminal numbers — focus on the name part.
+Search the web for this descriptor and Plaid's merchant name in the place the evidence points to (Chicagoland only if nothing points elsewhere) to identify the actual business. Trailing numbers/codes in descriptors are usually store or terminal numbers — focus on the name part.
 
 Respond with ONLY a JSON object, no markdown fences:
 {
@@ -160,6 +174,54 @@ Respond with ONLY a JSON object, no markdown fences:
   "reasoning": "1-3 sentences: what this most likely is and why; mention other plausible candidates if unsure"
 }
 PROMPT;
+    }
+
+    /**
+     * Where the card was around these charges: in-person charges on the same
+     * bank account from the day before to the day after that carry a Plaid
+     * location, or look like travel (airlines, shuttles, hotels, rides).
+     * Online charges are left out — their "location" is the seller's HQ.
+     * 2026-10-02: a Capital One "GIAMPIETRO PIZZERIA" with no location sat
+     * among Summit Express (the Denver–Breckenridge shuttle), Summit Wine &
+     * Liquor and Frontier Airlines on the same card.
+     */
+    protected function sameCardContext(Collection $transactions): string
+    {
+        $ids = $transactions->pluck('id')->filter()->all();
+        $lines = collect();
+
+        foreach ($transactions->take(5) as $transaction) {
+            if (! $transaction->bank_account_id || ! $transaction->transaction_date) {
+                continue;
+            }
+
+            \App\Models\Transaction::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->where('bank_account_id', $transaction->bank_account_id)
+                ->whereNotIn('id', $ids)
+                ->whereBetween('transaction_date', [$transaction->transaction_date->copy()->subDay()->toDateString(), $transaction->transaction_date->copy()->addDay()->toDateString()])
+                ->orderBy('transaction_date')
+                ->limit(80)
+                ->get()
+                ->each(function ($nearby) use ($lines) {
+                    $details = is_array($nearby->details) ? $nearby->details : [];
+                    if (data_get($details, 'payment_channel') === 'online') {
+                        return;
+                    }
+
+                    $place = collect([data_get($details, 'location.city'), data_get($details, 'location.region')])->filter()->implode(', ');
+                    $name = $nearby->plaid_merchant_name ?: $nearby->plaid_merchant_description;
+                    $travel = preg_match('/airline|airways|air lines|shuttle|express|airport|hotel|motel|inn\b|resort|lodge|uber|lyft|taxi|rental|hertz|avis|enterprise|national car|delta|united|southwest|frontier|spirit|american air/i', (string) $name.' '.$nearby->plaid_merchant_description);
+
+                    if ($place === '' && ! $travel) {
+                        return;
+                    }
+
+                    $lines->put($nearby->id, sprintf('- %s | %s%s%s', $nearby->transaction_date?->format('Y-m-d'), $name, $place !== '' ? ' | '.$place : '', $travel ? ' | travel' : ''));
+                });
+        }
+
+        return $lines->isEmpty() ? 'none with a place or travel' : $lines->take(15)->implode("\n");
     }
 
     /**
