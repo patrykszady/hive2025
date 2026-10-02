@@ -15,10 +15,19 @@ use Illuminate\Support\Facades\Log;
  *  - charged to a business card: that person's home purchase, paid by the
  *    business. It goes to their "<Name> - Home" distribution. A refund of
  *    such an order follows its order there, and waits for its credit.
- *  - no charge linked a week after it was imported: paid with someone's
- *    own card, not the company's. It is deleted exactly as the Expenses
- *    screen deletes (Expense::deleteWithAssociations, soft deletes).
- *  - younger than that: left alone until its week is up.
+ *  - paid in full by a personal card, and still no charge linked a week
+ *    after it was imported: not the company's. It is deleted exactly as
+ *    the Expenses screen deletes (Expense::deleteWithAssociations, soft
+ *    deletes).
+ *  - anything else is left alone: paid even partly by gift card or points
+ *    (a payment with no card number), no payment details recorded, or
+ *    younger than a week.
+ *
+ * Amazon records each payment's card (receipt_items.charges[].
+ * paymentInstrumentLast4Digits). A company card is one that has ever had a
+ * bank charge linked to an Amazon expense (4849 and 4842 on 2026-10-02);
+ * an order paid with one counts as business-paid even before its charge
+ * links.
  *
  * Until April 2025 these were deleted by hand; about sixty had piled up.
  */
@@ -38,21 +47,30 @@ class RemoveNotOursExpenses extends Command
         $cutoff = now()->subDays((int) $this->option('days'));
         $dryRun = (bool) $this->option('dry-run');
         $removed = $placed = 0;
+        $companyCards = $this->companyCards();
 
         Expense::withoutGlobalScopes()
             ->whereNull('deleted_at')
             ->where('vendor_id', self::AMAZON_VENDOR_ID)
             ->whereHas('receipts')
             ->with('receipts')
-            ->chunkById(200, function ($expenses) use ($cutoff, $dryRun, &$removed, &$placed) {
+            ->chunkById(200, function ($expenses) use ($cutoff, $dryRun, $companyCards, &$removed, &$placed) {
                 foreach ($expenses as $expense) {
                     $purchaseOrder = NotOursPurchaseOrder::purchaseOrderOn($expense);
                     if ($purchaseOrder === null) {
                         continue;
                     }
 
-                    if ($this->businessPaid($expense)) {
+                    $paidWith = $this->paidWith($expense, $companyCards);
+
+                    if ($paidWith === 'company_card' || $this->businessPaid($expense)) {
                         $placed += (int) $this->placeOnHomeDistribution($expense, $purchaseOrder, $dryRun);
+
+                        continue;
+                    }
+
+                    if ($paidWith !== 'personal_card') {
+                        $this->line(sprintf('Keeping expense %d ($%s, "%s") — %s', $expense->id, number_format((float) $expense->amount, 2), $purchaseOrder, $paidWith === 'gift_card_or_points' ? 'paid at least partly by gift card or points' : 'no payment details recorded'));
 
                         continue;
                     }
@@ -61,7 +79,7 @@ class RemoveNotOursExpenses extends Command
                         continue;
                     }
 
-                    $this->line(sprintf('%s expense %d ($%s, %s, "%s") — no charge after a week', $dryRun ? 'Would remove' : 'Removing', $expense->id, number_format((float) $expense->amount, 2), $expense->date?->toDateString() ?? '—', $purchaseOrder));
+                    $this->line(sprintf('%s expense %d ($%s, %s, "%s") — paid by a personal card, no charge after a week', $dryRun ? 'Would remove' : 'Removing', $expense->id, number_format((float) $expense->amount, 2), $expense->date?->toDateString() ?? '—', $purchaseOrder));
 
                     if (! $dryRun) {
                         $expense->deleteWithAssociations();
@@ -101,6 +119,85 @@ class RemoveNotOursExpenses extends Command
             ->where('amount', '>', 0)
             ->get()
             ->contains(fn (Expense $order) => $this->charged($order));
+    }
+
+    /**
+     * How Amazon says the order was paid, from its receipt's charges:
+     * 'company_card', 'personal_card' (card payments cover the whole order),
+     * 'gift_card_or_points' (money paid with no card number), or 'unknown'
+     * (no payment details). A $0.00 line with no card is an authorization,
+     * not a payment.
+     *
+     * @param  array<int, string>  $companyCards
+     */
+    protected function paidWith(Expense $expense, array $companyCards): string
+    {
+        $charges = $this->charges($expense);
+        if ($charges === []) {
+            return 'unknown';
+        }
+
+        $byCard = $withoutCard = 0.0;
+        foreach ($charges as $charge) {
+            $amount = abs((float) ($charge['amount'] ?? 0));
+            $card = trim((string) ($charge['paymentInstrumentLast4Digits'] ?? ''));
+
+            if ($card !== '' && in_array($card, $companyCards, true)) {
+                return 'company_card';
+            }
+
+            $card === '' ? $withoutCard += $amount : $byCard += $amount;
+        }
+
+        if ($withoutCard >= 0.005) {
+            return 'gift_card_or_points';
+        }
+
+        return $byCard + 0.01 >= abs((float) $expense->amount) ? 'personal_card' : 'unknown';
+    }
+
+    /** @return array<int, array{amount?: mixed, paymentInstrumentLast4Digits?: mixed}> */
+    protected function charges(Expense $expense): array
+    {
+        foreach ($expense->receipts as $receipt) {
+            $charges = is_array($receipt->receipt_items) ? ($receipt->receipt_items['charges'] ?? null) : null;
+
+            if (is_array($charges) && $charges !== []) {
+                return array_values(array_filter($charges, 'is_array'));
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Last four digits of every card the business has paid Amazon with:
+     * any card on an Amazon expense that has a bank charge linked.
+     *
+     * @return array<int, string>
+     */
+    protected function companyCards(): array
+    {
+        $cards = [];
+
+        Expense::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->where('vendor_id', self::AMAZON_VENDOR_ID)
+            ->whereHas('transactions')
+            ->with('receipts')
+            ->chunkById(500, function ($expenses) use (&$cards) {
+                foreach ($expenses as $expense) {
+                    foreach ($this->charges($expense) as $charge) {
+                        $card = trim((string) ($charge['paymentInstrumentLast4Digits'] ?? ''));
+                        if ($card !== '') {
+                            $cards[$card] = true;
+                        }
+                    }
+                }
+            });
+
+        // Numeric keys come back as integers ('4849' => 4849); compare as strings.
+        return array_map('strval', array_keys($cards));
     }
 
     protected function charged(Expense $expense): bool
