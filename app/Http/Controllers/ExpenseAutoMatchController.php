@@ -808,6 +808,12 @@ class ExpenseAutoMatchController extends Controller
      */
     protected function extractPurchaseOrderCandidates(Expense $expense): array
     {
+        // "Not Greg home" says the order is not ours: it matches nothing (it
+        // scored 1.0 against the Greg - Home distribution).
+        if (\App\Support\NotOursPurchaseOrder::onExpense($expense)) {
+            return [];
+        }
+
         if (! $expense->relationLoaded('receipts')) {
             $expense->load('receipts');
         }
@@ -891,6 +897,12 @@ class ExpenseAutoMatchController extends Controller
      */
     protected function extractDistributionOnlyCandidates(Expense $expense): array
     {
+        // "Not Greg home" says the order is not ours: it matches nothing (it
+        // scored 1.0 against the Greg - Home distribution).
+        if (\App\Support\NotOursPurchaseOrder::onExpense($expense)) {
+            return [];
+        }
+
         if (! $expense->relationLoaded('receipts')) {
             $expense->load('receipts');
         }

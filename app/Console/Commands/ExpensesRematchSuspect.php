@@ -191,6 +191,11 @@ class ExpensesRematchSuspect extends Command
             ->whereIn('id', $flaggedIds)
             ->update(['project_id' => null]);
 
+        // A query update skips Scout, and the matcher finds "No Project"
+        // expenses through the search index: without this the cleared
+        // expenses were never re-matched (2026-10-02, expense 28647).
+        Expense::withoutGlobalScopes()->whereIn('id', $flaggedIds)->searchable();
+
         $this->info(sprintf('Nulled project_id on %d expense(s).', $affected));
         $this->comment('Now run: php artisan expenses:auto-match-po --commit');
 

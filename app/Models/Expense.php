@@ -337,6 +337,43 @@ class Expense extends Model
         return $this->hasMany(Expense::class, 'id', 'parent_expense_id');
     }
 
+    /**
+     * Delete this expense the way ExpenseForm::delete() does (shared by the
+     * Expenses index and expenses:remove-not-ours):
+     * detach associations, soft-delete splits/receipts, null transactions, drop check pivots.
+     */
+    public function deleteWithAssociations(): void
+    {
+        foreach ($this->associated as $child) {
+            $child->parent_expense_id = null;
+            $child->save();
+        }
+
+        foreach ($this->splits as $split) {
+            $split->delete();
+        }
+
+        foreach ($this->transactions as $transaction) {
+            $transaction->expense_id = null;
+            $transaction->vendor_id = null;
+            $transaction->save();
+        }
+
+        foreach ($this->receipts as $receipt) {
+            $receipt->delete();
+        }
+
+        $this->checks()->detach();
+        if ($this->check_id) {
+            $this->check_id = null;
+            $this->save();
+        } else {
+            $this->searchable();
+        }
+
+        $this->delete();
+    }
+
     public function getAssociatedExpensesAttribute()
     {
         $results = collect();

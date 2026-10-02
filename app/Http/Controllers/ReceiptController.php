@@ -620,13 +620,7 @@ class ReceiptController extends Controller
                 $refundAmount = (float) $transaction['amount']['amount'];
                 $negativeRefundAmount = -1 * $refundAmount;
 
-                $existingRefund = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
-                    ->where('vendor_id', 54)
-                    ->whereNull('deleted_at')
-                    ->where('invoice', $order_id)
-                    ->where('amount', $negativeRefundAmount)
-                    ->where('date', $order_date)
-                    ->exists();
+                $existingRefund = $this->amazonRefundAlreadyImported((int) $receipt_account->belongs_to_vendor_id, (string) $order_id, $negativeRefundAmount, $order_date);
 
                 if (! $existingRefund) {
                     //create expense Model
@@ -1783,6 +1777,23 @@ class ReceiptController extends Controller
      * Match an Amazon Purchase Order number to a distribution.
      * Normalizes both strings (lowercase, strip non-alphanumeric) for fuzzy matching.
      */
+    /**
+     * Has this Amazon refund been imported before, even if someone has since
+     * deleted it? Deleted refunds count, as deleted orders already do: a
+     * refund someone removed was re-created on every sync (one "Not Greg
+     * home" refund came back ten times in 2024).
+     */
+    public function amazonRefundAlreadyImported(int $belongsToVendorId, string $orderId, float $negativeAmount, string $date): bool
+    {
+        return Expense::withTrashed()
+            ->where('belongs_to_vendor_id', $belongsToVendorId)
+            ->where('vendor_id', 54)
+            ->where('invoice', $orderId)
+            ->where('amount', $negativeAmount)
+            ->where('date', $date)
+            ->exists();
+    }
+
     private function matchDistributionByPurchaseOrder(string $purchaseOrder, int $belongsToVendorId): ?int
     {
         $purchaseOrder = trim($purchaseOrder);

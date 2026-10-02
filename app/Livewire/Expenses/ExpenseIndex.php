@@ -213,7 +213,7 @@ class ExpenseIndex extends Component
 
         $isAdmin = auth()->user()?->vendor_role === 'Admin';
 
-        // Load what the guard and cascadeDeleteExpense() both need — the loop
+        // Load what the guard and Expense::deleteWithAssociations() both need — the loop
         // used to fire a fresh exists() plus lazy loads per selected expense.
         $expenses = Expense::whereIn('id', $this->selected)
             ->with(['transactions', 'splits', 'receipts'])
@@ -229,7 +229,7 @@ class ExpenseIndex extends Component
                 continue;
             }
 
-            $this->cascadeDeleteExpense($expense);
+            $expense->deleteWithAssociations();
             $deletedIds[] = $expense->id;
         }
 
@@ -246,42 +246,6 @@ class ExpenseIndex extends Component
         $heading = $count === 1 ? '1 expense deleted.' : "{$count} expenses deleted.";
         $text = $skipped > 0 ? "{$skipped} skipped (admin-only: has transactions)." : '';
         Flux::toast($text, $heading, 5000, 'success', 'top right');
-    }
-
-    /**
-     * Cascade-delete an expense the same way ExpenseForm::delete() does:
-     * detach associations, soft-delete splits/receipts, null transactions, drop check pivots.
-     */
-    private function cascadeDeleteExpense(Expense $expense): void
-    {
-        foreach ($expense->associated as $child) {
-            $child->parent_expense_id = null;
-            $child->save();
-        }
-
-        foreach ($expense->splits as $split) {
-            $split->delete();
-        }
-
-        foreach ($expense->transactions as $transaction) {
-            $transaction->expense_id = null;
-            $transaction->vendor_id = null;
-            $transaction->save();
-        }
-
-        foreach ($expense->receipts as $receipt) {
-            $receipt->delete();
-        }
-
-        $expense->checks()->detach();
-        if ($expense->check_id) {
-            $expense->check_id = null;
-            $expense->save();
-        } else {
-            $expense->searchable();
-        }
-
-        $expense->delete();
     }
 
     public function updatedReimbursementFilter($value): void

@@ -276,6 +276,15 @@ Schedule::job(new RunScheduledTask(
     ->withoutOverlapping()
     ->onOneServer();
 
+// Amazon "Not <name> home" orders, nightly: business-paid ones go to that
+// person's Home distribution, the rest are deleted once a week has passed
+// with no charge linked — see RemoveNotOursExpenses.
+Schedule::command('expenses:remove-not-ours')
+    ->timezone('America/Chicago')
+    ->dailyAt('02:00')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // External API tasks
 Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::class, 'amazon_orders_api', [], null, 1, 5400, 7200))
     ->everyTwoHours()
