@@ -96,3 +96,52 @@ it('still matches a misspelled long street name and a full address', function ()
     expect($controller->match('M MARCELA', '2026-10-01', [$marcella])['project_id'] ?? null)->toBe(500)
         ->and($controller->match('1124 S Harvey', '2026-10-01', [poMatch_brodsonNorthbrook(), poMatch_frombergOakPark()])['project_id'] ?? null)->toBe(399);
 });
+
+/** Elm Street jobs as they stood on 2026-09-29: only the Kitchen at 949 S Elm Ct was under way. */
+function poMatch_elmJobs(): array
+{
+    return [
+        poMatch_project(147, '949 S Elm Ct', 'Basement', 'Palatine', ['Joe Doe'], [[7, '2021-10-12']]),
+        poMatch_project(381, '949 S Elm Ct', 'Kitchen', 'Palatine', ['Joe Doe'], [[4, '2026-08-01'], [6, '2026-09-08']]),
+        poMatch_project(451, '1801 Elm St', 'Primary Suite', 'Park Ridge', ['Ann Roe'], [[2, '2026-09-10'], [3, '2026-09-29']]),
+    ];
+}
+
+it('matches a PO naming a street to the one project on it under way', function () {
+    expect(poMatch_controller()->match('ELM', '2026-09-29', poMatch_elmJobs()))->toMatchArray(['project_id' => 381, 'ambiguous' => false]);
+});
+
+it('leaves a street with two projects under way for a person', function () {
+    $second = poMatch_project(452, '1801 Elm St', 'Garage', 'Park Ridge', ['Ann Roe'], [[6, '2026-09-20']]);
+
+    expect(poMatch_controller()->match('ELM', '2026-09-29', [...poMatch_elmJobs(), $second])['ambiguous'] ?? null)->toBeTrue();
+});
+
+it('never guesses from a short PO that names no street or city under way', function () {
+    $finished = [poMatch_project(147, '949 S Elm Ct', 'Basement', 'Palatine', ['Elm Smith'], [[7, '2026-09-01']])];
+
+    expect(poMatch_controller()->match('ELM', '2026-09-29', $finished))->toBeNull()
+        ->and(poMatch_controller()->match('BOB', '2026-09-29', poMatch_elmJobs()))->toBeNull();
+});
+
+it('reads the street past a spelled-out direction', function () {
+    expect(poMatch_controller()->match('harvey', '2026-10-01', [poMatch_brodsonNorthbrook(), poMatch_frombergOakPark()])['project_id'] ?? null)->toBe(399);
+});
+
+it('keeps a three-letter street PO, and still drops noise', function (string $po, ?string $kept) {
+    $controller = new class extends ExpenseAutoMatchController
+    {
+        public function normalize(string $po): ?string
+        {
+            return $this->normalizePurchaseOrderCandidate($po);
+        }
+    };
+
+    expect($controller->normalize($po))->toBe($kept);
+})->with([
+    ['ELM', 'ELM'],
+    ['901', '901'],
+    ['TBD', null],
+    ['PP', null],
+    ['N/A', null],
+]);

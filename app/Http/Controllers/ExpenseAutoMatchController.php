@@ -1202,7 +1202,10 @@ class ExpenseAutoMatchController extends Controller
             return null;
         }
 
-        if ($length === 3 && ! preg_match('/^\d{3}$/', $normalizedSegment)) {
+        // Three letters stay: a street ("ELM") or a city word can name the one
+        // job under way there. matchPurchaseOrderToProjectAtDate() matches a
+        // short PO only that way, never by guessing.
+        if ($length === 3 && ! preg_match('/^(\d{3}|[a-z]{3})$/', $normalizedSegment)) {
             return null;
         }
 
@@ -1600,6 +1603,40 @@ class ExpenseAutoMatchController extends Controller
             if ($poIsOnlyACity) {
                 return null;
             }
+
+            // The same for a street: "ELM" matches the one project on Elm being
+            // worked on at the expense date, and two or more is ambiguous
+            // (2026-10-02: "ELM" was thrown out as noise while 949 S Elm Ct was
+            // the only Elm job under way).
+            $poWords = explode(' ', $po);
+            $workingOnStreet = [];
+
+            foreach ($projectCandidates as $candidate) {
+                $street = $this->extractStreetToken((string) ($candidate['address_variants'][0] ?? ''));
+                if ($street === '' || ! in_array($street, $poWords, true)) {
+                    continue;
+                }
+
+                $statusCode = (int) ($this->projectStatusAtDate($candidate['statuses'] ?? [], $expenseDateString)['code'] ?? 0);
+
+                if (in_array($statusCode, [5, 6, 8], true)) {
+                    $workingOnStreet[(int) $candidate['id']] = true;
+                }
+            }
+
+            if (count($workingOnStreet) === 1) {
+                return ['project_id' => array_key_first($workingOnStreet), 'score' => 0.95, 'ambiguous' => false];
+            }
+
+            if (count($workingOnStreet) > 1) {
+                return ['project_id' => array_key_first($workingOnStreet), 'score' => 0.95, 'ambiguous' => true];
+            }
+        }
+
+        // A short PO is too little to guess from: it matches by city or street
+        // above, or not at all.
+        if (mb_strlen(str_replace(' ', '', $po)) < 4) {
+            return null;
         }
 
         foreach ($projectCandidates as $candidate) {
@@ -2030,7 +2067,7 @@ class ExpenseAutoMatchController extends Controller
         }
 
         $ignore = [
-            'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw',
+            'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw', 'north', 'south', 'east', 'west',
             'rd', 'road', 'st', 'street', 'ave', 'avenue', 'dr', 'drive',
             'ln', 'lane', 'blvd', 'boulevard', 'ct', 'court', 'cir', 'circle',
             'pl', 'place', 'way',
