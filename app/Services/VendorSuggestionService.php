@@ -26,9 +26,9 @@ class VendorSuggestionService
      */
     public function suggest(string $descriptor, Collection $transactions, Collection $vendors): ?array
     {
-        // v2 (2026-10-02): the prompt now carries location evidence; answers
-        // given without it are not reused.
-        $cacheKey = 'vendor-suggest:v2:'.md5($descriptor);
+        // v3 (2026-10-02): the prompt carries location evidence and places
+        // the card's trip; answers given without them are not reused.
+        $cacheKey = 'vendor-suggest:v3:'.md5($descriptor);
 
         $suggestion = Cache::get($cacheKey);
 
@@ -144,9 +144,9 @@ class VendorSuggestionService
         return <<<PROMPT
 You identify merchants from bank/credit-card statement descriptors for a construction company based in Mount Prospect, IL (Chicago northwest suburbs). Its people also travel. Decide WHERE the merchant is from the evidence, in this order:
 1. A LOCATION on one of the transactions below: the merchant is there. Search there.
-2. Where the same card was used around that date (below): out-of-state places, airlines, airport shuttles or hotels mean the card was travelling, and the merchant is likely at that destination.
+2. Where the same card was used around that date (below): out-of-state places, airlines, airport shuttles or hotels mean the card was travelling, and the merchant is likely at that destination. Work out the destination first: a travel merchant listed without a place must be looked up (search which airport and towns a shuttle runs between, where a hotel is) before you identify the merchant. The card is shared, so Chicagoland charges on the same day do not cancel a trip.
 3. Only when neither points elsewhere, assume the Chicagoland area.
-A match outside Illinois is not doubtful in itself when the evidence puts the card there. Some banks (Capital One) truncate descriptors and drop the location, and Plaid's category guesses are often wrong for small local businesses.
+An airport restaurant or shop charged on a travel day is at an airport of that trip: the destination's airport, or O'Hare (ORD) / Midway (MDW) at home; check which of them the business operates in. Short letter codes after a dash or store number in a descriptor (e.g. "-ME") are usually the outlet's code, not a state. A match outside Illinois is not doubtful in itself when the evidence puts the card there. Some banks (Capital One) truncate descriptors and drop the location, and Plaid's category guesses are often wrong for small local businesses.
 
 Descriptor: "{$descriptor}"
 Plaid's merchant match: {$plaidMatch}
@@ -154,7 +154,7 @@ Plaid's merchant match: {$plaidMatch}
 Transactions with this descriptor:
 {$transactionLines}
 
-Same card, the day before to the day after (in-person charges with a place, and travel):
+Same card, the day before to the day after (in-person charges with a place, and travel; "on file" is the address saved on our vendor record):
 {$sameCard}
 
 Existing vendors that might match (id: name):
@@ -181,6 +181,9 @@ PROMPT;
      * bank account from the day before to the day after that carry a Plaid
      * location, or look like travel (airlines, shuttles, hotels, rides).
      * Online charges are left out — their "location" is the seller's HQ.
+     * Without a Plaid location, the matched vendor's city on file stands in:
+     * an AI-identified merchant is saved with its city, so one placed charge
+     * places the rest of the trip.
      * 2026-10-02: a Capital One "GIAMPIETRO PIZZERIA" with no location sat
      * among Summit Express (the Denver–Breckenridge shuttle), Summit Wine &
      * Liquor and Frontier Airlines on the same card.
@@ -200,6 +203,7 @@ PROMPT;
                 ->where('bank_account_id', $transaction->bank_account_id)
                 ->whereNotIn('id', $ids)
                 ->whereBetween('transaction_date', [$transaction->transaction_date->copy()->subDay()->toDateString(), $transaction->transaction_date->copy()->addDay()->toDateString()])
+                ->with(['vendor' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'business_name', 'city', 'state'])])
                 ->orderBy('transaction_date')
                 ->limit(80)
                 ->get()
@@ -210,8 +214,11 @@ PROMPT;
                     }
 
                     $place = collect([data_get($details, 'location.city'), data_get($details, 'location.region')])->filter()->implode(', ');
+                    if ($place === '' && filled($nearby->vendor?->city)) {
+                        $place = collect([$nearby->vendor->city, $nearby->vendor->state])->filter()->implode(', ').' (on file)';
+                    }
                     $name = $nearby->plaid_merchant_name ?: $nearby->plaid_merchant_description;
-                    $travel = preg_match('/airline|airways|air lines|shuttle|express|airport|hotel|motel|inn\b|resort|lodge|uber|lyft|taxi|rental|hertz|avis|enterprise|national car|delta|united|southwest|frontier|spirit|american air/i', (string) $name.' '.$nearby->plaid_merchant_description);
+                    $travel = preg_match('/airline|airways|air lines|shuttle|express|airport|hotel|motel|inn\b|resort|lodge|uber|lyft|taxi|rental|hertz|avis|enterprise|national car|delta|united|southwest|frontier|spirit|american air/i', $name.' '.$nearby->plaid_merchant_description.' '.$nearby->vendor?->business_name);
 
                     if ($place === '' && ! $travel) {
                         return;

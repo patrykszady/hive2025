@@ -87,10 +87,38 @@ it('shows where the same card was the day before to the day after, travel includ
         ->and($prompt)->not->toContain('Miami');
 });
 
-it('does not reuse an answer cached before the prompt carried location', function () {
+/**
+ * 2026-10-02: "TST* TASTES ON THE FLY-ME" on the same card was placed at
+ * Boston ("-ME" read as Maine) though the card took the Denver airport
+ * shuttle that day and Giampietro had just been saved as a Breckenridge, CO
+ * vendor. Matched vendors' cities now place the trip, a vendor named a
+ * shuttle counts as travel, and the prompt has the trip placed first.
+ */
+it('places the trip from vendors on file and has it worked out before the merchant', function () {
+    $account = vsl_account();
+    $giampietro = Vendor::factory()->create(['business_name' => 'Giampietro Pasta & Pizzeria', 'city' => 'Breckenridge', 'state' => 'CO']);
+    $shuttle = Vendor::factory()->create(['business_name' => 'Summit Express Shuttle', 'city' => null, 'state' => null]);
+    $chain = Vendor::factory()->create(['business_name' => 'Shell', 'city' => null, 'state' => 'IL']);
+    vsl_charge($account, '2026-09-21', 'TST* TASTES ON THE FLY-ME', merchant: 'Tastes On The Fly');
+    vsl_charge($account, '2026-09-21', 'GIAMPIETRO PIZZERIA', merchant: 'Giampietro Pasta & Pizzeria')->update(['vendor_id' => $giampietro->id]);
+    vsl_charge($account, '2026-09-21', 'SUMMIT XPRS 0042', merchant: 'Summit Xprs')->update(['vendor_id' => $shuttle->id]);
+    vsl_charge($account, '2026-09-21', 'Shell', merchant: 'Shell Oil')->update(['vendor_id' => $chain->id]);
+
+    $prompt = vsl_prompt('TST* TASTES ON THE FLY-ME', $account);
+
+    expect($prompt)->toContain('- 2026-09-21 | Giampietro Pasta & Pizzeria | Breckenridge, CO (on file)')
+        ->and($prompt)->toContain('- 2026-09-21 | Summit Xprs | travel')
+        ->and($prompt)->not->toContain('Shell Oil')
+        ->and($prompt)->toContain('a travel merchant listed without a place must be looked up')
+        ->and($prompt)->toContain('(e.g. "-ME") are usually the outlet\'s code, not a state');
+});
+
+it('does not reuse an answer cached before the prompt placed the trip', function () {
     $account = vsl_account();
     vsl_charge($account, '2026-09-21', 'GIAMPIETRO PIZZERIA');
-    Cache::put('vendor-suggest:'.md5('GIAMPIETRO PIZZERIA'), ['vendor_name' => 'Old Guess', 'existing_vendor_id' => null, 'website' => null, 'city' => null, 'state' => null, 'match_desc' => 'GIAMPIETRO', 'confidence' => 'low', 'reasoning' => 'old'], 3600);
+    foreach (['vendor-suggest:', 'vendor-suggest:v2:'] as $oldPrefix) {
+        Cache::put($oldPrefix.md5('GIAMPIETRO PIZZERIA'), ['vendor_name' => 'Old Guess', 'existing_vendor_id' => null, 'website' => null, 'city' => null, 'state' => null, 'match_desc' => 'GIAMPIETRO', 'confidence' => 'low', 'reasoning' => 'old'], 3600);
+    }
 
     Http::fake(['api.openai.com/v1/responses' => Http::response(['output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
         'vendor_name' => 'Giampietro Pasta & Pizzeria', 'existing_vendor_id' => null, 'website' => 'https://www.giampietropizza.com/', 'city' => 'Breckenridge', 'state' => 'CO', 'match_desc' => 'GIAMPIETRO PIZZERIA', 'confidence' => 'high', 'reasoning' => 'Same card took the Breckenridge shuttle that day.',
