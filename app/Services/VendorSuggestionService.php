@@ -26,9 +26,9 @@ class VendorSuggestionService
      */
     public function suggest(string $descriptor, Collection $transactions, Collection $vendors): ?array
     {
-        // v3 (2026-10-02): the prompt carries location evidence and places
-        // the card's trip; answers given without them are not reused.
-        $cacheKey = 'vendor-suggest:v3:'.md5($descriptor);
+        // v4 (2026-10-02): the prompt carries location evidence and places
+        // the card member's trip; answers given without them are not reused.
+        $cacheKey = 'vendor-suggest:v4:'.md5($descriptor);
 
         $suggestion = Cache::get($cacheKey);
 
@@ -103,13 +103,17 @@ class VendorSuggestionService
             $category = implode(' > ', (array) data_get($details, 'category', []));
             $pfc = data_get($details, 'personal_finance_category.detailed');
             $channel = data_get($details, 'payment_channel');
+            $mcc = data_get($details, 'merchant_category_code');
+            $owner = data_get($details, 'account_owner');
             $bank = $t->bank_account?->bank?->name;
 
             return sprintf(
-                '- %s | $%s | %s%s%s%s%s',
+                '- %s | $%s | %s%s%s%s%s%s%s',
                 $t->transaction_date?->format('Y-m-d'),
                 number_format((float) $t->amount, 2),
                 $bank ? $bank.' '.$t->bank_account?->type : 'unknown bank',
+                $owner ? ' | card member ending '.$owner : '',
+                $mcc ? ' | MCC '.$mcc : '',
                 $category ? ' | category: '.$category : '',
                 $pfc ? ' | plaid_pfc: '.$pfc.' (may be wrong)' : '',
                 $channel ? ' | channel: '.$channel : '',
@@ -144,7 +148,7 @@ class VendorSuggestionService
         return <<<PROMPT
 You identify merchants from bank/credit-card statement descriptors for a construction company based in Mount Prospect, IL (Chicago northwest suburbs). Its people also travel. Decide WHERE the merchant is from the evidence, in this order:
 1. A LOCATION on one of the transactions below: the merchant is there. Search there.
-2. Where the same card was used around that date (below): out-of-state places, airlines, airport shuttles or hotels mean the card was travelling, and the merchant is likely at that destination. Work out the destination first: a travel merchant listed without a place must be looked up (search which airport and towns a shuttle runs between, where a hotel is) before you identify the merchant. The card is shared, so Chicagoland charges on the same day do not cancel a trip.
+2. Where the card was around that date (below). Look up the merchants listed without a place: a restaurant or shop on the same card is where the card member was. Out-of-state places, airlines, shuttles or lodging mean the card was travelling, and the merchant is likely at that destination. Work out the destination first (search which airport and towns a shuttle runs between, where a hotel or a named restaurant is) before you identify the merchant. Employees share the account, so Chicagoland charges on other cards say nothing about this card; their travel can show where a shared trip went. Dates are the bank's posting dates, often a day or two after the purchase.
 3. Only when neither points elsewhere, assume the Chicagoland area.
 An airport restaurant or shop charged on a travel day is at an airport of that trip: the destination's airport, or O'Hare (ORD) / Midway (MDW) at home; check which of them the business operates in. Short letter codes after a dash or store number in a descriptor (e.g. "-ME") are usually the outlet's code, not a state. A match outside Illinois is not doubtful in itself when the evidence puts the card there. Some banks (Capital One) truncate descriptors and drop the location, and Plaid's category guesses are often wrong for small local businesses.
 
@@ -154,7 +158,6 @@ Plaid's merchant match: {$plaidMatch}
 Transactions with this descriptor:
 {$transactionLines}
 
-Same card, the day before to the day after (in-person charges with a place, and travel; "on file" is the address saved on our vendor record):
 {$sameCard}
 
 Existing vendors that might match (id: name):
@@ -177,21 +180,28 @@ PROMPT;
     }
 
     /**
-     * Where the card was around these charges: in-person charges on the same
-     * bank account from the day before to the day after that carry a Plaid
-     * location, or look like travel (airlines, shuttles, hotels, rides).
-     * Online charges are left out — their "location" is the seller's HQ.
-     * Without a Plaid location, the matched vendor's city on file stands in:
-     * an AI-identified merchant is saved with its city, so one placed charge
-     * places the rest of the trip.
-     * 2026-10-02: a Capital One "GIAMPIETRO PIZZERIA" with no location sat
-     * among Summit Express (the Denver–Breckenridge shuttle), Summit Wine &
-     * Liquor and Frontier Airlines on the same card.
+     * Where the card was around these charges. Capital One names the card
+     * member (account_owner, the employee card's last four digits) on every
+     * charge, so that card's in-person charges three days either side are
+     * all listed by name — a restaurant with no location is still evidence
+     * once looked up — while other employees' cards on the account add only
+     * travel and places outside Illinois. Accounts without card members get
+     * the day before to the day after, places and travel only. Online
+     * charges are left out: their "location" is the seller's HQ. Without a
+     * Plaid location the matched vendor's city on file stands in, so one
+     * identified merchant places the rest of the trip.
+     * 2026-10-02: "LA NUEVA VIZCAINA" and "LA VENDIMIA DE JOSE" on card 0616
+     * were placed in Chicago and San Jose from other cards' Home Depot runs;
+     * 0616's own charges (Doña Fela two days later, Frontier) were in San
+     * Juan, PR.
      */
     protected function sameCardContext(Collection $transactions): string
     {
         $ids = $transactions->pluck('id')->filter()->all();
-        $lines = collect();
+        $owners = $transactions->take(5)->map(fn ($t) => (string) data_get($t->details, 'account_owner'))->filter()->unique()->values();
+        $days = $owners->isNotEmpty() ? 3 : 1;
+        $thisCard = collect();
+        $otherCards = collect();
 
         foreach ($transactions->take(5) as $transaction) {
             if (! $transaction->bank_account_id || ! $transaction->transaction_date) {
@@ -202,33 +212,82 @@ PROMPT;
                 ->whereNull('deleted_at')
                 ->where('bank_account_id', $transaction->bank_account_id)
                 ->whereNotIn('id', $ids)
-                ->whereBetween('transaction_date', [$transaction->transaction_date->copy()->subDay()->toDateString(), $transaction->transaction_date->copy()->addDay()->toDateString()])
+                ->whereBetween('transaction_date', [$transaction->transaction_date->copy()->subDays($days)->toDateString(), $transaction->transaction_date->copy()->addDays($days)->toDateString()])
                 ->with(['vendor' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'business_name', 'city', 'state'])])
                 ->orderBy('transaction_date')
-                ->limit(80)
+                ->limit(150)
                 ->get()
-                ->each(function ($nearby) use ($lines) {
+                ->each(function ($nearby) use ($owners, $thisCard, $otherCards) {
                     $details = is_array($nearby->details) ? $nearby->details : [];
                     if (data_get($details, 'payment_channel') === 'online') {
                         return;
                     }
 
                     $place = collect([data_get($details, 'location.city'), data_get($details, 'location.region')])->filter()->implode(', ');
+                    $state = (string) data_get($details, 'location.region');
                     if ($place === '' && filled($nearby->vendor?->city)) {
                         $place = collect([$nearby->vendor->city, $nearby->vendor->state])->filter()->implode(', ').' (on file)';
+                        $state = (string) $nearby->vendor->state;
                     }
                     $name = $nearby->plaid_merchant_name ?: $nearby->plaid_merchant_description;
-                    $travel = preg_match('/airline|airways|air lines|shuttle|express|airport|hotel|motel|inn\b|resort|lodge|uber|lyft|taxi|rental|hertz|avis|enterprise|national car|delta|united|southwest|frontier|spirit|american air/i', $name.' '.$nearby->plaid_merchant_description.' '.$nearby->vendor?->business_name);
+                    $kind = $this->travelKind($nearby, $details);
+                    $owner = (string) data_get($details, 'account_owner');
+                    $line = sprintf('- %s | %s%s%s', $nearby->transaction_date?->format('Y-m-d'), $name, $place !== '' ? ' | '.$place : '', $kind ? ' | '.$kind : '');
 
-                    if ($place === '' && ! $travel) {
+                    if ($owners->contains($owner)) {
+                        $thisCard->put($nearby->id, $line);
+
                         return;
                     }
 
-                    $lines->put($nearby->id, sprintf('- %s | %s%s%s', $nearby->transaction_date?->format('Y-m-d'), $name, $place !== '' ? ' | '.$place : '', $travel ? ' | travel' : ''));
+                    $away = $kind !== null || ($state !== '' && strtoupper($state) !== 'IL');
+                    if ($away || ($owners->isEmpty() && $place !== '')) {
+                        $otherCards->put($nearby->id, $line.($owner !== '' ? ' | card ending '.$owner : ''));
+                    }
                 });
         }
 
-        return $lines->isEmpty() ? 'none with a place or travel' : $lines->take(15)->implode("\n");
+        if ($owners->isEmpty()) {
+            return "Same card, the day before to the day after (in-person charges with a place, and travel; \"on file\" is the address saved on our vendor record):\n"
+                .($otherCards->isEmpty() ? 'none with a place or travel' : $otherCards->take(15)->implode("\n"));
+        }
+
+        return sprintf("This card (card member ending %s), %d days either side, every in-person charge (\"on file\" is the address saved on our vendor record):\n%s\n\nOther employees' cards on the account, same days, only travel and places outside Illinois:\n%s",
+            $owners->implode(', '),
+            $days,
+            $thisCard->isEmpty() ? 'none' : $thisCard->take(25)->implode("\n"),
+            $otherCards->isEmpty() ? 'none' : $otherCards->take(15)->implode("\n"),
+        );
+    }
+
+    /**
+     * Airline, lodging, car rental or ground transport, by the card network's
+     * merchant category code when Plaid sends one, else by name. The code
+     * wins: "LAMPLIGHTER INN TAVE" is a bar (5813), not lodging.
+     */
+    protected function travelKind(\App\Models\Transaction $transaction, array $details): ?string
+    {
+        $mcc = (int) data_get($details, 'merchant_category_code');
+
+        if ($mcc > 0) {
+            return match (true) {
+                ($mcc >= 3000 && $mcc <= 3299) || in_array($mcc, [4511, 4582], true) => 'airline',
+                ($mcc >= 3351 && $mcc <= 3500) || in_array($mcc, [7512, 7519], true) => 'car rental',
+                ($mcc >= 3501 && $mcc <= 3999) || in_array($mcc, [4722, 7011, 7012], true) => 'lodging',
+                in_array($mcc, [4111, 4112, 4131, 4411, 4789], true) => 'ground transport',
+                default => null,
+            };
+        }
+
+        $text = implode(' ', [$transaction->plaid_merchant_name, $transaction->plaid_merchant_description, $transaction->vendor?->business_name]);
+
+        return match (true) {
+            (bool) preg_match('/airline|airways|air lines|airport|frontier ai|spirit air|delta air|united air|southwest air|american air|jetblue|alaska air/i', $text) => 'airline',
+            (bool) preg_match('/hertz|avis\b|enterprise rent|national car|budget car|alamo|sixt|car rental/i', $text) => 'car rental',
+            preg_match('/hotel|motel|resort|lodge|\binn\b|airbnb|vrbo|marriott|hilton|hyatt/i', $text) && ! preg_match('/tavern|\btave|\bpub\b|\bbar\b|grill|restaurant|pizz/i', $text) => 'lodging',
+            (bool) preg_match('/shuttle|amtrak|greyhound|ferry|cruise/i', $text) => 'ground transport',
+            default => null,
+        };
     }
 
     /**

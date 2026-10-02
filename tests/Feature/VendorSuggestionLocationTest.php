@@ -68,8 +68,9 @@ it('passes Plaid\'s own merchant match and its confidence', function () {
 it('shows where the same card was the day before to the day after, travel included', function () {
     $account = vsl_account();
     vsl_charge($account, '2026-09-21', 'GIAMPIETRO PIZZERIA');
-    vsl_charge($account, '2026-09-21', 'Summit Express', merchant: 'Summit Express');
+    vsl_charge($account, '2026-09-21', 'SUMMIT EXPRESS SHUTTLE', merchant: 'Summit Express Shuttle');
     vsl_charge($account, '2026-09-22', 'FRONTIER AI LCZNMY', merchant: 'Frontier Airlines');
+    vsl_charge($account, '2026-09-21', 'PANDA EXPRESS #1234', merchant: 'Panda Express');
     vsl_charge($account, '2026-09-20', 'BRECK GROCERY', ['location' => ['city' => 'Breckenridge', 'region' => 'CO']], 'City Market');
     vsl_charge($account, '2026-09-21', 'AMAZON MKTPL*5R6', ['payment_channel' => 'online', 'location' => ['city' => 'Seattle', 'region' => 'WA']], 'Amazon');
     vsl_charge($account, '2026-09-21', 'CORNER STORE', merchant: 'Corner Store');
@@ -78,8 +79,9 @@ it('shows where the same card was the day before to the day after, travel includ
 
     $prompt = vsl_prompt('GIAMPIETRO PIZZERIA', $account);
 
-    expect($prompt)->toContain('- 2026-09-21 | Summit Express | travel')
-        ->and($prompt)->toContain('- 2026-09-22 | Frontier Airlines | travel')
+    expect($prompt)->toContain('- 2026-09-21 | Summit Express Shuttle | ground transport')
+        ->and($prompt)->toContain('- 2026-09-22 | Frontier Airlines | airline')
+        ->and($prompt)->not->toContain('Panda Express')
         ->and($prompt)->toContain('- 2026-09-20 | City Market | Breckenridge, CO')
         ->and($prompt)->not->toContain('Seattle')
         ->and($prompt)->not->toContain('Corner Store')
@@ -107,16 +109,46 @@ it('places the trip from vendors on file and has it worked out before the mercha
     $prompt = vsl_prompt('TST* TASTES ON THE FLY-ME', $account);
 
     expect($prompt)->toContain('- 2026-09-21 | Giampietro Pasta & Pizzeria | Breckenridge, CO (on file)')
-        ->and($prompt)->toContain('- 2026-09-21 | Summit Xprs | travel')
+        ->and($prompt)->toContain('- 2026-09-21 | Summit Xprs | ground transport')
         ->and($prompt)->not->toContain('Shell Oil')
-        ->and($prompt)->toContain('a travel merchant listed without a place must be looked up')
+        ->and($prompt)->toContain('Look up the merchants listed without a place')
         ->and($prompt)->toContain('(e.g. "-ME") are usually the outlet\'s code, not a state');
+});
+
+/**
+ * 2026-10-02: "LA NUEVA VIZCAINA" and "LA VENDIMIA DE JOSE" on Capital One
+ * card 0616 were placed in Chicago and San Jose: other employees' Home Depot
+ * runs in Cicero outvoted the trip, Doña Fela (two days later) was outside
+ * the window, and "Lamplighter Inn Tave", a bar, was read as a hotel. The
+ * card member's own charges were in San Juan, PR.
+ */
+it('reads the card member\'s own charges, and other cards only for travel', function () {
+    $account = vsl_account();
+    $toroVerde = Vendor::factory()->create(['business_name' => 'Toro Verde Adventure Park', 'city' => 'Orocovis', 'state' => 'PR']);
+    vsl_charge($account, '2026-08-29', 'LA NUEVA VIZCAINA', ['account_owner' => '0616', 'merchant_category_code' => '5499']);
+    vsl_charge($account, '2026-08-31', 'DONA FELA', ['account_owner' => '0616', 'merchant_category_code' => '5812']);
+    vsl_charge($account, '2026-09-01', 'TST*LAMPLIGHTER INN TAVE', ['account_owner' => '0616', 'merchant_category_code' => '5813'], 'Lamplighter Inn Tave');
+    vsl_charge($account, '2026-09-01', 'FRONTIER AI QNYD7E', ['account_owner' => '0616', 'merchant_category_code' => '3132'], 'Frontier Airlines');
+    vsl_charge($account, '2026-09-05', 'DD/BR #301361', ['account_owner' => '0616', 'location' => ['city' => 'Arlington Heights', 'region' => 'IL']], 'Dunkin\'');
+    vsl_charge($account, '2026-08-29', 'Home Depot', ['account_owner' => '0286', 'location' => ['city' => 'Cicero', 'region' => 'IL']], 'The Home Depot');
+    vsl_charge($account, '2026-08-26', 'TORO VERDE OROCOVIS', ['account_owner' => '4060', 'merchant_category_code' => '7991'])->update(['vendor_id' => $toroVerde->id]);
+
+    $prompt = vsl_prompt('LA NUEVA VIZCAINA', $account);
+
+    expect($prompt)->toContain('card member ending 0616 | MCC 5499')
+        ->and($prompt)->toContain('This card (card member ending 0616), 3 days either side')
+        ->and($prompt)->toContain('- 2026-08-31 | DONA FELA')
+        ->and($prompt)->toContain('- 2026-09-01 | Frontier Airlines | airline')
+        ->and($prompt)->toContain('- 2026-09-01 | Lamplighter Inn Tave'."\n")
+        ->and($prompt)->toContain('- 2026-08-26 | TORO VERDE OROCOVIS | Orocovis, PR (on file) | card ending 4060')
+        ->and($prompt)->not->toContain('Cicero')
+        ->and($prompt)->not->toContain('Arlington Heights');
 });
 
 it('does not reuse an answer cached before the prompt placed the trip', function () {
     $account = vsl_account();
     vsl_charge($account, '2026-09-21', 'GIAMPIETRO PIZZERIA');
-    foreach (['vendor-suggest:', 'vendor-suggest:v2:'] as $oldPrefix) {
+    foreach (['vendor-suggest:', 'vendor-suggest:v2:', 'vendor-suggest:v3:'] as $oldPrefix) {
         Cache::put($oldPrefix.md5('GIAMPIETRO PIZZERIA'), ['vendor_name' => 'Old Guess', 'existing_vendor_id' => null, 'website' => null, 'city' => null, 'state' => null, 'match_desc' => 'GIAMPIETRO', 'confidence' => 'low', 'reasoning' => 'old'], 3600);
     }
 
