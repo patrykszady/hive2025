@@ -137,20 +137,28 @@
                     :view="'expenses.show'" />
             @endif
 
-            {{-- TRANSACTIONS (uses allTransactions() fallback: own -> check) --}}
+            {{-- TRANSACTIONS (uses allTransactions() fallback: own -> check), then what
+                 paid it without a bank charge: rebate checks, certificates, store credit,
+                 points, cash (App\Models\ExpensePayment) --}}
             @php
                 $all_transactions = $expense->allTransactions();
-                $transaction_word = $all_transactions->count() === 1 ? 'Transaction' : 'Transactions';
+                $off_bank_payments = $expense->payments->filter(fn ($payment) => $payment->isOffBank())->sortBy('id')->values();
+                $transaction_word = ($all_transactions->count() + $off_bank_payments->count()) === 1 ? 'Transaction' : 'Transactions';
             @endphp
-            @if($all_transactions->isNotEmpty())
+            @if($all_transactions->isNotEmpty() || $off_bank_payments->isNotEmpty())
                 <x-transactions.list_card
                     :transactions="$all_transactions"
-                    :title="$expense->transactions()->exists() ? $transaction_word : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check ' . $transaction_word : $transaction_word)"
+                    :payments="$off_bank_payments"
+                    :title="$expense->transactions()->exists() || $all_transactions->isEmpty() ? $transaction_word : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check ' . $transaction_word : $transaction_word)"
                 />
             @endif
 
-            {{-- No charge linked and no check: offer to link one by hand (amounts may differ). --}}
-            @if($all_transactions->isEmpty() && ! $expense->check && $expense->checks->isEmpty())
+            {{-- No charge linked and no check: offer to link one by hand (amounts may differ) —
+                 unless rebate checks, store credit, points or cash already paid all of it. --}}
+            @php
+                $paid_off_bank = abs(round((float) $off_bank_payments->sum('amount'), 2)) >= abs(round((float) $expense->amount, 2)) - 0.01;
+            @endphp
+            @if($all_transactions->isEmpty() && ! $expense->check && $expense->checks->isEmpty() && ! ($off_bank_payments->isNotEmpty() && $paid_off_bank))
                 @can('update', $expense)
                     <livewire:expenses.link-transaction :expense="$expense" :key="'link-transaction-'.$expense->id" />
                 @endcan

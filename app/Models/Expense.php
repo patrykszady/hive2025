@@ -32,6 +32,14 @@ class Expense extends Model
     protected static function booted()
     {
         static::addGlobalScope(new ExpenseScope);
+
+        // A new amount can make the receipt's tenders add up, or stop them
+        // adding up (ExpensePaymentSync): keep the payment lines true to it.
+        static::updated(function (Expense $expense) {
+            if ($expense->wasChanged('amount')) {
+                app(\App\Services\ExpensePaymentSync::class)->syncById((int) $expense->id);
+            }
+        });
     }
 
     public function resolveRouteBinding($value, $field = null): ?self
@@ -320,6 +328,12 @@ class Expense extends Model
     public function receipts(): HasMany
     {
         return $this->hasMany(ExpenseReceipts::class);
+    }
+
+    /** How it was paid, one row per tender (card, store credit, gift card, points, cash). */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(ExpensePayment::class);
     }
 
     /**

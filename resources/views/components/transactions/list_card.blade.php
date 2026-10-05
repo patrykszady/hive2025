@@ -1,5 +1,9 @@
 @props([
     'transactions' => [],
+    // Payments that never reached the bank (App\Models\ExpensePayment, off-bank
+    // methods): rebate checks, certificates, store credit, points, cash. Listed
+    // under the bank charges, each with a note saying so.
+    'payments' => collect(),
     'title' => 'Transactions'
 ])
 
@@ -92,6 +96,26 @@
                             </flux:table.cell>
                         </flux:table.row>
                     @endif
+                @endforeach
+
+                @foreach ($payments as $payment)
+                    <flux:table.row :key="'payment-'.$payment->id">
+                        <flux:table.cell variant="strong" class="whitespace-nowrap">
+                            {{ money($payment->amount) }}
+                        </flux:table.cell>
+                        <flux:table.cell class="whitespace-nowrap">{{ ($payment->paid_at ?? $payment->expense?->date)?->format('m/d/Y') }}</flux:table.cell>
+                        <flux:table.cell class="min-w-0">
+                            <x-table-link :label="$payment->methodName()" />
+                        </flux:table.cell>
+                        <flux:table.cell class="min-w-0">
+                            <x-table-link :label="$payment->last_four ? '••'.$payment->last_four : '—'" />
+                        </flux:table.cell>
+                    </flux:table.row>
+                    <flux:table.row class="table-subrow">
+                        <flux:table.cell :colspan="count($columns)" class="whitespace-normal break-words !border-t-0 !pt-0">
+                            <span class="block italic text-sm text-gray-500">{{ $payment->notation() }}</span>
+                        </flux:table.cell>
+                    </flux:table.row>
                 @endforeach
     </x-index-table.table>
 

@@ -33,6 +33,17 @@ class ExpenseReceipts extends Model
         'updated_at',
     ];
 
+    /**
+     * A receipt saved or removed changes how its expense was paid: the payment
+     * lines (ExpensePayment) are rebuilt from the receipts right away, so they
+     * are in place before the bank matcher next looks at the expense.
+     */
+    protected static function booted(): void
+    {
+        static::saved(fn (ExpenseReceipts $receipt) => $receipt->expense_id && app(\App\Services\ExpensePaymentSync::class)->syncById((int) $receipt->expense_id));
+        static::deleted(fn (ExpenseReceipts $receipt) => $receipt->expense_id && app(\App\Services\ExpensePaymentSync::class)->syncById((int) $receipt->expense_id));
+    }
+
     protected $casts = [
         'receipt_items' => 'array',
         'is_material_order' => 'boolean',

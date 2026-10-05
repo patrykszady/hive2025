@@ -283,6 +283,39 @@ class Transaction extends Model
         ]);
     }
 
+    /**
+     * The last four of the card that made this charge, wherever the bank put
+     * it: Capital One's card member (owner, Plaid's account_owner), Citi's
+     * description ("DEBIT PIN PURCHASE 4849 …", "DEBIT PURCHASE Sep 27 4849 …",
+     * "MOBILE WALLET PURCHASE Sep28 10:35p 4849 …"), or a card account's own
+     * number. Several can apply; none means the bank did not say.
+     *
+     * @return list<string>
+     */
+    public function cardNumbers(): array
+    {
+        $numbers = [];
+
+        if (preg_match('/^\d{4}$/', (string) $this->owner)) {
+            $numbers[] = (string) $this->owner;
+        }
+
+        if (preg_match('/\bPURCHASE\s+(?:[A-Z][a-z]{2}\s?\d{1,2}\s+)?(?:\d{1,2}:\d{2}[ap]?\s+)?(\d{4})\b/', (string) $this->plaid_merchant_description, $m)) {
+            $numbers[] = $m[1];
+        }
+
+        // A shared card account's own number says nothing about which card was
+        // used once Plaid names the card member (Capital One: account 4060,
+        // members 0616, 0286, 4060…).
+        $account = (string) $this->bank_account?->account_number;
+
+        if ($numbers === [] && preg_match('/^\d{4}$/', $account) && in_array($this->bank_account?->type, ['credit', 'Credit', 'Credit Card', 'credit card'], true)) {
+            $numbers[] = $account;
+        }
+
+        return array_values(array_unique($numbers));
+    }
+
     public function expense(): BelongsTo
     {
         // return $this->belongsTo(Expense::class)->withDefault([
