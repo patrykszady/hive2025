@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\ReceiptAccount;
 use App\Models\Vendor;
+use App\Support\ReceiptTenders;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -193,11 +194,17 @@ class ScrapeMenardsReceipts extends Command
                 }
             }
 
-            // Try to match to an existing expense
+            // Try to match to an existing expense: same day and Menards' total,
+            // or the expense this receipt was imported to before — its amount
+            // may have been raised to the full total since (rebate checks, see
+            // below), and the receipt file name still carries Menards' total.
+            $receiptStem = sprintf('-menards-%s-%s.', $date->format('Y-m-d'), str_replace(['.', '-'], ['_', 'neg'], (string) $amount));
             $expense = Expense::withoutGlobalScopes()
                 ->where('vendor_id', $vendorId)
                 ->whereDate('date', $date->format('Y-m-d'))
-                ->where('amount', $amount)
+                ->where(fn ($query) => $query
+                    ->where('amount', $amount)
+                    ->orWhereHas('receipts', fn ($receipts) => $receipts->where('receipt_filename', 'like', '%'.$receiptStem.'%')))
                 ->first();
 
             if ($expense) {
@@ -309,6 +316,16 @@ class ScrapeMenardsReceipts extends Command
                 ]);
 
                 $linkedExpenseIds[] = $expense->id;
+
+                // Rebate checks spent at the register print before the total,
+                // so Menards' transaction total (what $amount is) is what was
+                // left after them. The purchase cost TOTAL SALE + the checks.
+                $rebateTotal = ReceiptTenders::menardsRebateTotal((string) ($ocrData['fields']['raw_content'] ?? $ocrData['content'] ?? ''));
+
+                if ($rebateTotal && abs((float) $expense->amount - $rebateTotal['sale']) <= 0.02 && abs($rebateTotal['total'] - (float) $expense->amount) > 0.02) {
+                    $expense->update(['amount' => $rebateTotal['total']]);
+                    $this->line(sprintf('    <info>REBATE</info> %s in rebate checks: amount %s → %s', number_format($rebateTotal['rebates'], 2), number_format($rebateTotal['sale'], 2), number_format($rebateTotal['total'], 2)));
+                }
             }
 
             $imported++;
