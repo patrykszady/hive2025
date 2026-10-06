@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Check;
 use App\Models\Distribution;
 use App\Models\Expense;
+use App\Models\ExpensePayment;
 use App\Models\ExpenseSplits;
 use App\Models\Payment;
 use App\Models\Transaction;
@@ -1456,11 +1457,16 @@ class TransactionController extends Controller
                 ->whereNotNull('vendor_id')
                 ->whereNull('paid_by') // Exclude employee reimbursements - they match to check, not bank transactions
                 ->whereDate('date', '>=', Carbon::now()->subMonths(12))
-                // Only fetch expenses that are not fully matched (transaction sum < expense amount)
+                // Only fetch expenses not fully paid: linked charges plus what the receipt
+                // says was paid without a bank charge (store credit, gift cards and Menards
+                // certificates, rebate checks, points, cash — ExpensePayment::OFF_BANK)
+                // fall short of the amount. An expense paid entirely that way is done.
                 ->whereRaw("(
-                    (expenses.amount >= 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL) < expenses.amount)
+                    (expenses.amount >= 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL)
+                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash')) < expenses.amount)
                     OR
-                    (expenses.amount < 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL) > expenses.amount)
+                    (expenses.amount < 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL)
+                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash')) > expenses.amount)
                 )")
                 ->orderBy('date', 'DESC')
                 ->cursor();
@@ -1491,17 +1497,19 @@ class TransactionController extends Controller
                 $start_date = $expense->date->copy()->subDays(7)->format('Y-m-d');
                 $end_date = $expense->date->copy()->addDays(21)->format('Y-m-d');
 
-                if (! $expenseTransactions->isEmpty()) {
-                    $transaction_amount_outstanding = $expense->amount - $expenseTransactions->sum('amount');
+                // What is left for bank charges to pay: the amount, less the charges
+                // already linked, less what never reaches the bank. Card lines are the
+                // receipt's own word on which charges to look for.
+                $payments = ExpensePayment::query()->where('expense_id', $expense->id)->get();
+                $offBankPaid = (float) $payments->filter(fn (ExpensePayment $payment) => $payment->isOffBank())->sum('amount');
+                $cardLines = $payments->where('method', ExpensePayment::CARD)->values();
+                $this->noteChargesOnCardLines($cardLines, $expenseTransactions);
 
-                    if ($transaction_amount_outstanding == 0) {
-                        continue;
-                    }
-                } else {
-                    $transaction_amount_outstanding = $expense->amount;
+                $transaction_amount_outstanding = round((float) $expense->amount - (float) $expenseTransactions->sum('amount') - $offBankPaid, 2);
+
+                if (abs($transaction_amount_outstanding) < 0.005) {
+                    continue;
                 }
-
-                $transaction_amount_outstanding = (float) $transaction_amount_outstanding;
      
                 $transactions = Transaction::whereIn('bank_account_id', $hive_vendor_bank_account_ids)
                     ->whereNull('expense_id')
@@ -1583,7 +1591,22 @@ class TransactionController extends Controller
                         $transaction->date_diff = $transaction->transaction_date->floatDiffInDays($expense->date);
                     }
 
-                    $transactions_full_amount = $transactions->where('amount', $transaction_amount_outstanding);
+                    // Each card line on the receipt names one charge: its amount, from
+                    // that card. Matched first, and when they cover what is left the
+                    // expense is done — no guessing among the other candidates.
+                    if ($cardLines->whereNull('transaction_id')->isNotEmpty()) {
+                        $transaction_amount_outstanding = $this->matchCardLines($expense, $cardLines, $transactions, $transaction_amount_outstanding);
+
+                        if (abs($transaction_amount_outstanding) < 0.005 || $transactions->isEmpty()) {
+                            continue;
+                        }
+                    }
+
+                    // A receipt that names its cards rules out a charge on another card.
+                    $receiptCards = $cardLines->pluck('last_four')->filter()->unique()->values()->all();
+                    $transactions_full_amount = $transactions
+                        ->filter(fn (Transaction $candidate) => abs((float) $candidate->amount - $transaction_amount_outstanding) < 0.005)
+                        ->filter(fn (Transaction $candidate) => $receiptCards === [] || $candidate->cardNumbers() === [] || array_intersect($candidate->cardNumbers(), $receiptCards) !== []);
 
                     if (!$transactions_full_amount->isEmpty()) {
                         // dd($transaction->makeHidden('date_diff'));
@@ -1592,7 +1615,10 @@ class TransactionController extends Controller
                         $transaction->save();
                         //where amount != $expense->amount
                     } else {
-                        if (!$expense->receipts->isEmpty()) {
+                        // With card lines the receipt has already said which charges paid
+                        // it; the amount-in-the-text and several-charges guesses below are
+                        // for receipts that did not.
+                        if (!$expense->receipts->isEmpty() && $cardLines->isEmpty()) {
                             foreach ($transactions as $transaction) {
                                 //find $transaction->amount in $receipt_text. If expense receipt has items .. offset the last item
                                 if ($expense->vendor_id === $transaction->vendor_id) {
@@ -1658,8 +1684,10 @@ class TransactionController extends Controller
                                 $sum = number_format($result['sum'], 2, '.', '');
                                 //this can happen multiple of times.. eg transaction_id 6230
 
-                                //is this Transaction a RETURN CHECK "DEPOSIT"?
-                                if ($sum == $expense->amount) {
+                                // What is still unpaid, not the whole amount: with a charge
+                                // already linked (or store credit spent) the rest is what
+                                // these charges have to add up to.
+                                if (abs((float) $sum - $transaction_amount_outstanding) < 0.005) {
                                     $transaction_results = $result;
                                 }
                             }
@@ -1689,6 +1717,81 @@ class TransactionController extends Controller
         // Negative transactions are excluded from the main pass's sign check,
         // so unmatched refunds need a dedicated lookup by vendor + date proximity.
         $this->matchRefundTransactions();
+    }
+
+    /**
+     * Card lines already paid by a charge linked to the expense (by hand, an
+     * earlier pass, the receipt import): note which, so the line is not
+     * matched twice and the expense page knows which charge paid which tender.
+     *
+     * @param  \Illuminate\Support\Collection<int, ExpensePayment>  $cardLines
+     * @param  \Illuminate\Support\Collection<int, Transaction>  $linkedCharges
+     */
+    protected function noteChargesOnCardLines(\Illuminate\Support\Collection $cardLines, \Illuminate\Support\Collection $linkedCharges): void
+    {
+        $taken = $cardLines->pluck('transaction_id')->filter()->all();
+
+        foreach ($cardLines->whereNull('transaction_id') as $line) {
+            $charge = $linkedCharges
+                ->reject(fn (Transaction $charge) => in_array($charge->id, $taken, true))
+                ->filter(fn (Transaction $charge) => abs((float) $charge->amount - (float) $line->amount) < 0.005 && $this->cardFits($charge, $line->last_four))
+                ->first();
+
+            if ($charge) {
+                $line->update(['transaction_id' => $charge->id]);
+                $taken[] = $charge->id;
+            }
+        }
+    }
+
+    /**
+     * Link one charge to each card line still unpaid: exactly the line's
+     * amount, from the line's card when the bank names it, closest to the day
+     * it was paid. Returns what is left to pay; matched charges leave the pool.
+     *
+     * @param  \Illuminate\Support\Collection<int, ExpensePayment>  $cardLines
+     * @param  \Illuminate\Support\Collection<int, Transaction>  $transactions
+     */
+    protected function matchCardLines(Expense $expense, \Illuminate\Support\Collection $cardLines, \Illuminate\Support\Collection &$transactions, float $outstanding): float
+    {
+        foreach ($cardLines->whereNull('transaction_id') as $line) {
+            $paidOn = $line->paid_at ?? $expense->date;
+
+            $charge = $transactions
+                ->filter(fn (Transaction $charge) => abs((float) $charge->amount - (float) $line->amount) < 0.005 && $this->cardFits($charge, $line->last_four))
+                ->sortBy(fn (Transaction $charge) => [
+                    $line->last_four && in_array($line->last_four, $charge->cardNumbers(), true) ? 0 : 1,
+                    $charge->transaction_date->floatDiffInDays($paidOn),
+                ])
+                ->first();
+
+            if (! $charge) {
+                continue;
+            }
+
+            $linked = Transaction::findOrFail($charge->id);
+            $linked->expense()->associate($expense);
+            $linked->save();
+
+            // The model's own guards (another vendor, a check charge) may refuse the link.
+            if ((int) $linked->fresh()->expense_id !== (int) $expense->id) {
+                continue;
+            }
+
+            $line->update(['transaction_id' => $linked->id]);
+            $transactions = $transactions->reject(fn (Transaction $candidate) => $candidate->id === $linked->id)->values();
+            $outstanding = round($outstanding - (float) $linked->amount, 2);
+        }
+
+        return $outstanding;
+    }
+
+    /** A charge fits a card line unless the bank names a different card. */
+    protected function cardFits(Transaction $charge, ?string $lastFour): bool
+    {
+        $cards = $charge->cardNumbers();
+
+        return $lastFour === null || $cards === [] || in_array($lastFour, $cards, true);
     }
 
     /**
