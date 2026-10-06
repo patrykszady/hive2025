@@ -23,7 +23,7 @@ class PlaidWebhookController extends Controller
      *
      * Webhook types we handle:
      * - TRANSACTIONS: SYNC_UPDATES_AVAILABLE, DEFAULT_UPDATE, TRANSACTIONS_REMOVED, INITIAL_UPDATE, HISTORICAL_UPDATE
-     * - ITEM: ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED
+     * - ITEM: ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED, LOGIN_REPAIRED
      */
     public function handle(Request $request)
     {
@@ -159,6 +159,10 @@ class PlaidWebhookController extends Controller
             
             // User revoked permission
             'USER_PERMISSION_REVOKED' => $this->handleUserPermissionRevoked($bank, $payload),
+
+            // The Item left ITEM_LOGIN_REQUIRED without our update flow (the user
+            // fixed it at the bank or through another app): clear the error and sync.
+            'LOGIN_REPAIRED' => app(\App\Services\PlaidService::class)->refreshItemStatus($bank),
             
             // New accounts available
             'NEW_ACCOUNTS_AVAILABLE' => Log::channel('plaid_adds')->info('New accounts available', [

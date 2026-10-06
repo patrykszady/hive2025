@@ -285,10 +285,16 @@ class BankShow extends Component
             return;
         }
 
-        // Process the bank item if no error occurred
-        // Note: Item status updates are now handled by ITEM webhooks
-        // app(\App\Controllers\TransactionController::class)->plaid_item_status();
-        sleep(2);
+        // Plaid sends no webhook for a repair made through our own update mode,
+        // so ask it how the Item is now: a cleared ITEM_LOGIN_REQUIRED leaves
+        // the card at once and a catch-up sync starts (PlaidService::refreshItemStatus).
+        $bank = Bank::find($bank_id) ?? $this->bank;
+
+        if ($bank) {
+            $plaidService->refreshItemStatus($bank);
+            $this->bank = $bank->fresh();
+        }
+
         $this->render();
 
         $this->dispatch('confirmProcessStep', 'banks_registered')->to('entry.vendor-registration');

@@ -76,6 +76,13 @@ class TransactionController extends Controller
         foreach ($banks as $bank) {
             $accessToken = $bank->plaid_access_token;
             $result = $this->plaidService->getItem($accessToken);
+            $storedErrorCode = $bank->plaid_options['error']['error_code'] ?? null;
+            $hadError = (bool) $storedErrorCode;
+            $repairedAt = $bank->plaid_options['repaired_at'] ?? null;
+            // A login error Plaid no longer reports was repaired (a reconnect, or a
+            // fix at the bank), whatever our own "no new transactions" rule says.
+            $repairedNow = $storedErrorCode && $storedErrorCode !== 'NO_TRANSACTIONS'
+                && ($result['error'] ?? false) !== true && empty($result['item']['error'] ?? null);
 
             if (($result['error'] ?? false) === true) {
                 $error = ['error' => $result];
@@ -93,7 +100,12 @@ class TransactionController extends Controller
                     $difference = $lastFailed->diff($lastSuccessful);
                     $difference = ['before' => $difference->invert, 'diff_in_days' => $difference->days];
 
-                    if ($difference['before'] === 1 && $difference['diff_in_days'] > 3) {
+                    // Right after a repair Plaid's last successful update is still the
+                    // old one; give it three days before calling the bank stale, or a
+                    // reconnected bank goes straight back into error and stops syncing.
+                    $recentlyRepaired = $repairedNow || ($repairedAt && Carbon::parse($repairedAt)->gt(now()->subDays(3)));
+
+                    if ($difference['before'] === 1 && $difference['diff_in_days'] > 3 && ! $recentlyRepaired) {
                         $error = ['error' => ['error_type' => 'ITEM_ERROR', 'error_code' => 'NO_TRANSACTIONS', 'error_message' => 'No New Transactions in over 3 days. Please UPDATE BANK.']];
                     } else {
                         $error = ['error' => false];
@@ -122,8 +134,20 @@ class TransactionController extends Controller
 
             // dd($result);
 
+            $cleared = $hadError && ($error['error'] ?? false) === false && ($result['error'] ?? false) !== true;
+
+            if ($cleared) {
+                $error['repaired_at'] = now()->toIso8601String();
+            }
+
             $bank->plaid_options = array_merge($bank->plaid_options ?? [], $error, $result);
             $bank->save();
+
+            // Syncs skip a bank in error, so the updates Plaid announced while it was
+            // in error were dropped: catch up now that it is clear.
+            if ($cleared) {
+                \App\Jobs\ProcessPlaidTransactionSync::dispatch($bank, 'LOGIN_REPAIRED');
+            }
         }
     }
 

@@ -233,6 +233,53 @@ class PlaidService
     }
 
     /**
+     * Ask Plaid how the bank's Item is now and record it: a cleared error is
+     * removed and a transaction sync starts to catch up; a standing error is
+     * stored fresh. Run after Link's update mode succeeds — Plaid sends no
+     * webhook for a repair made through our own update flow (its
+     * LOGIN_REPAIRED fires only for repairs made elsewhere) — so before
+     * 2026-10-05 a reconnected Citibank kept showing ITEM_LOGIN_REQUIRED, and
+     * because syncs skip a bank in error it also stopped syncing.
+     *
+     * @return array{checked: bool, repaired: bool, error: array<string, mixed>|null}
+     */
+    public function refreshItemStatus(\App\Models\Bank $bank): array
+    {
+        $result = $this->getItem($bank->plaid_access_token);
+
+        if (($result['error'] ?? false) === true || ! isset($result['item'])) {
+            return ['checked' => false, 'repaired' => false, 'error' => null];
+        }
+
+        $itemError = $result['item']['error'] ?? null;
+        $options = is_array($bank->plaid_options) ? $bank->plaid_options : [];
+        $hadError = (bool) ($options['error']['error_code'] ?? false);
+
+        if (empty($itemError)) {
+            $options['error'] = false;
+
+            if ($hadError) {
+                $options['repaired_at'] = now()->toIso8601String();
+            }
+
+            $bank->plaid_options = $options;
+            $bank->save();
+
+            if ($hadError) {
+                \App\Jobs\ProcessPlaidTransactionSync::dispatch($bank, 'LOGIN_REPAIRED');
+            }
+
+            return ['checked' => true, 'repaired' => $hadError, 'error' => null];
+        }
+
+        $options['error'] = ['error' => true] + $itemError;
+        $bank->plaid_options = $options;
+        $bank->save();
+
+        return ['checked' => true, 'repaired' => false, 'error' => $itemError];
+    }
+
+    /**
      * Exchange a Link public_token for the Item's access_token and item_id.
      *
      * @return array{access_token?: string, item_id?: string, error?: bool, error_message?: string}
