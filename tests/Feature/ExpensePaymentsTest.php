@@ -191,7 +191,7 @@ it('reads Menards rebate checks and certificates, and the full total they hide',
     $withCard = "TOTAL SALE\n51.51\nCERTIFICATE-BARCODED\n7.59\n****** 7256\nRemaining Balance: \$0.00\nCAPITAL ONE VISA 4144\n43.92";
 
     expect(tenders($receipt))->toBe(['store_credit 5338 214.98', 'gift_card 9769 5.97'])
-        ->and(ReceiptTenders::menardsRebateTotal($receipt))->toBe(['sale' => 5.97, 'rebates' => 214.98, 'total' => 220.95])
+        ->and(ReceiptTenders::menardsRebateTotal($receipt))->toBe(['sale' => 5.97, 'rebates' => 214.98, 'total' => 220.95, 'subtotal' => 220.51, 'tax' => 0.44])
         ->and(tenders($withCard))->toBe(['gift_card 7256 7.59', 'card 4144 43.92'])
         ->and(ReceiptTenders::menardsRebateTotal($withCard))->toBeNull();
 });

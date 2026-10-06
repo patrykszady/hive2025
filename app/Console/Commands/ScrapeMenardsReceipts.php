@@ -308,6 +308,12 @@ class ScrapeMenardsReceipts extends Command
             }
 
             if ($expense) {
+                // Rebate checks: the receipt's subtotal / tax / total describe the
+                // purchase, not what Menards printed after the checks.
+                if (is_array($ocrData['fields'] ?? null)) {
+                    $ocrData['fields'] = ReceiptTenders::withMenardsRebateTotals($ocrData['fields'], (string) ($ocrData['fields']['raw_content'] ?? $ocrData['content'] ?? ''));
+                }
+
                 ExpenseReceipts::create([
                     'expense_id'       => $expense->id,
                     'receipt_filename' => $filename,

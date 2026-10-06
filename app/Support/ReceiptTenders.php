@@ -336,12 +336,16 @@ class ReceiptTenders
     }
 
     /**
-     * What a Menards purchase really cost when rebate checks paid part of it:
-     * TOTAL SALE (what was left after the checks, tax included) plus the
-     * checks. Menards' own transaction total, which the receipt import uses,
-     * is the smaller TOTAL SALE. Null when the receipt spent no rebate check.
+     * What a Menards purchase really cost when rebate checks paid part of it.
+     * Menards takes the checks off before tax and prints what is left: TOTAL
+     * (pre-tax, after the checks), the TAX lines, TOTAL SALE. The purchase:
+     * subtotal = TOTAL + checks (the line items), tax = what was charged,
+     * total = TOTAL SALE + checks. Menards' own transaction total, which the
+     * receipt import uses, is the smaller TOTAL SALE. Expense 25950 (2025-10-31)
+     * was $243.01 of lumber paid entirely by a check: TOTAL SALE 0.00, no tax.
+     * Null when the receipt spent no rebate check.
      *
-     * @return array{sale: float, rebates: float, total: float}|null
+     * @return array{sale: float, rebates: float, total: float, subtotal: float, tax: float}|null
      */
     public static function menardsRebateTotal(string $text): ?array
     {
@@ -356,28 +360,77 @@ class ReceiptTenders
 
         $lines = array_values(array_filter(array_map('trim', preg_split('/\R/u', str_replace("\t", ' ', $text)) ?: []), fn ($line) => $line !== ''));
         $sale = null;
+        $preTax = null;
+        $tax = 0.0;
 
         foreach ($lines as $i => $line) {
-            if (! preg_match('/^TOTAL SALE\b\s*(.*)$/i', $line, $m)) {
+            if (preg_match('/^TOTAL SALE\b\s*(.*)$/i', $line, $m)) {
+                $sale ??= self::amountIn($m[1]) ?? self::amountOnNextLines($lines, $i, 3);
+
                 continue;
             }
 
-            $sale = self::amountIn($m[1]);
+            if (preg_match('/^TOTAL\b(?!\s*(?:SALE|NUMBER|SAVINGS))\s*(.*)$/i', $line, $m)) {
+                $preTax ??= self::amountIn($m[1]) ?? self::amountOnNextLines($lines, $i, 1);
 
-            for ($j = $i + 1; $sale === null && $j <= $i + 3 && isset($lines[$j]); $j++) {
-                if (preg_match('/^(USD\$\s*)?'.self::AMOUNT.'$/i', $lines[$j])) {
-                    $sale = self::amountIn($lines[$j]);
-                }
+                continue;
             }
 
-            break;
+            if (preg_match('/^TAX\b[^%]*%\s*(.*)$/i', $line, $m)) {
+                $tax += self::amountIn($m[1]) ?? self::amountOnNextLines($lines, $i, 1) ?? 0.0;
+            }
         }
 
         if ($sale === null) {
             return null;
         }
 
-        return ['sale' => $sale, 'rebates' => $rebates, 'total' => round($sale + $rebates, 2)];
+        $tax = $preTax !== null ? round($sale - $preTax, 2) : round($tax, 2);
+
+        return [
+            'sale' => $sale,
+            'rebates' => $rebates,
+            'total' => round($sale + $rebates, 2),
+            'subtotal' => round(($preTax ?? $sale - $tax) + $rebates, 2),
+            'tax' => $tax,
+        ];
+    }
+
+    /**
+     * The receipt's own subtotal, tax and total, put right for rebate checks
+     * (see menardsRebateTotal); Menards' printed figures are kept alongside.
+     * Unchanged when the receipt spent no rebate check.
+     *
+     * @param  array<string, mixed>  $fields  receipt_items
+     * @return array<string, mixed>
+     */
+    public static function withMenardsRebateTotals(array $fields, string $text): array
+    {
+        $full = self::menardsRebateTotal($text);
+
+        if ($full === null) {
+            return $fields;
+        }
+
+        return array_merge($fields, [
+            'subtotal' => $full['subtotal'],
+            'total_tax' => $full['tax'],
+            'total' => $full['total'],
+            'menards_rebate_checks' => $full['rebates'],
+            'menards_total_sale' => $full['sale'],
+        ]);
+    }
+
+    /** @param  list<string>  $lines */
+    protected static function amountOnNextLines(array $lines, int $i, int $reach): ?float
+    {
+        for ($j = $i + 1; $j <= $i + $reach && isset($lines[$j]); $j++) {
+            if (preg_match('/^(USD\$\s*)?'.self::AMOUNT.'$/i', $lines[$j])) {
+                return self::amountIn($lines[$j]);
+            }
+        }
+
+        return null;
     }
 
     /** The receipt's OCR text: raw_content on newer rows, receipt_html on older ones. */

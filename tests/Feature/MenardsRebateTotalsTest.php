@@ -16,9 +16,11 @@ uses(RefreshDatabase::class);
  * $216.67 purchase; 26088 read -$82.50 for an $82.50 one). Many were fixed by
  * hand over the years.
  */
-function rebateReceipt(string $sale, string $rebate, string $tender = ''): string
+function rebateReceipt(string $sale, string $rebate, string $tender = '', ?string $preTax = null, ?string $tax = null): string
 {
-    return "PINE TAPERED SHIMS 4334222 3 @1.56 4.68\nMENARD REBATE NO: 6323495338\n{$rebate}-\nRemaining Balance: \$0.00\nTOTAL\n0.00\nTOTAL SALE\n{$sale}\n{$tender}";
+    $totals = $preTax !== null ? "TOTAL\n{$preTax}\nTAX MOUNT PROSPEC-IL 10%\n{$tax}\n" : '';
+
+    return "PINE TAPERED SHIMS 4334222 3 @1.56 4.68\nMENARD REBATE NO: 6323495338\n{$rebate}-\nRemaining Balance: \$0.00\n{$totals}TOTAL SALE\n{$sale}\n{$tender}";
 }
 
 /** @return array{0: Vendor, 1: Vendor} Menards, and the company that owns the expenses */
@@ -40,9 +42,9 @@ function menardsExpense(Vendor $menards, Vendor $company, float $amount, string 
 
 it('raises Menards expenses to TOTAL SALE plus the rebate checks, on --commit only', function () {
     [$menards, $company] = menardsVendors();
-    $short = menardsExpense($menards, $company, 173.43, rebateReceipt('173.43', '43.24', "US Debit 4849\n173.43"));
+    $short = menardsExpense($menards, $company, 173.43, rebateReceipt('173.43', '43.24', "US Debit 4849\n173.43", '157.66', '15.77'));
     $wrongSign = menardsExpense($menards, $company, -82.50, rebateReceipt('0.00', '82.50'));
-    $fixedByHand = menardsExpense($menards, $company, 216.67, rebateReceipt('173.43', '43.24'));
+    $fixedByHand = menardsExpense($menards, $company, 243.01, rebateReceipt('0.00', '243.01'));
 
     $this->artisan('expenses:fix-menards-rebate-totals')->expectsOutputToContain('2 to correct (dry run)')->assertSuccessful();
     expect((float) $short->fresh()->amount)->toBe(173.43);
@@ -51,7 +53,11 @@ it('raises Menards expenses to TOTAL SALE plus the rebate checks, on --commit on
 
     expect((float) $short->fresh()->amount)->toBe(216.67)
         ->and((float) $wrongSign->fresh()->amount)->toBe(82.50)
-        ->and((float) $fixedByHand->fresh()->amount)->toBe(216.67);
+        ->and((float) $fixedByHand->fresh()->amount)->toBe(243.01);
+
+    // The receipts describe the purchase, Menards' printed figures kept alongside.
+    expect($short->receipts()->first()->receipt_items)->toMatchArray(['subtotal' => 200.90, 'total_tax' => 15.77, 'total' => 216.67, 'menards_rebate_checks' => 43.24, 'menards_total_sale' => 173.43])
+        ->and($fixedByHand->receipts()->first()->receipt_items)->toMatchArray(['subtotal' => 243.01, 'total_tax' => 0.0, 'total' => 243.01]);
 });
 
 it('imports a rebate-check receipt at the full total, and recognizes it when Menards sends it again', function () {
@@ -80,7 +86,8 @@ it('imports a rebate-check receipt at the full total, and recognizes it when Men
     $expenses = Expense::withoutGlobalScopes()->where('vendor_id', $menards->id)->get();
     expect($expenses)->toHaveCount(1)
         ->and((float) $expenses->first()->amount)->toBe(216.67)
-        ->and(ExpenseReceipts::where('expense_id', $expenses->first()->id)->count())->toBe(1);
+        ->and(ExpenseReceipts::where('expense_id', $expenses->first()->id)->count())->toBe(1)
+        ->and(ExpenseReceipts::where('expense_id', $expenses->first()->id)->first()->receipt_items)->toMatchArray(['total' => 216.67, 'menards_rebate_checks' => 43.24]);
 });
 
 it('runs the receipt check only outside production', function () {

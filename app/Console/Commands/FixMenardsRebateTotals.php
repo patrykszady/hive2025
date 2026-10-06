@@ -19,6 +19,9 @@ use Illuminate\Console\Command;
  *
  * Raises an expense to TOTAL SALE + rebate checks when it holds TOTAL SALE
  * (or the negative of the full total). Anything else is listed for a person.
+ * Also puts the receipt's own subtotal / tax / total right (they held what
+ * Menards printed after the checks: 25950 read $0.00 under $243.01 of
+ * lumber), Menards' printed figures kept alongside.
  * Dry run unless --commit. Re-running is harmless.
  */
 class FixMenardsRebateTotals extends Command
@@ -47,10 +50,13 @@ class FixMenardsRebateTotals extends Command
         $fix = [];
         $review = [];
         $alreadyFull = 0;
+        $receiptsFixed = 0;
 
         foreach ($query->get() as $expense) {
-            $text = $expense->receipts->map(fn ($receipt) => ReceiptTenders::receiptText($receipt))->first(fn ($t) => stripos($t, 'REBATE NO') !== false) ?? '';
+            $receipt = $expense->receipts->first(fn ($r) => stripos(ReceiptTenders::receiptText($r), 'REBATE NO') !== false);
+            $text = $receipt ? ReceiptTenders::receiptText($receipt) : '';
             $full = ReceiptTenders::menardsRebateTotal($text);
+
             $amount = round((float) $expense->amount, 2);
             $row = [$expense->id, $expense->date?->format('Y-m-d'), number_format($amount, 2)];
 
@@ -62,6 +68,7 @@ class FixMenardsRebateTotals extends Command
 
             if (abs($amount - $full['total']) <= 0.02) {
                 $alreadyFull++;
+                $receiptsFixed += $this->correctReceipt($receipt, $text);
 
                 continue;
             }
@@ -80,10 +87,13 @@ class FixMenardsRebateTotals extends Command
             if ($this->option('commit')) {
                 $expense->update(['amount' => $full['total']]);
             }
+
+            $receiptsFixed += $this->correctReceipt($receipt, $text);
         }
 
         $this->info(sprintf('%d Menards expenses spent rebate checks: %d already at the full total, %d %s, %d to review.',
             $alreadyFull + count($fix) + count($review), $alreadyFull, count($fix), $this->option('commit') ? 'corrected' : 'to correct (dry run)', count($review)));
+        $this->info(sprintf('Receipt subtotal / tax / total %s on %d of them.', $this->option('commit') ? 'corrected' : 'to correct', $receiptsFixed));
 
         if ($fix !== []) {
             $this->table(['Expense', 'Date', 'Amount', 'Full total', 'Rebate checks', 'Why'], $fix);
@@ -95,5 +105,33 @@ class FixMenardsRebateTotals extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Put the receipt's subtotal / tax / total right — only for an expense
+     * whose amount is (or is being made) the full total, never on a receipt
+     * read too poorly to trust. Returns 1 when it needed it.
+     */
+    protected function correctReceipt(?\App\Models\ExpenseReceipts $receipt, string $text): int
+    {
+        if ($receipt === null) {
+            return 0;
+        }
+
+        $fields = is_array($receipt->receipt_items) ? $receipt->receipt_items : [];
+        $corrected = ReceiptTenders::withMenardsRebateTotals($fields, $text);
+        $same = round((float) ($fields['subtotal'] ?? 0), 2) === $corrected['subtotal']
+            && round((float) ($fields['total'] ?? 0), 2) === $corrected['total']
+            && array_key_exists('total_tax', $fields) && round((float) $fields['total_tax'], 2) === $corrected['total_tax'];
+
+        if ($same) {
+            return 0;
+        }
+
+        if ($this->option('commit')) {
+            $receipt->update(['receipt_items' => $corrected]);
+        }
+
+        return 1;
     }
 }
