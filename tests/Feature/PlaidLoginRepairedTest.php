@@ -113,3 +113,55 @@ it('does not call a just-repaired bank stale on the hourly check, and catches it
     app(App\Http\Controllers\TransactionController::class)->plaid_item_status();
     expect($bank->fresh()->error)->toBeFalse();
 });
+
+/** A bank of an active company, healthy or in ITEM_LOGIN_REQUIRED. */
+function syncBank(bool $inError, string $name = 'Citibank'): Bank
+{
+    $vendor = Vendor::factory()->create(['business_name' => $name.' Co']);
+    $vendor->forceFill(['registration' => ['registered' => true, 'registration_date' => now()->toDateString()]])->save();
+
+    return Bank::create([
+        'name' => $name,
+        'vendor_id' => $vendor->id,
+        'plaid_ins_id' => 'ins_'.uniqid(),
+        'plaid_item_id' => 'item-'.uniqid(),
+        'plaid_access_token' => 'access-'.uniqid(),
+        'plaid_options' => ['error' => $inError ? ['error' => true, 'error_type' => 'ITEM_ERROR', 'error_code' => 'ITEM_LOGIN_REQUIRED'] : false],
+    ]);
+}
+
+it('syncs every healthy bank daily, and re-checks the ones in error', function () {
+    Queue::fake();
+    $healthy = syncBank(false, 'Capital One');
+    $repaired = syncBank(true, 'Citibank');
+    $stillBroken = syncBank(true, 'PSFCU');
+
+    $mock = Mockery::mock(PlaidService::class)->makePartial();
+    $mock->shouldReceive('getItem')->andReturnUsing(fn (string $token) => $token === $stillBroken->plaid_access_token
+        ? ['item' => ['error' => ['error_type' => 'ITEM_ERROR', 'error_code' => 'ITEM_LOGIN_REQUIRED']]]
+        : ['item' => ['error' => null]]);
+    app()->instance(PlaidService::class, $mock);
+    $this->mock(App\Http\Controllers\PlaidTransactionSyncController::class)
+        ->shouldReceive('syncBank')->once()->withArgs(fn (Bank $bank) => $bank->is($healthy));
+
+    $this->artisan('plaid:sync-transactions', ['--all' => true])
+        ->expectsOutputToContain("Bank {$repaired->id} (Citibank): ITEM_LOGIN_REQUIRED cleared by Plaid — catch-up sync queued")
+        ->expectsOutputToContain("Skipped bank {$stillBroken->id} (PSFCU): still ITEM_LOGIN_REQUIRED")
+        ->expectsOutputToContain('Sync complete: 2 synced, 1 skipped, 0 errors')
+        ->assertSuccessful();
+
+    Queue::assertPushed(ProcessPlaidTransactionSync::class, fn ($job) => $job->bank->is($repaired) && $job->webhookCode === 'LOGIN_REPAIRED');
+    Queue::assertNotPushed(ProcessPlaidTransactionSync::class, fn ($job) => $job->bank->is($stillBroken));
+    expect($repaired->fresh()->error)->toBeFalse()
+        ->and($stillBroken->fresh()->error['error_code'])->toBe('ITEM_LOGIN_REQUIRED');
+});
+
+it('runs the daily Plaid sync at 4 am Chicago in production only', function () {
+    $event = collect(app(Illuminate\Console\Scheduling\Schedule::class)->events())
+        ->first(fn ($event) => str_contains((string) $event->command, 'plaid:sync-transactions'));
+
+    expect($event)->not->toBeNull()
+        ->and($event->expression)->toBe('0 4 * * *')
+        ->and($event->timezone)->toBe('America/Chicago')
+        ->and($event->environments)->toBe(['production']);
+});

@@ -192,13 +192,19 @@ Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::
     ->withoutOverlapping()
     ->onOneServer();
 
-// Daily fallback for Plaid transaction sync (in case webhooks miss updates)
-// Schedule::command('plaid:sync-transactions --all')
-//   ->dailyAt('04:00')
-//   ->name('plaid-transactions-sync-fallback')
-//   ->environments(['production'])
-//   ->withoutOverlapping()
-//   ->onOneServer();
+// Daily Plaid sync. Webhooks are the only other trigger, and they skip a bank
+// in error — on 2026-10-06 a reconnected Citibank sat showing ITEM_LOGIN_REQUIRED
+// with a week of charges unsynced. Every healthy bank is synced in case a
+// webhook was missed; every bank in error is re-checked with Plaid and synced
+// the moment Plaid reports it healthy. A reconnect on the banks page syncs at
+// once; this is the daily try for everything else.
+Schedule::command('plaid:sync-transactions --all')
+    ->dailyAt('04:00')
+    ->timezone('America/Chicago')
+    ->name('plaid-transactions-sync-fallback')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
 
 Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_check_deposit_to_transactions'))
     ->everyTenMinutes()
