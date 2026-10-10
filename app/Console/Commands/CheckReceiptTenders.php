@@ -70,13 +70,13 @@ class CheckReceiptTenders extends Command
                 continue;
             }
 
-            if (! $mentions) {
-                $result['status'] === 'none' ? $counts['no_tender']++ : $counts['card_unread']++;
+            if (! $mentions && $result['status'] === 'none') {
+                $counts['no_tender']++;
 
                 continue;
             }
 
-            $counts['off_bank_unread']++;
+            $mentions ? $counts['off_bank_unread']++ : $counts['card_unread']++;
 
             if (count($unread) < (int) $this->option('show')) {
                 $rebate = $texts->map(fn ($text) => ReceiptTenders::menardsRebateTotal($text))->filter()->first();
@@ -87,7 +87,7 @@ class CheckReceiptTenders extends Command
                     number_format((float) $expense->amount, 2),
                     $result['found'] === null ? '-' : number_format((float) $result['found'], 2),
                     mb_strimwidth(implode(', ', array_map(fn ($l) => $l['method'].($l['last_four'] ? ' '.$l['last_four'] : '').' '.$l['amount'], $result['lines'])), 0, 54, '…') ?: 'nothing read',
-                    $rebate ? 'Menards full total '.number_format($rebate['total'], 2) : '',
+                    $rebate ? 'Menards full total '.number_format($rebate['total'], 2) : ($mentions ? '' : 'card tenders do not add up'),
                 ];
             }
         }
@@ -102,7 +102,7 @@ class CheckReceiptTenders extends Command
         ]);
 
         if ($unread !== []) {
-            $this->line('Not accounted for (newest first):');
+            $this->line('Not accounted for, or not adding up (newest first):');
             $this->table(['Expense', 'Date', 'Vendor', 'Amount', 'Lines sum', 'Lines read', 'Hint'], $unread);
         }
 

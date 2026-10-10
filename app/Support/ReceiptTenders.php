@@ -42,11 +42,7 @@ class ReceiptTenders
      */
     public static function fromText(string $text): array
     {
-        $lines = array_values(array_filter(
-            array_map(fn (string $line) => trim(preg_replace('/\s+/', ' ', $line)), preg_split('/\R/u', str_replace("\t", ' ', $text)) ?: []),
-            fn (string $line) => $line !== '',
-        ));
-
+        $lines = self::lines($text);
         $tenders = [];
         $consumed = [];
         $change = 0.0;
@@ -59,12 +55,28 @@ class ReceiptTenders
             // Menards: a rebate check spent at the register prints BEFORE the total as a
             // negative line ("MENARD REBATE NO: 6323495338" then "214.98-"), so TOTAL SALE
             // is what was left after it. It pays like store credit: a positive tender.
+            // The check's amount is the NEGATIVE one: on its line, the next, or the one
+            // before. An item price the reader dragged onto the line ("… 20 @10.48
+            // 209.60", 19310) is not it; failing those, the first trailing-minus amount
+            // further down that no card, total or tender printed ("587.93 204.85-").
             if (preg_match('/^MENARDS? REBATE NO:?\s*(\d{4,})\b\s*(.*)$/i', $line, $m)) {
-                $amount = self::amountIn($m[2]) ?? self::amountAhead($lines, $i + 1, 1, $consumed);
+                $amount = self::negative(self::amountIn($m[2]));
+
+                if ($amount === null) {
+                    $peek = $consumed;
+                    $next = self::amountAhead($lines, $i + 1, 1, $peek);
+
+                    if ($next !== null && $next < 0) {
+                        $consumed = $peek;
+                        $amount = $next;
+                    }
+                }
 
                 if ($amount === null && $i > 0 && ! isset($consumed[$i - 1]) && ($before = self::amountIn($lines[$i - 1])) !== null && $before < 0) {
                     $amount = $before;
                 }
+
+                $amount ??= self::trailingMinusAhead($lines, $i + 1);
 
                 if ($amount !== null) {
                     $tenders[] = ['method' => ExpensePayment::STORE_CREDIT, 'amount' => abs($amount), 'last_four' => substr($m[1], -4), 'brand' => self::REBATE_CHECK];
@@ -122,6 +134,27 @@ class ReceiptTenders
 
                 if ($amount !== null && ! $declined) {
                     $tenders[] = self::tender(null, $amount, $card);
+                }
+
+                continue;
+            }
+
+            // Route 12 Rental: "VI Card #: XXXXXXXXXXXX4060 Type: AUTHORIZATION ONLY" is
+            // the deposit hold at pickup, never charged; the "FORCE/PRE-AUTHORIZED" block
+            // after it is the charge (27028). The type sits on the line or the next; the
+            // amount is the first lone amount before the next card block.
+            if (preg_match('/^(?:[A-Z]{2}\s+)?CARD\s*#:?\s*X{4,16}\s?(\d{4})\b\s*(.*)$/i', $line, $m)) {
+                $type = $m[2];
+
+                if (preg_match('/TYPE:?\s*$/i', $type) && isset($lines[$i + 1]) && ! preg_match('/'.self::AMOUNT.'/', $lines[$i + 1])) {
+                    $type .= ' '.$lines[$i + 1];
+                    $consumed[$i + 1] = true;
+                }
+
+                $amount = self::loneAmountAhead($lines, $i + 1, 10, $consumed);
+
+                if ($amount !== null && ! preg_match('/AUTHORI[SZ]ATION ONLY/i', $type)) {
+                    $tenders[] = self::tender(null, $amount, $m[1]);
                 }
 
                 continue;
@@ -305,9 +338,10 @@ class ReceiptTenders
      * since 2026-03-20). Early rows say "Credit"/"Debit" instead of the enum.
      *
      * @param  array<int, array<string, mixed>>  $methods
+     * @param  list<float>  $authorizedOnly  amounts the receipt printed as AUTHORIZATION ONLY (authorizationOnlyAmounts)
      * @return list<array{method: string, amount: float, last_four: ?string, brand: ?string}>
      */
-    public static function fromReaderPaymentMethods(array $methods): array
+    public static function fromReaderPaymentMethods(array $methods, array $authorizedOnly = []): array
     {
         $lines = [];
 
@@ -316,6 +350,15 @@ class ReceiptTenders
 
             if (abs($amount) < 0.005) {
                 continue;
+            }
+
+            // A card line for an amount the receipt printed as AUTHORIZATION ONLY is the hold, not a payment.
+            foreach ($authorizedOnly as $k => $hold) {
+                if (abs(abs($amount) - $hold) < 0.005 && in_array((string) ($method['type'] ?? ''), ['CreditCard', 'Credit', 'DebitCard', 'Debit'], true)) {
+                    unset($authorizedOnly[$k]);
+
+                    continue 2;
+                }
             }
 
             $lines[] = [
@@ -459,18 +502,24 @@ class ReceiptTenders
     {
         $target = round((float) $expense->amount, 2);
         $closest = null;
+        $bySource = [];
 
         foreach ($expense->receipts as $receipt) {
             $items = is_array($receipt->receipt_items) ? $receipt->receipt_items : [];
+            $text = self::receiptText($receipt);
             $candidates = [
                 ExpensePayment::SOURCE_AMAZON => self::fromAmazonCharges(is_array($items['charges'] ?? null) ? $items['charges'] : []),
-                ExpensePayment::SOURCE_RECEIPT_TEXT => self::fromText(self::receiptText($receipt)),
-                ExpensePayment::SOURCE_RECEIPT_READER => self::fromReaderPaymentMethods(is_array($items['payment_methods'] ?? null) ? $items['payment_methods'] : []),
+                ExpensePayment::SOURCE_RECEIPT_TEXT => self::fromText($text),
+                ExpensePayment::SOURCE_RECEIPT_READER => self::fromReaderPaymentMethods(is_array($items['payment_methods'] ?? null) ? $items['payment_methods'] : [], self::authorizationOnlyAmounts($text)),
             ];
 
             foreach ($candidates as $source => $lines) {
                 if ($lines === []) {
                     continue;
+                }
+
+                foreach ($lines as $line) {
+                    $bySource[$source][] = ['receipt_id' => $receipt->id] + $line;
                 }
 
                 foreach ([$lines, self::withoutRepeats($lines)] as $attempt) {
@@ -490,6 +539,29 @@ class ReceiptTenders
                 }
 
                 $closest ??= ['source' => $source, 'receipt_id' => $receipt->id, 'lines' => $lines, 'found' => round(array_sum(array_column($lines, 'amount')), 2)];
+            }
+        }
+
+        // Receipts that pay one purchase between them: a Home Depot deposit on
+        // one, the final sale with the deposit's refund on the other (26045).
+        // Each line keeps its receipt.
+        if ($expense->receipts->count() > 1) {
+            foreach ($bySource as $source => $lines) {
+                foreach ([$lines, self::withoutRepeats($lines)] as $attempt) {
+                    $sum = round(array_sum(array_column($attempt, 'amount')), 2);
+
+                    if (abs(abs($sum) - abs($target)) <= 0.02) {
+                        $sign = ($target < 0) === ($sum < 0) ? 1 : -1;
+
+                        return [
+                            'status' => 'matched',
+                            'source' => $source,
+                            'receipt_id' => null,
+                            'lines' => array_map(fn (array $line) => ['amount' => round($line['amount'] * $sign, 2)] + $line, $attempt),
+                            'found' => $sum,
+                        ];
+                    }
+                }
             }
         }
 
@@ -556,6 +628,89 @@ class ReceiptTenders
     protected static function labelOnly(string $line): ?string
     {
         return preg_match('/^('.self::STORE_TENDER.'|'.self::BRAND.')\s*('.self::AMOUNT.')?$/i', $line, $m) ? $m[1] : null;
+    }
+
+    /** @return list<string> the receipt's non-empty lines, whitespace collapsed */
+    protected static function lines(string $text): array
+    {
+        return array_values(array_filter(
+            array_map(fn (string $line) => trim(preg_replace('/\s+/', ' ', $line)), preg_split('/\R/u', str_replace("\t", ' ', $text)) ?: []),
+            fn (string $line) => $line !== '',
+        ));
+    }
+
+    protected static function negative(?float $amount): ?float
+    {
+        return $amount !== null && $amount < 0 ? $amount : null;
+    }
+
+    /**
+     * The first trailing-minus amount ("204.85-") from $from on that is not
+     * on a card's, a total's or a tender's own line: a Menards rebate check
+     * the reader moved away from its REBATE NO line.
+     *
+     * @param  list<string>  $lines
+     */
+    protected static function trailingMinusAhead(array $lines, int $from): ?float
+    {
+        for ($j = $from; $j < count($lines); $j++) {
+            if (preg_match('/^(X{4,}|CARD BALANCE|TOTAL|SUBTOTAL|TAX|CHANGE|CERTIFICATE|CASH|'.self::STORE_TENDER.'|(?:CAPITAL ONE |CHASE |CITI )?(?:'.self::BRAND.'))\b/i', $lines[$j])) {
+                continue;
+            }
+
+            if (preg_match_all('/(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})-(?![\d%])/', $lines[$j], $all, PREG_SET_ORDER)) {
+                $m = end($all);
+
+                return -(float) (str_replace(',', '', $m[1]).'.'.$m[2]);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The first line within reach that is only an amount, stopping at the
+     * next card block ("Card #").
+     *
+     * @param  list<string>  $lines
+     * @param  array<int, bool>  $consumed
+     */
+    protected static function loneAmountAhead(array $lines, int $from, int $reach, array &$consumed): ?float
+    {
+        for ($j = $from; $j <= $from + $reach && isset($lines[$j]); $j++) {
+            if (preg_match('/CARD\s*#/i', $lines[$j])) {
+                return null;
+            }
+
+            if (preg_match('/^'.self::AMOUNT.'$/', $lines[$j])) {
+                $consumed[$j] = true;
+
+                return self::amountIn($lines[$j]);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Amounts the receipt printed as "AUTHORIZATION ONLY": a rental's deposit
+     * hold, never charged, which the receipt reader lists as a payment.
+     *
+     * @return list<float>
+     */
+    public static function authorizationOnlyAmounts(string $text): array
+    {
+        $lines = self::lines($text);
+        $amounts = [];
+        $consumed = [];
+
+        foreach ($lines as $i => $line) {
+            if (preg_match('/AUTHORI[SZ]ATION ONLY/i', $line) && ($amount = self::loneAmountAhead($lines, $i + 1, 10, $consumed)) !== null) {
+                $amounts[] = abs($amount);
+            }
+        }
+
+        return $amounts;
     }
 
     /** The last amount in a piece of text, signed as printed. */

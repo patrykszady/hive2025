@@ -206,3 +206,41 @@ it('nets every way change is printed out of cash', function () {
     expect(tenders("TOTAL\n\$40.13\nCASH\n41.00\nCHANGE DUE\n0.87"))->toBe(['cash 40.13'])
         ->and(tenders("Total\n\$3.00\nCash\n\$5.00\nChange back (Cash)\n\$2.00"))->toBe(['cash 3']);
 });
+
+it('reads a Menards rebate check as the trailing-minus amount, never an item price dragged onto its line', function () {
+    $receipt = "1/2X4X8 GYPSUM-LIGHTWT -PICK 1311223 20 @10.48 209.60\nMENARD REBATE NO: 6321404115 Remaining Balance: \$0.00 ORDER 95313 1/2X4X8 GYPSUM-LIGHTWT -PICK 1311223 20 @10.48 209.60\nTOTAL\nTOTAL SALE\nCERTIFICATE-BARCODED\n65.57\n****** 9769\nUS Debit 4846\n622.99\nEFT Debit\n587.93 204.85-";
+
+    expect(tenders($receipt))->toBe(['store_credit 4115 204.85', 'gift_card 9769 65.57', 'card 4846 622.99'])
+        ->and(ReceiptTenders::forExpense(paidExpense(893.41, $receipt))['status'])->toBe('matched');
+});
+
+it('skips a rental deposit authorization, in the receipt text and in the reader\'s lines', function () {
+    $text = "Credit Card Payments\nVI Card #: XXXXXXXXXXXX4060 Type: AUTHORIZATION ONLY\nAPPROVAL#: 042978\n05/11/26 10:28 AM\nAMOUNT\n250.00\nCredit Card Payments ********\nVI Card #: XXXXXXXXXXXX4060 Type:\nFORCE/PRE-AUTHORIZED\nAPPROVAL#: 042978\nAMOUNT\n65.15\nDEPOSIT\n0.00\nTOTAL DUE\n65.15\nTOTAL PAID\n65.15";
+    $reader = ['payment_methods' => [['type' => 'CreditCard', 'amount' => 250, 'last_four' => '4060'], ['type' => 'CreditCard', 'amount' => 65.15, 'last_four' => '4060']]];
+
+    expect(tenders($text))->toBe(['card 4060 65.15'])
+        ->and(ReceiptTenders::authorizationOnlyAmounts($text))->toBe([250.0])
+        ->and(ReceiptTenders::fromReaderPaymentMethods($reader['payment_methods'], [250.0]))->toBe([['method' => 'card', 'amount' => 65.15, 'last_four' => '4060', 'brand' => null]]);
+
+    $fromText = ReceiptTenders::forExpense(paidExpense(65.15, $text, $reader));
+    $readerOnly = ReceiptTenders::forExpense(paidExpense(65.15, "Type: AUTHORIZATION ONLY\nAMOUNT\n250.00\nTOTAL PAID\n65.15", $reader));
+
+    expect($fromText['status'])->toBe('matched')->and($fromText['source'])->toBe('receipt_text')
+        ->and($readerOnly['status'])->toBe('matched')->and($readerOnly['source'])->toBe('receipt_reader')
+        ->and(array_column($readerOnly['lines'], 'amount'))->toBe([65.15]);
+});
+
+it('reads an expense\'s receipts together: a Home Depot deposit and the final sale that refunds it', function () {
+    $expense = paidExpense(21.85, "SUBTOTAL\n150.00\nTOTAL\n\$150.00\nXXXXXXXXXXXX4849 MASTERCARD\nUSD\$ 150.00\nDEPOSIT NO# 19132512100733019342710996");
+    expect(ExpensePayment::where('expense_id', $expense->id)->count())->toBe(0);
+
+    ExpenseReceipts::create(['expense_id' => $expense->id, 'receipt_html' => "SUBTOTAL\n21.85\nTOTAL\n\$21.85\nE-DEPOSIT\n150.00\nXXXXXXXXXXXX4849 MASTERCARD\n-128.15\nDEPOSIT NO# 19132512100733019342710996"]);
+    $expense = $expense->fresh('receipts');
+    $result = ReceiptTenders::forExpense($expense);
+
+    expect($result['status'])->toBe('matched')
+        ->and($result['source'])->toBe('receipt_text')
+        ->and(array_column($result['lines'], 'amount'))->toBe([150.0, -128.15])
+        ->and(array_column($result['lines'], 'receipt_id'))->toBe($expense->receipts->pluck('id')->all())
+        ->and(ExpensePayment::where('expense_id', $expense->id)->orderBy('id')->pluck('expense_receipt_id')->all())->toBe($expense->receipts->pluck('id')->all());
+});

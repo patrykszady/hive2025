@@ -51,7 +51,7 @@ class ExpensePaymentSync
 
                 ExpensePayment::create([
                     'expense_id' => $expense->id,
-                    'expense_receipt_id' => $result['receipt_id'],
+                    'expense_receipt_id' => $line['receipt_id'] ?? $result['receipt_id'],
                     'method' => $line['method'],
                     'amount' => $line['amount'],
                     'last_four' => $line['last_four'],
