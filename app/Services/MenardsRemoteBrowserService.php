@@ -384,6 +384,15 @@ class MenardsRemoteBrowserService
             \App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY
         );
 
+        // One tab before signing in. Every attempt that fails leaves its login
+        // tab open, and the sign-in script attaches to whichever login tab it
+        // finds first — on 2026-10-06 one of five, never the one in front, and
+        // it waited there until its time ran out.
+        if (($tabs = $this->pageTabCount()) !== null && $tabs > 1) {
+            $tidied = $this->tidyTabs();
+            Log::channel('menards')->info('Menards browser: closed extra tabs before signing in', ['closed' => $tidied['closed'] ?? null, 'had' => $tabs]);
+        }
+
         $loaded = $this->loadAndWait('https://www.menards.com/main/login.html', ['Sign In at Menards']) !== '';
 
         // Menards bounces a signed-in visitor straight off login.html onto an
@@ -583,15 +592,26 @@ class MenardsRemoteBrowserService
         }
         fclose($socket);
 
-        $result = \Illuminate\Support\Facades\Process::path(base_path())
-            ->timeout(90)
-            ->input(json_encode([
-                'email' => $email,
-                'password' => $password,
-                'port' => $port,
-                'timeoutMs' => 45000,
-            ]))
-            ->run([(string) config('services.menards.node_binary', 'node'), base_path('scripts/menards-signin.cjs')]);
+        try {
+            $result = \Illuminate\Support\Facades\Process::path(base_path())
+                ->timeout(90)
+                ->input(json_encode([
+                    'email' => $email,
+                    'password' => $password,
+                    'port' => $port,
+                    'timeoutMs' => 45000,
+                ]))
+                ->run([(string) config('services.menards.node_binary', 'node'), base_path('scripts/menards-signin.cjs')]);
+        } catch (\Illuminate\Process\Exceptions\ProcessTimedOutException $e) {
+            // A script that never answers (2026-10-06: it attached to one of five
+            // sign-in tabs left by earlier attempts and waited for a form that
+            // never rendered there) is a failed attempt, not a crash: the typed
+            // sign-in follows and a wall still gets flagged for a person. Thrown,
+            // it ended the sync with no alert, thirteen times in a day.
+            Log::channel('menards')->warning('Menards browser: Puppeteer sign-in script timed out — typing the form instead', ['seconds' => 90]);
+
+            return ['ok' => false, 'stage' => 'timeout', 'error' => 'The sign-in script did not finish in 90 seconds.'];
+        }
 
         $lines = array_values(array_filter(array_map('trim', explode("\n", $result->output()))));
         $decoded = $lines === [] ? null : json_decode(end($lines), true);
@@ -1526,6 +1546,20 @@ class MenardsRemoteBrowserService
 
         return collect($targets)->contains(fn ($target) => ($target['type'] ?? null) === 'page'
             && str_contains((string) ($target['url'] ?? ''), '/main/receiptLookup.html'));
+    }
+
+    /** How many page tabs Chrome has open, from the DevTools tab list; null when it cannot be asked. */
+    public function pageTabCount(): ?int
+    {
+        try {
+            $targets = \Illuminate\Support\Facades\Http::timeout(2)
+                ->get('http://127.0.0.1:'.(int) config('services.menards.cdp_port', 9298).'/json/list')
+                ->json();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return is_array($targets) ? collect($targets)->where('type', 'page')->count() : null;
     }
 
     /**

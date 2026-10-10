@@ -237,3 +237,42 @@ it('signs straight in when no check appears, without clicking anything', functio
     expect($browser->login('buyer@example.test', 'secret')['ok'])->toBeTrue()
         ->and($browser->clicks)->toBe([]);
 });
+
+/**
+ * 2026-10-06: the script attached to one of five sign-in tabs left by
+ * earlier attempts, waited there for a form that never rendered, and the
+ * 90-second limit threw out of the sync thirteen times in a day — no typed
+ * fallback, no alert for a person.
+ */
+it('treats a script that runs out of time as a failed attempt, not a crash', function () {
+    [$server, $port] = menardsCdp_fakePort();
+    config(['services.menards.puppeteer_signin' => true, 'services.menards.cdp_port' => $port]);
+
+    $symfony = new Symfony\Component\Process\Process(['true']);
+    Process::fake(['*' => function () use ($symfony) {
+        throw new Illuminate\Process\Exceptions\ProcessTimedOutException(
+            new Symfony\Component\Process\Exception\ProcessTimedOutException($symfony, Symfony\Component\Process\Exception\ProcessTimedOutException::TYPE_GENERAL),
+            new Illuminate\Process\ProcessResult($symfony),
+        );
+    }]);
+
+    expect(app(MenardsRemoteBrowserService::class)->fillSignInFormWithPuppeteer('a@b.test', 'x'))
+        ->toMatchArray(['ok' => false, 'stage' => 'timeout']);
+
+    fclose($server);
+});
+
+it('closes the extra tabs before signing in', function () {
+    $browser = Mockery::mock(MenardsRemoteBrowserService::class)->makePartial()->shouldAllowMockingProtectedMethods();
+    $browser->shouldReceive('xdotoolAvailable', 'displayUp')->andReturn(true);
+    $browser->shouldReceive('pageTabCount')->andReturn(5);
+    $browser->shouldReceive('tidyTabs')->once()->andReturn(['ok' => true, 'closed' => 4]);
+    $browser->shouldReceive('loadAndWait')->andReturn('');
+    $browser->shouldReceive('onSignedInPage')->andReturn(true);
+    $browser->shouldReceive('windowTitle')->andReturn('Account Overview at Menards® - Google Chrome');
+    $browser->shouldReceive('retireExpiredReport', 'markSignedIn');
+
+    $result = (fn () => $this->loginLocked('a@b.test', 'x', force: true))->call($browser);
+
+    expect($result['ok'])->toBeTrue();
+});
