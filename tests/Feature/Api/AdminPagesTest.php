@@ -25,7 +25,7 @@ it('lists every marketing/legal page exactly once, in English, never a hand-type
     $finances = collect($data['data'])->firstWhere('path', 'en/welcome/finances');
     expect($finances)->not->toBeNull();
     expect($finances['type'])->toBe('area');
-    expect($finances['title'])->toBe('Finances — Hive Contractors');
+    expect($finances['title'])->toBe('Contractor bookkeeping on autopilot — Hive Contractors');
     expect($finances['status'])->toBe('published');
     expect($finances['in_sitemap'])->toBeNull(); // nothing to switch: the admin hides the sitemap toggle
     expect($finances['url'])->toBe('https://hive.contractors/en/welcome/finances');
@@ -94,7 +94,7 @@ it('shows a single page by its stable id, the same shape as the list row', funct
 
     expect($data['id'])->toBe($override->id);
     expect($data['path'])->toBe('en/welcome/finances');
-    expect($data['title'])->toBe('Finances — Hive Contractors');
+    expect($data['title'])->toBe('Contractor bookkeeping on autopilot — Hive Contractors');
 });
 
 it('404s a page id that was never listed', function () {

@@ -1,5 +1,19 @@
-@section('title', 'Finances — Hive Contractors')
-<x-guest-layout>
+@section('title', __('Contractor bookkeeping on autopilot — Hive Contractors'))
+<x-guest-layout :description="__('Receipts, bank transactions, payments, checks and payroll flow into one place and reconcile themselves: clean books and accurate job costs for every project.')">
+    @push('head-appended')
+        @php
+            $financesSchema = [
+                '@context' => 'https://schema.org',
+                '@type' => 'WebPage',
+                'name' => __('Contractor bookkeeping on autopilot'),
+                'description' => __('Receipts, bank transactions, payments, checks and payroll flow into one place and reconcile themselves: clean books and accurate job costs for every project.'),
+                'url' => locale_alternate_url(app()->getLocale()),
+                'inLanguage' => app()->getLocale(),
+                'isPartOf' => ['@type' => 'WebSite', 'name' => config('app.name'), 'url' => config('app.marketing_url', config('app.url'))],
+            ];
+        @endphp
+        <script type="application/ld+json">{!! json_encode($financesSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) !!}</script>
+    @endpush
     <x-marketing.nav active="finances" />
 
     <x-marketing.feature-hero

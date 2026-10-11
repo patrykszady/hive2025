@@ -207,7 +207,20 @@ it('gives every marketing page its own title tag, not the bare app name', functi
     // production shipped "<title>Hive</title>" on every page (2026-09-27).
     $html = $this->get('/en/welcome/finances')->assertOk()->getContent();
 
-    expect($html)->toMatch('#<title>Finances — Hive Contractors</title>#')
+    expect($html)->toMatch('#<title>Contractor bookkeeping on autopilot — Hive Contractors</title>#')
         ->and($html)->not->toContain('<title>Hive</title>')
         ->and($html)->not->toContain('<title>Hive Contractors</title>');
+});
+
+it('gives the finances page a description, structured data and a title that fits, in every language', function () {
+    foreach (['en', 'pl', 'es'] as $locale) {
+        $html = $this->get("/{$locale}/welcome/finances")->assertOk()->getContent();
+        preg_match('#<title>([^<]*)</title>#', $html, $t);
+        preg_match('#<meta name="description" content="([^"]*)">#', $html, $d);
+
+        expect(mb_strlen(html_entity_decode($t[1] ?? '')))->toBeGreaterThanOrEqual(30)->toBeLessThanOrEqual(60)
+            ->and(mb_strlen(html_entity_decode($d[1] ?? '')))->toBeGreaterThanOrEqual(70)->toBeLessThanOrEqual(160)
+            ->and($html)->toContain('application/ld+json')
+            ->and($html)->toContain('"@type":"WebPage"');
+    }
 });
