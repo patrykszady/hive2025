@@ -176,6 +176,64 @@ class Transaction extends Model
     /**
      * Get the name of the index associated with the model.
      */
+    /** check_number of a transaction marked as a transfer (both legs of a card payment, money between accounts, a payment app). */
+    public const TRANSFER_CHECK_NUMBER = '1010101';
+
+    /**
+     * How a transfer-marked transaction moved money. 'person' when it paid
+     * someone through a payment app or a named transfer (Venmo, Zelle,
+     * PayPal, Cash App, a credit union's "To NAME," share transfer): those
+     * settle somebody's Transfer check and must stay visible until one
+     * claims them. 'account' for everything else marked a transfer (a
+     * credit-card payment, money between our own accounts), whose other leg
+     * is the record. Null when the transaction is not a transfer at all.
+     * Plaid's categories cannot do this: 177 of the last year's Zelle debits
+     * came categorised as credit-card payments (2026-10-11).
+     */
+    public static function transferKindFor(?string $description, ?string $checkNumber): ?string
+    {
+        if ((string) $checkNumber !== self::TRANSFER_CHECK_NUMBER) {
+            return null;
+        }
+
+        $description = (string) $description;
+
+        if (preg_match('/\b(VENMO|ZELLE|PAYPAL|CASH\s?APP|APPLE\s?CASH)\b/i', $description)) {
+            return 'person';
+        }
+
+        // "88123 To RACZKA,CEZARY T 4411 Share 1" — a named payee, upper case,
+        // the way the credit union writes a share transfer to a person.
+        if (preg_match('/\bTo [A-Z][A-Z\'\- ]+,/', $description)) {
+            return 'person';
+        }
+
+        return 'account';
+    }
+
+    public function transferKind(): ?string
+    {
+        return self::transferKindFor($this->plaid_merchant_description, $this->check_number);
+    }
+
+    /** The badge a transfer-marked row wears in the Transactions card: the app that carried it, else "Transfer". */
+    public function transferLabel(): ?string
+    {
+        if ($this->transferKind() === null) {
+            return null;
+        }
+
+        $description = (string) $this->plaid_merchant_description;
+
+        foreach (['Venmo' => '/\bVENMO\b/i', 'Zelle' => '/\bZELLE\b/i', 'PayPal' => '/\bPAYPAL\b/i', 'Cash App' => '/\bCASH\s?APP\b/i'] as $label => $pattern) {
+            if (preg_match($pattern, $description)) {
+                return $label;
+            }
+        }
+
+        return 'Transfer';
+    }
+
     public function searchableAs(): string
     {
         return env('APP_ENV') == 'local' ? 'transaction_index_dev' : 'transaction_index';
@@ -205,6 +263,7 @@ class Transaction extends Model
         // "No Vendor" default model when none is attached, which pollutes text
         // search (e.g. typo tolerance fuzzy-matches "Venmo" against "Vendor").
         $array['vendor_name'] = $this->vendor_id ? $this->vendor?->business_name : null;
+        $array['transfer_kind'] = $this->transferKind();
 
         // The default vendor stub must never leak into the index via toArray().
         unset($array['vendor']);
@@ -220,6 +279,33 @@ class Transaction extends Model
     protected function makeAllSearchableUsing(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
     {
         return $query->with('payments:id,transaction_id');
+    }
+
+    /**
+     * The Meilisearch filters behind the Expenses screen's Transactions card:
+     * what still has to be accounted for. Nothing with an expense, a check
+     * (and so a timesheet), or a deposit. A transfer-marked row stays out too
+     * — a credit-card payment or money between our own accounts has its other
+     * leg as the record — UNLESS it paid a person (transfer_kind 'person').
+     * Those settle somebody's Transfer check, and while unclaimed they were
+     * visible nowhere: 65 Venmo debits from Citibank since May 2026, $18,019,
+     * 32 of them never linked to a check (2026-10-11). Real check numbers stay
+     * visible until matched to a Check.
+     *
+     * @param  list<int>  $bankAccountIds
+     * @return list<string>
+     */
+    public static function unmatchedSearchFilters(array $bankAccountIds): array
+    {
+        return [
+            '__soft_deleted = 0',
+            'bank_account_id IN ['.implode(',', $bankAccountIds).']',
+            'expense_id IS NULL',
+            'expenses_count = 0',
+            'check_id IS NULL',
+            'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]',
+            '(check_number IS NULL OR check_number != "'.self::TRANSFER_CHECK_NUMBER.'" OR transfer_kind = "person")',
+        ];
     }
 
     /**
@@ -239,22 +325,7 @@ class Transaction extends Model
                     ->toArray();
             });
             
-            // Convert bank account IDs array to MeiliSearch filter format
-            $bankAccountFilter = "bank_account_id IN [" . implode(',', $bankAccountIds) . "]";
-            
-            // Base filters that apply to all queries
-            $baseFilters = [
-                "__soft_deleted = 0",
-                $bankAccountFilter,
-                "expense_id IS NULL",
-                "expenses_count = 0",
-                "check_id IS NULL",
-                'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]',
-                // Transfer-marked transactions (both sides of a credit card
-                // payment / bank transfer) never become expenses — hide them.
-                // Real check numbers stay visible until matched to a Check.
-                '(check_number IS NULL OR check_number != "1010101")',
-            ];
+            $baseFilters = self::unmatchedSearchFilters($bankAccountIds);
             
             $baseFilter = implode(' AND ', $baseFilters);
             
