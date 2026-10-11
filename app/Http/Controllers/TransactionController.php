@@ -2587,8 +2587,9 @@ class TransactionController extends Controller
                     continue; // Need at least 2 transactions for subset matching
                 }
 
-                // Limit to 14 for subset sum algorithm
-                $payeeTransactions = $payeeTransactions->take(14);
+                // Limit to 14 for the subset sum algorithm: the 14 nearest the
+                // check date, not the 14 earliest in the window.
+                $payeeTransactions = $this->nearestToCheckDate($check, $payeeTransactions, 14);
 
                 $matched = $this->trySubsetSumMatch($check, $payeeTransactions);
                 if ($matched) {
@@ -2598,7 +2599,7 @@ class TransactionController extends Controller
         } else {
             // For non-Transfer types (Check, Cash), just ensure all transactions have the same check_number
             // which is already filtered in the query above
-            $transactions = $transactions->take(14);
+            $transactions = $this->nearestToCheckDate($check, $transactions, 14);
             $this->trySubsetSumMatch($check, $transactions);
         }
     }
@@ -2720,23 +2721,35 @@ class TransactionController extends Controller
     }
 
     /**
+     * The $limit candidates closest to the check's date (ties: earliest first),
+     * handed back in date order — what the subset sum can afford to consider.
+     */
+    protected function nearestToCheckDate(Check $check, $transactions, int $limit)
+    {
+        return collect($transactions)
+            ->sortBy(fn ($t) => sprintf('%06d-%011d-%011d', abs($t->transaction_date->diffInDays($check->date, true)), $t->transaction_date->timestamp, $t->id))
+            ->take($limit)
+            ->sortBy(fn ($t) => sprintf('%011d-%011d', $t->transaction_date->timestamp, $t->id))
+            ->values();
+    }
+
+    /**
      * Attempt to match transactions to a check using subset sum algorithm.
      * Returns true if a match was found and linked.
      */
     protected function trySubsetSumMatch(Check $check, $transactions): bool
     {
-        // Verify transactions are within reasonable date range of each other (7 days max spread)
-        $minDate = $transactions->min('transaction_date');
-        $maxDate = $transactions->max('transaction_date');
-        if ($minDate->diffInDays($maxDate) > 7) {
-            // Transactions are too spread out - filter to only those within 7 days of check date
-            $transactions = $transactions->filter(function ($t) use ($check) {
-                return abs($t->transaction_date->diffInDays($check->date)) <= 7;
-            });
-            
-            if ($transactions->count() < 2) {
-                return false;
-            }
+        // Every candidate inside the caller's window stays in play (±14 days
+        // for a Transfer check). This used to drop everything further than 7
+        // days from the check date whenever the group spanned more than a
+        // week — and a week's pay sent in four Venmo transfers over the eight
+        // days AFTER the check date (check 3925, 2026-07-10: $200 on 07-12,
+        // 07-15, 07-17 and $300 on 07-18) lost its $300 and never matched. The
+        // date-tightest ranking below already prefers the closest combination;
+        // the only cap left is the subset sum's own, taken nearest-first.
+        $transactions = $this->nearestToCheckDate($check, $transactions, 14);
+        if ($transactions->count() < 2) {
+            return false;
         }
 
         $transaction_ids = $transactions->pluck('id')->toArray();

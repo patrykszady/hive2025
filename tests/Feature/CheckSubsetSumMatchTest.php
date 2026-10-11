@@ -299,3 +299,41 @@ it('never matches a Venmo business payment (Plaid-enriched merchant) to a person
         ->and($personB->refresh()->check_id)->toBe($check->id)
         ->and($personC->refresh()->check_id)->toBe($check->id);
 });
+
+it('links a transfer check to the transfers sent over the week after it, not only those within seven days', function () {
+    $bankAccount = makeTransferCheckBankAccount();
+    $user = makeCheckUser($bankAccount->vendor_id);
+
+    // Check 3925 (2026-10-11): a $900 Transfer dated 07-10 for a week of hours,
+    // paid out through Venmo on 07-12, 07-15, 07-17 and 07-18. The old matcher
+    // cut the group to seven days of the check date, lost the 07-18 $300 and
+    // never matched; the two 07-23 payments are the next week's and must stay.
+    $check = Check::create([
+        'check_type' => 'Transfer',
+        'date' => '2026-07-10',
+        'amount' => 900.00,
+        'bank_account_id' => $bankAccount->id,
+        'belongs_to_vendor_id' => $bankAccount->vendor_id,
+        'user_id' => $user->id,
+        'created_by_user_id' => $user->id,
+    ]);
+    $venmo = fn (string $date, float $amount) => Transaction::create([
+        'transaction_date' => $date,
+        'amount' => $amount,
+        'bank_account_id' => $bankAccount->id,
+        'check_number' => '1010101',
+        'plaid_merchant_description' => 'Venmo',
+    ]);
+    $week = [$venmo('2026-07-12', 200.00), $venmo('2026-07-15', 200.00), $venmo('2026-07-17', 200.00), $venmo('2026-07-18', 300.00)];
+    $nextWeek = [$venmo('2026-07-23', 200.00), $venmo('2026-07-23', 200.00)];
+
+    app(TransactionController::class)->add_check_id_to_transactions();
+
+    foreach ($week as $transaction) {
+        expect($transaction->refresh()->check_id)->toBe($check->id);
+    }
+    foreach ($nextWeek as $transaction) {
+        expect($transaction->refresh()->check_id)->toBeNull();
+    }
+});
+
