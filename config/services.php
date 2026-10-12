@@ -291,6 +291,8 @@ return [
         // Captcha solvers never pass EWCCV's reCAPTCHA v3 Enterprise (measured
         // 2026-08-16 and 2026-10-12); keys only spend. Off unless forced.
         'use_captcha_solvers' => (bool) env('EWCCV_USE_CAPTCHA_SOLVERS', false),
+        // How long a run waits for a running scraper to finish before giving up.
+        'lock_wait_seconds' => (int) env('EWCCV_LOCK_WAIT_SECONDS', 1500),
     ],
 
     'geoapify' => [

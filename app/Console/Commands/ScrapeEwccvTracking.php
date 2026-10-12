@@ -166,183 +166,199 @@ class ScrapeEwccvTracking extends Command
             return self::SUCCESS;
         }
 
-        // ── Run the Puppeteer scraper ─────────────────────────────────────
-        $this->info('Launching EWCCV scraper…');
+        // One scraper at a time: two runs share the Chrome profile and the
+        // EWCCV session, and on 2026-10-12 an overlapping pair re-posted a
+        // subscription and stamped a freshly tracked policy as failed.
+        $lock = \Illuminate\Support\Facades\Cache::lock('ewccv:scraper', 3600);
+        try {
+            $lock->block((int) config('services.ewccv.lock_wait_seconds', 1500));
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            $this->error('Another EWCCV run is in progress — try again when it finishes.');
 
-        $configData = [
-            'loginUrl'        => $loginUrl,
-            'captchaApiKey'   => $captchaKey ?: '',
-            'twoCaptchaKey'   => $twoCaptchaKey ?: '',
-            'vendors'         => $searchable->values()->toArray(),
-            'outputDir'       => $outputDir,
-            'screenshotDir'   => public_path('EWCCV'),
-            'bypassKey'       => config('services.ewccv.bypass_key') ?: env('EWCCV_BYPASS_KEY', ''),
-            // Handed over by the browser extension (EwccvSessionController):
-            // a real browser's accessToken, which skips reCAPTCHA entirely.
-            'bridgedAccessToken' => $this->bridgedAccessToken(),
-            'headless'        => $headless,
-            'delayMs'         => $delay,
-        ];
+            return self::FAILURE;
+        }
 
-        $configFile = tempnam(sys_get_temp_dir(), 'ewccv_cfg_');
-        file_put_contents($configFile, json_encode($configData));
+        try {
+            // ── Run the Puppeteer scraper ─────────────────────────────────────
+            $this->info('Launching EWCCV scraper…');
 
-        $scriptPath = base_path('scripts/ewccv-scraper.cjs');
-        $nodePath = trim(shell_exec('which node') ?: 'node');
+            $configData = [
+                'loginUrl'        => $loginUrl,
+                'captchaApiKey'   => $captchaKey ?: '',
+                'twoCaptchaKey'   => $twoCaptchaKey ?: '',
+                'vendors'         => $searchable->values()->toArray(),
+                'outputDir'       => $outputDir,
+                'screenshotDir'   => public_path('EWCCV'),
+                'bypassKey'       => config('services.ewccv.bypass_key') ?: env('EWCCV_BYPASS_KEY', ''),
+                // Handed over by the browser extension (EwccvSessionController):
+                // a real browser's accessToken, which skips reCAPTCHA entirely.
+                'bridgedAccessToken' => $this->bridgedAccessToken(),
+                'headless'        => $headless,
+                'delayMs'         => $delay,
+            ];
 
-        $this->line("  Output: {$outputDir}");
-        $this->line("  Vendors: {$searchable->count()}");
-        $this->line("  Headless: " . ($headless ? 'yes' : 'no'));
-        $this->line("  Delay: {$delay}ms");
-        $this->newLine();
-
-        $result = Process::timeout(3600) // 1 hour max
-            ->env(['EWCCV_PROXY_SESSION' => $this->proxySession])
-            ->run("{$nodePath} {$scriptPath} {$configFile}", function (string $type, string $output): void {
-                // Stream stderr (scraper logs) in real-time so the user can see
-                // prompts like the manual reCAPTCHA request immediately
-                if ($type === 'err') {
-                    $this->output->write($output);
-                }
-            });
-
-        @unlink($configFile);
-
-        // Exit code 2 = login failure (token expired) — retry with fresh token
-        if ($result->exitCode() === 2 && ! $this->option('login-url')) {
-            $this->warn('Login failed (token may be expired). Clearing cache and fetching fresh token…');
-            $this->clearCachedLoginUrl($outputDir);
-
-            $loginEmail = $this->option('login-email');
-            $freshUrl = $this->fetchLoginUrl($nylasService, $loginEmail, $outputDir, $headless, $delay);
-
-            if (! $freshUrl) {
-                $this->error('Could not obtain fresh EWCCV login URL from email.');
-
-                return self::FAILURE;
-            }
-
-            $this->cacheLoginUrl($outputDir, $freshUrl);
-            $this->info("  Got fresh login URL: " . substr($freshUrl, 0, 80) . '…');
-
-            // Re-run the scraper with the fresh URL
-            $configData['loginUrl'] = $freshUrl;
             $configFile = tempnam(sys_get_temp_dir(), 'ewccv_cfg_');
             file_put_contents($configFile, json_encode($configData));
 
-            $this->info('Retrying scraper with fresh token…');
+            $scriptPath = base_path('scripts/ewccv-scraper.cjs');
+            $nodePath = trim(shell_exec('which node') ?: 'node');
 
-            $result = Process::timeout(3600)
+            $this->line("  Output: {$outputDir}");
+            $this->line("  Vendors: {$searchable->count()}");
+            $this->line("  Headless: " . ($headless ? 'yes' : 'no'));
+            $this->line("  Delay: {$delay}ms");
+            $this->newLine();
+
+            $result = Process::timeout(3600) // 1 hour max
                 ->env(['EWCCV_PROXY_SESSION' => $this->proxySession])
                 ->run("{$nodePath} {$scriptPath} {$configFile}", function (string $type, string $output): void {
+                    // Stream stderr (scraper logs) in real-time so the user can see
+                    // prompts like the manual reCAPTCHA request immediately
                     if ($type === 'err') {
                         $this->output->write($output);
                     }
                 });
 
             @unlink($configFile);
-        }
 
-        if (! $result->successful()) {
-            $this->error('Scraper process failed (exit code ' . $result->exitCode() . ')');
-            $this->showDebugFiles($outputDir);
+            // Exit code 2 = login failure (token expired) — retry with fresh token
+            if ($result->exitCode() === 2 && ! $this->option('login-url')) {
+                $this->warn('Login failed (token may be expired). Clearing cache and fetching fresh token…');
+                $this->clearCachedLoginUrl($outputDir);
 
-            Log::error('EWCCV scraper failed', [
-                'exit_code'  => $result->exitCode(),
-                'output_dir' => $outputDir,
-                'stderr_tail' => substr($result->errorOutput(), -2000),
+                $loginEmail = $this->option('login-email');
+                $freshUrl = $this->fetchLoginUrl($nylasService, $loginEmail, $outputDir, $headless, $delay);
+
+                if (! $freshUrl) {
+                    $this->error('Could not obtain fresh EWCCV login URL from email.');
+
+                    return self::FAILURE;
+                }
+
+                $this->cacheLoginUrl($outputDir, $freshUrl);
+                $this->info("  Got fresh login URL: " . substr($freshUrl, 0, 80) . '…');
+
+                // Re-run the scraper with the fresh URL
+                $configData['loginUrl'] = $freshUrl;
+                $configFile = tempnam(sys_get_temp_dir(), 'ewccv_cfg_');
+                file_put_contents($configFile, json_encode($configData));
+
+                $this->info('Retrying scraper with fresh token…');
+
+                $result = Process::timeout(3600)
+                    ->env(['EWCCV_PROXY_SESSION' => $this->proxySession])
+                    ->run("{$nodePath} {$scriptPath} {$configFile}", function (string $type, string $output): void {
+                        if ($type === 'err') {
+                            $this->output->write($output);
+                        }
+                    });
+
+                @unlink($configFile);
+            }
+
+            if (! $result->successful()) {
+                $this->error('Scraper process failed (exit code ' . $result->exitCode() . ')');
+                $this->showDebugFiles($outputDir);
+
+                Log::error('EWCCV scraper failed', [
+                    'exit_code'  => $result->exitCode(),
+                    'output_dir' => $outputDir,
+                    'stderr_tail' => substr($result->errorOutput(), -2000),
+                ]);
+
+                return self::FAILURE;
+            }
+
+            // ── Parse results ─────────────────────────────────────────────────
+            $jsonOutput = $result->output();
+            $results = json_decode($jsonOutput, true);
+
+            if (! $results) {
+                $this->warn('Could not parse scraper output.');
+                $this->showDebugFiles($outputDir);
+
+                return self::FAILURE;
+            }
+
+            $this->newLine();
+            $this->line(str_repeat('═', 60));
+            $this->info('Results Summary');
+            $this->line(str_repeat('═', 60));
+
+            if (! empty($results['success'])) {
+                $this->info('  Successful (' . count($results['success']) . '):');
+                foreach ($results['success'] as $s) {
+                    $status = $s['alreadyTracking'] ? 'already tracking' : 'tracking enabled';
+                    $this->line("    ✓ {$s['businessName']} (ID: {$s['vendorId']}) — {$status}");
+                }
+            }
+
+            if (! empty($results['failed'])) {
+                $this->warn('  Failed (' . count($results['failed']) . '):');
+                foreach ($results['failed'] as $f) {
+                    $this->line("    ✗ {$f['businessName']} (ID: {$f['vendorId']}) — {$f['reason']}");
+                }
+            }
+
+            if (! empty($results['skipped'])) {
+                $this->warn('  Skipped (' . count($results['skipped']) . '):');
+                foreach ($results['skipped'] as $sk) {
+                    $this->line("    ⊘ {$sk['businessName']} (ID: {$sk['vendorId']}) — {$sk['reason']}");
+                }
+            }
+
+            // ── Persist per-doc state so /vendor_docs can show it ─────────────
+            // Results are keyed by vendor; stamp every active workers doc for that
+            // vendor. saveQuietly: the VendorDocObserver re-queues a lookup when a
+            // doc changes, and stamping the lookup's own result must not loop it.
+            $stamped = 0;
+            $stamp = function (int $vendorId, array $state) use ($vendorDocs, &$stamped): void {
+                foreach ($vendorDocs->where('vendor_id', $vendorId) as $doc) {
+                    $options = $doc->options ?? [];
+                    $options['ewccv'] = $state + ['checked_at' => now()->toIso8601String()];
+                    $doc->options = $options;
+                    $doc->saveQuietly();
+                    $stamped++;
+                }
+            };
+
+            foreach ($results['success'] ?? [] as $s) {
+                $stamp((int) $s['vendorId'], [
+                    'status'           => 'tracking',
+                    'match_type'       => $s['matchType'] ?? null,
+                    'already_tracking' => (bool) ($s['alreadyTracking'] ?? false),
+                ]);
+            }
+            foreach ($results['failed'] ?? [] as $f) {
+                $stamp((int) $f['vendorId'], [
+                    'status' => 'failed',
+                    'reason' => $f['reason'] ?? 'unknown',
+                ]);
+            }
+            foreach ($results['skipped'] ?? [] as $sk) {
+                $stamp((int) $sk['vendorId'], [
+                    'status' => 'skipped',
+                    'reason' => $sk['reason'] ?? 'unknown',
+                ]);
+            }
+
+            $this->info("Persisted EWCCV state onto {$stamped} vendor doc(s).");
+
+            $successCount = count($results['success'] ?? []);
+            $totalCount = $searchable->count();
+            $this->newLine();
+            $this->info("Done: {$successCount}/{$totalCount} vendors tracked successfully.");
+
+            Log::info('EWCCV scraper completed', [
+                'success' => count($results['success'] ?? []),
+                'failed'  => count($results['failed'] ?? []),
+                'skipped' => count($results['skipped'] ?? []),
             ]);
 
-            return self::FAILURE;
+            return self::SUCCESS;
+        } finally {
+            $lock->release();
         }
-
-        // ── Parse results ─────────────────────────────────────────────────
-        $jsonOutput = $result->output();
-        $results = json_decode($jsonOutput, true);
-
-        if (! $results) {
-            $this->warn('Could not parse scraper output.');
-            $this->showDebugFiles($outputDir);
-
-            return self::FAILURE;
-        }
-
-        $this->newLine();
-        $this->line(str_repeat('═', 60));
-        $this->info('Results Summary');
-        $this->line(str_repeat('═', 60));
-
-        if (! empty($results['success'])) {
-            $this->info('  Successful (' . count($results['success']) . '):');
-            foreach ($results['success'] as $s) {
-                $status = $s['alreadyTracking'] ? 'already tracking' : 'tracking enabled';
-                $this->line("    ✓ {$s['businessName']} (ID: {$s['vendorId']}) — {$status}");
-            }
-        }
-
-        if (! empty($results['failed'])) {
-            $this->warn('  Failed (' . count($results['failed']) . '):');
-            foreach ($results['failed'] as $f) {
-                $this->line("    ✗ {$f['businessName']} (ID: {$f['vendorId']}) — {$f['reason']}");
-            }
-        }
-
-        if (! empty($results['skipped'])) {
-            $this->warn('  Skipped (' . count($results['skipped']) . '):');
-            foreach ($results['skipped'] as $sk) {
-                $this->line("    ⊘ {$sk['businessName']} (ID: {$sk['vendorId']}) — {$sk['reason']}");
-            }
-        }
-
-        // ── Persist per-doc state so /vendor_docs can show it ─────────────
-        // Results are keyed by vendor; stamp every active workers doc for that
-        // vendor. saveQuietly: the VendorDocObserver re-queues a lookup when a
-        // doc changes, and stamping the lookup's own result must not loop it.
-        $stamped = 0;
-        $stamp = function (int $vendorId, array $state) use ($vendorDocs, &$stamped): void {
-            foreach ($vendorDocs->where('vendor_id', $vendorId) as $doc) {
-                $options = $doc->options ?? [];
-                $options['ewccv'] = $state + ['checked_at' => now()->toIso8601String()];
-                $doc->options = $options;
-                $doc->saveQuietly();
-                $stamped++;
-            }
-        };
-
-        foreach ($results['success'] ?? [] as $s) {
-            $stamp((int) $s['vendorId'], [
-                'status'           => 'tracking',
-                'match_type'       => $s['matchType'] ?? null,
-                'already_tracking' => (bool) ($s['alreadyTracking'] ?? false),
-            ]);
-        }
-        foreach ($results['failed'] ?? [] as $f) {
-            $stamp((int) $f['vendorId'], [
-                'status' => 'failed',
-                'reason' => $f['reason'] ?? 'unknown',
-            ]);
-        }
-        foreach ($results['skipped'] ?? [] as $sk) {
-            $stamp((int) $sk['vendorId'], [
-                'status' => 'skipped',
-                'reason' => $sk['reason'] ?? 'unknown',
-            ]);
-        }
-
-        $this->info("Persisted EWCCV state onto {$stamped} vendor doc(s).");
-
-        $successCount = count($results['success'] ?? []);
-        $totalCount = $searchable->count();
-        $this->newLine();
-        $this->info("Done: {$successCount}/{$totalCount} vendors tracked successfully.");
-
-        Log::info('EWCCV scraper completed', [
-            'success' => count($results['success'] ?? []),
-            'failed'  => count($results['failed'] ?? []),
-            'skipped' => count($results['skipped'] ?? []),
-        ]);
-
-        return self::SUCCESS;
     }
 
     /**
