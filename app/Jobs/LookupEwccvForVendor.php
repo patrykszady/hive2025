@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\VendorDoc;
+use App\Support\Ewccv\BridgedSession;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -69,6 +70,25 @@ class LookupEwccvForVendor implements ShouldQueue, ShouldBeUnique
         if (! $doc->vendor_id) {
             Log::warning('LookupEwccvForVendor skipped — missing vendor_id', [
                 'vendor_doc_id' => $this->vendorDocId,
+            ]);
+
+            return;
+        }
+
+        // EWCCV's search only accepts a credential a person's browser earned
+        // (BridgedSession); without one the scraper can only fail. Mark the
+        // doc as waiting — the card says what to do — and let
+        // RunPendingEwccvLookups pick it up when a session arrives.
+        if (! BridgedSession::canSearch()) {
+            $options = $doc->options ?? [];
+            if (($options['ewccv']['status'] ?? null) !== 'tracking') {
+                $options['ewccv'] = ['status' => 'pending', 'reason' => 'needs_browser_session', 'checked_at' => now()->toIso8601String()];
+                $doc->options = $options;
+                $doc->saveQuietly();
+            }
+            Log::info('LookupEwccvForVendor: no EWCCV browser session — doc marked pending', [
+                'vendor_doc_id' => $this->vendorDocId,
+                'vendor_id' => $doc->vendor_id,
             ]);
 
             return;

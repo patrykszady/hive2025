@@ -109,6 +109,7 @@ class VendorDoc extends Model
 
         $tip = match ($state['status']) {
             'tracking' => 'EWCCV coverage tracking enabled',
+            'pending' => 'EWCCV lookup waiting for a browser session: open ewccv.com with the Hive extension and it runs',
             'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
             'skipped' => 'EWCCV lookup skipped: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
             default => 'EWCCV: '.$state['status'],

@@ -415,14 +415,18 @@ Schedule::job(new DispatchIncompleteReceiptImageScrapesJob)
 // // tracked policies needs no human and no captcha. Daily because a subscription
 // // silently disappearing is exactly the failure we must notice: while a policy
 // // is tracked, EWCCV emails us if it is cancelled or not renewed.
-// Schedule::command('ewccv:sync-subscriptions --belongs-to-vendor-id=1')->runInBackground()
-//     ->dailyAt('06:30')
-//     ->timezone('America/Chicago')
-//     ->name('ewccv-subscription-sync')
-//     ->environments(['production'])
-//     ->withoutOverlapping()
-//     ->onOneServer()
-//     ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
+// Live since 2026-10-12: the magic-link sign-in reads the certificates
+// mailbox (live.com now forwards EWCCV's mail), and new policies are searched
+// by RunPendingEwccvLookups the moment the bridge extension hands over a
+// browser session — the only credential EWCCV's search accepts from here.
+Schedule::command('ewccv:sync-subscriptions --belongs-to-vendor-id=1')->runInBackground()
+    ->dailyAt('06:30')
+    ->timezone('America/Chicago')
+    ->name('ewccv-subscription-sync')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
 
 // System maintenance
 Schedule::command('horizon:snapshot')
@@ -594,3 +598,12 @@ Schedule::command('seo:health --markdown')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-health.log'));
+
+// Action items from calls and texts (ProjectActionItemExtractor): every
+// planner project reads what came in since its last run, nightly.
+Schedule::command('project:action-items --active')
+    ->dailyAt('04:10')
+    ->timezone('America/Chicago')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/action-items.log'));

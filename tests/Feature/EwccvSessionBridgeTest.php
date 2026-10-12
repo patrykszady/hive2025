@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\EwccvSessionController;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -8,6 +9,9 @@ use Illuminate\Support\Facades\Cache;
  * cannot pass ewccv.com's reCAPTCHA v3 itself. That makes this endpoint a
  * credential sink, so its auth is worth pinning.
  */
+// The hand-off now reads vendor docs to start pending lookups.
+uses(RefreshDatabase::class);
+
 beforeEach(function () {
     config()->set('services.ewccv.bridge_token', 'test-bridge-token-abc123');
     Cache::forget(EwccvSessionController::CACHE_KEY);

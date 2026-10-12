@@ -39,8 +39,11 @@ class ScrapeEwccvTracking extends Command
         $this->line(str_repeat('═', 60));
 
         $loginUrl   = $this->option('login-url');
-        $captchaKey = config('services.anticaptcha.api_key');
-        $twoCaptchaKey = config('services.twocaptcha.api_key');
+        // Captcha solvers are off unless EWCCV_USE_CAPTCHA_SOLVERS=true: their
+        // tokens are refused by EWCCV (measured), so a key here only spends.
+        $useSolvers = (bool) config('services.ewccv.use_captcha_solvers', false);
+        $captchaKey = $useSolvers ? config('services.anticaptcha.api_key') : null;
+        $twoCaptchaKey = $useSolvers ? config('services.twocaptcha.api_key') : null;
         $outputDir  = $this->option('output-dir') ?: storage_path('files/_temp_ewccv');
         $headless   = ! $this->option('visible');
         $dryRun     = $this->option('dry-run');
@@ -72,8 +75,8 @@ class ScrapeEwccvTracking extends Command
             $this->info("  Got login URL: " . substr($loginUrl, 0, 80) . '…');
         }
 
-        if (! $captchaKey && ! $twoCaptchaKey) {
-            $this->warn('Neither ANTICAPTCHA_API_KEY nor TWOCAPTCHA_API_KEY set — reCAPTCHA solving will fail.');
+        if (! $useSolvers) {
+            $this->line('  Captcha solvers off (EWCCV refuses their tokens); searches use the bridged browser session or the bypass key.');
         }
 
         // ── Load vendors with active WC policies ─────────────────────────
@@ -493,25 +496,17 @@ class ScrapeEwccvTracking extends Command
      */
     private function bridgedAccessToken(): string
     {
-        $session = \Illuminate\Support\Facades\Cache::get(
-            \App\Http\Controllers\EwccvSessionController::CACHE_KEY
-        );
+        $session = \App\Support\Ewccv\BridgedSession::fresh();
 
-        if (! is_array($session) || empty($session['access_token'])) {
-            return '';
-        }
-
-        $age = Carbon::parse($session['received_at'])->diffInMinutes(now());
-
-        if ($age > 45) {
-            $this->warn("  Bridged EWCCV session is {$age} min old — ignoring it; open ewccv.com so the extension refreshes it.");
+        if (! $session) {
+            $this->warn('  No fresh EWCCV browser session (under '.\App\Support\Ewccv\BridgedSession::MAX_AGE_MINUTES.' min) — open ewccv.com so the extension hands one over.');
 
             return '';
         }
 
-        $this->info("  Using EWCCV session from the browser extension ({$age} min old).");
+        $this->info("  Using EWCCV session from the browser extension ({$session['age_minutes']} min old).");
 
-        return (string) $session['access_token'];
+        return $session['access_token'];
     }
 
     private function resolveProxySession(): string

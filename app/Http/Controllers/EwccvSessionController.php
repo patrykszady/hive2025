@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunPendingEwccvLookups;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -70,15 +71,26 @@ class EwccvSessionController extends Controller
             'received_at' => now()->toIso8601String(),
         ], now()->addHours(12));
 
+        // The session lasts about 45 minutes: whatever is waiting for a
+        // search runs now, not on a schedule that would find it expired.
+        $pending = RunPendingEwccvLookups::pendingVendorIds((int) config('services.ewccv.belongs_to_vendor_id', 1));
+        if ($pending !== []) {
+            RunPendingEwccvLookups::dispatch();
+        }
+
         Log::info('EWCCV bridge: session received', [
             'access_token_len' => strlen($data['accessToken']),
             'has_jwt' => ! empty($data['jwt']),
+            'pending_lookups' => count($pending),
         ]);
 
         return response()->json([
             'ok' => true,
-            'message' => 'EWCCV search session stored.',
+            'message' => $pending === []
+                ? 'EWCCV search session stored; every active policy is already tracked.'
+                : sprintf('EWCCV search session stored; verifying %d vendor(s) now.', count($pending)),
             'expires_in_hours' => 12,
+            'pending_lookups' => count($pending),
         ]);
     }
 }
