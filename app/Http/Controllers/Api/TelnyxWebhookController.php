@@ -1234,10 +1234,10 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        // Play a screening prompt to the answering admin: "{Caller} is calling.
-        // Hang up now to send them to voicemail or remain on the line to
-        // connect." On speak.ended (admin_screen_done) we'll either join the
-        // existing conference (late answerer) or create one (first answerer).
+        // Play a screening prompt to the answering admin: "Call from {name}.
+        // Stay on the line to connect, or press 1 to text them back." On
+        // speak.ended (admin_screen) we'll either join the existing
+        // conference (late answerer) or create one (first answerer).
         // If the admin hangs up during the prompt, the admin_ring hangup
         // handler removes them and may trigger voicemail.
         $metadata = $callLog->metadata ?? [];
@@ -1277,9 +1277,10 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Speak the screening prompt to the answering admin. The prompt tells them
-     * who's calling and that hanging up sends the caller to voicemail. On
-     * speak.ended (action=admin_screen_done) the bridge/join is performed.
+     * Speak the screening prompt to the answering admin: who is calling, stay
+     * on the line to connect, 1 to text them back. On speak.ended
+     * (action=admin_screen) the bridge/join is performed, unless answering
+     * machine detection has called the leg a voicemail box meanwhile.
      */
     protected function playAdminScreeningPrompt(
         string $callControlId,
@@ -1303,13 +1304,15 @@ class TelnyxWebhookController extends Controller
             '{greeting}' => $greeting,
         ]);
 
-        // The answerer must press a key to be connected. A carrier voicemail
-        // box stays on the line but never presses anything, so "stay on the
-        // line to connect" put callers into Patryk's personal voicemail on
-        // 2026-09-25 (it answered 18 s in) and the cascade never reached Greg.
-        $promptText = trim($promptText.' '.\App\Livewire\Vendors\VendorOptions::SCREENING_KEY_INSTRUCTION);
+        // The answerer stays on the line to be connected — nothing to press
+        // (Patryk, 2026-10-12). A carrier voicemail box stays on the line too:
+        // on 2026-09-25 one took a call and the cascade never reached Greg.
+        // That is what premium answering machine detection on every team leg
+        // is for — a machine verdict drops the leg while the prompt plays
+        // (handleAdminLegAmdResult). 1 during the prompt texts the caller back.
+        $promptText = trim($promptText.' '.\App\Livewire\Vendors\VendorOptions::SCREENING_INSTRUCTION);
 
-        Log::channel('telnyx')->info('Playing admin screening prompt (keypress to connect)', [
+        Log::channel('telnyx')->info('Playing admin screening prompt (stay on the line to connect)', [
             'admin_call_control_id' => $callControlId,
             'call_log_id' => $callLog->id,
             'admin_user_id' => $adminUserId,
@@ -1317,14 +1320,9 @@ class TelnyxWebhookController extends Controller
             'caller_label' => $callerLabel,
         ]);
 
-        $this->sendCallCommand($callControlId, 'gather_using_speak', [
+        $this->sendCallCommand($callControlId, 'speak', [
             'payload' => $promptText,
             ...$this->ttsVoiceParams(),
-            'valid_digits' => '0123456789*#',
-            'minimum_digits' => 1,
-            'maximum_digits' => 1,
-            'timeout_millis' => self::SCREENING_KEY_WAIT_MS,
-            'maximum_tries' => 1,
             'client_state' => base64_encode(json_encode([
                 'action' => 'admin_screen',
                 'call_log_id' => $callLog->id,
@@ -1338,10 +1336,18 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * How long the answering phone has, after the prompt finishes, to press
-     * a key before it is treated as a voicemail box and dropped.
+     * Premium answering machine detection on every team leg (inbound cascade
+     * and press-9 invites): the answerer stays on the line to connect, so
+     * this is the only thing that keeps a voicemail box from taking the call.
+     * Same tuning as click-to-call targets; the verdict lands within the
+     * screening prompt.
+     *
+     * @var array{after_greeting_silence_millis: int, total_analysis_time_millis: int}
      */
-    public const SCREENING_KEY_WAIT_MS = 5000;
+    public const ADMIN_LEG_AMD_CONFIG = [
+        'after_greeting_silence_millis' => 800,
+        'total_analysis_time_millis' => 5000,
+    ];
 
     /**
      * Called from handleCallSpeakEnded when the admin screening prompt finishes
@@ -1367,6 +1373,18 @@ class TelnyxWebhookController extends Controller
         // voicemail IVR instead so they aren't left in silence.
         if ($callLogId && Cache::has("telnyx_callback_promised:{$callLogId}")) {
             Log::channel('telnyx')->info('Screening prompt ended after the admin pressed 1 — caller is being told we will call back', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Answering machine detection called this leg a voicemail box while
+        // the prompt played: it is being hung up (handleAdminLegAmdResult)
+        // and its hangup rings the next person. Never connect it.
+        if (Cache::has("telnyx_admin_machine:{$callControlId}")) {
+            Log::channel('telnyx')->info('Screening prompt ended on a leg detection called a machine — not connecting', [
                 'admin_call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
             ]);
@@ -1501,49 +1519,6 @@ class TelnyxWebhookController extends Controller
         }
 
         return response()->json(['status' => 'ok']);
-    }
-
-    /**
-     * Handle the result of the admin DTMF screening gather.
-     * If admin pressed a key → confirmed human, proceed to bridge.
-     * If no keypress (timeout) → voicemail or unattended, hang up.
-     */
-    protected function handleAdminScreenResult(string $callControlId, string $digits, array $clientState): JsonResponse
-    {
-        $callLogId = $clientState['call_log_id'] ?? null;
-
-        // No key: a voicemail box (or someone who let it be). Drop this leg;
-        // handleAdminRingHangup then rings the next person in the cascade,
-        // or sends the caller to the voicemail menu after the last one.
-        if ($digits === '') {
-            Log::channel('telnyx')->info('Screening: no key pressed — treating the answer as voicemail and dropping the leg', [
-                'admin_call_control_id' => $callControlId,
-                'call_log_id' => $callLogId,
-                'admin_user_id' => $clientState['admin_user_id'] ?? null,
-            ]);
-
-            if (! Cache::has("telnyx_admin_dead:{$callControlId}")) {
-                $this->sendCallCommand($callControlId, 'hangup');
-            }
-
-            return response()->json(['status' => 'ok']);
-        }
-
-        // 1: can't take it — the caller is promised a callback by text.
-        if ($digits === '1') {
-            $this->textCallerFromInboundCall($callControlId, $clientState);
-
-            return response()->json(['status' => 'ok']);
-        }
-
-        // Any other key: a person is on the line — connect them.
-        Log::channel('telnyx')->info('Screening: key pressed — connecting', [
-            'admin_call_control_id' => $callControlId,
-            'call_log_id' => $callLogId,
-            'digits' => $digits,
-        ]);
-
-        return $this->handleAdminScreenDone($callControlId, $clientState);
     }
 
     /**
@@ -2333,7 +2308,7 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        if ($action === 'admin_screen_done') {
+        if ($action === 'admin_screen' || $action === 'admin_screen_done') {
             return $this->handleAdminScreenDone($callControlId, $clientState ?? []);
         }
 
@@ -2809,9 +2784,49 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * A detection verdict on a team leg. The answerer stays on the line to
+     * connect, so a voicemail box would be connected too: the machine verdict
+     * is what drops it, and its hangup rings the next person
+     * (handleAdminRingHangup). A verdict after the leg is bridged is ignored —
+     * a person answered and detection was late or wrong.
+     *
+     * @param  array<string, mixed>  $clientState
+     */
+    protected function handleAdminLegAmdResult(string $callControlId, ?string $result, bool $isMachine, array $clientState): JsonResponse
+    {
+        $context = [
+            'admin_call_control_id' => $callControlId,
+            'call_log_id' => $clientState['call_log_id'] ?? null,
+            'admin_user_id' => $clientState['admin_user_id'] ?? null,
+            'result' => $result,
+        ];
+
+        if (! $isMachine) {
+            Log::channel('telnyx')->info('Detection: a person answered the team leg', $context);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        if (Cache::has("telnyx_bridged:{$callControlId}")) {
+            Log::channel('telnyx')->info('Detection called a team leg a machine after it was bridged — ignoring', $context);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        Log::channel('telnyx')->info('Detection: a voicemail box answered the team leg — dropping it', $context);
+        Cache::put("telnyx_admin_machine:{$callControlId}", true, now()->addMinutes(10));
+
+        if (! Cache::has("telnyx_admin_dead:{$callControlId}")) {
+            $this->sendCallCommand($callControlId, 'hangup');
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
      * Handle answering machine detection result.
-     * If a machine/voicemail is detected on an admin ring leg, hang it up.
-     * If a human is detected, proceed with bridging the admin to the caller.
+     * A machine on a team leg drops that leg (handleAdminLegAmdResult); a
+     * machine on a click-to-call target ends the attempt and tells the user.
      */
     protected function handleAmdEnded(array $data): JsonResponse
     {
@@ -2835,15 +2850,9 @@ class TelnyxWebhookController extends Controller
         $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true);
         $isHuman = in_array($result, ['human', 'human_residence', 'human_business', 'not_sure'], true);
 
-        // ── Admin ring leg: AMD no longer used (replaced by DTMF screening) ──
-        // AMD is not requested on admin dials (DTMF "press any key" screening
-        // is used instead), so an AMD event here is unexpected — ignore it.
-        if ($action === 'admin_ring') {
-            Log::channel('telnyx')->info('AMD event on admin_ring leg ignored (DTMF screening active)', [
-                'call_control_id' => $callControlId,
-                'result' => $result,
-            ]);
-            return response()->json(['status' => 'ok']);
+        // ── Team leg (inbound cascade or press-9 invite) ──
+        if (in_array($action, ['admin_ring', 'admin_screen', 'admin_waiting_for_tts'], true)) {
+            return $this->handleAdminLegAmdResult($callControlId, $result, $isMachine, $clientState ?? []);
         }
 
         // ── Click-to-call target: AMD result ──
@@ -2966,11 +2975,11 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        // Keys pressed during the screening prompt are read from the gather's
-        // result (handleAdminScreenResult); acting on them here too would
-        // text the caller twice or connect a leg the gather is still judging.
+        // During the screening prompt only 1 means anything (text the caller
+        // back). Any other key is ignored: the leg connects when the prompt
+        // ends, as it would have anyway.
         $dtmfState = json_decode(base64_decode((string) ($payload['client_state'] ?? '')), true) ?: [];
-        if (($dtmfState['action'] ?? null) === 'admin_screen') {
+        if (($dtmfState['action'] ?? null) === 'admin_screen' && $digit !== '1') {
             return response()->json(['status' => 'ok']);
         }
 
@@ -2981,7 +2990,7 @@ class TelnyxWebhookController extends Controller
         if ($digit === '1') {
             $clientStateRaw = $payload['client_state'] ?? null;
             $clientState = $clientStateRaw ? (json_decode(base64_decode($clientStateRaw), true) ?: []) : [];
-            if (in_array($clientState['action'] ?? null, ['admin_ring', 'admin_screen_done', 'admin_waiting_for_tts'], true)) {
+            if (in_array($clientState['action'] ?? null, ['admin_ring', 'admin_screen', 'admin_screen_done', 'admin_waiting_for_tts'], true)) {
                 // An admin hearing "Call from {name}" who cannot take it: the
                 // caller gets "we will call you right back" by text and voice.
                 $this->textCallerFromInboundCall($callControlId, $clientState);
@@ -3335,6 +3344,8 @@ class TelnyxWebhookController extends Controller
                         'from_display_name' => $callLog->caller_name ?: 'Conference Invite',
                         'timeout_secs' => $timeout,
                         'preferred_codecs' => config('services.telnyx.preferred_codecs'),
+                        'answering_machine_detection' => 'premium',
+                        'answering_machine_detection_config' => self::ADMIN_LEG_AMD_CONFIG,
                         'client_state' => base64_encode(json_encode([
                             'action' => 'admin_ring',
                             'call_log_id' => $callLog->id,
@@ -3541,11 +3552,8 @@ class TelnyxWebhookController extends Controller
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => self::RING_SECONDS,
                         'preferred_codecs' => config('services.telnyx.preferred_codecs'),
-                        // No answering_machine_detection here — deliberately.
-                        // handleAmdEnded discards every AMD result for
-                        // admin_ring legs (screening replaced it), so
-                        // requesting it billed premium detection on every
-                        // admin leg of every inbound call for nothing.
+                        'answering_machine_detection' => 'premium',
+                        'answering_machine_detection_config' => self::ADMIN_LEG_AMD_CONFIG,
                         'client_state' => base64_encode(json_encode([
                             'action' => 'admin_ring',
                             'call_log_id' => $callLogId,
@@ -3931,11 +3939,6 @@ class TelnyxWebhookController extends Controller
             : null;
 
         $action = $clientState['action'] ?? null;
-
-        // ── Admin DTMF screen result ──
-        if ($action === 'admin_screen') {
-            return $this->handleAdminScreenResult($callControlId, $digits, $clientState);
-        }
 
         if ($action === 'voicemail_ivr_ringback_wait') {
             return $this->handleRingbackGatherResult($callControlId, $digits, $clientState);

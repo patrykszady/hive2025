@@ -76,11 +76,11 @@ class VendorOptions extends Component
     public const DEFAULT_SCREENING = "Call from {name}.";
 
     /**
-     * Always spoken after the screening prompt. The answerer must press a key
-     * to connect, so a voicemail box that picks up is dropped (it never
-     * presses anything) and the next person rings instead.
+     * Always spoken after the screening prompt. The answerer stays on the
+     * line to connect; a voicemail box that picks up is caught by answering
+     * machine detection on the leg and dropped, and the next person rings.
      */
-    public const SCREENING_KEY_INSTRUCTION = "Press 5 to connect, or 1 to text them back.";
+    public const SCREENING_INSTRUCTION = "Stay on the line to connect, or press 1 to text them back.";
     public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to redial {company}. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
     public const DEFAULT_VOICEMAIL_UNKNOWN = "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
     public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
@@ -382,7 +382,7 @@ class VendorOptions extends Component
         $template = match ($type) {
             'welcome' => $this->welcome_message ?: self::DEFAULT_WELCOME,
             'welcome_unknown' => $this->welcome_message_unknown ?: self::DEFAULT_WELCOME_UNKNOWN,
-            'screening' => trim(($this->screening_message ?: self::DEFAULT_SCREENING).' '.self::SCREENING_KEY_INSTRUCTION),
+            'screening' => trim(($this->screening_message ?: self::DEFAULT_SCREENING).' '.self::SCREENING_INSTRUCTION),
             'voicemail' => $this->voicemail_message ?: self::DEFAULT_VOICEMAIL,
             'voicemail_unknown' => $this->voicemail_message_unknown ?: self::DEFAULT_VOICEMAIL_UNKNOWN,
             'ivr_press1' => $this->ivr_press1_message ?: self::DEFAULT_IVR_PRESS1,

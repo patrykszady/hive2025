@@ -254,7 +254,7 @@
                         <div class="flex items-center justify-between gap-4">
                             <div>
                                 <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Screening Prompt</div>
-                                <div class="text-xs text-zinc-500">Played to your team member when they answer, followed by "{{ \App\Livewire\Vendors\VendorOptions::SCREENING_KEY_INSTRUCTION }}" They press 5 to be connected. If no key is pressed, for example because their phone's voicemail answered, the next person rings. Off, whoever answers is connected at once, including a voicemail box.</div>
+                                <div class="text-xs text-zinc-500">Played to your team member when they answer, followed by "{{ \App\Livewire\Vendors\VendorOptions::SCREENING_INSTRUCTION }}" They are connected when it ends. A phone whose voicemail answers is recognised and dropped, and the next person rings. Off, whoever answers is connected at once, including a voicemail box.</div>
                             </div>
                             <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('screening')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview screening prompt" />
                         </div>
