@@ -14,7 +14,7 @@ class ScrapeEwccvTracking extends Command
 {
     protected $signature = 'ewccv:scrape-tracking
         {--login-url= : JWT magic link URL (auto-fetched from email if omitted)}
-        {--login-email=patryk.szady@live.com : EWCCV account email; a live.com rule forwards its mail to the Nylas-monitored certificates@hive.contractors}
+        {--login-email= : EWCCV account email, spelled as the person signs in (default config services.ewccv.login_email); its mail is forwarded to the certificates mailbox}
         {--belongs-to-vendor-id= : The belongs_to_vendor_id to scope vendor docs}
         {--vendor-id=* : Specific vendor ID(s) to process (default: all with active WC policies)}
         {--visible : Run browser in visible (non-headless) mode}
@@ -42,6 +42,7 @@ class ScrapeEwccvTracking extends Command
         // Captcha solvers are off unless EWCCV_USE_CAPTCHA_SOLVERS=true: their
         // tokens are refused by EWCCV (measured), so a key here only spends.
         $useSolvers = (bool) config('services.ewccv.use_captcha_solvers', false);
+        $loginEmail = (string) ($this->option('login-email') ?: config('services.ewccv.login_email'));
         $captchaKey = $useSolvers ? config('services.anticaptcha.api_key') : null;
         $twoCaptchaKey = $useSolvers ? config('services.twocaptcha.api_key') : null;
         $outputDir  = $this->option('output-dir') ?: storage_path('files/_temp_ewccv');
@@ -51,8 +52,6 @@ class ScrapeEwccvTracking extends Command
 
         // ── Auto-fetch login URL if not provided (skipped during dry-run) ─
         if (! $loginUrl && ! $dryRun) {
-            $loginEmail = $this->option('login-email');
-
             // Try cached token first
             $cachedUrl = $this->getCachedLoginUrl($outputDir);
             if ($cachedUrl) {
@@ -193,6 +192,7 @@ class ScrapeEwccvTracking extends Command
                 // Handed over by the browser extension (EwccvSessionController):
                 // a real browser's accessToken, which skips reCAPTCHA entirely.
                 'bridgedAccessToken' => $this->bridgedAccessToken(),
+                'loginEmail' => $loginEmail,
                 'headless'        => $headless,
                 'delayMs'         => $delay,
             ];
@@ -226,7 +226,6 @@ class ScrapeEwccvTracking extends Command
                 $this->warn('Login failed (token may be expired). Clearing cache and fetching fresh token…');
                 $this->clearCachedLoginUrl($outputDir);
 
-                $loginEmail = $this->option('login-email');
                 $freshUrl = $this->fetchLoginUrl($nylasService, $loginEmail, $outputDir, $headless, $delay);
 
                 if (! $freshUrl) {

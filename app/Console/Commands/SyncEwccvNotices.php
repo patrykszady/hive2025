@@ -82,8 +82,11 @@ class SyncEwccvNotices extends Command
             $numbers = NoticeParser::policyNumbers($message, $known);
             $employer = NoticeParser::employer($message);
             $matched = $docs->filter(function (VendorDoc $doc) use ($numbers, $employer) {
-                if (in_array(NoticeParser::normalize((string) $doc->number), $numbers, true)) {
-                    return true;
+                $ours = NoticeParser::normalize((string) $doc->number);
+                foreach ($numbers as $theirs) {
+                    if (strlen($ours) >= 6 && strlen($theirs) >= 6 && ($ours === $theirs || str_contains($ours, $theirs) || str_contains($theirs, $ours))) {
+                        return true;
+                    }
                 }
                 $name = NoticeParser::normalize((string) ($doc->vendor?->business_name ?? ''));
 

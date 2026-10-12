@@ -115,7 +115,9 @@ class VendorDoc extends Model
                 ? 'EWCCV: coverage reinstated'.($noticeDate ? ' on '.$noticeDate : '').', tracking enabled'
                 : 'EWCCV coverage tracking enabled',
             'cancelled' => 'EWCCV: coverage '.(($notice['kind'] ?? '') === 'nonrenewal' ? 'NOT RENEWED' : 'CANCELLED').($noticeDate ? ' as of '.$noticeDate : '').' — get a new certificate',
-            'pending' => 'EWCCV lookup waiting for a browser session: open ewccv.com with the Hive extension and it runs',
+            'pending' => ($state['reason'] ?? '') === 'not_tracked_by_ewccv'
+                ? 'EWCCV no longer lists this policy as tracked; it is re-tracked with the next browser session'
+                : 'EWCCV lookup waiting for a browser session: open ewccv.com with the Hive extension and it runs',
             'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
             'skipped' => 'EWCCV lookup skipped: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
             default => 'EWCCV: '.$state['status'],

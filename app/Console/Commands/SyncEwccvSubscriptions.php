@@ -32,7 +32,7 @@ use Illuminate\Support\Facades\Process;
 class SyncEwccvSubscriptions extends Command
 {
     protected $signature = 'ewccv:sync-subscriptions
-        {--login-email=patryk.szady@live.com : Mailbox that receives the EWCCV sign-in link}
+        {--login-email= : EWCCV account email, spelled as the person signs in (default config services.ewccv.login_email)}
         {--belongs-to-vendor-id= : Limit the docs we stamp to one owning vendor}
         {--output-dir= : Working dir (default storage/files/_temp_ewccv)}
         {--dry-run : Show what EWCCV tracks without writing to vendor docs}';
@@ -186,10 +186,38 @@ class SyncEwccvSubscriptions extends Command
             }
         }
 
+        // A doc stamped as tracked that EWCCV no longer lists for this account
+        // is the failure this sync exists to catch (a subscription silently
+        // gone, or made under another spelling of the account): back to
+        // pending, so the next browser session re-tracks it, and said so.
+        $lapsed = 0;
+        foreach ($untracked as $d) {
+            $state = (array) ($d->options['ewccv'] ?? []);
+            $active = $d->expiration_date && Carbon::parse($d->expiration_date)->gte(Carbon::today());
+            if (($state['status'] ?? null) !== 'tracking' || ! $active) {
+                continue;
+            }
+            if ($this->option('dry-run')) {
+                $this->line("    would reset: {$d->vendor?->business_name} ← {$d->number} (tracked here, not at EWCCV)");
+                $lapsed++;
+
+                continue;
+            }
+            $options = $d->options ?? [];
+            $options['ewccv'] = ['status' => 'pending', 'reason' => 'not_tracked_by_ewccv', 'checked_at' => now()->toIso8601String()] + array_intersect_key($state, ['notice' => 1, 'notice_message_ids' => 1]);
+            $d->options = $options;
+            $d->saveQuietly();
+            $lapsed++;
+        }
+        if ($lapsed > 0) {
+            $this->warn("  Reset to pending (tracked here, not at EWCCV): {$lapsed}");
+        }
+
         Log::info('EWCCV subscriptions synced', [
             'tracked' => $subscriptions->count(),
             'matched' => $matched,
             'untracked' => $untracked->count(),
+            'reset_to_pending' => $lapsed,
         ]);
 
         return self::SUCCESS;
@@ -200,6 +228,10 @@ class SyncEwccvSubscriptions extends Command
      * carrier feed ("WC5-39S-342438-046" vs "WC539S342438046"), so compare on
      * alphanumerics only.
      */
+    /**
+     * Letters and digits only, and either side may carry a prefix the other
+     * lacks: EWCCV lists Sereno's "100134391" as "AFWCP100134391".
+     */
     private function policiesMatch(?string $ours, ?string $theirs): bool
     {
         if (! $ours || ! $theirs) {
@@ -207,8 +239,10 @@ class SyncEwccvSubscriptions extends Command
         }
 
         $norm = fn (string $v) => strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $v));
+        $a = $norm($ours);
+        $b = $norm($theirs);
 
-        return $norm($ours) !== '' && $norm($ours) === $norm($theirs);
+        return strlen($a) >= 6 && strlen($b) >= 6 && ($a === $b || str_contains($a, $b) || str_contains($b, $a));
     }
 
     /** EWCCV drops sign-in emails requested via the residential proxy. */

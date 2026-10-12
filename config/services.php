@@ -293,6 +293,11 @@ return [
         'use_captcha_solvers' => (bool) env('EWCCV_USE_CAPTCHA_SOLVERS', false),
         // How long a run waits for a running scraper to finish before giving up.
         'lock_wait_seconds' => (int) env('EWCCV_LOCK_WAIT_SECONDS', 1500),
+        // The account's address EXACTLY as the person signs in with it. EWCCV
+        // keys its tracking user by the spelling: "patryk.szady@live.com" and
+        // "patryk.szady@Live.com" were two users with two subscription lists
+        // (2026-10-12), and the server's went where the person never saw them.
+        'login_email' => env('EWCCV_LOGIN_EMAIL', 'patryk.szady@Live.com'),
     ],
 
     'geoapify' => [

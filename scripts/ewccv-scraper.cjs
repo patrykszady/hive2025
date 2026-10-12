@@ -1965,7 +1965,7 @@ async function enableTracking(page, vendor, matchedItem, searchMeta) {
         } catch (e) {
             return { ok: false, reason: 'create_subscription_error: ' + e.message };
         }
-    }, matchedItem, searchMeta, config.loginEmail || 'patryk.szady@live.com');
+    }, matchedItem, searchMeta, config.loginEmail || '');
 
     if (!result.ok) {
         log(`    Tracking FAILED: ${result.reason}`);
