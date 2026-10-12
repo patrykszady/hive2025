@@ -287,7 +287,7 @@ class SyncEwccvSubscriptions extends Command
 
     private function fetchLoginUrl(NylasService $nylasService, string $outputDir): ?string
     {
-        $email = $this->option('login-email');
+        $email = (string) ($this->option('login-email') ?: config('services.ewccv.login_email'));
         $requestedAfter = now()->subMinute();
 
         $this->line("  Requesting a sign-in link for {$email}…");
