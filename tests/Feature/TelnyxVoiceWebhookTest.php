@@ -803,6 +803,10 @@ it('does not hang up admin leg when AMD detects human', function () {
 });
 
 it('sends premium AMD config when dialing admins', function () {
+    // Admins are only dialled within business hours; an unknown caller after
+    // hours goes to voicemail, which is not what this test is about.
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::create(2025, 1, 8, 11, 0, 0, 'America/Chicago'));
+
     $admin = User::factory()->create([
         'first_name' => 'Patryk',
         'last_name' => 'Szady',
@@ -862,6 +866,8 @@ it('sends premium AMD config when dialing admins', function () {
         return ($request->data()['answering_machine_detection'] ?? null) === 'premium'
             && ($request->data()['answering_machine_detection_config'] ?? null) === \App\Http\Controllers\Api\TelnyxWebhookController::ADMIN_LEG_AMD_CONFIG;
     });
+
+    \Carbon\Carbon::setTestNow();
 });
 
 // =========================================================================
