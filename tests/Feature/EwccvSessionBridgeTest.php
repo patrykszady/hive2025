@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\EwccvSessionController;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use App\Support\Ewccv\BridgedSession;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * The browser extension hands over an EWCCV search session because the server
@@ -14,7 +16,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config()->set('services.ewccv.bridge_token', 'test-bridge-token-abc123');
-    Cache::forget(EwccvSessionController::CACHE_KEY);
+    Storage::fake('local');
 });
 
 it('stores a session handed over with the right bearer token', function () {
@@ -27,7 +29,7 @@ it('stores a session handed over with the right bearer token', function () {
 
     $response->assertOk()->assertJson(['ok' => true]);
 
-    $stored = Cache::get(EwccvSessionController::CACHE_KEY);
+    $stored = BridgedSession::raw();
 
     expect($stored)->toBeArray()
         ->and($stored['access_token'])->toBe(str_repeat('a', 120))
@@ -43,7 +45,7 @@ it('rejects a wrong or missing bearer token and stores nothing', function () {
     $this->postJson('/api/ewccv/session', ['accessToken' => str_repeat('a', 120)])
         ->assertStatus(401);
 
-    expect(Cache::get(EwccvSessionController::CACHE_KEY))->toBeNull();
+    expect(BridgedSession::raw())->toBeNull();
 });
 
 it('refuses to accept sessions when the server has no bridge token configured', function () {
@@ -54,7 +56,7 @@ it('refuses to accept sessions when the server has no bridge token configured', 
         ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('a', 120)])
         ->assertStatus(503);
 
-    expect(Cache::get(EwccvSessionController::CACHE_KEY))->toBeNull();
+    expect(BridgedSession::raw())->toBeNull();
 });
 
 it('validates the payload', function () {

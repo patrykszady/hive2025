@@ -91,12 +91,11 @@ class CaptureEwccvSession extends Command
             return self::FAILURE;
         }
 
-        Cache::put(EwccvSessionController::CACHE_KEY, [
-            'access_token' => $payload['accessToken'],
-            'jwt' => $payload['jwt'] ?? null,
-            'state_token' => $payload['stateToken'] ?? null,
-            'received_at' => now()->toIso8601String(),
-        ], now()->addHours(12));
+        \App\Support\Ewccv\BridgedSession::store([
+            'access_token' => $result['accessToken'],
+            'jwt' => $result['jwt'] ?? null,
+            'state_token' => $result['stateToken'] ?? null,
+        ]);
 
         Log::info('EWCCV session captured interactively', [
             'access_token_len' => strlen((string) $payload['accessToken']),

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\RunPendingEwccvLookups;
+use App\Support\Ewccv\BridgedSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -61,15 +62,15 @@ class EwccvSessionController extends Controller
             'stateToken' => ['nullable', 'string', 'max:200'],
         ]);
 
-        // Keep only as long as it can plausibly be useful. The extension
-        // refreshes on its own schedule, so a stale entry is replaced long
-        // before this expires; the TTL exists so a dead token cannot linger.
-        Cache::put(self::CACHE_KEY, [
+        // A file under storage, not the cache: a deploy's optimize:clear
+        // empties the file cache and took the session with it (2026-10-12).
+        // The extension refreshes on its own schedule, so a stale entry is
+        // replaced long before BridgedSession stops reading it.
+        BridgedSession::store([
             'access_token' => $data['accessToken'],
             'jwt' => $data['jwt'] ?? null,
             'state_token' => $data['stateToken'] ?? null,
-            'received_at' => now()->toIso8601String(),
-        ], now()->addHours(12));
+        ]);
 
         // The session lasts about 45 minutes: whatever is waiting for a
         // search runs now, not on a schedule that would find it expired.

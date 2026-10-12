@@ -38,16 +38,17 @@ function wcDoc(int $belongsTo, ?array $ewccv = null, string $expires = '+6 month
 
 function bridgedSession(int $minutesAgo = 1): void
 {
-    Cache::put(EwccvSessionController::CACHE_KEY, [
+    \Illuminate\Support\Facades\Storage::disk('local')->put(BridgedSession::FILE, json_encode([
         'access_token' => str_repeat('t', 120),
         'jwt' => null,
         'state_token' => null,
         'received_at' => now()->subMinutes($minutesAgo)->toIso8601String(),
-    ], now()->addHours(12));
+    ]));
 }
 
 beforeEach(function () {
-    Cache::forget(EwccvSessionController::CACHE_KEY);
+    \Illuminate\Support\Facades\Storage::fake('local');
+    Cache::forget('ewccv:lookup-dispatched');
     config(['services.ewccv.bypass_key' => null, 'services.ewccv.belongs_to_vendor_id' => 1]);
 });
 
@@ -131,7 +132,7 @@ it('a session handed over by the extension starts the pending lookups right away
         ->assertOk()
         ->assertJson(['pending_lookups' => 1]);
     Queue::assertPushed(RunPendingEwccvLookups::class, 1);
-    expect(Cache::get(EwccvSessionController::CACHE_KEY)['access_token'])->toBe(str_repeat('c', 120));
+    expect(BridgedSession::raw()['access_token'])->toBe(str_repeat('c', 120));
 
     // Nothing pending: the session is stored, no job.
     Cache::forget('ewccv:lookup-dispatched');
