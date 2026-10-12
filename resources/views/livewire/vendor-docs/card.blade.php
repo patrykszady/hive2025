@@ -93,6 +93,10 @@
                                         @if($doc->verification_summary['verified_at'])
                                             <flux:icon.shield-check variant="micro" class="size-3.5 shrink-0 text-emerald-500" />
                                             <span>{{ $doc->verification_summary['verified_at'] }}</span>
+                                        @elseif(! empty($doc->verification_summary['alert']))
+                                            {{-- EWCCV reported the coverage cancelled or not renewed. --}}
+                                            <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0 text-red-600" />
+                                            <span class="text-red-600 dark:text-red-400">cancelled</span>
                                         @else
                                             <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0 text-amber-500" />
                                         @endif

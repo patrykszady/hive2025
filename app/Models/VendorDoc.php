@@ -107,8 +107,14 @@ class VendorDoc extends Model
             return null;
         }
 
+        $notice = is_array($state['notice'] ?? null) ? $state['notice'] : null;
+        $noticeDate = ! empty($notice['received_at']) ? \Carbon\Carbon::parse($notice['received_at'])->format('m/d/Y') : null;
+
         $tip = match ($state['status']) {
-            'tracking' => 'EWCCV coverage tracking enabled',
+            'tracking' => ($notice['kind'] ?? null) === 'reinstatement'
+                ? 'EWCCV: coverage reinstated'.($noticeDate ? ' on '.$noticeDate : '').', tracking enabled'
+                : 'EWCCV coverage tracking enabled',
+            'cancelled' => 'EWCCV: coverage '.(($notice['kind'] ?? '') === 'nonrenewal' ? 'NOT RENEWED' : 'CANCELLED').($noticeDate ? ' as of '.$noticeDate : '').' — get a new certificate',
             'pending' => 'EWCCV lookup waiting for a browser session: open ewccv.com with the Hive extension and it runs',
             'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
             'skipped' => 'EWCCV lookup skipped: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
@@ -129,6 +135,8 @@ class VendorDoc extends Model
             // The policy counts as verified only when EWCCV matched it and
             // tracking is on — a failed lookup's checked_at is not verification.
             'verified_at' => $state['status'] === 'tracking' ? $checked : null,
+            // EWCCV reported the coverage gone: the column goes red, not amber.
+            'alert' => $state['status'] === 'cancelled',
         ];
     }
 
@@ -190,7 +198,7 @@ class VendorDoc extends Model
     public function getVerificationSummaryAttribute(): ?array
     {
         $parts = array_values(array_filter([
-            $this->ewccv_summary ? ['ok' => $this->ewccv_summary['tracking'], 'at' => $this->ewccv_summary['verified_at'], 'tip' => $this->ewccv_summary['tip'], 'name' => 'ewccv'] : null,
+            $this->ewccv_summary ? ['ok' => $this->ewccv_summary['tracking'], 'at' => $this->ewccv_summary['verified_at'], 'tip' => $this->ewccv_summary['tip'], 'name' => 'ewccv', 'alert' => $this->ewccv_summary['alert']] : null,
             $this->trackmyvendor_summary ? ['ok' => $this->trackmyvendor_summary['compliant'], 'at' => $this->trackmyvendor_summary['verified_at'], 'tip' => $this->trackmyvendor_summary['tip'], 'name' => 'trackmyvendor'] : null,
         ]));
 
@@ -212,6 +220,7 @@ class VendorDoc extends Model
             'verified_at' => $verifiedAt,
             'tip' => collect($parts)->pluck('tip')->implode(' · '),
             'sources' => collect($parts)->pluck('name')->all(),
+            'alert' => (bool) collect($parts)->contains(fn (array $p) => ! empty($p['alert'])),
         ];
     }
 }

@@ -428,6 +428,16 @@ Schedule::command('ewccv:sync-subscriptions --belongs-to-vendor-id=1')->runInBac
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
 
+// EWCCV's own notices (cancellation, non-renewal, reinstatement of a tracked
+// policy) arrive by email; pin them to the doc and text the admins.
+Schedule::command('ewccv:notices --belongs-to-vendor-id=1')->runInBackground()
+    ->hourlyAt(20)
+    ->name('ewccv-notices')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
+
 // System maintenance
 Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()

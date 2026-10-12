@@ -38,3 +38,15 @@ it('is null for docs never looked up and for non-workers docs', function () {
         ->and(makeDoc(['options' => ['other' => true]])->ewccv_summary)->toBeNull()
         ->and(makeDoc(['type' => 'liability', 'options' => ['ewccv' => ['status' => 'tracking']]])->ewccv_summary)->toBeNull();
 });
+
+it('shows a cancelled policy as an alert, not merely unverified', function () {
+    $doc = makeDoc(['options' => ['ewccv' => ['status' => 'cancelled', 'checked_at' => '2026-10-12T20:00:00Z', 'notice' => ['kind' => 'cancellation', 'received_at' => '2026-10-12T19:30:00Z']]]]);
+
+    expect($doc->ewccv_summary)
+        ->tracking->toBeFalse()
+        ->verified_at->toBeNull()
+        ->alert->toBeTrue()
+        ->tip->toBe('EWCCV: coverage CANCELLED as of 10/12/2026 — get a new certificate · checked 10/12/2026');
+
+    expect(makeDoc(['options' => ['ewccv' => ['status' => 'tracking']]])->ewccv_summary['alert'])->toBeFalse();
+});

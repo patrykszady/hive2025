@@ -1,0 +1,150 @@
+<?php
+
+use App\Console\Commands\SyncEwccvNotices;
+use App\Models\User;
+use App\Models\Vendor;
+use App\Models\VendorDoc;
+use App\Notifications\EwccvNoticeNotification;
+use App\Services\NylasService;
+use App\Support\Ewccv\NoticeParser;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
+
+uses(RefreshDatabase::class);
+
+// =========================================================================
+// EWCCV notices (2026-10-12): the cancellation / non-renewal / reinstatement
+// emails a tracked policy produces are read from the certificates mailbox,
+// pinned to the workers comp doc, and texted to the admins.
+// =========================================================================
+
+/**
+ * @return array{gs: Vendor, admin: User, doc: VendorDoc}
+ */
+function noticeFixture(): array
+{
+    $gs = Vendor::factory()->create(['business_name' => 'GS Construction']);
+    $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+    $gs->users()->attach($admin->id, ['role_id' => 1]);
+
+    $sub = Vendor::factory()->create(['business_name' => 'Green Dump Inc']);
+    $doc = VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $sub->id, 'belongs_to_vendor_id' => $gs->id,
+        'number' => 'WC5-39S-342438-046', 'doc_filename' => 'jw.pdf',
+        'effective_date' => now()->subMonths(2)->toDateString(), 'expiration_date' => now()->addMonths(10)->toDateString(),
+        'options' => ['ewccv' => ['status' => 'tracking', 'checked_at' => now()->subDay()->toIso8601String()]],
+    ]));
+
+    return ['gs' => $gs, 'admin' => $admin, 'doc' => $doc];
+}
+
+function ewccvMail(string $id, string $subject, string $body, int $minutesAgo = 30): array
+{
+    return [
+        'id' => $id,
+        'subject' => $subject,
+        'from' => [['email' => 'donotreply@ewccv.com', 'name' => 'Workers Compensation Coverage Verification']],
+        'body' => $body,
+        'date' => now()->subMinutes($minutesAgo)->timestamp,
+    ];
+}
+
+beforeEach(function () {
+    Storage::fake('local');
+    Notification::fake();
+    config(['nylas.certificates_grant_id' => 'grant-1']);
+});
+
+it('pins a cancellation to the policy it names, turns the doc red, texts the admins, and never twice', function () {
+    ['gs' => $gs, 'admin' => $admin, 'doc' => $doc] = noticeFixture();
+
+    $mails = ['data' => [
+        ewccvMail('m-signin', 'Sign in to Workers Compensation Coverage Verification', '<p>Click the button below to Sign In</p>', 90),
+        ewccvMail('m-cancel', 'Policy Cancellation Notice', '<p>A cancellation has been reported for the policy you are tracking.</p><p>Employer: JW GREEN DUMP INC<br>Policy Number: WC539S342438046<br>Effective: 10/12/2026</p>', 20),
+    ]];
+    $this->mock(NylasService::class, fn ($mock) => $mock->shouldReceive('getMessages')->andReturn($mails));
+
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])
+        ->expectsOutputToContain('Notices 1, stamped 1, texts 1, unmatched 0, other mail 1.')
+        ->assertExitCode(0);
+
+    $doc->refresh();
+    expect($doc->options['ewccv']['status'])->toBe('cancelled')
+        ->and($doc->options['ewccv']['notice']['kind'])->toBe('cancellation')
+        ->and($doc->options['ewccv']['notice']['message_id'])->toBe('m-cancel')
+        ->and($doc->ewccv_summary['tracking'])->toBeFalse()
+        ->and($doc->ewccv_summary['alert'])->toBeTrue()
+        ->and($doc->ewccv_summary['tip'])->toContain('CANCELLED')
+        ->and($doc->verification_summary['alert'])->toBeTrue()
+        ->and($doc->verification_summary['verified_at'])->toBeNull();
+
+    Notification::assertSentTo($admin, EwccvNoticeNotification::class, function (EwccvNoticeNotification $n) use ($admin) {
+        return $n->kind === 'cancellation'
+            && str_contains($n->toTelnyx($admin), "Green Dump Inc's workers comp policy WC5-39S-342438-046 was CANCELLED");
+    });
+    expect(Storage::disk('local')->exists(SyncEwccvNotices::BOOKMARK))->toBeTrue();
+
+    // The same mail read again (the bookmark overlaps an hour): nothing new.
+    Notification::fake();
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])
+        ->expectsOutputToContain('Notices 1, stamped 0, texts 0')
+        ->assertExitCode(0);
+    Notification::assertNothingSent();
+});
+
+it('a reinstatement puts the policy back to tracking, and an unmatched notice is reported, not dropped', function () {
+    ['gs' => $gs, 'admin' => $admin, 'doc' => $doc] = noticeFixture();
+    $doc->forceFill(['options' => ['ewccv' => ['status' => 'cancelled', 'notice' => ['kind' => 'cancellation', 'received_at' => now()->subDays(3)->toIso8601String(), 'message_id' => 'old']]]])->saveQuietly();
+
+    $mails = ['data' => [
+        ewccvMail('m-reinst', 'Policy Reinstatement Notice', 'The policy WC5-39S-342438-046 for JW GREEN DUMP INC has been reinstated.', 15),
+        ewccvMail('m-stranger', 'Policy Cancellation Notice', 'Employer: SOMEONE ELSE LLC Policy Number: ZZ-999-111', 10),
+    ]];
+    $this->mock(NylasService::class, fn ($mock) => $mock->shouldReceive('getMessages')->andReturn($mails));
+
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])
+        ->expectsOutputToContain('unmatched: ')
+        ->expectsOutputToContain('Notices 2, stamped 1, texts 1, unmatched 1')
+        ->assertExitCode(0);
+
+    $doc->refresh();
+    expect($doc->options['ewccv']['status'])->toBe('tracking')
+        ->and($doc->ewccv_summary['tracking'])->toBeTrue()
+        ->and($doc->ewccv_summary['alert'])->toBeFalse()
+        ->and($doc->ewccv_summary['tip'])->toContain('reinstated');
+    Notification::assertSentTo($admin, EwccvNoticeNotification::class, fn ($n) => $n->kind === 'reinstatement');
+});
+
+it('a dry run shows the matches and changes nothing', function () {
+    ['gs' => $gs, 'doc' => $doc] = noticeFixture();
+    $this->mock(NylasService::class, fn ($mock) => $mock->shouldReceive('getMessages')->andReturn(['data' => [
+        ewccvMail('m-cancel', 'Policy Cancellation Notice', 'Policy Number: WC5-39S-342438-046 has been cancelled', 5),
+    ]]));
+
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id, '--dry-run' => true])
+        ->expectsOutputToContain('Green Dump Inc')
+        ->assertExitCode(0);
+
+    expect($doc->fresh()->options['ewccv']['status'])->toBe('tracking')
+        ->and(Storage::disk('local')->exists(SyncEwccvNotices::BOOKMARK))->toBeFalse();
+    Notification::assertNothingSent();
+});
+
+it('classifies EWCCV mail and finds the policy numbers it names', function () {
+    $cancel = ewccvMail('a', 'Coverage Cancellation', '<p>Policy No: R2WC-795013</p><p>Employer Name: MORENOS DRYWALL INC</p>');
+    $nonrenewal = ewccvMail('b', 'Notice', 'The policy 83WECBP6H9V will not be renewed.');
+    $confirm = ewccvMail('c', 'Workers Compensation Coverage Verification', 'You are now tracking policy AW9173630 for TBD PRO PAINTING.');
+    $signIn = ewccvMail('d', 'Sign in to Workers Compensation Coverage Verification', 'Click to sign in');
+    $unrelated = ['id' => 'e', 'subject' => 'Re: COI Request', 'from' => [['email' => 'agent@insurance.test']], 'body' => 'Attached', 'date' => time()];
+
+    expect(NoticeParser::kind($cancel))->toBe('cancellation')
+        ->and(NoticeParser::policyNumbers($cancel))->toBe(['R2WC795013'])
+        ->and(NoticeParser::employer($cancel))->toBe('MORENOS DRYWALL INC')
+        ->and(NoticeParser::kind($nonrenewal))->toBe('nonrenewal')
+        ->and(NoticeParser::policyNumbers($nonrenewal, ['83WECBP6H9V']))->toBe(['83WECBP6H9V'])
+        ->and(NoticeParser::kind($confirm))->toBe('confirmation')
+        ->and(NoticeParser::kind($signIn))->toBe('sign_in')
+        ->and(NoticeParser::isFromEwccv($signIn))->toBeTrue()
+        ->and(NoticeParser::isFromEwccv($unrelated))->toBeFalse();
+});
