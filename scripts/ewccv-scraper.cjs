@@ -2424,6 +2424,14 @@ async function requestLoginEmail(page, email) {
         // Step 6: For each vendor, search and enable tracking
         for (let i = 0; i < vendors.length; i++) {
             const vendor = vendors[i];
+            // The bridged credential lives in sessionStorage, which is per tab: the
+            // recovery step between vendors opens a new tab, and on 2026-10-12 every
+            // vendor after the first failed with no_accessToken. Put it back first.
+            if (useApiSearch && config.bridgedAccessToken) {
+                await page.evaluate((tok) => {
+                    if (!sessionStorage.getItem('accessToken')) sessionStorage.setItem('accessToken', tok);
+                }, config.bridgedAccessToken).catch(() => {});
+            }
             log(`═══ Vendor ${i + 1}/${vendors.length}: ${vendor.businessName} (ID: ${vendor.id}) ═══`);
 
             if (!vendor.state || !vendor.address) {
