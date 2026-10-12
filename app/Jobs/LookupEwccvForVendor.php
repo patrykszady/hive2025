@@ -28,6 +28,9 @@ class LookupEwccvForVendor implements ShouldQueue, ShouldBeUnique
      */
     public int $timeout = 900;
 
+    /** The scraper outlives the default queue's 60-second supervisor limit. */
+    public string $queue = 'long-running';
+
     public function __construct(
         public int $vendorDocId,
     ) {}

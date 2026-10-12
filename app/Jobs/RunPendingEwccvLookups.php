@@ -29,8 +29,16 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 1;
 
-    /** The scraper may spend a minute per vendor. */
-    public int $timeout = 3600;
+    /**
+     * The default queue's Horizon supervisor kills a job after 60 seconds;
+     * a scraper run (plus a wait for a running one) needs the long-running
+     * queue's 35 minutes. On 2026-10-12 every queued run was cut off at 60 s
+     * while its scraper child ran on orphaned.
+     */
+    public string $queue = 'long-running';
+
+    /** Under the long-running supervisor's own 2100 s limit. */
+    public int $timeout = 2000;
 
     public function uniqueFor(): int
     {

@@ -165,3 +165,9 @@ it('never runs two scrapers at once: a second run waits, then gives up with a me
 
     $held->release();
 });
+
+it('runs on the long-running queue, where Horizon allows a scraper to finish', function () {
+    expect((new RunPendingEwccvLookups)->queue)->toBe('long-running')
+        ->and((new LookupEwccvForVendor(1))->queue)->toBe('long-running')
+        ->and((new RunPendingEwccvLookups)->timeout)->toBeLessThanOrEqual(2100);
+});
