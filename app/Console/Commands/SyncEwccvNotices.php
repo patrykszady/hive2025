@@ -6,6 +6,7 @@ use App\Models\Vendor;
 use App\Models\VendorDoc;
 use App\Notifications\EwccvNoticeNotification;
 use App\Services\NylasService;
+use App\Support\Ewccv\MailFolders;
 use App\Support\Ewccv\NoticeParser;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -33,13 +34,14 @@ class SyncEwccvNotices extends Command
     protected $signature = 'ewccv:notices
         {--belongs-to-vendor-id=1 : Whose workers comp docs the notices concern}
         {--since= : Read mail from this date instead of the bookmark}
-        {--dry-run : Show what would be stamped and sent, change nothing}';
+        {--dry-run : Show what would be stamped and sent, change nothing}
+        {--no-filing : Leave the mail where it is instead of filing it under Workers Comp}';
 
     protected $description = 'Pin EWCCV cancellation / reinstatement notices from the certificates mailbox onto workers comp docs, and alert the admins';
 
     public const BOOKMARK = 'ewccv/notices-bookmark.json';
 
-    public function handle(NylasService $nylas): int
+    public function handle(NylasService $nylas, MailFolders $folders): int
     {
         $belongsTo = (int) $this->option('belongs-to-vendor-id');
         $dryRun = (bool) $this->option('dry-run');
@@ -63,8 +65,9 @@ class SyncEwccvNotices extends Command
 
         $this->info(sprintf('EWCCV mail since %s: %d message(s)%s', $since->toDateTimeString(), $messages->count(), $dryRun ? ' (dry run)' : ''));
 
-        $stats = ['notices' => 0, 'stamped' => 0, 'alerted' => 0, 'unmatched' => 0, 'skipped' => 0];
+        $stats = ['notices' => 0, 'stamped' => 0, 'alerted' => 0, 'unmatched' => 0, 'skipped' => 0, 'filed' => 0];
         $newest = $since;
+        $filing = ! $dryRun && ! $this->option('no-filing');
 
         foreach ($messages as $message) {
             $receivedAt = Carbon::createFromTimestamp((int) ($message['date'] ?? 0));
@@ -72,7 +75,14 @@ class SyncEwccvNotices extends Command
             $kind = NoticeParser::kind($message);
             $id = (string) ($message['id'] ?? '');
 
-            if (in_array($kind, [NoticeParser::KIND_SIGN_IN, NoticeParser::KIND_OTHER], true)) {
+            // Every EWCCV mail is filed by what it is: sign-in links and
+            // subscription confirmations into their subfolders, the rest
+            // under Workers Comp itself.
+            if ($filing && $folders->file($grantId, $message, $kind)) {
+                $stats['filed']++;
+            }
+
+            if (in_array($kind, [NoticeParser::KIND_SIGN_IN, NoticeParser::KIND_OTHER, NoticeParser::KIND_CONFIRMATION], true)) {
                 $stats['skipped']++;
 
                 continue;
@@ -152,7 +162,7 @@ class SyncEwccvNotices extends Command
             Storage::disk('local')->put(self::BOOKMARK, json_encode(['last_received_at' => $newest->toIso8601String()]));
         }
 
-        $this->info(sprintf('Notices %d, stamped %d, texts %d, unmatched %d, other mail %d.', $stats['notices'], $stats['stamped'], $stats['alerted'], $stats['unmatched'], $stats['skipped']));
+        $this->info(sprintf('Notices %d, stamped %d, texts %d, unmatched %d, other mail %d, filed %d.', $stats['notices'], $stats['stamped'], $stats['alerted'], $stats['unmatched'], $stats['skipped'], $stats['filed']));
         Log::info('EWCCV notices synced', $stats);
 
         return self::SUCCESS;

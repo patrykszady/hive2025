@@ -6,6 +6,7 @@ use App\Models\Vendor;
 use App\Models\VendorDoc;
 use App\Notifications\EwccvNoticeNotification;
 use App\Services\NylasService;
+use App\Support\Ewccv\MailFolders;
 use App\Support\Ewccv\NoticeParser;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
@@ -65,8 +66,8 @@ it('pins a cancellation to the policy it names, turns the doc red, texts the adm
     ]];
     $this->mock(NylasService::class, fn ($mock) => $mock->shouldReceive('getMessages')->andReturn($mails));
 
-    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])
-        ->expectsOutputToContain('Notices 1, stamped 1, texts 1, unmatched 0, other mail 1.')
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id, '--no-filing' => true])
+        ->expectsOutputToContain('Notices 1, stamped 1, texts 1, unmatched 0, other mail 1, filed 0.')
         ->assertExitCode(0);
 
     $doc->refresh();
@@ -87,7 +88,7 @@ it('pins a cancellation to the policy it names, turns the doc red, texts the adm
 
     // The same mail read again (the bookmark overlaps an hour): nothing new.
     Notification::fake();
-    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id, '--no-filing' => true])
         ->expectsOutputToContain('Notices 1, stamped 0, texts 0')
         ->assertExitCode(0);
     Notification::assertNothingSent();
@@ -103,7 +104,7 @@ it('a reinstatement puts the policy back to tracking, and an unmatched notice is
     ]];
     $this->mock(NylasService::class, fn ($mock) => $mock->shouldReceive('getMessages')->andReturn($mails));
 
-    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id, '--no-filing' => true])
         ->expectsOutputToContain('unmatched: ')
         ->expectsOutputToContain('Notices 2, stamped 1, texts 1, unmatched 1')
         ->assertExitCode(0);
@@ -149,4 +150,41 @@ it('classifies EWCCV mail and finds the policy numbers it names', function () {
         ->and(NoticeParser::kind($signIn))->toBe('sign_in')
         ->and(NoticeParser::isFromEwccv($signIn))->toBeTrue()
         ->and(NoticeParser::isFromEwccv($unrelated))->toBeFalse();
+});
+
+it('files each EWCCV mail under Workers Comp by what it is, creating the subfolders once', function () {
+    ['gs' => $gs] = noticeFixture();
+    $root = 'root-id';
+    $existing = ['data' => ['data' => [
+        ['id' => 'inbox-id', 'name' => 'Inbox', 'parent_id' => $root],
+        ['id' => 'wc-id', 'name' => 'Workers Comp', 'parent_id' => $root],
+    ]]];
+    $moved = [];
+    $this->mock(NylasService::class, function ($mock) use ($existing, &$moved) {
+        $mock->shouldReceive('getMessages')->andReturn(['data' => [
+            ['id' => 'm-signin', 'subject' => 'Sign in to Workers Compensation Coverage Verification', 'from' => [['email' => 'donotreply@ewccv.com']], 'body' => 'Click', 'date' => now()->subMinutes(30)->timestamp, 'folders' => ['inbox-id']],
+            ['id' => 'm-confirm', 'subject' => 'FW: We received your ewccv.com subscription', 'from' => [['email' => 'patryk.szady@live.com']], 'body' => 'We received your subscription for policy AFWCP100134391', 'date' => now()->subMinutes(20)->timestamp, 'folders' => ['wc-id']],
+            ['id' => 'm-cancel', 'subject' => 'Policy Cancellation Notice', 'from' => [['email' => 'donotreply@ewccv.com']], 'body' => 'Policy Number: ZZ-999-111 cancelled', 'date' => now()->subMinutes(10)->timestamp, 'folders' => ['wc-id']],
+        ]]);
+        $mock->shouldReceive('getFolders')->once()->andReturn($existing);
+        $mock->shouldReceive('createFolder')->once()->with('grant-1', MailFolders::SIGN_IN, 'wc-id')->andReturn(['status' => 200, 'data' => ['data' => ['id' => 'signin-id', 'name' => MailFolders::SIGN_IN, 'parent_id' => 'wc-id']]]);
+        $mock->shouldReceive('createFolder')->once()->with('grant-1', MailFolders::SUBSCRIPTIONS, 'wc-id')->andReturn(['status' => 200, 'data' => ['data' => ['id' => 'subs-id', 'name' => MailFolders::SUBSCRIPTIONS, 'parent_id' => 'wc-id']]]);
+        $mock->shouldReceive('moveEmailToFolder')->andReturnUsing(function ($messageId, $folderId) use (&$moved) {
+            $moved[$messageId] = $folderId;
+
+            return true;
+        });
+    });
+
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])
+        ->expectsOutputToContain('filed 3.')
+        ->assertExitCode(0);
+
+    // The sign-in link and the confirmation move into their subfolders; the
+    // cancellation already sits under Workers Comp and stays put.
+    expect($moved)->toBe(['m-signin' => 'signin-id', 'm-confirm' => 'subs-id'])
+        ->and(json_decode(Storage::disk('local')->get(MailFolders::FILE), true))->toBe(['Workers Comp' => 'wc-id', MailFolders::SIGN_IN => 'signin-id', MailFolders::SUBSCRIPTIONS => 'subs-id']);
+
+    // Ids are remembered: a second run lists nothing and creates nothing.
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])->assertExitCode(0);
 });

@@ -43,6 +43,7 @@ class NoticeParser
 
         return str_contains($from, 'ewccv.com')
             || str_contains($from, 'ncci.com')
+            || str_contains($subject, 'ewccv')
             || str_contains($subject, 'coverage verification')
             || str_contains($subject, 'workers compensation coverage');
     }
