@@ -35,10 +35,15 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
      * queue's 35 minutes. On 2026-10-12 every queued run was cut off at 60 s
      * while its scraper child ran on orphaned.
      */
-    public string $queue = 'long-running';
+    public const QUEUE = 'long-running';
 
     /** Under the long-running supervisor's own 2100 s limit. */
     public int $timeout = 2000;
+
+    public function __construct()
+    {
+        $this->onQueue(self::QUEUE);
+    }
 
     public function uniqueFor(): int
     {
