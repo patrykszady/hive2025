@@ -578,6 +578,10 @@ Route::middleware(['auth', 'can:platform-admin'])->group(function () {
 // browser earns the accessToken and posts it here. Bearer-authed, CSRF-exempt.
 Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::class)
     ->name('ewccv.session');
+// The extension asks this before minting: a credential is only worth minting
+// when a lookup is waiting and no run is on (it lives minutes, not hours).
+Route::get('api/ewccv/pending', [\App\Http\Controllers\EwccvSessionController::class, 'pending'])
+    ->name('ewccv.pending');
 
 // The no-install hand-off: a bookmarklet for the platform admin, plus the
 // extension's page-world minter it loads on ewccv.com (public, plain JS).

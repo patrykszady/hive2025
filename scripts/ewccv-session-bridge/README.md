@@ -49,15 +49,20 @@ The POST runs in the service worker, which bypasses CORS for hosts in
 Sign in to [ewccv.com](https://www.ewccv.com/cvs/search) as normal and leave a
 tab open. That's it.
 
-The extension sends the session:
+The extension sends a credential only when Hive has a lookup waiting, because
+a credential lives minutes and covers about 25 searches:
 
+- **once a minute** while an ewccv.com tab is open, it asks Hive whether a
+  lookup is waiting; if one is and no run is on, it mints and sends,
 - **when an ewccv.com page finishes loading** (i.e. right after you sign in),
-- **every 20 minutes** while a tab is open, so the server's copy stays fresh,
-- **on demand**, via the popup's *Send session now* button.
+  it does the same check,
+- **on demand**, via the popup's *Send session now* button, which always sends.
 
-If the site refuses to mint a token silently, do one search on the page by hand
-and press send again — a search always produces one, and the extension prefers
-an existing token over minting its own.
+A pinned ewccv.com tab therefore keeps Hive supplied by itself. If the page
+cannot mint (reCAPTCHA refused it), the extension falls back to the copy the
+page already holds; Hive refuses that copy, since an earlier run has usually
+spent it, and answers "do one search on ewccv.com by hand, then send again".
+A search always produces a fresh one.
 
 ## How the server uses it
 

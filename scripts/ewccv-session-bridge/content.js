@@ -24,6 +24,9 @@
             accessToken: event.data.accessToken,
             jwt: event.data.jwt,
             stateToken: event.data.stateToken,
+            // The minter could not mint and fell back to the page's own copy,
+            // which an earlier run has usually spent; Hive refuses those.
+            reused: !!event.data.reused,
         });
     });
 

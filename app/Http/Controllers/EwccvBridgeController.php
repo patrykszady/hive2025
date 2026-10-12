@@ -78,7 +78,7 @@ class EwccvBridgeController extends Controller
 function tell(m){alert('Hive: '+m);}
 function post(p){fetch(H+'/api/ewccv/session',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json','Authorization':'Bearer '+T},body:JSON.stringify(p)}).then(function(r){return r.json();}).then(function(j){tell(j.message||j.error||JSON.stringify(j));}).catch(function(e){tell('could not reach Hive: '+e.message);});}
 if(location.hostname!=='www.ewccv.com'){tell('open www.ewccv.com/cvs/search, sign in, then click this bookmark');return;}
-function onReply(e){if(e.source!==window||!e.data||e.data.source!=='hive-ewccv-bridge')return;window.removeEventListener('message',onReply);if(e.data.ok){post({accessToken:e.data.accessToken,jwt:e.data.jwt||null,stateToken:e.data.stateToken||null});}else{tell(e.data.error||'EWCCV did not hand over a session');}}
+function onReply(e){if(e.source!==window||!e.data||e.data.source!=='hive-ewccv-bridge')return;window.removeEventListener('message',onReply);if(e.data.ok){post({accessToken:e.data.accessToken,reused:!!e.data.reused,jwt:e.data.jwt||null,stateToken:e.data.stateToken||null});}else{tell(e.data.error||'EWCCV did not hand over a session');}}
 window.addEventListener('message',onReply);
 var s=document.createElement('script');s.src=M+'?v='+Date.now();s.onerror=function(){window.removeEventListener('message',onReply);tell('could not load the minter from Hive');};document.head.appendChild(s);
 setTimeout(function(){window.removeEventListener('message',onReply);},35000);

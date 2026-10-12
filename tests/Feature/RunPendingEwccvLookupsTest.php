@@ -90,7 +90,7 @@ it('starts the scraper for exactly the pending vendors when a session is at hand
 
     bridgedSession();
     $launcher = $this->mock(ScrapeLauncher::class);
-    $launcher->shouldReceive('launch')->once()->with([$pending->vendor_id], 1)->andReturn(4242);
+    $launcher->shouldReceive('launch')->once()->with([$pending->vendor_id], 1, [])->andReturn(4242);
     (new RunPendingEwccvLookups)->handle($launcher);
 });
 
@@ -127,8 +127,8 @@ it('a session handed over by the extension starts the pending lookups right away
 
     Queue::assertPushed(RunPendingEwccvLookups::class, 1);
 
-    // A second hand-off minutes later (the extension re-sends on a timer)
-    // stores the fresher session but does not queue a second run.
+    // A second hand-off moments later (a page load) stores the fresher
+    // session but does not queue a second run.
     $this->withHeader('Authorization', 'Bearer bridge-secret')
         ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('c', 120)])
         ->assertOk()

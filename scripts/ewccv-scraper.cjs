@@ -2414,6 +2414,12 @@ async function requestLoginEmail(page, email) {
         // Step 6: For each vendor, search and enable tracking
         for (let i = 0; i < vendors.length; i++) {
             const vendor = vendors[i];
+            // Every result entry of this vendor carries its config key: one run
+            // can hold the same vendor twice (a tracking lookup and a coverage
+            // check as of a date), and the server stamps each by its key.
+            for (const list of [results.success, results.failed, results.skipped]) {
+                list.push = (entry) => Array.prototype.push.call(list, { key: vendor.key ?? String(vendor.id), ...entry });
+            }
             if (results.sessionExpired) {
                 results.skipped.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired' });
                 continue;
@@ -2612,7 +2618,7 @@ async function requestLoginEmail(page, email) {
                 log(`    Matched: ${picked.matchedName} via ${picked.via} (policy: ${picked.matchedPolicy})`);
 
                 // ── Verify-only mode: confirm coverage, create no subscription ──
-                if (config.verifyOnly) {
+                if (config.verifyOnly || vendor.verifyOnly) {
                     const scalarDetails = {};
                     for (const [key, val] of Object.entries(picked.match)) {
                         if (val === null || ['string', 'number', 'boolean'].includes(typeof val)) {

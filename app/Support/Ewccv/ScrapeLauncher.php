@@ -27,7 +27,7 @@ class ScrapeLauncher
 
     /**
      * @param  list<int>  $vendorIds
-     * @param  array{coverage_date?: string, verify_only?: bool}  $options  an audit's as-of check: search that date, create no subscription
+     * @param  array{coverage_date?: string, verify_only?: bool, checks?: array<string, list<int>>}  $options  verify_only + coverage_date: every vendor is an as-of check; checks: coverage checks (vendor ids by date) run alongside the tracking lookups
      * @return int|null the new process id, null when it could not be started
      */
     public function launch(array $vendorIds, int $belongsToVendorId, array $options = []): ?int
@@ -48,16 +48,24 @@ class ScrapeLauncher
      * and prints the new process id.
      *
      * @param  list<int>  $vendorIds
-     * @param  array{coverage_date?: string, verify_only?: bool}  $options
+     * @param  array{coverage_date?: string, verify_only?: bool, checks?: array<string, list<int>>}  $options
      */
     public static function commandLine(array $vendorIds, int $belongsToVendorId, array $options = []): string
     {
+        $checks = [];
+        foreach ((array) ($options['checks'] ?? []) as $date => $ids) {
+            foreach ((array) $ids as $id) {
+                $checks[] = '--check='.(int) $id.':'.$date;
+            }
+        }
+
         $command = implode(' ', array_map('escapeshellarg', array_values(array_filter([
             PHP_BINARY,
             base_path('artisan'),
             'ewccv:scrape-tracking',
             '--belongs-to-vendor-id='.$belongsToVendorId,
             ...array_map(fn (int $id) => '--vendor-id='.$id, $vendorIds),
+            ...$checks,
             filled($options['coverage_date'] ?? null) ? '--coverage-date='.$options['coverage_date'] : null,
             ! empty($options['verify_only']) ? '--verify-only' : null,
         ]))));

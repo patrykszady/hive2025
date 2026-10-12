@@ -186,7 +186,7 @@ it('a verify-only run records covered, not found, or still waiting, and subscrib
     ])
         ->expectsOutputToContain('Coverage check as of 12/31/2025 for 3 vendor(s)')
         ->expectsOutputToContain('closest: SMART TECH LLC (policy X1, score 0.5)')
-        ->expectsOutputToContain('Recorded EWCCV coverage on 12/31/2025 for 3 vendor(s).')
+        ->expectsOutputToContain('Recorded EWCCV coverage for 3 coverage check(s).')
         ->assertExitCode(0);
 
     expect($config['verifyOnly'])->toBeTrue()
@@ -202,7 +202,7 @@ it('a verify-only run records covered, not found, or still waiting, and subscrib
         ->and(VendorDoc::withoutGlobalScopes()->where('vendor_id', $covered->id)->first()->options)->not->toHaveKey('ewccv');
 });
 
-it('a hand-off runs the pending coverage checks, one detached run per date, alongside the tracking lookups', function () {
+it('a hand-off runs the pending coverage checks and the tracking lookups in one detached run', function () {
     config(['services.ewccv.bridge_token' => 'bridge-secret']);
     $a = Vendor::factory()->create();
     $b = Vendor::factory()->create();
@@ -221,13 +221,97 @@ it('a hand-off runs the pending coverage checks, one detached run per date, alon
 
     coverageBridgedSession();
     $launcher = $this->mock(ScrapeLauncher::class);
-    $launcher->shouldReceive('launch')->once()->with([$tracking->vendor_id], 1)->andReturn(11);
-    $launcher->shouldReceive('launch')->once()->with([$a->id], 1, ['coverage_date' => '2024-12-31', 'verify_only' => true])->andReturn(12);
-    $launcher->shouldReceive('launch')->once()->with([$a->id, $b->id], 1, ['coverage_date' => '2025-12-31', 'verify_only' => true])->andReturn(13);
+    $launcher->shouldReceive('launch')->once()
+        ->with([$tracking->vendor_id], 1, ['checks' => ['2024-12-31' => [$a->id], '2025-12-31' => [$a->id, $b->id]]])
+        ->andReturn(11);
     (new RunPendingEwccvLookups)->handle($launcher);
 
     expect(ScrapeLauncher::commandLine([$a->id], 1, ['coverage_date' => '2025-12-31', 'verify_only' => true]))
-        ->toContain("'--vendor-id={$a->id}' '--coverage-date=2025-12-31' '--verify-only'");
+        ->toContain("'--vendor-id={$a->id}' '--coverage-date=2025-12-31' '--verify-only'")
+        ->and(ScrapeLauncher::commandLine([7], 1, ['checks' => ['2025-12-31' => [$a->id, $b->id]]]))
+        ->toContain("'--vendor-id=7' '--check={$a->id}:2025-12-31' '--check={$b->id}:2025-12-31'");
+
+    // While a run is on, nothing starts: the next hand-off covers the rest.
+    $held = \Illuminate\Support\Facades\Cache::lock(\App\Support\Ewccv\ScraperLock::NAME, 60);
+    expect($held->get())->toBeTrue();
+    $idle = $this->mock(ScrapeLauncher::class);
+    $idle->shouldReceive('launch')->never();
+    (new RunPendingEwccvLookups)->handle($idle);
+    $held->release();
+});
+
+it('one run carries tracking lookups and coverage checks, keyed per entry, and stamps each where it belongs', function () {
+    $both = Vendor::factory()->create(['state' => 'IL', 'address' => '5 Main St', 'business_name' => 'Both Ways Inc']);
+    $only = Vendor::factory()->create(['state' => 'IL', 'address' => '6 Main St', 'business_name' => 'Check Only Inc']);
+    $doc = VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $both->id, 'belongs_to_vendor_id' => 1, 'number' => 'WC-BOTH',
+        'doc_filename' => 'b.pdf', 'effective_date' => now()->subMonths(3)->toDateString(), 'expiration_date' => now()->addMonths(9)->toDateString(),
+    ]));
+    EwccvCoverageCheck::request($both->id, 1, '2025-12-31');
+    EwccvCoverageCheck::request($only->id, 1, '2025-12-31');
+
+    $config = null;
+    Process::fake(function ($process) use (&$config, $both, $only) {
+        $file = preg_match('/(\/\S*ewccv_cfg_\S+)/', $process->command, $m) ? $m[1] : null;
+        $config = $file && is_file($file) ? json_decode(file_get_contents($file), true) : null;
+
+        return Process::result(json_encode([
+            'success' => [
+                ['key' => (string) $both->id, 'vendorId' => $both->id, 'businessName' => 'Both Ways Inc', 'matchType' => 'policyNumber', 'tracked' => true, 'alreadyTracking' => false, 'matchedName' => 'BOTH WAYS INC', 'matchedPolicy' => 'WC-BOTH'],
+                ['key' => $both->id.'@2025-12-31', 'vendorId' => $both->id, 'businessName' => 'Both Ways Inc', 'matchType' => 'policyNumber', 'verifyOnly' => true, 'coverageDate' => '12/31/2025', 'policyNumber' => 'WC-BOTH', 'employerName' => 'BOTH WAYS INC'],
+            ],
+            'failed' => [
+                ['key' => $only->id.'@2025-12-31', 'vendorId' => $only->id, 'businessName' => 'Check Only Inc', 'reason' => 'no_results', 'searched' => [['type' => 'employer', 'term' => 'Check Only', 'count' => 0]]],
+            ],
+            'skipped' => [],
+        ]));
+    });
+
+    $this->artisan('ewccv:scrape-tracking', [
+        '--belongs-to-vendor-id' => 1, '--vendor-id' => [$both->id],
+        '--check' => [$both->id.':2025-12-31', $only->id.':2025-12-31'], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test',
+    ])
+        ->expectsOutputToContain('Plus 2 coverage check(s) as of 2025-12-31')
+        ->expectsOutputToContain('Recorded EWCCV coverage for 2 coverage check(s).')
+        ->assertExitCode(0);
+
+    expect(collect($config['vendors'])->pluck('key')->all())->toBe([(string) $both->id, $both->id.'@2025-12-31', $only->id.'@2025-12-31'])
+        ->and(collect($config['vendors'])->firstWhere('key', $only->id.'@2025-12-31'))->toMatchArray(['verifyOnly' => true, 'coverageDate' => '12/31/2025'])
+        ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'tracking', 'matched_name' => 'BOTH WAYS INC'])
+        ->and(EwccvCoverageCheck::where('vendor_id', $both->id)->first())->toMatchArray(['status' => 'covered', 'policy_number' => 'WC-BOTH'])
+        ->and(EwccvCoverageCheck::where('vendor_id', $only->id)->first())->toMatchArray(['status' => 'not_found', 'reason' => 'no_results'])
+        ->and(RunPendingEwccvLookups::pendingCount(1))->toBe(0);
+});
+
+it('refuses a reused credential and tells the extension what is waiting', function () {
+    Queue::fake();
+    config(['services.ewccv.bridge_token' => 'bridge-secret']);
+    $pending = coverageWcDoc();
+
+    $this->withHeader('Authorization', 'Bearer bridge-secret')
+        ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('a', 120), 'reused' => true])
+        ->assertStatus(409)
+        ->assertJson(['ok' => false, 'reused' => true, 'pending_lookups' => 1])
+        ->assertJsonPath('error', fn ($e) => str_contains($e, 'Do one search on ewccv.com by hand'));
+    expect(BridgedSession::raw())->toBeNull();
+    Queue::assertNotPushed(RunPendingEwccvLookups::class);
+
+    $this->withHeader('Authorization', 'Bearer bridge-secret')
+        ->getJson('/api/ewccv/pending')
+        ->assertOk()
+        ->assertJson(['pending' => 1, 'running' => false, 'session' => 'none']);
+
+    $held = \Illuminate\Support\Facades\Cache::lock(\App\Support\Ewccv\ScraperLock::NAME, 60);
+    expect($held->get())->toBeTrue();
+    $this->withHeader('Authorization', 'Bearer bridge-secret')->getJson('/api/ewccv/pending')->assertJson(['running' => true]);
+    // A hand-off during a run is stored but starts nothing.
+    $this->withHeader('Authorization', 'Bearer bridge-secret')
+        ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('b', 120)])
+        ->assertOk();
+    Queue::assertNotPushed(RunPendingEwccvLookups::class);
+    $held->release();
+
+    $this->flushHeaders()->getJson('/api/ewccv/pending')->assertUnauthorized();
 });
 
 it('a failed tracking lookup says what was searched and the closest employers EWCCV listed', function () {

@@ -6,6 +6,7 @@ use App\Models\EwccvCoverageCheck;
 use App\Models\VendorDoc;
 use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\ScrapeLauncher;
+use App\Support\Ewccv\ScraperLock;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -58,27 +59,27 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        if ($vendorIds !== []) {
-            $pid = $launcher->launch($vendorIds, $belongsToVendorId);
+        // A run already on has its own copy of a credential and will leave
+        // whatever it cannot finish pending; the extension hands over a fresh
+        // one when it ends. Starting another now would only queue behind it
+        // on the scraper lock while this credential dies.
+        if (ScraperLock::isHeld()) {
+            Log::info('RunPendingEwccvLookups: a scraper run is in progress — the next hand-off covers the rest');
 
-            Log::info('RunPendingEwccvLookups: EWCCV lookup started detached', [
-                'vendor_ids' => $vendorIds,
-                'session_age_minutes' => $session['age_minutes'] ?? null,
-                'pid' => $pid,
-            ]);
+            return;
         }
 
-        // An audit's coverage checks: one run per as-of date, search only.
-        // The runs queue up behind one another on the scraper lock.
-        foreach ($checksByDate as $date => $checkVendorIds) {
-            $pid = $launcher->launch($checkVendorIds, $belongsToVendorId, ['coverage_date' => $date, 'verify_only' => true]);
+        // One run per credential: the tracking lookups and the audits' as-of
+        // coverage checks all go into a single scraper process, since a
+        // credential lives minutes and a second run would outlive it.
+        $pid = $launcher->launch($vendorIds, $belongsToVendorId, $checksByDate !== [] ? ['checks' => $checksByDate] : []);
 
-            Log::info('RunPendingEwccvLookups: EWCCV coverage check started detached', [
-                'coverage_date' => $date,
-                'vendor_ids' => $checkVendorIds,
-                'pid' => $pid,
-            ]);
-        }
+        Log::info('RunPendingEwccvLookups: EWCCV lookup started detached', [
+            'vendor_ids' => $vendorIds,
+            'coverage_checks' => $checksByDate,
+            'session_age_minutes' => $session['age_minutes'] ?? null,
+            'pid' => $pid,
+        ]);
     }
 
     /** Everything a browser session would be spent on right now. */

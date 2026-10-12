@@ -99,6 +99,7 @@ class EwccvCoverageCheck extends Model
             ->get(['vendor_id', 'coverage_date'])
             ->groupBy(fn (self $check) => $check->coverage_date->toDateString())
             ->map(fn ($checks) => $checks->pluck('vendor_id')->map(fn ($id) => (int) $id)->unique()->values()->all())
+            ->sortKeys()
             ->all();
     }
 

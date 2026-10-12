@@ -19,6 +19,7 @@ class ScrapeEwccvTracking extends Command
         {--vendor-id=* : Specific vendor ID(s) to process (default: all with active WC policies)}
         {--coverage-date= : Search coverage as of this date (Y-m-d or m/d/Y) instead of yesterday}
         {--verify-only : Record whether EWCCV lists coverage on the date (EwccvCoverageCheck) and create no subscription}
+        {--check=* : A coverage check to run alongside, as vendorId:Y-m-d (search as of that date, no subscription); with --check and no --vendor-id, nothing is tracked}
         {--visible : Run browser in visible (non-headless) mode}
         {--dry-run : Show vendors that would be processed without running scraper}
         {--delay= : Base delay between actions in ms (default 3000)}
@@ -72,6 +73,8 @@ class ScrapeEwccvTracking extends Command
                     && $doc->effective_date->lte($coverageDate) && $doc->expiration_date->gte($coverageDate));
 
                 return [
+                    'key'          => $vendor->id.'@'.$coverageDate->toDateString(),
+                    'verifyOnly'   => true,
                     'id'           => $vendor->id,
                     'businessName' => $vendor->business_name,
                     'address'      => $vendor->address,
@@ -87,30 +90,54 @@ class ScrapeEwccvTracking extends Command
     }
 
     /**
-     * Record a verify-only run on the EwccvCoverageCheck rows it was run for:
-     * a match is `covered`, a search that found nothing is `not_found`, and a
+     * The --check options, vendor ids by date (Y-m-d).
+     *
+     * @return array<string, list<int>>
+     */
+    protected function coverageChecksOption(): array
+    {
+        $checks = [];
+        foreach ((array) $this->option('check') as $spec) {
+            if (! preg_match('/^(\d+):(\d{4}-\d{2}-\d{2})$/', trim((string) $spec), $m)) {
+                $this->warn("Ignoring --check={$spec}: expected vendorId:Y-m-d");
+
+                continue;
+            }
+            $checks[$m[2]][] = (int) $m[1];
+        }
+        ksort($checks);
+
+        return array_map(fn ($ids) => array_values(array_unique($ids)), $checks);
+    }
+
+    /**
+     * Record the coverage checks of a run on their EwccvCoverageCheck rows: a
+     * match is `covered`, a search that found nothing is `not_found`, and a
      * run that failed for its own reasons (spent session, reCAPTCHA, a 500)
      * leaves the check pending with the reason, for the next session.
      *
      * @param  array<string, mixed>  $results
-     * @param  list<int>  $vendorIds
+     * @param  list<string>  $allowedKeys  the vendor@date entries this run was asked to check
+     * @param  \Closure(array): string  $keyOf
      */
-    protected function recordCoverageChecks(array $results, array $vendorIds, int $belongsToVendorId, Carbon $coverageDate): int
+    protected function recordCoverageChecks(array $results, array $allowedKeys, int $belongsToVendorId, \Closure $keyOf): int
     {
         $recorded = 0;
-        $record = function (int $vendorId, array $state) use (&$recorded, $belongsToVendorId, $coverageDate, $vendorIds): void {
-            if (! in_array($vendorId, $vendorIds, true)) {
+        $record = function (array $entry, array $state) use (&$recorded, $belongsToVendorId, $allowedKeys, $keyOf): void {
+            $key = $keyOf($entry);
+            if (! in_array($key, $allowedKeys, true) || ! str_contains($key, '@')) {
                 return;
             }
+            [$vendorId, $date] = explode('@', $key, 2);
             \App\Models\EwccvCoverageCheck::updateOrCreate(
-                ['vendor_id' => $vendorId, 'belongs_to_vendor_id' => $belongsToVendorId, 'coverage_date' => $coverageDate->copy()->startOfDay()],
+                ['vendor_id' => (int) $vendorId, 'belongs_to_vendor_id' => $belongsToVendorId, 'coverage_date' => Carbon::parse($date)->startOfDay()],
                 $state + ['checked_at' => now()],
             );
             $recorded++;
         };
 
         foreach ($results['success'] ?? [] as $s) {
-            $record((int) $s['vendorId'], [
+            $record($s, [
                 'status' => \App\Models\EwccvCoverageCheck::STATUS_COVERED,
                 'policy_number' => $s['policyNumber'] ?? $s['matchedPolicy'] ?? null,
                 'employer_name' => $s['employerName'] ?? $s['matchedName'] ?? null,
@@ -124,7 +151,7 @@ class ScrapeEwccvTracking extends Command
         foreach (array_merge($results['failed'] ?? [], $results['skipped'] ?? []) as $f) {
             $reason = (string) ($f['reason'] ?? 'unknown');
             $settled = in_array($reason, \App\Models\EwccvCoverageCheck::NOT_FOUND_REASONS, true);
-            $record((int) $f['vendorId'], [
+            $record($f, [
                 'status' => $settled ? \App\Models\EwccvCoverageCheck::STATUS_NOT_FOUND : \App\Models\EwccvCoverageCheck::STATUS_PENDING,
                 'reason' => $reason,
                 'searched' => array_slice((array) ($f['searched'] ?? []), 0, 8),
@@ -189,6 +216,8 @@ class ScrapeEwccvTracking extends Command
         $verifyOnly = (bool) $this->option('verify-only');
         $coverageDate = $this->coverageDate();
         $vendorDocs = collect();
+        $checks = $this->coverageChecksOption();
+        $tenantId = (int) ($belongsToVendorId ?: config('services.ewccv.belongs_to_vendor_id', 1));
 
         if ($verifyOnly) {
             // An audit's question: was each of these vendors covered on the
@@ -202,6 +231,10 @@ class ScrapeEwccvTracking extends Command
             }
             $vendors = $this->vendorsForCoverageCheck($specificVendorIds, $belongsToVendorId ? (int) $belongsToVendorId : null, $coverageDate);
             $this->info(sprintf('Coverage check as of %s for %d vendor(s)', $coverageDate->format('m/d/Y'), count($vendors)));
+        } elseif ($specificVendorIds === [] && $checks !== []) {
+            // Coverage checks only: no tracking lookup, so no doc query that
+            // would otherwise mean "every active policy".
+            $vendors = [];
         } else {
             $query = VendorDoc::withoutGlobalScopes()
                 ->where('type', 'workers')
@@ -233,6 +266,7 @@ class ScrapeEwccvTracking extends Command
                 }
 
                 return [
+                    'key'          => (string) $vendor->id,
                     'id'           => $vendor->id,
                     'businessName' => $vendor->business_name,
                     'address'      => $vendor->address,
@@ -245,6 +279,17 @@ class ScrapeEwccvTracking extends Command
             })->filter()->values()->toArray();
 
             $this->info("Found {$vendorDocs->count()} active WC policies across " . count($vendors) . ' vendor(s)');
+        }
+
+        // Coverage checks ride along in the same run (one credential, one
+        // process): each is its own entry, keyed vendor@date, searched as of
+        // its date and never subscribed.
+        foreach ($checks as $date => $checkVendorIds) {
+            $asOf = Carbon::parse($date)->startOfDay();
+            $vendors = array_merge($vendors, $this->vendorsForCoverageCheck($checkVendorIds, $belongsToVendorId ? (int) $belongsToVendorId : null, $asOf));
+        }
+        if ($checks !== []) {
+            $this->info(sprintf('Plus %d coverage check(s) as of %s', array_sum(array_map('count', $checks)), implode(', ', array_keys($checks))));
         }
 
         // Filter out vendors missing both name and address (need at least one search method)
@@ -291,7 +336,7 @@ class ScrapeEwccvTracking extends Command
         // One scraper at a time: two runs share the Chrome profile and the
         // EWCCV session, and on 2026-10-12 an overlapping pair re-posted a
         // subscription and stamped a freshly tracked policy as failed.
-        $lock = \Illuminate\Support\Facades\Cache::lock('ewccv:scraper', 3600);
+        $lock = \Illuminate\Support\Facades\Cache::lock(\App\Support\Ewccv\ScraperLock::NAME, 3600);
         try {
             $lock->block((int) config('services.ewccv.lock_wait_seconds', 1500));
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
@@ -448,13 +493,33 @@ class ScrapeEwccvTracking extends Command
             $this->warn('  The bridged EWCCV session is spent — dropped it; open ewccv.com (or press Send session now) for a fresh one.');
         }
 
-            if ($verifyOnly) {
-                $recorded = $this->recordCoverageChecks($results, $searchable->pluck('id')->map(fn ($id) => (int) $id)->all(), (int) ($belongsToVendorId ?: config('services.ewccv.belongs_to_vendor_id', 1)), $coverageDate);
-                $this->info("Recorded EWCCV coverage on {$coverageDate->format('m/d/Y')} for {$recorded} vendor(s).");
-                Log::info('EWCCV coverage check completed', ['coverage_date' => $coverageDate->toDateString(), 'recorded' => $recorded, 'success' => count($results['success'] ?? []), 'failed' => count($results['failed'] ?? [])]);
+            // Every result carries the key of the entry it answers: a plain
+            // vendor id is a tracking lookup (stamped on the docs), vendor@date
+            // a coverage check (recorded on its EwccvCoverageCheck row). Older
+            // scraper output without keys is read by vendor id.
+            $keyOf = fn (array $entry): string => (string) ($entry['key']
+                ?? ($verifyOnly ? $entry['vendorId'].'@'.$coverageDate->toDateString() : $entry['vendorId']));
+            $isCheck = fn (array $entry): bool => str_contains($keyOf($entry), '@');
+            $allowedChecks = [];
+            foreach ($searchable as $entry) {
+                if (! empty($entry['verifyOnly'])) {
+                    $allowedChecks[] = $entry['key'];
+                }
+            }
 
+            $recorded = $this->recordCoverageChecks($results, $allowedChecks, $tenantId, $keyOf);
+            if ($recorded > 0 || $verifyOnly || $checks !== []) {
+                $this->info("Recorded EWCCV coverage for {$recorded} coverage check(s).");
+                Log::info('EWCCV coverage checks completed', ['recorded' => $recorded, 'dates' => $verifyOnly ? [$coverageDate->toDateString()] : array_keys($checks)]);
+            }
+            if ($verifyOnly) {
                 return self::SUCCESS;
             }
+            $results = [
+                'success' => array_values(array_filter($results['success'] ?? [], fn ($e) => ! $isCheck($e))),
+                'failed' => array_values(array_filter($results['failed'] ?? [], fn ($e) => ! $isCheck($e))),
+                'skipped' => array_values(array_filter($results['skipped'] ?? [], fn ($e) => ! $isCheck($e))),
+            ] + $results;
 
         // ── Persist per-doc state so /vendor_docs can show it ─────────────
             // Results are keyed by vendor; stamp every active workers doc for that
