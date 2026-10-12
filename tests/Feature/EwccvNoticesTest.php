@@ -136,7 +136,8 @@ it('classifies EWCCV mail and finds the policy numbers it names', function () {
     $cancel = ewccvMail('a', 'Coverage Cancellation', '<p>Policy No: R2WC-795013</p><p>Employer Name: MORENOS DRYWALL INC</p>');
     $nonrenewal = ewccvMail('b', 'Notice', 'The policy 83WECBP6H9V will not be renewed.');
     $confirm = ewccvMail('c', 'Workers Compensation Coverage Verification', 'You are now tracking policy AW9173630 for TBD PRO PAINTING.');
-    $received = ewccvMail('c2', 'FW: We received your ewccv.com subscription', 'Thank you. We received your subscription for policy AFWCP100134391.');
+    $received = ewccvMail('c2', 'FW: We received your ewccv.com subscription', "Thank You For Subscribing! You have successfully subscribed this email address to receive notification of any cancellation/reinstatement for the following policy. Subscription Info Employer Name: MORENOS DRYWALL INC State: Illinois Policy Number: R2WC795013");
+    $footer = ewccvMail('c3', 'Workers Compensation Coverage Verification', 'Your tracked policy R2WC795013 is active. To cancel this subscription, use the link below.');
     $signIn = ewccvMail('d', 'Sign in to Workers Compensation Coverage Verification', 'Click to sign in');
     $unrelated = ['id' => 'e', 'subject' => 'Re: COI Request', 'from' => [['email' => 'agent@insurance.test']], 'body' => 'Attached', 'date' => time()];
 
@@ -147,6 +148,7 @@ it('classifies EWCCV mail and finds the policy numbers it names', function () {
         ->and(NoticeParser::policyNumbers($nonrenewal, ['83WECBP6H9V']))->toBe(['83WECBP6H9V'])
         ->and(NoticeParser::kind($confirm))->toBe('confirmation')
         ->and(NoticeParser::kind($received))->toBe('confirmation')
+        ->and(NoticeParser::kind($footer))->toBe('other')
         ->and(NoticeParser::kind($signIn))->toBe('sign_in')
         ->and(NoticeParser::isFromEwccv($signIn))->toBeTrue()
         ->and(NoticeParser::isFromEwccv($unrelated))->toBeFalse();
@@ -187,4 +189,20 @@ it('files each EWCCV mail under Workers Comp by what it is, creating the subfold
 
     // Ids are remembered: a second run lists nothing and creates nothing.
     $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id])->assertExitCode(0);
+});
+
+it('takes a wrong notice off a doc once its mail reads as a confirmation', function () {
+    ['gs' => $gs, 'doc' => $doc] = noticeFixture();
+    $doc->forceFill(['options' => ['ewccv' => ['status' => 'tracking', 'notice' => ['kind' => 'reinstatement', 'message_id' => 'm-conf', 'received_at' => now()->subHour()->toIso8601String()], 'notice_message_ids' => ['m-conf']]]])->saveQuietly();
+    $this->mock(NylasService::class, fn ($mock) => $mock->shouldReceive('getMessages')->andReturn(['data' => [
+        ewccvMail('m-conf', 'FW: We received your ewccv.com subscription', 'Thank You For Subscribing! notification of any cancellation/reinstatement for the following policy. Policy Number: WC539S342438046', 30),
+    ]]));
+
+    $this->artisan('ewccv:notices', ['--belongs-to-vendor-id' => $gs->id, '--no-filing' => true])
+        ->expectsOutputToContain('repaired: the notice on WC5-39S-342438-046')
+        ->assertExitCode(0);
+
+    expect($doc->fresh()->options['ewccv'])->not->toHaveKey('notice')
+        ->and($doc->fresh()->ewccv_summary['tip'])->toBe('EWCCV coverage tracking enabled');
+    Notification::assertNothingSent();
 });

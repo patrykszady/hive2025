@@ -82,6 +82,10 @@ class SyncEwccvNotices extends Command
                 $stats['filed']++;
             }
 
+            if ($kind === NoticeParser::KIND_CONFIRMATION && ! $dryRun) {
+                $this->repairMisreadConfirmation($docs, $id);
+            }
+
             if (in_array($kind, [NoticeParser::KIND_SIGN_IN, NoticeParser::KIND_OTHER, NoticeParser::KIND_CONFIRMATION], true)) {
                 $stats['skipped']++;
 
@@ -166,6 +170,32 @@ class SyncEwccvNotices extends Command
         Log::info('EWCCV notices synced', $stats);
 
         return self::SUCCESS;
+    }
+
+    /**
+     * A confirmation mail once misread as a notice (2026-10-12: five of them
+     * as "reinstatement") left a wrong notice on the doc; when the same
+     * message now reads as a confirmation, the notice comes off.
+     *
+     * @param  \Illuminate\Support\Collection<int, VendorDoc>  $docs
+     */
+    protected function repairMisreadConfirmation($docs, string $messageId): void
+    {
+        if ($messageId === '') {
+            return;
+        }
+        foreach ($docs as $doc) {
+            $state = (array) ($doc->options['ewccv'] ?? []);
+            if (($state['notice']['message_id'] ?? null) !== $messageId) {
+                continue;
+            }
+            unset($state['notice']);
+            $options = $doc->options;
+            $options['ewccv'] = $state;
+            $doc->options = $options;
+            $doc->saveQuietly();
+            $this->line("  repaired: the notice on {$doc->number} was this confirmation, removed");
+        }
     }
 
     /** Where the last run stopped, with an hour's overlap; the first run reads a week back. */

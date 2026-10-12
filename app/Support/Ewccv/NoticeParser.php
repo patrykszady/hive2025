@@ -59,19 +59,34 @@ class NoticeParser
         if (str_contains($subject, 'sign in') || str_contains($subject, 'log in')) {
             return self::KIND_SIGN_IN;
         }
-        foreach ([$subject, $text] as $haystack) {
-            if (preg_match('/reinstat/', $haystack)) {
-                return self::KIND_REINSTATEMENT;
-            }
-            if (preg_match('/non-?\s?renew|not (be )?renewed|nonrenewal/', $haystack)) {
-                return self::KIND_NONRENEWAL;
-            }
-            if (preg_match('/cancel/', $haystack)) {
-                return self::KIND_CANCELLATION;
-            }
-        }
-        if (preg_match('/now tracking|tracking (this|the) policy|subscription (created|confirmed)|you are tracking|received your [a-z.]* ?subscription/', $subject.' '.$text)) {
+
+        // The subject decides first. EWCCV's subscription confirmation says
+        // "notification of any cancellation/reinstatement" in its body, and on
+        // 2026-10-12 a body-only reading of it sent five false "reinstated"
+        // texts; a body counts only with the phrasing of an actual notice.
+        if (preg_match('/received your .*subscription|thank you for subscribing|subscription (confirmation|confirmed|created)/', $subject)) {
             return self::KIND_CONFIRMATION;
+        }
+        if (preg_match('/reinstat/', $subject)) {
+            return self::KIND_REINSTATEMENT;
+        }
+        if (preg_match('/non-?\s?renew|not (be )?renewed/', $subject)) {
+            return self::KIND_NONRENEWAL;
+        }
+        if (preg_match('/cancel/', $subject)) {
+            return self::KIND_CANCELLATION;
+        }
+        if (preg_match('/thank you for subscribing|successfully subscribed|now tracking|you are tracking/', $text)) {
+            return self::KIND_CONFIRMATION;
+        }
+        if (preg_match('/(has been|was|is) reinstated|reinstatement (has been|was) reported|notice of reinstatement/', $text)) {
+            return self::KIND_REINSTATEMENT;
+        }
+        if (preg_match('/will not be renewed|(has|was) not (been )?renewed|notice of non-?\s?renewal|non-?renewal (has been|was) reported/', $text)) {
+            return self::KIND_NONRENEWAL;
+        }
+        if (preg_match('/(has been|was|is) cancell?ed|cancellation (has been|was) reported|notice of cancellation/', $text)) {
+            return self::KIND_CANCELLATION;
         }
 
         return self::KIND_OTHER;
