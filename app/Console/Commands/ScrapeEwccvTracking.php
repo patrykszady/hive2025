@@ -327,6 +327,9 @@ class ScrapeEwccvTracking extends Command
                     'status'           => 'tracking',
                     'match_type'       => $s['matchType'] ?? null,
                     'already_tracking' => (bool) ($s['alreadyTracking'] ?? false),
+                    // What EWCCV said to the "you are now tracking" email step.
+                    'confirmation'     => $s['confirmation'] ?? null,
+                    'subscription_id'  => $s['subscriptionId'] ?? null,
                 ]);
             }
             foreach ($results['failed'] ?? [] as $f) {
