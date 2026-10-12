@@ -92,9 +92,9 @@ class CaptureEwccvSession extends Command
         }
 
         \App\Support\Ewccv\BridgedSession::store([
-            'access_token' => $result['accessToken'],
-            'jwt' => $result['jwt'] ?? null,
-            'state_token' => $result['stateToken'] ?? null,
+            'access_token' => $payload['accessToken'],
+            'jwt' => $payload['jwt'] ?? null,
+            'state_token' => $payload['stateToken'] ?? null,
         ]);
 
         Log::info('EWCCV session captured interactively', [
