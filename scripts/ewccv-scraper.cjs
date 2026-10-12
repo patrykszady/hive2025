@@ -1910,26 +1910,25 @@ async function enableTracking(page, vendor, matchedItem, searchMeta) {
             console.log('[EWCCV] fetchSubscription check error:', e.message);
         }
 
-        // Step 3: Build subscription payload (mirrors handleSearchResultsClick + createSubscription saga)
-        // The payload shape: { ...searchResultItem, stateCode, coverageDate, searchType, searchTerm, userId, email }
-        // With employer name base64-encoded if present
+        // Step 3: The payload EWCCV's own app sends (TrackingSignUp.handleSubmit
+        // + the createSubscription saga, read from the 2026-10 bundle):
+        //   { writtenPolicyId, policyNumber, state, employer: { employer, covDate, fein }, userId, email }
+        // with employer.employer base64-encoded (encodeEmployerName). Spreading
+        // the raw search result instead was refused for every vendor on
+        // 2026-10-12 (create_subscription_failed) once searches finally passed.
+        const employerName = item.employerName || item.name || '';
         const payload = {
-            ...item,
-            stateCode: meta.stateCode,
-            coverageDate: meta.coverageDate,
-            searchType: meta.searchType,
-            searchTerm: meta.searchTerm,
+            writtenPolicyId: writtenPolicyId,
+            policyNumber: item.policyNumber || '',
+            state: meta.stateCode,
+            employer: {
+                employer: btoa(unescape(encodeURIComponent(employerName))),
+                covDate: meta.coverageDate,
+                fein: item.fein || '',
+            },
             userId: userId,
             email: email,
         };
-
-        // Encode employer name (base64) — mirrors encodeEmployerName() in bundle
-        if (payload.policy && payload.policy.employer && payload.policy.employer.employer) {
-            payload.policy.employer.employer = btoa(payload.policy.employer.employer);
-        }
-        if (payload.employer && payload.employer.employer) {
-            payload.employer.employer = btoa(payload.employer.employer);
-        }
 
         // Step 4: Create subscription
         try {
