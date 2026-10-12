@@ -92,6 +92,15 @@ class SyncEwccvSubscriptions extends Command
         }
 
         $subscriptions = collect($payload['subscriptions'] ?? []);
+
+        // Keep EWCCV's records as returned: when the site's own list disagrees
+        // with ours, the fields it carries (not just the policy number) are
+        // the evidence.
+        file_put_contents($outputDir.'/subscriptions.json', json_encode([
+            'read_at' => now()->toIso8601String(),
+            'user' => $payload['user'] ?? null,
+            'subscriptions' => $subscriptions->values()->all(),
+        ], JSON_PRETTY_PRINT));
         $this->info('  EWCCV is tracking '.$subscriptions->count().' policy(ies) for this account.');
         $this->newLine();
 
