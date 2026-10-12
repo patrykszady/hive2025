@@ -1945,7 +1945,21 @@ async function enableTracking(page, vendor, matchedItem, searchMeta) {
             });
             const subJson = await subRes.json();
             if (subRes.status === 200 && subJson.data) {
-                return { ok: true, alreadyTracking: false, subscriptionData: subJson.data };
+                // Step 5: the app's createSubscription saga follows up with
+                // the "you are now tracking this policy" email, so the account
+                // holder sees each new subscription land in the inbox.
+                let confirmation = 'sent';
+                try {
+                    const mailRes = await fetch(BASE + '/email-template/send-email/confirmation', {
+                        method: 'POST',
+                        headers: authHeaders,
+                        body: JSON.stringify({ ...payload, stateName: meta.stateName || '' }),
+                    });
+                    if (mailRes.status !== 200) confirmation = 'http_' + mailRes.status;
+                } catch (e) {
+                    confirmation = 'error: ' + e.message;
+                }
+                return { ok: true, alreadyTracking: false, subscriptionData: subJson.data, confirmation };
             }
             return { ok: false, reason: 'create_subscription_failed', status: subRes.status, detail: JSON.stringify(subJson).substring(0, 500) };
         } catch (e) {
@@ -1964,7 +1978,7 @@ async function enableTracking(page, vendor, matchedItem, searchMeta) {
         return { tracked: true, alreadyTracking: true };
     }
 
-    log('    Subscription created successfully');
+    log(`    Subscription created successfully (confirmation email: ${result.confirmation || 'n/a'})`);
     return { tracked: true, alreadyTracking: false };
 }
 
@@ -2540,6 +2554,7 @@ async function requestLoginEmail(page, email) {
                 });
                 const searchMeta = {
                     stateCode: resolvedStateCode,
+                    stateName: STATE_NAMES[(vendor.state || '').toUpperCase()] || '',
                     coverageDate: coverageDate,
                     searchType: matched.via === 'employerName' ? 'employer' : 'address',
                     searchTerm: matched.via === 'employerName' ? vendor.businessName : vendor.address,
