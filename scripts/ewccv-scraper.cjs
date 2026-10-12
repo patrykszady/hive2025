@@ -1979,7 +1979,7 @@ async function enableTracking(page, vendor, matchedItem, searchMeta) {
     }
 
     log(`    Subscription created successfully (confirmation email: ${result.confirmation || 'n/a'})`);
-    return { tracked: true, alreadyTracking: false };
+    return { tracked: true, alreadyTracking: false, confirmation: result.confirmation || null, subscriptionId: result.subscriptionData?.policySubscriptionId || result.subscriptionData?.subscriptionId || null };
 }
 
 // ── Request login email ───────────────────────────────────────────────────────
@@ -2579,6 +2579,8 @@ async function requestLoginEmail(page, email) {
                         matchType: matched.via,
                         tracked: trackResult.tracked,
                         alreadyTracking: trackResult.alreadyTracking || false,
+                        confirmation: trackResult.confirmation || null,
+                        subscriptionId: trackResult.subscriptionId || null,
                     });
                     log(`  ✓ Done: tracked=${trackResult.tracked}, already=${trackResult.alreadyTracking || false}`);
                 } else {
