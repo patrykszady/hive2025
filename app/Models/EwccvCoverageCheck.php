@@ -123,7 +123,7 @@ class EwccvCoverageCheck extends Model
     {
         return match ($this->status) {
             self::STATUS_COVERED => 'EWCCV: covered',
-            self::STATUS_NOT_FOUND => 'EWCCV: not found',
+            self::STATUS_NOT_FOUND => $this->reason === 'no_active_policy' ? 'EWCCV: no active policy' : 'EWCCV: not found',
             default => 'EWCCV: waiting',
         };
     }
@@ -136,7 +136,9 @@ class EwccvCoverageCheck extends Model
 
         return match ($this->status) {
             self::STATUS_COVERED => sprintf('Covered on %s: %s%s%s', $date, $this->employer_name ?: 'listed by EWCCV', $this->policy_number ? ', policy '.$this->policy_number : '', $checked),
-            self::STATUS_NOT_FOUND => sprintf('Not found on EWCCV for %s (%s)%s', $date, str_replace('_', ' ', (string) ($this->reason ?: 'no results')), $checked),
+            self::STATUS_NOT_FOUND => $this->reason === 'no_active_policy'
+                ? sprintf('Not searched for %s: no workers comp policy active today on file%s', $date, $checked)
+                : sprintf('Not found on EWCCV for %s (%s)%s', $date, str_replace('_', ' ', (string) ($this->reason ?: 'no results')), $checked),
             default => $this->reason
                 ? sprintf('Waiting for a browser session to retry (last attempt: %s)', str_replace('_', ' ', $this->reason))
                 : 'Waiting for a browser session: open ewccv.com with the Hive extension and the check runs',

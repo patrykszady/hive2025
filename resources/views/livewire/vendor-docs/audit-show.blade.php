@@ -41,7 +41,7 @@
                     <div class="text-sm">
                         <span class="font-medium">EWCCV coverage as of {{ \Carbon\Carbon::parse($end_date)->format('m/d/Y') }}:</span>
                         @if($this->coverage_check_counts['total'] === 0)
-                            <span class="text-zinc-500">no subs need coverage in this period</span>
+                            <span class="text-zinc-500">no paid sub has a workers comp policy active today</span>
                         @elseif($this->coverage_check_counts['covered'] + $this->coverage_check_counts['not_found'] + $this->coverage_check_counts['pending'] === 0)
                             <span class="text-zinc-500">not checked yet ({{ $this->coverage_check_counts['total'] }} subs)</span>
                         @else

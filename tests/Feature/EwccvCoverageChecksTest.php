@@ -11,6 +11,7 @@ use App\Models\VendorDoc;
 use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\ScrapeLauncher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -45,7 +46,7 @@ function auditFixture(): array
 
     $doc = VendorDoc::withoutEvents(fn () => VendorDoc::create([
         'type' => 'workers', 'vendor_id' => $sub->id, 'belongs_to_vendor_id' => $gc->id, 'number' => 'WC-KOT-1',
-        'doc_filename' => 'kot.pdf', 'effective_date' => '2025-01-01', 'expiration_date' => '2025-12-31',
+        'doc_filename' => 'kot.pdf', 'effective_date' => '2025-01-01', 'expiration_date' => now()->addMonths(3)->toDateString(),
         'options' => ['ewccv' => ['status' => 'tracking', 'checked_at' => '2026-10-12T20:00:00+00:00']],
     ]));
 
@@ -89,11 +90,13 @@ it('shows on every policy of the audit whether and when its coverage was verifie
         'doc_filename' => 'plain.pdf', 'effective_date' => '2025-01-01', 'expiration_date' => '2025-12-31',
     ]));
 
+    // The expired policy is shown (not verified) but is not an EWCCV check:
+    // only policies active today are verified.
     auditPage($f)
         ->assertSee('WC verified 10/12/2026')
         ->assertSee('not verified')
         ->assertSee('EWCCV coverage as of 12/31/2025')
-        ->assertSee('not checked yet (2 subs)');
+        ->assertSee('not checked yet (1 subs)');
 
     expect(AuditShow::verificationCell($f['doc']))->toBe('WC verified 10/12/2026 (EWCCV)');
 });
@@ -135,11 +138,21 @@ it('asks EWCCV for coverage as of the end date for every paid sub, and shows the
     expect(auditPage($f, '2025-06-30')->get('coverage_check_counts')['unchecked'])->toBe(1);
 });
 
-it('leaves the company itself, employees, retail and categorised vendors out of the coverage checks', function () {
+it('leaves the company itself, employees, retail and categorised vendors, and subs without a policy active today out of the coverage checks', function () {
     $f = auditFixture();
     $retail = Vendor::factory()->create(['business_type' => 'Retail']);
     $f['gc']->vendors()->attach($retail->id);
     Check::create(['check_type' => 'Check', 'check_number' => '1003', 'date' => '2025-03-01', 'bank_account_id' => $f['bank']->id, 'vendor_id' => $retail->id, 'belongs_to_vendor_id' => $f['gc']->id, 'created_by_user_id' => $f['user']->id, 'amount' => 50]);
+    $noDoc = Vendor::factory()->create(['business_type' => 'Sub']);
+    $expired = Vendor::factory()->create(['business_type' => 'Sub']);
+    $f['gc']->vendors()->attach([$noDoc->id, $expired->id]);
+    foreach ([$noDoc, $expired] as $i => $vendor) {
+        Check::create(['check_type' => 'Check', 'check_number' => '101'.$i, 'date' => '2025-04-01', 'bank_account_id' => $f['bank']->id, 'vendor_id' => $vendor->id, 'belongs_to_vendor_id' => $f['gc']->id, 'created_by_user_id' => $f['user']->id, 'amount' => 75]);
+    }
+    VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $expired->id, 'belongs_to_vendor_id' => $f['gc']->id, 'number' => 'WC-OLD',
+        'doc_filename' => 'old.pdf', 'effective_date' => '2025-01-01', 'expiration_date' => '2025-12-31',
+    ]));
     Check::create(['check_type' => 'Check', 'check_number' => '1004', 'date' => '2025-03-02', 'bank_account_id' => $f['bank']->id, 'vendor_id' => $f['gc']->id, 'belongs_to_vendor_id' => $f['gc']->id, 'created_by_user_id' => $f['user']->id, 'amount' => 50]);
 
     auditPage($f)->call('verify_coverage_on_ewccv');
@@ -151,11 +164,18 @@ it('a verify-only run records covered, not found, or still waiting, and subscrib
     $covered = Vendor::factory()->create(['state' => 'IL', 'address' => '1 Main St', 'business_name' => 'Kot Construction Inc']);
     $missing = Vendor::factory()->create(['state' => 'IL', 'address' => '2 Main St', 'business_name' => 'Smartech Electric Inc']);
     $hiccup = Vendor::factory()->create(['state' => 'IL', 'address' => '3 Main St', 'business_name' => 'JW Green Dump Inc']);
+    $lapsed = Vendor::factory()->create(['state' => 'IL', 'address' => '4 Main St', 'business_name' => 'Lapsed Roofing Inc']);
+    foreach ([[$covered, 'WCIL000171300'], [$missing, 'WC-SMART'], [$hiccup, 'WC-JW']] as [$vendor, $number]) {
+        VendorDoc::withoutEvents(fn () => VendorDoc::create([
+            'type' => 'workers', 'vendor_id' => $vendor->id, 'belongs_to_vendor_id' => 1, 'number' => $number,
+            'doc_filename' => $number.'.pdf', 'effective_date' => '2025-01-01', 'expiration_date' => now()->addMonths(2)->toDateString(),
+        ]));
+    }
     VendorDoc::withoutEvents(fn () => VendorDoc::create([
-        'type' => 'workers', 'vendor_id' => $covered->id, 'belongs_to_vendor_id' => 1, 'number' => 'WCIL000171300',
-        'doc_filename' => 'k.pdf', 'effective_date' => '2025-01-01', 'expiration_date' => '2025-12-31',
+        'type' => 'workers', 'vendor_id' => $lapsed->id, 'belongs_to_vendor_id' => 1, 'number' => 'WC-LAPSED',
+        'doc_filename' => 'l.pdf', 'effective_date' => '2024-01-01', 'expiration_date' => '2024-12-31',
     ]));
-    foreach ([$covered, $missing, $hiccup] as $vendor) {
+    foreach ([$covered, $missing, $hiccup, $lapsed] as $vendor) {
         EwccvCoverageCheck::request($vendor->id, 1, '2025-12-31');
     }
 
@@ -182,8 +202,9 @@ it('a verify-only run records covered, not found, or still waiting, and subscrib
 
     $this->artisan('ewccv:scrape-tracking', [
         '--belongs-to-vendor-id' => 1, '--verify-only' => true, '--coverage-date' => '2025-12-31',
-        '--vendor-id' => [$covered->id, $missing->id, $hiccup->id], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test',
+        '--vendor-id' => [$covered->id, $missing->id, $hiccup->id, $lapsed->id], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test',
     ])
+        ->expectsOutputToContain('Lapsed Roofing Inc (ID: '.$lapsed->id.') — no workers comp policy active today, not searched')
         ->expectsOutputToContain('Coverage check as of 12/31/2025 for 3 vendor(s)')
         ->expectsOutputToContain('closest: SMART TECH LLC (policy X1, score 0.5)')
         ->expectsOutputToContain('Recorded EWCCV coverage for 3 coverage check(s).')
@@ -198,6 +219,9 @@ it('a verify-only run records covered, not found, or still waiting, and subscrib
         ->and($row($missing))->toMatchArray(['status' => 'not_found', 'reason' => 'no_match'])
         ->and($row($missing)->candidates[0]['employerName'])->toBe('SMART TECH LLC')
         ->and($row($hiccup))->toMatchArray(['status' => 'pending', 'reason' => 'session_expired'])
+        ->and($row($lapsed))->toMatchArray(['status' => 'not_found', 'reason' => 'no_active_policy'])
+        ->and($row($lapsed)->label())->toStartWith('Not searched for 12/31/2025: no workers comp policy active today on file')
+        ->and(collect($config['vendors'])->pluck('id')->all())->not->toContain($lapsed->id)
         ->and(EwccvCoverageCheck::pendingByDate(1))->toBe(['2025-12-31' => [$hiccup->id]])
         ->and(VendorDoc::withoutGlobalScopes()->where('vendor_id', $covered->id)->first()->options)->not->toHaveKey('ewccv');
 });
@@ -243,6 +267,10 @@ it('a hand-off runs the pending coverage checks and the tracking lookups in one 
 it('one run carries tracking lookups and coverage checks, keyed per entry, and stamps each where it belongs', function () {
     $both = Vendor::factory()->create(['state' => 'IL', 'address' => '5 Main St', 'business_name' => 'Both Ways Inc']);
     $only = Vendor::factory()->create(['state' => 'IL', 'address' => '6 Main St', 'business_name' => 'Check Only Inc']);
+    VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $only->id, 'belongs_to_vendor_id' => 1, 'number' => 'WC-ONLY',
+        'doc_filename' => 'o.pdf', 'effective_date' => now()->subMonths(3)->toDateString(), 'expiration_date' => now()->addMonths(9)->toDateString(),
+    ]));
     $doc = VendorDoc::withoutEvents(fn () => VendorDoc::create([
         'type' => 'workers', 'vendor_id' => $both->id, 'belongs_to_vendor_id' => 1, 'number' => 'WC-BOTH',
         'doc_filename' => 'b.pdf', 'effective_date' => now()->subMonths(3)->toDateString(), 'expiration_date' => now()->addMonths(9)->toDateString(),
@@ -280,21 +308,41 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
         ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'tracking', 'matched_name' => 'BOTH WAYS INC'])
         ->and(EwccvCoverageCheck::where('vendor_id', $both->id)->first())->toMatchArray(['status' => 'covered', 'policy_number' => 'WC-BOTH'])
         ->and(EwccvCoverageCheck::where('vendor_id', $only->id)->first())->toMatchArray(['status' => 'not_found', 'reason' => 'no_results'])
-        ->and(RunPendingEwccvLookups::pendingCount(1))->toBe(0);
+        // The check-only vendor's policy has never been looked up for tracking: that stays pending.
+        ->and(EwccvCoverageCheck::pendingByDate(1))->toBe([])
+        ->and(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$only->id]);
 });
 
-it('refuses a reused credential and tells the extension what is waiting', function () {
+it('refuses a credential handed over before, takes a new one even when marked reused, and tells the extension what is waiting', function () {
     Queue::fake();
     config(['services.ewccv.bridge_token' => 'bridge-secret']);
     $pending = coverageWcDoc();
 
+    // The first hand-off of a credential is taken and starts the run.
     $this->withHeader('Authorization', 'Bearer bridge-secret')
-        ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('a', 120), 'reused' => true])
-        ->assertStatus(409)
-        ->assertJson(['ok' => false, 'reused' => true, 'pending_lookups' => 1])
-        ->assertJsonPath('error', fn ($e) => str_contains($e, 'Do one search on ewccv.com by hand'));
-    expect(BridgedSession::raw())->toBeNull();
-    Queue::assertNotPushed(RunPendingEwccvLookups::class);
+        ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('a', 120)])
+        ->assertOk();
+    Queue::assertPushed(RunPendingEwccvLookups::class, 1);
+
+    // The same credential again — the minter's fallback copy, flagged or not — is refused.
+    foreach ([['reused' => true], []] as $flag) {
+        $this->withHeader('Authorization', 'Bearer bridge-secret')
+            ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('a', 120)] + $flag)
+            ->assertStatus(409)
+            ->assertJson(['ok' => false, 'reused' => true, 'pending_lookups' => 1])
+            ->assertJsonPath('error', fn ($e) => str_contains($e, 'Do one search on ewccv.com by hand'));
+    }
+    Queue::assertPushed(RunPendingEwccvLookups::class, 1);
+
+    // A new credential (a search by hand produced it) is taken even when marked reused.
+    Cache::forget('ewccv:lookup-dispatched');
+    $this->withHeader('Authorization', 'Bearer bridge-secret')
+        ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('n', 120), 'reused' => true])
+        ->assertOk();
+    expect(BridgedSession::raw()['access_token'])->toBe(str_repeat('n', 120))
+        ->and(BridgedSession::hasSeen(str_repeat('a', 120)))->toBeTrue()
+        ->and(BridgedSession::hasSeen(str_repeat('z', 120)))->toBeFalse();
+    Storage::disk('local')->delete(BridgedSession::FILE);
 
     $this->withHeader('Authorization', 'Bearer bridge-secret')
         ->getJson('/api/ewccv/pending')
@@ -304,11 +352,14 @@ it('refuses a reused credential and tells the extension what is waiting', functi
     $held = \Illuminate\Support\Facades\Cache::lock(\App\Support\Ewccv\ScraperLock::NAME, 60);
     expect($held->get())->toBeTrue();
     $this->withHeader('Authorization', 'Bearer bridge-secret')->getJson('/api/ewccv/pending')->assertJson(['running' => true]);
-    // A hand-off during a run is stored but starts nothing.
+    // A hand-off during a run is stored but starts nothing: the dispatch
+    // flag is only set when a run is actually queued.
+    Cache::forget('ewccv:lookup-dispatched');
     $this->withHeader('Authorization', 'Bearer bridge-secret')
         ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('b', 120)])
         ->assertOk();
-    Queue::assertNotPushed(RunPendingEwccvLookups::class);
+    expect(Cache::has('ewccv:lookup-dispatched'))->toBeFalse()
+        ->and(BridgedSession::raw()['access_token'])->toBe(str_repeat('b', 120));
     $held->release();
 
     $this->flushHeaders()->getJson('/api/ewccv/pending')->assertUnauthorized();

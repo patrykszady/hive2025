@@ -386,9 +386,12 @@ class AuditShow extends Component
     }
 
     /**
-     * The vendors whose coverage the audit must show: paid subs that are not
-     * the company itself, an employee, a retail or categorised vendor, or a
-     * vendor with a professional policy for the period.
+     * The vendors whose coverage the audit asks EWCCV about: paid subs that
+     * are not the company itself, an employee, a retail or categorised
+     * vendor, or a vendor with a professional policy for the period — and
+     * only those with a workers comp policy on file that is active today
+     * (not expired). A sub without a current certificate is a document
+     * problem to chase, not an EWCCV search.
      *
      * @return list<int>
      */
@@ -396,7 +399,7 @@ class AuditShow extends Component
     {
         $own = auth()->user()->vendor->id;
 
-        return $this->vendors_grouped_checks
+        $candidates = $this->vendors_grouped_checks
             ->filter(fn (array $group) => $group['vendor'] instanceof Vendor
                 && $group['vendor']->id !== $own
                 && empty($group['is_user'])
@@ -404,6 +407,21 @@ class AuditShow extends Component
                 && $group['vendor']->business_type !== 'Retail'
                 && ! isset($group['professional_doc']))
             ->map(fn (array $group) => (int) $group['vendor']->id)
+            ->unique()
+            ->values();
+
+        if ($candidates->isEmpty()) {
+            return [];
+        }
+
+        return VendorDoc::withoutGlobalScopes()
+            ->where('type', 'workers')
+            ->where('belongs_to_vendor_id', $own)
+            ->whereIn('vendor_id', $candidates)
+            ->whereDate('effective_date', '<=', today())
+            ->whereDate('expiration_date', '>=', today())
+            ->pluck('vendor_id')
+            ->map(fn ($id) => (int) $id)
             ->unique()
             ->values()
             ->all();

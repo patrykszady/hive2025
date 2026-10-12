@@ -57,16 +57,18 @@ class EwccvSessionController extends Controller
         $belongsToVendorId = (int) config('services.ewccv.belongs_to_vendor_id', 1);
 
         // When minting fails in the browser, the minter falls back to the copy
-        // the page already holds — which an earlier run has usually spent. Two
-        // runs on 2026-10-12 died on their first search that way. Refuse it,
-        // and say what to do, rather than store a credential that cannot search.
-        if (! empty($data['reused'])) {
-            Log::info('EWCCV bridge: reused credential refused');
+        // the page already holds — the one handed over before, which the run
+        // that used it has spent. Four runs on 2026-10-12 died on their first
+        // search that way. A credential seen before is refused whatever the
+        // extension says about it (older copies send no flag); a new one that
+        // a search by hand produced is taken even when marked reused.
+        if (BridgedSession::hasSeen($data['accessToken'])) {
+            Log::info('EWCCV bridge: credential handed over before, refused', ['marked_reused' => ! empty($data['reused'])]);
 
             return response()->json([
                 'ok' => false,
                 'reused' => true,
-                'error' => 'That EWCCV credential was already used up. Do one search on ewccv.com by hand, then send again.',
+                'error' => 'Hive already has that EWCCV credential, and a run has spent it. Do one search on ewccv.com by hand, then send again.',
                 'pending_lookups' => RunPendingEwccvLookups::pendingCount($belongsToVendorId),
             ], 409);
         }

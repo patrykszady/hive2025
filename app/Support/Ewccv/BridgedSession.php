@@ -31,6 +31,11 @@ class BridgedSession
     /** How long a stored session is kept at all; past this it is dead weight. */
     public const KEEP_HOURS = 12;
 
+    /** Hashes of the credentials handed over so far, newest last. */
+    public const SEEN_FILE = 'ewccv/seen-tokens.json';
+
+    public const SEEN_KEEP = 40;
+
     /**
      * @param  array{access_token: string, jwt?: ?string, state_token?: ?string}  $session
      */
@@ -42,6 +47,43 @@ class BridgedSession
             'state_token' => $session['state_token'] ?? null,
             'received_at' => now()->toIso8601String(),
         ]));
+        self::remember((string) $session['access_token']);
+    }
+
+    /**
+     * Has this exact credential been handed over before? The browser's minter
+     * falls back to the copy its page already holds when minting fails, and
+     * the extension sends on every page load: the same credential arrived
+     * again and again on 2026-10-12, each time "0 min old" and already spent
+     * by the run that used it first. One that was handed over once is never
+     * worth taking twice; a genuinely new one (after a search by hand) is.
+     */
+    public static function hasSeen(string $accessToken): bool
+    {
+        return in_array(self::hash($accessToken), self::seen(), true);
+    }
+
+    protected static function remember(string $accessToken): void
+    {
+        $seen = array_values(array_unique([...self::seen(), self::hash($accessToken)]));
+        Storage::disk('local')->put(self::SEEN_FILE, json_encode(array_slice($seen, -self::SEEN_KEEP)));
+    }
+
+    /** @return list<string> */
+    protected static function seen(): array
+    {
+        $disk = Storage::disk('local');
+        if (! $disk->exists(self::SEEN_FILE)) {
+            return [];
+        }
+        $seen = json_decode((string) $disk->get(self::SEEN_FILE), true);
+
+        return is_array($seen) ? array_values(array_filter($seen, 'is_string')) : [];
+    }
+
+    protected static function hash(string $accessToken): string
+    {
+        return hash('sha256', $accessToken);
     }
 
     /**

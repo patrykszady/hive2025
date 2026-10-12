@@ -46,10 +46,13 @@ class ScrapeEwccvTracking extends Command
     }
 
     /**
-     * Vendors for a coverage check, by id: the vendor's address and name are
-     * what EWCCV is searched by; the policy number of the workers doc in
-     * force on the date (else the latest on file) is what a result is matched
-     * on first.
+     * Vendors for a coverage check, by id — only those with a workers comp
+     * policy on file that is active today: EWCCV is only asked about
+     * policies Hive currently holds, never about a sub whose certificate has
+     * expired or was never collected (those are settled as not found, reason
+     * no_active_policy, so nothing retries them). The vendor's address and
+     * name are what EWCCV is searched by; the number of the policy in force
+     * on the date (else the active one) is what a result is matched on first.
      *
      * @param  list<int>  $vendorIds
      * @return list<array<string, mixed>>
@@ -63,14 +66,31 @@ class ScrapeEwccvTracking extends Command
             ->orderByDesc('expiration_date')
             ->get()
             ->groupBy('vendor_id');
+        $today = Carbon::today();
 
-        return \App\Models\Vendor::withoutGlobalScopes()
-            ->whereIn('id', $vendorIds)
-            ->get()
-            ->map(function (\App\Models\Vendor $vendor) use ($docs, $coverageDate) {
+        $vendors = \App\Models\Vendor::withoutGlobalScopes()->whereIn('id', $vendorIds)->get();
+        $tenantId = (int) ($belongsToVendorId ?: config('services.ewccv.belongs_to_vendor_id', 1));
+
+        return $vendors
+            ->filter(function (\App\Models\Vendor $vendor) use ($docs, $today, $coverageDate, $tenantId) {
+                $active = collect($docs->get($vendor->id) ?? [])->contains(fn (VendorDoc $doc) => $doc->effective_date && $doc->expiration_date
+                    && $doc->effective_date->lte($today) && $doc->expiration_date->gte($today));
+                if (! $active) {
+                    $this->line("    • {$vendor->business_name} (ID: {$vendor->id}) — no workers comp policy active today, not searched");
+                    \App\Models\EwccvCoverageCheck::updateOrCreate(
+                        ['vendor_id' => $vendor->id, 'belongs_to_vendor_id' => $tenantId, 'coverage_date' => $coverageDate->copy()->startOfDay()],
+                        ['status' => \App\Models\EwccvCoverageCheck::STATUS_NOT_FOUND, 'reason' => 'no_active_policy', 'checked_at' => now()],
+                    );
+                }
+
+                return $active;
+            })
+            ->map(function (\App\Models\Vendor $vendor) use ($docs, $coverageDate, $today) {
                 $vendorDocs = collect($docs->get($vendor->id) ?? []);
                 $inForce = $vendorDocs->first(fn (VendorDoc $doc) => $doc->effective_date && $doc->expiration_date
                     && $doc->effective_date->lte($coverageDate) && $doc->expiration_date->gte($coverageDate));
+                $activeNow = $vendorDocs->first(fn (VendorDoc $doc) => $doc->effective_date && $doc->expiration_date
+                    && $doc->effective_date->lte($today) && $doc->expiration_date->gte($today));
 
                 return [
                     'key'          => $vendor->id.'@'.$coverageDate->toDateString(),
@@ -81,7 +101,7 @@ class ScrapeEwccvTracking extends Command
                     'city'         => $vendor->city,
                     'state'        => $vendor->state,
                     'zip'          => $vendor->zip_code,
-                    'policyNumber' => ($inForce ?? $vendorDocs->first())?->number,
+                    'policyNumber' => ($inForce ?? $activeNow)?->number,
                     'coverageDate' => $coverageDate->format('m/d/Y'),
                 ];
             })
