@@ -88,7 +88,7 @@ it('the lookup job no-ops when the VendorDoc has been deleted', function () {
     $doc->forceDelete();
 
     // Should not throw — job exits cleanly when row is gone.
-    (new LookupEwccvForVendor($docId))->handle();
+    (new LookupEwccvForVendor($docId))->handle($this->mock(\App\Support\Ewccv\ScrapeLauncher::class, fn ($m) => $m->shouldReceive('launch')->never()));
 })->throwsNoExceptions();
 
 it('the lookup job no-ops when the VendorDoc is not a workers comp policy', function () {
@@ -97,5 +97,5 @@ it('the lookup job no-ops when the VendorDoc is not a workers comp policy', func
     $doc = makeWorkersCompDoc(['type' => 'general']);
 
     // Should not throw and should not invoke the artisan command path.
-    (new LookupEwccvForVendor($doc->id))->handle();
+    (new LookupEwccvForVendor($doc->id))->handle($this->mock(\App\Support\Ewccv\ScrapeLauncher::class, fn ($m) => $m->shouldReceive('launch')->never()));
 })->throwsNoExceptions();

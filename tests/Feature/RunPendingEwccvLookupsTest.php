@@ -6,8 +6,8 @@ use App\Jobs\RunPendingEwccvLookups;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 use App\Support\Ewccv\BridgedSession;
+use App\Support\Ewccv\ScrapeLauncher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 
@@ -80,37 +80,39 @@ it('a session fresher than 45 minutes is usable, an older one is not', function 
     expect(BridgedSession::canSearch())->toBeTrue();
 });
 
-it('runs the scraper for exactly the pending vendors when a session is at hand, and not at all without one', function () {
+it('starts the scraper for exactly the pending vendors when a session is at hand, and not at all without one', function () {
     $pending = wcDoc(1);
     wcDoc(1, ['status' => 'tracking']);
 
-    Artisan::shouldReceive('call')->never();
-    (new RunPendingEwccvLookups)->handle();
+    $launcher = $this->mock(ScrapeLauncher::class);
+    $launcher->shouldReceive('launch')->never();
+    (new RunPendingEwccvLookups)->handle($launcher);
 
     bridgedSession();
-    Artisan::shouldReceive('call')->once()
-        ->with('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--vendor-id' => [$pending->vendor_id]])
-        ->andReturn(0);
-    (new RunPendingEwccvLookups)->handle();
+    $launcher = $this->mock(ScrapeLauncher::class);
+    $launcher->shouldReceive('launch')->once()->with([$pending->vendor_id], 1)->andReturn(4242);
+    (new RunPendingEwccvLookups)->handle($launcher);
 });
 
 it('marks a new policy as waiting for a browser session instead of running a lookup that can only fail', function () {
     $doc = wcDoc(1);
     $tracked = wcDoc(1, ['status' => 'tracking', 'checked_at' => '2026-10-01T00:00:00+00:00']);
 
-    Artisan::shouldReceive('call')->never();
-    (new LookupEwccvForVendor($doc->id))->handle();
-    (new LookupEwccvForVendor($tracked->id))->handle();
+    $launcher = $this->mock(ScrapeLauncher::class);
+    $launcher->shouldReceive('launch')->never();
+    (new LookupEwccvForVendor($doc->id))->handle($launcher);
+    (new LookupEwccvForVendor($tracked->id))->handle($launcher);
 
     expect($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'pending', 'reason' => 'needs_browser_session'])
         ->and($doc->fresh()->ewccv_summary['tip'])->toContain('open ewccv.com with the Hive extension')
         ->and($doc->fresh()->ewccv_summary['tracking'])->toBeFalse()
         ->and($tracked->fresh()->options['ewccv']['status'])->toBe('tracking');
 
-    // With a session the lookup runs as before.
+    // With a session the lookup starts as before.
     bridgedSession();
-    Artisan::shouldReceive('call')->once()->with('ewccv:scrape-tracking', ['--vendor-id' => [$doc->vendor_id], '--belongs-to-vendor-id' => 1])->andReturn(0);
-    (new LookupEwccvForVendor($doc->id))->handle();
+    $launcher = $this->mock(ScrapeLauncher::class);
+    $launcher->shouldReceive('launch')->once()->with([$doc->vendor_id], 1)->andReturn(4243);
+    (new LookupEwccvForVendor($doc->id))->handle($launcher);
 });
 
 it('a session handed over by the extension starts the pending lookups right away', function () {
@@ -166,10 +168,17 @@ it('never runs two scrapers at once: a second run waits, then gives up with a me
     $held->release();
 });
 
-it('runs on the long-running queue, where Horizon allows a scraper to finish', function () {
-    expect((new RunPendingEwccvLookups)->queue)->toBe('long-running')
-        ->and((new LookupEwccvForVendor(1))->queue)->toBe('long-running')
-        ->and((new RunPendingEwccvLookups)->timeout)->toBeLessThanOrEqual(2100);
+it('starts the scraper in a session of its own so no worker, and no deploy, waits on the run', function () {
+    // The job is instant, so it needs no long-running queue or timeout.
+    expect((new RunPendingEwccvLookups)->queue)->toBeNull()
+        ->and((new LookupEwccvForVendor(1))->queue)->toBeNull()
+        ->and((new RunPendingEwccvLookups)->timeout ?? null)->toBeNull();
+
+    $line = ScrapeLauncher::commandLine([4, 30], 1);
+    expect($line)->toStartWith('nohup setsid ')
+        ->toContain("'ewccv:scrape-tracking' '--belongs-to-vendor-id=1' '--vendor-id=4' '--vendor-id=30'")
+        ->toContain(escapeshellarg(base_path('artisan')))
+        ->toContain('>> '.escapeshellarg(storage_path('logs/ewccv-scraper.log')).' 2>&1 < /dev/null & echo $!');
 });
 
 it('drops a spent browser session when the scraper reports it, so the next hand-off runs fresh', function () {

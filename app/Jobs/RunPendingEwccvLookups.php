@@ -4,11 +4,11 @@ namespace App\Jobs;
 
 use App\Models\VendorDoc;
 use App\Support\Ewccv\BridgedSession;
+use App\Support\Ewccv\ScrapeLauncher;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -22,6 +22,11 @@ use Illuminate\Support\Facades\Log;
  * One run covers every pending vendor in a single scraper process; a policy
  * EWCCV already tracks (status `tracking`, kept current by the daily
  * ewccv:sync-subscriptions) is left alone.
+ *
+ * The run itself is started detached (ScrapeLauncher) and this job is over
+ * in milliseconds: a run that held a worker for its 4–30 minutes made every
+ * deploy in that window wait for it before Horizon restarted (2026-10-12),
+ * so it never runs inside a worker again.
  */
 class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
 {
@@ -29,28 +34,12 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 1;
 
-    /**
-     * The default queue's Horizon supervisor kills a job after 60 seconds;
-     * a scraper run (plus a wait for a running one) needs the long-running
-     * queue's 35 minutes. On 2026-10-12 every queued run was cut off at 60 s
-     * while its scraper child ran on orphaned.
-     */
-    public const QUEUE = 'long-running';
-
-    /** Under the long-running supervisor's own 2100 s limit. */
-    public int $timeout = 2000;
-
-    public function __construct()
-    {
-        $this->onQueue(self::QUEUE);
-    }
-
     public function uniqueFor(): int
     {
         return 600;
     }
 
-    public function handle(): void
+    public function handle(ScrapeLauncher $launcher): void
     {
         $session = BridgedSession::fresh();
         if (! $session && blank(config('services.ewccv.bypass_key'))) {
@@ -67,19 +56,13 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        Log::info('RunPendingEwccvLookups: running the EWCCV lookup', [
+        $pid = $launcher->launch($vendorIds, $belongsToVendorId);
+
+        Log::info('RunPendingEwccvLookups: EWCCV lookup started detached', [
             'vendor_ids' => $vendorIds,
             'session_age_minutes' => $session['age_minutes'] ?? null,
+            'pid' => $pid,
         ]);
-
-        $exitCode = Artisan::call('ewccv:scrape-tracking', [
-            '--belongs-to-vendor-id' => $belongsToVendorId,
-            '--vendor-id' => $vendorIds,
-        ]);
-
-        if ($exitCode !== 0) {
-            Log::warning('RunPendingEwccvLookups: scraper exited non-zero', ['exit_code' => $exitCode, 'vendor_ids' => $vendorIds]);
-        }
     }
 
     /** A search that found nothing, or a tracking refusal, is not retried for this long. */

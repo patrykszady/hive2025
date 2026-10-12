@@ -4,12 +4,18 @@ namespace App\Jobs;
 
 use App\Models\VendorDoc;
 use App\Support\Ewccv\BridgedSession;
+use App\Support\Ewccv\ScrapeLauncher;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * A workers comp doc was added or changed: have EWCCV look its policy up,
+ * when a browser session is at hand. The scraper is started detached
+ * (ScrapeLauncher), so the job itself takes milliseconds and no deploy
+ * waits on it.
+ */
 class LookupEwccvForVendor implements ShouldQueue, ShouldBeUnique
 {
     use Queueable;
@@ -19,22 +25,9 @@ class LookupEwccvForVendor implements ShouldQueue, ShouldBeUnique
      */
     public int $tries = 2;
 
-    /**
-     * Wall-clock seconds the scraper is allowed to run.
-     *
-     * Generous because the underlying Puppeteer + 2Captcha flow can spend
-     * 30-90s per vendor solving reCAPTCHA and waiting for the EWCCV React
-     * app to populate its Redux store.
-     */
-    public int $timeout = 900;
-
-
     public function __construct(
         public int $vendorDocId,
-    ) {
-        // The scraper outlives the default queue's 60-second supervisor limit.
-        $this->onQueue(RunPendingEwccvLookups::QUEUE);
-    }
+    ) {}
 
     /**
      * Prevent duplicate scrapes for the same VendorDoc within 30 minutes.
@@ -49,7 +42,7 @@ class LookupEwccvForVendor implements ShouldQueue, ShouldBeUnique
         return 1800;
     }
 
-    public function handle(): void
+    public function handle(ScrapeLauncher $launcher): void
     {
         /** @var VendorDoc|null $doc */
         $doc = VendorDoc::withoutGlobalScopes()->find($this->vendorDocId);
@@ -98,21 +91,12 @@ class LookupEwccvForVendor implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        Log::info('LookupEwccvForVendor dispatching scraper', [
+        $pid = $launcher->launch([(int) $doc->vendor_id], (int) $doc->belongs_to_vendor_id);
+
+        Log::info('LookupEwccvForVendor: scraper started detached', [
             'vendor_doc_id' => $this->vendorDocId,
             'vendor_id' => $doc->vendor_id,
+            'pid' => $pid,
         ]);
-
-        $exitCode = Artisan::call('ewccv:scrape-tracking', [
-            '--vendor-id' => [$doc->vendor_id],
-            '--belongs-to-vendor-id' => $doc->belongs_to_vendor_id,
-        ]);
-
-        if ($exitCode !== 0) {
-            Log::warning('LookupEwccvForVendor: scraper exited non-zero', [
-                'vendor_doc_id' => $this->vendorDocId,
-                'exit_code' => $exitCode,
-            ]);
-        }
     }
 }
