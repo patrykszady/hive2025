@@ -135,6 +135,7 @@ it('classifies EWCCV mail and finds the policy numbers it names', function () {
     $cancel = ewccvMail('a', 'Coverage Cancellation', '<p>Policy No: R2WC-795013</p><p>Employer Name: MORENOS DRYWALL INC</p>');
     $nonrenewal = ewccvMail('b', 'Notice', 'The policy 83WECBP6H9V will not be renewed.');
     $confirm = ewccvMail('c', 'Workers Compensation Coverage Verification', 'You are now tracking policy AW9173630 for TBD PRO PAINTING.');
+    $received = ewccvMail('c2', 'FW: We received your ewccv.com subscription', 'Thank you. We received your subscription for policy AFWCP100134391.');
     $signIn = ewccvMail('d', 'Sign in to Workers Compensation Coverage Verification', 'Click to sign in');
     $unrelated = ['id' => 'e', 'subject' => 'Re: COI Request', 'from' => [['email' => 'agent@insurance.test']], 'body' => 'Attached', 'date' => time()];
 
@@ -144,6 +145,7 @@ it('classifies EWCCV mail and finds the policy numbers it names', function () {
         ->and(NoticeParser::kind($nonrenewal))->toBe('nonrenewal')
         ->and(NoticeParser::policyNumbers($nonrenewal, ['83WECBP6H9V']))->toBe(['83WECBP6H9V'])
         ->and(NoticeParser::kind($confirm))->toBe('confirmation')
+        ->and(NoticeParser::kind($received))->toBe('confirmation')
         ->and(NoticeParser::kind($signIn))->toBe('sign_in')
         ->and(NoticeParser::isFromEwccv($signIn))->toBeTrue()
         ->and(NoticeParser::isFromEwccv($unrelated))->toBeFalse();

@@ -69,7 +69,7 @@ class NoticeParser
                 return self::KIND_CANCELLATION;
             }
         }
-        if (preg_match('/now tracking|tracking (this|the) policy|subscription (created|confirmed)|you are tracking/', $subject.' '.$text)) {
+        if (preg_match('/now tracking|tracking (this|the) policy|subscription (created|confirmed)|you are tracking|received your [a-z.]* ?subscription/', $subject.' '.$text)) {
             return self::KIND_CONFIRMATION;
         }
 
