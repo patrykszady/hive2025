@@ -44,8 +44,20 @@ class BridgedSession
         ]));
     }
 
-    public static function forget(): void
+    /**
+     * Drop the stored session — only the one a run used (by its received_at)
+     * when given: a fresh hand-off can land while a run is finishing, and on
+     * 2026-10-12 the run then deleted the fresh session instead of its own
+     * spent one.
+     */
+    public static function forget(?string $receivedAt = null): void
     {
+        if ($receivedAt !== null) {
+            $current = self::raw();
+            if ($current && $current['received_at'] !== $receivedAt) {
+                return;
+            }
+        }
         Storage::disk('local')->delete(self::FILE);
     }
 

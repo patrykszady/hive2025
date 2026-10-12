@@ -192,3 +192,15 @@ it('drops a spent browser session when the scraper reports it, so the next hand-
         ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'failed', 'reason' => 'session_expired'])
         ->and(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$doc->vendor_id]);
 });
+
+it('a spent-session drop leaves a fresher hand-off alone', function () {
+    bridgedSession(30);
+    $old = BridgedSession::raw()['received_at'];
+    BridgedSession::store(['access_token' => str_repeat('n', 120)]);
+
+    BridgedSession::forget($old);
+    expect(BridgedSession::raw()['access_token'])->toBe(str_repeat('n', 120));
+
+    BridgedSession::forget(BridgedSession::raw()['received_at']);
+    expect(BridgedSession::raw())->toBeNull();
+});

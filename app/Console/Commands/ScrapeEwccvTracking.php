@@ -309,7 +309,7 @@ class ScrapeEwccvTracking extends Command
             // The browser session's credential ran out mid-run: forget it, so
         // the next hand-off (a fresh one) is what runs next.
         if (! empty($results['sessionExpired'])) {
-            \App\Support\Ewccv\BridgedSession::forget();
+            \App\Support\Ewccv\BridgedSession::forget($this->bridgedSessionReceivedAt);
             $this->warn('  The bridged EWCCV session is spent — dropped it; open ewccv.com (or press Send session now) for a fresh one.');
         }
 
@@ -519,9 +519,13 @@ class ScrapeEwccvTracking extends Command
      * accessToken is session-scoped, and a stale one just fails the searches
      * that a fresh one would have completed.
      */
+    /** received_at of the session this run took, so only that one is dropped when spent. */
+    private ?string $bridgedSessionReceivedAt = null;
+
     private function bridgedAccessToken(): string
     {
         $session = \App\Support\Ewccv\BridgedSession::fresh();
+        $this->bridgedSessionReceivedAt = $session['received_at'] ?? null;
 
         if (! $session) {
             $this->warn('  No fresh EWCCV browser session (under '.\App\Support\Ewccv\BridgedSession::MAX_AGE_MINUTES.' min) — open ewccv.com so the extension hands one over.');
