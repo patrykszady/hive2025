@@ -2613,6 +2613,27 @@ class TransactionController extends Controller
      * the person from there keeps different people's Venmo transfers in separate
      * payee groups so subset-sum can't mix them.
      */
+    /**
+     * Plaid's own counterparties say this money went through a payment app
+     * (Venmo, Zelle, …) and to no merchant — then its merchant_name is a
+     * guess, not a payee. Transaction 29182 (2026-07-12, $200 Venmo to a
+     * person) came back as "Anthropic Headquarters" with counterparties
+     * [Venmo: payment_app, VERY_HIGH] and category Transfer > Third Party >
+     * Venmo; trusting the guess put it in a business group, and check 3925
+     * matched the next week's $200 instead. A real Venmo business payment
+     * (AssemblyAI, 2026-06-29) carries a merchant-type counterparty, and a
+     * row with no counterparty data at all keeps trusting the merchant.
+     */
+    protected function plaidSaysPaymentAppToNoMerchant(Transaction $transaction): bool
+    {
+        $types = collect($transaction->details['counterparties'] ?? [])
+            ->map(fn ($counterparty) => strtolower((string) ($counterparty['type'] ?? '')))
+            ->filter()
+            ->values();
+
+        return $types->contains('payment_app') && ! $types->contains('merchant');
+    }
+
     protected function extractPayeeNameFromTransaction(Transaction $transaction): string
     {
         // Plaid's merchant enrichment beats the bank memo. A Venmo BUSINESS
@@ -2620,7 +2641,7 @@ class TransactionController extends Controller
         // holder's own name in the bank description ("VENMO *PATRYK SZADY"),
         // so the memo would wrongly group it with person-to-person transfers.
         $merchant = trim((string) ($transaction->plaid_merchant_name ?? ''));
-        if ($merchant !== '' && ! in_array(strtoupper($merchant), ['VENMO', 'ZELLE'], true)) {
+        if ($merchant !== '' && ! in_array(strtoupper($merchant), ['VENMO', 'ZELLE'], true) && ! $this->plaidSaysPaymentAppToNoMerchant($transaction)) {
             return strtoupper($merchant);
         }
 

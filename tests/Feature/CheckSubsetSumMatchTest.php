@@ -337,3 +337,53 @@ it('links a transfer check to the transfers sent over the week after it, not onl
     }
 });
 
+it('ignores a Plaid merchant guess on a Venmo payment whose counterparties say payment app, no merchant', function () {
+    $bankAccount = makeTransferCheckBankAccount();
+    $patryk = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Szady',
+        'email' => 'patryk-'.uniqid().'@example.com',
+        'cell_phone' => '5551234567',
+        'password' => bcrypt('password'),
+        'primary_vendor_id' => $bankAccount->vendor_id,
+    ]);
+    // Check 3925 again, with the real twist: Plaid tagged the 07-12 $200 as
+    // "Anthropic Headquarters" while its counterparties say Venmo, payment
+    // app. Filed under a business payee it was excluded, and the matcher took
+    // the next week's 07-23 $200 instead (2026-10-11, scheduled run 23:50).
+    $check = Check::create([
+        'check_type' => 'Transfer',
+        'date' => '2026-07-10',
+        'amount' => 900.00,
+        'bank_account_id' => $bankAccount->id,
+        'belongs_to_vendor_id' => $bankAccount->vendor_id,
+        'user_id' => $patryk->id,
+        'created_by_user_id' => $patryk->id,
+    ]);
+    $venmo = fn (string $date, float $amount, ?string $merchant = null) => Transaction::create([
+        'transaction_date' => $date,
+        'amount' => $amount,
+        'bank_account_id' => $bankAccount->id,
+        'check_number' => '1010101',
+        'plaid_merchant_description' => 'Venmo',
+        'plaid_merchant_name' => $merchant,
+        'details' => [
+            'original_description' => 'DEBIT PURCHASE '.$date.' 4849 VENMO *PATRYK SZADY 8558124430 NY 26195',
+            'counterparties' => [['name' => 'Venmo', 'type' => 'payment_app', 'confidence_level' => 'VERY_HIGH']],
+            'category' => ['Transfer', 'Third Party', 'Venmo'],
+        ],
+    ]);
+    $misread = $venmo('2026-07-12', 200.00, 'Anthropic Headquarters');
+    $week = [$misread, $venmo('2026-07-15', 200.00), $venmo('2026-07-17', 200.00), $venmo('2026-07-18', 300.00)];
+    $nextWeek = [$venmo('2026-07-23', 200.00), $venmo('2026-07-23', 200.00)];
+
+    app(TransactionController::class)->add_check_id_to_transactions();
+
+    foreach ($week as $transaction) {
+        expect($transaction->refresh()->check_id)->toBe($check->id);
+    }
+    foreach ($nextWeek as $transaction) {
+        expect($transaction->refresh()->check_id)->toBeNull();
+    }
+});
+
