@@ -72,9 +72,21 @@
         return decodeURIComponent(raw.split('=').slice(1).join('='));
     }
 
+    // The credential the app already holds (sessionStorage) may be spent:
+    // EWCCV allows ~25 searches per verification, and Hive's runs use them
+    // up server-side while this tab's copy stays the same. So mint a fresh
+    // one first, and fall back to the existing one only when minting fails.
+    function existingOrError(error) {
+        const existing = sessionStorage.getItem('accessToken');
+        if (existing && existing.length > 20) {
+            return reply({ ok: true, accessToken: existing, jwt: bearerFromCookie(), stateToken: stateTokenString(findStore()), reused: true });
+        }
+        return reply({ ok: false, error });
+    }
+
     async function mint() {
         if (typeof grecaptcha === 'undefined' || !grecaptcha.enterprise) {
-            return reply({ ok: false, error: 'reCAPTCHA is not loaded on this page yet — open ewccv.com/cvs/search and try again.' });
+            return existingOrError('reCAPTCHA is not loaded on this page yet — open ewccv.com/cvs/search and try again.');
         }
 
         const jwt = bearerFromCookie();
@@ -127,21 +139,13 @@
         const data = json?.data || {};
 
         if (!data.verified || !data.accessToken) {
-            return reply({
-                ok: false,
-                error: `EWCCV did not verify this session${data.reason ? ` (${data.reason})` : ''}. Do one search on the page by hand, then press send again.`,
-            });
+            return existingOrError(`EWCCV did not verify this session${data.reason ? ` (${data.reason})` : ''}. Do one search on the page by hand, then press send again.`);
         }
 
+        // Keep the app's copy current too, so the tab and Hive hold the same credential.
+        try { sessionStorage.setItem('accessToken', data.accessToken); } catch (_) { /* best effort */ }
         reply({ ok: true, accessToken: data.accessToken, jwt, stateToken: stateTkn });
     }
 
-    // Also honour a token the app itself already minted (i.e. you just searched):
-    // cheaper and guaranteed-good, so prefer it when present.
-    const existing = sessionStorage.getItem('accessToken');
-    if (existing && existing.length > 20) {
-        reply({ ok: true, accessToken: existing, jwt: bearerFromCookie(), stateToken: stateTokenString(findStore()) });
-    } else {
-        mint();
-    }
+    mint();
 })();

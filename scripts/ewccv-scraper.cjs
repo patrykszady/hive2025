@@ -2438,6 +2438,10 @@ async function requestLoginEmail(page, email) {
         // Step 6: For each vendor, search and enable tracking
         for (let i = 0; i < vendors.length; i++) {
             const vendor = vendors[i];
+            if (results.sessionExpired) {
+                results.skipped.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired' });
+                continue;
+            }
             // The bridged credential lives in sessionStorage, which is per tab: the
             // recovery step between vendors opens a new tab, and on 2026-10-12 every
             // vendor after the first failed with no_accessToken. Put it back first.
@@ -2494,6 +2498,16 @@ async function requestLoginEmail(page, email) {
                             const retry = await searchViaApi(page, vendor, 'employer');
                             if (retry.ok && retry.items) allItems.push(...retry.items);
                             lastApiResult = retry;
+                        } else if (config.bridgedAccessToken) {
+                            // The browser session's credential is spent (EWCCV
+                            // allows ~25 searches per verification). Nothing
+                            // this run can do passes reCAPTCHA; stop here and
+                            // let the server drop the session, so the next
+                            // hand-off brings a fresh one.
+                            log('    Bridged session credential is spent — ending the run; a fresh hand-off is needed');
+                            results.sessionExpired = true;
+                            results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired' });
+                            continue;
                         } else {
                             log('    Re-verify failed — falling back to UI search');
                             useApiSearch = false;

@@ -307,7 +307,14 @@ class ScrapeEwccvTracking extends Command
                 }
             }
 
-            // ── Persist per-doc state so /vendor_docs can show it ─────────────
+            // The browser session's credential ran out mid-run: forget it, so
+        // the next hand-off (a fresh one) is what runs next.
+        if (! empty($results['sessionExpired'])) {
+            \App\Support\Ewccv\BridgedSession::forget();
+            $this->warn('  The bridged EWCCV session is spent — dropped it; open ewccv.com (or press Send session now) for a fresh one.');
+        }
+
+        // ── Persist per-doc state so /vendor_docs can show it ─────────────
             // Results are keyed by vendor; stamp every active workers doc for that
             // vendor. saveQuietly: the VendorDocObserver re-queues a lookup when a
             // doc changes, and stamping the lookup's own result must not loop it.

@@ -171,3 +171,24 @@ it('runs on the long-running queue, where Horizon allows a scraper to finish', f
         ->and((new LookupEwccvForVendor(1))->queue)->toBe('long-running')
         ->and((new RunPendingEwccvLookups)->timeout)->toBeLessThanOrEqual(2100);
 });
+
+it('drops a spent browser session when the scraper reports it, so the next hand-off runs fresh', function () {
+    config(['services.ewccv.lock_wait_seconds' => 0]);
+    $doc = wcDoc(1);
+    bridgedSession();
+    \Illuminate\Support\Facades\Process::fake([
+        '*' => \Illuminate\Support\Facades\Process::result(json_encode([
+            'success' => [], 'skipped' => [],
+            'failed' => [['vendorId' => $doc->vendor_id, 'businessName' => 'X', 'reason' => 'session_expired']],
+            'sessionExpired' => true,
+        ])),
+    ]);
+
+    $this->artisan('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test'])
+        ->expectsOutputToContain('bridged EWCCV session is spent')
+        ->assertExitCode(0); // a completed run is a success even when vendors failed
+
+    expect(BridgedSession::raw())->toBeNull()
+        ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'failed', 'reason' => 'session_expired'])
+        ->and(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$doc->vendor_id]);
+});
