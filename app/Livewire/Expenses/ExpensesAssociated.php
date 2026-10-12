@@ -3,16 +3,34 @@
 namespace App\Livewire\Expenses;
 
 use App\Models\Expense;
+use App\Scopes\VendorScope;
 use Flux;
+use Illuminate\Support\Collection;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class ExpensesAssociated extends Component
 {
+    /** Most expenses a search shows. */
+    public const SEARCH_LIMIT = 30;
+
+    /** Most suggestions shown (newest first); a vendor like Home Depot has thousands of expenses. */
+    public const SUGGESTION_LIMIT = 40;
+
     public Expense $expense;
 
     public $associate_expense = '';
 
+    /** Suggested matches: the same vendor (newest first), or the same amount within three months. */
     public $expenses = [];
+
+    /**
+     * Anything else: an id, an amount, a vendor or an invoice. The suggestions
+     * alone could not link expense 28701 ($1,500, GS Construction, 10/07) to
+     * 28703 (-$44.99, Sixt, 10/06) — neither rule fits, so neither ever showed
+     * in the other's list (Patryk, 2026-10-11).
+     */
+    public string $search = '';
 
     protected $listeners = ['addAssociatedExpense'];
 
@@ -26,6 +44,8 @@ class ExpensesAssociated extends Component
     public function addAssociatedExpense(Expense $expense)
     {
         $this->expense = $expense;
+        $this->search = '';
+        $this->associate_expense = '';
 
         $excludedIds = $expense->associated()->pluck('id')->toArray();
         $excludedIds[] = $expense->id;
@@ -46,15 +66,58 @@ class ExpensesAssociated extends Component
                           ]);
                     })
                     ->orWhere(function ($q) use ($expense) {
-                        // Condition B: same calendar date and same vendor.
-                        $q->whereDate('date', $expense->date->toDateString())
-                          ->where('vendor_id', $expense->vendor_id);
+                        // Condition B: the same vendor, whenever — "the vendor
+                        // should always match" (Patryk, 2026-10-11); this used
+                        // to need the same calendar day as well.
+                        $q->where('vendor_id', $expense->vendor_id);
                     });
             })
             ->orderBy('date', 'desc')
+            ->orderBy('id', 'desc')
+            ->limit(self::SUGGESTION_LIMIT)
             ->get();
 
         $this->modal('associated_expenses_form_modal')->show();
+    }
+
+    /**
+     * What the picker lists: the suggestions, or — once something is typed —
+     * every expense matching it, newest first. A number matches an id or an
+     * amount (either sign); text matches the vendor's name or the invoice.
+     *
+     * @return Collection<int, Expense>
+     */
+    #[Computed]
+    public function candidates(): Collection
+    {
+        $term = trim($this->search);
+
+        if ($term === '') {
+            return collect($this->expenses);
+        }
+
+        $excludedIds = $this->expense->associated()->pluck('id')->all();
+        $excludedIds[] = $this->expense->id;
+
+        $number = is_numeric(str_replace([',', '$'], '', $term)) ? (float) str_replace([',', '$'], '', $term) : null;
+
+        return Expense::query()
+            ->with('vendor')
+            ->whereNotIn('id', $excludedIds)
+            ->where(function ($query) use ($term, $number) {
+                if ($number !== null) {
+                    $query->where('id', (int) $number)
+                        ->orWhere('amount', $number)
+                        ->orWhere('amount', -1 * $number);
+                }
+
+                $query->orWhereHas('vendor', fn ($vendor) => $vendor->withoutGlobalScope(VendorScope::class)->where('business_name', 'like', "%{$term}%"))
+                    ->orWhere('invoice', 'like', "%{$term}%");
+            })
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->limit(self::SEARCH_LIMIT)
+            ->get();
     }
 
     public function save()
