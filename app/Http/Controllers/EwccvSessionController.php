@@ -73,8 +73,11 @@ class EwccvSessionController extends Controller
 
         // The session lasts about 45 minutes: whatever is waiting for a
         // search runs now, not on a schedule that would find it expired.
+        // The extension re-sends every 20 minutes while a tab is open (and
+        // on every click of its button): one queued run per 10 minutes is
+        // plenty, the run reads the freshest session when it starts.
         $pending = RunPendingEwccvLookups::pendingVendorIds((int) config('services.ewccv.belongs_to_vendor_id', 1));
-        if ($pending !== []) {
+        if ($pending !== [] && Cache::add('ewccv:lookup-dispatched', true, now()->addMinutes(10))) {
             RunPendingEwccvLookups::dispatch();
         }
 

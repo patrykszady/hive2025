@@ -51,15 +51,18 @@ beforeEach(function () {
     config(['services.ewccv.bypass_key' => null, 'services.ewccv.belongs_to_vendor_id' => 1]);
 });
 
-it('counts as pending every active workers comp policy EWCCV is not tracking', function () {
+it('counts as pending every active workers comp policy EWCCV is not tracking, minus recent settled failures', function () {
     $never = wcDoc(1);
-    $failed = wcDoc(1, ['status' => 'failed', 'reason' => 'recaptcha_failed_ui']);
+    $failed = wcDoc(1, ['status' => 'failed', 'reason' => 'recaptcha_failed_ui', 'checked_at' => now()->subHour()->toIso8601String()]);
     $waiting = wcDoc(1, ['status' => 'pending', 'reason' => 'needs_browser_session']);
+    $noToken = wcDoc(1, ['status' => 'failed', 'reason' => 'no_accessToken', 'checked_at' => now()->subMinutes(5)->toIso8601String()]);
     $tracking = wcDoc(1, ['status' => 'tracking']);
     $expired = wcDoc(1, null, '-1 day');
+    $noResultsToday = wcDoc(1, ['status' => 'failed', 'reason' => 'no_results', 'checked_at' => now()->subHours(3)->toIso8601String()]);
+    $noResultsOld = wcDoc(1, ['status' => 'failed', 'reason' => 'no_results', 'checked_at' => now()->subHours(30)->toIso8601String()]);
     $otherTenant = wcDoc(2);
 
-    expect(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$never->vendor_id, $failed->vendor_id, $waiting->vendor_id])
+    expect(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$never->vendor_id, $failed->vendor_id, $waiting->vendor_id, $noToken->vendor_id, $noResultsOld->vendor_id])
         ->and(RunPendingEwccvLookups::pendingVendorIds(2))->toBe([$otherTenant->vendor_id]);
 });
 
@@ -121,7 +124,17 @@ it('a session handed over by the extension starts the pending lookups right away
 
     Queue::assertPushed(RunPendingEwccvLookups::class, 1);
 
+    // A second hand-off minutes later (the extension re-sends on a timer)
+    // stores the fresher session but does not queue a second run.
+    $this->withHeader('Authorization', 'Bearer bridge-secret')
+        ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('c', 120)])
+        ->assertOk()
+        ->assertJson(['pending_lookups' => 1]);
+    Queue::assertPushed(RunPendingEwccvLookups::class, 1);
+    expect(Cache::get(EwccvSessionController::CACHE_KEY)['access_token'])->toBe(str_repeat('c', 120));
+
     // Nothing pending: the session is stored, no job.
+    Cache::forget('ewccv:lookup-dispatched');
     $pending->forceFill(['options' => ['ewccv' => ['status' => 'tracking']]])->saveQuietly();
     $this->withHeader('Authorization', 'Bearer bridge-secret')
         ->postJson('/api/ewccv/session', ['accessToken' => str_repeat('b', 120)])

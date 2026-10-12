@@ -1893,21 +1893,27 @@ async function enableTracking(page, vendor, matchedItem, searchMeta) {
         const email = userData.email || loginEmail;
         const writtenPolicyId = item.writtenPolicyId || item.policyNumber || '';
 
-        // Step 2: Check if already subscribed
+        // Step 2: Already tracked? Compare against the account's own list by
+        // policy number (letters and digits only — EWCCV stores
+        // "WC5-39S-342438-046" as "WC539S342438046"). The per-id lookup used
+        // before never matched, and on 2026-10-12 the same policy was
+        // subscribed two and three times over.
+        const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const wanted = norm(item.policyNumber || writtenPolicyId);
         try {
-            const checkRes = await fetch(
-                BASE + '/' + SUB_EP + '/subscription/userId=' + userId + '/writtenPolicyId=' + writtenPolicyId,
-                { method: 'GET', headers: authHeaders }
-            );
-            if (checkRes.status === 200) {
-                const checkJson = await checkRes.json();
-                if (checkJson.data && Object.keys(checkJson.data).length > 0) {
-                    return { ok: true, alreadyTracking: true, subscriptionId: checkJson.data.subscriptionId || null };
+            const allRes = await fetch(BASE + '/' + SUB_EP + '/subscription/all', { method: 'GET', headers: authHeaders });
+            if (allRes.status === 200) {
+                const allJson = await allRes.json();
+                const existing = (Array.isArray(allJson.data) ? allJson.data : []).find((s) =>
+                    (wanted && norm(s.policyNumber) === wanted)
+                    || (writtenPolicyId && String(s.writtenPolicyId) === String(writtenPolicyId)));
+                if (existing) {
+                    return { ok: true, alreadyTracking: true, subscriptionId: existing.policySubscriptionId || existing.subscriptionId || null };
                 }
             }
         } catch (e) {
-            // Not fatal — subscription may just not exist yet
-            console.log('[EWCCV] fetchSubscription check error:', e.message);
+            // Not fatal — fall through to creating it
+            console.log('[EWCCV] subscription list check error:', e.message);
         }
 
         // Step 3: The payload EWCCV's own app sends (TrackingSignUp.handleSubmit

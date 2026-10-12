@@ -69,21 +69,38 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
         }
     }
 
+    /** A search that found nothing, or a tracking refusal, is not retried for this long. */
+    public const RETRY_AFTER_HOURS = 24;
+
     /**
      * Vendors with an active workers comp policy EWCCV is not tracking yet
-     * (never looked up, pending, failed or skipped).
+     * (never looked up, pending, failed or skipped). A vendor whose policy
+     * EWCCV could not find, or refused, in the last RETRY_AFTER_HOURS is left
+     * out: every browser session would otherwise search it again for the same
+     * answer. Failures the run itself caused (no session, no token) retry.
      *
      * @return list<int>
      */
     public static function pendingVendorIds(int $belongsToVendorId): array
     {
+        $retryBefore = Carbon::now()->subHours(self::RETRY_AFTER_HOURS);
+
         return VendorDoc::withoutGlobalScopes()
             ->where('type', 'workers')
             ->where('belongs_to_vendor_id', $belongsToVendorId)
             ->whereNotNull('vendor_id')
             ->where('expiration_date', '>=', Carbon::today())
             ->get(['vendor_id', 'options'])
-            ->reject(fn (VendorDoc $doc) => (($doc->options['ewccv']['status'] ?? null) === 'tracking'))
+            ->reject(function (VendorDoc $doc) use ($retryBefore) {
+                $state = (array) ($doc->options['ewccv'] ?? []);
+                if (($state['status'] ?? null) === 'tracking') {
+                    return true;
+                }
+                $settled = in_array($state['reason'] ?? '', ['no_results', 'create_subscription_failed', 'no_match'], true);
+                $checkedAt = filled($state['checked_at'] ?? null) ? Carbon::parse($state['checked_at']) : null;
+
+                return $settled && $checkedAt && $checkedAt->gt($retryBefore);
+            })
             ->pluck('vendor_id')
             ->map(fn ($id) => (int) $id)
             ->unique()
