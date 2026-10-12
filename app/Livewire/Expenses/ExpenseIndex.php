@@ -127,43 +127,25 @@ class ExpenseIndex extends Component
      * Search terms for the vendor/project filters. The option lists used to be
      * public properties holding every vendor (831) and project (413) — that is
      * ~1.1k <ui-option> elements rendered server-side AND dehydrated into the
-     * wire payload on every request. They are computed + search-limited now,
-     * backed by Meilisearch (both models are Scout Searchable).
+     * wire payload on every request. Projects are computed + search-limited
+     * now (Meilisearch); vendors moved to <x-vendor-picker>, which filters the
+     * whole list in the browser from one cached fetch (2026-10-11).
      */
-    public string $vendorSearch = '';
 
     public string $projectSearch = '';
 
     /** Grows as the user scrolls the open dropdown (wire:intersect sentinel). */
-    public int $vendorLimit = self::FILTER_OPTION_LIMIT;
 
     public int $projectLimit = self::FILTER_OPTION_LIMIT;
-
-    /** Typing a new term restarts paging from the top. */
-    public function updatedVendorSearch(): void
-    {
-        $this->vendorLimit = self::FILTER_OPTION_LIMIT;
-    }
 
     public function updatedProjectSearch(): void
     {
         $this->projectLimit = self::FILTER_OPTION_LIMIT;
     }
 
-    public function loadMoreVendorOptions(): void
-    {
-        $this->vendorLimit += self::FILTER_OPTION_LIMIT;
-    }
-
     public function loadMoreProjectOptions(): void
     {
         $this->projectLimit += self::FILTER_OPTION_LIMIT;
-    }
-
-    /** True while more rows exist beyond the current limit. */
-    public function hasMoreVendorOptions(): bool
-    {
-        return count($this->vendorOptions) >= $this->vendorLimit;
     }
 
     public function hasMoreProjectOptions(): bool
@@ -302,38 +284,8 @@ class ExpenseIndex extends Component
     private const FILTER_OPTION_LIMIT = 25;
 
     /**
-     * Vendors for the filter dropdown: the search hits when the user types,
-     * otherwise the most-used ones — plus whatever is currently selected, so
-     * an active filter always shows its own label.
-     */
-    #[Computed]
-    public function vendorOptions()
-    {
-        $term = trim($this->vendorSearch);
-        $columns = ['id', 'business_name', 'business_type'];
-
-        // Embedded on a project page: only vendors billed to that project.
-        if ($this->view === 'projects.show' && $this->project_id) {
-            return Vendor::whereHas('expenses', fn ($q) => $q->where('project_id', $this->project_id))
-                ->when($term !== '', fn ($q) => $q->where('business_name', 'like', "%{$term}%"))
-                ->orderBy('business_name')
-                ->limit($this->vendorLimit)
-                ->get($columns);
-        }
-
-        $options = $term !== ''
-            ? Vendor::search($term)->take($this->vendorLimit)->get()
-            : Vendor::whereHas('expenses')
-                ->orWhereHas('transactions')
-                ->orderBy('business_name')
-                ->limit($this->vendorLimit)
-                ->get($columns);
-
-        return $this->withSelectedOption($options, $this->expense_vendor, Vendor::class);
-    }
-
-    /**
-     * Projects for the filter dropdown — same shape as vendorOptions().
+     * Projects for the filter dropdown: the search hits when the user types,
+     * otherwise the newest, plus the selected one so an active filter keeps its label.
      */
     #[Computed]
     public function projectOptions()

@@ -9,23 +9,7 @@
         </div>
 
         <div class="flex-1 min-w-0 w-full">
-            <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
-                <x-slot name="search">
-                    <flux:select.search wire:model.live.debounce.300ms="vendorSearch" placeholder="Search vendors..." />
-                </x-slot>
-                <flux:select.option value="0">NO VENDOR</flux:select.option>
-                <flux:select.option disabled>---------</flux:select.option>
-                @foreach ($this->vendorOptions as $vendor)
-                    <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
-                @endforeach
-                @if ($this->hasMoreVendorOptions())
-                    {{-- Scrolling this into view inside the open dropdown loads the next page. --}}
-                    <div wire:intersect="loadMoreVendorOptions" class="px-3 py-2 text-xs text-zinc-400" wire:key="vendor-more-{{ $this->vendorLimit }}">
-                        <span wire:loading.remove wire:target="loadMoreVendorOptions">Scroll for more…</span>
-                        <span wire:loading wire:target="loadMoreVendorOptions">Loading…</span>
-                    </div>
-                @endif
-            </flux:select>
+            <x-vendor-picker wire:model.live="expense_vendor" label="Vendor" placeholder="Choose Vendor..." clearable :extra="[['value' => '0', 'label' => 'NO VENDOR']]" :project-id="$view === 'projects.show' ? $project_id : null" />
         </div>
 
         <div class="flex-1 min-w-0 w-full">
@@ -107,18 +91,7 @@
         </div>
         @if($view !== 'vendors.show')
             <div class="min-w-0 w-full">
-                <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
-                    <x-slot name="search">
-                        <flux:select.search wire:model.live.debounce.300ms="vendorSearch" placeholder="Search vendors..." />
-                    </x-slot>
-                    @if($view !== 'projects.show')
-                        <flux:select.option value="0">NO VENDOR</flux:select.option>
-                        <flux:select.option disabled>---------</flux:select.option>
-                    @endif
-                    @foreach ($this->vendorOptions as $vendor)
-                        <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
-                    @endforeach
-                </flux:select>
+                <x-vendor-picker wire:model.live="expense_vendor" label="Vendor" placeholder="Choose Vendor..." clearable :extra="$view !== 'projects.show' ? [['value' => '0', 'label' => 'NO VENDOR']] : []" :project-id="$view === 'projects.show' ? $project_id : null" />
             </div>
         @endif
         @if($view === 'projects.show')

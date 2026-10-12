@@ -25,7 +25,6 @@ class VendorTransactionsPanel extends Component
 
     public const PER_PAGE = 25;
 
-    public const VENDOR_OPTION_LIMIT = 25;
 
     public array $new_vendor_transaction = [];
 
@@ -40,10 +39,6 @@ class VendorTransactionsPanel extends Component
     /** Filters the table by vendor name or description. */
     public string $search = '';
 
-    /** The form's vendor picker: what was typed, and how far it has scrolled. */
-    public string $vendorSearch = '';
-
-    public int $vendorLimit = self::VENDOR_OPTION_LIMIT;
 
     public function mount(): void
     {
@@ -53,54 +48,6 @@ class VendorTransactionsPanel extends Component
     public function updatedSearch(): void
     {
         $this->resetPage();
-    }
-
-    /** The picker's search box calls this (debounced); a new term restarts paging from the top. */
-    public function searchVendors(string $term): void
-    {
-        $this->vendorSearch = $term;
-        $this->vendorLimit = self::VENDOR_OPTION_LIMIT;
-        unset($this->vendorOptions);
-    }
-
-    public function loadMoreVendorOptions(): void
-    {
-        $this->vendorLimit += self::VENDOR_OPTION_LIMIT;
-        unset($this->vendorOptions);
-    }
-
-    /** True while more vendors exist beyond what the open dropdown has shown. */
-    public function hasMoreVendorOptions(): bool
-    {
-        return $this->vendorOptions->count() >= $this->vendorLimit;
-    }
-
-    /**
-     * One scroll-page of vendors matching the search (or the alphabetical
-     * head of the list), plus the selected vendor so the picker can label it.
-     */
-    #[Computed]
-    public function vendorOptions(): Collection
-    {
-        $term = trim($this->vendorSearch);
-        $columns = ['id', 'business_name', 'city', 'state'];
-
-        $options = Vendor::withoutGlobalScopes()
-            ->select($columns)
-            ->when($term !== '', fn ($query) => $query->where('business_name', 'like', "%{$term}%"))
-            ->orderBy('business_name')
-            ->limit($this->vendorLimit)
-            ->get();
-
-        $selected = $this->new_vendor_transaction['vendor_id'] ?? '';
-        if (is_numeric($selected) && (int) $selected > 0 && ! $options->contains('id', (int) $selected)) {
-            $vendor = Vendor::withoutGlobalScopes()->select($columns)->find((int) $selected);
-            if ($vendor) {
-                $options->prepend($vendor);
-            }
-        }
-
-        return $options;
     }
 
     #[Computed]

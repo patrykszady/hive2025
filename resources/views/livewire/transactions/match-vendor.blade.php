@@ -23,7 +23,6 @@
                 @foreach($this->merchantCards as $merchant_name => $merchant_transactions)
                     @php
                         $cardIndex = $loop->index;
-                        $pickerKey = 'txn_'.$cardIndex;
                     @endphp
                     <x-island-card
                         class="mt-6"
@@ -81,33 +80,7 @@
                             {{-- Server-searched picker: one scroll-page of vendors at a
                                  time, never the whole list. Same treatment as the
                                  expenses filter. --}}
-                            <flux:select
-                                wire:model="match_merchant_names.{{ $cardIndex }}.vendor_id"
-                                label="Vendor"
-                                variant="listbox"
-                                searchable
-                                placeholder="Select Vendor"
-                            >
-                                <x-slot name="search">
-                                    <flux:select.search x-on:input.debounce.400ms="$wire.searchVendors('{{ $pickerKey }}', $event.target.value)" placeholder="Search vendors..." />
-                                </x-slot>
-                                <flux:select.option value="NEW">NEW Retail Vendor</flux:select.option>
-                                <flux:select.option value="DEPOSIT">Deposit Transaction</flux:select.option>
-                                <flux:select.option value="CHECK">Check Paid</flux:select.option>
-                                <flux:select.option value="TRANSFER">Transfer/Zelle Out</flux:select.option>
-                                <flux:select.option value="CASH">Cash Withdrawal</flux:select.option>
-                                <flux:separator />
-                                @foreach ($this->vendorOptions($pickerKey) as $vendor)
-                                    <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}{{ $vendor->city ? ' — '.$vendor->city.($vendor->state ? ', '.$vendor->state : '') : '' }}</flux:select.option>
-                                @endforeach
-                                @if ($this->hasMoreVendorOptions($pickerKey))
-                                    {{-- Scrolling this into view inside the open dropdown loads the next page. --}}
-                                    <div wire:intersect="loadMoreVendorOptions('{{ $pickerKey }}')" class="px-3 py-2 text-xs text-zinc-400" wire:key="vendor-more-{{ $pickerKey }}-{{ $vendor_limit[$pickerKey] ?? 0 }}">
-                                        <span wire:loading.remove wire:target="loadMoreVendorOptions('{{ $pickerKey }}')">Scroll for more…</span>
-                                        <span wire:loading wire:target="loadMoreVendorOptions('{{ $pickerKey }}')">Loading…</span>
-                                    </div>
-                                @endif
-                            </flux:select>
+                            <x-vendor-picker wire:model="match_merchant_names.{{ $cardIndex }}.vendor_id" label="Vendor" placeholder="Select Vendor" :details="true" :all="true" :extra="[['value' => 'NEW', 'label' => 'NEW Retail Vendor'], ['value' => 'DEPOSIT', 'label' => 'Deposit Transaction'], ['value' => 'CHECK', 'label' => 'Check Paid'], ['value' => 'TRANSFER', 'label' => 'Transfer/Zelle Out'], ['value' => 'CASH', 'label' => 'Cash Withdrawal']]" />
 
                             <flux:input.group label="Options">
                                 <flux:input
@@ -207,7 +180,6 @@
                 @foreach($this->expenseCards as $merchant_name => $merchant_expenses)
                     @php
                         $cardIndex = $loop->index;
-                        $pickerKey = 'exp_'.$cardIndex;
                     @endphp
                     <x-island-card class="mt-6" wire:key="exp-card-{{ $cardIndex }}" :heading="$merchant_name !== '' ? $merchant_name : 'Receipt without a merchant name'">
                         <div class="space-y-4">
@@ -233,28 +205,7 @@
                                 label="Match As"
                             />
 
-                            <flux:select
-                                wire:model="match_expense_merchant_names.{{ $cardIndex }}.vendor_id"
-                                label="Vendor"
-                                variant="listbox"
-                                searchable
-                                placeholder="Select Vendor"
-                            >
-                                <x-slot name="search">
-                                    <flux:select.search x-on:input.debounce.400ms="$wire.searchVendors('{{ $pickerKey }}', $event.target.value)" placeholder="Search vendors..." />
-                                </x-slot>
-                                <flux:select.option value="NEW">NEW Retail Vendor</flux:select.option>
-                                <flux:separator />
-                                @foreach ($this->vendorOptions($pickerKey) as $vendor)
-                                    <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}{{ $vendor->city ? ' — '.$vendor->city.($vendor->state ? ', '.$vendor->state : '') : '' }}</flux:select.option>
-                                @endforeach
-                                @if ($this->hasMoreVendorOptions($pickerKey))
-                                    <div wire:intersect="loadMoreVendorOptions('{{ $pickerKey }}')" class="px-3 py-2 text-xs text-zinc-400" wire:key="vendor-more-{{ $pickerKey }}-{{ $vendor_limit[$pickerKey] ?? 0 }}">
-                                        <span wire:loading.remove wire:target="loadMoreVendorOptions('{{ $pickerKey }}')">Scroll for more…</span>
-                                        <span wire:loading wire:target="loadMoreVendorOptions('{{ $pickerKey }}')">Loading…</span>
-                                    </div>
-                                @endif
-                            </flux:select>
+                            <x-vendor-picker wire:model="match_expense_merchant_names.{{ $cardIndex }}.vendor_id" label="Vendor" placeholder="Select Vendor" :details="true" :all="true" :extra="[['value' => 'NEW', 'label' => 'NEW Retail Vendor']]" />
                         </div>
                     </x-island-card>
                 @endforeach

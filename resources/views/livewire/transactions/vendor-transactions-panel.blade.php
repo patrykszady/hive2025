@@ -2,30 +2,7 @@
     <x-island-card heading="New Vendor Transaction">
         <form wire:submit="createVendorTransaction" class="space-y-4">
             <div class="grid gap-4 lg:grid-cols-3 items-end">
-                {{-- Server-searched picker: a scroll-page of vendors at a time,
-                     never all 800+ as options. --}}
-                <flux:select
-                    wire:model="new_vendor_transaction.vendor_id"
-                    label="Vendor"
-                    variant="listbox"
-                    searchable
-                    placeholder="Select vendor"
-                >
-                    <x-slot name="search">
-                        <flux:select.search x-on:input.debounce.400ms="$wire.searchVendors($event.target.value)" placeholder="Search vendors..." />
-                    </x-slot>
-                    <flux:select.option value="">None</flux:select.option>
-                    @foreach($this->vendorOptions as $vendor)
-                        <flux:select.option :value="$vendor->id">{{ $vendor->business_name }}{{ $vendor->city ? ' — '.$vendor->city.($vendor->state ? ', '.$vendor->state : '') : '' }}</flux:select.option>
-                    @endforeach
-                    @if ($this->hasMoreVendorOptions())
-                        {{-- Scrolling this into view inside the open dropdown loads the next page. --}}
-                        <div wire:intersect="loadMoreVendorOptions" class="px-3 py-2 text-xs text-zinc-400" wire:key="vendor-more-{{ $vendorLimit }}">
-                            <span wire:loading.remove wire:target="loadMoreVendorOptions">Scroll for more…</span>
-                            <span wire:loading wire:target="loadMoreVendorOptions">Loading…</span>
-                        </div>
-                    @endif
-                </flux:select>
+                <x-vendor-picker wire:model="new_vendor_transaction.vendor_id" label="Vendor" placeholder="Select vendor" :details="true" :all="true" :extra="[['value' => '', 'label' => 'None']]" />
 
                 <flux:select
                     wire:model="new_vendor_transaction.deposit_check"

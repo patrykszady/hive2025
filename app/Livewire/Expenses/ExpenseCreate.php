@@ -121,50 +121,6 @@ class ExpenseCreate extends Component
     }
 
     #[Computed]
-    public function vendors()
-    {
-        $term = trim($this->vendorSearch);
-
-        // Search hits (Meilisearch) while typing, otherwise the first page —
-        // this dropdown used to render all 831 vendors on every modal open.
-        $options = $term !== ''
-            ? Vendor::search($term)->take($this->vendorLimit)->get()
-            : Vendor::orderBy('business_name')->limit($this->vendorLimit)->get(['id', 'business_name']);
-
-        // The expense's current vendor must stay selectable even when it falls
-        // outside the page/search, or editing an expense blanks its vendor.
-        foreach ([$this->form->vendor_id ?? null, $this->form->belongs_to_vendor_id ?? null] as $selectedId) {
-            if ($selectedId && ! $options->contains('id', (int) $selectedId)) {
-                if ($selected = Vendor::find((int) $selectedId)) {
-                    $options = $options->prepend($selected);
-                }
-            }
-        }
-
-        return $options;
-    }
-
-    /** Search + paging state for the vendor dropdown. */
-    public string $vendorSearch = '';
-
-    public int $vendorLimit = 25;
-
-    public function updatedVendorSearch(): void
-    {
-        $this->vendorLimit = 25;
-    }
-
-    public function loadMoreVendors(): void
-    {
-        $this->vendorLimit += 25;
-    }
-
-    public function hasMoreVendors(): bool
-    {
-        return count($this->vendors) >= $this->vendorLimit;
-    }
-
-    #[Computed]
     public function projects()
     {
         return Project::with('latestStatus')
@@ -359,7 +315,7 @@ class ExpenseCreate extends Component
             return true;
         }
         
-        $selectedVendor = $this->vendors->firstWhere('id', $this->form->vendor_id);
+        $selectedVendor = Vendor::find($this->form->vendor_id);
         return !$selectedVendor || $this->form->merchant_name != $selectedVendor->business_name;
     }
 

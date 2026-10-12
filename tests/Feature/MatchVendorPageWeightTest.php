@@ -16,8 +16,10 @@ uses(RefreshDatabase::class);
 /**
  * The Match Vendor page used to print every vendor as an option in every
  * card and carry every list in the Livewire snapshot — 17MB of HTML that
- * stalled before all cards had painted. These pin the diet: pickers show a
- * scroll-page of matches, tables paginate, and nothing heavy is public state.
+ * stalled before all cards had painted. These pin the diet: the page prints
+ * no vendor options at all (every card's picker is <x-vendor-picker>, which
+ * fetches one shared list and filters it in the browser), tables paginate,
+ * and nothing heavy is public state.
  */
 function pageWeightActor(): User
 {
@@ -41,43 +43,6 @@ function manyVendors(int $count, string $prefix = 'Vendor'): void
         Vendor::factory()->create(['business_name' => sprintf('%s %03d', $prefix, $i)]);
     }
 }
-
-it('shows a card picker one scroll-page of vendors at a time, searched on the server', function () {
-    pageWeightActor();
-    manyVendors(40);
-    Vendor::factory()->create(['business_name' => 'Menards Store 3120']);
-
-    $component = new MatchVendor();
-
-    expect($component->vendorOptions('txn_0'))->toHaveCount(MatchVendor::VENDOR_OPTION_LIMIT)
-        ->and($component->hasMoreVendorOptions('txn_0'))->toBeTrue();
-
-    $component->vendor_search = ['txn_0' => 'menard'];
-    $names = $component->vendorOptions('txn_0')->pluck('business_name')->all();
-
-    expect($names)->toBe(['Menards Store 3120'])
-        ->and($component->hasMoreVendorOptions('txn_0'))->toBeFalse();
-
-    // Scrolling the open dropdown asks for the next page — for THAT picker only.
-    $component->vendor_search = [];
-    $component->loadMoreVendorOptions('txn_0');
-    expect($component->vendorOptions('txn_0')->count())->toBeGreaterThan(MatchVendor::VENDOR_OPTION_LIMIT)
-        ->and($component->vendorOptions('exp_0'))->toHaveCount(MatchVendor::VENDOR_OPTION_LIMIT);
-});
-
-it('keeps a card\'s selected vendor in its options even when the search would hide it', function () {
-    pageWeightActor();
-    manyVendors(30);
-    $chosen = Vendor::factory()->create(['business_name' => 'Zzz Chosen Vendor']);
-
-    $component = new MatchVendor();
-    $component->match_merchant_names = [2 => ['match_desc' => 'X', 'vendor_id' => (string) $chosen->id]];
-    $component->vendor_search = ['txn_2' => 'Vendor 00'];
-
-    expect($component->vendorOptions('txn_2')->first()->id)->toBe($chosen->id)
-        // The static NEW/DEPOSIT/... choices are not vendors and add nothing.
-        ->and((new MatchVendor())->vendorOptions('txn_0')->pluck('business_name'))->not->toContain('NEW');
-});
 
 it('paginates and searches the vendor transaction rules', function () {
     pageWeightActor();
@@ -103,23 +68,11 @@ it('paginates and searches the vendor transaction rules', function () {
         ->and($found->getCollection()->first()['desc'])->toBe('ZELLE OUT');
 });
 
-it('renders the page without printing the whole vendor list into every card', function () {
+it('renders the page without printing any vendor into any card', function () {
     $user = pageWeightActor();
     manyVendors(60, 'Bulk');
 
-    $html = Livewire::actingAs($user)->test(MatchVendor::class)->html();
-
-    // island_lazy() is off in tests, so both islands render inline. Each
-    // picker shows a scroll-page (25) — never the 60 bulk vendors.
-    expect(substr_count($html, 'Bulk 0'))->toBeLessThanOrEqual(MatchVendor::VENDOR_OPTION_LIMIT)
-        ->and($html)->toContain('Loading vendor transactions...');
-});
-
-it('searches a card picker on the server from inside the island', function () {
-    $user = pageWeightActor();
-    manyVendors(30);
-    Vendor::factory()->create(['business_name' => 'Menards Store 3120']);
-
+    // One unmatched charge, so the page has a card (and a picker) to render.
     $bank = Bank::create(['name' => 'Fixture Bank', 'vendor_id' => $user->primary_vendor_id, 'plaid_ins_id' => 'ins_fixture']);
     $account = BankAccount::create([
         'vendor_id' => $user->primary_vendor_id, 'bank_id' => $bank->id, 'account_number' => '0001',
@@ -131,11 +84,14 @@ it('searches a card picker on the server from inside the island', function () {
         'details' => ['category' => ['Shops'], 'payment_channel' => 'in store'],
     ]);
 
-    Livewire::actingAs($user)
-        ->test(MatchVendor::class)
-        ->assertSee('MENARDS #3120')
-        ->assertSee('Vendor 001')
-        ->call('searchVendors', 'txn_0', 'menard')
-        ->assertSee('Menards Store 3120')
-        ->assertDontSee('Vendor 001');
+    $html = Livewire::actingAs($user)->test(MatchVendor::class)->html();
+
+    expect($html)->toContain('MENARDS #3120');
+
+    // island_lazy() is off in tests, so both islands render inline. No card
+    // carries vendor options: the picker fetches the shared list itself.
+    expect(substr_count($html, 'Bulk 0'))->toBe(0)
+        ->and($html)->toContain('data-vendor-picker')
+        ->and($html)->toContain('picker-options')
+        ->and($html)->toContain('Loading vendor transactions...');
 });

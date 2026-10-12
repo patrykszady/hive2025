@@ -422,6 +422,8 @@ Route::get('l/{code}', ShortLinkController::class)->name('short-links.redirect')
 
 // Passkey setup page (requires auth)
 Route::middleware('auth')->group(function () {
+    // The vendor list every <x-vendor-picker> filters in the browser; any signed-in user, scoped like the Vendor model.
+    Route::get('/vendors/picker-options', \App\Http\Controllers\VendorPickerOptionsController::class)->name('vendors.picker-options');
     Route::get('passkey/setup', PasskeySetup::class)->name('passkey.setup');
 });
 

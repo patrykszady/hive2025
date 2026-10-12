@@ -32,8 +32,6 @@ class MatchVendor extends Component
 {
     use AuthorizesRequests;
 
-    /** Options a vendor picker shows per scroll-page. */
-    public const VENDOR_OPTION_LIMIT = 25;
 
     public $match_merchant_names = [];
 
@@ -42,14 +40,8 @@ class MatchVendor extends Component
     // card index => AI suggestion payload
     public $ai_suggestions = [];
 
-    /** picker key ("txn_0", "exp_2") => what was typed into its search box */
-    public array $vendor_search = [];
 
-    /** picker key => how many rows the open dropdown has scrolled to */
-    public array $vendor_limit = [];
 
-    /** Per-request memo so a card's options query runs once, not once per use in the view. */
-    protected array $vendorOptionsMemo = [];
 
     public $view_text = [
         'card_title' => 'Save Transactions/Vendor',
@@ -69,17 +61,6 @@ class MatchVendor extends Component
 
     public function updated($field)
     {
-        // A new search term restarts that picker's paging from the top.
-        if (str_starts_with($field, 'vendor_search.')) {
-            unset($this->vendor_limit[substr($field, strlen('vendor_search.'))]);
-
-            return;
-        }
-
-        if (str_starts_with($field, 'vendor_limit.')) {
-            return;
-        }
-
         $this->validateOnly($field);
     }
 
@@ -170,82 +151,6 @@ class MatchVendor extends Component
     }
 
     /**
-     * The options one card's vendor picker shows: the typed search (or the
-     * alphabetical head of the list), one scroll-page at a time, plus whatever
-     * that card already has selected so the picker can still label it.
-     */
-    public function vendorOptions(string $key): Collection
-    {
-        $term = trim((string) ($this->vendor_search[$key] ?? ''));
-        $selected = $this->selectedVendorId($key);
-        $limit = $this->vendorLimitFor($key);
-
-        // Keyed on everything that shapes the list, so a changed term or a
-        // scrolled page within the same request never serves stale options.
-        $memo = implode('|', [$key, $term, $limit, (string) $selected]);
-        if (isset($this->vendorOptionsMemo[$memo])) {
-            return $this->vendorOptionsMemo[$memo];
-        }
-
-        $columns = ['id', 'business_name', 'city', 'state'];
-
-        $options = Vendor::withoutGlobalScopes()
-            ->select($columns)
-            ->when($term !== '', fn ($query) => $query->where('business_name', 'like', "%{$term}%"))
-            ->orderBy('business_name')
-            ->limit($limit)
-            ->get();
-
-        if ($selected !== null && ! $options->contains('id', $selected)) {
-            $vendor = Vendor::withoutGlobalScopes()->select($columns)->find($selected);
-            if ($vendor) {
-                $options->prepend($vendor);
-            }
-        }
-
-        return $this->vendorOptionsMemo[$memo] = $options;
-    }
-
-    /**
-     * The picker's search box calls this (debounced) instead of binding
-     * wire:model: a bound input inside a re-rendering island had its value
-     * written back from the server mid-typing, eating keystrokes ("mnard").
-     * With a method call the typed text lives only in the DOM.
-     */
-    public function searchVendors(string $key, string $term): void
-    {
-        $this->vendor_search[$key] = $term;
-        unset($this->vendor_limit[$key]);
-    }
-
-    /** True while more vendors exist beyond what the open dropdown has shown. */
-    public function hasMoreVendorOptions(string $key): bool
-    {
-        return $this->vendorOptions($key)->count() >= $this->vendorLimitFor($key);
-    }
-
-    /** Scrolling the dropdown's sentinel into view asks for the next page. */
-    public function loadMoreVendorOptions(string $key): void
-    {
-        $this->vendor_limit[$key] = $this->vendorLimitFor($key) + self::VENDOR_OPTION_LIMIT;
-    }
-
-    protected function vendorLimitFor(string $key): int
-    {
-        return max(self::VENDOR_OPTION_LIMIT, (int) ($this->vendor_limit[$key] ?? self::VENDOR_OPTION_LIMIT));
-    }
-
-    /** The numeric vendor a card's form has chosen — NEW/DEPOSIT/CHECK/... are static options, not vendors. */
-    protected function selectedVendorId(string $key): ?int
-    {
-        [$scope, $index] = array_pad(explode('_', $key, 2), 2, null);
-        $form = $scope === 'exp' ? $this->match_expense_merchant_names : $this->match_merchant_names;
-        $value = $form[(int) $index]['vendor_id'] ?? null;
-
-        return is_numeric($value) && (int) $value > 0 ? (int) $value : null;
-    }
-
-    /**
      * Forget everything the last render knew, without a page load.
      *
      * The display collections are computed per request, so this only drops
@@ -256,13 +161,10 @@ class MatchVendor extends Component
     protected function refreshLists(): void
     {
         unset($this->merchantCards, $this->expenseCards);
-        $this->vendorOptionsMemo = [];
 
         $this->ai_suggestions = [];
         $this->match_merchant_names = [];
         $this->match_expense_merchant_names = [];
-        $this->vendor_search = [];
-        $this->vendor_limit = [];
         $this->resetValidation();
     }
 
