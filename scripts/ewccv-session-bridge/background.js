@@ -78,7 +78,7 @@ async function push({ interactive = false } = {}) {
     try {
         res = await fetch(`${cfg.serverUrl.replace(/\/+$/, '')}/api/ewccv/session`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${cfg.token}` },
             body: JSON.stringify({
                 accessToken: minted.accessToken,
                 jwt: minted.jwt || null,
