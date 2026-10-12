@@ -2626,12 +2626,7 @@ class TransactionController extends Controller
      */
     protected function plaidSaysPaymentAppToNoMerchant(Transaction $transaction): bool
     {
-        $types = collect($transaction->details['counterparties'] ?? [])
-            ->map(fn ($counterparty) => strtolower((string) ($counterparty['type'] ?? '')))
-            ->filter()
-            ->values();
-
-        return $types->contains('payment_app') && ! $types->contains('merchant');
+        return $transaction->merchantNameIsPaymentAppGuess();
     }
 
     protected function extractPayeeNameFromTransaction(Transaction $transaction): string

@@ -675,10 +675,13 @@ class PlaidTransactionSyncController extends Controller
         $isBankFee = (($payload['personal_finance_category']['primary'] ?? null) === 'BANK_FEES')
             || preg_match('/\bFEE\b|RETURNED|SERVICE CHARGE|ACCT ANALYSIS|OVERDRAFT|\bNSF\b/i', $incomingDescription);
 
-        if (isset($payload['merchant_name']) && $payload['merchant_name'] !== null) {
-            $matchedTransaction->plaid_merchant_name = $payload['merchant_name'];
-        } elseif ($isTransfer || $isBankFee) {
-            // Don't inherit a stale merchant name from a mis-matched pending transaction.
+        $merchantFromPlaid = Transaction::merchantNameFromPlaid($payload);
+        if ($merchantFromPlaid !== null) {
+            $matchedTransaction->plaid_merchant_name = $merchantFromPlaid;
+        } elseif ((isset($payload['merchant_name']) && $payload['merchant_name'] !== null) || $isTransfer || $isBankFee) {
+            // Don't inherit a stale merchant name from a mis-matched pending
+            // transaction, and don't keep one Plaid only guessed (a payment-app
+            // transfer with no merchant counterparty — Transaction::merchantNameFromPlaid()).
             $matchedTransaction->plaid_merchant_name = null;
         }
         // Otherwise keep existing merchant name (for non-transfer upgrades where Plaid doesn't send merchant_name)
@@ -733,7 +736,7 @@ class PlaidTransactionSyncController extends Controller
             ->value('id');
         $transaction->owner = $payload['account_owner'] ?? null;
         $transaction->check_number = $payload['check_number'] ?? null;
-        $transaction->plaid_merchant_name = $payload['merchant_name'] ?? null;
+        $transaction->plaid_merchant_name = Transaction::merchantNameFromPlaid($payload);
         $transaction->plaid_merchant_description = $payload['name'] ?? $payload['original_description'] ?? null;
         $transaction->plaid_transaction_id = $plaidTransactionId;
         $transaction->details = $payload;

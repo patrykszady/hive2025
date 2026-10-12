@@ -176,6 +176,63 @@ class Transaction extends Model
     /**
      * Get the name of the index associated with the model.
      */
+    /**
+     * The merchant name worth storing from a Plaid transaction payload. Plaid
+     * guesses a merchant even for a payment-app transfer: 29182 ($200 Venmo
+     * to a person, memo "VENMO *PATRYK SZADY") came back as "Anthropic
+     * Headquarters" while Plaid's own counterparties said [Venmo:
+     * payment_app] and no merchant (2026-07-12). Such a guess is dropped; a
+     * payment that Plaid ties to a merchant counterparty (Netflix through
+     * PayPal) keeps its merchant, and so does a payload without counterparty
+     * data.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function merchantNameFromPlaid(array $payload): ?string
+    {
+        $merchant = trim((string) ($payload['merchant_name'] ?? ''));
+        if ($merchant === '') {
+            return null;
+        }
+
+        $memo = implode(' ', array_filter([(string) ($payload['name'] ?? ''), (string) ($payload['original_description'] ?? '')]));
+
+        return self::isPaymentAppGuess($merchant, (array) ($payload['counterparties'] ?? []), $memo) ? null : $merchant;
+    }
+
+    /** Does this stored row carry such a guess (see merchantNameFromPlaid())? */
+    public function merchantNameIsPaymentAppGuess(): bool
+    {
+        $details = (array) ($this->details ?? []);
+        $memo = implode(' ', array_filter([(string) $this->plaid_merchant_description, (string) ($details['original_description'] ?? '')]));
+
+        return self::isPaymentAppGuess((string) $this->plaid_merchant_name, (array) ($details['counterparties'] ?? []), $memo);
+    }
+
+    /**
+     * A merchant name is a guess when Plaid's counterparties say the money
+     * went through a payment app and to no merchant, and the bank memo names
+     * that app.
+     *
+     * @param  list<array<string, mixed>>  $counterparties
+     */
+    public static function isPaymentAppGuess(string $merchant, array $counterparties, string $memo): bool
+    {
+        $merchant = trim($merchant);
+        if ($merchant === '' || in_array(strtoupper($merchant), ['VENMO', 'ZELLE', 'PAYPAL', 'CASH APP'], true)) {
+            return false;
+        }
+
+        $types = collect($counterparties)
+            ->map(fn ($counterparty) => strtolower((string) (is_array($counterparty) ? ($counterparty['type'] ?? '') : '')))
+            ->filter()
+            ->values();
+
+        return $types->contains('payment_app')
+            && ! $types->contains('merchant')
+            && preg_match('/\b(VENMO|ZELLE|PAYPAL|CASH\s?APP|APPLE\s?CASH)\b/i', $memo) === 1;
+    }
+
     /** check_number of a transaction marked as a transfer (both legs of a card payment, money between accounts, a payment app). */
     public const TRANSFER_CHECK_NUMBER = '1010101';
 
