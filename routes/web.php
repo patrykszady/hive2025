@@ -579,6 +579,14 @@ Route::middleware(['auth', 'can:platform-admin'])->group(function () {
 Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::class)
     ->name('ewccv.session');
 
+// The no-install hand-off: a bookmarklet for the platform admin, plus the
+// extension's page-world minter it loads on ewccv.com (public, plain JS).
+Route::get('ewccv/minter.js', [\App\Http\Controllers\EwccvBridgeController::class, 'minter'])
+    ->name('ewccv.minter');
+Route::get('ewccv/bridge', [\App\Http\Controllers\EwccvBridgeController::class, 'show'])
+    ->middleware('auth')
+    ->name('ewccv.bridge');
+
 // Menards receipts fetched by the browser extension running in the server-side
 // signed-in Chromium. Bearer-authed, CSRF-exempt; writes a manifest + PDFs and
 // runs the normal --skip-scrape importer.
