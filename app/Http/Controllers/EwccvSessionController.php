@@ -77,24 +77,25 @@ class EwccvSessionController extends Controller
         // The extension re-sends every 20 minutes while a tab is open (and
         // on every click of its button): one queued run per 10 minutes is
         // plenty, the run reads the freshest session when it starts.
-        $pending = RunPendingEwccvLookups::pendingVendorIds((int) config('services.ewccv.belongs_to_vendor_id', 1));
-        if ($pending !== [] && Cache::add('ewccv:lookup-dispatched', true, now()->addMinutes(10))) {
+        // Pending work is tracking lookups plus an audit's as-of coverage checks.
+        $pending = RunPendingEwccvLookups::pendingCount((int) config('services.ewccv.belongs_to_vendor_id', 1));
+        if ($pending > 0 && Cache::add('ewccv:lookup-dispatched', true, now()->addMinutes(10))) {
             RunPendingEwccvLookups::dispatch();
         }
 
         Log::info('EWCCV bridge: session received', [
             'access_token_len' => strlen($data['accessToken']),
             'has_jwt' => ! empty($data['jwt']),
-            'pending_lookups' => count($pending),
+            'pending_lookups' => $pending,
         ]);
 
         return response()->json([
             'ok' => true,
-            'message' => $pending === []
+            'message' => $pending === 0
                 ? 'EWCCV search session stored; every active policy is already tracked.'
-                : sprintf('EWCCV search session stored; verifying %d vendor(s) now.', count($pending)),
+                : sprintf('EWCCV search session stored; verifying %d vendor(s) now.', $pending),
             'expires_in_hours' => 12,
-            'pending_lookups' => count($pending),
+            'pending_lookups' => $pending,
         ]);
     }
 }

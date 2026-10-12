@@ -36,6 +36,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
+const { nameVariants, addressVariants, pickMatch } = require('./ewccv-matching.cjs');
 
 const useRebrowser = process.env.EWCCV_USE_REBROWSER !== '0';
 let puppeteer;
@@ -1702,12 +1703,17 @@ function resolveStateCode(stateAbbr, statesList) {
 }
 
 // ── Search vendor via direct API call ─────────────────────────────────────────
-async function searchViaApi(page, vendor, searchType) {
+// overrides.businessName / overrides.address substitute a narrower fallback
+// search term (see nameVariants()/addressVariants()) while city/zip always
+// come from the vendor — EWCCV's address search wants those as-is.
+async function searchViaApi(page, vendor, searchType, overrides = {}) {
     const coverageDate = vendor.coverageDate || new Date().toLocaleDateString('en-US', {
         month: '2-digit', day: '2-digit', year: 'numeric',
     });
+    const searchBusinessName = overrides.businessName || vendor.businessName;
+    const searchAddress = overrides.address || vendor.address;
 
-    const result = await page.evaluate(async (v, covDate, sType, stateNames) => {
+    const result = await page.evaluate(async (v, covDate, sType, stateNames, bizName, addr) => {
         const accessToken = sessionStorage.getItem('accessToken');
         if (!accessToken) return { ok: false, reason: 'no_accessToken' };
 
@@ -1738,11 +1744,11 @@ async function searchViaApi(page, vendor, searchType) {
 
         let url;
         if (sType === 'employer') {
-            const name = encodeURIComponent(v.businessName);
+            const name = encodeURIComponent(bizName);
             url = `${BASE}/insureds/coverage/stateCode/${stateCode}/searchType/employer/?employerName=${name}&searchMode=contains&coverageDate=${encodeURIComponent(covDate)}`;
         } else {
             // Address search
-            let qs = `?streetLine1=${encodeURIComponent(v.address)}&coverageDate=${encodeURIComponent(covDate)}`;
+            let qs = `?streetLine1=${encodeURIComponent(addr)}&coverageDate=${encodeURIComponent(covDate)}`;
             if (v.city) qs += `&city=${encodeURIComponent(v.city)}`;
             if (v.zip) qs += `&zipCode=${encodeURIComponent(v.zip)}`;
             url = `${BASE}/insureds/coverage/stateCode/${stateCode}/searchType/address/${qs}`;
@@ -1766,39 +1772,9 @@ async function searchViaApi(page, vendor, searchType) {
         } catch (e) {
             return { ok: false, reason: 'fetch_error: ' + e.message };
         }
-    }, vendor, coverageDate, searchType, STATE_NAMES);
+    }, vendor, coverageDate, searchType, STATE_NAMES, searchBusinessName, searchAddress);
 
     return result;
-}
-
-// ── Match search results to vendor ────────────────────────────────────────────
-function matchResult(items, vendor) {
-    if (!items || items.length === 0) return null;
-
-    // Try policy number match first
-    if (vendor.policyNumber) {
-        const normalized = vendor.policyNumber.replace(/[\s-]/g, '').toUpperCase();
-        const match = items.find(item => {
-            const p = (item.policyNumber || item.writtenPolicyId || '').replace(/[\s-]/g, '').toUpperCase();
-            return p === normalized || p.includes(normalized) || normalized.includes(p);
-        });
-        if (match) return { match, via: 'policyNumber' };
-    }
-
-    // Try employer name match
-    if (vendor.businessName) {
-        const normalized = vendor.businessName.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const match = items.find(item => {
-            const name = (item.employerName || item.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-            return name.includes(normalized) || normalized.includes(name);
-        });
-        if (match) return { match, via: 'employerName' };
-    }
-
-    // If only one result, use it
-    if (items.length === 1) return { match: items[0], via: 'sole_result' };
-
-    return null;
 }
 
 // ── Navigate to policy details and enable tracking ────────────────────────────
@@ -2458,6 +2434,11 @@ async function requestLoginEmail(page, email) {
                 continue;
             }
 
+            // Every search this vendor makes (primary + fallback + UI), recorded
+            // regardless of outcome so the caller can see what was tried. Declared
+            // outside the try so the catch block below can also attach it.
+            const searched = [];
+
             try {
                 // Collect results from both search types
                 let allItems = [];
@@ -2469,6 +2450,7 @@ async function requestLoginEmail(page, email) {
                     // Search by address first
                     const addrResult = await searchViaApi(page, vendor, 'address');
                     log(`    Address search: ${addrResult.ok ? addrResult.count + ' result(s)' : addrResult.reason}`);
+                    searched.push({ type: 'address', term: vendor.address, count: addrResult.ok ? addrResult.count : 0, reason: addrResult.ok ? undefined : addrResult.reason });
                     if (addrResult.ok && addrResult.items) {
                         allItems.push(...addrResult.items);
                     }
@@ -2477,6 +2459,7 @@ async function requestLoginEmail(page, email) {
                     // Also try employer name search (more likely to find by business name)
                     const empResult = await searchViaApi(page, vendor, 'employer');
                     log(`    Employer search: ${empResult.ok ? empResult.count + ' result(s)' : empResult.reason}`);
+                    searched.push({ type: 'employer', term: vendor.businessName, count: empResult.ok ? empResult.count : 0, reason: empResult.ok ? undefined : empResult.reason });
                     if (empResult.ok && empResult.items) {
                         // Deduplicate by writtenPolicyId/policyNumber
                         for (const item of empResult.items) {
@@ -2498,6 +2481,7 @@ async function requestLoginEmail(page, email) {
                             const retry = await searchViaApi(page, vendor, 'employer');
                             if (retry.ok && retry.items) allItems.push(...retry.items);
                             lastApiResult = retry;
+                            searched.push({ type: 'employer', term: vendor.businessName, count: retry.ok ? retry.count : 0, reason: retry.ok ? undefined : retry.reason });
                         } else if (config.bridgedAccessToken) {
                             // The browser session's credential is spent (EWCCV
                             // allows ~25 searches per verification). Nothing
@@ -2506,7 +2490,7 @@ async function requestLoginEmail(page, email) {
                             // hand-off brings a fresh one.
                             log('    Bridged session credential is spent — ending the run; a fresh hand-off is needed');
                             results.sessionExpired = true;
-                            results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired' });
+                            results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired', searched });
                             continue;
                         } else {
                             log('    Re-verify failed — falling back to UI search');
@@ -2515,6 +2499,67 @@ async function requestLoginEmail(page, email) {
                     }
 
                     resolvedStateCode = (addrResult.ok && addrResult.stateCode) || (empResult.ok && empResult.stateCode) || '';
+
+                    // ── Fallback searches ──────────────────────────────────────
+                    // The two primary searches (full business name, full address)
+                    // miss when EWCCV's "contains" search needs a narrower term —
+                    // a legal suffix it dropped, a suite number it never recorded,
+                    // or simply a different name on file. Try progressively
+                    // narrower name/address variants, stopping at the first one
+                    // that returns anything, capped so one hard vendor can't burn
+                    // the whole ~25-search budget on a bridged credential.
+                    if (allItems.length === 0 && useApiSearch && !results.sessionExpired) {
+                        const maxFallback = config.maxFallbackSearches ?? 4;
+                        let fallbackCount = 0;
+
+                        for (const term of nameVariants(vendor.businessName)) {
+                            if (fallbackCount >= maxFallback || allItems.length > 0) break;
+                            fallbackCount++;
+                            const fbResult = await searchViaApi(page, vendor, 'employer', { businessName: term });
+                            log(`    Fallback employer "${term}": ${fbResult.ok ? fbResult.count + ' result(s)' : fbResult.reason}`);
+                            searched.push({ type: 'employer', term, count: fbResult.ok ? fbResult.count : 0, reason: fbResult.ok ? undefined : fbResult.reason });
+
+                            if (fbResult.status === 401) {
+                                log('    accessToken expired during fallback search — ending the run');
+                                results.sessionExpired = true;
+                                results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired', searched });
+                                break;
+                            }
+
+                            if (fbResult.ok && fbResult.items && fbResult.items.length > 0) {
+                                allItems = fbResult.items.slice();
+                                resolvedStateCode = fbResult.stateCode || resolvedStateCode;
+                                lastApiResult = fbResult;
+                            }
+                        }
+
+                        if (results.sessionExpired) continue;
+
+                        if (allItems.length === 0) {
+                            for (const term of addressVariants(vendor.address)) {
+                                if (fallbackCount >= maxFallback || allItems.length > 0) break;
+                                fallbackCount++;
+                                const fbResult = await searchViaApi(page, vendor, 'address', { address: term });
+                                log(`    Fallback address "${term}": ${fbResult.ok ? fbResult.count + ' result(s)' : fbResult.reason}`);
+                                searched.push({ type: 'address', term, count: fbResult.ok ? fbResult.count : 0, reason: fbResult.ok ? undefined : fbResult.reason });
+
+                                if (fbResult.status === 401) {
+                                    log('    accessToken expired during fallback search — ending the run');
+                                    results.sessionExpired = true;
+                                    results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired', searched });
+                                    break;
+                                }
+
+                                if (fbResult.ok && fbResult.items && fbResult.items.length > 0) {
+                                    allItems = fbResult.items.slice();
+                                    resolvedStateCode = fbResult.stateCode || resolvedStateCode;
+                                    lastApiResult = fbResult;
+                                }
+                            }
+
+                            if (results.sessionExpired) continue;
+                        }
+                    }
                 }
 
                 // ── UI-driven search fallback ─────────────────────────────
@@ -2525,6 +2570,7 @@ async function requestLoginEmail(page, email) {
 
                     const uiResult = await searchViaUI(page, vendor);
                     log(`    UI search: ${uiResult.ok ? uiResult.count + ' result(s)' : uiResult.reason}`);
+                    searched.push({ type: 'ui', term: vendor.address, count: uiResult.ok ? uiResult.count : 0, reason: uiResult.ok ? undefined : uiResult.reason });
                     if (uiResult.ok && uiResult.items) {
                         allItems.push(...uiResult.items);
                         resolvedStateCode = uiResult.stateCode || '';
@@ -2537,6 +2583,7 @@ async function requestLoginEmail(page, email) {
                         vendorId: vendor.id,
                         businessName: vendor.businessName,
                         reason: lastApiResult?.reason || 'no_results',
+                        searched,
                     });
                     log(`  ✗ No results: ${lastApiResult?.reason || 'empty'}`);
                     continue;
@@ -2545,22 +2592,50 @@ async function requestLoginEmail(page, email) {
                 log(`    Total unique results: ${allItems.length}`);
 
                 // Match result
-                const matched = matchResult(allItems, vendor);
-                if (!matched) {
+                const picked = pickMatch(allItems, vendor);
+                if (!picked.match) {
                     log(`    No matching result among ${allItems.length} items:`);
-                    for (const item of allItems.slice(0, 10)) {
-                        log(`      - ${item.employerName || item.name}: policy=${item.policyNumber || item.writtenPolicyId}`);
+                    for (const c of picked.candidates) {
+                        log(`      - ${c.employerName}: policy=${c.policyNumber} score=${c.score.toFixed(2)}`);
                     }
                     results.failed.push({
                         vendorId: vendor.id,
                         businessName: vendor.businessName,
-                        reason: 'no_matching_result',
+                        reason: 'no_match',
                         count: allItems.length,
+                        searched,
+                        candidates: picked.candidates,
                     });
                     continue;
                 }
 
-                log(`    Matched: ${matched.match.employerName || matched.match.name} via ${matched.via} (policy: ${matched.match.policyNumber || matched.match.writtenPolicyId})`);
+                log(`    Matched: ${picked.matchedName} via ${picked.via} (policy: ${picked.matchedPolicy})`);
+
+                // ── Verify-only mode: confirm coverage, create no subscription ──
+                if (config.verifyOnly) {
+                    const scalarDetails = {};
+                    for (const [key, val] of Object.entries(picked.match)) {
+                        if (val === null || ['string', 'number', 'boolean'].includes(typeof val)) {
+                            scalarDetails[key] = val;
+                        }
+                    }
+                    results.success.push({
+                        vendorId: vendor.id,
+                        businessName: vendor.businessName,
+                        matchType: picked.via,
+                        score: picked.score,
+                        matchedName: picked.matchedName,
+                        matchedPolicy: picked.matchedPolicy,
+                        verifyOnly: true,
+                        coverageDate: vendor.coverageDate || null,
+                        policyNumber: picked.matchedPolicy,
+                        employerName: picked.matchedName,
+                        details: scalarDetails,
+                        searched,
+                    });
+                    log(`  ✓ Covered on ${vendor.coverageDate || null}: ${picked.matchedName} (policy ${picked.matchedPolicy}) — verify only, no subscription`);
+                    continue;
+                }
 
                 // Build search metadata (mirrors handleSearchResultsClick in the EWCCV app)
                 const coverageDate = vendor.coverageDate || new Date().toLocaleDateString('en-US', {
@@ -2570,14 +2645,14 @@ async function requestLoginEmail(page, email) {
                     stateCode: resolvedStateCode,
                     stateName: STATE_NAMES[(vendor.state || '').toUpperCase()] || '',
                     coverageDate: coverageDate,
-                    searchType: matched.via === 'employerName' ? 'employer' : 'address',
-                    searchTerm: matched.via === 'employerName' ? vendor.businessName : vendor.address,
+                    searchType: picked.via === 'employerName' ? 'employer' : 'address',
+                    searchTerm: picked.via === 'employerName' ? vendor.businessName : vendor.address,
                 };
 
                 // Navigate to details page (for screenshot/debugging)
-                const nav = await navigateToDetails(page, matched.match);
+                const nav = await navigateToDetails(page, picked.match);
                 if (!nav) {
-                    results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'nav_to_details_failed' });
+                    results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'nav_to_details_failed', searched });
                     continue;
                 }
 
@@ -2585,16 +2660,20 @@ async function requestLoginEmail(page, email) {
                 await interceptRedirects(page);
 
                 // Enable tracking via subscription API
-                const trackResult = await enableTracking(page, vendor, matched.match, searchMeta);
+                const trackResult = await enableTracking(page, vendor, picked.match, searchMeta);
                 if (trackResult.tracked || trackResult.alreadyTracking) {
                     results.success.push({
                         vendorId: vendor.id,
                         businessName: vendor.businessName,
-                        matchType: matched.via,
+                        matchType: picked.via,
+                        matchedName: picked.matchedName,
+                        matchedPolicy: picked.matchedPolicy,
+                        score: picked.score,
                         tracked: trackResult.tracked,
                         alreadyTracking: trackResult.alreadyTracking || false,
                         confirmation: trackResult.confirmation || null,
                         subscriptionId: trackResult.subscriptionId || null,
+                        searched,
                     });
                     log(`  ✓ Done: tracked=${trackResult.tracked}, already=${trackResult.alreadyTracking || false}`);
                 } else {
@@ -2602,13 +2681,14 @@ async function requestLoginEmail(page, email) {
                         vendorId: vendor.id,
                         businessName: vendor.businessName,
                         reason: trackResult.reason || 'tracking_failed',
+                        searched,
                     });
                     log(`  ✗ Tracking failed: ${trackResult.reason || 'unknown'}`);
                 }
             } catch (err) {
                 log(`  ERROR: ${err.message}`);
                 await screenshot(page, `error_${vendor.id}`).catch(() => {});
-                results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: err.message });
+                results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: err.message, searched });
             }
 
             // Rate limit between vendors and recover page state

@@ -30,6 +30,35 @@
                 </flux:dropdown>
             </flux:button.group>
         </x-slot:header_buttons>
+
+        {{-- A workers comp audit also asks EWCCV whether each paid sub was
+             covered on the audit's end date (ewccv_coverage_checks); the
+             tracking badge on each policy only says the policy is in force
+             today. --}}
+        @if($audit_type === 'workers' && $end_date)
+            <x-slot name="details">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="text-sm">
+                        <span class="font-medium">EWCCV coverage as of {{ \Carbon\Carbon::parse($end_date)->format('m/d/Y') }}:</span>
+                        @if($this->coverage_check_counts['total'] === 0)
+                            <span class="text-zinc-500">no subs need coverage in this period</span>
+                        @elseif($this->coverage_check_counts['covered'] + $this->coverage_check_counts['not_found'] + $this->coverage_check_counts['pending'] === 0)
+                            <span class="text-zinc-500">not checked yet ({{ $this->coverage_check_counts['total'] }} subs)</span>
+                        @else
+                            <span class="text-emerald-700 dark:text-emerald-400">{{ $this->coverage_check_counts['covered'] }} covered</span>
+                            · <span class="text-red-600 dark:text-red-400">{{ $this->coverage_check_counts['not_found'] }} not found</span>
+                            · <span class="text-amber-600 dark:text-amber-400">{{ $this->coverage_check_counts['pending'] }} waiting</span>
+                            @if($this->coverage_check_counts['unchecked'] > 0)
+                                · <span class="text-zinc-500">{{ $this->coverage_check_counts['unchecked'] }} not checked</span>
+                            @endif
+                        @endif
+                    </div>
+                    <flux:button wire:click="verify_coverage_on_ewccv" size="sm" icon="shield-check">
+                        Check EWCCV as of {{ \Carbon\Carbon::parse($end_date)->format('m/d/Y') }}
+                    </flux:button>
+                </div>
+            </x-slot>
+        @endif
     </x-details.card>
 
     {{-- TRANSACTIONS NO CHECKS --}}
@@ -129,11 +158,41 @@
                                 <div class="p-3 flex items-center justify-between">
                                     <div class="space-y-0.5">
                                         <div class="text-sm font-medium">{{ ucfirst($doc->type) }} #{{ $doc->number }}</div>
-                                        <div class="text-xs text-zinc-600 dark:text-zinc-300">
-                                            {{ $doc->effective_date->format('m/d/Y') }} – {{ $doc->expiration_date->format('m/d/Y') }}
-                                            {{-- @if($doc->agent)
-                                                • Agent: {{ $doc->agent->name }}
-                                            @endif --}}
+                                        <div class="text-xs text-zinc-600 dark:text-zinc-300 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                            <span>{{ $doc->effective_date->format('m/d/Y') }} – {{ $doc->expiration_date->format('m/d/Y') }}</span>
+                                            {{-- Coverage verification, as on the vendor docs card: the
+                                                 date a provider (EWCCV, TrackMyVendor) last confirmed
+                                                 the policy; a workers comp policy nobody confirmed
+                                                 says so. --}}
+                                            @if($doc->verification_summary && $doc->verification_summary['verified_at'])
+                                                <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
+                                                    <span class="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                                                        <flux:icon.shield-check variant="micro" class="size-3.5 shrink-0" />
+                                                        WC verified {{ $doc->verification_summary['verified_at'] }}
+                                                    </span>
+                                                </flux:tooltip>
+                                            @elseif($doc->verification_summary && ! empty($doc->verification_summary['alert']))
+                                                <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
+                                                    <span class="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
+                                                        cancelled
+                                                    </span>
+                                                </flux:tooltip>
+                                            @elseif($doc->verification_summary)
+                                                <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
+                                                    <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
+                                                        not verified
+                                                    </span>
+                                                </flux:tooltip>
+                                            @elseif($doc->type === 'workers')
+                                                <flux:tooltip content="EWCCV has not looked this policy up yet" position="top">
+                                                    <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
+                                                        not verified
+                                                    </span>
+                                                </flux:tooltip>
+                                            @endif
                                         </div>
                                     </div>
                                     @if(!empty($doc->doc_filename))
@@ -142,6 +201,14 @@
                                 </div>
                             @endforeach
                         </div>
+                    </div>
+                @endif
+
+                {{-- EWCCV's answer as of the audit's end date (see the Audit card). --}}
+                @if(! empty($group['coverage_check']))
+                    <div class="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+                        <flux:badge size="sm" :color="$group['coverage_check']->tone()" inset="top bottom">{{ $group['coverage_check']->badge() }}</flux:badge>
+                        <span>{{ $group['coverage_check']->label() }}</span>
                     </div>
                 @endif
             </x-slot>

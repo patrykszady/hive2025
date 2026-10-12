@@ -27,11 +27,12 @@ class ScrapeLauncher
 
     /**
      * @param  list<int>  $vendorIds
+     * @param  array{coverage_date?: string, verify_only?: bool}  $options  an audit's as-of check: search that date, create no subscription
      * @return int|null the new process id, null when it could not be started
      */
-    public function launch(array $vendorIds, int $belongsToVendorId): ?int
+    public function launch(array $vendorIds, int $belongsToVendorId, array $options = []): ?int
     {
-        $pid = (int) trim((string) shell_exec(self::commandLine($vendorIds, $belongsToVendorId)));
+        $pid = (int) trim((string) shell_exec(self::commandLine($vendorIds, $belongsToVendorId, $options)));
         if ($pid <= 0) {
             Log::warning('EWCCV scraper could not be started detached', ['vendor_ids' => $vendorIds]);
 
@@ -47,16 +48,19 @@ class ScrapeLauncher
      * and prints the new process id.
      *
      * @param  list<int>  $vendorIds
+     * @param  array{coverage_date?: string, verify_only?: bool}  $options
      */
-    public static function commandLine(array $vendorIds, int $belongsToVendorId): string
+    public static function commandLine(array $vendorIds, int $belongsToVendorId, array $options = []): string
     {
-        $command = implode(' ', array_map('escapeshellarg', [
+        $command = implode(' ', array_map('escapeshellarg', array_values(array_filter([
             PHP_BINARY,
             base_path('artisan'),
             'ewccv:scrape-tracking',
             '--belongs-to-vendor-id='.$belongsToVendorId,
             ...array_map(fn (int $id) => '--vendor-id='.$id, $vendorIds),
-        ]));
+            filled($options['coverage_date'] ?? null) ? '--coverage-date='.$options['coverage_date'] : null,
+            ! empty($options['verify_only']) ? '--verify-only' : null,
+        ]))));
 
         return sprintf('nohup setsid %s >> %s 2>&1 < /dev/null & echo $!', $command, escapeshellarg(storage_path(self::LOG)));
     }

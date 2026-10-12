@@ -2,12 +2,15 @@
 
 namespace App\Livewire\VendorDocs;
 
+use App\Jobs\RunPendingEwccvLookups;
 use App\Models\Check;
+use App\Models\EwccvCoverageCheck;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 use App\Models\BankAccount;
 use App\Services\PlaidService;
+use App\Support\Ewccv\BridgedSession;
 use Carbon\Carbon;
 use Ilovepdf\Ilovepdf;
 use Illuminate\Support\Collection;
@@ -250,12 +253,16 @@ class AuditShow extends Component
             ->groupBy('vendor_id')
         : collect();
 
-    return $mergedGroups->map(function ($group) use ($auditEnd, $startDateStr, $endDateStr, $docsByVendor) {
+    $coverageChecks = $this->coverage_checks;
+
+    return $mergedGroups->map(function ($group) use ($auditEnd, $startDateStr, $endDateStr, $docsByVendor, $coverageChecks) {
             $vendor = $group['vendor'];
 
             // Only real vendors have docs; pseudo vendors (employees) skip this block
             if ($vendor instanceof Vendor) {
                 $vendorDocs = collect($docsByVendor->get($vendor->id) ?? []);
+                // EWCCV's answer for this vendor as of the audit's end date.
+                $group['coverage_check'] = $coverageChecks->get($vendor->id);
 
                 // Attach active Professional policy (if any)
                 $professional = $vendorDocs
@@ -294,6 +301,112 @@ class AuditShow extends Component
 
             return $group;
         })->values();
+    }
+
+    /**
+     * EWCCV's coverage checks as of the audit's end date, by vendor id. A
+     * workers comp audit asks "was the sub covered on the last day?", which
+     * the tracking state (today's coverage) does not answer.
+     *
+     * @return Collection<int, EwccvCoverageCheck>
+     */
+    #[Computed]
+    public function coverage_checks(): Collection
+    {
+        if ($this->audit_type !== 'workers' || ! $this->end_date) {
+            return collect();
+        }
+
+        return EwccvCoverageCheck::query()
+            ->where('belongs_to_vendor_id', auth()->user()->vendor->id)
+            ->whereDate('coverage_date', $this->end_date)
+            ->get()
+            ->keyBy('vendor_id');
+    }
+
+    /**
+     * @return array{covered: int, not_found: int, pending: int, unchecked: int, total: int}
+     */
+    #[Computed]
+    public function coverage_check_counts(): array
+    {
+        $needing = $this->vendorsNeedingCoverage();
+        $checks = $this->coverage_checks;
+        $counts = ['covered' => 0, 'not_found' => 0, 'pending' => 0, 'unchecked' => 0, 'total' => count($needing)];
+        foreach ($needing as $vendorId) {
+            $check = $checks->get($vendorId);
+            $key = match ($check?->status) {
+                EwccvCoverageCheck::STATUS_COVERED => 'covered',
+                EwccvCoverageCheck::STATUS_NOT_FOUND => 'not_found',
+                EwccvCoverageCheck::STATUS_PENDING => 'pending',
+                default => 'unchecked',
+            };
+            $counts[$key]++;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Ask EWCCV whether every sub paid in the period was covered on the end
+     * date. The checks wait for a browser session (the bridge extension) when
+     * none is at hand; the page shows each vendor's answer as it lands.
+     */
+    public function verify_coverage_on_ewccv(): void
+    {
+        $this->authorize('viewAny', VendorDoc::class);
+        if ($this->audit_type !== 'workers' || ! $this->end_date) {
+            return;
+        }
+
+        $own = auth()->user()->vendor->id;
+        $queued = 0;
+        foreach ($this->vendorsNeedingCoverage() as $vendorId) {
+            if (EwccvCoverageCheck::request($vendorId, $own, $this->end_date)) {
+                $queued++;
+            }
+        }
+        unset($this->coverage_checks, $this->coverage_check_counts, $this->vendors_grouped_checks);
+
+        $date = Carbon::parse($this->end_date)->format('m/d/Y');
+        if ($queued === 0) {
+            $this->toast(text: "Every vendor in this audit already has an EWCCV answer for {$date}, or is waiting for one.", heading: 'EWCCV', duration: 5000);
+
+            return;
+        }
+
+        if (BridgedSession::canSearch()) {
+            RunPendingEwccvLookups::dispatch();
+            $this->toast(text: "Checking {$queued} vendor(s) on EWCCV as of {$date} now; answers land here in a few minutes.", heading: 'EWCCV', duration: 6000);
+
+            return;
+        }
+
+        $this->toast(text: "{$queued} vendor(s) queued for EWCCV as of {$date}. They run when a browser session is handed over: open ewccv.com with the Hive extension.", heading: 'EWCCV', duration: 8000, variant: 'warning');
+    }
+
+    /**
+     * The vendors whose coverage the audit must show: paid subs that are not
+     * the company itself, an employee, a retail or categorised vendor, or a
+     * vendor with a professional policy for the period.
+     *
+     * @return list<int>
+     */
+    protected function vendorsNeedingCoverage(): array
+    {
+        $own = auth()->user()->vendor->id;
+
+        return $this->vendors_grouped_checks
+            ->filter(fn (array $group) => $group['vendor'] instanceof Vendor
+                && $group['vendor']->id !== $own
+                && empty($group['is_user'])
+                && empty($group['vendor']->category_id)
+                && $group['vendor']->business_type !== 'Retail'
+                && ! isset($group['professional_doc']))
+            ->map(fn (array $group) => (int) $group['vendor']->id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     #[Computed]
@@ -483,9 +596,15 @@ class AuditShow extends Component
                     foreach ($group['applicable_docs'] as $doc) {
                         $writer->addRow(Row::fromValues([
                             $doc->number . ' (' . $doc->effective_date->format('m/d/Y') . '–' . $doc->expiration_date->format('m/d/Y') . ')',
-                            null, null, null, null,
+                            null, null, null, self::verificationCell($doc),
                         ]));
                     }
+                    $writer->addRow(Row::fromValues(['', '', '', '', '']));
+                }
+                if (! empty($group['coverage_check'])) {
+                    $writer->addRow(Row::fromValuesWithStyles([
+                        $group['coverage_check']->label(), null, null, null, $group['coverage_check']->badge(),
+                    ], null, [4 => match ($group['coverage_check']->tone()) { 'green' => $coverageGreen, 'red' => $coverageRed, default => $coverageOrange }]));
                     $writer->addRow(Row::fromValues(['', '', '', '', '']));
                 }
 
@@ -868,6 +987,23 @@ class AuditShow extends Component
         unlink($tempZipPath);
         
         return $content;
+    }
+
+    /** The Coverage column of a policy row in the export: "WC verified 10/12/2026 (EWCCV)" and the like. */
+    public static function verificationCell(VendorDoc $doc): ?string
+    {
+        $summary = $doc->verification_summary;
+        if ($summary && $summary['verified_at']) {
+            return 'WC verified '.$summary['verified_at'].' ('.implode(', ', array_map('strtoupper', $summary['sources'])).')';
+        }
+        if ($summary && ! empty($summary['alert'])) {
+            return 'Coverage cancelled (EWCCV)';
+        }
+        if ($doc->type === 'workers') {
+            return 'Not verified';
+        }
+
+        return null;
     }
 
     #[Title('Audit')]

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\EwccvCoverageCheck;
 use App\Models\VendorDoc;
 use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\ScrapeLauncher;
@@ -50,19 +51,41 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
 
         $belongsToVendorId = (int) config('services.ewccv.belongs_to_vendor_id', 1);
         $vendorIds = self::pendingVendorIds($belongsToVendorId);
-        if ($vendorIds === []) {
+        $checksByDate = EwccvCoverageCheck::pendingByDate($belongsToVendorId);
+        if ($vendorIds === [] && $checksByDate === []) {
             Log::info('RunPendingEwccvLookups: every active workers comp policy is already tracked');
 
             return;
         }
 
-        $pid = $launcher->launch($vendorIds, $belongsToVendorId);
+        if ($vendorIds !== []) {
+            $pid = $launcher->launch($vendorIds, $belongsToVendorId);
 
-        Log::info('RunPendingEwccvLookups: EWCCV lookup started detached', [
-            'vendor_ids' => $vendorIds,
-            'session_age_minutes' => $session['age_minutes'] ?? null,
-            'pid' => $pid,
-        ]);
+            Log::info('RunPendingEwccvLookups: EWCCV lookup started detached', [
+                'vendor_ids' => $vendorIds,
+                'session_age_minutes' => $session['age_minutes'] ?? null,
+                'pid' => $pid,
+            ]);
+        }
+
+        // An audit's coverage checks: one run per as-of date, search only.
+        // The runs queue up behind one another on the scraper lock.
+        foreach ($checksByDate as $date => $checkVendorIds) {
+            $pid = $launcher->launch($checkVendorIds, $belongsToVendorId, ['coverage_date' => $date, 'verify_only' => true]);
+
+            Log::info('RunPendingEwccvLookups: EWCCV coverage check started detached', [
+                'coverage_date' => $date,
+                'vendor_ids' => $checkVendorIds,
+                'pid' => $pid,
+            ]);
+        }
+    }
+
+    /** Everything a browser session would be spent on right now. */
+    public static function pendingCount(int $belongsToVendorId): int
+    {
+        return count(self::pendingVendorIds($belongsToVendorId))
+            + EwccvCoverageCheck::query()->where('belongs_to_vendor_id', $belongsToVendorId)->pending()->count();
     }
 
     /** A search that found nothing, or a tracking refusal, is not retried for this long. */

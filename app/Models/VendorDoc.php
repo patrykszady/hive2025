@@ -118,7 +118,7 @@ class VendorDoc extends Model
             'pending' => ($state['reason'] ?? '') === 'not_tracked_by_ewccv'
                 ? 'EWCCV no longer lists this policy as tracked; it is re-tracked with the next browser session'
                 : 'EWCCV lookup waiting for a browser session: open ewccv.com with the Hive extension and it runs',
-            'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
+            'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')).self::ewccvSearchNotes($state),
             'skipped' => 'EWCCV lookup skipped: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
             default => 'EWCCV: '.$state['status'],
         };
@@ -140,6 +140,37 @@ class VendorDoc extends Model
             // EWCCV reported the coverage gone: the column goes red, not amber.
             'alert' => $state['status'] === 'cancelled',
         ];
+    }
+
+    /**
+     * What the scraper tried and what it found, for a failed lookup's tip:
+     * the name and address variants it searched and the closest employers
+     * EWCCV listed, so a person can see why nothing matched and look by hand.
+     *
+     * @param  array<string, mixed>  $state
+     */
+    public static function ewccvSearchNotes(array $state): string
+    {
+        $notes = [];
+        $searched = collect((array) ($state['searched'] ?? []))
+            ->map(fn ($s) => is_array($s) && filled($s['term'] ?? null) ? ($s['type'] ?? 'name').' "'.$s['term'].'"' : null)
+            ->filter()
+            ->unique()
+            ->take(4);
+        if ($searched->isNotEmpty()) {
+            $notes[] = 'searched '.$searched->implode(', ');
+        }
+        $candidates = collect((array) ($state['candidates'] ?? []))
+            ->map(fn ($c) => is_array($c) && filled($c['employerName'] ?? null)
+                ? $c['employerName'].(filled($c['policyNumber'] ?? null) ? ' (policy '.$c['policyNumber'].')' : '')
+                : null)
+            ->filter()
+            ->take(3);
+        if ($candidates->isNotEmpty()) {
+            $notes[] = 'closest '.$candidates->implode('; ');
+        }
+
+        return $notes === [] ? '' : ' — '.implode(' · ', $notes);
     }
 
     /**
