@@ -582,6 +582,10 @@ Route::post('api/ewccv/session', \App\Http\Controllers\EwccvSessionController::c
 // when a lookup is waiting and no run is on (it lives minutes, not hours).
 Route::get('api/ewccv/pending', [\App\Http\Controllers\EwccvSessionController::class, 'pending'])
     ->name('ewccv.pending');
+// A sign-in link for the extension's tab when it finds itself logged out:
+// the one the server has, or a fresh one requested by email.
+Route::get('api/ewccv/sign-in-link', [\App\Http\Controllers\EwccvSessionController::class, 'signInLink'])
+    ->name('ewccv.sign-in-link');
 
 // The no-install hand-off: a bookmarklet for the platform admin, plus the
 // extension's page-world minter it loads on ewccv.com (public, plain JS).

@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RequestEwccvSignInLink;
 use App\Jobs\RunPendingEwccvLookups;
 use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\ScraperLock;
+use App\Support\Ewccv\SignInLink;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -128,6 +130,28 @@ class EwccvSessionController extends Controller
             'running' => ScraperLock::isHeld(),
             'session' => BridgedSession::fresh() ? 'fresh' : 'none',
         ]);
+    }
+
+    /**
+     * The sign-in link for the extension's tab: the server's cached one
+     * while it is young, else a fresh one is requested (a minute or two by
+     * email) and the extension asks again on its next poll.
+     */
+    public function signInLink(Request $request): JsonResponse
+    {
+        if ($denied = $this->denyUnlessBridge($request)) {
+            return $denied;
+        }
+
+        if ($url = SignInLink::cached()) {
+            return response()->json(['url' => $url, 'requested' => false]);
+        }
+
+        if (Cache::add('ewccv:sign-in-link-requested', true, now()->addMinutes(3))) {
+            RequestEwccvSignInLink::dispatch();
+        }
+
+        return response()->json(['url' => null, 'requested' => true, 'message' => 'Hive is requesting a sign-in link by email; ask again in a minute.']);
     }
 
     /** The bearer token the extension carries, compared in constant time. */

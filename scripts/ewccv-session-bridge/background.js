@@ -81,6 +81,32 @@ async function pendingWork(cfg) {
 }
 
 /**
+ * The tab is logged out: sign it in with the link Hive holds (the server
+ * obtains EWCCV's emailed sign-in link for its own runs). When Hive has none
+ * yet it requests one by email, and the next poll tries again. The page
+ * load that follows triggers the usual pending check, which mints.
+ */
+async function signInTab(cfg, tab) {
+    let body = null;
+    try {
+        const res = await fetch(`${cfg.serverUrl.replace(/\/+$/, '')}/api/ewccv/sign-in-link`, {
+            headers: { Accept: 'application/json', Authorization: `Bearer ${cfg.token}` },
+        });
+        body = res.ok ? await res.json() : null;
+    } catch {
+        body = null;
+    }
+    if (!body?.url) {
+        const r = { ok: false, error: body?.message || 'The EWCCV tab is logged out and Hive has no sign-in link yet; it is requesting one.' };
+        await setStatus(r);
+        return r;
+    }
+    await setStatus({ ok: true, message: 'Signing the EWCCV tab in with a link from Hive…' });
+    await chrome.tabs.update(tab.id, { url: body.url });
+    return { ok: true, message: 'Signing in…' };
+}
+
+/**
  * The automatic path: mint and send only when Hive has a lookup waiting and
  * no run is on. Anything else would spend a credential for nothing.
  */
@@ -118,6 +144,14 @@ async function push({ interactive = false } = {}) {
     }
 
     const minted = await mintFromTab(tab.id);
+    if (minted && minted.signedIn === false) {
+        return signInTab(cfg, tab);
+    }
+    if (!minted?.ok && /reCAPTCHA is not loaded/.test(minted?.error || '') && !/\/cvs\/search/.test(tab.url || '')) {
+        // Signed in but not on the search page (just landed from the link): go there; the load mints.
+        await chrome.tabs.update(tab.id, { url: 'https://www.ewccv.com/cvs/search' });
+        return { ok: true, message: 'Opening the search page…' };
+    }
     if (!minted?.ok) {
         const r = { ok: false, error: minted?.error || 'Could not read the EWCCV session.' };
         await setStatus(r);

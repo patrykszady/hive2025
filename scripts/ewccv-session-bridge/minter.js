@@ -85,13 +85,15 @@
     }
 
     async function mint() {
-        if (typeof grecaptcha === 'undefined' || !grecaptcha.enterprise) {
-            return existingOrError('reCAPTCHA is not loaded on this page yet — open ewccv.com/cvs/search and try again.');
-        }
-
+        // Logged out comes first: the extension signs the tab in by itself
+        // (a link from Hive) when it hears this.
         const jwt = bearerFromCookie();
         if (!jwt) {
-            return reply({ ok: false, error: 'Not signed in to EWCCV — sign in first, then send the session.' });
+            return reply({ ok: false, signedIn: false, error: 'Not signed in to EWCCV — sign in first, then send the session.' });
+        }
+
+        if (typeof grecaptcha === 'undefined' || !grecaptcha.enterprise) {
+            return existingOrError('reCAPTCHA is not loaded on this page yet — open ewccv.com/cvs/search and try again.');
         }
 
         const store = findStore();

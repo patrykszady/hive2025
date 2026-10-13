@@ -27,6 +27,8 @@
             // The minter could not mint and fell back to the page's own copy,
             // which an earlier run has usually spent; Hive refuses those.
             reused: !!event.data.reused,
+            // false when the tab is logged out; the worker then signs it in.
+            signedIn: event.data.signedIn !== false,
         });
     });
 

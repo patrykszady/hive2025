@@ -618,3 +618,26 @@ it('queues a coverage check two days before a workers comp doc expires, and a co
         ->assertExitCode(0);
     expect(EwccvCoverageCheck::where('vendor_id', $expired->id)->first())->toMatchArray(['status' => 'not_found', 'reason' => 'no_results']);
 });
+
+it('hands the extension a young sign-in link, or requests a fresh one by email', function () {
+    config(['services.ewccv.bridge_token' => 'bridge-secret']);
+    Queue::fake();
+    Cache::forget('ewccv:sign-in-link-requested');
+    $file = \App\Support\Ewccv\SignInLink::file();
+    @mkdir(dirname($file), 0775, true);
+    @unlink($file);
+
+    $this->withHeader('Authorization', 'Bearer bridge-secret')->getJson('/api/ewccv/sign-in-link')
+        ->assertOk()->assertJson(['url' => null, 'requested' => true]);
+    Queue::assertPushed(\App\Jobs\RequestEwccvSignInLink::class, 1);
+
+    \App\Support\Ewccv\SignInLink::remember('https://www.ewccv.com/cvs/login/?t=fresh.token.here');
+    $this->withHeader('Authorization', 'Bearer bridge-secret')->getJson('/api/ewccv/sign-in-link')
+        ->assertOk()->assertJson(['url' => 'https://www.ewccv.com/cvs/login/?t=fresh.token.here', 'requested' => false]);
+
+    file_put_contents($file, json_encode(['url' => 'https://www.ewccv.com/cvs/login/?t=old', 'cached_at' => now()->subHours(11)->toIso8601String()]));
+    expect(\App\Support\Ewccv\SignInLink::cached())->toBeNull();
+    @unlink($file);
+
+    $this->flushHeaders()->getJson('/api/ewccv/sign-in-link')->assertUnauthorized();
+});
