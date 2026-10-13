@@ -641,3 +641,16 @@ it('hands the extension a young sign-in link, or requests a fresh one by email',
 
     $this->flushHeaders()->getJson('/api/ewccv/sign-in-link')->assertUnauthorized();
 });
+
+it('an audit whose period has not ended is checked as of today, and says so', function () {
+    Queue::fake();
+    $f = auditFixture();
+    $end = now()->addMonths(10)->toDateString();
+    expect(\App\Models\AuditRequest::coverageDateFor($end)->toDateString())->toBe(now()->toDateString())
+        ->and(\App\Models\AuditRequest::coverageDateIsClamped($end))->toBeTrue()
+        ->and(\App\Models\AuditRequest::coverageDateIsClamped('2025-12-31'))->toBeFalse();
+
+    auditPage($f, $end)
+        ->assertSee('EWCCV coverage as of '.now()->format('m/d/Y').' (the period has not ended; checked as of today)');
+    expect(EwccvCoverageCheck::where('vendor_id', $f['sub']->id)->first()->coverage_date->toDateString())->toBe(now()->toDateString());
+});

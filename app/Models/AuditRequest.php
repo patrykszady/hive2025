@@ -62,10 +62,22 @@ class AuditRequest extends Model
         return sha1(implode('|', [Carbon::parse($start)->toDateString(), Carbon::parse($end)->toDateString(), (string) $type, implode(',', $ids)]));
     }
 
-    /** The EWCCV coverage date an audit is checked against. */
+    /**
+     * The EWCCV coverage date an audit is checked against: two days before
+     * the end date, or today when the period has not ended yet — coverage
+     * can only be confirmed up to today.
+     */
     public static function coverageDateFor(string $end): Carbon
     {
-        return Carbon::parse($end)->subDays(self::COVERAGE_DAYS_BEFORE_END)->startOfDay();
+        $asOf = Carbon::parse($end)->subDays(self::COVERAGE_DAYS_BEFORE_END)->startOfDay();
+
+        return $asOf->gt(Carbon::today()) ? Carbon::today() : $asOf;
+    }
+
+    /** Whether the checked date had to be pulled back to today. */
+    public static function coverageDateIsClamped(string $end): bool
+    {
+        return Carbon::parse($end)->subDays(self::COVERAGE_DAYS_BEFORE_END)->startOfDay()->gt(Carbon::today());
     }
 
     /**

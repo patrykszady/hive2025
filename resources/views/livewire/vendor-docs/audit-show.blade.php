@@ -41,7 +41,7 @@
             <x-slot name="details">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                     <div class="text-sm">
-                        <span class="font-medium">EWCCV coverage as of {{ $this->coverageDate?->format('m/d/Y') }} (two days before the period ends):</span>
+                        <span class="font-medium">EWCCV coverage as of {{ $this->coverageDate?->format('m/d/Y') }} ({{ \App\Models\AuditRequest::coverageDateIsClamped($end_date) ? 'the period has not ended; checked as of today' : 'two days before the period ends' }}):</span>
                         @if($this->coverage_check_counts['total'] === 0)
                             <span class="text-zinc-500">no paid sub has a workers comp policy active today</span>
                         @elseif($this->coverage_check_counts['covered'] + $this->coverage_check_counts['not_found'] + $this->coverage_check_counts['pending'] === 0)
