@@ -2,9 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\RunPendingEwccvLookups;
 use App\Models\EwccvCoverageCheck;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
+use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\SearchHints;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -88,6 +90,13 @@ class EwccvSearchHints extends Command
             $check = EwccvCoverageCheck::firstOrNew(['vendor_id' => $vendor->id, 'belongs_to_vendor_id' => $belongsTo, 'coverage_date' => Carbon::parse($date)->startOfDay()]);
             $check->fill(['status' => EwccvCoverageCheck::STATUS_PENDING, 'reason' => null, 'requested_at' => now()])->save();
             $this->info("Queued a coverage check as of {$date} (search only) to capture the employer's EWCCV record.");
+        }
+
+        // A credential already on file may have searches left: use it now
+        // rather than wait for the next hand-off.
+        if (BridgedSession::canSearch()) {
+            RunPendingEwccvLookups::dispatch();
+            $this->info('A browser session is on file: the run starts now.');
         }
 
         return self::SUCCESS;

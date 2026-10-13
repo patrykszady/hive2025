@@ -421,10 +421,18 @@ it('search hints: names, addresses and the FEIN ride along to the scraper, a loo
         'options' => ['ewccv' => ['status' => 'failed', 'reason' => 'no_match', 'checked_at' => now()->toIso8601String()]],
     ]));
 
+    Queue::fake();
     $this->artisan('ewccv:hints', ['vendor' => $vendor->id, '--name' => ['Smartech Inc', 'Smart Tech Electric'], '--address' => ['3548 Grandmore Ave, Gurnee, IL 60031'], '--check-as-of' => '2025-06-01'])
         ->expectsOutputToContain('Queued a fresh tracking lookup for 1 active workers comp doc(s)')
         ->expectsOutputToContain('Queued a coverage check as of 2025-06-01')
         ->assertExitCode(0);
+    Queue::assertNotPushed(RunPendingEwccvLookups::class);
+
+    // With a credential on file the run starts at once.
+    coverageBridgedSession();
+    $this->artisan('ewccv:hints', ['vendor' => $vendor->id])->expectsOutputToContain('the run starts now')->assertExitCode(0);
+    Queue::assertPushed(RunPendingEwccvLookups::class, 1);
+    Storage::disk('local')->delete(BridgedSession::FILE);
 
     expect(\App\Support\Ewccv\SearchHints::for($vendor->fresh()))->toBe([
         'names' => ['Smartech Inc', 'Smart Tech Electric'],
