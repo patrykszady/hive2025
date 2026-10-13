@@ -143,6 +143,9 @@
                             @if($entry->candidateLines() !== [])
                                 <div class="text-xs text-zinc-600 dark:text-zinc-300">EWCCV listed: {{ implode(' · ', $entry->candidateLines()) }}</div>
                             @endif
+                            @if($entry->detailLines() !== [])
+                                <div class="text-xs text-zinc-600 dark:text-zinc-300">EWCCV's record: {{ implode(' · ', $entry->detailLines()) }}</div>
+                            @endif
                         </div>
                     @endforeach
                 </div>

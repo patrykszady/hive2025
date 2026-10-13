@@ -285,7 +285,7 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
 
         return Process::result(json_encode([
             'success' => [
-                ['key' => (string) $both->id, 'vendorId' => $both->id, 'businessName' => 'Both Ways Inc', 'matchType' => 'policyNumber', 'tracked' => true, 'alreadyTracking' => false, 'matchedName' => 'BOTH WAYS INC', 'matchedPolicy' => 'WC-BOTH'],
+                ['key' => (string) $both->id, 'vendorId' => $both->id, 'businessName' => 'Both Ways Inc', 'matchType' => 'policyNumber', 'tracked' => true, 'alreadyTracking' => false, 'matchedName' => 'BOTH WAYS INC', 'matchedPolicy' => 'WC-BOTH', 'details' => ['employerName' => 'BOTH WAYS INC', 'policyNumber' => 'WC-BOTH', 'fein' => '12-3456789', 'stateCode' => 12]],
                 ['key' => $both->id.'@2025-12-31', 'vendorId' => $both->id, 'businessName' => 'Both Ways Inc', 'matchType' => 'policyNumber', 'verifyOnly' => true, 'coverageDate' => '12/31/2025', 'policyNumber' => 'WC-BOTH', 'employerName' => 'BOTH WAYS INC'],
             ],
             'failed' => [
@@ -306,6 +306,7 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
     expect(collect($config['vendors'])->pluck('key')->all())->toBe([(string) $both->id, $both->id.'@2025-12-31', $only->id.'@2025-12-31'])
         ->and(collect($config['vendors'])->firstWhere('key', $only->id.'@2025-12-31'))->toMatchArray(['verifyOnly' => true, 'coverageDate' => '12/31/2025'])
         ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'tracking', 'matched_name' => 'BOTH WAYS INC'])
+        ->and($doc->fresh()->options['ewccv']['ewccv_details'])->toBe(['employerName' => 'BOTH WAYS INC', 'policyNumber' => 'WC-BOTH', 'fein' => '12-3456789', 'stateCode' => 12])
         ->and(EwccvCoverageCheck::where('vendor_id', $both->id)->first())->toMatchArray(['status' => 'covered', 'policy_number' => 'WC-BOTH'])
         ->and(EwccvCoverageCheck::where('vendor_id', $only->id)->first())->toMatchArray(['status' => 'not_found', 'reason' => 'no_results'])
         // The check-only vendor's policy has never been looked up for tracking: that stays pending.
@@ -316,6 +317,7 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
     $logs = \App\Models\EwccvLookupLog::orderBy('id')->get();
     expect($logs)->toHaveCount(3)
         ->and($logs[0])->toMatchArray(['vendor_id' => $both->id, 'vendor_doc_id' => $doc->id, 'kind' => 'tracking', 'outcome' => 'tracking', 'matched_name' => 'BOTH WAYS INC', 'matched_policy' => 'WC-BOTH', 'our_policy_number' => 'WC-BOTH'])
+        ->and($logs[0]->detailLines())->toBe(['employerName: BOTH WAYS INC', 'policyNumber: WC-BOTH', 'fein: 12-3456789', 'stateCode: 12'])
         ->and($logs[1])->toMatchArray(['vendor_id' => $both->id, 'kind' => 'coverage_check', 'outcome' => 'covered'])
         ->and($logs[1]->coverage_date->toDateString())->toBe('2025-12-31')
         ->and($logs[2])->toMatchArray(['vendor_id' => $only->id, 'kind' => 'coverage_check', 'outcome' => 'not_found', 'reason' => 'no_results'])
@@ -329,6 +331,7 @@ it('the vendor docs card opens a review log of every EWCCV attempt from the Veri
         'outcome' => 'no_match', 'reason' => 'no_match', 'our_policy_number' => 'WC-KOT-1', 'run_at' => now()->subHour(),
         'searched' => [['type' => 'employer', 'term' => 'Kot Construction', 'count' => 0, 'reason' => 'http_500'], ['type' => 'employer', 'term' => 'Kot', 'count' => 2]],
         'candidates' => [['employerName' => 'KOT CONSTRUCTION INC', 'policyNumber' => 'WC9', 'score' => 0.5]],
+        'details' => ['employerName' => 'KOT CONSTRUCTION INC', 'fein' => '98-7654321'],
     ]);
 
     \Livewire\Livewire::withoutLazyLoading();
@@ -340,7 +343,8 @@ it('the vendor docs card opens a review log of every EWCCV attempt from the Veri
         ->assertSee('Policy on file: WC-KOT-1')
         ->assertSee('employer "Kot Construction" → http 500')
         ->assertSee('employer "Kot" → 2 result(s)')
-        ->assertSee('KOT CONSTRUCTION INC · policy WC9 · score 0.50');
+        ->assertSee('KOT CONSTRUCTION INC · policy WC9 · score 0.50')
+        ->assertSee("EWCCV's record: employerName: KOT CONSTRUCTION INC · fein: 98-7654321", false);
 });
 
 it('refuses a credential handed over before, takes a new one even when marked reused, and tells the extension what is waiting', function () {

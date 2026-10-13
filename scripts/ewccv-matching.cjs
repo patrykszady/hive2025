@@ -264,6 +264,15 @@ function pickBest(candidates, vendorPolicyNorm) {
  * @param {{businessName?: string, policyNumber?: string}} vendor
  * @returns {{match: object|null, via: string|null, score: number, matchedName: string|null, matchedPolicy: string|null, candidates: Array<{employerName: string, policyNumber: string, stateCode: *, score: number}>}}
  */
+/** The scalar fields of an EWCCV result item, kept for comparison with the vendor on file. */
+function scalarFields(item) {
+    const out = {};
+    for (const [key, val] of Object.entries(item || {})) {
+        if (val === null || ['string', 'number', 'boolean'].includes(typeof val)) out[key] = val;
+    }
+    return out;
+}
+
 function pickMatch(items, vendor) {
     const empty = { match: null, via: null, score: 0, matchedName: null, matchedPolicy: null, candidates: [] };
     if (!items || items.length === 0) return empty;
@@ -278,7 +287,7 @@ function pickMatch(items, vendor) {
         .slice()
         .sort((a, b) => b.score - a.score)
         .slice(0, 10)
-        .map((s) => ({ employerName: s.name, policyNumber: s.policy, stateCode: s.item.stateCode, score: s.score }));
+        .map((s) => ({ employerName: s.name, policyNumber: s.policy, stateCode: s.item.stateCode, score: s.score, fields: scalarFields(s.item) }));
 
     const vendorPolicyNorm = normalizePolicy(vendor.policyNumber);
 

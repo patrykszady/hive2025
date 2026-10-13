@@ -44,6 +44,15 @@ const { nameVariants, addressVariants, pickMatch } = require('./ewccv-matching.c
 // reason can be read instead of guessed.
 const FALLBACK_PAUSE_MS = 2500;
 
+/** The scalar fields of an EWCCV result item (strings, numbers, booleans, nulls). */
+function scalarFields(item) {
+    const out = {};
+    for (const [key, val] of Object.entries(item || {})) {
+        if (val === null || ['string', 'number', 'boolean'].includes(typeof val)) out[key] = val;
+    }
+    return out;
+}
+
 const useRebrowser = process.env.EWCCV_USE_REBROWSER !== '0';
 let puppeteer;
 if (useRebrowser) {
@@ -2625,14 +2634,12 @@ async function requestLoginEmail(page, email) {
 
                 log(`    Matched: ${picked.matchedName} via ${picked.via} (policy: ${picked.matchedPolicy})`);
 
+                // Every field EWCCV returned for the matched employer, kept as-is
+                // so the server can show it next to the vendor on file.
+                const scalarDetails = scalarFields(picked.match);
+
                 // ── Verify-only mode: confirm coverage, create no subscription ──
                 if (config.verifyOnly || vendor.verifyOnly) {
-                    const scalarDetails = {};
-                    for (const [key, val] of Object.entries(picked.match)) {
-                        if (val === null || ['string', 'number', 'boolean'].includes(typeof val)) {
-                            scalarDetails[key] = val;
-                        }
-                    }
                     results.success.push({
                         vendorId: vendor.id,
                         businessName: vendor.businessName,
@@ -2685,6 +2692,7 @@ async function requestLoginEmail(page, email) {
                         matchedPolicy: picked.matchedPolicy,
                         score: picked.score,
                         candidates: picked.candidates,
+                        details: scalarDetails,
                         tracked: trackResult.tracked,
                         alreadyTracking: trackResult.alreadyTracking || false,
                         confirmation: trackResult.confirmation || null,

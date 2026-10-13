@@ -149,6 +149,7 @@ class ScrapeEwccvTracking extends Command
                     'score' => isset($entry['score']) ? (float) $entry['score'] : null,
                     'searched' => array_slice((array) ($entry['searched'] ?? []), 0, 12),
                     'candidates' => array_slice((array) ($entry['candidates'] ?? []), 0, 10),
+                    'details' => is_array($entry['details'] ?? null) ? $entry['details'] : null,
                     'session_age_minutes' => $sessionAge,
                     'run_at' => $runAt,
                 ]);
@@ -617,6 +618,8 @@ class ScrapeEwccvTracking extends Command
                     'subscription_id'  => $s['subscriptionId'] ?? null,
                     'matched_name'     => $s['matchedName'] ?? null,
                     'matched_policy'   => $s['matchedPolicy'] ?? null,
+                    // Every field EWCCV returned for the matched employer.
+                    'ewccv_details'    => is_array($s['details'] ?? null) ? $s['details'] : null,
                 ]);
             }
             foreach ($results['failed'] ?? [] as $f) {

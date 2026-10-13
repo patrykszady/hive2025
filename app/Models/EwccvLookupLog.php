@@ -21,7 +21,7 @@ class EwccvLookupLog extends Model
     protected $fillable = [
         'vendor_id', 'vendor_doc_id', 'belongs_to_vendor_id', 'kind', 'coverage_date', 'outcome', 'reason',
         'our_policy_number', 'matched_name', 'matched_policy', 'match_type', 'score', 'searched', 'candidates',
-        'session_age_minutes', 'run_at',
+        'details', 'session_age_minutes', 'run_at',
     ];
 
     protected function casts(): array
@@ -31,6 +31,7 @@ class EwccvLookupLog extends Model
             'score' => 'float',
             'searched' => 'array',
             'candidates' => 'array',
+            'details' => 'array',
             'run_at' => 'datetime',
         ];
     }
@@ -95,6 +96,21 @@ class EwccvLookupLog extends Model
                 ? sprintf('%s "%s" → %s', $s['type'] ?? 'name', $s['term'], filled($s['reason'] ?? null) ? str_replace('_', ' ', (string) $s['reason']) : (($s['count'] ?? 0).' result(s)'))
                 : null)
             ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Every field EWCCV returned for the matched employer, as "key: value"
+     * lines, for comparison with the vendor on file.
+     *
+     * @return list<string>
+     */
+    public function detailLines(): array
+    {
+        return collect((array) $this->details)
+            ->filter(fn ($v) => $v !== null && $v !== '')
+            ->map(fn ($v, $k) => $k.': '.(is_bool($v) ? ($v ? 'yes' : 'no') : (string) $v))
             ->values()
             ->all();
     }
