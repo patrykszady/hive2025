@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Finish every audit whose EWCCV answers are in: build the certificates PDF
@@ -39,10 +40,14 @@ class SendAuditWhenReady implements ShouldBeUnique, ShouldQueue
 
     public function handle(CertificateMerger $merger): void
     {
-        $pending = AuditRequest::query()->where('status', AuditRequest::STATUS_PENDING)->orderBy('id')->get();
+        $waiting = AuditRequest::query()
+            ->whereIn('status', [AuditRequest::STATUS_PENDING, AuditRequest::STATUS_READY])
+            ->whereNull('emailed_at')
+            ->orderBy('id')
+            ->get();
 
-        foreach ($pending as $audit) {
-            if ($audit->pendingChecks() > 0) {
+        foreach ($waiting as $audit) {
+            if ($audit->status === AuditRequest::STATUS_PENDING && $audit->pendingChecks() > 0) {
                 continue;
             }
             try {
@@ -54,17 +59,31 @@ class SendAuditWhenReady implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    /** Build the package and email it. */
+    /**
+     * Build the package (once), keep it on disk for the audit page's
+     * downloads, and email it: links always, the files attached only when
+     * they fit under the mail provider's size limit (a year's certificates
+     * merged into one PDF exceeded 10 MB on 2026-10-13).
+     */
     public static function finish(AuditRequest $audit, CertificateMerger $merger): void
     {
         $report = new AuditReport($audit->belongs_to_vendor_id, $audit->start_date->toDateString(), $audit->end_date->toDateString(), $audit->audit_type, $audit->bank_account_ids, $audit->coverage_date);
         $missing = [];
-        $pdf = $report->certificatesPdf($merger, $missing);
-        $xlsx = $report->xlsx();
-        $company = $report->company();
-        $companyName = (string) ($company?->name ?? $company?->business_name ?? 'the company');
+        $disk = Storage::disk('local');
+        $base = 'audits/'.$audit->id.'/'.$report->filenameBase();
 
-        $audit->forceFill(['status' => AuditRequest::STATUS_READY, 'ready_at' => now(), 'error' => null])->save();
+        if (! $audit->xlsx_path || ! $disk->exists($audit->xlsx_path)) {
+            $disk->put($base.'.xlsx', $report->xlsx());
+            $audit->xlsx_path = $base.'.xlsx';
+        }
+        if (! $audit->pdf_path || ! $disk->exists($audit->pdf_path)) {
+            $pdf = $report->certificatesPdf($merger, $missing);
+            if ($pdf !== null) {
+                $disk->put($base.'.pdf', $pdf);
+                $audit->pdf_path = $base.'.pdf';
+            }
+        }
+        $audit->forceFill(['status' => AuditRequest::STATUS_READY, 'ready_at' => $audit->ready_at ?? now(), 'error' => null])->save();
 
         $recipient = $audit->requestedBy;
         if (! $recipient || blank($recipient->email)) {
@@ -73,7 +92,20 @@ class SendAuditWhenReady implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        Mail::to($recipient)->send(new AuditReadyMail($audit, $companyName, $report->coverageCounts(), $pdf, $xlsx, $report->filenameBase(), $missing));
-        $audit->forceFill(['status' => AuditRequest::STATUS_SENT, 'emailed_at' => now(), 'emailed_to' => $recipient->email])->save();
+        $company = $report->company();
+        $companyName = (string) ($company?->name ?? $company?->business_name ?? 'the company');
+        $size = ($audit->pdf_path ? $disk->size($audit->pdf_path) : 0) + ($audit->xlsx_path ? $disk->size($audit->xlsx_path) : 0);
+        $attach = $size <= AuditRequest::ATTACH_MAX_BYTES;
+
+        try {
+            Mail::to($recipient)->send(new AuditReadyMail($audit, $companyName, $report->coverageCounts(), $attach, $missing));
+        } catch (\Throwable $e) {
+            // The package is built and downloadable; only the mail failed.
+            Log::error('Audit package email failed', ['audit_request_id' => $audit->id, 'error' => $e->getMessage()]);
+            $audit->forceFill(['error' => 'Email failed: '.mb_substr($e->getMessage(), 0, 900)])->save();
+
+            return;
+        }
+        $audit->forceFill(['status' => AuditRequest::STATUS_SENT, 'emailed_at' => now(), 'emailed_to' => $recipient->email, 'error' => null])->save();
     }
 }

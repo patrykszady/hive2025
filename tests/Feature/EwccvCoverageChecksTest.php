@@ -171,20 +171,50 @@ it('the audit package waits for the EWCCV answers, then is built and emailed wit
     $merger->shouldReceive('merge')->once()->withArgs(fn (array $files, string $name) => count($files) === 1 && str_ends_with($files[0], 'kot.pdf') && str_starts_with($name, 'Audit-'.$f['gc']->id.'-'))->andReturn('%PDF-1.4 merged');
     (new \App\Jobs\SendAuditWhenReady)->handle($merger);
 
-    \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\AuditReadyMail::class, function (\App\Mail\AuditReadyMail $mail) use ($f) {
-        $mail->assertHasAttachedData('%PDF-1.4 merged', $mail->filenameBase.'.pdf', ['mime' => 'application/pdf']);
+    $audit->refresh();
+    \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\AuditReadyMail::class, function (\App\Mail\AuditReadyMail $mail) use ($f, $audit) {
+        $rendered = $mail->render();
 
         return $mail->hasTo($f['user']->email)
             && $mail->counts['covered'] === 1
-            && str_starts_with($mail->xlsx, 'PK')
+            && $mail->attach === true
+            && count($mail->attachments()) === 2
             && str_contains($mail->envelope()->subject, 'Audit package ready')
-            && str_contains($mail->render(), 'Covered: 1');
+            && str_contains($rendered, 'Covered: 1')
+            && str_contains($rendered, route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'pdf']))
+            && str_contains($rendered, 'attached to this email as well');
     });
-    $audit->refresh();
     expect($audit->status)->toBe('sent')
         ->and($audit->emailed_to)->toBe($f['user']->email)
+        ->and(Storage::disk('local')->get($audit->pdf_path))->toBe('%PDF-1.4 merged')
+        ->and(Storage::disk('local')->exists($audit->xlsx_path))->toBeTrue()
         ->and(auditPage($f)->get('canDownload'))->toBeTrue();
     auditPage($f)->assertSee('Package emailed to '.$f['user']->email);
+
+    // The email's links serve the stored package to an admin of the company, and nobody else.
+    $this->get(route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'pdf']))->assertOk()->assertDownload(basename($audit->pdf_path));
+    $this->get(route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'xlsx']))->assertOk();
+    $other = Vendor::factory()->create(['business_type' => 'GC']);
+    $stranger = User::query()->create(['first_name' => 'Other', 'last_name' => 'Admin', 'email' => 'other-'.uniqid().'@example.test', 'cell_phone' => '224'.rand(1000000, 9999999), 'primary_vendor_id' => $other->id]);
+    $stranger->vendors()->attach($other->id, ['role_id' => 1]);
+    $this->actingAs($stranger)->get(route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'pdf']))->assertForbidden();
+});
+
+it('a package too large to attach is emailed as links only', function () {
+    \Illuminate\Support\Facades\Mail::fake();
+    Queue::fake();
+    $f = auditFixture();
+    Storage::fake('files');
+    Storage::disk('files')->put('vendor_docs/kot.pdf', '%PDF-1.4 kot');
+    auditPage($f);
+    $audit = \App\Models\AuditRequest::first();
+    EwccvCoverageCheck::where('vendor_id', $f['sub']->id)->first()->update(['status' => 'covered', 'checked_at' => now()]);
+    $merger = $this->mock(\App\Services\Audits\CertificateMerger::class);
+    $merger->shouldReceive('merge')->once()->andReturn('%PDF-1.4 '.str_repeat('x', 8 * 1024 * 1024));
+    (new \App\Jobs\SendAuditWhenReady)->handle($merger);
+
+    \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\AuditReadyMail::class, fn (\App\Mail\AuditReadyMail $mail) => $mail->attach === false && $mail->attachments() === [] && str_contains($mail->render(), 'too large to attach'));
+    expect($audit->fresh()->status)->toBe('sent');
 });
 
 it('a general audit, with nothing to ask EWCCV, is finished at once', function () {

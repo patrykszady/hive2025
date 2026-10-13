@@ -32,8 +32,11 @@ class AuditRequest extends Model
 
     protected $fillable = [
         'belongs_to_vendor_id', 'requested_by_user_id', 'signature', 'start_date', 'end_date', 'audit_type',
-        'bank_account_ids', 'coverage_date', 'status', 'vendors_checked', 'ready_at', 'emailed_at', 'emailed_to', 'error',
+        'bank_account_ids', 'coverage_date', 'status', 'vendors_checked', 'pdf_path', 'xlsx_path', 'ready_at', 'emailed_at', 'emailed_to', 'error',
     ];
+
+    /** Attach the package to the email only when it fits comfortably under the mail provider's 10 MB. */
+    public const ATTACH_MAX_BYTES = 7 * 1024 * 1024;
 
     protected function casts(): array
     {

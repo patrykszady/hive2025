@@ -219,6 +219,12 @@ class AuditShow extends Component
             return;
         }
 
+        // The package built for the email is the download.
+        $stored = $this->auditRequest?->pdf_path;
+        if ($stored && \Illuminate\Support\Facades\Storage::disk('local')->exists($stored)) {
+            return \Illuminate\Support\Facades\Storage::disk('local')->download($stored, basename($stored));
+        }
+
         $files = $this->report->certificateFiles();
         if ($files['missing'] !== []) {
             $list = collect($files['missing']);
@@ -249,6 +255,11 @@ class AuditShow extends Component
     {
         if ($this->refuseUntilReady()) {
             return;
+        }
+
+        $storedXlsx = $this->auditRequest?->xlsx_path;
+        if ($storedXlsx && \Illuminate\Support\Facades\Storage::disk('local')->exists($storedXlsx)) {
+            return \Illuminate\Support\Facades\Storage::disk('local')->download($storedXlsx, basename($storedXlsx));
         }
 
         $filename = $this->report->filenameBase().'.xlsx';

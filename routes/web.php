@@ -667,6 +667,14 @@ Route::post('webhooks/nylas', [\App\Http\Controllers\Api\NylasWebhookController:
 // Email tracking pixel (no auth required - loaded by email clients)
 Route::get('t/o', [EmailTrackingController::class, 'trackOpen'])->name('email.track.open');
 
+// The built audit package (certificates PDF, Excel) kept on Hive; the
+// "audit ready" email links here, since a year's certificates exceed a
+// mail's size. Signed in is enough to reach it: the controller checks the
+// company and the admin role itself.
+Route::middleware('auth')->get('/audit/{audit}/download/{file}', [\App\Http\Controllers\AuditPackageController::class, 'download'])
+    ->whereIn('file', ['pdf', 'xlsx'])
+    ->name('vendor_docs.audit.download');
+
 Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // Registration route
     Route::get('vendor/registration/{vendor}', VendorRegistration::class)

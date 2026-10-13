@@ -1,7 +1,24 @@
 <x-mail::message>
 # {{ $audit->label() }} is ready
 
-The audit package for **{{ $companyName }}** is attached: the policy certificates in one PDF and the Excel report (By Vendor and All Checks).
+The audit package for **{{ $companyName }}** is on Hive: the policy certificates in one PDF and the Excel report (By Vendor and All Checks). Sign in to download.
+
+@if($pdfUrl)
+<x-mail::button :url="$pdfUrl">
+Download the certificates PDF
+</x-mail::button>
+@endif
+@if($xlsxUrl)
+<x-mail::button :url="$xlsxUrl">
+Download the Excel report
+</x-mail::button>
+@endif
+
+@if($attach)
+Both files are attached to this email as well.
+@else
+The files are too large to attach to an email; use the links above.
+@endif
 
 @if($audit->audit_type === 'workers')
 **EWCCV coverage as of {{ $audit->coverage_date?->format('m/d/Y') }}** ({{ $counts['total'] }} subs with a workers comp policy on file):
