@@ -208,9 +208,12 @@ function policiesMatch(aNorm, bNorm) {
     return aNorm.length >= 6 && bNorm.length >= 6 && (aNorm.includes(bNorm) || bNorm.includes(aNorm));
 }
 
-// score = shared distinctive tokens / our distinctive tokens; falls back to
-// unfiltered tokenization on both sides when our name has no distinctive
-// tokens left (e.g. it's entirely a legal suffix / generic word).
+// score = shared distinctive tokens / the LARGER of the two token sets, so a
+// candidate that merely contains our one distinctive word scores low: on
+// 2026-10-13 "Smartech Electric, Inc" was matched to "ZOLO CARBON SMARTECH
+// INC" (and subscribed to) because the old ratio looked only at our side.
+// Falls back to unfiltered tokens when our name has no distinctive ones left
+// (e.g. it is entirely a legal suffix / generic word).
 function similarityScore(ourName, theirName) {
     let ours = nameTokens(ourName);
     let theirs = nameTokens(theirName);
@@ -221,9 +224,24 @@ function similarityScore(ourName, theirName) {
     if (ours.length === 0) return 0;
 
     const oursUnique = Array.from(new Set(ours));
-    const theirSet = new Set(theirs);
+    const theirsUnique = Array.from(new Set(theirs));
+    const theirSet = new Set(theirsUnique);
     const shared = oursUnique.filter((t) => theirSet.has(t)).length;
-    return shared / oursUnique.length;
+    return shared / Math.max(oursUnique.length, theirsUnique.length);
+}
+
+// A name-only match is accepted on its own when the policy numbers agree
+// or we have none on file. When the certificate on file carries a number
+// EWCCV does not list for that employer, the name must be near-identical —
+// a renewal with a new number is fine, "KOT CONSTRUCTION" for "Mariusz Kot
+// Construction" with a different number is a question for a person.
+const STRICT_WHEN_POLICY_DIFFERS = 0.75;
+
+function nameMatchAllowed(candidate, vendorPolicyNorm, threshold) {
+    if (candidate.score < threshold) return false;
+    if (!vendorPolicyNorm) return true;
+    if (policiesMatch(normalizePolicy(candidate.policy), vendorPolicyNorm)) return true;
+    return candidate.score >= STRICT_WHEN_POLICY_DIFFERS;
 }
 
 // Tie-break among several same-tier candidates: prefer one whose policy
@@ -277,7 +295,7 @@ function pickMatch(items, vendor) {
     }
 
     // Tier 2: name similarity.
-    const nameMatches = scored.filter((s) => s.score >= 0.6);
+    const nameMatches = scored.filter((s) => nameMatchAllowed(s, vendorPolicyNorm, 0.6));
     if (nameMatches.length > 0) {
         const chosen = pickBest(nameMatches, vendorPolicyNorm);
         return {
@@ -286,8 +304,8 @@ function pickMatch(items, vendor) {
         };
     }
 
-    // Tier 3: a sole result with at least weak name signal.
-    if (items.length === 1 && scored[0].score >= 0.34) {
+    // Tier 3: a sole result sharing at least half of the distinctive words.
+    if (items.length === 1 && nameMatchAllowed(scored[0], vendorPolicyNorm, 0.5)) {
         const chosen = scored[0];
         return {
             match: chosen.item, via: 'sole_result', score: chosen.score,

@@ -104,7 +104,7 @@ test('pickMatch: name tier score of 0.5 is not accepted against other candidates
     assert.equal(result.candidates[0].score, 0.5);
 });
 
-test('pickMatch: that same 0.5-scoring item is accepted as a sole result (>= 0.34)', () => {
+test('pickMatch: that same 0.5-scoring item is accepted as a sole result (>= 0.5) when no policy is on file', () => {
     const vendor = { businessName: 'Mariusz Kot Construction, Inc' };
     const items = [
         { employerName: 'KOT CONSTRUCTION INC', policyNumber: 'X1' },
@@ -136,6 +136,42 @@ test('pickMatch: employer-name tier accepts a strong match (score >= 0.6)', () =
     const result = pickMatch(items, vendor);
     assert.equal(result.via, 'employerName');
     assert.equal(result.matchedName, 'SMARTECH ELECTRIC LLC');
+});
+
+test('pickMatch: a sole result that merely contains our one distinctive word is rejected (the ZOLO CARBON SMARTECH case)', () => {
+    const vendor = { businessName: 'Smartech Electric, Inc', policyNumber: '121562826064403998' };
+    const items = [
+        { employerName: 'ZOLO CARBON SMARTECH INC', policyNumber: 'WC1269001689' },
+    ];
+    const result = pickMatch(items, vendor);
+    assert.equal(result.match, null);
+    assert.equal(result.candidates.length, 1);
+    assert.ok(Math.abs(result.candidates[0].score - 1 / 3) < 0.001);
+});
+
+test('pickMatch: a sole 0.5 result whose policy differs from the certificate on file is left for review', () => {
+    const vendor = { businessName: 'Mariusz Kot Construction, Inc', policyNumber: 'WCIL000171300' };
+    const items = [
+        { employerName: 'KOT CONSTRUCTION INC', policyNumber: 'OTHER123456' },
+    ];
+    const result = pickMatch(items, vendor);
+    assert.equal(result.match, null);
+    assert.equal(result.candidates[0].employerName, 'KOT CONSTRUCTION INC');
+
+    // The same employer listed with our number is tier 1.
+    const same = pickMatch([{ employerName: 'KOT CONSTRUCTION INC', policyNumber: 'WCIL000171300' }], vendor);
+    assert.equal(same.via, 'policyNumber');
+});
+
+test('pickMatch: a near-identical name with a different policy number (a renewal) is still accepted', () => {
+    const vendor = { businessName: 'Smartech Electric, Inc', policyNumber: 'WC-OLD-123456' };
+    const items = [
+        { employerName: 'SMARTECH ELECTRIC LLC', policyNumber: 'WC-NEW-654321' },
+        { employerName: 'UNRELATED PLUMBING CO', policyNumber: 'W2' },
+    ];
+    const result = pickMatch(items, vendor);
+    assert.equal(result.via, 'employerName');
+    assert.equal(result.score, 1);
 });
 
 test('pickMatch: no items at all returns a null match with empty candidates', () => {

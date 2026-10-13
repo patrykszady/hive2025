@@ -111,9 +111,9 @@ class VendorDoc extends Model
         $noticeDate = ! empty($notice['received_at']) ? \Carbon\Carbon::parse($notice['received_at'])->format('m/d/Y') : null;
 
         $tip = match ($state['status']) {
-            'tracking' => ($notice['kind'] ?? null) === 'reinstatement'
+            'tracking' => (($notice['kind'] ?? null) === 'reinstatement'
                 ? 'EWCCV: coverage reinstated'.($noticeDate ? ' on '.$noticeDate : '').', tracking enabled'
-                : 'EWCCV coverage tracking enabled',
+                : 'EWCCV coverage tracking enabled').self::ewccvPolicyDifference($state),
             'cancelled' => 'EWCCV: coverage '.(($notice['kind'] ?? '') === 'nonrenewal' ? 'NOT RENEWED' : 'CANCELLED').($noticeDate ? ' as of '.$noticeDate : '').' — get a new certificate',
             'pending' => ($state['reason'] ?? '') === 'not_tracked_by_ewccv'
                 ? 'EWCCV no longer lists this policy as tracked; it is re-tracked with the next browser session'
@@ -140,6 +140,23 @@ class VendorDoc extends Model
             // EWCCV reported the coverage gone: the column goes red, not amber.
             'alert' => $state['status'] === 'cancelled',
         ];
+    }
+
+    /**
+     * When EWCCV matched the employer by name and lists a policy number other
+     * than the certificate on file (a renewal, or a wrong match), say so.
+     *
+     * @param  array<string, mixed>  $state
+     */
+    protected function ewccvPolicyDifference(array $state): string
+    {
+        $theirs = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) ($state['matched_policy'] ?? '')));
+        $ours = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) ($this->attributes['number'] ?? '')));
+        if ($theirs === '' || $ours === '' || $theirs === $ours || str_contains($theirs, $ours) || str_contains($ours, $theirs)) {
+            return '';
+        }
+
+        return sprintf(' · matched by name (%s); EWCCV lists policy %s, the certificate on file says %s — check it is the same business', (string) ($state['matched_name'] ?? '?'), (string) $state['matched_policy'], (string) $this->attributes['number']);
     }
 
     /**
