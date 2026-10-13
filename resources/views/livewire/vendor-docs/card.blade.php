@@ -59,54 +59,27 @@
                  real header can never drift apart. --}}
             <x-index-table.table :columns="\App\Livewire\VendorDocs\VendorDocsCard::columnDefs()">
                 @foreach($vendor_docs as $doc)
-                    <flux:table.row :key="$doc->id">
-                        <flux:table.cell variant="strong" class="w-[32%]">
-                            <x-truncate-tooltip :content="$doc->type_label">
-                            <a
-                                href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->doc_filename]) }}"
-                                target="_blank"
-                                class="block truncate"
-                            >
-                                {{$doc->type_label}}
-                            </a>
-                            </x-truncate-tooltip>
-                        </flux:table.cell>
-                        <flux:table.cell class="w-[24%]">
-                            <flux:badge size="sm" :color="$doc->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
-                                {{$doc->expiration_date->format('m/d/Y')}}
-                            </flux:badge>
-                        </flux:table.cell>
-                        <flux:table.cell class="w-[28%]">
-                            <x-truncate-tooltip :content="(string) $doc->number"><div class="truncate">{{ $doc->number }}</div></x-truncate-tooltip>
-                        </flux:table.cell>
-                        {{-- Coverage verification: the date a provider last
-                             confirmed this policy. EWCCV reports the carrier's
-                             filing with the state rating bureau; TrustLayer
-                             reports the certificate the sub's agent provided —
-                             either counts, and the tooltip names both.
-                             Logic lives on the model ($doc->verification_summary)
-                             because @php blocks miscompile in Blaze slots. --}}
-                        <flux:table.cell class="w-[16%] whitespace-nowrap">
-                            @if($doc->verification_summary)
-                                <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
-                                    <div class="flex items-center gap-1.5">
-                                        @if($doc->verification_summary['verified_at'])
-                                            <flux:icon.shield-check variant="micro" class="size-3.5 shrink-0 text-emerald-500" />
-                                            <span>{{ $doc->verification_summary['verified_at'] }}</span>
-                                        @elseif(! empty($doc->verification_summary['alert']))
-                                            {{-- EWCCV reported the coverage cancelled or not renewed. --}}
-                                            <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0 text-red-600" />
-                                            <span class="text-red-600 dark:text-red-400">cancelled</span>
-                                        @else
-                                            <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0 text-amber-500" />
-                                        @endif
-                                    </div>
-                                </flux:tooltip>
-                            @endif
-                        </flux:table.cell>
-                    </flux:table.row>
+                    @include('livewire.vendor-docs._doc-row', ['doc' => $doc])
                 @endforeach
             </x-index-table.table>
+
+            {{-- The older documents (every doc that is not the latest of its
+                 type), folded away under the current ones: the renewal history
+                 of each policy, expired certificates included. --}}
+            @if($previous_docs->isNotEmpty())
+                <flux:accordion class="mt-4 pt-2 pb-1 border-t border-zinc-200 dark:border-white/10">
+                    <flux:accordion.item>
+                        <flux:accordion.heading class="py-2">Previous / expired ({{ $previous_docs->count() }})</flux:accordion.heading>
+                        <flux:accordion.content class="pt-2">
+                            <x-index-table.table :columns="\App\Livewire\VendorDocs\VendorDocsCard::columnDefs()">
+                                @foreach($previous_docs as $doc)
+                                    @include('livewire.vendor-docs._doc-row', ['doc' => $doc])
+                                @endforeach
+                            </x-index-table.table>
+                        </flux:accordion.content>
+                    </flux:accordion.item>
+                </flux:accordion>
+            @endif
         @endif
     </x-index-table>
 </div>

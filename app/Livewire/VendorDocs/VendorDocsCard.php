@@ -17,6 +17,10 @@ class VendorDocsCard extends Component
     public Vendor $vendor;
 
     public $vendor_docs = [];
+
+    /** The older documents: every doc that is not the latest of its type. */
+    public $previous_docs = [];
+
     public $view = false;
 
     /**
@@ -39,11 +43,12 @@ class VendorDocsCard extends Component
     public static function columnDefs(): array
     {
         return [
-            ['label' => 'Type', 'width' => 'w-[32%] min-w-0', 'skeletonWidth' => 'w-24'],
-            ['label' => 'Exp Date', 'width' => 'w-[24%]', 'skeleton' => 'badge'],
-            ['label' => 'Policy #', 'width' => 'w-[28%] min-w-0', 'skeletonWidth' => 'w-28'],
-            // EWCCV coverage verification date (workers comp only).
-            ['label' => 'Verified', 'width' => 'w-[16%]', 'skeletonWidth' => 'w-16'],
+            ['label' => 'Type', 'width' => 'w-[28%] min-w-0', 'skeletonWidth' => 'w-24'],
+            ['label' => 'Exp Date', 'width' => 'w-[22%]', 'skeleton' => 'badge'],
+            ['label' => 'Policy #', 'width' => 'w-[26%] min-w-0', 'skeletonWidth' => 'w-28'],
+            // Coverage verification date (workers comp only), m/d/y so it
+            // fits: the card must never scroll sideways.
+            ['label' => 'Verified', 'width' => 'w-[24%] min-w-0', 'skeletonWidth' => 'w-16'],
         ];
     }
 
@@ -102,6 +107,14 @@ class VendorDocsCard extends Component
                 return strtolower((string) ($doc->getRawOriginal('type') ?? $doc->type));
             })
             ->map(fn ($group) => $group->first())
+            ->values();
+
+        // Everything older than the latest of its type, for the "previous /
+        // expired" accordion under the current documents.
+        $currentIds = $this->vendor_docs->pluck('id')->all();
+        $this->previous_docs = $docs
+            ->reject(fn (VendorDoc $doc) => in_array($doc->id, $currentIds, true))
+            ->sortByDesc('expiration_date')
             ->values();
 
         foreach ($this->vendor_docs as $doc) {

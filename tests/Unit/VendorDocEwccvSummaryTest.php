@@ -21,7 +21,7 @@ it('summarizes a tracking policy', function () {
     expect($doc->ewccv_summary)
         ->tracking->toBeTrue()
         ->verified_at->toBe('08/16/2026')
-        ->tip->toBe('EWCCV coverage tracking enabled · checked 08/16/2026');
+        ->tip->toBe('EWCCV coverage tracking enabled · checked 08/16/26');
 });
 
 it('summarizes a failed lookup with a readable reason', function () {
@@ -46,7 +46,7 @@ it('shows a cancelled policy as an alert, not merely unverified', function () {
         ->tracking->toBeFalse()
         ->verified_at->toBeNull()
         ->alert->toBeTrue()
-        ->tip->toBe('EWCCV: coverage CANCELLED as of 10/12/2026 — get a new certificate · checked 10/12/2026');
+        ->tip->toBe('EWCCV: coverage CANCELLED as of 10/12/2026 — get a new certificate · checked 10/12/26');
 
     expect(makeDoc(['options' => ['ewccv' => ['status' => 'tracking']]])->ewccv_summary['alert'])->toBeFalse();
 });
@@ -63,5 +63,5 @@ it('says when EWCCV matched by name but lists a policy number other than the cer
         'status' => 'tracking', 'checked_at' => '2026-10-13T00:15:00+00:00', 'match_type' => 'policyNumber',
         'matched_name' => 'JW GREEN DUMP INC', 'matched_policy' => 'WC539S342438046',
     ]]]);
-    expect($same->ewccv_summary['tip'])->toBe('EWCCV coverage tracking enabled · checked 10/13/2026');
+    expect($same->ewccv_summary['tip'])->toBe('EWCCV coverage tracking enabled · checked 10/13/26');
 });

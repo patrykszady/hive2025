@@ -39,20 +39,32 @@
              today. --}}
         @if($audit_type === 'workers' && $end_date)
             <x-slot name="details">
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div class="text-sm">
-                        <span class="font-medium">EWCCV coverage as of {{ $this->coverageDate?->format('m/d/Y') }} ({{ \App\Models\AuditRequest::coverageDateIsClamped($end_date) ? 'the period has not ended; checked as of today' : 'two days before the period ends' }}):</span>
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="text-sm space-y-1">
+                        <div class="font-medium">EWCCV coverage as of {{ $this->coverageDate?->format('m/d/Y') }} ({{ \App\Models\AuditRequest::coverageDateIsClamped($end_date) ? 'the period has not ended; checked as of today' : 'two days before the period ends' }})</div>
                         @if($this->coverage_check_counts['total'] === 0)
-                            <span class="text-zinc-500">no paid sub has a workers comp policy on file for this period</span>
+                            <div class="text-zinc-500">no paid sub has a workers comp policy on file for this period</div>
                         @elseif($this->coverage_check_counts['covered'] + $this->coverage_check_counts['not_found'] + $this->coverage_check_counts['pending'] === 0)
-                            <span class="text-zinc-500">not checked yet ({{ $this->coverage_check_counts['total'] }} policies)</span>
+                            <div class="text-zinc-500">not checked yet ({{ $this->coverage_check_counts['total'] }} policies)</div>
                         @else
-                            <span class="text-emerald-700 dark:text-emerald-400">{{ $this->coverage_check_counts['covered'] }} covered</span>
-                            · <span class="text-red-600 dark:text-red-400">{{ $this->coverage_check_counts['not_found'] }} not found</span>
-                            · <span class="text-amber-600 dark:text-amber-400">{{ $this->coverage_check_counts['pending'] }} waiting</span>
-                            @if($this->coverage_check_counts['unchecked'] > 0)
-                                · <span class="text-zinc-500">{{ $this->coverage_check_counts['unchecked'] }} not checked</span>
-                            @endif
+                            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span class="text-emerald-700 dark:text-emerald-400">{{ $this->coverage_check_counts['covered'] }} covered</span>
+                                <span class="text-zinc-400">·</span>
+                                @if($this->coverage_check_counts['not_found'] > 0)
+                                    {{-- The ones to question: a click lists them with what EWCCV was asked. --}}
+                                    <flux:modal.trigger name="audit-not-found">
+                                        <flux:button size="xs" variant="ghost" class="!px-1.5 !text-red-600 dark:!text-red-400" icon="magnifying-glass">{{ $this->coverage_check_counts['not_found'] }} not found</flux:button>
+                                    </flux:modal.trigger>
+                                @else
+                                    <span class="text-zinc-500">0 not found</span>
+                                @endif
+                                <span class="text-zinc-400">·</span>
+                                <span class="text-amber-600 dark:text-amber-400">{{ $this->coverage_check_counts['pending'] }} waiting</span>
+                                @if($this->coverage_check_counts['unchecked'] > 0)
+                                    <span class="text-zinc-400">·</span>
+                                    <span class="text-zinc-500">{{ $this->coverage_check_counts['unchecked'] }} not checked</span>
+                                @endif
+                            </div>
                         @endif
                     </div>
                     <flux:button wire:click="verify_coverage_on_ewccv" size="sm" icon="shield-check">
@@ -62,7 +74,7 @@
                 @if($this->auditRequest)
                     <div class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
                         @if($this->auditRequest->status === 'sent')
-                            Package emailed to {{ $this->auditRequest->emailed_to }} on {{ $this->auditRequest->emailed_at?->timezone(auth()->user()->vendor->timezone ?: 'America/Chicago')->format('m/d/Y g:i A T') }}.
+                            Package emailed to {{ $this->auditRequest->emailed_to }} on {{ $this->auditRequest->emailed_at?->timezone(auth()->user()->vendor->timezone ?: 'America/Chicago')->format('m/d/Y g:i A') }}.
                         @elseif($this->auditRequest->status === 'ready')
                             Every answer is in; the downloads are open.
                         @elseif($this->auditRequest->status === 'failed')
@@ -277,6 +289,33 @@
         </x-details.card>
     @endforeach
     <livewire:expenses.expense-create />
+
+    {{-- The policies EWCCV did not find for their day, with what it was asked. --}}
+    <flux:modal name="audit-not-found" class="md:w-[46rem]">
+        <div class="space-y-4">
+            <div>
+                <flux:heading size="lg">Not found on EWCCV</flux:heading>
+                <flux:text class="mt-1">Policies EWCCV did not list for the day asked about. Check the certificate's policy number and the business name, then press "Check EWCCV" to ask again.</flux:text>
+            </div>
+            @forelse($this->not_found_policies as $row)
+                <div class="space-y-1 border-t border-zinc-200 dark:border-white/10 pt-3" wire:key="not-found-{{ $row['vendor_id'] }}-{{ $row['number'] }}">
+                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                        <flux:link :href="route('vendors.show', $row['vendor_id'])" class="font-medium">{{ $row['vendor'] }}</flux:link>
+                        <span class="text-zinc-600 dark:text-zinc-300">policy {{ $row['number'] }} · {{ $row['term'] }}</span>
+                    </div>
+                    <div class="text-xs text-red-600 dark:text-red-400">Not found for {{ $row['as_of'] }} ({{ $row['reason'] }})</div>
+                    @if($row['searched'] !== [])
+                        <div class="text-xs text-zinc-600 dark:text-zinc-300">Searched: {{ implode(' · ', $row['searched']) }}</div>
+                    @endif
+                    @if($row['candidates'] !== [])
+                        <div class="text-xs text-zinc-600 dark:text-zinc-300">EWCCV listed instead: {{ implode(' · ', $row['candidates']) }}</div>
+                    @endif
+                </div>
+            @empty
+                <flux:text>Every policy was found.</flux:text>
+            @endforelse
+        </div>
+    </flux:modal>
 </div>
 
 

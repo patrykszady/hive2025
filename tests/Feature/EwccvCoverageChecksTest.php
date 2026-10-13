@@ -141,8 +141,12 @@ it('opening an audit asks EWCCV for coverage as of the end date minus two days f
     auditPage($f)->assertSee('WC verified 12/29/2025')->assertSee('1 covered');
     expect(AuditReport::auditVerificationCell(auditPage($f)->get('vendors_grouped_checks')->first()['applicable_docs'][0]))->toBe('WC verified 12/29/2025 (EWCCV)');
 
-    $check->update(['status' => 'not_found', 'reason' => 'no_match']);
-    auditPage($f)->assertSee('not found on EWCCV for 12/29/2025')->assertSee('1 not found');
+    $check->update(['status' => 'not_found', 'reason' => 'no_match', 'searched' => [['type' => 'employer', 'term' => 'Kot Construction', 'count' => 1]], 'candidates' => [['employerName' => 'KOTA BUILDERS', 'policyNumber' => 'X9']]]);
+    $page = auditPage($f)->assertSee('not found on EWCCV for 12/29/2025')->assertSee('1 not found');
+    // "1 not found" opens a modal naming the policy, what was asked and what EWCCV listed instead.
+    expect($page->get('not_found_policies'))->toHaveCount(1)
+        ->and($page->get('not_found_policies')[0])->toMatchArray(['vendor' => 'Kot Construction', 'number' => 'WC-KOT-1', 'as_of' => '12/29/2025', 'reason' => 'no match', 'searched' => ['employer "Kot Construction" → 1 result(s)'], 'candidates' => ['KOTA BUILDERS (policy X9)']]);
+    $page->assertSee('Not found on EWCCV')->assertSee('Not found for 12/29/2025 (no match)')->assertSee('EWCCV listed instead: KOTA BUILDERS (policy X9)');
 
     // A different end date is a different question, asked on first sight.
     expect(auditPage($f, '2025-06-30')->get('coverage_check_counts')['pending'])->toBe(1)
@@ -193,7 +197,7 @@ it('the audit package waits for the EWCCV answers, then is built and emailed wit
         ->and(Storage::disk('local')->exists($audit->xlsx_path))->toBeTrue()
         ->and(auditPage($f)->get('canDownload'))->toBeTrue();
     // Shown in the company's timezone, not UTC.
-    auditPage($f)->assertSee('Package emailed to '.$f['user']->email.' on '.$audit->emailed_at->timezone('America/Chicago')->format('m/d/Y g:i A T'));
+    auditPage($f)->assertSee('Package emailed to '.$f['user']->email.' on '.$audit->emailed_at->timezone('America/Chicago')->format('m/d/Y g:i A'));
 
     // The email's links are signed: they work without signing in, and not at all when tampered with.
     $pdfLink = \Illuminate\Support\Facades\URL::signedRoute('vendor_docs.audit.package', ['audit' => $audit->id, 'file' => 'pdf']);
@@ -441,7 +445,7 @@ it('the vendor docs page shows the verification only; the attempts are reviewed 
 
     \Livewire\Livewire::withoutLazyLoading();
     \Livewire\Livewire::test(\App\Livewire\VendorDocs\VendorDocsCard::class, ['vendor' => $f['sub']])
-        ->assertSee('10/12/2026')
+        ->assertSee('10/12/26')
         ->assertDontSee('lookup log')
         ->assertDontSee('showEwccvLog');
 });
@@ -509,7 +513,7 @@ it('a failed tracking lookup says what was searched and the closest employers EW
         ->toContain('EWCCV lookup failed: no match')
         ->toContain('searched employer "Mariusz Kot Construction, Inc", employer "Kot", address "12 Main"')
         ->toContain('closest KOT CONSTRUCTION INC (policy WC1); KOTA BUILDERS')
-        ->toContain('checked 10/12/2026');
+        ->toContain('checked 10/12/26');
 });
 
 it('search hints: names, addresses and the FEIN ride along to the scraper, a lookup is queued, and a matched FEIN is learned', function () {
@@ -639,11 +643,11 @@ it('queues a coverage check two days before a workers comp doc expires, and a co
 
     // Before the answer the doc is unverified (its last lookup failed) and says the check is queued; a covered answer verifies it for that day.
     expect($doc->fresh()->verification_summary['verified_at'])->toBeNull()
-        ->and($doc->fresh()->verification_summary['tip'])->toContain('EWCCV lookup failed: recaptcha failed ui · checked 09/10/2026 · EWCCV check as of '.now()->format('m/d/Y').' queued, waiting for a browser session');
+        ->and($doc->fresh()->verification_summary['tip'])->toContain('EWCCV lookup failed: recaptcha failed ui · checked 09/10/26 · EWCCV check as of '.now()->format('m/d/Y').' queued, waiting for a browser session');
     EwccvCoverageCheck::first()->update(['status' => 'covered', 'employer_name' => 'M POWER SOLUTION COMPANY', 'policy_number' => '6JUBA4211404-25', 'checked_at' => now()]);
     $summary = $doc->fresh()->verification_summary;
     expect($summary['verified_at'])->toBe(now()->format('m/d/Y'))
-        ->and($summary['tip'])->toContain('EWCCV: covered on '.now()->format('m/d/Y').' (M POWER SOLUTION COMPANY, policy 6JUBA4211404-25) · checked '.now()->format('m/d/Y'))
+        ->and($summary['tip'])->toContain('EWCCV: covered on '.now()->format('m/d/Y').' (M POWER SOLUTION COMPANY, policy 6JUBA4211404-25) · checked '.now()->format('m/d/y'))
         ->and(\App\Livewire\VendorDocs\AuditShow::verificationCell($doc->fresh()))->toBe('WC verified '.now()->format('m/d/Y').' (EWCCV)');
 
     // The command accepts a check for a day the policy covered even after it expired (a retroactive check).

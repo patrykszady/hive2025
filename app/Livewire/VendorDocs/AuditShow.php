@@ -152,6 +152,45 @@ class AuditShow extends Component
     }
 
     /**
+     * The policies EWCCV did not find, with what it was asked and what it
+     * listed instead — the ones to question before the auditor does.
+     *
+     * @return list<array{vendor: string, vendor_id: int, number: string, term: string, as_of: string, reason: string, searched: list<string>, candidates: list<string>}>
+     */
+    #[Computed]
+    public function not_found_policies(): array
+    {
+        $rows = [];
+        foreach ($this->vendors_grouped_checks as $group) {
+            if (! ($group['vendor'] instanceof Vendor)) {
+                continue;
+            }
+            foreach ($group['applicable_docs'] ?? [] as $doc) {
+                $check = $doc->audit_check ?? null;
+                if (! ($check instanceof EwccvCoverageCheck) || $check->status !== EwccvCoverageCheck::STATUS_NOT_FOUND) {
+                    continue;
+                }
+                $rows[] = [
+                    'vendor' => (string) $group['vendor']->business_name,
+                    'vendor_id' => (int) $group['vendor']->id,
+                    'number' => (string) $doc->number,
+                    'term' => $doc->effective_date->format('m/d/Y').' – '.$doc->expiration_date->format('m/d/Y'),
+                    'as_of' => $check->coverage_date->format('m/d/Y'),
+                    'reason' => str_replace('_', ' ', (string) ($check->reason ?: 'no results')),
+                    'searched' => collect((array) $check->searched)
+                        ->map(fn ($s) => is_array($s) && filled($s['term'] ?? null) ? sprintf('%s "%s" → %s', $s['type'] ?? 'name', $s['term'], filled($s['reason'] ?? null) ? str_replace('_', ' ', (string) $s['reason']) : (($s['count'] ?? 0).' result(s)')) : null)
+                        ->filter()->values()->all(),
+                    'candidates' => collect((array) $check->candidates)
+                        ->map(fn ($c) => is_array($c) && filled($c['employerName'] ?? null) ? $c['employerName'].(filled($c['policyNumber'] ?? null) ? ' (policy '.$c['policyNumber'].')' : '') : null)
+                        ->filter()->values()->all(),
+                ];
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
      * Ask EWCCV again for every sub still without an answer as of the
      * coverage date (a failed attempt is put back); the checks wait for a
      * browser session when none is at hand.

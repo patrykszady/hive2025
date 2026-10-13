@@ -111,7 +111,7 @@ class VendorDoc extends Model
 
             return [
                 'tracking' => true,
-                'tip' => sprintf('EWCCV: covered on %s (%s, policy %s) · checked %s', $covered, $check->employer_name ?: 'listed', $check->policy_number ?: '?', $check->checked_at?->format('m/d/Y') ?? '?'),
+                'tip' => sprintf('EWCCV: covered on %s (%s, policy %s) · checked %s', $covered, $check->employer_name ?: 'listed', $check->policy_number ?: '?', $check->checked_at?->format('m/d/y') ?? '?'),
                 'verified_at' => $covered,
                 'alert' => false,
             ];
@@ -141,12 +141,22 @@ class VendorDoc extends Model
             default => 'EWCCV: '.$state['status'],
         };
 
-        $checked = ! empty($state['checked_at'])
-            ? \Carbon\Carbon::parse($state['checked_at'])->format('m/d/Y')
-            : null;
+        $checkedAt = ! empty($state['checked_at']) ? \Carbon\Carbon::parse($state['checked_at']) : null;
+        $checked = $checkedAt?->format('m/d/Y');
 
-        if ($checked) {
-            $tip .= ' · checked '.$checked;
+        // What the Verified column shows is the day EWCCV confirmed coverage
+        // FOR: a tracking confirmation speaks for the day it ran, a coverage
+        // check for its own date; the later of the two wins. "Checked" is
+        // when we asked, and lives in the tooltip.
+        $verifiedFor = $state['status'] === 'tracking' ? $checkedAt?->copy()->startOfDay() : null;
+        $coveredCheck = $state['status'] === 'tracking' ? $this->latestCoveredCheck() : null;
+        if ($coveredCheck && ($verifiedFor === null || $coveredCheck->coverage_date->gt($verifiedFor))) {
+            $verifiedFor = $coveredCheck->coverage_date->copy();
+            $tip = 'EWCCV: covered on '.$verifiedFor->format('m/d/Y').' · '.$tip;
+        }
+
+        if ($checkedAt) {
+            $tip .= ' · checked '.$checkedAt->format('m/d/y');
         }
         $tip .= $queued;
 
@@ -155,7 +165,7 @@ class VendorDoc extends Model
             'tip' => $tip,
             // The policy counts as verified only when EWCCV matched it and
             // tracking is on — a failed lookup's checked_at is not verification.
-            'verified_at' => $state['status'] === 'tracking' ? $checked : null,
+            'verified_at' => $state['status'] === 'tracking' ? $verifiedFor?->format('m/d/Y') : null,
             // EWCCV reported the coverage gone: the column goes red, not amber.
             'alert' => $state['status'] === 'cancelled',
         ];
@@ -262,6 +272,7 @@ class VendorDoc extends Model
         $checked = ! empty($state['checked_at'])
             ? \Carbon\Carbon::parse($state['checked_at'])->format('m/d/Y')
             : null;
+        $checkedShort = ! empty($state['checked_at']) ? \Carbon\Carbon::parse($state['checked_at'])->format('m/d/y') : null;
 
         $compliant = (bool) ($state['compliant'] ?? false);
 
@@ -274,8 +285,8 @@ class VendorDoc extends Model
             $tip .= ' (expires in '.$state['expiring_in_days'].' days)';
         }
 
-        if ($checked) {
-            $tip .= ' · checked '.$checked;
+        if ($checkedShort) {
+            $tip .= ' · checked '.$checkedShort;
         }
 
         return [
@@ -323,6 +334,8 @@ class VendorDoc extends Model
         return [
             'verified' => $verified,
             'verified_at' => $verifiedAt,
+            // m/d/y for the card's narrow Verified column.
+            'verified_at_short' => $verifiedAt ? \Carbon\Carbon::createFromFormat('m/d/Y', $verifiedAt)->format('m/d/y') : null,
             'tip' => collect($parts)->pluck('tip')->implode(' · '),
             'sources' => collect($parts)->pluck('name')->all(),
             'alert' => (bool) collect($parts)->contains(fn (array $p) => ! empty($p['alert'])),
