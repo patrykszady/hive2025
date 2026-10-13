@@ -327,7 +327,7 @@ it('the vendor docs card opens a review log of every EWCCV attempt from the Veri
     \App\Models\EwccvLookupLog::create([
         'vendor_id' => $f['sub']->id, 'vendor_doc_id' => $f['doc']->id, 'belongs_to_vendor_id' => $f['gc']->id, 'kind' => 'tracking',
         'outcome' => 'no_match', 'reason' => 'no_match', 'our_policy_number' => 'WC-KOT-1', 'run_at' => now()->subHour(),
-        'searched' => [['type' => 'employer', 'term' => 'Kot Construction', 'count' => 0], ['type' => 'employer', 'term' => 'Kot', 'count' => 2]],
+        'searched' => [['type' => 'employer', 'term' => 'Kot Construction', 'count' => 0, 'reason' => 'http_500'], ['type' => 'employer', 'term' => 'Kot', 'count' => 2]],
         'candidates' => [['employerName' => 'KOT CONSTRUCTION INC', 'policyNumber' => 'WC9', 'score' => 0.5]],
     ]);
 
@@ -338,6 +338,7 @@ it('the vendor docs card opens a review log of every EWCCV attempt from the Veri
         ->assertSee('EWCCV lookups')
         ->assertSee('results, none matched: no match')
         ->assertSee('Policy on file: WC-KOT-1')
+        ->assertSee('employer "Kot Construction" → http 500')
         ->assertSee('employer "Kot" → 2 result(s)')
         ->assertSee('KOT CONSTRUCTION INC · policy WC9 · score 0.50');
 });

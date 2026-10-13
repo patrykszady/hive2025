@@ -92,7 +92,7 @@ class EwccvLookupLog extends Model
     {
         return collect((array) $this->searched)
             ->map(fn ($s) => is_array($s) && filled($s['term'] ?? null)
-                ? sprintf('%s "%s" → %s', $s['type'] ?? 'name', $s['term'], isset($s['count']) ? $s['count'].' result(s)' : str_replace('_', ' ', (string) ($s['reason'] ?? '?')))
+                ? sprintf('%s "%s" → %s', $s['type'] ?? 'name', $s['term'], filled($s['reason'] ?? null) ? str_replace('_', ' ', (string) $s['reason']) : (($s['count'] ?? 0).' result(s)'))
                 : null)
             ->filter()
             ->values()

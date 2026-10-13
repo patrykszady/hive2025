@@ -38,6 +38,12 @@ const http = require('http');
 const { spawn } = require('child_process');
 const { nameVariants, addressVariants, pickMatch } = require('./ewccv-matching.cjs');
 
+// Fallback searches fired back-to-back came back http_500 from EWCCV on
+// 2026-10-13 (every one of Kot's four); a pause between them, like the one
+// between vendors, is cheap. The body of a refused search is logged so the
+// reason can be read instead of guessed.
+const FALLBACK_PAUSE_MS = 2500;
+
 const useRebrowser = process.env.EWCCV_USE_REBROWSER !== '0';
 let puppeteer;
 if (useRebrowser) {
@@ -2521,8 +2527,9 @@ async function requestLoginEmail(page, email) {
                         for (const term of nameVariants(vendor.businessName)) {
                             if (fallbackCount >= maxFallback || allItems.length > 0) break;
                             fallbackCount++;
+                            if (fallbackCount > 1) await sleep(FALLBACK_PAUSE_MS + Math.random() * 1000);
                             const fbResult = await searchViaApi(page, vendor, 'employer', { businessName: term });
-                            log(`    Fallback employer "${term}": ${fbResult.ok ? fbResult.count + ' result(s)' : fbResult.reason}`);
+                            log(`    Fallback employer "${term}": ${fbResult.ok ? fbResult.count + ' result(s)' : fbResult.reason}${!fbResult.ok && fbResult.body ? ' — ' + String(fbResult.body).replace(/\s+/g, ' ').slice(0, 160) : ''}`);
                             searched.push({ type: 'employer', term, count: fbResult.ok ? fbResult.count : 0, reason: fbResult.ok ? undefined : fbResult.reason });
 
                             if (fbResult.status === 401) {
@@ -2545,8 +2552,9 @@ async function requestLoginEmail(page, email) {
                             for (const term of addressVariants(vendor.address)) {
                                 if (fallbackCount >= maxFallback || allItems.length > 0) break;
                                 fallbackCount++;
+                                if (fallbackCount > 1) await sleep(FALLBACK_PAUSE_MS + Math.random() * 1000);
                                 const fbResult = await searchViaApi(page, vendor, 'address', { address: term });
-                                log(`    Fallback address "${term}": ${fbResult.ok ? fbResult.count + ' result(s)' : fbResult.reason}`);
+                                log(`    Fallback address "${term}": ${fbResult.ok ? fbResult.count + ' result(s)' : fbResult.reason}${!fbResult.ok && fbResult.body ? ' — ' + String(fbResult.body).replace(/\s+/g, ' ').slice(0, 160) : ''}`);
                                 searched.push({ type: 'address', term, count: fbResult.ok ? fbResult.count : 0, reason: fbResult.ok ? undefined : fbResult.reason });
 
                                 if (fbResult.status === 401) {
@@ -2633,6 +2641,7 @@ async function requestLoginEmail(page, email) {
                         matchedName: picked.matchedName,
                         matchedPolicy: picked.matchedPolicy,
                         verifyOnly: true,
+                        candidates: picked.candidates,
                         coverageDate: vendor.coverageDate || null,
                         policyNumber: picked.matchedPolicy,
                         employerName: picked.matchedName,
@@ -2675,6 +2684,7 @@ async function requestLoginEmail(page, email) {
                         matchedName: picked.matchedName,
                         matchedPolicy: picked.matchedPolicy,
                         score: picked.score,
+                        candidates: picked.candidates,
                         tracked: trackResult.tracked,
                         alreadyTracking: trackResult.alreadyTracking || false,
                         confirmation: trackResult.confirmation || null,

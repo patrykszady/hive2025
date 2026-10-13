@@ -206,13 +206,13 @@ class ScrapeEwccvTracking extends Command
         foreach ($results['success'] ?? [] as $s) {
             $record($s, [
                 'status' => \App\Models\EwccvCoverageCheck::STATUS_COVERED,
+                'candidates' => array_slice((array) ($s['candidates'] ?? []), 0, 5),
                 'policy_number' => $s['policyNumber'] ?? $s['matchedPolicy'] ?? null,
                 'employer_name' => $s['employerName'] ?? $s['matchedName'] ?? null,
                 'match_type' => $s['matchType'] ?? null,
                 'reason' => null,
                 'details' => is_array($s['details'] ?? null) ? $s['details'] : null,
                 'searched' => array_slice((array) ($s['searched'] ?? []), 0, 8),
-                'candidates' => null,
             ]);
         }
         foreach (array_merge($results['failed'] ?? [], $results['skipped'] ?? []) as $f) {
