@@ -417,10 +417,8 @@ class ScrapeEwccvTracking extends Command
         // One scraper at a time: two runs share the Chrome profile and the
         // EWCCV session, and on 2026-10-12 an overlapping pair re-posted a
         // subscription and stamped a freshly tracked policy as failed.
-        $lock = \Illuminate\Support\Facades\Cache::lock(\App\Support\Ewccv\ScraperLock::NAME, 3600);
-        try {
-            $lock->block((int) config('services.ewccv.lock_wait_seconds', 1500));
-        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+        $lock = new \App\Support\Ewccv\ScraperLock;
+        if (! $lock->acquire((int) config('services.ewccv.lock_wait_seconds', 1500))) {
             $this->error('Another EWCCV run is in progress — try again when it finishes.');
 
             return self::FAILURE;

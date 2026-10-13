@@ -256,8 +256,8 @@ it('a hand-off runs the pending coverage checks and the tracking lookups in one 
         ->toContain("'--vendor-id=7' '--check={$a->id}:2025-12-31' '--check={$b->id}:2025-12-31'");
 
     // While a run is on, nothing starts: the next hand-off covers the rest.
-    $held = \Illuminate\Support\Facades\Cache::lock(\App\Support\Ewccv\ScraperLock::NAME, 60);
-    expect($held->get())->toBeTrue();
+    $held = new \App\Support\Ewccv\ScraperLock;
+    expect($held->acquire())->toBeTrue();
     $idle = $this->mock(ScrapeLauncher::class);
     $idle->shouldReceive('launch')->never();
     (new RunPendingEwccvLookups)->handle($idle);
@@ -383,8 +383,8 @@ it('refuses a credential handed over before, takes a new one even when marked re
         ->assertOk()
         ->assertJson(['pending' => 1, 'running' => false, 'session' => 'none']);
 
-    $held = \Illuminate\Support\Facades\Cache::lock(\App\Support\Ewccv\ScraperLock::NAME, 60);
-    expect($held->get())->toBeTrue();
+    $held = new \App\Support\Ewccv\ScraperLock;
+    expect($held->acquire())->toBeTrue();
     $this->withHeader('Authorization', 'Bearer bridge-secret')->getJson('/api/ewccv/pending')->assertJson(['running' => true]);
     // A hand-off during a run is stored but starts nothing: the dispatch
     // flag is only set when a run is actually queued.

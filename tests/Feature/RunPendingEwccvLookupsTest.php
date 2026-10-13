@@ -158,8 +158,8 @@ it('leaves captcha solvers out of the scraper unless forced on', function () {
 it('never runs two scrapers at once: a second run waits, then gives up with a message', function () {
     config(['services.ewccv.lock_wait_seconds' => 0]);
     wcDoc(1);
-    $held = \Illuminate\Support\Facades\Cache::lock('ewccv:scraper', 60);
-    expect($held->get())->toBeTrue();
+    $held = new \App\Support\Ewccv\ScraperLock;
+    expect($held->acquire())->toBeTrue();
 
     $this->artisan('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test'])
         ->expectsOutputToContain('Another EWCCV run is in progress')
