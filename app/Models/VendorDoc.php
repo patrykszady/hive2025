@@ -103,6 +103,20 @@ class VendorDoc extends Model
 
         $state = $this->options['ewccv'] ?? null;
 
+        // A coverage check EWCCV answered for a day inside this policy's term
+        // (two days before expiration, an audit's end date) verifies the
+        // policy when tracking does not: it says EWCCV listed it in force.
+        if ((! is_array($state) || ($state['status'] ?? null) !== 'tracking') && ($check = $this->latestCoveredCheck())) {
+            $covered = $check->coverage_date->format('m/d/Y');
+
+            return [
+                'tracking' => true,
+                'tip' => sprintf('EWCCV: covered on %s (%s, policy %s) · checked %s', $covered, $check->employer_name ?: 'listed', $check->policy_number ?: '?', $check->checked_at?->format('m/d/Y') ?? '?'),
+                'verified_at' => $covered,
+                'alert' => false,
+            ];
+        }
+
         if (! is_array($state) || empty($state['status'])) {
             return null;
         }
@@ -140,6 +154,25 @@ class VendorDoc extends Model
             // EWCCV reported the coverage gone: the column goes red, not amber.
             'alert' => $state['status'] === 'cancelled',
         ];
+    }
+
+    /**
+     * The latest coverage check EWCCV answered "covered" for a day inside
+     * this policy's term, if any.
+     */
+    public function latestCoveredCheck(): ?EwccvCoverageCheck
+    {
+        if (! $this->vendor_id || ! $this->effective_date || ! $this->expiration_date) {
+            return null;
+        }
+
+        return EwccvCoverageCheck::query()
+            ->where('vendor_id', $this->vendor_id)
+            ->where('status', EwccvCoverageCheck::STATUS_COVERED)
+            ->whereDate('coverage_date', '>=', $this->effective_date)
+            ->whereDate('coverage_date', '<=', $this->expiration_date)
+            ->orderByDesc('coverage_date')
+            ->first();
     }
 
     /**

@@ -507,3 +507,45 @@ it('tracks a policy from a record EWCCV returned before, without a search or a b
     $this->artisan('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--vendor-id' => [$vendor->id], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test'])->assertExitCode(0);
     expect($config['vendors'][0])->not->toHaveKey('knownRecord');
 });
+
+it('queues a coverage check two days before a workers comp doc expires, and a covered answer becomes its Verified date', function () {
+    $soon = Vendor::factory()->create(['business_name' => 'M Power Solution Company']);
+    $later = Vendor::factory()->create();
+    $expired = Vendor::factory()->create();
+    $mk = fn (Vendor $v, string $number, string $expires) => VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $v->id, 'belongs_to_vendor_id' => 1, 'number' => $number, 'doc_filename' => $number.'.pdf',
+        'effective_date' => Carbon\Carbon::parse($expires)->subYear()->toDateString(), 'expiration_date' => $expires,
+        'options' => ['ewccv' => ['status' => 'failed', 'reason' => 'recaptcha_failed_ui', 'checked_at' => '2026-09-10T16:43:14+00:00']],
+    ]));
+    $doc = $mk($soon, '6-JUB-A421140-4-25', now()->addDays(2)->toDateString());
+    $mk($later, 'WC-LATER', now()->addDays(20)->toDateString());
+    $mk($expired, 'WC-GONE', now()->subDay()->toDateString());
+
+    Queue::fake();
+    $this->artisan('ewccv:expiring-checks', ['--belongs-to-vendor-id' => 1])
+        ->expectsOutputToContain('queued: M Power Solution Company — 6-JUB-A421140-4-25 expires '.now()->addDays(2)->format('m/d/Y').', check as of '.now()->format('m/d/Y'))
+        ->expectsOutputToContain('Expiring workers comp docs: 1; coverage checks queued: 1.')
+        ->assertExitCode(0);
+    expect(EwccvCoverageCheck::pluck('vendor_id')->all())->toBe([$soon->id])
+        ->and(EwccvCoverageCheck::first()->coverage_date->toDateString())->toBe(now()->toDateString());
+
+    // Running again queues nothing new.
+    $this->artisan('ewccv:expiring-checks', ['--belongs-to-vendor-id' => 1])->expectsOutputToContain('coverage checks queued: 0.');
+
+    // Before the answer the doc is unverified (its last lookup failed); a covered answer verifies it for that day.
+    expect($doc->fresh()->verification_summary['verified_at'])->toBeNull();
+    EwccvCoverageCheck::first()->update(['status' => 'covered', 'employer_name' => 'M POWER SOLUTION COMPANY', 'policy_number' => '6JUBA4211404-25', 'checked_at' => now()]);
+    $summary = $doc->fresh()->verification_summary;
+    expect($summary['verified_at'])->toBe(now()->format('m/d/Y'))
+        ->and($summary['tip'])->toContain('EWCCV: covered on '.now()->format('m/d/Y').' (M POWER SOLUTION COMPANY, policy 6JUBA4211404-25) · checked '.now()->format('m/d/Y'))
+        ->and(\App\Livewire\VendorDocs\AuditShow::verificationCell($doc->fresh()))->toBe('WC verified '.now()->format('m/d/Y').' (EWCCV)');
+
+    // The command accepts a check for a day the policy covered even after it expired (a retroactive check).
+    $expiredDoc = VendorDoc::withoutGlobalScopes()->where('number', 'WC-GONE')->first();
+    EwccvCoverageCheck::request($expired->id, 1, now()->subDays(3)->toDateString());
+    Process::fake(['*' => Process::result(json_encode(['success' => [], 'failed' => [['key' => $expired->id.'@'.now()->subDays(3)->toDateString(), 'vendorId' => $expired->id, 'businessName' => 'x', 'reason' => 'no_results', 'searched' => []]], 'skipped' => []]))]);
+    $this->artisan('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--check' => [$expired->id.':'.now()->subDays(3)->toDateString()], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test'])
+        ->expectsOutputToContain('Plus 1 coverage check(s)')
+        ->assertExitCode(0);
+    expect(EwccvCoverageCheck::where('vendor_id', $expired->id)->first())->toMatchArray(['status' => 'not_found', 'reason' => 'no_results']);
+});

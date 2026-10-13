@@ -419,6 +419,17 @@ Schedule::job(new DispatchIncompleteReceiptImageScrapesJob)
 // mailbox (live.com now forwards EWCCV's mail), and new policies are searched
 // by RunPendingEwccvLookups the moment the bridge extension hands over a
 // browser session — the only credential EWCCV's search accepts from here.
+// Two days before a workers comp certificate expires, ask EWCCV whether the
+// policy is still in force that day (the answer becomes the Verified date).
+Schedule::command('ewccv:expiring-checks --belongs-to-vendor-id=1')->runInBackground()
+    ->dailyAt('06:00')
+    ->timezone('America/Chicago')
+    ->name('ewccv-expiring-checks')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/ewccv-scraper.log'));
+
 Schedule::command('ewccv:sync-subscriptions --belongs-to-vendor-id=1')->runInBackground()
     ->dailyAt('06:30')
     ->timezone('America/Chicago')

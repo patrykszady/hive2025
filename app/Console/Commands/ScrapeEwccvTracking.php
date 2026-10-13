@@ -95,8 +95,11 @@ class ScrapeEwccvTracking extends Command
 
         return $vendors
             ->filter(function (\App\Models\Vendor $vendor) use ($docs, $today, $coverageDate, $tenantId) {
+                // A policy on file for the day asked about (a pre-expiry check,
+                // an audit's end date) or for today.
                 $active = collect($docs->get($vendor->id) ?? [])->contains(fn (VendorDoc $doc) => $doc->effective_date && $doc->expiration_date
-                    && $doc->effective_date->lte($today) && $doc->expiration_date->gte($today));
+                    && (($doc->effective_date->lte($today) && $doc->expiration_date->gte($today))
+                        || ($doc->effective_date->lte($coverageDate) && $doc->expiration_date->gte($coverageDate))));
                 if (! $active) {
                     $this->line("    • {$vendor->business_name} (ID: {$vendor->id}) — no workers comp policy active today, not searched");
                     \App\Models\EwccvCoverageCheck::updateOrCreate(
@@ -113,6 +116,7 @@ class ScrapeEwccvTracking extends Command
                     && $doc->effective_date->lte($coverageDate) && $doc->expiration_date->gte($coverageDate));
                 $activeNow = $vendorDocs->first(fn (VendorDoc $doc) => $doc->effective_date && $doc->expiration_date
                     && $doc->effective_date->lte($today) && $doc->expiration_date->gte($today));
+                $activeNow ??= $inForce;
 
                 return [
                     'key'          => $vendor->id.'@'.$coverageDate->toDateString(),
