@@ -131,7 +131,7 @@ class SyncEwccvSubscriptions extends Command
         $unmatched = [];
 
         foreach ($subscriptions as $sub) {
-            $doc = $docs->first(fn (VendorDoc $d) => $this->policiesMatch($d->number, $sub['policyNumber'] ?? null));
+            $doc = $docs->first(fn (VendorDoc $d) => $this->docMatches($d, $sub['policyNumber'] ?? null));
 
             if (! $doc) {
                 $unmatched[] = ($sub['employerInformation']['employer'] ?? '?').' ('.($sub['policyNumber'] ?? '?').')';
@@ -147,6 +147,7 @@ class SyncEwccvSubscriptions extends Command
             }
 
             $options = $doc->options ?? [];
+            $previous = (array) ($options['ewccv'] ?? []);
             $options['ewccv'] = [
                 'status' => 'tracking',
                 'source' => 'subscription-sync',
@@ -155,7 +156,11 @@ class SyncEwccvSubscriptions extends Command
                 'state_code' => $sub['stateCode'] ?? null,
                 'tracking_since' => $sub['createDate'] ?? null,
                 'checked_at' => now()->toIso8601String(),
-            ];
+                // What EWCCV lists the policy as, kept across stamps: it is how
+                // a doc whose certificate carries another number stays matched.
+                'matched_policy' => $previous['matched_policy'] ?? ($sub['policyNumber'] ?? null),
+                'matched_name' => $previous['matched_name'] ?? ($sub['employerInformation']['employer'] ?? null),
+            ] + array_intersect_key($previous, array_flip(['match_type', 'ewccv_details', 'notice', 'notice_message_ids', 'searched', 'candidates']));
             $doc->options = $options;
             // saveQuietly: VendorDocObserver re-queues an EWCCV lookup whenever
             // a doc changes, and recording a lookup's own result must not loop.
@@ -175,7 +180,7 @@ class SyncEwccvSubscriptions extends Command
 
         // Which of our policies EWCCV is NOT watching — the actual gap to close.
         $untracked = $docs->filter(function (VendorDoc $d) use ($subscriptions) {
-            return ! $subscriptions->contains(fn ($s) => $this->policiesMatch($d->number, $s['policyNumber'] ?? null));
+            return ! $subscriptions->contains(fn ($s) => $this->docMatches($d, $s['policyNumber'] ?? null));
         });
 
         if ($untracked->isNotEmpty()) {
@@ -228,6 +233,18 @@ class SyncEwccvSubscriptions extends Command
      * carrier feed ("WC5-39S-342438-046" vs "WC539S342438046"), so compare on
      * alphanumerics only.
      */
+    /**
+     * The certificate's number, or the policy number EWCCV matched the doc
+     * to: a certificate can carry a number EWCCV never lists (Smartech's
+     * LM certificate says 121562826064403998, EWCCV says WC533SB2784N016).
+     */
+    private function docMatches(VendorDoc $doc, ?string $theirs): bool
+    {
+        $matched = $doc->options['ewccv']['matched_policy'] ?? null;
+
+        return $this->policiesMatch($doc->number, $theirs) || (filled($matched) && $this->policiesMatch((string) $matched, $theirs));
+    }
+
     /**
      * Letters and digits only, and either side may carry a prefix the other
      * lacks: EWCCV lists Sereno's "100134391" as "AFWCP100134391".

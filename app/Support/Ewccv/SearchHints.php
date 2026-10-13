@@ -24,7 +24,18 @@ class SearchHints
         $raw = json_decode(json_encode($vendor->options ?? []), true);
         $hints = is_array($raw[self::KEY] ?? null) ? $raw[self::KEY] : [];
 
+        $known = is_array($hints['known_record'] ?? null) && filled($hints['known_record']['writtenPolicyId'] ?? null)
+            ? [
+                'writtenPolicyId' => (string) $hints['known_record']['writtenPolicyId'],
+                'policyNumber' => (string) ($hints['known_record']['policyNumber'] ?? ''),
+                'employerName' => (string) ($hints['known_record']['employerName'] ?? ''),
+                'fein' => (string) ($hints['known_record']['fein'] ?? ''),
+                'for_policy_number' => filled($hints['known_record']['for_policy_number'] ?? null) ? (string) $hints['known_record']['for_policy_number'] : null,
+            ]
+            : null;
+
         return [
+            'known_record' => $known,
             'names' => array_values(array_filter(array_map('strval', (array) ($hints['names'] ?? [])))),
             'addresses' => array_values(array_filter(array_map(
                 fn ($a) => is_array($a) && filled($a['address'] ?? null)
@@ -37,7 +48,7 @@ class SearchHints
     }
 
     /**
-     * @param  array{names?: list<string>, addresses?: list<array{address: string, city?: ?string, zip?: ?string}>, fein?: ?string}  $hints
+     * @param  array{names?: list<string>, addresses?: list<array{address: string, city?: ?string, zip?: ?string}>, fein?: ?string, known_record?: ?array<string, mixed>}  $hints
      */
     public static function save(Vendor $vendor, array $hints): void
     {
@@ -47,6 +58,7 @@ class SearchHints
             'names' => array_values(array_unique(array_filter([...$current['names'], ...array_map('strval', (array) ($hints['names'] ?? []))]))),
             'addresses' => array_values(array_unique(array_filter([...$current['addresses'], ...(array) ($hints['addresses'] ?? [])]), SORT_REGULAR)),
             'fein' => filled($hints['fein'] ?? null) ? (string) $hints['fein'] : $current['fein'],
+            'known_record' => array_key_exists('known_record', $hints) ? $hints['known_record'] : $current['known_record'],
         ];
         $options[self::KEY] = $merged;
         $vendor->options = (object) $options;

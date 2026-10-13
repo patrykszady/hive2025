@@ -2471,6 +2471,50 @@ async function requestLoginEmail(page, email) {
             }
             log(`═══ Vendor ${i + 1}/${vendors.length}: ${vendor.businessName} (ID: ${vendor.id}) ═══`);
 
+            // A record EWCCV returned before (ewccv:track-known): subscribe to it
+            // outright. The subscription endpoints take the login alone, so this
+            // needs neither a search nor a browser credential — the way to track
+            // a policy a search as of today no longer lists (Smartech, 2026-10-13).
+            if (vendor.knownRecord && !(config.verifyOnly || vendor.verifyOnly)) {
+                const rec = vendor.knownRecord;
+                const item = {
+                    writtenPolicyId: String(rec.writtenPolicyId || ''),
+                    policyNumber: rec.policyNumber || '',
+                    employerName: rec.employerName || '',
+                    fein: rec.fein || '',
+                };
+                try {
+                    const statesList = await page.evaluate(() => window.__EWCCV_REDUX_STORE__?.getState()?.coverageStates?.statesList || []).catch(() => []);
+                    const stateCode = rec.stateCode || resolveStateCode(vendor.state, statesList) || '';
+                    const meta = {
+                        stateCode,
+                        stateName: STATE_NAMES[(vendor.state || '').toUpperCase()] || '',
+                        coverageDate: vendor.coverageDate || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+                        searchType: 'employer',
+                        searchTerm: item.employerName,
+                    };
+                    log(`    Known EWCCV record: ${item.employerName} (policy ${item.policyNumber}, id ${item.writtenPolicyId}) — subscribing without a search`);
+                    if (await navigateToDetails(page, item)) await interceptRedirects(page);
+                    const trackResult = await enableTracking(page, vendor, item, meta);
+                    if (trackResult.tracked || trackResult.alreadyTracking) {
+                        results.success.push({
+                            vendorId: vendor.id, businessName: vendor.businessName, matchType: 'known_record',
+                            matchedName: item.employerName, matchedPolicy: item.policyNumber, score: 1, candidates: [],
+                            details: scalarFields(item), tracked: trackResult.tracked, alreadyTracking: trackResult.alreadyTracking || false,
+                            confirmation: trackResult.confirmation || null, subscriptionId: trackResult.subscriptionId || null, searched: [],
+                        });
+                        log(`  ✓ Done: tracked=${trackResult.tracked}, already=${trackResult.alreadyTracking || false}`);
+                    } else {
+                        results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: trackResult.reason || 'tracking_failed', searched: [] });
+                        log(`  ✗ Tracking failed: ${trackResult.reason || 'unknown'}`);
+                    }
+                } catch (err) {
+                    log(`  ERROR: ${err.message}`);
+                    results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: err.message, searched: [] });
+                }
+                continue;
+            }
+
             if (!vendor.state || !vendor.address) {
                 log('  SKIPPED: Missing state or address');
                 results.skipped.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'missing_address' });

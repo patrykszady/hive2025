@@ -40,11 +40,20 @@ class ScrapeEwccvTracking extends Command
      *
      * @return array{aliases: list<string>, altAddresses: list<array<string, mixed>>, fein: ?string}
      */
-    protected static function hintFields(\App\Models\Vendor $vendor): array
+    protected static function hintFields(\App\Models\Vendor $vendor, ?string $docNumber = null): array
     {
         $hints = \App\Support\Ewccv\SearchHints::for($vendor);
+        $fields = ['aliases' => $hints['names'], 'altAddresses' => $hints['addresses'], 'fein' => $hints['fein']];
 
-        return ['aliases' => $hints['names'], 'altAddresses' => $hints['addresses'], 'fein' => $hints['fein']];
+        // A record EWCCV returned before stands for one certificate: the one
+        // on file when it was recorded. A newer certificate gets a search.
+        $known = $hints['known_record'];
+        $norm = fn (?string $v) => strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) $v));
+        if ($known && $docNumber !== null && ($known['for_policy_number'] === null || $norm($known['for_policy_number']) === $norm($docNumber))) {
+            $fields['knownRecord'] = $known;
+        }
+
+        return $fields;
     }
 
     /** The coverage date every search carries: the option, else yesterday. */
@@ -356,7 +365,7 @@ class ScrapeEwccvTracking extends Command
                     'zip'          => $vendor->zip_code,
                     'policyNumber' => $doc->number,
                     'coverageDate' => $coverageDate->format('m/d/Y'),
-                ] + self::hintFields($vendor);
+                ] + self::hintFields($vendor, (string) $doc->number);
             })->filter()->values()->toArray();
 
             $this->info("Found {$vendorDocs->count()} active WC policies across " . count($vendors) . ' vendor(s)');

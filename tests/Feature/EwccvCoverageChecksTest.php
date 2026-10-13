@@ -435,6 +435,7 @@ it('search hints: names, addresses and the FEIN ride along to the scraper, a loo
     Storage::disk('local')->delete(BridgedSession::FILE);
 
     expect(\App\Support\Ewccv\SearchHints::for($vendor->fresh()))->toBe([
+        'known_record' => null,
         'names' => ['Smartech Inc', 'Smart Tech Electric'],
         'addresses' => [['address' => '3548 Grandmore Ave', 'city' => 'Gurnee', 'zip' => '60031']],
         'fein' => null,
@@ -468,4 +469,47 @@ it('search hints: names, addresses and the FEIN ride along to the scraper, a loo
         ->and(EwccvCoverageCheck::where('vendor_id', $vendor->id)->first())->toMatchArray(['status' => 'covered', 'employer_name' => 'SMART TECH ELECTRIC INC']);
 
     $this->artisan('ewccv:hints', ['vendor' => $vendor->id, '--show' => true])->expectsOutputToContain('"fein": "36-1234567"')->assertExitCode(0);
+});
+
+it('tracks a policy from a record EWCCV returned before, without a search or a browser credential', function () {
+    $vendor = Vendor::factory()->create(['state' => 'IL', 'address' => '102 Brook Rd', 'business_name' => 'Smartech Electric, Inc']);
+    $doc = VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $vendor->id, 'belongs_to_vendor_id' => 1, 'number' => '121562826064403998',
+        'doc_filename' => 's.pdf', 'effective_date' => now()->subMonths(7)->toDateString(), 'expiration_date' => now()->addMonths(4)->toDateString(),
+        'options' => ['ewccv' => ['status' => 'failed', 'reason' => 'search_unavailable']],
+    ]));
+
+    $launcher = $this->mock(ScrapeLauncher::class);
+    $launcher->shouldReceive('launch')->once()->with([$vendor->id], 1)->andReturn(777);
+    $this->artisan('ewccv:track-known', ['vendor' => $vendor->id, '--written-policy-id' => '102756218', '--policy' => 'WC533SB2784N016', '--employer' => 'SMARTECH ELECTRIC INC'])
+        ->expectsOutputToContain('Known EWCCV record saved for Smartech Electric, Inc: SMARTECH ELECTRIC INC, policy WC533SB2784N016 (id 102756218); 1 doc(s) queued.')
+        ->expectsOutputToContain('Subscribing now (detached run, pid 777); no browser credential needed.')
+        ->assertExitCode(0);
+
+    expect(\App\Support\Ewccv\SearchHints::for($vendor->fresh())['known_record'])->toBe([
+        'writtenPolicyId' => '102756218', 'policyNumber' => 'WC533SB2784N016', 'employerName' => 'SMARTECH ELECTRIC INC', 'fein' => '', 'for_policy_number' => '121562826064403998',
+    ])
+        ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'pending', 'reason' => 'track_known_record']);
+
+    // The run carries the record for that certificate, and stamps the doc from the subscription it made.
+    $config = null;
+    Process::fake(function ($process) use (&$config, $vendor) {
+        $file = preg_match('/(\/\S*ewccv_cfg_\S+)/', $process->command, $m) ? $m[1] : null;
+        $config = $file && is_file($file) ? json_decode(file_get_contents($file), true) : null;
+
+        return Process::result(json_encode(['success' => [[
+            'key' => (string) $vendor->id, 'vendorId' => $vendor->id, 'businessName' => 'Smartech Electric, Inc', 'matchType' => 'known_record', 'score' => 1,
+            'matchedName' => 'SMARTECH ELECTRIC INC', 'matchedPolicy' => 'WC533SB2784N016', 'tracked' => true, 'alreadyTracking' => false, 'subscriptionId' => 55,
+            'details' => ['writtenPolicyId' => '102756218', 'policyNumber' => 'WC533SB2784N016', 'employerName' => 'SMARTECH ELECTRIC INC', 'fein' => ''],
+        ]], 'failed' => [], 'skipped' => []]));
+    });
+    $this->artisan('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--vendor-id' => [$vendor->id], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test'])->assertExitCode(0);
+
+    expect($config['vendors'][0]['knownRecord'])->toMatchArray(['writtenPolicyId' => '102756218', 'policyNumber' => 'WC533SB2784N016'])
+        ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'tracking', 'match_type' => 'known_record', 'matched_policy' => 'WC533SB2784N016', 'subscription_id' => 55]);
+
+    // A new certificate with another number gets a search, not the old record.
+    $doc->forceFill(['number' => 'WC-RENEWED-2027'])->saveQuietly();
+    $this->artisan('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--vendor-id' => [$vendor->id], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test'])->assertExitCode(0);
+    expect($config['vendors'][0])->not->toHaveKey('knownRecord');
 });
