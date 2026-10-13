@@ -156,6 +156,26 @@ class ScrapeEwccvTracking extends Command
                         : ((string) ($entry['reason'] ?? '') === 'no_match' ? 'no_match' : 'failed'),
                 };
 
+                $searchedText = collect(array_slice((array) ($entry['searched'] ?? []), 0, 12))
+                    ->map(fn ($x) => is_array($x) && filled($x['term'] ?? null) ? sprintf('%s "%s" → %s', $x['type'] ?? 'name', $x['term'], filled($x['reason'] ?? null) ? $x['reason'] : (($x['count'] ?? 0).' result(s)')) : null)
+                    ->filter()->implode('; ');
+                $candidatesText = collect(array_slice((array) ($entry['candidates'] ?? []), 0, 10))
+                    ->map(fn ($c) => is_array($c) && filled($c['employerName'] ?? null) ? sprintf('%s (policy %s, score %s)', $c['employerName'], $c['policyNumber'] ?? '—', isset($c['score']) ? number_format((float) $c['score'], 2) : '—') : null)
+                    ->filter()->implode('; ');
+                Log::channel('ewccv')->info(sprintf(
+                    '%s | vendor %d %s | %s%s | policy on file %s | matched %s%s | searched: %s | EWCCV listed: %s',
+                    $isCheck ? 'coverage check as of '.explode('@', $key, 2)[1] : 'tracking lookup',
+                    $vendorId,
+                    (string) ($entry['businessName'] ?? ''),
+                    $outcome,
+                    $list === 'success' ? '' : ' ('.(string) ($entry['reason'] ?? 'unknown').')',
+                    (string) ($doc?->number ?? '—'),
+                    (string) ($entry['matchedName'] ?? $entry['employerName'] ?? '—'),
+                    filled($entry['matchedPolicy'] ?? $entry['policyNumber'] ?? null) ? ', policy '.($entry['matchedPolicy'] ?? $entry['policyNumber']).' via '.($entry['matchType'] ?? '?') : '',
+                    $searchedText ?: '—',
+                    $candidatesText ?: '—',
+                ), ['details' => $entry['details'] ?? null, 'session_age_minutes' => $sessionAge]);
+
                 \App\Models\EwccvLookupLog::create([
                     'vendor_id' => $vendorId,
                     'vendor_doc_id' => $doc?->id,

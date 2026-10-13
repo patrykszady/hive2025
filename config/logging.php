@@ -162,6 +162,15 @@ return [
             'days' => 30,
         ],
 
+        // Every EWCCV lookup attempt (what was searched, what EWCCV listed,
+        // how it compared, the outcome), for review in /log-viewer.
+        'ewccv' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/ewccv.log'),
+            'level' => 'debug',
+            'days' => 90,
+        ],
+
         'receipt_processing' => [
             'driver' => 'daily',
             'path' => storage_path('logs/receipt_processing.log'),

@@ -295,6 +295,8 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
         ]));
     });
 
+    $logFile = sys_get_temp_dir().'/ewccv-log-'.uniqid().'.log';
+    config(['logging.channels.ewccv' => ['driver' => 'single', 'path' => $logFile]]);
     $this->artisan('ewccv:scrape-tracking', [
         '--belongs-to-vendor-id' => 1, '--vendor-id' => [$both->id],
         '--check' => [$both->id.':2025-12-31', $only->id.':2025-12-31'], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test',
@@ -313,7 +315,12 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
         ->and(EwccvCoverageCheck::pendingByDate(1))->toBe([])
         ->and(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$only->id]);
 
-    // Every attempt is in the review log, with the doc it concerned.
+    // Every attempt is a line in the ewccv log channel (read in /log-viewer)…
+    $written = file_get_contents($logFile);
+    expect($written)->toContain('tracking lookup | vendor '.$both->id.' Both Ways Inc | tracking | policy on file WC-BOTH | matched BOTH WAYS INC, policy WC-BOTH via policyNumber')
+        ->toContain('coverage check as of 2025-12-31 | vendor '.$only->id.' Check Only Inc | not_found (no_results) | policy on file — | matched — | searched: employer "Check Only" → 0 result(s)');
+
+    // …and a row in the review table, with the doc it concerned.
     $logs = \App\Models\EwccvLookupLog::orderBy('id')->get();
     expect($logs)->toHaveCount(3)
         ->and($logs[0])->toMatchArray(['vendor_id' => $both->id, 'vendor_doc_id' => $doc->id, 'kind' => 'tracking', 'outcome' => 'tracking', 'matched_name' => 'BOTH WAYS INC', 'matched_policy' => 'WC-BOTH', 'our_policy_number' => 'WC-BOTH'])
@@ -324,27 +331,14 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
         ->and($logs[2]->searchLines())->toBe(['employer "Check Only" → 0 result(s)']);
 });
 
-it('the vendor docs card opens a review log of every EWCCV attempt from the Verified column', function () {
+it('the vendor docs page shows the verification only; the attempts are reviewed in /log-viewer, not there', function () {
     $f = auditFixture();
-    \App\Models\EwccvLookupLog::create([
-        'vendor_id' => $f['sub']->id, 'vendor_doc_id' => $f['doc']->id, 'belongs_to_vendor_id' => $f['gc']->id, 'kind' => 'tracking',
-        'outcome' => 'no_match', 'reason' => 'no_match', 'our_policy_number' => 'WC-KOT-1', 'run_at' => now()->subHour(),
-        'searched' => [['type' => 'employer', 'term' => 'Kot Construction', 'count' => 0, 'reason' => 'http_500'], ['type' => 'employer', 'term' => 'Kot', 'count' => 2]],
-        'candidates' => [['employerName' => 'KOT CONSTRUCTION INC', 'policyNumber' => 'WC9', 'score' => 0.5]],
-        'details' => ['employerName' => 'KOT CONSTRUCTION INC', 'fein' => '98-7654321'],
-    ]);
 
     \Livewire\Livewire::withoutLazyLoading();
     \Livewire\Livewire::test(\App\Livewire\VendorDocs\VendorDocsCard::class, ['vendor' => $f['sub']])
-        ->assertSee('click for the lookup log')
-        ->call('showEwccvLog', $f['doc']->id)
-        ->assertSee('EWCCV lookups')
-        ->assertSee('results, none matched: no match')
-        ->assertSee('Policy on file: WC-KOT-1')
-        ->assertSee('employer "Kot Construction" → http 500')
-        ->assertSee('employer "Kot" → 2 result(s)')
-        ->assertSee('KOT CONSTRUCTION INC · policy WC9 · score 0.50')
-        ->assertSee("EWCCV's record: employerName: KOT CONSTRUCTION INC · fein: 98-7654321", false);
+        ->assertSee('10/12/2026')
+        ->assertDontSee('lookup log')
+        ->assertDontSee('showEwccvLog');
 });
 
 it('refuses a credential handed over before, takes a new one even when marked reused, and tells the extension what is waiting', function () {
