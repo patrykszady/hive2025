@@ -82,6 +82,33 @@ class Check extends Model
         return $this->hasMany(LienWaiver::class);
     }
 
+    /**
+     * Give the check another date, and the expenses dated by the check (the
+     * payment rows written the day of the check) the same date. Expenses
+     * with a date of their own — a reimbursed purchase — keep it. Returns
+     * how many expenses moved.
+     */
+    public function moveDate(string $date): int
+    {
+        $old = $this->date?->toDateString();
+        $new = \Illuminate\Support\Carbon::parse($date)->toDateString();
+        if ($old === $new) {
+            return 0;
+        }
+        $this->update(['date' => $new]);
+        if ($old === null) {
+            return 0;
+        }
+
+        $ids = Expense::withoutGlobalScopes()->where('check_id', $this->id)->pluck('id')
+            ->merge($this->expensesMany()->pluck('expenses.id'))
+            ->unique();
+        $moved = Expense::withoutGlobalScopes()->whereIn('id', $ids)->whereDate('date', $old)->get();
+        $moved->each(fn (Expense $expense) => $expense->update(['date' => $new]));
+
+        return $moved->count();
+    }
+
     public function expensesMany(): BelongsToMany
     {
         return $this->belongsToMany(Expense::class, 'check_expense')->withTimestamps();

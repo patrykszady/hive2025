@@ -1037,8 +1037,15 @@ class TransactionController extends Controller
                 }
             }
             
-            // Don't assign retail vendors to transfer transactions
+            // Don't assign retail vendors to transfer transactions — but a
+            // person transfer (Zelle "NAME PRO TAXE") names its payee, and an
+            // unambiguous one gets that vendor so the vendor filter finds it.
             if ($isTransfer) {
+                $company = (int) ($bankAccounts->firstWhere('id', $transaction->bank_account_id)?->bank?->vendor_id ?? 0);
+                if ($company) {
+                    \App\Support\Transactions\TransferPayee::assign($transaction, $company);
+                }
+
                 continue;
             }
 
@@ -2141,6 +2148,38 @@ class TransactionController extends Controller
                 ->where('amount', $check->amount)
                 ->orderBy('id', 'DESC')
                 ->get();
+
+            // A paper check whose number AND amount match a charge is that
+            // check, even when the dates disagree: on 2026-10-13 "CHECK 2638"
+            // ($5,060, cleared 07/30) never met check #2638, entered in Hive
+            // as 08/17 — 18 days after the bank paid it, outside the window.
+            // A check cannot clear before it is written, so the bank's date
+            // replaces Hive's, and the expenses dated by the check move too.
+            if ($transactions->isEmpty() && $check->check_type === 'Check' && filled($check->check_number)) {
+                $byNumber = Transaction::withoutGlobalScopes()
+                    ->whereNull('deleted_at')
+                    ->whereNull('check_id')
+                    ->where('check_number', $check->check_number)
+                    ->where('amount', $check->amount)
+                    ->where(fn ($query) => $query->whereNull('plaid_merchant_description')->orWhere('plaid_merchant_description', 'NOT LIKE', '%RETURNED%'))
+                    ->when($bank_account_ids, fn ($query, $ids) => $query->whereIn('bank_account_id', $ids))
+                    ->whereBetween('transaction_date', [$check->date->copy()->subDays(365)->format('Y-m-d'), $check->date->copy()->addDays(365)->format('Y-m-d')])
+                    ->get();
+                if ($byNumber->count() === 1) {
+                    $charge = $byNumber->first();
+                    $this->attachChargeToCheck($charge, $check);
+                    if ($charge->transaction_date->lt($check->date)) {
+                        $from = $check->date->toDateString();
+                        $moved = $check->moveDate($charge->transaction_date->toDateString());
+                        Log::info('Check matched by number and amount; dated to the day it cleared', [
+                            'check_id' => $check->id, 'check_number' => $check->check_number, 'from' => $from,
+                            'to' => $charge->transaction_date->toDateString(), 'expenses_moved' => $moved, 'transaction_id' => $charge->id,
+                        ]);
+                    }
+
+                    continue;
+                }
+            }
 
             //if amount matches and is only one, that's the one
             if ($transactions->count() === 1) {

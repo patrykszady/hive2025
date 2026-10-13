@@ -14,6 +14,11 @@
                 </flux:select>
             @endif
 
+            {{-- The date stays editable when the bank has matched the check;
+                 it may then not be later than the day it cleared. Expenses
+                 dated by the check move with it. --}}
+            <flux:input wire:model="form.date" type="date" label="Date" class="mb-4" />
+
             <flux:select x-bind:disabled="transaction" label="Bank" wire:model.live="form.bank_account_id" placeholder="Choose Bank...">
                 @foreach($bank_accounts as $bank_account)
                     <flux:select.option value="{{$bank_account->id}}">{{$bank_account->getNameAndType()}}</flux:select.option>

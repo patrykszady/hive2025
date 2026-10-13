@@ -15,7 +15,7 @@ class CheckForm extends Form
 
     public ?Check $check;
 
-    #[Validate('nullable|date|before_or_equal:today|after:2017-01-01')]
+    /** Validated in rules(): the cleared-date ceiling depends on the check. */
     public $date = null;
 
     // required_without:check.bank_account_id
@@ -57,6 +57,14 @@ class CheckForm extends Form
                 Rule::exists('user_vendor', 'user_id')->where('vendor_id', $vendorId)->where('is_employed', 1),
             ],
             'vendor_id' => ['nullable', 'exists:vendors,id'],
+            // A check cannot clear before it was written: when the bank has
+            // already matched it, the date may not be later than that.
+            'date' => array_values(array_filter([
+                isset($this->check) ? 'required' : 'nullable',
+                'date',
+                'before_or_equal:'.($this->latestAllowedDate() ?? 'today'),
+                'after:2017-01-01',
+            ])),
             'check_number' => [
                 'required_if:check_type,Check',
                 'nullable',
@@ -84,6 +92,7 @@ class CheckForm extends Form
         $this->check_number = $this->check->check_number;
         $this->vendor_id = $this->check->vendor_id;
         $this->user_id = $this->check->user_id;
+        $this->date = $this->check->date?->format('Y-m-d');
 
         if ($this->check->transactions->sum('amount') == $this->check->amount) {
             $this->transaction = true;
@@ -105,6 +114,11 @@ class CheckForm extends Form
             'user_id' => $this->user_id,
         ]);
 
+        // A new date moves the expenses dated by the check with it.
+        if ($this->date) {
+            $this->check->moveDate($this->date);
+        }
+
         // Update expenses vendor when payee changes
         if ($this->vendor_id && $oldVendorId !== (int) $this->vendor_id) {
             // Direct FK expenses
@@ -122,6 +136,18 @@ class CheckForm extends Form
         }
 
         return $this->check;
+    }
+
+    /** The latest date the check may carry: the day the bank cleared it, when it has. */
+    protected function latestAllowedDate(): ?string
+    {
+        if (! isset($this->check)) {
+            return null;
+        }
+
+        return $this->check->transactions()->min('transaction_date')
+            ? \Illuminate\Support\Carbon::parse($this->check->transactions()->min('transaction_date'))->toDateString()
+            : null;
     }
 
     public function delete()
