@@ -33,6 +33,17 @@ const DEFAULTS = {
 const POLL_ALARM = 'poll-ewccv-pending';
 const POLL_MINUTES = 1;
 
+/**
+ * After a mint fails (reCAPTCHA refused the page's attempt) or Hive refuses
+ * the page's own copy as already spent, the automatic path waits this long
+ * before trying again: every attempt is another reCAPTCHA execution, and a
+ * minute-by-minute drumbeat of them only lowers the score further. A page
+ * load (a search by hand) or the button clears the wait.
+ */
+const BACKOFF_MINUTES = 10;
+let backoffUntil = 0;
+let lastRefusedToken = null;
+
 async function settings() {
     return { ...DEFAULTS, ...(await chrome.storage.sync.get(Object.keys(DEFAULTS))) };
 }
@@ -77,6 +88,7 @@ async function pushIfPending() {
     const cfg = await settings();
     if (!cfg.enabled || !cfg.token) return;
     if (!(await findEwccvTab())) return;
+    if (Date.now() < backoffUntil) return;
 
     const work = await pendingWork(cfg);
     if (!work) return;
@@ -110,6 +122,16 @@ async function push({ interactive = false } = {}) {
         const r = { ok: false, error: minted?.error || 'Could not read the EWCCV session.' };
         await setStatus(r);
         if (interactive) notify(r);
+        if (!interactive) backoffUntil = Date.now() + BACKOFF_MINUTES * 60000;
+        return r;
+    }
+
+    // The page's own copy, already refused once: sending it again changes
+    // nothing. Wait for a fresh one (a search by hand produces it).
+    if (!interactive && minted.reused && minted.accessToken === lastRefusedToken) {
+        backoffUntil = Date.now() + BACKOFF_MINUTES * 60000;
+        const r = { ok: false, error: 'EWCCV did not mint a fresh credential and the page\'s copy was already used. Do one search on ewccv.com by hand; it is picked up within a minute.' };
+        await setStatus(r);
         return r;
     }
 
@@ -139,6 +161,11 @@ async function push({ interactive = false } = {}) {
     const result = res.ok
         ? { ok: true, message: body.message || 'EWCCV session sent to Hive.' }
         : { ok: false, error: body.error || `Hive returned ${res.status}.` };
+
+    if (res.status === 409) {
+        lastRefusedToken = minted.accessToken;
+        if (!interactive) backoffUntil = Date.now() + BACKOFF_MINUTES * 60000;
+    }
 
     await setStatus(result);
     if (interactive) notify(result);
@@ -171,12 +198,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // to mint — the page is fresh and the person is right there.
 chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
     if (info.status === 'complete' && tab.url?.startsWith('https://www.ewccv.com/')) {
+        backoffUntil = 0;
         setTimeout(() => pushIfPending(), 4000);
     }
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'hive-ewccv-push-now') {
+        backoffUntil = 0;
         push({ interactive: true }).then(sendResponse);
         return true;
     }
