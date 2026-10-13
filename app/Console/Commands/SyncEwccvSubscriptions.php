@@ -166,6 +166,23 @@ class SyncEwccvSubscriptions extends Command
             // a doc changes, and recording a lookup's own result must not loop.
             $doc->saveQuietly();
             $matched++;
+
+            // Every verification is kept, not only the last: the daily
+            // confirmation that EWCCV still tracks the policy is one too.
+            \App\Models\EwccvLookupLog::create([
+                'vendor_id' => (int) $doc->vendor_id,
+                'vendor_doc_id' => $doc->id,
+                'belongs_to_vendor_id' => (int) $doc->belongs_to_vendor_id,
+                'kind' => 'subscription_sync',
+                'outcome' => 'tracking',
+                'our_policy_number' => $doc->number,
+                'matched_name' => $sub['employerInformation']['employer'] ?? null,
+                'matched_policy' => $sub['policyNumber'] ?? null,
+                'match_type' => 'subscription',
+                'details' => array_filter(['writtenPolicyId' => $sub['writtenPolicyId'] ?? null, 'policySubscriptionId' => $sub['policySubscriptionId'] ?? null, 'stateCode' => $sub['stateCode'] ?? null, 'trackingSince' => $sub['createDate'] ?? null]),
+                'run_at' => now(),
+            ]);
+            \Illuminate\Support\Facades\Log::channel('ewccv')->info(sprintf('subscription sync | vendor %d %s | tracking | policy on file %s | EWCCV lists %s, policy %s (subscription %s)', (int) $doc->vendor_id, (string) ($doc->vendor?->business_name ?? ''), (string) $doc->number, (string) ($sub['employerInformation']['employer'] ?? '?'), (string) ($sub['policyNumber'] ?? '?'), (string) ($sub['policySubscriptionId'] ?? '?')));
         }
 
         $this->newLine();

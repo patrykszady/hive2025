@@ -34,6 +34,7 @@ it('stamps what EWCCV lists and resets what it no longer lists', function () {
     // The certificate says one number, EWCCV lists the policy under another: the matched one counts.
     $byMatch = syncDoc(1, '121562826064403998', ['status' => 'tracking', 'matched_policy' => 'WC533SB2784N016', 'checked_at' => now()->subDay()->toIso8601String()]);
 
+    config(['logging.channels.ewccv' => ['driver' => 'single', 'path' => sys_get_temp_dir().'/ewccv-sync-test-'.uniqid().'.log']]);
     Process::fake(['*' => Process::result(json_encode(['ok' => true, 'user' => ['userId' => 1], 'subscriptions' => [
         ['policySubscriptionId' => 10, 'writtenPolicyId' => 102756218, 'policyNumber' => 'WC533SB2784N016', 'stateCode' => '12', 'createDate' => '2026-10-13T01:30:00.000Z', 'employerInformation' => ['employer' => 'SMARTECH ELECTRIC INC']],
         ['policySubscriptionId' => 9, 'writtenPolicyId' => 77, 'policyNumber' => 'AFWCP100134391', 'stateCode' => '12', 'createDate' => '2026-10-12T22:26:00.000Z', 'employerInformation' => ['employer' => 'SERENOS']],
@@ -50,4 +51,6 @@ it('stamps what EWCCV lists and resets what it no longer lists', function () {
         ->and($gone->fresh()->ewccv_summary['tip'])->toContain('no longer lists')
         ->and($neverTracked->fresh()->options['ewccv']['status'])->toBe('failed')
         ->and($byMatch->fresh()->options['ewccv'])->toMatchArray(['status' => 'tracking', 'matched_policy' => 'WC533SB2784N016']);
+    expect(\App\Models\EwccvLookupLog::where('kind', 'subscription_sync')->where('outcome', 'tracking')->count())->toBe(2)
+        ->and(\App\Models\EwccvLookupLog::where('vendor_doc_id', $byMatch->id)->first()->matched_policy)->toBe('WC533SB2784N016');
 });
