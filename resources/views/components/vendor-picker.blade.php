@@ -23,6 +23,21 @@
     'size' => null,
 ])
 @php
+    // The trigger is styled exactly like Flux's select button (flux:select.button):
+    // same height per size, border, shadow, placeholder colour and chevron, so the
+    // vendor picker sits in a row of flux:selects without looking different.
+    $name = $attributes->whereStartsWith('wire:model')->first();
+    $invalid = $name && isset($errors) && $errors->has($name);
+    $triggerClasses = collect([
+        'group/select-button cursor-default overflow-hidden flex items-center w-full shadow-xs',
+        'bg-white dark:bg-white/10 dark:disabled:bg-white/[7%] disabled:shadow-none',
+        match ($size) {
+            'sm' => 'h-8 py-1.5 text-sm rounded-md ps-3 pe-2',
+            'xs' => 'h-6 text-xs rounded-md ps-3 pe-2',
+            default => 'h-10 py-2 text-base sm:text-sm rounded-lg px-3',
+        },
+        $invalid ? 'border border-red-500' : 'border border-zinc-200 border-b-zinc-300/80 dark:border-white/10',
+    ])->implode(' ');
     $config = [
         'url' => route('vendors.picker-options', array_filter(['all' => $all ? 1 : null, 'project' => $projectId ?: null])),
         'extra' => array_values(array_map(fn ($option) => ['value' => (string) $option['value'], 'label' => (string) $option['label']], $extra)),
@@ -42,9 +57,11 @@
         @endif
         <div class="flex min-w-0 items-stretch gap-1">
             <flux:dropdown class="min-w-0 flex-1" position="bottom" align="start">
-                <flux:button type="button" class="w-full justify-between!" icon-trailing="chevron-down" :size="$size">
-                    <span class="truncate text-start" x-text="label || @js($placeholder)" x-bind:class="{ 'text-zinc-400 dark:text-zinc-400': !label }"></span>
-                </flux:button>
+                <button type="button" class="{{ $triggerClasses }}" @if($invalid) data-invalid @endif data-flux-select-button>
+                    <span class="min-w-0 flex-1 truncate text-start" x-text="label || @js($placeholder)"
+                          x-bind:class="label ? 'text-zinc-700 dark:text-zinc-300' : 'text-zinc-400 dark:text-zinc-400'"></span>
+                    <flux:icon.chevron-down variant="mini" class="ms-2 -me-1 shrink-0 text-zinc-400/75 group-hover/select-button:text-zinc-800 dark:text-white/60 dark:group-hover/select-button:text-white" />
+                </button>
                 <flux:popover class="w-[min(28rem,calc(100vw-2rem))] p-2!" x-on:toggle="$event.newState === 'open' && opened()">
                     <flux:input
                         x-ref="search"
