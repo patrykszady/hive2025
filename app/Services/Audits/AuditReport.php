@@ -249,7 +249,9 @@ class AuditReport
      * The vendors whose coverage the audit asks EWCCV about: paid subs that
      * are not the company itself, an employee, a retail or categorised
      * vendor, or a vendor with a professional policy for the period — and
-     * only those with a workers comp policy on file that is active today.
+     * only those with a workers comp policy on file for the checked date
+     * (the end date minus two days) or for today. A sub without a
+     * certificate for either is a document problem, not an EWCCV search.
      *
      * @return list<int>
      */
@@ -273,12 +275,16 @@ class AuditReport
             return [];
         }
 
+        $asOf = $this->coverageDate ?? today();
+
         return VendorDoc::withoutGlobalScopes()
             ->where('type', 'workers')
             ->where('belongs_to_vendor_id', $own)
             ->whereIn('vendor_id', $candidates)
-            ->whereDate('effective_date', '<=', today())
-            ->whereDate('expiration_date', '>=', today())
+            ->where(function ($query) use ($asOf) {
+                $query->where(fn ($q) => $q->whereDate('effective_date', '<=', today())->whereDate('expiration_date', '>=', today()))
+                    ->orWhere(fn ($q) => $q->whereDate('effective_date', '<=', $asOf)->whereDate('expiration_date', '>=', $asOf));
+            })
             ->pluck('vendor_id')
             ->map(fn ($id) => (int) $id)
             ->unique()

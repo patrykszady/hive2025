@@ -96,7 +96,7 @@ it('shows on every policy of the audit whether and when its coverage was verifie
         ->assertSee('WC verified 10/12/2026')
         ->assertSee('not verified')
         ->assertSee('EWCCV coverage as of 12/29/2025')
-        ->assertSee('1 waiting');
+        ->assertSee('2 waiting');
 
     expect(AuditShow::verificationCell($f['doc']))->toBe('WC verified 10/12/2026 (EWCCV)');
 });
@@ -197,7 +197,7 @@ it('a general audit, with nothing to ask EWCCV, is finished at once', function (
     Queue::assertPushed(\App\Jobs\SendAuditWhenReady::class);
 });
 
-it('leaves the company itself, employees, retail and categorised vendors, and subs without a policy active today out of the coverage checks', function () {
+it('leaves the company itself, employees, retail and categorised vendors, and subs with no policy for the checked date or today out of the coverage checks', function () {
     $f = auditFixture();
     $retail = Vendor::factory()->create(['business_type' => 'Retail']);
     $f['gc']->vendors()->attach($retail->id);
@@ -208,15 +208,24 @@ it('leaves the company itself, employees, retail and categorised vendors, and su
     foreach ([$noDoc, $expired] as $i => $vendor) {
         Check::create(['check_type' => 'Check', 'check_number' => '101'.$i, 'date' => '2025-04-01', 'bank_account_id' => $f['bank']->id, 'vendor_id' => $vendor->id, 'belongs_to_vendor_id' => $f['gc']->id, 'created_by_user_id' => $f['user']->id, 'amount' => 75]);
     }
+    // A certificate that covered the checked date (12/29/2025) but has expired since still counts for THIS audit.
     VendorDoc::withoutEvents(fn () => VendorDoc::create([
         'type' => 'workers', 'vendor_id' => $expired->id, 'belongs_to_vendor_id' => $f['gc']->id, 'number' => 'WC-OLD',
         'doc_filename' => 'old.pdf', 'effective_date' => '2025-01-01', 'expiration_date' => '2025-12-31',
+    ]));
+    $gone = Vendor::factory()->create(['business_type' => 'Sub']);
+    $f['gc']->vendors()->attach($gone->id);
+    Check::create(['check_type' => 'Check', 'check_number' => '1020', 'date' => '2025-02-01', 'bank_account_id' => $f['bank']->id, 'vendor_id' => $gone->id, 'belongs_to_vendor_id' => $f['gc']->id, 'created_by_user_id' => $f['user']->id, 'amount' => 75]);
+    VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $gone->id, 'belongs_to_vendor_id' => $f['gc']->id, 'number' => 'WC-GONE-EARLY',
+        'doc_filename' => 'gone.pdf', 'effective_date' => '2024-06-01', 'expiration_date' => '2025-06-01',
     ]));
     Check::create(['check_type' => 'Check', 'check_number' => '1004', 'date' => '2025-03-02', 'bank_account_id' => $f['bank']->id, 'vendor_id' => $f['gc']->id, 'belongs_to_vendor_id' => $f['gc']->id, 'created_by_user_id' => $f['user']->id, 'amount' => 50]);
 
     auditPage($f)->call('verify_coverage_on_ewccv');
 
-    expect(EwccvCoverageCheck::pluck('vendor_id')->all())->toBe([$f['sub']->id]);
+    // The sub active today and the one whose certificate covered 12/29/2025; not the one that expired in mid-2025.
+    expect(EwccvCoverageCheck::pluck('vendor_id')->sort()->values()->all())->toBe(collect([$f['sub']->id, $expired->id])->sort()->values()->all());
 });
 
 it('a verify-only run records covered, not found, or still waiting, and subscribes to nothing', function () {
