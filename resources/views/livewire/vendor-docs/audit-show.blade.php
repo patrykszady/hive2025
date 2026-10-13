@@ -62,7 +62,7 @@
                 @if($this->auditRequest)
                     <div class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
                         @if($this->auditRequest->status === 'sent')
-                            Package emailed to {{ $this->auditRequest->emailed_to }} on {{ $this->auditRequest->emailed_at?->timezone(config('app.timezone'))->format('m/d/Y H:i') }}.
+                            Package emailed to {{ $this->auditRequest->emailed_to }} on {{ $this->auditRequest->emailed_at?->timezone(auth()->user()->vendor->timezone ?: 'America/Chicago')->format('m/d/Y g:i A T') }}.
                         @elseif($this->auditRequest->status === 'ready')
                             Every answer is in; the downloads are open.
                         @elseif($this->auditRequest->status === 'failed')

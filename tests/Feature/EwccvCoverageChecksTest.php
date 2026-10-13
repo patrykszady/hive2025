@@ -192,7 +192,8 @@ it('the audit package waits for the EWCCV answers, then is built and emailed wit
         ->and(Storage::disk('local')->get($audit->pdf_path))->toBe('%PDF-1.4 merged')
         ->and(Storage::disk('local')->exists($audit->xlsx_path))->toBeTrue()
         ->and(auditPage($f)->get('canDownload'))->toBeTrue();
-    auditPage($f)->assertSee('Package emailed to '.$f['user']->email);
+    // Shown in the company's timezone, not UTC.
+    auditPage($f)->assertSee('Package emailed to '.$f['user']->email.' on '.$audit->emailed_at->timezone('America/Chicago')->format('m/d/Y g:i A T'));
 
     // The email's links are signed: they work without signing in, and not at all when tampered with.
     $pdfLink = \Illuminate\Support\Facades\URL::signedRoute('vendor_docs.audit.package', ['audit' => $audit->id, 'file' => 'pdf']);
