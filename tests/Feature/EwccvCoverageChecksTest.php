@@ -8,6 +8,7 @@ use App\Models\EwccvCoverageCheck;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
+use App\Services\Audits\AuditReport;
 use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\ScrapeLauncher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -92,9 +93,10 @@ it('shows on every policy of the audit whether and when its coverage was verifie
 
     // The expired policy is shown (not verified) but is not an EWCCV check:
     // only policies active today are verified.
+    // In an audit each policy carries EWCCV's answer for its own day: both are queued as of 12/29/2025.
     auditPage($f)
-        ->assertSee('WC verified 10/12/2026')
-        ->assertSee('not verified')
+        ->assertSee('waiting for EWCCV as of 12/29/2025')
+        ->assertDontSee('WC verified 10/12/2026')
         ->assertSee('EWCCV coverage as of 12/29/2025')
         ->assertSee('2 waiting');
 
@@ -107,8 +109,7 @@ it('opening an audit asks EWCCV for coverage as of the end date minus two days f
 
     // Opening the audit creates its request and queues the check; no browser session: it waits, the page says so.
     auditPage($f)
-        ->assertSee('EWCCV: waiting')
-        ->assertSee('Waiting for a browser session')
+        ->assertSee('waiting for EWCCV as of 12/29/2025')
         ->assertSee('1 waiting')
         ->assertSee('Downloads open when EWCCV has answered for every sub');
     Queue::assertNotPushed(RunPendingEwccvLookups::class);
@@ -118,6 +119,7 @@ it('opening an audit asks EWCCV for coverage as of the end date minus two days f
         ->and($audit->status)->toBe('pending')
         ->and($audit->coverage_date->toDateString())->toBe('2025-12-29')
         ->and($audit->vendors_checked)->toBe([$f['sub']->id])
+        ->and($audit->checks)->toBe([['vendor_id' => $f['sub']->id, 'doc_id' => $f['doc']->id, 'coverage_date' => '2025-12-29']])
         ->and($audit->requested_by_user_id)->toBe($f['user']->id);
 
     $check = EwccvCoverageCheck::where('vendor_id', $f['sub']->id)->first();
@@ -136,10 +138,11 @@ it('opening an audit asks EWCCV for coverage as of the end date minus two days f
 
     // The answers.
     $check->update(['status' => 'covered', 'policy_number' => 'WC-KOT-1', 'employer_name' => 'KOT CONSTRUCTION INC', 'checked_at' => now()]);
-    auditPage($f)->assertSee('EWCCV: covered')->assertSee('Covered on 12/29/2025: KOT CONSTRUCTION INC, policy WC-KOT-1')->assertSee('1 covered');
+    auditPage($f)->assertSee('WC verified 12/29/2025')->assertSee('1 covered');
+    expect(AuditReport::auditVerificationCell(auditPage($f)->get('vendors_grouped_checks')->first()['applicable_docs'][0]))->toBe('WC verified 12/29/2025 (EWCCV)');
 
     $check->update(['status' => 'not_found', 'reason' => 'no_match']);
-    auditPage($f)->assertSee('EWCCV: not found')->assertSee('Not found on EWCCV for 12/29/2025 (no match)')->assertSee('1 not found');
+    auditPage($f)->assertSee('not found on EWCCV for 12/29/2025')->assertSee('1 not found');
 
     // A different end date is a different question, asked on first sight.
     expect(auditPage($f, '2025-06-30')->get('coverage_check_counts')['pending'])->toBe(1)
@@ -181,7 +184,7 @@ it('the audit package waits for the EWCCV answers, then is built and emailed wit
             && count($mail->attachments()) === 2
             && str_contains($mail->envelope()->subject, 'Audit package ready')
             && str_contains($rendered, 'Covered: 1')
-            && str_contains($rendered, route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'pdf']))
+            && str_contains($rendered, '/audit/'.$audit->id.'/package/pdf?signature=')
             && str_contains($rendered, 'attached to this email as well');
     });
     expect($audit->status)->toBe('sent')
@@ -191,13 +194,13 @@ it('the audit package waits for the EWCCV answers, then is built and emailed wit
         ->and(auditPage($f)->get('canDownload'))->toBeTrue();
     auditPage($f)->assertSee('Package emailed to '.$f['user']->email);
 
-    // The email's links serve the stored package to an admin of the company, and nobody else.
-    $this->get(route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'pdf']))->assertOk()->assertDownload(basename($audit->pdf_path));
-    $this->get(route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'xlsx']))->assertOk();
-    $other = Vendor::factory()->create(['business_type' => 'GC']);
-    $stranger = User::query()->create(['first_name' => 'Other', 'last_name' => 'Admin', 'email' => 'other-'.uniqid().'@example.test', 'cell_phone' => '224'.rand(1000000, 9999999), 'primary_vendor_id' => $other->id]);
-    $stranger->vendors()->attach($other->id, ['role_id' => 1]);
-    $this->actingAs($stranger)->get(route('vendor_docs.audit.download', ['audit' => $audit->id, 'file' => 'pdf']))->assertForbidden();
+    // The email's links are signed: they work without signing in, and not at all when tampered with.
+    $pdfLink = \Illuminate\Support\Facades\URL::signedRoute('vendor_docs.audit.package', ['audit' => $audit->id, 'file' => 'pdf']);
+    auth()->logout();
+    $this->get($pdfLink)->assertOk()->assertDownload(basename($audit->pdf_path));
+    $this->get(\Illuminate\Support\Facades\URL::signedRoute('vendor_docs.audit.package', ['audit' => $audit->id, 'file' => 'xlsx']))->assertOk();
+    $this->get(str_replace('signature=', 'signature=0', $pdfLink))->assertForbidden();
+    $this->get('/audit/'.$audit->id.'/package/pdf')->assertForbidden();
 });
 
 it('a package too large to attach is emailed as links only', function () {
@@ -254,8 +257,11 @@ it('leaves the company itself, employees, retail and categorised vendors, and su
 
     auditPage($f)->call('verify_coverage_on_ewccv');
 
-    // The sub active today and the one whose certificate covered 12/29/2025; not the one that expired in mid-2025.
-    expect(EwccvCoverageCheck::pluck('vendor_id')->sort()->values()->all())->toBe(collect([$f['sub']->id, $expired->id])->sort()->values()->all());
+    // Each policy for its own day: the two that cover 12/29/2025 as of that day, the one that ended
+    // 06/01/2025 as of its last day, 05/31/2025. Retail, the company and employees never.
+    $rows = EwccvCoverageCheck::orderBy('vendor_id')->get()->map(fn ($c) => $c->vendor_id.'@'.$c->coverage_date->toDateString())->all();
+    expect($rows)->toEqualCanonicalizing([$f['sub']->id.'@2025-12-29', $expired->id.'@2025-12-29', $gone->id.'@2025-05-31']);
+    expect(EwccvCoverageCheck::where('vendor_id', $retail->id)->exists())->toBeFalse();
 });
 
 it('a verify-only run records covered, not found, or still waiting, and subscribes to nothing', function () {

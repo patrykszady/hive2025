@@ -11,6 +11,7 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 /**
  * The audit package, sent when EWCCV has answered for every sub: download
@@ -45,8 +46,8 @@ class AuditReadyMail extends Mailable
     public function content(): Content
     {
         return new Content(markdown: 'emails.audit_ready', with: [
-            'pdfUrl' => $this->audit->pdf_path ? route('vendor_docs.audit.download', ['audit' => $this->audit->id, 'file' => 'pdf']) : null,
-            'xlsxUrl' => $this->audit->xlsx_path ? route('vendor_docs.audit.download', ['audit' => $this->audit->id, 'file' => 'xlsx']) : null,
+            'pdfUrl' => $this->audit->pdf_path ? URL::signedRoute('vendor_docs.audit.package', ['audit' => $this->audit->id, 'file' => 'pdf']) : null,
+            'xlsxUrl' => $this->audit->xlsx_path ? URL::signedRoute('vendor_docs.audit.package', ['audit' => $this->audit->id, 'file' => 'xlsx']) : null,
         ]);
     }
 

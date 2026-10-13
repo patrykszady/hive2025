@@ -46,7 +46,30 @@ class AuditReport
         return Vendor::withoutGlobalScopes()->find($this->companyVendorId);
     }
 
-    /** EWCCV's answers as of the coverage date, by vendor id. */
+    /**
+     * The day EWCCV is asked about for one policy of the audit: the audit's
+     * checked date when the policy covers it, else the policy's own last day
+     * (the day before it expires), so a policy that ended inside the period
+     * is confirmed for its own term.
+     */
+    public function coverageDateForDoc(VendorDoc $doc): ?Carbon
+    {
+        if ($this->auditType !== 'workers' || ! $this->coverageDate || ! $doc->effective_date || ! $doc->expiration_date) {
+            return null;
+        }
+        $lastDay = $doc->expiration_date->copy()->subDay()->startOfDay();
+        $date = $this->coverageDate->copy();
+        if ($date->gt($lastDay)) {
+            $date = $lastDay;
+        }
+        if ($date->lt($doc->effective_date)) {
+            $date = $doc->effective_date->copy()->startOfDay();
+        }
+
+        return $date;
+    }
+
+    /** EWCCV's answers for this audit's policies, keyed "vendor@Y-m-d". */
     public function coverageChecks(): Collection
     {
         if ($this->auditType !== 'workers' || ! $this->coverageDate) {
@@ -55,9 +78,10 @@ class AuditReport
 
         return EwccvCoverageCheck::query()
             ->where('belongs_to_vendor_id', $this->companyVendorId)
-            ->whereDate('coverage_date', $this->coverageDate)
+            ->whereDate('coverage_date', '>=', $this->startDate)
+            ->whereDate('coverage_date', '<=', $this->coverageDate)
             ->get()
-            ->keyBy('vendor_id');
+            ->keyBy(fn (EwccvCoverageCheck $check) => $check->vendor_id.'@'.$check->coverage_date->toDateString());
     }
 
     /**
@@ -218,7 +242,6 @@ class AuditReport
 
             if ($vendor instanceof Vendor) {
                 $vendorDocs = collect($docsByVendor->get($vendor->id) ?? []);
-                $group['coverage_check'] = $coverageChecks->get($vendor->id);
 
                 $professional = $vendorDocs->where('type', 'professional')->sortByDesc('effective_date')->first();
                 if ($professional && $professional->effective_date->lte($auditEnd) && $professional->expiration_date->gte($auditEnd)) {
@@ -236,6 +259,12 @@ class AuditReport
                         ->filter(fn ($doc) => $doc->effective_date?->format('Y-m-d') <= $end && $doc->expiration_date?->format('Y-m-d') >= $start)
                         ->sortByDesc('expiration_date');
                     if ($applicable->isNotEmpty()) {
+                        // EWCCV's answer for each policy, for its own date.
+                        foreach ($applicable as $doc) {
+                            $date = $this->coverageDateForDoc($doc);
+                            $doc->audit_check_date = $date;
+                            $doc->audit_check = $date ? $coverageChecks->get($vendor->id.'@'.$date->toDateString()) : null;
+                        }
                         $group['applicable_docs'] = $applicable->values();
                     }
                 }
@@ -275,16 +304,14 @@ class AuditReport
             return [];
         }
 
-        $asOf = $this->coverageDate ?? today();
-
+        // Every sub with a workers comp policy on file for any part of the
+        // period: each policy is checked for its own day.
         return VendorDoc::withoutGlobalScopes()
             ->where('type', 'workers')
             ->where('belongs_to_vendor_id', $own)
             ->whereIn('vendor_id', $candidates)
-            ->where(function ($query) use ($asOf) {
-                $query->where(fn ($q) => $q->whereDate('effective_date', '<=', today())->whereDate('expiration_date', '>=', today()))
-                    ->orWhere(fn ($q) => $q->whereDate('effective_date', '<=', $asOf)->whereDate('expiration_date', '>=', $asOf));
-            })
+            ->whereDate('effective_date', '<=', $this->endDate)
+            ->whereDate('expiration_date', '>=', $this->startDate)
             ->pluck('vendor_id')
             ->map(fn ($id) => (int) $id)
             ->unique()
@@ -292,14 +319,43 @@ class AuditReport
             ->all();
     }
 
+    /**
+     * The checks this audit asks EWCCV for: one per policy of a vendor that
+     * needs coverage, each for its own date.
+     *
+     * @return list<array{vendor_id: int, doc_id: int, coverage_date: string}>
+     */
+    public function checksNeeded(): array
+    {
+        $vendorIds = $this->vendorsNeedingCoverage();
+        if ($vendorIds === []) {
+            return [];
+        }
+        $needed = [];
+        foreach ($this->groups() as $group) {
+            $vendor = $group['vendor'];
+            if (! ($vendor instanceof Vendor) || ! in_array((int) $vendor->id, $vendorIds, true)) {
+                continue;
+            }
+            foreach ($group['applicable_docs'] ?? [] as $doc) {
+                $date = $this->coverageDateForDoc($doc);
+                if ($date) {
+                    $needed[] = ['vendor_id' => (int) $vendor->id, 'doc_id' => (int) $doc->id, 'coverage_date' => $date->toDateString()];
+                }
+            }
+        }
+
+        return $needed;
+    }
+
     /** @return array{covered: int, not_found: int, pending: int, unchecked: int, total: int} */
     public function coverageCounts(): array
     {
-        $needing = $this->vendorsNeedingCoverage();
+        $needed = $this->checksNeeded();
         $checks = $this->coverageChecks();
-        $counts = ['covered' => 0, 'not_found' => 0, 'pending' => 0, 'unchecked' => 0, 'total' => count($needing)];
-        foreach ($needing as $vendorId) {
-            $key = match ($checks->get($vendorId)?->status) {
+        $counts = ['covered' => 0, 'not_found' => 0, 'pending' => 0, 'unchecked' => 0, 'total' => count($needed)];
+        foreach ($needed as $need) {
+            $key = match ($checks->get($need['vendor_id'].'@'.$need['coverage_date'])?->status) {
                 EwccvCoverageCheck::STATUS_COVERED => 'covered',
                 EwccvCoverageCheck::STATUS_NOT_FOUND => 'not_found',
                 EwccvCoverageCheck::STATUS_PENDING => 'pending',
@@ -366,6 +422,29 @@ class AuditReport
         return $merger->merge($files['sources'], $this->filenameBase());
     }
 
+    /**
+     * The Coverage column of a policy row in an audit: EWCCV's answer for
+     * the policy's own day ("WC verified 08/24/2026 (EWCCV)"), else what the
+     * vendor docs page knows.
+     */
+    public static function auditVerificationCell(VendorDoc $doc): string
+    {
+        $check = $doc->audit_check ?? null;
+        $date = $doc->audit_check_date ?? null;
+        if ($check instanceof EwccvCoverageCheck) {
+            return match ($check->status) {
+                EwccvCoverageCheck::STATUS_COVERED => 'WC verified '.$check->coverage_date->format('m/d/Y').' (EWCCV)',
+                EwccvCoverageCheck::STATUS_NOT_FOUND => 'Not found on EWCCV for '.$check->coverage_date->format('m/d/Y'),
+                default => 'Waiting for EWCCV as of '.$check->coverage_date->format('m/d/Y'),
+            };
+        }
+        if ($date) {
+            return 'Not checked yet as of '.$date->format('m/d/Y');
+        }
+
+        return (string) (self::verificationCell($doc) ?? '');
+    }
+
     /** The Coverage column of a policy row in the export. */
     public static function verificationCell(VendorDoc $doc): ?string
     {
@@ -423,13 +502,10 @@ class AuditReport
 
             if (isset($group['applicable_docs']) && $group['applicable_docs']->count() > 0) {
                 foreach ($group['applicable_docs'] as $doc) {
-                    $writer->addRow(Row::fromValues([$doc->number.' ('.$doc->effective_date->format('m/d/Y').'–'.$doc->expiration_date->format('m/d/Y').')', null, null, null, self::verificationCell($doc)]));
+                    $cell = self::auditVerificationCell($doc);
+                    $style = str_starts_with($cell, 'WC verified') ? $coverageGreen : (str_starts_with($cell, 'Not found') ? $coverageRed : $coverageOrange);
+                    $writer->addRow(Row::fromValuesWithStyles([$doc->number.' ('.$doc->effective_date->format('m/d/Y').'–'.$doc->expiration_date->format('m/d/Y').')', null, null, null, $cell], null, [4 => $style]));
                 }
-                $writer->addRow(Row::fromValues(['', '', '', '', '']));
-            }
-            if (! empty($group['coverage_check'])) {
-                $check = $group['coverage_check'];
-                $writer->addRow(Row::fromValuesWithStyles([$check->label(), null, null, null, $check->badge()], null, [4 => match ($check->tone()) { 'green' => $coverageGreen, 'red' => $coverageRed, default => $coverageOrange }]));
                 $writer->addRow(Row::fromValues(['', '', '', '', '']));
             }
 

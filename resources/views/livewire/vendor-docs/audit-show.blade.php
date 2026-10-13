@@ -43,9 +43,9 @@
                     <div class="text-sm">
                         <span class="font-medium">EWCCV coverage as of {{ $this->coverageDate?->format('m/d/Y') }} ({{ \App\Models\AuditRequest::coverageDateIsClamped($end_date) ? 'the period has not ended; checked as of today' : 'two days before the period ends' }}):</span>
                         @if($this->coverage_check_counts['total'] === 0)
-                            <span class="text-zinc-500">no paid sub has a workers comp policy active today</span>
+                            <span class="text-zinc-500">no paid sub has a workers comp policy on file for this period</span>
                         @elseif($this->coverage_check_counts['covered'] + $this->coverage_check_counts['not_found'] + $this->coverage_check_counts['pending'] === 0)
-                            <span class="text-zinc-500">not checked yet ({{ $this->coverage_check_counts['total'] }} subs)</span>
+                            <span class="text-zinc-500">not checked yet ({{ $this->coverage_check_counts['total'] }} policies)</span>
                         @else
                             <span class="text-emerald-700 dark:text-emerald-400">{{ $this->coverage_check_counts['covered'] }} covered</span>
                             · <span class="text-red-600 dark:text-red-400">{{ $this->coverage_check_counts['not_found'] }} not found</span>
@@ -175,38 +175,47 @@
                                         <div class="text-sm font-medium">{{ ucfirst($doc->type) }} #{{ $doc->number }}</div>
                                         <div class="text-xs text-zinc-600 dark:text-zinc-300 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                             <span>{{ $doc->effective_date->format('m/d/Y') }} – {{ $doc->expiration_date->format('m/d/Y') }}</span>
-                                            {{-- Coverage verification, as on the vendor docs card: the
-                                                 date a provider (EWCCV, TrackMyVendor) last confirmed
-                                                 the policy; a workers comp policy nobody confirmed
-                                                 says so. --}}
-                                            @if($doc->verification_summary && $doc->verification_summary['verified_at'])
+                                            {{-- EWCCV's answer for this policy's own day in the audit
+                                                 (the checked date, or the policy's last day); the vendor
+                                                 docs page's verification only when the audit has none. --}}
+                                            @if(($doc->audit_check ?? null) && $doc->audit_check->status === 'covered')
+                                                <flux:tooltip :content="$doc->audit_check->label()" position="top">
+                                                    <span class="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                                                        <flux:icon.shield-check variant="micro" class="size-3.5 shrink-0" />
+                                                        WC verified {{ $doc->audit_check->coverage_date->format('m/d/Y') }}
+                                                    </span>
+                                                </flux:tooltip>
+                                            @elseif(($doc->audit_check ?? null) && $doc->audit_check->status === 'not_found')
+                                                <flux:tooltip :content="$doc->audit_check->label()" position="top">
+                                                    <span class="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
+                                                        not found on EWCCV for {{ $doc->audit_check->coverage_date->format('m/d/Y') }}
+                                                    </span>
+                                                </flux:tooltip>
+                                            @elseif($doc->audit_check ?? null)
+                                                <flux:tooltip :content="$doc->audit_check->label()" position="top">
+                                                    <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
+                                                        waiting for EWCCV as of {{ $doc->audit_check->coverage_date->format('m/d/Y') }}
+                                                    </span>
+                                                </flux:tooltip>
+                                            @elseif($doc->audit_check_date ?? null)
+                                                <span class="inline-flex items-center gap-1 text-zinc-500">
+                                                    <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
+                                                    not checked yet as of {{ $doc->audit_check_date->format('m/d/Y') }}
+                                                </span>
+                                            @elseif($doc->verification_summary && $doc->verification_summary['verified_at'])
                                                 <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
                                                     <span class="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
                                                         <flux:icon.shield-check variant="micro" class="size-3.5 shrink-0" />
                                                         WC verified {{ $doc->verification_summary['verified_at'] }}
                                                     </span>
                                                 </flux:tooltip>
-                                            @elseif($doc->verification_summary && ! empty($doc->verification_summary['alert']))
-                                                <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
-                                                    <span class="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
-                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
-                                                        cancelled
-                                                    </span>
-                                                </flux:tooltip>
-                                            @elseif($doc->verification_summary)
-                                                <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
-                                                    <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
-                                                        not verified
-                                                    </span>
-                                                </flux:tooltip>
                                             @elseif($doc->type === 'workers')
-                                                <flux:tooltip content="EWCCV has not looked this policy up yet" position="top">
-                                                    <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                                                        <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
-                                                        not verified
-                                                    </span>
-                                                </flux:tooltip>
+                                                <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                                    <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
+                                                    not verified
+                                                </span>
                                             @endif
                                         </div>
                                     </div>
@@ -219,13 +228,6 @@
                     </div>
                 @endif
 
-                {{-- EWCCV's answer as of the audit's end date (see the Audit card). --}}
-                @if(! empty($group['coverage_check']))
-                    <div class="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-                        <flux:badge size="sm" :color="$group['coverage_check']->tone()" inset="top bottom">{{ $group['coverage_check']->badge() }}</flux:badge>
-                        <span>{{ $group['coverage_check']->label() }}</span>
-                    </div>
-                @endif
             </x-slot>
 
             <x-slot name="details">

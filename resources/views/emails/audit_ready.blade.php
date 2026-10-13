@@ -1,7 +1,7 @@
 <x-mail::message>
 # {{ $audit->label() }} is ready
 
-The audit package for **{{ $companyName }}** is on Hive: the policy certificates in one PDF and the Excel report (By Vendor and All Checks). Sign in to download.
+The audit package for **{{ $companyName }}** is on Hive: the policy certificates in one PDF and the Excel report (By Vendor and All Checks). The links below need no sign-in; this email can be forwarded as it is.
 
 @if($pdfUrl)
 <x-mail::button :url="$pdfUrl">

@@ -669,11 +669,11 @@ Route::get('t/o', [EmailTrackingController::class, 'trackOpen'])->name('email.tr
 
 // The built audit package (certificates PDF, Excel) kept on Hive; the
 // "audit ready" email links here, since a year's certificates exceed a
-// mail's size. Signed in is enough to reach it: the controller checks the
-// company and the admin role itself.
-Route::middleware('auth')->get('/audit/{audit}/download/{file}', [\App\Http\Controllers\AuditPackageController::class, 'download'])
+// mail's size. The links are signed and need no sign-in: whoever holds the
+// email (the auditor it is forwarded to) can download.
+Route::middleware('signed')->get('/audit/{audit}/package/{file}', [\App\Http\Controllers\AuditPackageController::class, 'download'])
     ->whereIn('file', ['pdf', 'xlsx'])
-    ->name('vendor_docs.audit.download');
+    ->name('vendor_docs.audit.package');
 
 Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // Registration route

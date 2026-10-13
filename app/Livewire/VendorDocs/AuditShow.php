@@ -163,14 +163,7 @@ class AuditShow extends Component
             return;
         }
 
-        $own = (int) auth()->user()->vendor->id;
-        $date = $this->coverageDate->toDateString();
-        $queued = 0;
-        foreach ($this->report->vendorsNeedingCoverage() as $vendorId) {
-            if (EwccvCoverageCheck::request($vendorId, $own, $date)) {
-                $queued++;
-            }
-        }
+        $queued = $this->auditRequest?->queueChecks() ?? 0;
         unset($this->report, $this->coverage_checks, $this->coverage_check_counts, $this->vendors_grouped_checks, $this->auditRequest, $this->canDownload);
 
         $shown = $this->coverageDate->format('m/d/Y');
