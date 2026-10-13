@@ -1727,8 +1727,10 @@ async function searchViaApi(page, vendor, searchType, overrides = {}) {
     });
     const searchBusinessName = overrides.businessName || vendor.businessName;
     const searchAddress = overrides.address || vendor.address;
+    // An alternate address carries its own city/zip; a FEIN search its number.
+    const extra = { city: overrides.city ?? vendor.city, zip: overrides.zip ?? vendor.zip, fein: overrides.fein ?? vendor.fein ?? null };
 
-    const result = await page.evaluate(async (v, covDate, sType, stateNames, bizName, addr) => {
+    const result = await page.evaluate(async (v, covDate, sType, stateNames, bizName, addr, extra) => {
         const accessToken = sessionStorage.getItem('accessToken');
         if (!accessToken) return { ok: false, reason: 'no_accessToken' };
 
@@ -1761,11 +1763,15 @@ async function searchViaApi(page, vendor, searchType, overrides = {}) {
         if (sType === 'employer') {
             const name = encodeURIComponent(bizName);
             url = `${BASE}/insureds/coverage/stateCode/${stateCode}/searchType/employer/?employerName=${name}&searchMode=contains&coverageDate=${encodeURIComponent(covDate)}`;
+        } else if (sType === 'fein') {
+            // Exact: the employer's FEIN, digits only.
+            const fein = encodeURIComponent(String(extra.fein || '').replace(/[^0-9]/g, ''));
+            url = `${BASE}/insureds/coverage/stateCode/${stateCode}/searchType/fein/?fein=${fein}&coverageDate=${encodeURIComponent(covDate)}`;
         } else {
             // Address search
             let qs = `?streetLine1=${encodeURIComponent(addr)}&coverageDate=${encodeURIComponent(covDate)}`;
-            if (v.city) qs += `&city=${encodeURIComponent(v.city)}`;
-            if (v.zip) qs += `&zipCode=${encodeURIComponent(v.zip)}`;
+            if (extra.city) qs += `&city=${encodeURIComponent(extra.city)}`;
+            if (extra.zip) qs += `&zipCode=${encodeURIComponent(extra.zip)}`;
             url = `${BASE}/insureds/coverage/stateCode/${stateCode}/searchType/address/${qs}`;
         }
 
@@ -1787,7 +1793,7 @@ async function searchViaApi(page, vendor, searchType, overrides = {}) {
         } catch (e) {
             return { ok: false, reason: 'fetch_error: ' + e.message };
         }
-    }, vendor, coverageDate, searchType, STATE_NAMES, searchBusinessName, searchAddress);
+    }, vendor, coverageDate, searchType, STATE_NAMES, searchBusinessName, searchAddress, extra);
 
     return result;
 }
@@ -2468,8 +2474,21 @@ async function requestLoginEmail(page, email) {
 
                 if (useApiSearch) {
                     // ── API-driven search (accessToken available) ─────────────
+                    // A known FEIN is exact: search it first and, when it answers,
+                    // take that answer alone.
+                    if (vendor.fein) {
+                        const feinResult = await searchViaApi(page, vendor, 'fein');
+                        log(`    FEIN search: ${feinResult.ok ? feinResult.count + ' result(s)' : feinResult.reason}${!feinResult.ok && feinResult.body ? ' — ' + String(feinResult.body).replace(/\s+/g, ' ').slice(0, 160) : ''}`);
+                        searched.push({ type: 'fein', term: String(vendor.fein), count: feinResult.ok ? feinResult.count : 0, reason: feinResult.ok ? undefined : feinResult.reason });
+                        if (feinResult.ok && feinResult.items && feinResult.items.length > 0) {
+                            allItems.push(...feinResult.items);
+                            resolvedStateCode = feinResult.stateCode || '';
+                            lastApiResult = feinResult;
+                        }
+                    }
+
                     // Search by address first
-                    const addrResult = await searchViaApi(page, vendor, 'address');
+                    const addrResult = allItems.length > 0 ? { ok: true, count: 0, items: [], stateCode: resolvedStateCode, skipped: true } : await searchViaApi(page, vendor, 'address');
                     log(`    Address search: ${addrResult.ok ? addrResult.count + ' result(s)' : addrResult.reason}`);
                     searched.push({ type: 'address', term: vendor.address, count: addrResult.ok ? addrResult.count : 0, reason: addrResult.ok ? undefined : addrResult.reason });
                     if (addrResult.ok && addrResult.items) {
@@ -2532,6 +2551,33 @@ async function requestLoginEmail(page, email) {
                     if (allItems.length === 0 && useApiSearch && !results.sessionExpired) {
                         const maxFallback = config.maxFallbackSearches ?? 4;
                         let fallbackCount = 0;
+
+                        // Hints first: the addresses and names the business has used
+                        // on earlier certificates (vendor.altAddresses, vendor.aliases),
+                        // set per vendor with `ewccv:hints`. Their own budget of six.
+                        const hints = [
+                            ...((vendor.altAddresses || []).map((a) => ({ type: 'address', term: a.address, overrides: { address: a.address, city: a.city || undefined, zip: a.zip || undefined } }))),
+                            ...((vendor.aliases || []).map((n) => ({ type: 'employer', term: n, overrides: { businessName: n } }))),
+                        ].slice(0, 6);
+                        for (const hint of hints) {
+                            if (allItems.length > 0 || results.sessionExpired) break;
+                            await sleep(FALLBACK_PAUSE_MS + Math.random() * 1000);
+                            const hr = await searchViaApi(page, vendor, hint.type, hint.overrides);
+                            log(`    Hint ${hint.type} "${hint.term}": ${hr.ok ? hr.count + ' result(s)' : hr.reason}${!hr.ok && hr.body ? ' — ' + String(hr.body).replace(/\s+/g, ' ').slice(0, 160) : ''}`);
+                            searched.push({ type: hint.type, term: hint.term, count: hr.ok ? hr.count : 0, reason: hr.ok ? undefined : hr.reason });
+                            if (hr.status === 401) {
+                                log('    accessToken expired during a hint search — ending the run');
+                                results.sessionExpired = true;
+                                results.failed.push({ vendorId: vendor.id, businessName: vendor.businessName, reason: 'session_expired', searched });
+                                break;
+                            }
+                            if (hr.ok && hr.items && hr.items.length > 0) {
+                                allItems = hr.items.slice();
+                                resolvedStateCode = hr.stateCode || resolvedStateCode;
+                                lastApiResult = hr;
+                            }
+                        }
+                        if (results.sessionExpired) continue;
 
                         for (const term of nameVariants(vendor.businessName)) {
                             if (fallbackCount >= maxFallback || allItems.length > 0) break;

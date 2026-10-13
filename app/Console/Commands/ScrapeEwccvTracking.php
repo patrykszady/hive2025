@@ -34,6 +34,19 @@ class ScrapeEwccvTracking extends Command
      */
     private string $proxySession = '';
 
+    /**
+     * The extra ways to search a vendor (ewccv:hints): names it has used,
+     * addresses it has had, its FEIN.
+     *
+     * @return array{aliases: list<string>, altAddresses: list<array<string, mixed>>, fein: ?string}
+     */
+    protected static function hintFields(\App\Models\Vendor $vendor): array
+    {
+        $hints = \App\Support\Ewccv\SearchHints::for($vendor);
+
+        return ['aliases' => $hints['names'], 'altAddresses' => $hints['addresses'], 'fein' => $hints['fein']];
+    }
+
     /** The coverage date every search carries: the option, else yesterday. */
     protected function coverageDate(): Carbon
     {
@@ -103,7 +116,7 @@ class ScrapeEwccvTracking extends Command
                     'zip'          => $vendor->zip_code,
                     'policyNumber' => ($inForce ?? $activeNow)?->number,
                     'coverageDate' => $coverageDate->format('m/d/Y'),
-                ];
+                ] + self::hintFields($vendor);
             })
             ->values()
             ->all();
@@ -343,7 +356,7 @@ class ScrapeEwccvTracking extends Command
                     'zip'          => $vendor->zip_code,
                     'policyNumber' => $doc->number,
                     'coverageDate' => $coverageDate->format('m/d/Y'),
-                ];
+                ] + self::hintFields($vendor);
             })->filter()->values()->toArray();
 
             $this->info("Found {$vendorDocs->count()} active WC policies across " . count($vendors) . ' vendor(s)');
@@ -578,6 +591,15 @@ class ScrapeEwccvTracking extends Command
             // Every attempt goes to the review log (ewccv_lookup_logs) with what
             // was searched and what EWCCV listed — the doc keeps only the last.
             $this->logAttempts($results, $vendorDocs, $tenantId, $keyOf);
+
+            // A match that came with the employer's FEIN teaches the vendor its
+            // FEIN; from then on the search is exact.
+            foreach ($results['success'] ?? [] as $s) {
+                $fein = $s['details']['fein'] ?? null;
+                if (filled($fein) && ($vendor = \App\Models\Vendor::withoutGlobalScopes()->find((int) $s['vendorId']))) {
+                    \App\Support\Ewccv\SearchHints::learnFein($vendor, (string) $fein);
+                }
+            }
 
             $recorded = $this->recordCoverageChecks($results, $allowedChecks, $tenantId, $keyOf);
             if ($recorded > 0 || $verifyOnly || $checks !== []) {

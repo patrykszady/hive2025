@@ -280,7 +280,11 @@ function pickMatch(items, vendor) {
     const scored = items.map((item) => {
         const name = item.employerName || item.name || '';
         const policy = item.policyNumber || item.writtenPolicyId || '';
-        return { item, name, policy, score: similarityScore(vendor.businessName, name) };
+        // The best score across every name the business has used (aliases from
+        // older certificates), so "Smartech Inc" on file still matches today's name.
+        const ourNames = [vendor.businessName, ...(vendor.aliases || [])].filter(Boolean);
+        const score = ourNames.length ? Math.max(...ourNames.map((n) => similarityScore(n, name))) : 0;
+        return { item, name, policy, score };
     });
 
     const candidates = scored
@@ -290,6 +294,19 @@ function pickMatch(items, vendor) {
         .map((s) => ({ employerName: s.name, policyNumber: s.policy, stateCode: s.item.stateCode, score: s.score, fields: scalarFields(s.item) }));
 
     const vendorPolicyNorm = normalizePolicy(vendor.policyNumber);
+
+    // Tier 0: the FEIN, when we know it — nothing is more exact.
+    const ourFein = String(vendor.fein || '').replace(/[^0-9]/g, '');
+    if (ourFein.length >= 9) {
+        const feinMatches = scored.filter((s) => String(s.item.fein || '').replace(/[^0-9]/g, '') === ourFein);
+        if (feinMatches.length > 0) {
+            const chosen = pickBest(feinMatches, vendorPolicyNorm);
+            return {
+                match: chosen.item, via: 'fein', score: 1,
+                matchedName: chosen.name, matchedPolicy: chosen.policy, candidates,
+            };
+        }
+    }
 
     // Tier 1: policy number containment (both sides >= 6 chars) or equality.
     if (vendorPolicyNorm) {

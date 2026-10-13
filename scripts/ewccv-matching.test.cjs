@@ -215,3 +215,26 @@ test('pickMatch: a true tie (same tier, same score) keeps the first item', () =>
     assert.equal(tiedResult.via, 'policyNumber');
     assert.equal(tiedResult.match, tiedItems[0]);
 });
+
+test('pickMatch: an alias from an older certificate scores like the current name', () => {
+    const vendor = { businessName: 'Smartech Electric, Inc', policyNumber: 'WC-NOW-123456', aliases: ['Smart Tech Electric Inc'] };
+    const items = [
+        { employerName: 'SMART TECH ELECTRIC INC', policyNumber: 'WC-NEW-999999' },
+        { employerName: 'ZOLO CARBON SMARTECH INC', policyNumber: 'WC1269001689' },
+    ];
+    const result = pickMatch(items, vendor);
+    assert.equal(result.via, 'employerName');
+    assert.equal(result.matchedName, 'SMART TECH ELECTRIC INC');
+    assert.equal(result.score, 1);
+});
+
+test('pickMatch: a known FEIN wins outright, whatever the name says', () => {
+    const vendor = { businessName: 'Smartech Electric, Inc', policyNumber: 'WC-NOW-123456', fein: '36-1234567' };
+    const items = [
+        { employerName: 'ZOLO CARBON SMARTECH INC', policyNumber: 'WC1269001689', fein: '47-0000000' },
+        { employerName: 'J DOE DBA SMART TECH', policyNumber: 'WC-NEW-999999', fein: '361234567' },
+    ];
+    const result = pickMatch(items, vendor);
+    assert.equal(result.via, 'fein');
+    assert.equal(result.matchedName, 'J DOE DBA SMART TECH');
+});

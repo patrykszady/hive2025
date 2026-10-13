@@ -412,3 +412,52 @@ it('a failed tracking lookup says what was searched and the closest employers EW
         ->toContain('closest KOT CONSTRUCTION INC (policy WC1); KOTA BUILDERS')
         ->toContain('checked 10/12/2026');
 });
+
+it('search hints: names, addresses and the FEIN ride along to the scraper, a lookup is queued, and a matched FEIN is learned', function () {
+    $vendor = Vendor::factory()->create(['state' => 'IL', 'address' => '102 Brook Rd', 'city' => 'Prospect Heights', 'zip_code' => '60070', 'business_name' => 'Smartech Electric, Inc']);
+    $doc = VendorDoc::withoutEvents(fn () => VendorDoc::create([
+        'type' => 'workers', 'vendor_id' => $vendor->id, 'belongs_to_vendor_id' => 1, 'number' => '121562826064403998',
+        'doc_filename' => 's.pdf', 'effective_date' => now()->subMonths(2)->toDateString(), 'expiration_date' => now()->addMonths(10)->toDateString(),
+        'options' => ['ewccv' => ['status' => 'failed', 'reason' => 'no_match', 'checked_at' => now()->toIso8601String()]],
+    ]));
+
+    $this->artisan('ewccv:hints', ['vendor' => $vendor->id, '--name' => ['Smartech Inc', 'Smart Tech Electric'], '--address' => ['3548 Grandmore Ave, Gurnee, IL 60031'], '--check-as-of' => '2025-06-01'])
+        ->expectsOutputToContain('Queued a fresh tracking lookup for 1 active workers comp doc(s)')
+        ->expectsOutputToContain('Queued a coverage check as of 2025-06-01')
+        ->assertExitCode(0);
+
+    expect(\App\Support\Ewccv\SearchHints::for($vendor->fresh()))->toBe([
+        'names' => ['Smartech Inc', 'Smart Tech Electric'],
+        'addresses' => [['address' => '3548 Grandmore Ave', 'city' => 'Gurnee', 'zip' => '60031']],
+        'fein' => null,
+    ])
+        ->and($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'pending', 'reason' => 'retry_with_hints'])
+        ->and(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$vendor->id])
+        ->and(EwccvCoverageCheck::pendingByDate(1))->toBe(['2025-06-01' => [$vendor->id]]);
+
+    // The run carries the hints and, matching by name at the Gurnee address, learns the FEIN.
+    $config = null;
+    Process::fake(function ($process) use (&$config, $vendor) {
+        $file = preg_match('/(\/\S*ewccv_cfg_\S+)/', $process->command, $m) ? $m[1] : null;
+        $config = $file && is_file($file) ? json_decode(file_get_contents($file), true) : null;
+
+        return Process::result(json_encode([
+            'success' => [[
+                'key' => $vendor->id.'@2025-06-01', 'vendorId' => $vendor->id, 'businessName' => 'Smartech Electric, Inc', 'matchType' => 'employerName', 'score' => 1,
+                'verifyOnly' => true, 'coverageDate' => '06/01/2025', 'policyNumber' => 'NVWV009000377800', 'employerName' => 'SMART TECH ELECTRIC INC',
+                'details' => ['employerName' => 'SMART TECH ELECTRIC INC', 'policyNumber' => 'NVWV009000377800', 'fein' => '36-1234567', 'stateCode' => 12],
+            ]],
+            'failed' => [['key' => (string) $vendor->id, 'vendorId' => $vendor->id, 'businessName' => 'Smartech Electric, Inc', 'reason' => 'no_results', 'searched' => [['type' => 'address', 'term' => '3548 Grandmore Ave', 'count' => 0]]]],
+            'skipped' => [],
+        ]));
+    });
+    $this->artisan('ewccv:scrape-tracking', ['--belongs-to-vendor-id' => 1, '--vendor-id' => [$vendor->id], '--check' => [$vendor->id.':2025-06-01'], '--login-url' => 'https://www.ewccv.com/cvs/login/?t=test'])
+        ->assertExitCode(0);
+
+    $entry = collect($config['vendors'])->firstWhere('key', (string) $vendor->id);
+    expect($entry)->toMatchArray(['aliases' => ['Smartech Inc', 'Smart Tech Electric'], 'altAddresses' => [['address' => '3548 Grandmore Ave', 'city' => 'Gurnee', 'zip' => '60031']], 'fein' => null])
+        ->and(\App\Support\Ewccv\SearchHints::for($vendor->fresh())['fein'])->toBe('36-1234567')
+        ->and(EwccvCoverageCheck::where('vendor_id', $vendor->id)->first())->toMatchArray(['status' => 'covered', 'employer_name' => 'SMART TECH ELECTRIC INC']);
+
+    $this->artisan('ewccv:hints', ['vendor' => $vendor->id, '--show' => true])->expectsOutputToContain('"fein": "36-1234567"')->assertExitCode(0);
+});
