@@ -528,19 +528,32 @@ class ExpenseIndex extends Component
 
         $hasTextSearch = trim($this->transaction_search) !== '';
 
-        $transactions = Transaction::scopedSearch(
-            $hasTextSearch ? $this->transaction_search : $this->amount,
-            $filterConditions,
-            'transaction_date',
-            'desc',
-            $hasTextSearch,
-        )->paginate(
-            // 8, matching the Expenses card: inserting a 100-row subtree froze
-            // the page on load — DOM build + style/layout on the main thread.
-            // The card paginates, so the rest is a click away.
-            8,
-            pageName: 'transactions-page'
-        );
+        try {
+            $transactions = Transaction::scopedSearch(
+                $hasTextSearch ? $this->transaction_search : $this->amount,
+                $filterConditions,
+                'transaction_date',
+                'desc',
+                $hasTextSearch,
+            )->paginate(
+                // 8, matching the Expenses card: inserting a 100-row subtree froze
+                // the page on load — DOM build + style/layout on the main thread.
+                // The card paginates, so the rest is a click away.
+                8,
+                pageName: 'transactions-page'
+            );
+        } catch (\Meilisearch\Exceptions\ApiException $e) {
+            // While the search index is being rebuilt (a full reindex deletes it
+            // and reimports in the background) it knows no fields yet, and an
+            // amount search fails with "Attribute `amount` is not searchable".
+            // Show an empty card for those minutes instead of an error page.
+            \Illuminate\Support\Facades\Log::warning('Transactions card search failed; showing it empty', ['error' => $e->getMessage()]);
+
+            return new LengthAwarePaginator([], 0, 8, 1, [
+                'path' => LengthAwarePaginator::resolveCurrentPath(),
+                'pageName' => 'transactions-page',
+            ]);
+        }
 
         // Filter out transactions that were just converted (MeiliSearch may not have indexed yet)
         if (!empty($this->removedTransactionIds)) {

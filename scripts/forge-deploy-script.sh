@@ -94,3 +94,14 @@ fi
 # state, and this just makes a post-deploy pass happen without waiting on it.
 setsid $FORGE_PHP artisan menards:browser ensure >> storage/logs/menards-ensure.log 2>&1 < /dev/null &
 echo 'menards:browser ensure dispatched in background (see storage/logs/menards-ensure.log)'
+
+# Search indexes — refreshed IN PLACE after every deploy, DETACHED.
+#
+# scout:refresh syncs index settings, upserts every record model by model and
+# prunes documents whose rows are gone. It never deletes an index (unlike
+# `scout:reindex --full`), so search keeps answering from the old documents
+# until the new ones land. A full run takes a couple of minutes, so it runs in
+# the background like the Menards pass above; flock -n makes a second deploy
+# skip the refresh rather than start a parallel one.
+setsid flock -n /tmp/hive-scout-refresh.lock $FORGE_PHP artisan scout:refresh --no-interaction >> storage/logs/scout-refresh.log 2>&1 < /dev/null &
+echo 'scout:refresh dispatched in background (see storage/logs/scout-refresh.log)'
