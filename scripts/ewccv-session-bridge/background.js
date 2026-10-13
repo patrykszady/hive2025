@@ -208,12 +208,17 @@ async function push({ interactive = false } = {}) {
 }
 
 function notify(result) {
-    chrome.notifications.create({
-        type: 'basic',
-        iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=',
-        title: result.ok ? 'EWCCV session sent' : 'EWCCV session not sent',
-        message: result.ok ? result.message : result.error,
-    });
+    // Best effort: a notification that cannot show (an icon Chrome will not
+    // load threw "Unable to download all specified images" on 2026-10-13)
+    // must never fail the send it reports on.
+    try {
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('icon-128.png'),
+            title: result.ok ? 'EWCCV session sent' : 'EWCCV session not sent',
+            message: String(result.ok ? result.message : result.error).slice(0, 300),
+        }, () => { void chrome.runtime.lastError; });
+    } catch (_) { /* the popup shows the status anyway */ }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
