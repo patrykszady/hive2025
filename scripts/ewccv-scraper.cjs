@@ -1730,6 +1730,22 @@ async function searchViaApi(page, vendor, searchType, overrides = {}) {
     // An alternate address carries its own city/zip; a FEIN search its number.
     const extra = { city: overrides.city ?? vendor.city, zip: overrides.zip ?? vendor.zip, fein: overrides.fein ?? vendor.fein ?? null };
 
+    // EWCCV's search backend answers http_500 "Search Unavailable" in bursts
+    // (the site shows "Oops! Something went wrong" for the same thing); the
+    // same search a few seconds later usually goes through. Try three times.
+    let result = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        if (attempt > 1) await sleep(3000 + Math.random() * 2000);
+        result = await searchViaApiOnce(page, vendor, searchType, coverageDate, searchBusinessName, searchAddress, extra);
+        const transient = !result.ok && result.status >= 500 && result.status !== 401;
+        if (!transient) break;
+        log(`    ${searchType} search: ${result.reason} (attempt ${attempt} of 3)`);
+    }
+
+    return result;
+}
+
+async function searchViaApiOnce(page, vendor, searchType, coverageDate, searchBusinessName, searchAddress, extra) {
     const result = await page.evaluate(async (v, covDate, sType, stateNames, bizName, addr, extra) => {
         const accessToken = sessionStorage.getItem('accessToken');
         if (!accessToken) return { ok: false, reason: 'no_accessToken' };
