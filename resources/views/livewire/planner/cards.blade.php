@@ -534,6 +534,7 @@
                                                         'revealOnHover' => true,
                                                         'showStatus'    => ! $dayData->isWeekend,
                                                         'showPending'   => false,
+                                                        'showActions'   => false,
                                                     ])
 
                                                     {{-- Task gap info (next/last task) — cards-view only, hidden on weekends --}}
@@ -561,6 +562,11 @@
                                                 @include('livewire.planner._pending-tasks-card', [
                                                     'projectId' => $projectColumn->id,
                                                     'count'     => $projectColumn->undated_tasks_count ?? 0,
+                                                    'dayIndex'  => $dayIndex,
+                                                ])
+                                                @include('livewire.planner._action-items-card', [
+                                                    'projectId' => $projectColumn->id,
+                                                    'count'     => $this->actionItemCounts[(int) $projectColumn->id] ?? 0,
                                                     'dayIndex'  => $dayIndex,
                                                 ])
 
@@ -1148,6 +1154,91 @@
             @endisland
         </flux:modal>
     </div>
+
+    {{-- From calls & texts: the open action items a project's calls and
+         texts asked for (ProjectActionItem), to book, tick off or dismiss. --}}
+    <div
+        x-data="plannerActionItemsModal()"
+        x-on:open-action-items.window="open($event.detail.projectId)"
+    >
+        <flux:modal name="planner_action_items_modal" class="min-w-[22rem] md:min-w-[36rem]">
+            <div class="space-y-1">
+                <flux:heading size="lg">From calls &amp; texts</flux:heading>
+                <flux:subheading class="truncate" x-show="title" x-text="title"></flux:subheading>
+            </div>
+
+            <flux:separator variant="subtle" class="my-3" />
+
+            @island(name: 'action-items', always: true)
+            @php $listCutoff = now()->subDays((int) config('action_items.list_days', 14)); @endphp
+            @foreach ($this->actionItemsByProject as $projectId => $entry)
+                <div
+                    data-action-project="{{ $projectId }}"
+                    data-project-title="{{ $entry['title'] }}"
+                    x-show="selectedProjectId === {{ (int) $projectId }}"
+                    x-data="{ showOlder: false }"
+                    style="display: none;"
+                    class="space-y-4"
+                >
+                    @foreach ($entry['groups'] as $owner => $items)
+                        <div class="space-y-1.5" wire:key="action-owner-{{ $projectId }}-{{ Str::slug($owner) }}">
+                            <div class="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                                <span>{{ $owner }}</span>
+                                <span class="text-zinc-400 dark:text-zinc-500">{{ $items->count() }}</span>
+                            </div>
+                            @foreach ($items as $item)
+                                @php $isOlder = ! $item->last_mentioned_at || $item->last_mentioned_at->lt($listCutoff); @endphp
+                                <div
+                                    wire:key="action-item-{{ $item->id }}"
+                                    @if ($isOlder) x-show="showOlder" x-cloak @endif
+                                    class="flex items-start gap-2 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-2 {{ $isOlder ? 'opacity-80' : '' }}"
+                                >
+                                    <div class="min-w-0 flex-1">
+                                        <div class="text-sm text-zinc-900 dark:text-zinc-100">{{ $item->title }}</div>
+                                        <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                                            @if ($item->due_on)
+                                                <span class="{{ $item->due_on->isPast() ? 'text-amber-600 dark:text-amber-400' : '' }}">due {{ $item->due_on->format('D M j') }}</span>
+                                            @endif
+                                            @if ($item->mentions > 1)
+                                                <span class="rounded bg-zinc-100 px-1 dark:bg-zinc-800" title="Came up {{ $item->mentions }} times">×{{ $item->mentions }}</span>
+                                            @endif
+                                            @foreach (collect($item->sources ?? [])->reverse()->take(3) as $source)
+                                                <a
+                                                    href="{{ \App\Models\ProjectActionItem::sourceUrl($source) }}"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    class="underline decoration-dotted underline-offset-2 hover:text-indigo-600 dark:hover:text-indigo-400"
+                                                    title="{{ $source['excerpt'] ?? '' }}"
+                                                >{{ \App\Models\ProjectActionItem::sourceLabel($source) }}</a>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                    <div class="flex shrink-0 items-center gap-0.5">
+                                        <flux:button size="xs" variant="subtle" icon="plus" x-on:click="toTask({{ (int) $item->id }})" title="Make it a task" aria-label="Make it a task" />
+                                        <flux:button size="xs" variant="subtle" icon="check" wire:click="actionItemDone({{ (int) $item->id }})" title="Done" aria-label="Done" />
+                                        <flux:button size="xs" variant="subtle" icon="x-mark" wire:click="actionItemDismiss({{ (int) $item->id }})" title="Dismiss" aria-label="Dismiss" />
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    @endforeach
+                    @if ($entry['older'] > 0)
+                        <button
+                            type="button"
+                            x-on:click="showOlder = ! showOlder"
+                            class="text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                            x-text="showOlder ? 'Hide the {{ $entry['older'] }} older than {{ (int) config('action_items.list_days', 14) }} days' : 'Show {{ $entry['older'] }} older than {{ (int) config('action_items.list_days', 14) }} days'"
+                        ></button>
+                    @endif
+                </div>
+            @endforeach
+            <p
+                x-show="selectedProjectId !== null && ! $root.querySelector(`[data-action-project='${selectedProjectId}']`)"
+                class="text-sm text-zinc-500 dark:text-zinc-400"
+            >Nothing open from calls or texts.</p>
+            @endisland
+        </flux:modal>
+    </div>
     </div>
 </div>
 
@@ -1217,6 +1308,28 @@ Alpine.data('plannerUndatedTasksModal', () => ({
         if (typeof Livewire !== 'undefined') {
             Livewire.dispatchTo('tasks.task-create', 'editTask', { task: taskId });
         }
+    },
+}));
+
+Alpine.data('plannerActionItemsModal', () => ({
+    title: '',
+    selectedProjectId: null,
+
+    open(projectId) {
+        const id = parseInt(projectId, 10);
+        const section = this.$root.querySelector(`[data-action-project="${id}"]`);
+        this.title = section ? (section.dataset.projectTitle || '') : '';
+        this.selectedProjectId = id;
+        if (typeof Flux !== 'undefined' && Flux.modal) {
+            Flux.modal('planner_action_items_modal').show();
+        }
+    },
+
+    toTask(itemId) {
+        if (typeof Flux !== 'undefined' && Flux.modal) {
+            Flux.modal('planner_action_items_modal').close();
+        }
+        this.$wire.actionItemToTask(itemId);
     },
 }));
 

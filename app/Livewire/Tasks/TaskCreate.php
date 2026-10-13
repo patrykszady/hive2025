@@ -5,6 +5,7 @@ namespace App\Livewire\Tasks;
 use App\Jobs\CreateMeetTaskCalendarEvent;
 use App\Jobs\UpdateMeetTaskCalendarEvent;
 use App\Models\Project;
+use App\Models\ProjectActionItem;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
@@ -40,6 +41,9 @@ class TaskCreate extends Component
 
     /** @var array<int, array<string, mixed>> */
     public $pendingSmsTasks = [];
+
+    /** The planner action item this dialog was opened from; it becomes the saved task. */
+    public ?int $actionItemId = null;
 
     public $view_text = [
         'card_title' => 'Create Task',
@@ -813,6 +817,7 @@ class TaskCreate extends Component
      */
     private function resetFormFields()
     {
+        $this->actionItemId = null;
         $this->form->reset();
         $this->resetErrorBag();
         $this->pendingSmsTasks = [];
@@ -1684,6 +1689,7 @@ class TaskCreate extends Component
         $clientId = isset($payload['client_id']) ? (int) $payload['client_id'] : null;
         $projectId = isset($payload['project_id']) ? (int) $payload['project_id'] : null;
         $vendorId = ! empty($payload['vendor_id']) ? (int) $payload['vendor_id'] : null;
+        $this->actionItemId = ! empty($payload['action_item_id']) ? (int) $payload['action_item_id'] : null;
 
         $this->pendingSmsTasks = collect($payload['additional_tasks'] ?? [])
             ->filter(fn ($row) => is_array($row) && trim((string) ($row['title'] ?? '')) !== '')
@@ -2146,6 +2152,17 @@ class TaskCreate extends Component
     public function save()
     {
         $task = $this->form->store();
+
+        // Opened from the planner's "From calls & texts" list: the item is
+        // now this task, so it leaves that list and keeps the link.
+        if ($task instanceof Task && $this->actionItemId) {
+            ProjectActionItem::query()
+                ->whereKey($this->actionItemId)
+                ->where('project_id', $task->project_id)
+                ->update(['status' => ProjectActionItem::STATUS_TASK, 'task_id' => $task->id]);
+            $this->actionItemId = null;
+            $this->dispatch('action-items-changed')->to(CardsIndex::class);
+        }
 
         // Predecessors chosen before the row existed are written now. The
         // circular check runs here, against real ids, because that is the first

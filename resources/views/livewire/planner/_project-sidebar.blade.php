@@ -13,6 +13,10 @@
         $showStatus       – hide the status badge (narrow weekend columns)
         $showPending      – hide the chip (cards view shows the shared
                             pending-tasks CARD inside the column instead)
+        $showActions      – same for the "from calls & texts" chip (the cards
+                            view shows the shared action-items CARD instead)
+        $actionCount      – open action items from calls & texts (defaults to
+                            the component's per-project count)
 --}}
 @php
     $latestStatus = $project->latestStatus;
@@ -20,6 +24,8 @@
     $revealOnHover = $revealOnHover ?? false;
     $showStatus = $showStatus ?? true;
     $showPending = $showPending ?? true;
+    $showActions = $showActions ?? true;
+    $actionCount = $actionCount ?? ($this->actionItemCounts[(int) $projectId] ?? 0);
     // Built here: quotes inside a {{ }} attribute survive as entities, and the
     // per-day columns need the date in both the payload and the wire:key.
     $addPayload = '{ project_id: ' . (int) $projectId . ($date ? ", date: '" . $date . "'" : '') . ' }';
@@ -56,13 +62,28 @@
     {{ $project->client->last_names ?? '' }}{{ $project->project_name ? ' | ' . $project->project_name : '' }}
 </div>
 
-@if ($showPending && $undatedCount > 0)
-    <button
-        type="button"
-        x-on:click="window.dispatchEvent(new CustomEvent('open-undated-tasks', { detail: { projectId: {{ (int) $projectId }} } }))"
-        class="self-start inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
-    >
-        {{ $undatedCount }} pending
-    </button>
+@if (($showPending && $undatedCount > 0) || ($showActions && $actionCount > 0))
+<div class="flex flex-wrap items-center gap-1">
+    @if ($showPending && $undatedCount > 0)
+        <button
+            type="button"
+            x-on:click="window.dispatchEvent(new CustomEvent('open-undated-tasks', { detail: { projectId: {{ (int) $projectId }} } }))"
+            class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
+        >
+            {{ $undatedCount }} pending
+        </button>
+    @endif
+    @if ($showActions && $actionCount > 0)
+        {{-- What the client's calls and texts asked for (ProjectActionItem). --}}
+        <button
+            type="button"
+            x-on:click="window.dispatchEvent(new CustomEvent('open-action-items', { detail: { projectId: {{ (int) $projectId }} } }))"
+            class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:hover:bg-sky-900/50 transition-colors"
+            title="Action items from calls and texts"
+        >
+            {{ $actionCount }} from calls &amp; texts
+        </button>
+    @endif
+</div>
 @endif
 </div>

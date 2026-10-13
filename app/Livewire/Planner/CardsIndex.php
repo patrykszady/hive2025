@@ -7,7 +7,9 @@ use App\Models\Task;
 use App\Models\TaskDependency;
 use App\Models\User;
 use App\Models\Project;
+use App\Models\ProjectActionItem;
 use App\Models\ProjectStatus;
+use App\Livewire\Tasks\TaskCreate;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux;
@@ -15,6 +17,8 @@ use Illuminate\Support\Collection;
 use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Lazy;
+use Livewire\Attributes\On;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
 
 // #[Lazy]
@@ -134,7 +138,7 @@ class CardsIndex extends Component
         }
     }
 
-    private const PLANNER_PROJECT_STATUS_CODES = [4, 5, 6, 8]; // Prep, Scheduled, Active, Service Call
+    public const PLANNER_PROJECT_STATUS_CODES = [4, 5, 6, 8]; // Prep, Scheduled, Active, Service Call
     private const PLANNER_STATUS_PRIORITY = [6 => 1, 8 => 2, 4 => 3, 5 => 4]; // Active, Service Call, Prep, Scheduled
 
     protected $listeners = [
@@ -2315,6 +2319,157 @@ class CardsIndex extends Component
         }
 
         return $map;
+    }
+
+    // ── Action items from calls & texts ──────────────────────────────────
+    // What the client's calls and texts asked for and nobody has booked,
+    // done or dismissed yet (ProjectActionItemExtractor), per active project:
+    // a chip on the project column in every view, and a modal to act on them.
+
+    /**
+     * Open item count per active project id.
+     *
+     * @return array<int, int>
+     */
+    #[Computed]
+    public function actionItemCounts(): array
+    {
+        $ids = collect($this->activeProjects)->pluck('id')->all();
+        if ($ids === []) {
+            return [];
+        }
+
+        return ProjectActionItem::query()
+            ->open()
+            ->whereIn('project_id', $ids)
+            ->selectRaw('project_id, count(*) as open_count')
+            ->groupBy('project_id')
+            ->pluck('open_count', 'project_id')
+            ->map(fn ($count) => (int) $count)
+            ->all();
+    }
+
+    /**
+     * The open items themselves for the "From calls & texts" modal, keyed
+     * by project id: grouped by who is responsible (the signed-in person's
+     * own first, then the company's, then the client's people), newest
+     * mention first within a group; items older than config
+     * action_items.list_days wait behind an "older" count.
+     *
+     * @return array<int, array{title: string, recent: int, older: int, groups: array<string, Collection<int, ProjectActionItem>>}>
+     */
+    #[Computed]
+    public function actionItemsByProject(): array
+    {
+        $projects = collect($this->activeProjects)->keyBy('id');
+        if ($projects->isEmpty()) {
+            return [];
+        }
+
+        $me = Str::lower((string) auth()->user()?->first_name);
+        $cutoff = now()->subDays((int) config('action_items.list_days', 14));
+        $rank = function (?string $owner) use ($me): string {
+            $o = Str::lower((string) $owner);
+
+            return match (true) {
+                $o === '' => '3',
+                $o === $me => '0',
+                in_array($o, ['gs', 'us', 'crew', 'team'], true) || str_starts_with($o, 'gs ') => '1',
+                default => '2',
+            };
+        };
+
+        $map = [];
+        $grouped = ProjectActionItem::query()
+            ->open()
+            ->whereIn('project_id', $projects->keys()->all())
+            ->orderByDesc('last_mentioned_at')
+            ->get()
+            ->groupBy('project_id');
+
+        foreach ($grouped as $projectId => $items) {
+            $groups = $items
+                ->sortBy(fn (ProjectActionItem $item) => $rank($item->owner).'|'.Str::lower((string) $item->owner).'|'.sprintf('%020d', PHP_INT_MAX - ($item->last_mentioned_at?->getTimestamp() ?? 0)))
+                ->groupBy(fn (ProjectActionItem $item) => $item->owner ?: 'Unassigned')
+                ->map(fn (Collection $rows) => $rows->values());
+
+            $map[(int) $projectId] = [
+                'title' => (string) $projects[$projectId]->short_address,
+                'recent' => $items->filter(fn (ProjectActionItem $item) => $item->last_mentioned_at && $item->last_mentioned_at->gte($cutoff))->count(),
+                'older' => $items->filter(fn (ProjectActionItem $item) => ! $item->last_mentioned_at || $item->last_mentioned_at->lt($cutoff))->count(),
+                'groups' => $groups->all(),
+            ];
+        }
+
+        return $map;
+    }
+
+    public function actionItemDone(int $itemId): void
+    {
+        $this->settleActionItem($itemId, ProjectActionItem::STATUS_DONE);
+    }
+
+    public function actionItemDismiss(int $itemId): void
+    {
+        $this->settleActionItem($itemId, ProjectActionItem::STATUS_DISMISSED);
+    }
+
+    /**
+     * Open the task dialog filled from the item; TaskCreate marks the item
+     * converted when the task is saved (action-items-changed comes back).
+     */
+    public function actionItemToTask(int $itemId): void
+    {
+        $item = $this->visibleActionItem($itemId);
+        if (! $item) {
+            return;
+        }
+
+        $notes = collect($item->sources ?? [])
+            ->map(fn (array $source) => 'From a '.ProjectActionItem::sourceLabel($source).': '.($source['excerpt'] ?? ''))
+            ->implode("
+");
+
+        $this->dispatch('prefillTaskFromSms', payload: [
+            'title' => $item->title,
+            'project_id' => $item->project_id,
+            'client_id' => $item->project?->client_id,
+            'date' => $item->due_on?->toDateString(),
+            'notes' => $notes,
+            'action_item_id' => $item->id,
+        ])->to(TaskCreate::class);
+    }
+
+    #[On('action-items-changed')]
+    public function onActionItemsChanged(): void
+    {
+        $this->forgetActionItemCaches();
+    }
+
+    protected function settleActionItem(int $itemId, string $status): void
+    {
+        $item = $this->visibleActionItem($itemId);
+        if (! $item) {
+            return;
+        }
+
+        $item->update([
+            'status' => $status,
+            'done_at' => $status === ProjectActionItem::STATUS_DONE ? now() : $item->done_at,
+            'done_evidence' => ['kind' => 'user', 'id' => (int) auth()->id(), 'at' => now()->toIso8601String(), 'excerpt' => 'Marked '.$status.' on the planner'],
+        ]);
+        $this->forgetActionItemCaches();
+    }
+
+    /** An item on a project this user can see (Project carries the tenant scope). */
+    protected function visibleActionItem(int $itemId): ?ProjectActionItem
+    {
+        return ProjectActionItem::query()->whereKey($itemId)->whereHas('project')->first();
+    }
+
+    protected function forgetActionItemCaches(): void
+    {
+        unset($this->actionItemCounts, $this->actionItemsByProject);
     }
 
     public function render()
