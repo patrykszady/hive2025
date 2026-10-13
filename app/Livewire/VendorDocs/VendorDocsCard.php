@@ -2,9 +2,11 @@
 
 namespace App\Livewire\VendorDocs;
 
+use App\Models\EwccvLookupLog;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
-
+use Flux\Flux;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Lazy;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -30,6 +32,39 @@ class VendorDocsCard extends Component
     public ?int $docTypeCount = null;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
+
+    /** The doc whose EWCCV lookup log is open, if any. */
+    public ?int $ewccvLogDocId = null;
+
+    /** Open the review log of EWCCV's attempts for this vendor (the shield in the Verified column). */
+    public function showEwccvLog(int $docId): void
+    {
+        $this->authorize('create', VendorDoc::class);
+        $this->ewccvLogDocId = $docId;
+        unset($this->ewccvLog);
+        Flux::modal('ewccv-log-'.$this->vendor->id)->show();
+    }
+
+    /**
+     * EWCCV's attempts for this vendor, newest first: tracking lookups and
+     * coverage checks, with what was searched and what EWCCV listed.
+     *
+     * @return \Illuminate\Support\Collection<int, EwccvLookupLog>
+     */
+    #[Computed]
+    public function ewccvLog()
+    {
+        if (! $this->ewccvLogDocId) {
+            return collect();
+        }
+
+        return EwccvLookupLog::query()
+            ->where('vendor_id', $this->vendor->id)
+            ->orderByDesc('run_at')
+            ->orderByDesc('id')
+            ->limit(40)
+            ->get();
+    }
 
     /**
      * Column defs for the vendor-docs table — the real header row AND the

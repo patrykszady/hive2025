@@ -311,6 +311,35 @@ it('one run carries tracking lookups and coverage checks, keyed per entry, and s
         // The check-only vendor's policy has never been looked up for tracking: that stays pending.
         ->and(EwccvCoverageCheck::pendingByDate(1))->toBe([])
         ->and(RunPendingEwccvLookups::pendingVendorIds(1))->toBe([$only->id]);
+
+    // Every attempt is in the review log, with the doc it concerned.
+    $logs = \App\Models\EwccvLookupLog::orderBy('id')->get();
+    expect($logs)->toHaveCount(3)
+        ->and($logs[0])->toMatchArray(['vendor_id' => $both->id, 'vendor_doc_id' => $doc->id, 'kind' => 'tracking', 'outcome' => 'tracking', 'matched_name' => 'BOTH WAYS INC', 'matched_policy' => 'WC-BOTH', 'our_policy_number' => 'WC-BOTH'])
+        ->and($logs[1])->toMatchArray(['vendor_id' => $both->id, 'kind' => 'coverage_check', 'outcome' => 'covered'])
+        ->and($logs[1]->coverage_date->toDateString())->toBe('2025-12-31')
+        ->and($logs[2])->toMatchArray(['vendor_id' => $only->id, 'kind' => 'coverage_check', 'outcome' => 'not_found', 'reason' => 'no_results'])
+        ->and($logs[2]->searchLines())->toBe(['employer "Check Only" → 0 result(s)']);
+});
+
+it('the vendor docs card opens a review log of every EWCCV attempt from the Verified column', function () {
+    $f = auditFixture();
+    \App\Models\EwccvLookupLog::create([
+        'vendor_id' => $f['sub']->id, 'vendor_doc_id' => $f['doc']->id, 'belongs_to_vendor_id' => $f['gc']->id, 'kind' => 'tracking',
+        'outcome' => 'no_match', 'reason' => 'no_match', 'our_policy_number' => 'WC-KOT-1', 'run_at' => now()->subHour(),
+        'searched' => [['type' => 'employer', 'term' => 'Kot Construction', 'count' => 0], ['type' => 'employer', 'term' => 'Kot', 'count' => 2]],
+        'candidates' => [['employerName' => 'KOT CONSTRUCTION INC', 'policyNumber' => 'WC9', 'score' => 0.5]],
+    ]);
+
+    \Livewire\Livewire::withoutLazyLoading();
+    \Livewire\Livewire::test(\App\Livewire\VendorDocs\VendorDocsCard::class, ['vendor' => $f['sub']])
+        ->assertSee('click for the lookup log')
+        ->call('showEwccvLog', $f['doc']->id)
+        ->assertSee('EWCCV lookups')
+        ->assertSee('results, none matched: no match')
+        ->assertSee('Policy on file: WC-KOT-1')
+        ->assertSee('employer "Kot" → 2 result(s)')
+        ->assertSee('KOT CONSTRUCTION INC · policy WC9 · score 0.50');
 });
 
 it('refuses a credential handed over before, takes a new one even when marked reused, and tells the extension what is waiting', function () {

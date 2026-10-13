@@ -110,6 +110,53 @@ class ScrapeEwccvTracking extends Command
     }
 
     /**
+     * Write one EwccvLookupLog row per result entry of this run.
+     *
+     * @param  array<string, mixed>  $results
+     * @param  \Illuminate\Support\Collection<int, VendorDoc>  $vendorDocs  the tracking run's docs, for the doc id
+     * @param  \Closure(array): string  $keyOf
+     */
+    protected function logAttempts(array $results, $vendorDocs, int $tenantId, \Closure $keyOf): void
+    {
+        $sessionAge = $this->bridgedSessionReceivedAt ? (int) Carbon::parse($this->bridgedSessionReceivedAt)->diffInMinutes(now()) : null;
+        $runAt = now();
+
+        foreach (['success', 'failed', 'skipped'] as $list) {
+            foreach ($results[$list] ?? [] as $entry) {
+                $key = $keyOf($entry);
+                $isCheck = str_contains($key, '@');
+                $vendorId = (int) $entry['vendorId'];
+                $doc = $isCheck ? null : $vendorDocs->firstWhere('vendor_id', $vendorId);
+                $outcome = match ($list) {
+                    'success' => $isCheck || ! empty($entry['verifyOnly']) ? 'covered' : 'tracking',
+                    'skipped' => 'skipped',
+                    default => in_array((string) ($entry['reason'] ?? ''), ['no_results', 'no_items_in_response', 'missing_address'], true) ? 'not_found'
+                        : ((string) ($entry['reason'] ?? '') === 'no_match' ? 'no_match' : 'failed'),
+                };
+
+                \App\Models\EwccvLookupLog::create([
+                    'vendor_id' => $vendorId,
+                    'vendor_doc_id' => $doc?->id,
+                    'belongs_to_vendor_id' => $tenantId,
+                    'kind' => $isCheck ? \App\Models\EwccvLookupLog::KIND_COVERAGE_CHECK : \App\Models\EwccvLookupLog::KIND_TRACKING,
+                    'coverage_date' => $isCheck ? explode('@', $key, 2)[1] : null,
+                    'outcome' => $outcome,
+                    'reason' => $list === 'success' ? null : (string) ($entry['reason'] ?? 'unknown'),
+                    'our_policy_number' => $doc?->number ?? ($entry['ourPolicyNumber'] ?? null),
+                    'matched_name' => $entry['matchedName'] ?? $entry['employerName'] ?? null,
+                    'matched_policy' => $entry['matchedPolicy'] ?? $entry['policyNumber'] ?? null,
+                    'match_type' => $entry['matchType'] ?? null,
+                    'score' => isset($entry['score']) ? (float) $entry['score'] : null,
+                    'searched' => array_slice((array) ($entry['searched'] ?? []), 0, 12),
+                    'candidates' => array_slice((array) ($entry['candidates'] ?? []), 0, 10),
+                    'session_age_minutes' => $sessionAge,
+                    'run_at' => $runAt,
+                ]);
+            }
+        }
+    }
+
+    /**
      * The --check options, vendor ids by date (Y-m-d).
      *
      * @return array<string, list<int>>
@@ -526,6 +573,10 @@ class ScrapeEwccvTracking extends Command
                     $allowedChecks[] = $entry['key'];
                 }
             }
+
+            // Every attempt goes to the review log (ewccv_lookup_logs) with what
+            // was searched and what EWCCV listed — the doc keeps only the last.
+            $this->logAttempts($results, $vendorDocs, $tenantId, $keyOf);
 
             $recorded = $this->recordCoverageChecks($results, $allowedChecks, $tenantId, $keyOf);
             if ($recorded > 0 || $verifyOnly || $checks !== []) {

@@ -88,8 +88,10 @@
                              because @php blocks miscompile in Blaze slots. --}}
                         <flux:table.cell class="w-[16%] whitespace-nowrap">
                             @if($doc->verification_summary)
-                                <flux:tooltip :content="$doc->verification_summary['tip']" position="top">
-                                    <div class="flex items-center gap-1.5">
+                                <flux:tooltip :content="$doc->verification_summary['tip'].' · click for the lookup log'" position="top">
+                                    {{-- The log of every EWCCV attempt (what was searched,
+                                         what was listed, how it compared) opens from here. --}}
+                                    <div class="flex items-center gap-1.5 cursor-pointer" wire:click="showEwccvLog({{ $doc->id }})">
                                         @if($doc->verification_summary['verified_at'])
                                             <flux:icon.shield-check variant="micro" class="size-3.5 shrink-0 text-emerald-500" />
                                             <span>{{ $doc->verification_summary['verified_at'] }}</span>
@@ -109,4 +111,42 @@
             </x-index-table.table>
         @endif
     </x-index-table>
+
+    {{-- EWCCV lookup log: every attempt for this vendor, for review. Outside
+         the card component: a conditional inside a Blaze slot is dropped. --}}
+    <flux:modal name="ewccv-log-{{ $vendor->id }}" class="md:w-[44rem]">
+        <div class="space-y-4">
+            <div>
+                <flux:heading size="lg">EWCCV lookups — {{ $vendor->name }}</flux:heading>
+                <flux:text class="mt-1">What Hive searched on ewccv.com, what EWCCV listed, and how it compared with the policy on file. Newest first.</flux:text>
+            </div>
+            @if($this->ewccvLog->isEmpty())
+                <flux:text>No lookup has run for this vendor yet.</flux:text>
+            @else
+                <div class="divide-y divide-zinc-200 dark:divide-white/10">
+                    @foreach($this->ewccvLog as $entry)
+                        <div class="py-3 space-y-1" wire:key="ewccv-log-{{ $entry->id }}">
+                            <div class="flex flex-wrap items-center gap-2 text-sm">
+                                <span class="text-zinc-500 tabular-nums">{{ $entry->run_at->timezone(config('app.timezone'))->format('m/d/Y H:i') }}</span>
+                                <flux:badge size="sm" :color="$entry->tone()" inset="top bottom">{{ $entry->kind === 'coverage_check' ? 'as of '.$entry->coverage_date?->format('m/d/Y') : 'tracking' }}</flux:badge>
+                                <span>{{ $entry->headline() }}</span>
+                                @if($entry->matchedSummary())
+                                    <span class="text-zinc-600 dark:text-zinc-300">→ {{ $entry->matchedSummary() }}</span>
+                                @endif
+                            </div>
+                            @if($entry->our_policy_number)
+                                <div class="text-xs text-zinc-500">Policy on file: {{ $entry->our_policy_number }}</div>
+                            @endif
+                            @if($entry->searchLines() !== [])
+                                <div class="text-xs text-zinc-600 dark:text-zinc-300">Searched: {{ implode(' · ', $entry->searchLines()) }}</div>
+                            @endif
+                            @if($entry->candidateLines() !== [])
+                                <div class="text-xs text-zinc-600 dark:text-zinc-300">EWCCV listed: {{ implode(' · ', $entry->candidateLines()) }}</div>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            @endif
+        </div>
+    </flux:modal>
 </div>
