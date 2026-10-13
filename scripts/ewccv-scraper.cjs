@@ -2471,6 +2471,7 @@ async function requestLoginEmail(page, email) {
                 let allItems = [];
                 let lastApiResult = null;
                 let resolvedStateCode = '';
+                let primaryAnswered = true;
 
                 if (useApiSearch) {
                     // ── API-driven search (accessToken available) ─────────────
@@ -2489,6 +2490,9 @@ async function requestLoginEmail(page, email) {
 
                     // Search by address first
                     const addrResult = allItems.length > 0 ? { ok: true, count: 0, items: [], stateCode: resolvedStateCode, skipped: true } : await searchViaApi(page, vendor, 'address');
+                    // EWCCV answers "Search Unavailable" (http_500) now and then; a
+                    // verdict reached without the real searches is no verdict.
+                    primaryAnswered = !!addrResult.ok;
                     log(`    Address search: ${addrResult.ok ? addrResult.count + ' result(s)' : addrResult.reason}`);
                     searched.push({ type: 'address', term: vendor.address, count: addrResult.ok ? addrResult.count : 0, reason: addrResult.ok ? undefined : addrResult.reason });
                     if (addrResult.ok && addrResult.items) {
@@ -2498,6 +2502,7 @@ async function requestLoginEmail(page, email) {
 
                     // Also try employer name search (more likely to find by business name)
                     const empResult = await searchViaApi(page, vendor, 'employer');
+                    primaryAnswered = primaryAnswered || !!empResult.ok;
                     log(`    Employer search: ${empResult.ok ? empResult.count + ' result(s)' : empResult.reason}`);
                     searched.push({ type: 'employer', term: vendor.businessName, count: empResult.ok ? empResult.count : 0, reason: empResult.ok ? undefined : empResult.reason });
                     if (empResult.ok && empResult.items) {
@@ -2648,13 +2653,14 @@ async function requestLoginEmail(page, email) {
                 }
 
                 if (allItems.length === 0) {
+                    const reason = (typeof primaryAnswered !== 'undefined' && !primaryAnswered) ? 'search_unavailable' : (lastApiResult?.reason || 'no_results');
                     results.failed.push({
                         vendorId: vendor.id,
                         businessName: vendor.businessName,
-                        reason: lastApiResult?.reason || 'no_results',
+                        reason,
                         searched,
                     });
-                    log(`  ✗ No results: ${lastApiResult?.reason || 'empty'}`);
+                    log(`  ✗ No results: ${reason}`);
                     continue;
                 }
 
@@ -2670,7 +2676,9 @@ async function requestLoginEmail(page, email) {
                     results.failed.push({
                         vendorId: vendor.id,
                         businessName: vendor.businessName,
-                        reason: 'no_match',
+                        // Only a loose hint answered while the real searches were
+                        // unavailable: try again next session rather than settle.
+                        reason: (typeof primaryAnswered !== 'undefined' && !primaryAnswered) ? 'search_unavailable' : 'no_match',
                         count: allItems.length,
                         searched,
                         candidates: picked.candidates,
@@ -2726,6 +2734,13 @@ async function requestLoginEmail(page, email) {
 
                 // Re-intercept redirects (new page load clears overrides)
                 await interceptRedirects(page);
+
+                // What the details page shows (address, carrier, dates) — kept
+                // with the match for comparison with the certificate on file.
+                try {
+                    const pageText = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 2500));
+                    if (pageText) scalarDetails.detailsPageText = pageText;
+                } catch (_) { /* best effort */ }
 
                 // Enable tracking via subscription API
                 const trackResult = await enableTracking(page, vendor, picked.match, searchMeta);
