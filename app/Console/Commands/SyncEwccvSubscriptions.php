@@ -35,7 +35,9 @@ class SyncEwccvSubscriptions extends Command
         {--login-email= : EWCCV account email, spelled as the person signs in (default config services.ewccv.login_email)}
         {--belongs-to-vendor-id= : Limit the docs we stamp to one owning vendor}
         {--output-dir= : Working dir (default storage/files/_temp_ewccv)}
-        {--dry-run : Show what EWCCV tracks without writing to vendor docs}';
+        {--dry-run : Show what EWCCV tracks without writing to vendor docs}
+        {--unsubscribe-policy= : Drop the one subscription with exactly this policy number (with --unsubscribe-employer)}
+        {--unsubscribe-employer= : …and exactly this employer name as EWCCV lists it}';
 
     protected $description = 'Read EWCCV tracking subscriptions (no captcha) and stamp them onto workers comp docs';
 
@@ -60,11 +62,22 @@ class SyncEwccvSubscriptions extends Command
         }
 
         $configFile = tempnam(sys_get_temp_dir(), 'ewccv_subs_');
-        file_put_contents($configFile, json_encode([
+        $unsubscribe = null;
+        if ($this->option('unsubscribe-policy') || $this->option('unsubscribe-employer')) {
+            if (blank($this->option('unsubscribe-policy')) || blank($this->option('unsubscribe-employer'))) {
+                $this->error('--unsubscribe-policy and --unsubscribe-employer go together: both must match one subscription exactly.');
+
+                return self::FAILURE;
+            }
+            $unsubscribe = ['policyNumber' => (string) $this->option('unsubscribe-policy'), 'employer' => (string) $this->option('unsubscribe-employer')];
+            $this->warn("  Dropping the subscription for {$unsubscribe['employer']} ({$unsubscribe['policyNumber']}) if exactly one matches.");
+        }
+        file_put_contents($configFile, json_encode(array_filter([
             'loginUrl' => $loginUrl,
             'outputDir' => $outputDir,
             'headless' => true,
-        ]));
+            'unsubscribe' => $unsubscribe,
+        ])));
 
         $result = Process::timeout(300)
             ->env($this->directNetworkEnv())
@@ -82,6 +95,15 @@ class SyncEwccvSubscriptions extends Command
         @unlink($configFile);
 
         $payload = json_decode(trim($result->output()), true);
+
+        if (is_array($payload) && ! empty($payload['unsubscribed'])) {
+            $u = $payload['unsubscribed'];
+            $this->info(sprintf('  Unsubscribed: %s (%s), subscription %s — EWCCV answered %s', $u['employer'] ?? '?', $u['policyNumber'] ?? '?', $u['policySubscriptionId'] ?? '?', $u['status'] ?? '?'));
+            Log::channel('ewccv')->info(sprintf('unsubscribe | %s (%s) subscription %s | http %s', $u['employer'] ?? '?', $u['policyNumber'] ?? '?', $u['policySubscriptionId'] ?? '?', $u['status'] ?? '?'));
+        }
+        if (is_array($payload) && ! empty($payload['unsubscribeError'])) {
+            $this->error('  Unsubscribe: '.$payload['unsubscribeError']);
+        }
 
         if (! is_array($payload) || empty($payload['ok'])) {
             $this->error('  Could not read subscriptions'.(! empty($payload['error']) ? ": {$payload['error']}" : '.'));

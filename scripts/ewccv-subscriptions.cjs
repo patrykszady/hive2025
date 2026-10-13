@@ -16,7 +16,11 @@
  * Read-only.
  *
  * Usage: node ewccv-subscriptions.cjs <config.json>
- * config: { loginUrl, outputDir, headless? }
+ * config: { loginUrl, outputDir, headless?, unsubscribe?: { policyNumber, employer } }
+ *
+ * unsubscribe: drop ONE subscription — the one whose policy number and employer
+ * both match exactly — with the app's own call (PUT subscription/unsubscribe/one,
+ * what the Unsubscribe button does). Never more than one, never "all".
  * Output (last stdout line): {"ok":true,"subscriptions":[...],"user":{...}}
  */
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -89,7 +93,7 @@ function findChrome() {
             if (clicked) { log('Accepted terms.'); await sleep(4000); }
         } catch (_) { /* no gate */ }
 
-        const result = await page.evaluate(async () => {
+        const result = await page.evaluate(async (unsubscribe) => {
             const BASE = '/cvs/endpoint/subscription';
             const ck = document.cookie.split(';').map((c) => c.trim()).find((c) => c.startsWith('token='));
             const jwt = ck ? decodeURIComponent(ck.split('=').slice(1).join('=')) : '';
@@ -104,14 +108,36 @@ function findChrome() {
                 else out.userStatus = r.status;
             } catch (e) { out.userError = e.message; }
 
-            try {
+            const listAll = async () => {
                 const r = await fetch(`${BASE}/subscription/all`, { method: 'GET', headers });
-                if (r.status !== 200) return { ok: false, error: `subscription/all returned ${r.status}` };
-                out.subscriptions = (await r.json()).data || [];
+                if (r.status !== 200) throw new Error(`subscription/all returned ${r.status}`);
+                return (await r.json()).data || [];
+            };
+            try {
+                out.subscriptions = await listAll();
             } catch (e) { return { ok: false, error: `subscription/all failed: ${e.message}` }; }
 
+            if (unsubscribe && unsubscribe.policyNumber && unsubscribe.employer) {
+                const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const matches = out.subscriptions.filter((s) => norm(s.policyNumber) === norm(unsubscribe.policyNumber)
+                    && norm(s.employerInformation && s.employerInformation.employer) === norm(unsubscribe.employer));
+                if (matches.length !== 1) {
+                    out.unsubscribeError = `${matches.length} subscription(s) match policy ${unsubscribe.policyNumber} and employer ${unsubscribe.employer}; nothing dropped`;
+                } else {
+                    const target = matches[0];
+                    try {
+                        const r = await fetch(`${BASE}/unsubscribe/one`, { method: 'PUT', headers, body: JSON.stringify({ subscriptionId: target.policySubscriptionId }) });
+                        const body = await r.text();
+                        out.unsubscribed = { policySubscriptionId: target.policySubscriptionId, policyNumber: target.policyNumber, employer: target.employerInformation && target.employerInformation.employer, status: r.status, body: body.slice(0, 300) };
+                        if (r.status === 200) {
+                            try { out.subscriptions = await listAll(); } catch (_) { /* keep the earlier list */ }
+                        }
+                    } catch (e) { out.unsubscribeError = `unsubscribe/one failed: ${e.message}`; }
+                }
+            }
+
             return out;
-        });
+        }, config.unsubscribe || null);
 
         if (!result.ok) {
             process.stdout.write(JSON.stringify(result));

@@ -54,3 +54,28 @@ it('stamps what EWCCV lists and resets what it no longer lists', function () {
     expect(\App\Models\EwccvLookupLog::where('kind', 'subscription_sync')->where('outcome', 'tracking')->count())->toBe(2)
         ->and(\App\Models\EwccvLookupLog::where('vendor_doc_id', $byMatch->id)->first()->matched_policy)->toBe('WC533SB2784N016');
 });
+
+it('drops exactly one subscription when policy number and employer both match, and refuses otherwise', function () {
+    $dir = sys_get_temp_dir().'/ewccv-sync-'.uniqid();
+    mkdir($dir, 0775, true);
+    file_put_contents($dir.'/.last_login_url.json', json_encode(['url' => 'https://www.ewccv.com/cvs/login/?t=test', 'cached_at' => now()->toIso8601String()]));
+    config(['logging.channels.ewccv' => ['driver' => 'single', 'path' => sys_get_temp_dir().'/ewccv-unsub-test-'.uniqid().'.log']]);
+
+    $config = null;
+    Process::fake(function ($process) use (&$config) {
+        $file = preg_match('/(\/\S*ewccv_subs_\S+)/', $process->command, $m) ? $m[1] : null;
+        $config = $file && is_file($file) ? json_decode(file_get_contents($file), true) : null;
+
+        return Process::result(json_encode(['ok' => true, 'user' => ['userId' => 1], 'subscriptions' => [],
+            'unsubscribed' => ['policySubscriptionId' => 167000, 'policyNumber' => 'WC1269001689', 'employer' => 'ZOLO CARBON SMARTECH INC', 'status' => 200]]));
+    });
+
+    $this->artisan('ewccv:sync-subscriptions', ['--belongs-to-vendor-id' => 1, '--output-dir' => $dir, '--unsubscribe-policy' => 'WC1269001689', '--unsubscribe-employer' => 'ZOLO CARBON SMARTECH INC'])
+        ->expectsOutputToContain('Unsubscribed: ZOLO CARBON SMARTECH INC (WC1269001689), subscription 167000 — EWCCV answered 200')
+        ->assertExitCode(0);
+    expect($config['unsubscribe'])->toBe(['policyNumber' => 'WC1269001689', 'employer' => 'ZOLO CARBON SMARTECH INC']);
+
+    $this->artisan('ewccv:sync-subscriptions', ['--belongs-to-vendor-id' => 1, '--output-dir' => $dir, '--unsubscribe-policy' => 'WC1269001689'])
+        ->expectsOutputToContain('go together')
+        ->assertExitCode(1);
+});
