@@ -591,8 +591,9 @@ it('queues a coverage check two days before a workers comp doc expires, and a co
     // Running again queues nothing new.
     $this->artisan('ewccv:expiring-checks', ['--belongs-to-vendor-id' => 1])->expectsOutputToContain('coverage checks queued: 0.');
 
-    // Before the answer the doc is unverified (its last lookup failed); a covered answer verifies it for that day.
-    expect($doc->fresh()->verification_summary['verified_at'])->toBeNull();
+    // Before the answer the doc is unverified (its last lookup failed) and says the check is queued; a covered answer verifies it for that day.
+    expect($doc->fresh()->verification_summary['verified_at'])->toBeNull()
+        ->and($doc->fresh()->verification_summary['tip'])->toContain('EWCCV lookup failed: recaptcha failed ui · checked 09/10/2026 · EWCCV check as of '.now()->format('m/d/Y').' queued, waiting for a browser session');
     EwccvCoverageCheck::first()->update(['status' => 'covered', 'employer_name' => 'M POWER SOLUTION COMPANY', 'policy_number' => '6JUBA4211404-25', 'checked_at' => now()]);
     $summary = $doc->fresh()->verification_summary;
     expect($summary['verified_at'])->toBe(now()->format('m/d/Y'))

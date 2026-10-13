@@ -117,8 +117,12 @@ class VendorDoc extends Model
             ];
         }
 
+        // A coverage check still waiting for a browser session: say so, so
+        // the doc explains why the last attempt is what it still shows.
+        $queued = $this->pendingCheckNote();
+
         if (! is_array($state) || empty($state['status'])) {
-            return null;
+            return $queued === '' ? null : ['tracking' => false, 'tip' => 'EWCCV: not looked up yet'.$queued, 'verified_at' => null, 'alert' => false];
         }
 
         $notice = is_array($state['notice'] ?? null) ? $state['notice'] : null;
@@ -144,6 +148,7 @@ class VendorDoc extends Model
         if ($checked) {
             $tip .= ' · checked '.$checked;
         }
+        $tip .= $queued;
 
         return [
             'tracking' => $state['status'] === 'tracking',
@@ -154,6 +159,23 @@ class VendorDoc extends Model
             // EWCCV reported the coverage gone: the column goes red, not amber.
             'alert' => $state['status'] === 'cancelled',
         ];
+    }
+
+    /** " · EWCCV check as of 10/06/2026 queued, waiting for a browser session", or nothing. */
+    protected function pendingCheckNote(): string
+    {
+        if (! $this->vendor_id || ! $this->effective_date || ! $this->expiration_date) {
+            return '';
+        }
+        $pending = EwccvCoverageCheck::query()
+            ->where('vendor_id', $this->vendor_id)
+            ->pending()
+            ->whereDate('coverage_date', '>=', $this->effective_date)
+            ->whereDate('coverage_date', '<=', $this->expiration_date)
+            ->orderByDesc('coverage_date')
+            ->first();
+
+        return $pending ? ' · EWCCV check as of '.$pending->coverage_date->format('m/d/Y').' queued, waiting for a browser session' : '';
     }
 
     /**
