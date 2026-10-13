@@ -3,8 +3,11 @@
 namespace App\Livewire\VendorDocs;
 
 use App\Jobs\RunPendingEwccvLookups;
+use App\Models\AuditRequest;
 use App\Models\Check;
 use App\Models\EwccvCoverageCheck;
+use App\Services\Audits\AuditReport;
+use App\Services\Audits\CertificateMerger;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
@@ -71,257 +74,72 @@ class AuditShow extends Component
             ->get();
     }
 
+    /** The report behind this page: the same builder the emailed package uses. */
     #[Computed]
-    public function vendors_grouped_checks(): Collection
+    public function report(): AuditReport
     {
-        if (!$this->end_date || empty($this->bank_account_ids)) {
-            return collect();
-        }
-
-        $start = $this->start_date;
-        $end = $this->end_date;
-
-        $authVendorId = auth()->user()->vendor->id;
-
-        // Checks written to the authenticated vendor (own vendor) — will be shown first
-        $ownVendorChecks = Check::whereBetween('date', [$start, $end])
-            ->whereIn('bank_account_id', $this->bank_account_ids)
-            ->where('vendor_id', $authVendorId)
-            ->whereNull('user_id')
-            ->where('check_type', '!=', 'Cash')
-            ->with('vendor')
-            ->orderBy('date')
-            ->get();
-
-        // Vendor-issued checks (existing behavior)
-        $vendorChecksByVendor = Check::whereBetween('date', [$start, $end])
-            ->whereIn('bank_account_id', $this->bank_account_ids)
-            ->whereNotNull('vendor_id')
-            ->whereNull('user_id')
-            ->where('vendor_id', '!=', $authVendorId)
-            ->where('check_type', '!=', 'Cash')
-            ->with('vendor')
-            ->orderBy('date')
-            ->get()
-            ->groupBy('vendor_id');
-
-        // User-owned checks where the user is employed by the authenticated vendor
-        $employeeChecksByUser = Check::whereBetween('date', [$start, $end])
-            ->whereIn('bank_account_id', $this->bank_account_ids)
-            ->whereNotNull('user_id')
-            ->where('check_type', '!=', 'Cash')
-            // ->whereHas('user', function ($q) use ($authVendorId) {
-            //     $q->where('vendor_id', $authVendorId);
-            // })
-            // user.vendors carries the pivot both the role check and the
-            // via-vendor lookup below need — otherwise each employee costs
-            // 2-3 pivot queries per render.
-            ->with('user.vendors')
-            ->orderBy('date')
-            ->get()
-            ->groupBy('user_id');
-
-        // Promote certain employees to vendor-like groups:
-        // If employee has role Member for this vendor AND via_vendor_id on the user_vendor pivot, treat as vendor, not employee.
-        $viaVendorEmployees = $employeeChecksByUser->filter(function ($checks) use ($authVendorId) {
-            $user = $checks->first()->user;
-            if (! $user) return false;
-            $role = method_exists($user, 'getRoleForVendor') ? $user->getRoleForVendor($authVendorId) : null;
-            $viaVendorId = $user->vendors->firstWhere('id', $authVendorId)?->pivot?->via_vendor_id;
-            return $role === 'Member' && !is_null($viaVendorId);
-        });
-
-        $regularEmployeeChecksByUser = $employeeChecksByUser->reject(function ($checks, $userId) use ($viaVendorEmployees) {
-            return $viaVendorEmployees->has($userId);
-        });
-
-        // Normalize to unified group structures
-        $groupsFromVendors = $vendorChecksByVendor->map(function ($checks) {
-            return [
-                'vendor' => $checks->first()->vendor, // App\Models\Vendor
-                'checks' => $checks->values(),
-            ];
-        });
-
-        $groupsFromEmployees = $regularEmployeeChecksByUser->map(function ($checks) {
-            $user = $checks->first()->user;
-
-            // Create a lightweight pseudo-vendor object for sorting/rendering
-            $pseudoVendor = new class($user) {
-                public string $business_name;
-                public string $business_type = 'Employee';
-                public function __construct($user)
-                {
-                    $this->business_name = $user?->full_name;
-                }
-            };
-
-            return [
-                'vendor' => $pseudoVendor,
-                'checks' => $checks->values(),
-                'is_user' => true,
-                'user' => $user,
-            ];
-        });
-
-        // Treat via-vendor members as vendors (non-employee group) grouped under the actual via_vendor Vendor
-        $viaVendorBuckets = [];
-        foreach ($viaVendorEmployees as $checks) {
-            $user = $checks->first()->user;
-            $viaVendorId = $user?->vendors->firstWhere('id', $authVendorId)?->pivot?->via_vendor_id;
-            if (!$viaVendorId) {
-                continue;
-            }
-            if (!array_key_exists($viaVendorId, $viaVendorBuckets)) {
-                $viaVendorBuckets[$viaVendorId] = collect();
-            }
-            $viaVendorBuckets[$viaVendorId] = $viaVendorBuckets[$viaVendorId]->merge($checks);
-        }
-
-        $groupsFromViaMembers = collect($viaVendorBuckets)->map(function ($checks, $viaVendorId) {
-            $vendor = Vendor::find($viaVendorId);
-            if (!$vendor) {
-                // Fallback: pseudo vendor using first user's name if vendor not found
-                $firstUser = $checks->first()?->user;
-                $vendor = new class($firstUser) {
-                    public string $business_name;
-                    public ?string $business_type = 'Vendor';
-                    public function __construct($user)
-                    {
-                        $this->business_name = $user?->full_name ?? 'Unknown';
-                    }
-                };
-            }
-            return [
-                'vendor' => $vendor,
-                'checks' => $checks->values(),
-                'via_vendor' => true,
-            ];
-        });
-
-        // Prepare the own vendor group (if any)
-        $ownVendorGroup = null;
-        if ($ownVendorChecks->isNotEmpty()) {
-            $ownVendorGroup = [
-                'vendor' => $ownVendorChecks->first()->vendor ?? auth()->user()->vendor,
-                'checks' => $ownVendorChecks->values(),
-            ];
-        }
-
-        // Merge and sort other groups with employees last, then by name
-        $otherGroups = $groupsFromVendors
-            ->merge($groupsFromViaMembers)
-            ->merge($groupsFromEmployees)
-            ->sort(function ($a, $b) {
-                $aIsUser = (bool)($a['is_user'] ?? false);
-                $bIsUser = (bool)($b['is_user'] ?? false);
-                if ($aIsUser !== $bIsUser) {
-                    // Non-employee groups first
-                    return $aIsUser <=> $bIsUser;
-                }
-                $aName = strtolower($a['vendor']->business_name ?? '');
-                $bName = strtolower($b['vendor']->business_name ?? '');
-                return $aName <=> $bName;
-            })
-            ->values();
-
-        // Ensure own vendor group is first
-        $mergedGroups = collect();
-        if ($ownVendorGroup) {
-            $mergedGroups->push($ownVendorGroup);
-        }
-        $mergedGroups = $mergedGroups->merge($otherGroups);
-
-    $auditEnd = $end;
-
-    $startDateStr = $start; // reuse start/end for queries below
-    $endDateStr = $end;
-
-    // All docs for all groups in ONE query — this used to be 3 queries per
-    // vendor group (professional, audit-type, applicable).
-    $groupVendorIds = $mergedGroups
-        ->map(fn ($group) => $group['vendor'] instanceof Vendor ? $group['vendor']->id : null)
-        ->filter()
-        ->unique()
-        ->values();
-
-    $docsByVendor = $groupVendorIds->isNotEmpty()
-        ? \App\Models\VendorDoc::whereIn('vendor_id', $groupVendorIds)
-            ->whereIn('type', array_values(array_filter(['professional', $this->audit_type])))
-            ->with('agent')
-            ->get()
-            ->groupBy('vendor_id')
-        : collect();
-
-    $coverageChecks = $this->coverage_checks;
-
-    return $mergedGroups->map(function ($group) use ($auditEnd, $startDateStr, $endDateStr, $docsByVendor, $coverageChecks) {
-            $vendor = $group['vendor'];
-
-            // Only real vendors have docs; pseudo vendors (employees) skip this block
-            if ($vendor instanceof Vendor) {
-                $vendorDocs = collect($docsByVendor->get($vendor->id) ?? []);
-                // EWCCV's answer for this vendor as of the audit's end date.
-                $group['coverage_check'] = $coverageChecks->get($vendor->id);
-
-                // Attach active Professional policy (if any)
-                $professional = $vendorDocs
-                    ->where('type', 'professional')
-                    ->sortByDesc('effective_date')
-                    ->first();
-                if ($professional) {
-                    $effective = $professional->effective_date;
-                    $expires = $professional->expiration_date;
-                    if ($effective->lte($auditEnd) && $expires->gte($auditEnd)) {
-                        $group['professional_doc'] = $professional;
-                    }
-                }
-
-                // Mark covered checks for the selected audit type documents
-                if ($this->audit_type) {
-                    $vendor_docs = $vendorDocs->where('type', $this->audit_type);
-                    foreach ($vendor_docs as $vendor_doc) {
-                        $doc_checks = $group['checks']->whereBetween('date', [$vendor_doc->effective_date, $vendor_doc->expiration_date]);
-                        foreach ($doc_checks as $vendor_check) {
-                            $vendor_check->covered = true;
-                        }
-                    }
-
-                    // Collect policies applicable to this audit window
-                    $applicable = $vendorDocs
-                        ->where('type', $this->audit_type)
-                        ->filter(fn ($doc) => $doc->effective_date?->format('Y-m-d') <= $endDateStr
-                            && $doc->expiration_date?->format('Y-m-d') >= $startDateStr)
-                        ->sortByDesc('expiration_date');
-                    if ($applicable->isNotEmpty()) {
-                        $group['applicable_docs'] = $applicable->values();
-                    }
-                }
-            }
-
-            return $group;
-        })->values();
+        return new AuditReport(
+            (int) auth()->user()->vendor->id,
+            (string) $this->start_date,
+            (string) $this->end_date,
+            $this->audit_type ?: null,
+            array_map('intval', $this->bank_account_ids),
+            $this->audit_type === 'workers' && $this->end_date ? AuditRequest::coverageDateFor($this->end_date) : null,
+        );
     }
 
     /**
-     * EWCCV's coverage checks as of the audit's end date, by vendor id. A
-     * workers comp audit asks "was the sub covered on the last day?", which
-     * the tracking state (today's coverage) does not answer.
+     * The request this page stands for: created on first sight (a workers
+     * comp audit then queues its EWCCV checks), so an audit opened by link
+     * is tracked like one started from the form.
+     */
+    #[Computed]
+    public function auditRequest(): ?AuditRequest
+    {
+        if (! $this->end_date || ! $this->start_date || empty($this->bank_account_ids)) {
+            return null;
+        }
+
+        return AuditRequest::findOrStart((int) auth()->user()->vendor->id, auth()->user(), (string) $this->start_date, (string) $this->end_date, $this->audit_type ?: null, array_map('intval', $this->bank_account_ids));
+    }
+
+    /** Downloads wait until EWCCV has answered for every sub; the package is emailed then. */
+    #[Computed]
+    public function canDownload(): bool
+    {
+        $audit = $this->auditRequest;
+
+        return $audit === null || $audit->isDownloadable();
+    }
+
+    #[Computed]
+    public function vendors_grouped_checks(): Collection
+    {
+        if (! $this->end_date || empty($this->bank_account_ids)) {
+            return collect();
+        }
+
+        return $this->report->groups();
+    }
+
+    /** The EWCCV coverage date this audit is checked against: the end date minus two days. */
+    #[Computed]
+    public function coverageDate(): ?\Illuminate\Support\Carbon
+    {
+        return $this->audit_type === 'workers' && $this->end_date ? AuditRequest::coverageDateFor($this->end_date) : null;
+    }
+
+    /**
+     * EWCCV's coverage checks as of the coverage date, by vendor id. A
+     * workers comp audit asks "was the sub covered two days before the
+     * period ended?", which the tracking state (today's coverage) cannot say.
      *
      * @return Collection<int, EwccvCoverageCheck>
      */
     #[Computed]
     public function coverage_checks(): Collection
     {
-        if ($this->audit_type !== 'workers' || ! $this->end_date) {
-            return collect();
-        }
-
-        return EwccvCoverageCheck::query()
-            ->where('belongs_to_vendor_id', auth()->user()->vendor->id)
-            ->whereDate('coverage_date', $this->end_date)
-            ->get()
-            ->keyBy('vendor_id');
+        return $this->report->coverageChecks();
     }
 
     /**
@@ -330,27 +148,13 @@ class AuditShow extends Component
     #[Computed]
     public function coverage_check_counts(): array
     {
-        $needing = $this->vendorsNeedingCoverage();
-        $checks = $this->coverage_checks;
-        $counts = ['covered' => 0, 'not_found' => 0, 'pending' => 0, 'unchecked' => 0, 'total' => count($needing)];
-        foreach ($needing as $vendorId) {
-            $check = $checks->get($vendorId);
-            $key = match ($check?->status) {
-                EwccvCoverageCheck::STATUS_COVERED => 'covered',
-                EwccvCoverageCheck::STATUS_NOT_FOUND => 'not_found',
-                EwccvCoverageCheck::STATUS_PENDING => 'pending',
-                default => 'unchecked',
-            };
-            $counts[$key]++;
-        }
-
-        return $counts;
+        return $this->report->coverageCounts();
     }
 
     /**
-     * Ask EWCCV whether every sub paid in the period was covered on the end
-     * date. The checks wait for a browser session (the bridge extension) when
-     * none is at hand; the page shows each vendor's answer as it lands.
+     * Ask EWCCV again for every sub still without an answer as of the
+     * coverage date (a failed attempt is put back); the checks wait for a
+     * browser session when none is at hand.
      */
     public function verify_coverage_on_ewccv(): void
     {
@@ -359,179 +163,78 @@ class AuditShow extends Component
             return;
         }
 
-        $own = auth()->user()->vendor->id;
+        $own = (int) auth()->user()->vendor->id;
+        $date = $this->coverageDate->toDateString();
         $queued = 0;
-        foreach ($this->vendorsNeedingCoverage() as $vendorId) {
-            if (EwccvCoverageCheck::request($vendorId, $own, $this->end_date)) {
+        foreach ($this->report->vendorsNeedingCoverage() as $vendorId) {
+            if (EwccvCoverageCheck::request($vendorId, $own, $date)) {
                 $queued++;
             }
         }
-        unset($this->coverage_checks, $this->coverage_check_counts, $this->vendors_grouped_checks);
+        unset($this->report, $this->coverage_checks, $this->coverage_check_counts, $this->vendors_grouped_checks, $this->auditRequest, $this->canDownload);
 
-        $date = Carbon::parse($this->end_date)->format('m/d/Y');
+        $shown = $this->coverageDate->format('m/d/Y');
         if ($queued === 0) {
-            $this->toast(text: "Every vendor in this audit already has an EWCCV answer for {$date}, or is waiting for one.", heading: 'EWCCV', duration: 5000);
+            $this->toast(text: "Every vendor in this audit already has an EWCCV answer for {$shown}, or is waiting for one.", heading: 'EWCCV', duration: 5000);
 
             return;
         }
 
         if (BridgedSession::canSearch()) {
             RunPendingEwccvLookups::dispatch();
-            $this->toast(text: "Checking {$queued} vendor(s) on EWCCV as of {$date} now; answers land here in a few minutes.", heading: 'EWCCV', duration: 6000);
+            $this->toast(text: "Checking {$queued} vendor(s) on EWCCV as of {$shown} now; the package is emailed when every answer is in.", heading: 'EWCCV', duration: 6000);
 
             return;
         }
 
-        $this->toast(text: "{$queued} vendor(s) queued for EWCCV as of {$date}. They run when a browser session is handed over: open ewccv.com with the Hive extension.", heading: 'EWCCV', duration: 8000, variant: 'warning');
+        $this->toast(text: "{$queued} vendor(s) queued for EWCCV as of {$shown}. They run when a browser session is handed over: open ewccv.com with the Hive extension.", heading: 'EWCCV', duration: 8000, variant: 'warning');
     }
 
-    /**
-     * The vendors whose coverage the audit asks EWCCV about: paid subs that
-     * are not the company itself, an employee, a retail or categorised
-     * vendor, or a vendor with a professional policy for the period — and
-     * only those with a workers comp policy on file that is active today
-     * (not expired). A sub without a current certificate is a document
-     * problem to chase, not an EWCCV search.
-     *
-     * @return list<int>
-     */
-    protected function vendorsNeedingCoverage(): array
-    {
-        $own = auth()->user()->vendor->id;
-
-        $candidates = $this->vendors_grouped_checks
-            ->filter(fn (array $group) => $group['vendor'] instanceof Vendor
-                && $group['vendor']->id !== $own
-                && empty($group['is_user'])
-                && empty($group['vendor']->category_id)
-                && $group['vendor']->business_type !== 'Retail'
-                && ! isset($group['professional_doc']))
-            ->map(fn (array $group) => (int) $group['vendor']->id)
-            ->unique()
-            ->values();
-
-        if ($candidates->isEmpty()) {
-            return [];
-        }
-
-        return VendorDoc::withoutGlobalScopes()
-            ->where('type', 'workers')
-            ->where('belongs_to_vendor_id', $own)
-            ->whereIn('vendor_id', $candidates)
-            ->whereDate('effective_date', '<=', today())
-            ->whereDate('expiration_date', '>=', today())
-            ->pluck('vendor_id')
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-    }
-
+    /** @return list<string> the certificate files the package merges */
     #[Computed]
     public function vendor_docs(): array
     {
-        // Build a unique list of file paths for the current audit_type
-        $files = collect();
-        foreach ($this->vendors_grouped_checks as $group) {
-            $vendor = $group['vendor'];
-            $vendor_docs = ($this->audit_type && $vendor instanceof Vendor)
-                ? $vendor->vendor_docs()->where('type', $this->audit_type)->get()
-                : collect();
-            foreach ($vendor_docs as $vendor_doc) {
-                // Only include if any checks fall within the doc window
-                $hasCovered = $group['checks']->whereBetween('date', [$vendor_doc->effective_date, $vendor_doc->expiration_date])->isNotEmpty();
-                if ($hasCovered) {
-                    // Resolve path via the configured storage disk to avoid path drift
-                    $path = \Storage::disk('files')->path('vendor_docs/'.($vendor_doc->doc_filename));
-                    if (file_exists($path)) {
-                        $files->push($path);
-                    }
-                }
-            }
+        return $this->report->certificateFiles()['sources'];
+    }
+
+    /** A download before the EWCCV answers are in: say so, and that the package is emailed. */
+    protected function refuseUntilReady(): bool
+    {
+        if ($this->canDownload) {
+            return false;
         }
-        return $files->unique()->values()->toArray();
+        $this->toast(
+            text: 'EWCCV is still checking coverage for this audit; the package is emailed to you the moment every answer is in.',
+            heading: 'Not ready yet',
+            duration: 7000,
+            variant: 'warning',
+        );
+
+        return true;
     }
 
     public function download_documents()
     {
-        // Build expected file list and collect any missing files to notify via Flux toast
-        $expected = collect();
-        $missing = collect();
-
-        foreach ($this->vendors_grouped_checks as $group) {
-            $vendor = $group['vendor'];
-            if (!($vendor instanceof Vendor) || !$this->audit_type) {
-                continue;
-            }
-
-            $vendor_docs = $vendor->vendor_docs()->where('type', $this->audit_type)->get();
-            foreach ($vendor_docs as $vendor_doc) {
-                $hasCovered = $group['checks']
-                    ->whereBetween('date', [$vendor_doc->effective_date, $vendor_doc->expiration_date])
-                    ->isNotEmpty();
-
-                if (!$hasCovered) {
-                    continue;
-                }
-
-                $path = \Storage::disk('files')->path('vendor_docs/' . $vendor_doc->doc_filename);
-                if (file_exists($path)) {
-                    $expected->push($path);
-                } else {
-                    $missing->push($vendor_doc->doc_filename);
-                }
-            }
-        }
-
-        $sources = $expected->unique()->values();
-
-        // If any expected files are missing, show an error toast and stop
-        if ($missing->isNotEmpty()) {
-            $list = $missing->unique()->values();
-            // Keep the toast concise if many files are missing
-            $preview = $list->take(5)->implode(', ');
-            $more = $list->count() > 5 ? ' and ' . ($list->count() - 5) . ' more' : '';
-            $this->toast(
-                text: 'Some policy files were not found: ' . $preview . $more,
-                heading: 'Missing files',
-                duration: 7000,
-                variant: 'danger',
-            );
+        if ($this->refuseUntilReady()) {
             return;
         }
 
-        // If none remain, warn and stop
-        if ($sources->isEmpty()) {
-            $this->toast(
-                text: 'No policy documents found for the selected filters and date range.',
-                heading: 'Nothing to download',
-                duration: 5000,
-                variant: 'warning',
-            );
+        $files = $this->report->certificateFiles();
+        if ($files['missing'] !== []) {
+            $list = collect($files['missing']);
+            $this->toast(text: 'Some policy files were not found: '.$list->take(5)->implode(', ').($list->count() > 5 ? ' and '.($list->count() - 5).' more' : ''), heading: 'Missing files', duration: 7000, variant: 'danger');
+
+            return;
+        }
+        if ($files['sources'] === []) {
+            $this->toast(text: 'No policy documents found for the selected filters and date range.', heading: 'Nothing to download', duration: 5000, variant: 'warning');
+
             return;
         }
 
-    // Build filename with vendor name and audit date range
-        $currentVendor = auth()->user()->vendor;
-        $vendorNameSlug = Str::slug($currentVendor->name);
-        $endStr = $this->end_date;
-        $startStr = $this->start_date;
-        $filename = 'Audit-'.$currentVendor->id.'-'.$vendorNameSlug.'-'.$startStr.'-to-'.$endStr;
+        $filename = $this->report->filenameBase();
+        $content = app(CertificateMerger::class)->merge($files['sources'], $filename);
 
-        $ilovepdf = new Ilovepdf(env('I_LOVE_PDF_PUBLIC'), env('I_LOVE_PDF_SECRET'));
-        $task = $ilovepdf->newTask('merge');
-
-    foreach ($sources as $file) {
-            $task->addFile($file);
-        }
-
-        $task->setOutputFilename($filename);
-        $task->execute();
-
-        // Get merged PDF bytes in memory (no disk write)
-        $content = $task->blob();
-
-        // Stream the file to the browser as a download (no disk write)
         return response()->streamDownload(function () use ($content) {
             echo $content;
         }, $filename.'.pdf', [
@@ -544,186 +247,15 @@ class AuditShow extends Component
 
     public function export_xlsx()
     {
-        $currentVendor = auth()->user()->vendor;
-        $vendorNameSlug = Str::slug($currentVendor->name);
-        $endStr = $this->end_date;
-        $startStr = $this->start_date;
-        $filename = 'Audit-'.$currentVendor->id.'-'.$vendorNameSlug.'-'.$startStr.'-to-'.$endStr.'.xlsx';
+        if ($this->refuseUntilReady()) {
+            return;
+        }
 
-        return response()->streamDownload(function () use ($filename) {
-            $authVendorId = auth()->user()->vendor->id;
-            // Styles
-            $underlineBorder = new Border(
-                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
-            );
-            $vendorHeaderStyle = (new Style())->setBorder($underlineBorder)->setFontBold();
-            $boldStyle = (new Style())->setFontBold();
+        $filename = $this->report->filenameBase().'.xlsx';
+        $content = $this->report->xlsx();
 
-            // Coverage cell-only styles
-            $coverageGreen = (new Style())->setFontColor(Color::GREEN);
-            $coverageOrange = (new Style())->setFontColor('C05621'); // dark orange
-            $coverageRed = (new Style())->setFontColor(Color::RED);
-
-            // OpenSpout writer
-            $writer = new XLSXWriter();
-            $writer->openToFile('php://output');
-
-            // Name the first sheet
-            $writer->getCurrentSheet()->setName('By Vendor');
-
-            // Sheet 1 header
-            $writer->addRow(Row::fromValues([
-                'Vendor', 'Date', 'Payment', 'Amount', 'Coverage',
-            ]));
-
-            foreach ($this->vendors_grouped_checks as $group) {
-                $vendor = $group['vendor'];
-
-                // Vendor header row (underline across all columns)
-                $writer->addRow(Row::fromValues([
-                    $vendor->business_name, null, null, null, null,
-                ], $vendorHeaderStyle));
-
-                // Optional subheading row (employees, Retail, or professional policy)
-                if (($group['is_user'] ?? false) === true) {
-                    $role = $group['user']?->getRoleForVendor($authVendorId) ?? 'No Role';
-                    if ($role === 'Admin') {
-                        $writer->addRow(Row::fromValues([
-                            $vendor->business_name . ' is a stakeholder in the business and is excluded.', null, null, null, null,
-                        ]));
-                    } else {
-                        $writer->addRow(Row::fromValues([
-                            $vendor->business_name . ' is an employee payment subject to audit review.', null, null, null, null,
-                        ]));
-                    }
-                } elseif ($vendor->business_type === 'Retail') {
-                    $writer->addRow(Row::fromValues([
-                        $vendor->business_name." is Retail and doesn't require coverage.", null, null, null, null,
-                    ]));
-                } elseif (isset($group['professional_doc'])) {
-                    $doc = $group['professional_doc'];
-                    $writer->addRow(Row::fromValues([
-                        'Professional policy active (' . $doc->effective_date->format('m/d/Y') . '–' . $doc->expiration_date->format('m/d/Y') . ')',
-                        null, null, null, null,
-                    ]));
-                }
-
-                // Applicable policies block (if any)
-                if (isset($group['applicable_docs']) && ($group['applicable_docs']?->count() ?? 0) > 0) {
-                    // $writer->addRow(Row::fromValues(['Applicable Policies', null, null, null, null], $boldStyle));
-                    foreach ($group['applicable_docs'] as $doc) {
-                        $writer->addRow(Row::fromValues([
-                            $doc->number . ' (' . $doc->effective_date->format('m/d/Y') . '–' . $doc->expiration_date->format('m/d/Y') . ')',
-                            null, null, null, self::verificationCell($doc),
-                        ]));
-                    }
-                    $writer->addRow(Row::fromValues(['', '', '', '', '']));
-                }
-                if (! empty($group['coverage_check'])) {
-                    $writer->addRow(Row::fromValuesWithStyles([
-                        $group['coverage_check']->label(), null, null, null, $group['coverage_check']->badge(),
-                    ], null, [4 => match ($group['coverage_check']->tone()) { 'green' => $coverageGreen, 'red' => $coverageRed, default => $coverageOrange }]));
-                    $writer->addRow(Row::fromValues(['', '', '', '', '']));
-                }
-
-                // Detail rows
-                foreach ($group['checks'] as $check) {
-                    $isUser = (bool)($group['is_user'] ?? false);
-                    if ($isUser) {
-                        $role = $group['user']?->getRoleForVendor($authVendorId) ?? 'No Role';
-                        $coverage = ($role === 'Admin') ? 'Not Applicable' : 'Not Covered';
-                    } else {
-                        $coverage = $check->covered
-                            ? 'Covered'
-                            : ((isset($group['professional_doc']) || $vendor->business_type === 'Retail' || !empty($vendor->category_id)) ? 'Not Applicable' : 'Not Covered');
-                    }
-
-                    $values = [
-                        null,
-                        $check->date->format('m/d/Y'),
-                        $check->payment_label . ' ' . $check->check_number,
-                        money($check->amount),
-                        $coverage,
-                    ];
-
-                    $coverageStyle = match ($coverage) {
-                        'Covered' => $coverageGreen,
-                        'Not Applicable' => $coverageOrange,
-                        default => $coverageRed,
-                    };
-
-                    $writer->addRow(Row::fromValuesWithStyles($values, null, [4 => $coverageStyle]));
-                }
-
-                // Spacer row between vendors
-                $writer->addRow(Row::fromValues(['', '', '', '', '']));
-            }
-
-            // =========================
-            // Sheet 2: All Checks (desc)
-            // =========================
-            $checks = [];
-            foreach ($this->vendors_grouped_checks as $group) {
-                $vendor = $group['vendor'];
-                $doc = $group['professional_doc'] ?? null;
-                $isUser = (bool)($group['is_user'] ?? false);
-
-                foreach ($group['checks'] as $check) {
-                    if ($isUser) {
-                        $role = $group['user']?->getRoleForVendor($authVendorId) ?? 'No Role';
-                        $coverage = ($role === 'Admin') ? 'Not Applicable' : 'Not Covered';
-                    } else {
-                        $coverage = $check->covered
-                            ? 'Covered'
-                            : (($doc || $vendor->business_type === 'Retail' || !empty($vendor->category_id)) ? 'Not Applicable' : 'Not Covered');
-                    }
-
-                    $checks[] = [
-                        'ts' => $check->date instanceof \Carbon\Carbon ? $check->date->getTimestamp() : strtotime((string) $check->date),
-                        'type' => (string) $check->check_type,
-                        'number' => (string) $check->check_number,
-                        'date' => $check->date->format('m/d/Y'),
-                        'vendor' => $vendor->business_name,
-                        'payment' => $check->payment_label . ' ' . $check->check_number,
-                        'amount' => money($check->amount),
-                        'coverage' => $coverage,
-                    ];
-                }
-            }
-
-            // Sort by check_type (asc), then check_number (asc, natural)
-            usort($checks, function ($a, $b) {
-                $typeCmp = strcasecmp($a['type'] ?? '', $b['type'] ?? '');
-                if ($typeCmp !== 0) {
-                    return $typeCmp;
-                }
-                return strnatcasecmp((string)($a['number'] ?? ''), (string)($b['number'] ?? ''));
-            });
-
-            // Create and name the second sheet
-            $writer->addNewSheetAndMakeItCurrent()->setName('All Checks');
-
-            // Sheet 2 header
-            $writer->addRow(Row::fromValues([
-                'Date', 'Vendor', 'Payment', 'Amount', 'Coverage',
-            ]));
-
-            // Rows (coverage colored per cell)
-            foreach ($checks as $row) {
-                $coverageStyle = match ($row['coverage']) {
-                    'Covered' => $coverageGreen,
-                    'Not Applicable' => $coverageOrange,
-                    default => $coverageRed,
-                };
-
-                $writer->addRow(Row::fromValuesWithStyles(
-                    [$row['date'], $row['vendor'], $row['payment'], $row['amount'], $row['coverage']],
-                    null,
-                    [4 => $coverageStyle]
-                ));
-            }
-
-            $writer->close();
+        return response()->streamDownload(function () use ($content) {
+            echo $content;
         }, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
@@ -731,6 +263,10 @@ class AuditShow extends Component
 
     public function download_bank_statements()
     {
+        if ($this->refuseUntilReady()) {
+            return;
+        }
+
         if (empty($this->bank_account_ids)) {
             $this->toast('Please select bank accounts first.', 'error');
             return;
@@ -1010,18 +546,7 @@ class AuditShow extends Component
     /** The Coverage column of a policy row in the export: "WC verified 10/12/2026 (EWCCV)" and the like. */
     public static function verificationCell(VendorDoc $doc): ?string
     {
-        $summary = $doc->verification_summary;
-        if ($summary && $summary['verified_at']) {
-            return 'WC verified '.$summary['verified_at'].' ('.implode(', ', array_map('strtoupper', $summary['sources'])).')';
-        }
-        if ($summary && ! empty($summary['alert'])) {
-            return 'Coverage cancelled (EWCCV)';
-        }
-        if ($doc->type === 'workers') {
-            return 'Not verified';
-        }
-
-        return null;
+        return AuditReport::verificationCell($doc);
     }
 
     #[Title('Audit')]

@@ -633,6 +633,10 @@ class ScrapeEwccvTracking extends Command
             }
 
             $recorded = $this->recordCoverageChecks($results, $allowedChecks, $tenantId, $keyOf);
+            if ($recorded > 0) {
+                // An audit waiting on these answers can now be finished and emailed.
+                \App\Jobs\SendAuditWhenReady::dispatch();
+            }
             if ($recorded > 0 || $verifyOnly || $checks !== []) {
                 $this->info("Recorded EWCCV coverage for {$recorded} coverage check(s).");
                 Log::info('EWCCV coverage checks completed', ['recorded' => $recorded, 'dates' => $verifyOnly ? [$coverageDate->toDateString()] : array_keys($checks)]);

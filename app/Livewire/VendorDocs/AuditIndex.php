@@ -77,6 +77,10 @@ class AuditIndex extends Component
             ->values()
             ->all();
 
+        // The audit is a request: its EWCCV checks run in the background and
+        // its package is emailed when they are answered (SendAuditWhenReady).
+        \App\Models\AuditRequest::findOrStart((int) auth()->user()->vendor->id, auth()->user(), $this->start_date, $this->end_date, $this->type ?: null, $bank_account_ids);
+
         return $this->redirectRoute('vendor_docs.audit', [
             'start_date' => $this->start_date,
             'end_date' => $this->end_date,

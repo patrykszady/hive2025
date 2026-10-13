@@ -3,15 +3,17 @@
     <x-details.card title="Audit" :accordion="false">
         <x-slot:header_buttons>
             <flux:button.group>
+                {{-- Downloads wait until EWCCV has answered for every sub; the
+                     package is emailed the moment it has (SendAuditWhenReady). --}}
                 <flux:button
                     wire:click="download_documents"
                     size="sm"
-                    {{-- variant="primary" --}}
+                    :disabled="! $this->canDownload"
                 >
                     Download Certificates
                 </flux:button>
                 <flux:dropdown position="bottom" align="end">
-                    <flux:button icon-trailing="chevron-down" size="sm"></flux:button>
+                    <flux:button icon-trailing="chevron-down" size="sm" :disabled="! $this->canDownload"></flux:button>
 
                     <flux:menu>
                         <flux:menu.item
@@ -39,7 +41,7 @@
             <x-slot name="details">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                     <div class="text-sm">
-                        <span class="font-medium">EWCCV coverage as of {{ \Carbon\Carbon::parse($end_date)->format('m/d/Y') }}:</span>
+                        <span class="font-medium">EWCCV coverage as of {{ $this->coverageDate?->format('m/d/Y') }} (two days before the period ends):</span>
                         @if($this->coverage_check_counts['total'] === 0)
                             <span class="text-zinc-500">no paid sub has a workers comp policy active today</span>
                         @elseif($this->coverage_check_counts['covered'] + $this->coverage_check_counts['not_found'] + $this->coverage_check_counts['pending'] === 0)
@@ -54,9 +56,22 @@
                         @endif
                     </div>
                     <flux:button wire:click="verify_coverage_on_ewccv" size="sm" icon="shield-check">
-                        Check EWCCV as of {{ \Carbon\Carbon::parse($end_date)->format('m/d/Y') }}
+                        Check EWCCV as of {{ $this->coverageDate?->format('m/d/Y') }}
                     </flux:button>
                 </div>
+                @if($this->auditRequest)
+                    <div class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+                        @if($this->auditRequest->status === 'sent')
+                            Package emailed to {{ $this->auditRequest->emailed_to }} on {{ $this->auditRequest->emailed_at?->timezone(config('app.timezone'))->format('m/d/Y H:i') }}.
+                        @elseif($this->auditRequest->status === 'ready')
+                            Every answer is in; the downloads are open.
+                        @elseif($this->auditRequest->status === 'failed')
+                            The package could not be built: {{ $this->auditRequest->error }}
+                        @else
+                            Downloads open when EWCCV has answered for every sub; the package (certificates PDF + Excel) is emailed to you then.
+                        @endif
+                    </div>
+                @endif
             </x-slot>
         @endif
     </x-details.card>

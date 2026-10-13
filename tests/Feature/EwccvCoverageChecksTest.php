@@ -95,32 +95,39 @@ it('shows on every policy of the audit whether and when its coverage was verifie
     auditPage($f)
         ->assertSee('WC verified 10/12/2026')
         ->assertSee('not verified')
-        ->assertSee('EWCCV coverage as of 12/31/2025')
-        ->assertSee('not checked yet (1 subs)');
+        ->assertSee('EWCCV coverage as of 12/29/2025')
+        ->assertSee('1 waiting');
 
     expect(AuditShow::verificationCell($f['doc']))->toBe('WC verified 10/12/2026 (EWCCV)');
 });
 
-it('asks EWCCV for coverage as of the end date for every paid sub, and shows the answers as they land', function () {
+it('opening an audit asks EWCCV for coverage as of the end date minus two days for every paid sub, and shows the answers as they land', function () {
     Queue::fake();
     $f = auditFixture();
 
-    // No browser session: the checks wait, the page says so.
+    // Opening the audit creates its request and queues the check; no browser session: it waits, the page says so.
     auditPage($f)
-        ->call('verify_coverage_on_ewccv')
         ->assertSee('EWCCV: waiting')
         ->assertSee('Waiting for a browser session')
-        ->assertSee('1 waiting');
+        ->assertSee('1 waiting')
+        ->assertSee('Downloads open when EWCCV has answered for every sub');
     Queue::assertNotPushed(RunPendingEwccvLookups::class);
+
+    $audit = \App\Models\AuditRequest::first();
+    expect($audit)->not->toBeNull()
+        ->and($audit->status)->toBe('pending')
+        ->and($audit->coverage_date->toDateString())->toBe('2025-12-29')
+        ->and($audit->vendors_checked)->toBe([$f['sub']->id])
+        ->and($audit->requested_by_user_id)->toBe($f['user']->id);
 
     $check = EwccvCoverageCheck::where('vendor_id', $f['sub']->id)->first();
     expect($check)->not->toBeNull()
         ->and($check->belongs_to_vendor_id)->toBe($f['gc']->id)
-        ->and($check->coverage_date->toDateString())->toBe('2025-12-31')
+        ->and($check->coverage_date->toDateString())->toBe('2025-12-29')
         ->and($check->status)->toBe('pending');
 
     // Asking again changes nothing; with a session at hand the run starts now.
-    expect(EwccvCoverageCheck::request($f['sub']->id, $f['gc']->id, '2025-12-31'))->toBeFalse();
+    expect(EwccvCoverageCheck::request($f['sub']->id, $f['gc']->id, '2025-12-29'))->toBeFalse();
     $check->update(['status' => 'pending', 'reason' => 'session_expired']);
     coverageBridgedSession();
     auditPage($f)->call('verify_coverage_on_ewccv');
@@ -129,13 +136,65 @@ it('asks EWCCV for coverage as of the end date for every paid sub, and shows the
 
     // The answers.
     $check->update(['status' => 'covered', 'policy_number' => 'WC-KOT-1', 'employer_name' => 'KOT CONSTRUCTION INC', 'checked_at' => now()]);
-    auditPage($f)->assertSee('EWCCV: covered')->assertSee('Covered on 12/31/2025: KOT CONSTRUCTION INC, policy WC-KOT-1')->assertSee('1 covered');
+    auditPage($f)->assertSee('EWCCV: covered')->assertSee('Covered on 12/29/2025: KOT CONSTRUCTION INC, policy WC-KOT-1')->assertSee('1 covered');
 
     $check->update(['status' => 'not_found', 'reason' => 'no_match']);
-    auditPage($f)->assertSee('EWCCV: not found')->assertSee('Not found on EWCCV for 12/31/2025 (no match)')->assertSee('1 not found');
+    auditPage($f)->assertSee('EWCCV: not found')->assertSee('Not found on EWCCV for 12/29/2025 (no match)')->assertSee('1 not found');
 
-    // A different end date is a different question.
-    expect(auditPage($f, '2025-06-30')->get('coverage_check_counts')['unchecked'])->toBe(1);
+    // A different end date is a different question, asked on first sight.
+    expect(auditPage($f, '2025-06-30')->get('coverage_check_counts')['pending'])->toBe(1)
+        ->and(\App\Models\AuditRequest::count())->toBe(2);
+});
+
+it('the audit package waits for the EWCCV answers, then is built and emailed with the certificates and the Excel', function () {
+    Queue::fake();
+    \Illuminate\Support\Facades\Mail::fake();
+    $f = auditFixture();
+    Storage::fake('files');
+    Storage::disk('files')->put('vendor_docs/kot.pdf', '%PDF-1.4 kot');
+
+    // Opened: pending, downloads refused.
+    $page = auditPage($f);
+    expect($page->get('canDownload'))->toBeFalse();
+    $page->call('download_documents');
+    $audit = \App\Models\AuditRequest::first();
+    expect($audit->status)->toBe('pending')->and($audit->pendingChecks())->toBe(1);
+
+    // Nothing is sent while a check is pending.
+    $this->mock(\App\Services\Audits\CertificateMerger::class)->shouldReceive('merge')->never();
+    (new \App\Jobs\SendAuditWhenReady)->handle(app(\App\Services\Audits\CertificateMerger::class));
+    \Illuminate\Support\Facades\Mail::assertNothingSent();
+
+    // The answer lands: the package is built and emailed, downloads open.
+    EwccvCoverageCheck::where('vendor_id', $f['sub']->id)->first()->update(['status' => 'covered', 'policy_number' => 'WC-KOT-1', 'employer_name' => 'KOT CONSTRUCTION INC', 'checked_at' => now()]);
+    $merger = $this->mock(\App\Services\Audits\CertificateMerger::class);
+    $merger->shouldReceive('merge')->once()->withArgs(fn (array $files, string $name) => count($files) === 1 && str_ends_with($files[0], 'kot.pdf') && str_starts_with($name, 'Audit-'.$f['gc']->id.'-'))->andReturn('%PDF-1.4 merged');
+    (new \App\Jobs\SendAuditWhenReady)->handle($merger);
+
+    \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\AuditReadyMail::class, function (\App\Mail\AuditReadyMail $mail) use ($f) {
+        $mail->assertHasAttachedData('%PDF-1.4 merged', $mail->filenameBase.'.pdf', ['mime' => 'application/pdf']);
+
+        return $mail->hasTo($f['user']->email)
+            && $mail->counts['covered'] === 1
+            && str_starts_with($mail->xlsx, 'PK')
+            && str_contains($mail->envelope()->subject, 'Audit package ready')
+            && str_contains($mail->render(), 'Covered: 1');
+    });
+    $audit->refresh();
+    expect($audit->status)->toBe('sent')
+        ->and($audit->emailed_to)->toBe($f['user']->email)
+        ->and(auditPage($f)->get('canDownload'))->toBeTrue();
+    auditPage($f)->assertSee('Package emailed to '.$f['user']->email);
+});
+
+it('a general audit, with nothing to ask EWCCV, is finished at once', function () {
+    Queue::fake();
+    $f = auditFixture();
+    Livewire::test(AuditShow::class, ['start_date' => '2025-01-01', 'end_date' => '2025-12-31', 'audit_type' => 'general', 'bank_account_ids' => [$f['bank']->id]])
+        ->assertDontSee('EWCCV coverage as of');
+    $audit = \App\Models\AuditRequest::first();
+    expect($audit->audit_type)->toBe('general')->and($audit->coverage_date)->toBeNull()->and($audit->pendingChecks())->toBe(0);
+    Queue::assertPushed(\App\Jobs\SendAuditWhenReady::class);
 });
 
 it('leaves the company itself, employees, retail and categorised vendors, and subs without a policy active today out of the coverage checks', function () {
