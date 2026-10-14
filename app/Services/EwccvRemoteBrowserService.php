@@ -193,6 +193,9 @@ class EwccvRemoteBrowserService
      * The extension's Hive URL and bridge token, bundled as defaults.json
      * (gitignored: it holds the token) so nobody types a token through a
      * remote framebuffer. Rewritten on every start so a rotation reaches it.
+     * singleTab tells the extension it runs here, where it keeps one tab: the
+     * restored session plus the parked page would otherwise pile up a tab per
+     * restart.
      */
     public function writeExtensionDefaults(): bool
     {
@@ -203,7 +206,7 @@ class EwccvRemoteBrowserService
             return false;
         }
         $path = $this->extensionDir().'/defaults.json';
-        file_put_contents($path, json_encode(['serverUrl' => rtrim((string) config('app.url'), '/'), 'token' => $token], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n");
+        file_put_contents($path, json_encode(['serverUrl' => rtrim((string) config('app.url'), '/'), 'token' => $token, 'singleTab' => true], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n");
         @chmod($path, 0600);
 
         return true;

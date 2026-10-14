@@ -46,7 +46,7 @@ it('hands the extension its Hive URL and token in a private defaults.json', func
     expect(browserWithExtensionDir($dir)->writeExtensionDefaults())->toBeTrue();
 
     $defaults = json_decode((string) file_get_contents($dir.'/defaults.json'), true);
-    expect($defaults)->toBe(['serverUrl' => 'https://hive.contractors', 'token' => 'bridge-secret'])
+    expect($defaults)->toBe(['serverUrl' => 'https://hive.contractors', 'token' => 'bridge-secret', 'singleTab' => true])
         ->and(substr(sprintf('%o', fileperms($dir.'/defaults.json')), -3))->toBe('600');
 
     @unlink($dir.'/defaults.json');

@@ -41,8 +41,29 @@ const POLL_MINUTES = 1;
  * load (a search by hand) or the button clears the wait.
  */
 const BACKOFF_MINUTES = 10;
-let backoffUntil = 0;
-let lastRefusedToken = null;
+
+/**
+ * The wait and the refused copy live in storage.session, not in variables:
+ * Chrome stops an idle service worker within a minute, the variables reset
+ * with it, and the wait never held — the server browser retried a refused
+ * mint every minute (2026-10-14).
+ */
+async function inBackoff() {
+    const { backoffUntil = 0 } = await chrome.storage.session.get('backoffUntil');
+    return Date.now() < backoffUntil;
+}
+
+async function backOff() {
+    await chrome.storage.session.set({ backoffUntil: Date.now() + BACKOFF_MINUTES * 60000 });
+}
+
+async function clearBackoff() {
+    await chrome.storage.session.set({ backoffUntil: 0 });
+}
+
+async function lastRefusedToken() {
+    return (await chrome.storage.session.get('lastRefusedToken')).lastRefusedToken || null;
+}
 
 async function settings() {
     return { ...DEFAULTS, ...(await chrome.storage.sync.get(Object.keys(DEFAULTS))) };
@@ -64,7 +85,28 @@ async function seedDefaults() {
         if (bundled.serverUrl) values.serverUrl = bundled.serverUrl;
         if (bundled.token) values.token = bundled.token;
         if (Object.keys(values).length) await chrome.storage.sync.set(values);
+        await chrome.storage.local.set({ singleTab: bundled.singleTab === true });
     } catch (_) { /* no defaults.json: configured by hand */ }
+}
+
+const PARK_URL = 'https://www.ewccv.com/cvs/search';
+
+/**
+ * The server browser shows one tab: Chrome restores the last session (so the
+ * EWCCV sign-in survives a restart) and opens the parked page on top, and an
+ * old options page rides along. Keep the active ewccv.com tab, close the
+ * rest. Only where defaults.json says singleTab — never in your own Chrome.
+ */
+async function keepOneTab() {
+    const { singleTab } = await chrome.storage.local.get('singleTab');
+    if (!singleTab) return;
+    const tabs = await chrome.tabs.query({});
+    if (tabs.length < 2) return;
+    const onEwccv = (t) => (t.pendingUrl || t.url || '').startsWith('https://www.ewccv.com/');
+    const ewccv = tabs.filter(onEwccv);
+    const keep = ewccv.find((t) => t.active) || ewccv[0] || tabs.find((t) => t.active) || tabs[0];
+    if (!onEwccv(keep)) await chrome.tabs.update(keep.id, { url: PARK_URL });
+    await chrome.tabs.remove(tabs.filter((t) => t.id !== keep.id).map((t) => t.id));
 }
 
 async function setStatus(status) {
@@ -133,10 +175,15 @@ async function pushIfPending() {
     const cfg = await settings();
     if (!cfg.enabled || !cfg.token) return;
     if (!(await findEwccvTab())) return;
-    if (Date.now() < backoffUntil) return;
+    if (await inBackoff()) return;
 
     const work = await pendingWork(cfg);
     if (!work) return;
+    if (work.closed_until) {
+        // EWCCV is down overnight (midnight to 6 am Eastern); Hive says so.
+        await setStatus({ ok: true, message: work.message || 'EWCCV is closed overnight; lookups wait until it opens.' });
+        return;
+    }
     if (!work.pending) {
         await setStatus({ ok: true, message: 'Nothing waiting at Hive; a credential is minted when a lookup is.' });
         return;
@@ -175,14 +222,14 @@ async function push({ interactive = false } = {}) {
         const r = { ok: false, error: minted?.error || 'Could not read the EWCCV session.' };
         await setStatus(r);
         if (interactive) notify(r);
-        if (!interactive) backoffUntil = Date.now() + BACKOFF_MINUTES * 60000;
+        if (!interactive) await backOff();
         return r;
     }
 
     // The page's own copy, already refused once: sending it again changes
     // nothing. Wait for a fresh one (a search by hand produces it).
-    if (!interactive && minted.reused && minted.accessToken === lastRefusedToken) {
-        backoffUntil = Date.now() + BACKOFF_MINUTES * 60000;
+    if (!interactive && minted.reused && minted.accessToken === (await lastRefusedToken())) {
+        await backOff();
         const r = { ok: false, error: 'EWCCV did not mint a fresh credential and the page\'s copy was already used. Do one search on ewccv.com by hand; it is picked up within a minute.' };
         await setStatus(r);
         return r;
@@ -216,8 +263,8 @@ async function push({ interactive = false } = {}) {
         : { ok: false, error: body.error || `Hive returned ${res.status}.` };
 
     if (res.status === 409) {
-        lastRefusedToken = minted.accessToken;
-        if (!interactive) backoffUntil = Date.now() + BACKOFF_MINUTES * 60000;
+        await chrome.storage.session.set({ lastRefusedToken: minted.accessToken });
+        if (!interactive) await backOff();
     }
 
     await setStatus(result);
@@ -243,30 +290,38 @@ function notify(result) {
 chrome.runtime.onInstalled.addListener(async () => {
     await seedDefaults();
     chrome.alarms.create(POLL_ALARM, { periodInMinutes: POLL_MINUTES });
+    await keepOneTab();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
     await seedDefaults();
     chrome.alarms.create(POLL_ALARM, { periodInMinutes: POLL_MINUTES });
+    await keepOneTab();
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === POLL_ALARM) pushIfPending();
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name !== POLL_ALARM) return;
+    await keepOneTab();
+    pushIfPending();
+});
+
+// A tab opened later (a link with target=_blank) folds back into one, once
+// its URL is known.
+chrome.tabs.onCreated.addListener(() => {
+    setTimeout(() => keepOneTab(), 1500);
 });
 
 // An EWCCV page just loaded: if Hive has a lookup waiting, this is the moment
 // to mint — the page is fresh and the person is right there.
 chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
     if (info.status === 'complete' && tab.url?.startsWith('https://www.ewccv.com/')) {
-        backoffUntil = 0;
-        setTimeout(() => pushIfPending(), 4000);
+        clearBackoff().then(() => setTimeout(() => pushIfPending(), 4000));
     }
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'hive-ewccv-push-now') {
-        backoffUntil = 0;
-        push({ interactive: true }).then(sendResponse);
+        clearBackoff().then(() => push({ interactive: true })).then(sendResponse);
         return true;
     }
 });
