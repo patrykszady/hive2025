@@ -48,6 +48,25 @@ async function settings() {
     return { ...DEFAULTS, ...(await chrome.storage.sync.get(Object.keys(DEFAULTS))) };
 }
 
+/**
+ * Take the Hive URL and token from the bundled defaults.json when there is
+ * one — the server writes it for the EWCCV server browser on every
+ * `ewccv:browser start` (gitignored: it holds the token), so nobody types a
+ * token through a remote framebuffer and a rotated one arrives by itself.
+ * Without the file (your own Chrome) the options page stays the way in.
+ */
+async function seedDefaults() {
+    try {
+        const res = await fetch(chrome.runtime.getURL('defaults.json'));
+        if (!res.ok) return;
+        const bundled = await res.json();
+        const values = {};
+        if (bundled.serverUrl) values.serverUrl = bundled.serverUrl;
+        if (bundled.token) values.token = bundled.token;
+        if (Object.keys(values).length) await chrome.storage.sync.set(values);
+    } catch (_) { /* no defaults.json: configured by hand */ }
+}
+
 async function setStatus(status) {
     await chrome.storage.local.set({ lastStatus: { ...status, at: new Date().toISOString() } });
 }
@@ -221,11 +240,13 @@ function notify(result) {
     } catch (_) { /* the popup shows the status anyway */ }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
+    await seedDefaults();
     chrome.alarms.create(POLL_ALARM, { periodInMinutes: POLL_MINUTES });
 });
 
-chrome.runtime.onStartup.addListener(() => {
+chrome.runtime.onStartup.addListener(async () => {
+    await seedDefaults();
     chrome.alarms.create(POLL_ALARM, { periodInMinutes: POLL_MINUTES });
 });
 

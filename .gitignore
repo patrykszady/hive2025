@@ -51,3 +51,4 @@ scripts/__pycache__/
 
 # Bundled extension credentials — never commit
 scripts/menards-receipt-extension/defaults.json
+scripts/ewccv-session-bridge/defaults.json
