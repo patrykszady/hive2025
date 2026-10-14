@@ -4,13 +4,19 @@
      links (expenses Vendor, leads Client, ...). Plain text, no hover
      color/weight tricks: the row hover background is the affordance.
      Tooltip (full value) appears only when the text is actually truncated.
-     Renders static text when href is null. --}}
+     Renders static text when href is null. new-tab opens the page in a new
+     browser tab (the Transactions card's vendor: the queue stays open). --}}
 @props([
     'href' => null,
     'label' => '',
+    'newTab' => false,
 ])
 <x-truncate-tooltip :content="$label">
-    @if($href)
+    @if($href && $newTab)
+        <a href="{{ $href }}" target="_blank" rel="noopener" {{ $attributes->merge(['class' => 'block min-w-0']) }}>
+            <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis">{{ $label }}</div>
+        </a>
+    @elseif($href)
         <a href="{{ $href }}" wire:navigate.hover {{ $attributes->merge(['class' => 'block min-w-0']) }}>
             <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis">{{ $label }}</div>
         </a>

@@ -1,13 +1,24 @@
-// Vendor picker (<x-vendor-picker>): the whole vendor list, fetched once per
-// page from /vendors/picker-options and filtered in the browser. Renders only
-// the matches (60 at most), so a page with twenty pickers costs one fetch and
-// a few dozen rows, never 851 options per picker. See the Blade component for
-// the markup and VendorPickerOptionsController for the list.
+// Vendor picker (<x-vendor-picker>): Flux's own searchable select, fed in the
+// browser. The whole vendor list is fetched once per page from
+// /vendors/picker-options; only the best matches (60 at most) are rendered as
+// Flux <ui-option>s, built from a server-rendered Flux option, so a page with
+// twenty pickers costs one fetch and a few dozen options, never 851 per
+// picker. Flux keeps the selected value in the select itself, so rebuilding
+// the options while typing never drops the selection.
 
 const lists = new Map(); // url -> Promise<vendor[]>
 
 function normalize(text) {
-    return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return String(text ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function escapeHtml(text) {
+    return String(text ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
 }
 
 function loadVendors(url) {
@@ -36,55 +47,61 @@ document.addEventListener('vendor-picker:reload', () => lists.clear());
 
 document.addEventListener('alpine:init', () => {
     window.Alpine.data('vendorPicker', (config) => ({
-        value: '',            // bound to the Livewire property through x-modelable
+        value: '',            // the Livewire property (x-modelable) and the Flux select (x-model)
+        query: '',            // the Flux search box (x-model)
+        open: false,          // Flux's open / close events: the list renders only while open
         extra: config.extra || [],
         details: !!config.details,
         url: config.url,
+        template: config.template || '',
+        initial: null,        // the chosen option the server printed: {value, label}
         limit: config.limit || 60,
         vendors: [],
         loaded: false,
         loading: false,
         failed: false,
-        query: '',
-        active: 0,
+        reloadedFor: null,
 
         init() {
-            // A preselected vendor needs the list for its label; otherwise the
-            // list loads when the picker first opens.
-            this.$watch('value', (value) => {
-                if (value !== '' && value !== null && value !== undefined && !this.isExtra(value)) this.load();
+            // The server prints the chosen option so the button has its label
+            // before the list arrives; read it before render() replaces it.
+            const printed = this.$root.querySelector('[data-vendor-picker-options] ui-option');
+            if (printed) this.initial = { value: printed.getAttribute('value'), label: printed.getAttribute('label') };
+            // One cached fetch per page serves every picker on it.
+            this.load();
+            // A value the list does not hold (a vendor added since the page
+            // loaded): fetch the list again, once per value.
+            this.$watch('value', () => {
+                if (this.loaded && this.hasValue && !this.known(this.value) && this.reloadedFor !== String(this.value)) {
+                    this.reloadedFor = String(this.value);
+                    lists.delete(this.url);
+                    this.loaded = false;
+                    this.load();
+                }
             });
-            if (this.value !== '' && this.value !== null && this.value !== undefined && !this.isExtra(this.value)) this.load();
         },
 
         load() {
-            if (this.loaded || this.loading) return;
+            if (this.loading) return;
             this.loading = true;
             this.failed = false;
             loadVendors(this.url)
-                .then((vendors) => { this.vendors = vendors; this.loaded = true; })
+                .then((vendors) => {
+                    this.vendors = vendors;
+                    this.loaded = true;
+                    this.$nextTick(() => this.refreshButtonLabel());
+                })
                 .catch(() => { this.failed = true; })
                 .finally(() => { this.loading = false; });
         },
 
-        isExtra(value) {
-            return this.extra.some((option) => String(option.value) === String(value));
-        },
-
-        get selected() {
-            if (this.value === '' || this.value === null || this.value === undefined) return null;
-            const extra = this.extra.find((option) => String(option.value) === String(this.value));
-            if (extra) return { label: extra.label };
-            const vendor = this.vendors.find((candidate) => String(candidate.id) === String(this.value));
-            return vendor ? { label: this.optionLabel(vendor) } : null;
-        },
-
-        get label() {
-            return this.selected ? this.selected.label : '';
-        },
-
         get hasValue() {
             return this.value !== '' && this.value !== null && this.value !== undefined;
+        },
+
+        known(value) {
+            return this.extra.some((option) => option.value === String(value))
+                || this.vendors.some((vendor) => String(vendor.id) === String(value));
         },
 
         optionLabel(vendor) {
@@ -94,14 +111,27 @@ document.addEventListener('alpine:init', () => {
             return vendor.name;
         },
 
+        // The chosen option: a static choice, a vendor from the list, the one
+        // the server printed, or a stand-in until the list knows it.
+        get selectedOption() {
+            if (!this.hasValue) return null;
+            const value = String(this.value);
+            const extra = this.extra.find((option) => option.value === value);
+            if (extra) return extra;
+            const vendor = this.vendors.find((candidate) => String(candidate.id) === value);
+            if (vendor) return { value, label: this.optionLabel(vendor) };
+            if (this.initial && String(this.initial.value) === value) return this.initial;
+            return { value, label: this.loaded ? `Vendor #${value}` : '…' };
+        },
+
         get terms() {
             return normalize(this.query.trim()).split(/\s+/).filter(Boolean);
         },
 
-        get extraFiltered() {
+        matches(label) {
             const terms = this.terms;
-            if (!terms.length) return this.extra;
-            return this.extra.filter((option) => terms.every((term) => normalize(option.label).includes(term)));
+            const text = normalize(label);
+            return terms.every((term) => text.includes(term));
         },
 
         get filtered() {
@@ -122,41 +152,80 @@ document.addEventListener('alpine:init', () => {
             return scored.slice(0, this.limit).map((entry) => entry[1]);
         },
 
-        get items() {
-            return [...this.extraFiltered.map((option) => option.value), ...this.filtered.map((vendor) => vendor.id)];
+        option(value, label, hidden = false) {
+            const html = this.template
+                .replaceAll('__VP_VALUE__', escapeHtml(value))
+                .replaceAll('__VP_LABEL__', escapeHtml(label));
+            return hidden ? html.replace('<ui-option', '<ui-option data-hidden') : html;
         },
 
-        opened() {
-            this.load();
-            this.query = '';
-            this.active = 0;
-            this.$nextTick(() => this.$refs.search?.focus());
+        note(text) {
+            return `<div class="px-2 py-1.5 text-sm text-zinc-500 dark:text-zinc-400">${escapeHtml(text)}</div>`;
         },
 
-        close() {
-            const overlay = this.$root.querySelector('[popover]');
-            if (overlay && overlay.matches(':popover-open')) overlay.hidePopover();
+        // The options Flux shows: the static choices and the matching vendors,
+        // plus the chosen one whenever it is not among them (hidden when it does
+        // not match the search), because Flux labels its button from that option.
+        // A closed picker keeps only the chosen option, so a page with many
+        // pickers carries one option each instead of 60 (1.3 KB apiece).
+        render() {
+            if (!this.open) {
+                const chosen = this.selectedOption;
+                return chosen ? this.option(chosen.value, chosen.label) : '';
+            }
+            const rows = [];
+            const seen = new Set();
+            const add = (value, label, hidden = false) => {
+                const key = String(value);
+                if (seen.has(key)) return;
+                seen.add(key);
+                rows.push(this.option(value, label, hidden));
+            };
+            const listed = this.extra.filter((option) => this.matches(option.label))
+                .map((option) => [option.value, option.label])
+                .concat(this.filtered.map((vendor) => [String(vendor.id), this.optionLabel(vendor)]));
+            const selected = this.selectedOption;
+            if (selected && !listed.some(([value]) => value === String(selected.value))) {
+                add(selected.value, selected.label, !this.matches(selected.label));
+            }
+            listed.forEach(([value, label]) => add(value, label));
+
+            if (this.failed) rows.push(this.note('Could not load the vendor list. Reload the page to try again.'));
+            else if (!this.loaded) rows.push(this.note('Loading vendors…'));
+
+            requestAnimationFrame(() => this.highlight());
+
+            return rows.join('');
         },
 
-        choose(value) {
-            this.value = value;
-            this.close();
+        select() {
+            return this.$root.querySelector('ui-select');
         },
 
-        clear() {
-            this.value = '';
+        // Like Flux's own list: on open the chosen option (or the first) is
+        // highlighted, while searching the first match, so Enter picks it.
+        highlight() {
+            const activatable = this.select()?._activatable;
+            if (!this.open || !activatable) return;
+            if (this.query.trim()) {
+                activatable.activateFirst?.();
+                return;
+            }
+            const chosen = this.select().querySelector('ui-option[data-selected]:not([data-hidden])');
+            activatable.activateSelectedOrFirst?.(chosen || undefined);
         },
 
-        move(step) {
-            const count = this.items.length;
-            if (!count) return;
-            this.active = (this.active + step + count) % count;
-            this.$nextTick(() => this.$refs.list?.querySelector('[data-active]')?.scrollIntoView({ block: 'nearest' }));
-        },
-
-        pick() {
-            const value = this.items[this.active];
-            if (value !== undefined) this.choose(value);
+        // Flux draws the button label once per value; when the list brings a
+        // better label for the same value, have it draw again (setting the
+        // value from code fires no input event, so Livewire is not touched).
+        refreshButtonLabel() {
+            const select = this.select();
+            const option = this.selectedOption;
+            if (!select || !option || (this.initial && this.initial.value === option.value && this.initial.label === option.label)) return;
+            const current = select.value;
+            if (current === '' || current === null || current === undefined) return;
+            select.value = '';
+            select.value = current;
         },
     }));
 });

@@ -416,7 +416,12 @@
                                     <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
                                     @if($transaction->vendor->name != 'No Vendor')
                                         <flux:table.cell class="max-w-[150px] min-w-0">
-                                            <x-truncate-tooltip :content="$transaction->vendor->name"><div class="truncate">{{ $transaction->vendor->name }}</div></x-truncate-tooltip>
+                                            {{-- The vendor opens in a new tab, so the queue stays where it was. --}}
+                                            <x-table-link
+                                                :href="$transaction->vendor->id ? route('vendors.show', $transaction->vendor->id) : null"
+                                                :label="$transaction->vendor->name"
+                                                new-tab
+                                            />
                                         </flux:table.cell>
                                     @else
                                         <flux:table.cell class="whitespace-normal break-words">
