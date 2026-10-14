@@ -286,6 +286,8 @@ return [
         // (scripts/ewccv-session-bridge). The server cannot pass EWCCV's
         // reCAPTCHA v3; a real browser can, so it hands the session over.
         'bridge_token' => env('EWCCV_BRIDGE_TOKEN'),
+        // The EWCCV server browser's Chrome for Testing (default: the newest Puppeteer downloaded).
+        'chrome_binary' => env('EWCCV_CHROME_BINARY'),
         // Whose workers comp docs the bridge's session verifies (GS = 1).
         'belongs_to_vendor_id' => (int) env('EWCCV_BELONGS_TO_VENDOR_ID', 1),
         // Captcha solvers never pass EWCCV's reCAPTCHA v3 Enterprise (measured

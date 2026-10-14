@@ -35,11 +35,10 @@ class EwccvBrowser extends Command
             return self::FAILURE;
         }
 
-        $this->info('EWCCV server browser started on display '.EwccvRemoteBrowserService::DISPLAY.'.');
-        $this->line('One-time setup, from your machine:');
+        $this->info('EWCCV server browser started on display '.EwccvRemoteBrowserService::DISPLAY.' with the EWCCV extension loaded.');
+        $this->line('To watch it from your machine:');
         $this->line('  ssh -L '.EwccvRemoteBrowserService::WS_PORT.':127.0.0.1:'.EwccvRemoteBrowserService::WS_PORT.' hive-prod');
         $this->line('  open '.$result['vnc_url']);
-        $this->line('  in that Chrome: chrome://extensions → Developer mode → Load unpacked → '.$browser->extensionDir());
 
         return self::SUCCESS;
     }

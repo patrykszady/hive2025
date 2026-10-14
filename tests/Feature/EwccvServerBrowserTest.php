@@ -21,10 +21,16 @@ function browserWithExtensionDir(string $dir): EwccvRemoteBrowserService
     };
 }
 
-it('launches Chrome like a person would: its own profile, the EWCCV search page, nothing automated', function (): void {
-    $command = app(EwccvRemoteBrowserService::class)->chromeCommand();
+it('launches Chrome for Testing like a person would: its own profile, only the EWCCV extension, nothing automated', function (): void {
+    config(['services.ewccv.chrome_binary' => '/home/forge/.cache/puppeteer/chrome/linux-149.0.7827.22/chrome-linux64/chrome']);
+    $browser = app(EwccvRemoteBrowserService::class);
+    $command = $browser->chromeCommand();
 
     expect($command)->toContain("DISPLAY=':96'")
+        ->toContain('chrome-linux64/chrome')
+        ->toContain("--load-extension='".$browser->extensionDir()."'")
+        ->toContain("--disable-extensions-except='".$browser->extensionDir()."'")
+        ->not->toContain('google-chrome')
         ->toContain('ewccv-browser')
         ->toContain('https://www.ewccv.com/cvs/search')
         ->not->toContain('--remote-debugging')
@@ -61,4 +67,20 @@ it('writes no defaults without a bridge token', function (): void {
 it('reports its parts and refuses an unknown action', function (): void {
     $this->artisan('ewccv:browser', ['action' => 'status'])->expectsOutputToContain('chrome')->assertSuccessful();
     $this->artisan('ewccv:browser', ['action' => 'bogus'])->assertFailed();
+});
+
+it('picks the newest Chrome for Testing build Puppeteer downloaded', function (): void {
+    $home = sys_get_temp_dir().'/ewccv-home-'.uniqid();
+    foreach (['137.0.7151.119', '149.0.7827.22', '146.0.7680.153'] as $version) {
+        mkdir("{$home}/.cache/puppeteer/chrome/linux-{$version}/chrome-linux64", 0777, true);
+        touch("{$home}/.cache/puppeteer/chrome/linux-{$version}/chrome-linux64/chrome");
+    }
+    config(['services.ewccv.chrome_binary' => null]);
+    $previous = $_SERVER['HOME'] ?? null;
+    $_SERVER['HOME'] = $home;
+
+    expect(app(EwccvRemoteBrowserService::class)->chromeBinary())->toContain('linux-149.0.7827.22');
+
+    $_SERVER['HOME'] = $previous;
+    exec('rm -rf '.escapeshellarg($home));
 });

@@ -18,11 +18,17 @@ use Illuminate\Support\Facades\Log;
  * as it does in Patryk's own Chrome. This is that experiment, built like the
  * Menards receipt browser (MenardsRemoteBrowserService) on its own display.
  *
+ * It runs Chrome for Testing, not the installed Google Chrome. The server's
+ * Chrome policy force-installs the Menards receipt and 2Captcha extensions
+ * into EVERY Chrome profile; on 2026-10-14 the first run of this browser got
+ * them too, and the Menards one ran a signed-out sync into Imperva's wall.
+ * Chrome for Testing reads no /etc/opt/chrome policy and still honours
+ * --load-extension (Google Chrome dropped it in 137), so only the EWCCV
+ * extension loads and nobody installs anything by hand.
+ *
  * The extension signs itself in (it asks Hive for EWCCV's emailed link) and
- * polls Hive every minute while the ewccv.com tab is open. A person does one
- * thing, once, through the viewer: chrome://extensions → Developer mode →
- * Load unpacked → scripts/ewccv-session-bridge. Its Hive URL and token come
- * from defaults.json, written here on every start.
+ * polls Hive every minute while the ewccv.com tab is open. Its Hive URL and
+ * token come from defaults.json, written here on every start.
  */
 class EwccvRemoteBrowserService
 {
@@ -47,27 +53,51 @@ class EwccvRemoteBrowserService
         return base_path('scripts/ewccv-session-bridge');
     }
 
+    /**
+     * The newest Chrome for Testing Puppeteer has downloaded
+     * (~/.cache/puppeteer/chrome/linux-<version>/chrome-linux64/chrome), or
+     * EWCCV_CHROME_BINARY. Empty when there is none: never Google Chrome,
+     * whose policy would load the Menards extension in here.
+     */
     public function chromeBinary(): string
     {
-        return (string) (config('services.menards.chromium_binary')
-            ?: trim((string) shell_exec('command -v google-chrome-stable 2>/dev/null'))
-            ?: trim((string) shell_exec('command -v google-chrome 2>/dev/null')));
+        $configured = (string) config('services.ewccv.chrome_binary');
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        $home = (string) ($_SERVER['HOME'] ?? getenv('HOME') ?: '');
+        $builds = glob($home.'/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome') ?: [];
+        usort($builds, fn ($a, $b) => version_compare($this->buildVersion($b), $this->buildVersion($a)));
+
+        return $builds[0] ?? '';
+    }
+
+    protected function buildVersion(string $path): string
+    {
+        return preg_match('#/linux-([\d.]+)/#', $path, $m) ? $m[1] : '0';
     }
 
     /**
      * Chrome as a person would run it: its own profile, the EWCCV search page,
      * and nothing that marks it as automated — no --remote-debugging-port, no
-     * --enable-automation, no --headless.
+     * --enable-automation, no --headless. The EWCCV extension, and only it,
+     * is loaded from the repository.
      */
     public function chromeCommand(): string
     {
+        $extension = $this->extensionDir();
+
         return sprintf(
             'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s %s --user-data-dir=%s '
             .'--no-first-run --no-default-browser-check --disable-session-crashed-bubble '
+            .'--load-extension=%s --disable-extensions-except=%s '
             .'--window-size=1280,900 --start-maximized %s',
             escapeshellarg(self::DISPLAY),
             escapeshellarg($this->chromeBinary()),
             escapeshellarg($this->userDataDir()),
+            escapeshellarg($extension),
+            escapeshellarg($extension),
             escapeshellarg(self::PARK_URL),
         );
     }
@@ -82,7 +112,7 @@ class EwccvRemoteBrowserService
             }
         }
         if ($this->chromeBinary() === '') {
-            $missing[] = 'google-chrome';
+            $missing[] = 'Chrome for Testing (npx @puppeteer/browsers install chrome@stable)';
         }
 
         return $missing;
@@ -193,9 +223,10 @@ class EwccvRemoteBrowserService
         file_put_contents($path, json_encode($prefs));
     }
 
+    /** Detached, as MenardsRemoteBrowserService::spawn() does it. */
     protected function spawn(string $command, string $logFile): int
     {
-        return (int) trim((string) shell_exec(sprintf('nohup setsid %s >> %s 2>&1 < /dev/null & echo $!', $command, escapeshellarg($logFile))));
+        return (int) trim((string) shell_exec(sprintf('setsid nohup %s >> %s 2>&1 < /dev/null & printf %%s "$!"; exit 0', $command, escapeshellarg($logFile))));
     }
 
     protected function processAlive(string $pattern): bool
