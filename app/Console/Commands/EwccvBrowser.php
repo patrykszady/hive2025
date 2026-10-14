@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Services\EwccvRemoteBrowserService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Run the EWCCV server browser (EwccvRemoteBrowserService): a real Chrome on
@@ -31,6 +32,7 @@ class EwccvBrowser extends Command
         $result = $browser->start();
         if (! $result['ok']) {
             $this->error($result['error'] ?? 'Could not start.');
+            Log::channel('ewccv')->error('EWCCV server browser: did not start', ['error' => $result['error'] ?? null]);
 
             return self::FAILURE;
         }

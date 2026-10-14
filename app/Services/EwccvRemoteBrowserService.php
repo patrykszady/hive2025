@@ -66,11 +66,25 @@ class EwccvRemoteBrowserService
             return $configured;
         }
 
-        $home = (string) ($_SERVER['HOME'] ?? getenv('HOME') ?: '');
-        $builds = glob($home.'/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome') ?: [];
+        $builds = glob($this->homeDir().'/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome') ?: [];
         usort($builds, fn ($a, $b) => version_compare($this->buildVersion($b), $this->buildVersion($a)));
 
         return $builds[0] ?? '';
+    }
+
+    /**
+     * HOME, or the account's home when it is unset: Horizon's workers run
+     * without HOME, so the Start button found no Chrome and quietly did
+     * nothing (2026-10-14).
+     */
+    public function homeDir(): string
+    {
+        $home = (string) ($_SERVER['HOME'] ?? getenv('HOME') ?: '');
+        if ($home === '' && function_exists('posix_getpwuid')) {
+            $home = (string) (posix_getpwuid(posix_geteuid())['dir'] ?? '');
+        }
+
+        return $home;
     }
 
     protected function buildVersion(string $path): string

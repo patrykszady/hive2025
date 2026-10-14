@@ -84,3 +84,27 @@ it('picks the newest Chrome for Testing build Puppeteer downloaded', function ()
     $_SERVER['HOME'] = $previous;
     exec('rm -rf '.escapeshellarg($home));
 });
+
+it('finds the account home when HOME is unset, as under Horizon', function (): void {
+    $previousServer = $_SERVER['HOME'] ?? null;
+    $previousEnv = getenv('HOME');
+    unset($_SERVER['HOME']);
+    putenv('HOME');
+
+    try {
+        expect(app(EwccvRemoteBrowserService::class)->homeDir())->toBe(posix_getpwuid(posix_geteuid())['dir']);
+    } finally {
+        $_SERVER['HOME'] = $previousServer;
+        putenv('HOME='.$previousEnv);
+    }
+});
+
+it('logs why the browser did not start, so a Start button press that fails leaves a trace', function (): void {
+    $browser = Mockery::mock(EwccvRemoteBrowserService::class)->makePartial();
+    $browser->shouldReceive('start')->once()->andReturn(['ok' => false, 'error' => 'Missing on this host: Chrome for Testing']);
+    app()->instance(EwccvRemoteBrowserService::class, $browser);
+    \Illuminate\Support\Facades\Log::shouldReceive('channel')->with('ewccv')->andReturnSelf();
+    \Illuminate\Support\Facades\Log::shouldReceive('error')->once()->with('EWCCV server browser: did not start', ['error' => 'Missing on this host: Chrome for Testing']);
+
+    $this->artisan('ewccv:browser', ['action' => 'start'])->assertFailed();
+});
