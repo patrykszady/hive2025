@@ -58,6 +58,12 @@ class SignInLink
      */
     public static function request(NylasService $nylas): ?string
     {
+        if (ServiceHours::isClosed()) {
+            Log::info('EWCCV sign-in link not requested: '.ServiceHours::closedMessage());
+
+            return null;
+        }
+
         $email = (string) config('services.ewccv.login_email');
         $outputDir = dirname(self::file());
         $requestedAfter = now()->subMinute();

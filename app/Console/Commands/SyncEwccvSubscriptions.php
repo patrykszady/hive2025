@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\VendorDoc;
 use App\Services\NylasService;
+use App\Support\Ewccv\ServiceHours;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -43,6 +44,12 @@ class SyncEwccvSubscriptions extends Command
 
     public function handle(NylasService $nylasService): int
     {
+        if (ServiceHours::isClosed()) {
+            $this->warn(ServiceHours::closedMessage().' Nothing synced.');
+
+            return self::SUCCESS;
+        }
+
         $outputDir = $this->option('output-dir') ?: storage_path('files/_temp_ewccv');
         @mkdir($outputDir, 0755, true);
 

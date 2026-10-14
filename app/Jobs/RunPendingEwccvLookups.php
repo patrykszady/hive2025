@@ -7,6 +7,7 @@ use App\Models\VendorDoc;
 use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\ScrapeLauncher;
 use App\Support\Ewccv\ScraperLock;
+use App\Support\Ewccv\ServiceHours;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -43,6 +44,12 @@ class RunPendingEwccvLookups implements ShouldBeUnique, ShouldQueue
 
     public function handle(ScrapeLauncher $launcher): void
     {
+        if (ServiceHours::isClosed()) {
+            Log::info('RunPendingEwccvLookups: '.ServiceHours::closedMessage().' Lookups stay pending.');
+
+            return;
+        }
+
         $session = BridgedSession::fresh();
         if (! $session && blank(config('services.ewccv.bypass_key'))) {
             Log::info('RunPendingEwccvLookups: no fresh EWCCV browser session — nothing to run with');

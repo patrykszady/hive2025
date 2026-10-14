@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 use App\Services\NylasService;
+use App\Support\Ewccv\ServiceHours;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -278,6 +279,12 @@ class ScrapeEwccvTracking extends Command
 
     public function handle(NylasService $nylasService): int
     {
+        if (ServiceHours::isClosed() && ! $this->option('dry-run')) {
+            $this->warn(ServiceHours::closedMessage().' Nothing searched.');
+
+            return self::SUCCESS;
+        }
+
         $this->proxySession = $this->resolveProxySession();
         $this->line(str_repeat('═', 60));
         $this->info('ewccv:scrape-tracking — ' . now()->format('Y-m-d H:i:s T'));

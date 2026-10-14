@@ -6,6 +6,7 @@ use App\Jobs\RequestEwccvSignInLink;
 use App\Jobs\RunPendingEwccvLookups;
 use App\Support\Ewccv\BridgedSession;
 use App\Support\Ewccv\ScraperLock;
+use App\Support\Ewccv\ServiceHours;
 use App\Support\Ewccv\SignInLink;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -92,7 +93,7 @@ class EwccvSessionController extends Controller
         // page load and button press; a minute's debounce covers the latter.
         // Pending work is tracking lookups plus an audit's as-of coverage checks.
         $pending = RunPendingEwccvLookups::pendingCount($belongsToVendorId);
-        if ($pending > 0 && ! ScraperLock::isHeld() && Cache::add('ewccv:lookup-dispatched', true, now()->addMinute())) {
+        if ($pending > 0 && ! ServiceHours::isClosed() && ! ScraperLock::isHeld() && Cache::add('ewccv:lookup-dispatched', true, now()->addMinute())) {
             RunPendingEwccvLookups::dispatch();
         }
 
@@ -115,12 +116,23 @@ class EwccvSessionController extends Controller
     /**
      * What a browser session would be spent on right now: the extension polls
      * this while an ewccv.com tab is open and mints only when something is
-     * waiting and no run is on.
+     * waiting and no run is on. Overnight, while EWCCV is down, nothing is
+     * waiting as far as the extension is concerned.
      */
     public function pending(Request $request): JsonResponse
     {
         if ($denied = $this->denyUnlessBridge($request)) {
             return $denied;
+        }
+
+        if (ServiceHours::isClosed()) {
+            return response()->json([
+                'pending' => 0,
+                'running' => false,
+                'session' => 'none',
+                'closed_until' => ServiceHours::opensAt()->toIso8601String(),
+                'message' => ServiceHours::closedMessage(),
+            ]);
         }
 
         $belongsToVendorId = (int) config('services.ewccv.belongs_to_vendor_id', 1);
@@ -141,6 +153,10 @@ class EwccvSessionController extends Controller
     {
         if ($denied = $this->denyUnlessBridge($request)) {
             return $denied;
+        }
+
+        if (ServiceHours::isClosed()) {
+            return response()->json(['url' => null, 'requested' => false, 'message' => ServiceHours::closedMessage()]);
         }
 
         if ($url = SignInLink::cached()) {
