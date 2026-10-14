@@ -65,6 +65,20 @@ class EwccvSessionController extends Controller
         // search that way. A credential seen before is refused whatever the
         // extension says about it (older copies send no flag); a new one that
         // a search by hand produced is taken even when marked reused.
+        // A credential past its own expiry (or a minute from it) cannot finish
+        // even one search; the page's stale copy arrives that way.
+        $expiresAt = BridgedSession::expiresAt($data['accessToken']);
+        if ($expiresAt && $expiresAt->lte(now()->addMinute())) {
+            Log::info('EWCCV bridge: expired credential refused', ['expired_at' => $expiresAt->toIso8601String(), 'marked_reused' => ! empty($data['reused'])]);
+
+            return response()->json([
+                'ok' => false,
+                'expired' => true,
+                'error' => 'That EWCCV credential expired at '.$expiresAt->copy()->setTimezone('America/Chicago')->format('g:i a').' Central. Do one search on ewccv.com by hand, then send again.',
+                'pending_lookups' => RunPendingEwccvLookups::pendingCount($belongsToVendorId),
+            ], 409);
+        }
+
         if (BridgedSession::hasSeen($data['accessToken'])) {
             Log::info('EWCCV bridge: credential handed over before, refused', ['marked_reused' => ! empty($data['reused'])]);
 

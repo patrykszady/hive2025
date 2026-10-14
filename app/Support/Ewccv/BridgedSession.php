@@ -51,6 +51,24 @@ class BridgedSession
     }
 
     /**
+     * When the credential stops working, from the expiry EWCCV writes into it
+     * (the accessToken is a JWT); null when it carries none. The browser's
+     * minter falls back to its page's own copy when minting fails, and on
+     * 2026-10-14 that copy arrived 26 minutes after it had expired: the run
+     * failed on its first search.
+     */
+    public static function expiresAt(string $accessToken): ?Carbon
+    {
+        $parts = explode('.', $accessToken);
+        if (count($parts) !== 3) {
+            return null;
+        }
+        $claims = json_decode((string) base64_decode(strtr($parts[1], '-_', '+/')), true);
+
+        return is_array($claims) && is_numeric($claims['exp'] ?? null) ? Carbon::createFromTimestamp((int) $claims['exp']) : null;
+    }
+
+    /**
      * Has this exact credential been handed over before? The browser's minter
      * falls back to the copy its page already holds when minting fails, and
      * the extension sends on every page load: the same credential arrived
