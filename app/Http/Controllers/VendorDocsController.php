@@ -62,8 +62,16 @@ class VendorDocsController extends Controller
                 return ($attachment['is_inline'] ?? false) === false;
             }));
 
-            // If no non-inline attachments, move to the deleted (or error) folder
-            if (empty($attachments)) {
+            // Only the documents: certificate PDFs and scans or photos of
+            // certificates. A forward from Outlook carries ATT0002-style
+            // fragments, icons and signature logos that are not certificates.
+            $documents = $this->certificateDocuments(
+                $attachments,
+                fn (string $attachmentId) => $this->nylasService->downloadAttachment($attachmentId, $grantId, $messageId),
+            );
+
+            // No usable document: move to the deleted (or error) folder
+            if (empty($documents)) {
                 try {
                     $this->nylasService->moveEmailToFolder($messageId, $deletedFolderId, $grantId);
                 } catch (\Exception $e) {
@@ -87,55 +95,182 @@ class VendorDocsController extends Controller
                 ] + $context);
             }
 
-            // Process each non-inline attachment
-            foreach ($attachments as $attachment) {
-                $attachmentId = $attachment['id'] ?? null;
-                if (! $attachmentId) {
-                    continue;
-                }
+            // Each document is read; the message is filed once, after all of
+            // them, by their outcome. Filed per document, the last attachment
+            // decided: on 2026-10-14 M Power's certificate was saved and the
+            // message still went to Error because of three ATT000x fragments.
+            $results = [];
+            $this->deferMailFiling = true;
+            try {
+                foreach ($documents as $document) {
+                    $docType = $document['type'];
+                    $tempFilePath = "_temp_vendor_docs/attachment_{$document['id']}.{$docType}";
 
-                $attachmentContent = $this->nylasService->downloadAttachment($attachmentId, $grantId, $messageId);
-                $docType = pathinfo($attachment['filename'] ?? ('attachment_'.$attachmentId), PATHINFO_EXTENSION) ?: 'pdf';
+                    // Store the file temporarily
+                    Storage::disk('files')->put($tempFilePath, $document['content']);
+                    $tempFilePath = 'files/'.$tempFilePath;
 
-                $tempFilePath = "_temp_vendor_docs/attachment_{$attachmentId}.{$docType}";
-
-                // Store the file temporarily
-                Storage::disk('files')->put($tempFilePath, $attachmentContent);
-                $tempFilePath = 'files/'.$tempFilePath;
-
-                if ($docType === 'pdf') {
-                    $splitPaths = $this->splitPdfIntoPages(ltrim($tempFilePath, 'files/'), $attachmentId);
-                    if (!empty($splitPaths)) {
-                        foreach ($splitPaths as $index => $splitPath) {
-                            $pageLabel = 'page-'.((int) $index + 1);
-                            $this->handleVendorDocProcessing(
-                                'files/'.$splitPath,
-                                $docType,
-                                $context['vendor_id'] ?? null,
-                                $context['belongs_to_vendor_id'] ?? null,
-                                $messageId,
-                                $grantId,
-                                $pageLabel
-                            );
+                    if ($docType === 'pdf') {
+                        $splitPaths = $this->splitPdfIntoPages(ltrim($tempFilePath, 'files/'), $document['id']);
+                        if (!empty($splitPaths)) {
+                            foreach ($splitPaths as $index => $splitPath) {
+                                $pageLabel = 'page-'.((int) $index + 1);
+                                $results[] = $this->handleVendorDocProcessing(
+                                    'files/'.$splitPath,
+                                    $docType,
+                                    $context['vendor_id'] ?? null,
+                                    $context['belongs_to_vendor_id'] ?? null,
+                                    $messageId,
+                                    $grantId,
+                                    $pageLabel
+                                );
+                            }
+                            continue;
                         }
-                        continue;
                     }
-                }
 
-                // Process the document
-                $this->handleVendorDocProcessing(
-                    $tempFilePath,
-                    $docType,
-                    $context['vendor_id'] ?? null,
-                    $context['belongs_to_vendor_id'] ?? null,
-                    $messageId,
-                    $grantId
-                );
+                    // Process the document
+                    $results[] = $this->handleVendorDocProcessing(
+                        $tempFilePath,
+                        $docType,
+                        $context['vendor_id'] ?? null,
+                        $context['belongs_to_vendor_id'] ?? null,
+                        $messageId,
+                        $grantId
+                    );
+                }
+            } finally {
+                $this->deferMailFiling = false;
             }
+
+            // true: saved; 'duplicate': already on file; 'updated': a state license refreshed.
+            $this->fileMessage($messageId, $grantId, collect($results)->every(fn ($result) => in_array($result, [true, 'duplicate', 'updated'], true)));
         }
     }
 
-    private function splitPdfIntoPages(string $relativePath, string $attachmentId): array
+    /** While a message's documents are read, the message is filed once at the end (fileMessage), not by each one. */
+    protected bool $deferMailFiling = false;
+
+    /** The smallest image read as a certificate scan or photo; signature logos (M Power's: 51 KB) and icons are smaller. */
+    public const MIN_IMAGE_BYTES = 100_000;
+
+    /** A scan or photo of a page: its shorter side at least this many pixels… */
+    public const MIN_IMAGE_SIDE = 600;
+
+    /** …and its longer side at most this many times the shorter (a letter page is 1.29, a phone photo 1.33; banners are wider). */
+    public const MAX_IMAGE_RATIO = 2.0;
+
+    /**
+     * The attachments that are certificates: every PDF — named .pdf, sent as
+     * application/pdf, or an unnamed file whose content is a PDF — and every
+     * image that is a scan or photo of a page (isCertificateScan), with or
+     * without a PDF beside it. Everything else is skipped and logged:
+     * Outlook's ATT0002 fragments, signature logos, 20x13 icons, calendar
+     * files.
+     *
+     * @param  list<array<string, mixed>>  $attachments  Nylas attachments (id, filename, content_type, size)
+     * @param  callable(string): string  $download  the attachment's bytes by id
+     * @return list<array{id: string, type: string, content: string}>
+     */
+    public function certificateDocuments(array $attachments, callable $download): array
+    {
+        $documents = [];
+
+        foreach ($attachments as $attachment) {
+            $id = (string) ($attachment['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $name = (string) ($attachment['filename'] ?? '');
+            $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            $contentType = strtolower((string) ($attachment['content_type'] ?? ''));
+            $size = (int) ($attachment['size'] ?? 0);
+
+            if ($contentType === 'application/pdf' || $extension === 'pdf') {
+                $documents[] = ['id' => $id, 'type' => 'pdf', 'content' => (string) $download($id)];
+
+                continue;
+            }
+
+            if (str_starts_with($contentType, 'image/') || in_array($extension, ['png', 'jpg', 'jpeg', 'heic', 'webp', 'tif', 'tiff'], true)) {
+                // Too small to be a page: skipped without downloading it.
+                if ($size > 0 && $size < self::MIN_IMAGE_BYTES) {
+                    Log::channel('vendor_docs')->info('Insurance mailbox: image skipped, not a certificate scan', ['filename' => $name, 'bytes' => $size]);
+
+                    continue;
+                }
+                $content = (string) $download($id);
+                if (! $this->isCertificateScan($content, $size ?: strlen($content))) {
+                    Log::channel('vendor_docs')->info('Insurance mailbox: image skipped, not a certificate scan', ['filename' => $name, 'bytes' => $size ?: strlen($content)]);
+
+                    continue;
+                }
+                $type = $extension !== '' ? $extension : match ($contentType) {
+                    'image/png' => 'png',
+                    'image/heic' => 'heic',
+                    'image/webp' => 'webp',
+                    default => 'jpg',
+                };
+                $documents[] = ['id' => $id, 'type' => $type, 'content' => $content];
+
+                continue;
+            }
+
+            // A file with no extension may still be a PDF; anything else is not a certificate.
+            if ($extension === '') {
+                $content = (string) $download($id);
+                if (str_starts_with(ltrim($content), '%PDF')) {
+                    $documents[] = ['id' => $id, 'type' => 'pdf', 'content' => $content];
+
+                    continue;
+                }
+            }
+
+            Log::channel('vendor_docs')->info('Insurance mailbox: attachment skipped, not a certificate', ['filename' => $name, 'content_type' => $contentType]);
+        }
+
+        return $documents;
+    }
+
+    /**
+     * An image is read as a certificate when it is a scan or photo of a page:
+     * large enough, its shorter side long enough and its shape page-like.
+     * Logos, signature banners, headshots and icons fail one of the three.
+     * An image whose size cannot be read (HEIC, TIFF) is judged by its bytes.
+     */
+    public function isCertificateScan(string $content, int $bytes): bool
+    {
+        if ($bytes < self::MIN_IMAGE_BYTES) {
+            return false;
+        }
+
+        $info = @getimagesizefromstring($content);
+        if (! is_array($info) || empty($info[0]) || empty($info[1])) {
+            return true;
+        }
+
+        $short = min($info[0], $info[1]);
+        $long = max($info[0], $info[1]);
+
+        return $short >= self::MIN_IMAGE_SIDE && $long / $short <= self::MAX_IMAGE_RATIO;
+    }
+
+    /** File a message once its documents are read: saved when every one was, else to the error folder for a person. */
+    protected function fileMessage(string $messageId, string $grantId, bool $allSaved): void
+    {
+        $folderId = $allSaved ? config('nylas.certificates_saved_folder_id') : config('nylas.certificates_error_folder_id');
+
+        try {
+            $this->nylasService->moveEmailToFolder($messageId, $folderId, $grantId);
+        } catch (\Exception $e) {
+            Log::channel('vendor_docs')->error('Failed to file insurance email', ApiErrorFormatter::format($e, [
+                'message_id' => $messageId,
+                'all_saved' => $allSaved,
+            ]));
+        }
+    }
+
+    protected function splitPdfIntoPages(string $relativePath, string $attachmentId): array
     {
         $publicKey = env('I_LOVE_PDF_PUBLIC');
         $secretKey = env('I_LOVE_PDF_SECRET');
@@ -207,6 +342,11 @@ class VendorDocsController extends Controller
 
     public function moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId)
     {
+        // Reading a message's documents: it is filed once, after all of them.
+        if ($this->deferMailFiling) {
+            return;
+        }
+
         $manualAddFolderId = config('nylas.certificates_error_folder_id');
         $processedFolderId = config('nylas.certificates_saved_folder_id');
         $failedFolderId = config('nylas.certificates_error_folder_id');
