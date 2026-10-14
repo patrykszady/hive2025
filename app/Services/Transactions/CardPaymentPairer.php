@@ -36,6 +36,17 @@ class CardPaymentPairer
     /** …or this many days before it (it often posts the day before the card shows it). */
     public const DAYS_BEFORE = 3;
 
+    /**
+     * Card payments Plaid removed are restored only from here on. Plaid
+     * (Capital One) began removing them about two weeks after sending them
+     * in July 2026; deletions before that include the 8338 → 4060 duplicate
+     * cleanup, which must stay deleted.
+     */
+    public const RESTORE_FROM = '2026-07-01';
+
+    /** A payment that came back to checking within this many days was never made. */
+    public const RETURN_DAYS = 30;
+
     /** @return int pairs made */
     public function run(): int
     {
@@ -85,6 +96,8 @@ class CardPaymentPairer
                 $this->pair($credit, $debit, (int) $vendorId, $company, $office);
                 $pairs++;
             }
+
+            $pairs += $this->pairRemovedCredits($cardAccounts->pluck('id'), $cardVendors, $checkingIds, $company, $office);
         }
 
         if ($pairs > 0) {
@@ -92,6 +105,73 @@ class CardPaymentPairer
         }
 
         return $pairs;
+    }
+
+    /**
+     * Card payments Plaid removed after sending them, restored and paired
+     * with the money that left checking for them. Plaid (Capital One)
+     * removed 10 card payments about two weeks after sending them, July to
+     * September 2026, and never sent them again, while the checking side of
+     * each stayed: 8 of them, $22,850, sat on the 2025-26 audit's Missing
+     * Expenses with no card side to pair. Only a payment still unpaired after
+     * the live card credits had their turn takes one, and only when the money
+     * did not come back to checking.
+     */
+    protected function pairRemovedCredits(Collection $cardAccountIds, array $cardVendors, Collection $checkingIds, Vendor $company, Distribution $office): int
+    {
+        $pairs = 0;
+        $removed = Transaction::withoutGlobalScopes()
+            ->whereNotNull('deleted_at')
+            ->whereNull('check_id')
+            ->whereNull('expense_id')
+            ->whereNull('deposit')
+            ->where('amount', '<', 0)
+            ->whereDate('transaction_date', '>=', self::RESTORE_FROM)
+            ->whereIn('bank_account_id', $cardAccountIds)
+            ->where(fn ($query) => $query
+                ->where(fn ($q) => $q->whereNull('check_number')->whereNotNull('vendor_id'))
+                ->orWhere('check_number', Transaction::TRANSFER_CHECK_NUMBER))
+            ->orderBy('transaction_date')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($removed as $credit) {
+            $vendorId = $credit->vendor_id ?: ($cardVendors['by_account'][$credit->bank_account_id] ?? $cardVendors['any']);
+            if (! $vendorId) {
+                continue;
+            }
+            $debit = $this->checkingLeg($credit, (int) $vendorId, $checkingIds);
+            if (! $debit || $this->cameBack($debit)) {
+                continue;
+            }
+
+            DB::transaction(function () use ($credit, $debit, $vendorId, $company, $office) {
+                $credit->restore();
+                $this->pair($credit, $debit, (int) $vendorId, $company, $office);
+            });
+            Log::info('Card payment Plaid had removed was restored and paired', [
+                'card_transaction_id' => $credit->id,
+                'checking_transaction_id' => $debit->id,
+                'amount' => (float) $debit->amount,
+            ]);
+            $pairs++;
+        }
+
+        return $pairs;
+    }
+
+    /** The payment came back: the same amount returned to that checking account soon after. */
+    protected function cameBack(Transaction $debit): bool
+    {
+        return Transaction::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->where('bank_account_id', $debit->bank_account_id)
+            ->where('amount', -abs((float) $debit->amount))
+            ->whereBetween('transaction_date', [$debit->transaction_date->toDateString(), $debit->transaction_date->copy()->addDays(self::RETURN_DAYS)->toDateString()])
+            ->where(fn ($q) => $q->where('plaid_merchant_description', 'like', '%CAPITAL ONE%')
+                ->orWhere('plaid_merchant_description', 'like', '%RETURN%')
+                ->orWhere('plaid_merchant_description', 'like', '%REVERS%'))
+            ->exists();
     }
 
     /**

@@ -132,3 +132,75 @@ it('never gives a Transfer check to a payment to one of our own cards', function
     expect($zelle->fresh()->check_id)->toBe($check->id)
         ->and($cardPayment->fresh()->check_id)->toBeNull();
 });
+
+/**
+ * Plaid (Capital One) removed 10 card payments about two weeks after sending
+ * them, July to September 2026, and never sent them again; the checking side
+ * of each stayed, and 8 of them ($22,850) sat on the 2025-26 audit's Missing
+ * Expenses with nothing to pair.
+ */
+function runPairer(): int
+{
+    return Expense::withoutSyncingToSearch(fn () => Transaction::withoutSyncingToSearch(fn () => app(CardPaymentPairer::class)->run()));
+}
+
+function removeTransaction(Transaction $transaction): void
+{
+    Transaction::withoutSyncingToSearch(fn () => $transaction->delete());
+}
+
+it('restores a card payment Plaid removed and pairs it with the money that left checking', function () {
+    $f = cardPairFixture();
+    $tx = $f['tx'];
+    $credit = $tx($f['card'], '2026-08-21', -14000, 'CAPITAL ONE MOBILE PYMT', '1010101');
+    removeTransaction($credit);
+    $debit = $tx($f['checking'], '2026-08-21', 14000, 'OTHER DECREASE CAPITAL ONE MOBILE PMT082126CA07DD3987BD1', '1010101');
+
+    expect(runPairer())->toBe(1);
+
+    $credit = Transaction::withoutGlobalScopes()->find($credit->id);
+    $debit = Transaction::withoutGlobalScopes()->find($debit->id);
+    expect($credit->deleted_at)->toBeNull()
+        ->and($credit->expense_id)->not->toBeNull()
+        ->and($debit->expense_id)->not->toBeNull()
+        ->and(Expense::withoutGlobalScopes()->find($debit->expense_id)->parent_expense_id)->toBe($credit->expense_id)
+        ->and((int) Expense::withoutGlobalScopes()->find($credit->expense_id)->vendor_id)->toBe($f['capitalOne']->id);
+});
+
+it('leaves a removed card payment deleted when nothing left checking for it, when the money came back, or before the cutoff', function () {
+    $f = cardPairFixture();
+    $tx = $f['tx'];
+    // Nothing left checking for it.
+    $lonely = $tx($f['card'], '2026-08-14', -800, 'CAPITAL ONE MOBILE PYMT', '1010101');
+    // The payment was returned to checking a week later.
+    $returned = $tx($f['card'], '2026-08-19', -700, 'CAPITAL ONE MOBILE PYMT', '1010101');
+    $debit700 = $tx($f['checking'], '2026-08-19', 700, 'OTHER DECREASE CAPITAL ONE MOBILE PMT081926CA0815E16F17B', '1010101');
+    $tx($f['checking'], '2026-08-26', -700, 'OTHER INCREASE CAPITAL ONE MOBILE PMT RETURN');
+    // Removed before 2026-07-01: the duplicate-cleanup era stays deleted.
+    $early = $tx($f['card'], '2026-05-01', -450, 'CAPITAL ONE MOBILE PYMT', '1010101');
+    $debit450 = $tx($f['checking'], '2026-05-01', 450, 'OTHER DECREASE CAPITAL ONE MOBILE PMT050126CA0', '1010101');
+    foreach ([$lonely, $returned, $early] as $removed) {
+        removeTransaction($removed);
+    }
+
+    expect(runPairer())->toBe(0);
+
+    foreach ([$lonely, $returned, $early] as $removed) {
+        expect(Transaction::withoutGlobalScopes()->find($removed->id)->deleted_at)->not->toBeNull();
+    }
+    expect(Transaction::withoutGlobalScopes()->find($debit700->id)->expense_id)->toBeNull()
+        ->and(Transaction::withoutGlobalScopes()->find($debit450->id)->expense_id)->toBeNull();
+});
+
+it('pairs a live card credit before a removed one', function () {
+    $f = cardPairFixture();
+    $tx = $f['tx'];
+    $removed = $tx($f['card'], '2026-08-20', -450, 'CAPITAL ONE MOBILE PYMT', '1010101');
+    removeTransaction($removed);
+    $live = $tx($f['card'], '2026-08-20', -450, 'CAPITAL ONE MOBILE PYMT', '1010101');
+    $tx($f['checking'], '2026-08-20', 450, 'OTHER DECREASE CAPITAL ONE MOBILE PMT082026CA01A69D45380', '1010101');
+
+    expect(runPairer())->toBe(1)
+        ->and(Transaction::withoutGlobalScopes()->find($live->id)->expense_id)->not->toBeNull()
+        ->and(Transaction::withoutGlobalScopes()->find($removed->id)->deleted_at)->not->toBeNull();
+});
