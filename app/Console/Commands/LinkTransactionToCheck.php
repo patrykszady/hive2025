@@ -13,16 +13,18 @@ use Illuminate\Support\Facades\DB;
 /**
  * Link a bank payment to the check it paid when the matcher could not: the
  * amounts differ, so it never paired them. Grzegorz's $1,035.50 Zelle on
- * 05/15/2026 paid timesheet check #3800 ($1,032.50) — $3 more. With --adjust
- * the difference the bank paid on top becomes an OFFICE adjustment expense on
- * the check, so the check total matches the bank again.
+ * 05/15/2026 paid timesheet check #3800 ($1,032.50) — $3 more; three Zelles
+ * ($400, $100, $5,000) paid #3878 ($5,525) — $25 less. Link a check's
+ * payments one by one; on the last, --adjust records whatever the bank paid
+ * more or less than the check as an OFFICE adjustment expense on it, so the
+ * check total matches the bank.
  */
 class LinkTransactionToCheck extends Command
 {
     protected $signature = 'transactions:link-check
         {transaction : The bank payment}
         {check : The check it paid}
-        {--adjust : Record what the bank paid beyond the check as an OFFICE adjustment expense}
+        {--adjust : This completes the check: record what the bank paid more or less as an OFFICE adjustment expense}
         {--dry-run : Show what would change, change nothing}';
 
     protected $description = 'Link a bank payment to the check it paid, with an OFFICE adjustment for a difference';
@@ -60,7 +62,7 @@ class LinkTransactionToCheck extends Command
 
             return self::FAILURE;
         }
-        if ($difference > 0 && ! $office) {
+        if ($difference != 0 && $this->option('adjust') && ! $office) {
             $this->error('The company has no OFFICE distribution for the adjustment.');
 
             return self::FAILURE;
@@ -69,8 +71,9 @@ class LinkTransactionToCheck extends Command
         $dryRun = (bool) $this->option('dry-run');
         $this->line(sprintf('  %s  %s  %s  → check %d (%s %s, %s)', $transaction->transaction_date->format('m/d/Y'), money($transaction->amount),
             (string) $transaction->plaid_merchant_description, $check->id, $check->check_type, $check->date?->format('m/d/Y'), money($check->amount)));
-        if ($difference > 0) {
-            $this->line(sprintf('  + OFFICE adjustment expense %s on the check, which then totals %s', money($difference), money((float) $check->amount + $difference)));
+        $adjust = $difference != 0 && ($difference > 0 || $this->option('adjust'));
+        if ($adjust) {
+            $this->line(sprintf('  %s OFFICE adjustment expense %s on the check, which then totals %s', $difference > 0 ? '+' : '-', money($difference), money((float) $check->amount + $difference)));
         } elseif ($difference < 0) {
             $this->line(sprintf('  The check keeps %s without a bank payment.', money(-$difference)));
         }
@@ -81,8 +84,9 @@ class LinkTransactionToCheck extends Command
             return self::SUCCESS;
         }
 
-        DB::transaction(function () use ($transaction, $check, $difference, $office, $company) {
-            if ($difference > 0) {
+        $paid = $linked + (float) $transaction->amount;
+        DB::transaction(function () use ($transaction, $check, $difference, $office, $company, $adjust, $paid) {
+            if ($adjust) {
                 Expense::create([
                     'amount' => $difference,
                     'date' => $transaction->transaction_date,
@@ -91,7 +95,7 @@ class LinkTransactionToCheck extends Command
                     'check_id' => $check->id,
                     'belongs_to_vendor_id' => $company,
                     'created_by_user_id' => 0,
-                    'note' => sprintf('Adjustment: the bank paid %s for this %s check', money($transaction->amount), money($check->amount)),
+                    'note' => sprintf('Adjustment: the bank paid %s for this %s check', money($paid), money($check->amount)),
                 ]);
                 $check->recalculateAmount();
             }

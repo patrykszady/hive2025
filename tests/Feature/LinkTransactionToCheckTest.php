@@ -62,7 +62,7 @@ it('refuses a payment larger than the check without --adjust, and changes nothin
 it('links a partial payment as it is, without an adjustment', function (): void {
     $f = linkCheckFixture(5525.00, 5000.00);
 
-    $this->artisan('transactions:link-check', ['transaction' => $f['zelle']->id, 'check' => $f['check']->id, '--adjust' => true])
+    $this->artisan('transactions:link-check', ['transaction' => $f['zelle']->id, 'check' => $f['check']->id])
         ->expectsOutputToContain('without a bank payment')
         ->assertSuccessful();
 
@@ -80,4 +80,23 @@ it('changes nothing on a dry run', function (): void {
 
     expect(Transaction::withoutGlobalScopes()->find($f['zelle']->id)->check_id)->toBeNull()
         ->and(Expense::withoutGlobalScopes()->where('check_id', $f['check']->id)->count())->toBe(1);
+});
+
+it('records a shortfall as a negative OFFICE adjustment when the last payment completes the check', function (): void {
+    $f = linkCheckFixture(5525.00, 5000.00);
+    $first = Transaction::create([
+        'transaction_date' => '2026-08-09', 'posted_date' => '2026-08-09', 'amount' => 500, 'bank_account_id' => $f['zelle']->bank_account_id,
+        'plaid_merchant_description' => 'ZELLE DEBIT PAY ID CTIa ORG ID CTI NAME GRZEGORZ', 'check_number' => '1010101', 'plaid_transaction_id' => uniqid('tx_'),
+    ]);
+
+    $this->artisan('transactions:link-check', ['transaction' => $first->id, 'check' => $f['check']->id])->assertSuccessful();
+    $this->artisan('transactions:link-check', ['transaction' => $f['zelle']->id, 'check' => $f['check']->id, '--adjust' => true])
+        ->expectsOutputToContain('now totals $5,500.00')
+        ->assertSuccessful();
+
+    $adjustment = Expense::withoutGlobalScopes()->where('check_id', $f['check']->id)->where('distribution_id', $f['office']->id)->first();
+    expect((float) $adjustment->amount)->toBe(-25.0)
+        ->and($adjustment->note)->toContain('$5,500.00 for this $5,525.00')
+        ->and((float) Check::withoutGlobalScopes()->find($f['check']->id)->amount)->toBe(5500.0)
+        ->and(Transaction::withoutGlobalScopes()->where('check_id', $f['check']->id)->count())->toBe(2);
 });
