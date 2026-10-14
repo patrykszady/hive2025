@@ -16,8 +16,9 @@ uses(RefreshDatabase::class);
  * Transfer check was visible nowhere: 65 Venmo debits from Citibank since
  * May 2026, $18,019, 32 of them unclaimed (2026-10-11). Patryk: "we should
  * see them under Transactions unless they have a check / timesheet attached".
- * Transfers between our own accounts (a credit-card payment) stay hidden —
- * their other leg is the record.
+ * Since 2026-10-13 transfers between our own accounts show too while
+ * unmatched ("we should show all unmatched transactions there"): an unpaired
+ * credit-card payment was otherwise visible only on the audit's list.
  */
 function transfersCardFixture(): array
 {
@@ -57,7 +58,7 @@ it('tells a payment to a person from a transfer between our own accounts', funct
     'an ordinary purchase' => ['HOME DEPOT #1920', null, null],
 ]);
 
-it('indexes the transfer kind, labels the row, and keeps person transfers inside the card filter', function (): void {
+it('indexes the transfer kind, labels the row, and shows every unmatched row — person transfers, card payments and cash alike', function (): void {
     [, $account, $row] = transfersCardFixture();
     $venmo = $row(['check_number' => '1010101', 'plaid_merchant_description' => 'Venmo']);
     $cardPayment = $row(['check_number' => '1010101', 'plaid_merchant_description' => 'OTHER DECREASE CAPITAL ONE MOBILE 5566', 'amount' => 2500]);
@@ -72,9 +73,11 @@ it('indexes the transfer kind, labels the row, and keeps person transfers inside
 
     $filters = Transaction::unmatchedSearchFilters([$account->id]);
 
-    // Still nothing with an expense, a check or a deposit; a transfer only
-    // when it paid a person.
+    // Nothing with an expense, a check or a deposit — and no exception for
+    // any kind of transfer or for cash.
     expect($filters)->toContain('check_id IS NULL', 'expense_id IS NULL', "bank_account_id IN [{$account->id}]")
-        ->and(implode(' AND ', $filters))->toContain('(check_number IS NULL OR check_number != "1010101" OR transfer_kind = "person")')
+        ->and(implode(' AND ', $filters))->not->toContain('1010101')
+        ->and(implode(' AND ', $filters))->not->toContain('transfer_kind')
+        ->and(implode(' AND ', $filters))->not->toContain('2020202')
         ->and(config('scout.meilisearch.index-settings')[Transaction::class]['filterableAttributes'])->toContain('transfer_kind');
 });

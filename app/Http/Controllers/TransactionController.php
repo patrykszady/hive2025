@@ -2149,6 +2149,14 @@ class TransactionController extends Controller
                 ->orderBy('id', 'DESC')
                 ->get();
 
+            // A Transfer check pays a person (Zelle, Venmo); a payment to one of
+            // our own cards wears the same transfer stamp but is never it:
+            // Morenos' $300 Transfer check #3922 took a $300 Capital One
+            // payment (2026-10-13) while its Zelle sat unlinked.
+            if ($check->check_type === 'Transfer') {
+                $transactions = $transactions->reject(fn (Transaction $t) => $t->transferKind() === 'account')->values();
+            }
+
             // A paper check whose number AND amount match a charge is that
             // check, even when the dates disagree: on 2026-10-13 "CHECK 2638"
             // ($5,060, cleared 07/30) never met check #2638, entered in Hive
@@ -2577,6 +2585,11 @@ class TransactionController extends Controller
             ->orderBy('transaction_date', 'ASC')
             ->limit(50) // Get more initially, we'll group by payee name
             ->get();
+
+        // Never a payment to one of our own cards for a Transfer check (see above).
+        if ($check->check_type === 'Transfer') {
+            $transactions = $transactions->reject(fn (Transaction $t) => $t->transferKind() === 'account')->values();
+        }
 
         if ($transactions->count() < 2) {
             return; // Need at least 2 transactions for subset matching
@@ -3308,99 +3321,15 @@ class TransactionController extends Controller
         return $summys;
     }
 
+    /**
+     * Pair credit-card payments with the money leaving checking — see
+     * CardPaymentPairer (it also pairs legs the transfer rules stamp).
+     */
     public function find_credit_payments_on_debit()
     {
-        //group bank_accounts per vendor
-        $vendors_credit_bank_accounts =
-            BankAccount::withoutGlobalScopes()
-                ->whereNull('deleted_at')
-                ->whereIn('type', ['Credit', 'Credit Card'])
-                ->get()
-                ->groupBy('vendor_id');
-
-        foreach ($vendors_credit_bank_accounts as $vendor_id => $vendor_bank_accounts) {
-            $vendor = Vendor::findOrFail($vendor_id);
-            $vendor_office_distribution_id = Distribution::withoutGlobalScopes()->where('vendor_id', $vendor_id)->where('name', 'OFFICE')->first()->id;
-            $bank_account_ids = $vendors_credit_bank_accounts[$vendor_id]->pluck('id');
-
-            $vendors_debit_bank_accounts =
-            BankAccount::withoutGlobalScopes()
-                ->where('vendor_id', $vendor_id)
-                ->where('deleted_at', null)
-                ->where('type', 'Checking')
-                ->get();
-
-            $credit_transactions =
-                Transaction::where('check_id', null)
-                    // ->where('id', 25137)
-                    ->where('expense_id', null)
-                    ->where('check_number', null)
-                    ->where('deposit', null)
-                    ->whereNotNull('vendor_id')
-                    ->whereDate('transaction_date', '>=', '2022-10-07')
-                    //where bank_id_account is a credit card for this user
-                    ->whereIn('bank_account_id', $bank_account_ids)
-                    ->orderBy('transaction_date', 'ASC')
-                    ->get();
-            // dd($credit_transactions);
-
-            foreach ($credit_transactions as $credit_transaction) {
-                $debit_transactions =
-                    Transaction::where('amount', substr($credit_transaction->amount, 1))
-                        ->where('vendor_id', $credit_transaction->vendor_id)
-                        ->whereIn('bank_account_id', $vendors_debit_bank_accounts->pluck('id')) //and where bank_type = DEBIT
-                        ->whereNull('expense_id')
-                        //->subDays(2)
-                        ->whereBetween('transaction_date', [$credit_transaction->transaction_date, $credit_transaction->transaction_date->addDays(10)])
-                        //where what else?
-                        ->get();
-                // dd($debit_transactions);
-
-                //can we add a Model attribute in the above Where statement?! --I dont think so
-                foreach ($debit_transactions as $debit_transaction) {
-                    $debit_transaction->date_diff = $credit_transaction->transaction_date->floatDiffInDays($debit_transaction->transaction_date);
-                }
-
-                $debit_transaction = $debit_transactions->sortBy('date_diff')->first();
-
-                if (is_null($debit_transaction)) {
-                    // continue;
-                } else {
-                    //create new expenses with associated_expense_id
-                    //CREDIT CARD TRANSACTION
-                    $credit_expense = Expense::create([
-                        'distribution_id' => $vendor_office_distribution_id,
-                        'created_by_user_id' => 0,
-                        'amount' => $credit_transaction->amount,
-                        'date' => $credit_transaction->transaction_date,
-                        'vendor_id' => $credit_transaction->vendor_id,
-                        'belongs_to_vendor_id' => $vendor->id,
-                    ]);
-
-                    $credit_transaction->expense()->associate($credit_expense);
-                    $credit_transaction->save();
-
-                    //DEBIT CARD TRANSACTION
-                    $debit_expense = Expense::create([
-                        'distribution_id' => $vendor_office_distribution_id,
-                        'created_by_user_id' => 0,
-                        'amount' => $debit_transaction->amount,
-                        'date' => $debit_transaction->transaction_date,
-                        'vendor_id' => $debit_transaction->vendor_id,
-                        'belongs_to_vendor_id' => $vendor->id,
-                    ]);
-
-                    $debit_expense->parent_expense_id = $credit_expense->id;
-                    $debit_expense->save();
-
-                    $debit_transaction = Transaction::find($debit_transaction->id);
-                    $debit_transaction->expense()->associate($debit_expense);
-                    $debit_transaction->save();
-                }
-            }
-        }
+        return app(\App\Services\Transactions\CardPaymentPairer::class)->run();
     }
-    
+
     /**
      * Match existing expenses that are associated (credit/debit pairs).
      * Finds negative expenses (refunds/credits) and links them to matching positive expenses (payments).

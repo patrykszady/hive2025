@@ -340,14 +340,14 @@ class Transaction extends Model
 
     /**
      * The Meilisearch filters behind the Expenses screen's Transactions card:
-     * what still has to be accounted for. Nothing with an expense, a check
-     * (and so a timesheet), or a deposit. A transfer-marked row stays out too
-     * — a credit-card payment or money between our own accounts has its other
-     * leg as the record — UNLESS it paid a person (transfer_kind 'person').
-     * Those settle somebody's Transfer check, and while unclaimed they were
-     * visible nowhere: 65 Venmo debits from Citibank since May 2026, $18,019,
-     * 32 of them never linked to a check (2026-10-11). Real check numbers stay
-     * visible until matched to a Check.
+     * every bank row still to be accounted for — nothing with an expense, a
+     * check (and so a timesheet), or a deposit. Every kind shows: checks,
+     * cash, payments to people (Venmo, Zelle) and, since 2026-10-13, transfers
+     * between our own accounts too (a credit-card payment). Those used to be
+     * hidden on the grounds that the card's other leg is the record, but an
+     * unpaired one was then visible nowhere: 32 Capital One payments since
+     * 07/09/2026 sat only on the audit's list. Patryk: "we should show all
+     * unmatched transactions there".
      *
      * @param  list<int>  $bankAccountIds
      * @return list<string>
@@ -361,7 +361,6 @@ class Transaction extends Model
             'expenses_count = 0',
             'check_id IS NULL',
             'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]',
-            '(check_number IS NULL OR check_number != "'.self::TRANSFER_CHECK_NUMBER.'" OR transfer_kind = "person")',
         ];
     }
 
