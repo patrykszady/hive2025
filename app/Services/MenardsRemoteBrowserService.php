@@ -891,6 +891,39 @@ class MenardsRemoteBrowserService
     {
         \Illuminate\Support\Facades\Cache::forget(self::NEEDS_SIGNIN_CACHE_KEY);
         $this->resumeAutomaticSignIn();
+        $this->syncSoonAfterSignIn();
+    }
+
+    /** Set while the post-sign-in sync is owed or ran, so a burst of sign-ins asks for one. */
+    public const SYNC_AFTER_SIGNIN_KEY = 'menards:sync_after_signin';
+
+    /**
+     * Fetch receipts right after a sign-in instead of at the next window
+     * (Patryk, 2026-10-14: "when menards gets re-auth we should run the
+     * scheduled job right away"). markSignedIn() runs only inside the login
+     * flow — the 07:30 ensure, a person's Retry, a security check cleared
+     * over the viewer — never from keep-alive or a deploy. A sync that is
+     * itself signing in fetches next anyway (SYNC_IN_FLIGHT_KEY), and at most
+     * one such sync runs per half hour. Queued a moment later so the browser
+     * has settled on its signed-in page; skipped on a queue that runs jobs
+     * inline, where "later" would mean inside this sign-in.
+     */
+    protected function syncSoonAfterSignIn(): void
+    {
+        if (app('queue')->connection() instanceof \Illuminate\Queue\SyncQueue) {
+            return;
+        }
+        if (\Illuminate\Support\Facades\Cache::has(self::SYNC_IN_FLIGHT_KEY)) {
+            return;
+        }
+        if (! \Illuminate\Support\Facades\Cache::add(self::SYNC_AFTER_SIGNIN_KEY, now()->toIso8601String(), now()->addMinutes(30))) {
+            return;
+        }
+
+        Log::channel('menards')->info('Menards browser: signed in — fetching receipts now instead of at the next window');
+        dispatch(fn () => \Illuminate\Support\Facades\Artisan::call('menards:browser', ['action' => 'sync']))
+            ->onQueue('background')
+            ->delay(now()->addSeconds(20));
     }
 
     /** A file, not the cache: every deploy's optimize:clear empties the cache. */
