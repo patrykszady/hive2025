@@ -236,6 +236,9 @@ class Transaction extends Model
     /** check_number of a transaction marked as a transfer (both legs of a card payment, money between accounts, a payment app). */
     public const TRANSFER_CHECK_NUMBER = '1010101';
 
+    /** check_number of a cash withdrawal (an ATM, a teller). */
+    public const CASH_CHECK_NUMBER = '2020202';
+
     /**
      * How a transfer-marked transaction moved money. 'person' when it paid
      * someone through a payment app or a named transfer (Venmo, Zelle,
@@ -291,6 +294,22 @@ class Transaction extends Model
         return 'Transfer';
     }
 
+    /**
+     * How the money left, as the audit's Payment column names it and the
+     * Transactions card's badge shows it: "Cash" for a withdrawal, the app or
+     * "Transfer" for a transfer, null for anything else. The card listed the
+     * five ATM withdrawals of the 2025-26 audit, but only as "Citibank ATM
+     * Withdrawal", so "Cash" was nowhere to be found (2026-10-13).
+     */
+    public function paymentLabel(): ?string
+    {
+        if ((string) $this->check_number === self::CASH_CHECK_NUMBER) {
+            return 'Cash';
+        }
+
+        return $this->transferLabel();
+    }
+
     public function searchableAs(): string
     {
         return env('APP_ENV') == 'local' ? 'transaction_index_dev' : 'transaction_index';
@@ -321,6 +340,8 @@ class Transaction extends Model
         // search (e.g. typo tolerance fuzzy-matches "Venmo" against "Vendor").
         $array['vendor_name'] = $this->vendor_id ? $this->vendor?->business_name : null;
         $array['transfer_kind'] = $this->transferKind();
+        // Searchable, so "cash" or "zelle" in the Transactions card's search finds them.
+        $array['payment_label'] = $this->paymentLabel();
 
         // The default vendor stub must never leak into the index via toArray().
         unset($array['vendor']);
@@ -393,7 +414,8 @@ class Transaction extends Model
 
             // Restrict which fields are searched based on search type
             if ($textSearch && trim($actualQuery) !== '') {
-                $options['attributesToSearchOn'] = ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name'];
+                // payment_label: "cash" finds the withdrawals ("Citibank ATM Withdrawal").
+                $options['attributesToSearchOn'] = ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name', 'payment_label'];
             } elseif (!$textSearch && trim($actualQuery) !== '') {
                 $options['attributesToSearchOn'] = ['amount'];
             }

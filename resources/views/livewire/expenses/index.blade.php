@@ -425,9 +425,9 @@
                                         </flux:table.cell>
                                     @else
                                         <flux:table.cell class="whitespace-normal break-words">
-                                            @if($transferLabel = $transaction->transferLabel())
-                                                {{-- A payment to a person through Venmo/Zelle/… stays in this queue until a Transfer check claims it. --}}
-                                                <flux:badge size="sm" color="zinc" inset="top bottom" class="mr-1">{{ $transferLabel }}</flux:badge>
+                                            @if($paymentLabel = $transaction->paymentLabel())
+                                                {{-- Cash, or a transfer (Zelle, Venmo, …): stays in this queue until a check or an expense claims it. --}}
+                                                <flux:badge size="sm" color="zinc" inset="top bottom" class="mr-1">{{ $paymentLabel }}</flux:badge>
                                             @endif
                                             {{ $transaction->plaid_merchant_description }}
                                         </flux:table.cell>

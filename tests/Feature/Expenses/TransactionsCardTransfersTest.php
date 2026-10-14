@@ -81,3 +81,16 @@ it('indexes the transfer kind, labels the row, and shows every unmatched row —
         ->and(implode(' AND ', $filters))->not->toContain('2020202')
         ->and(config('scout.meilisearch.index-settings')[Transaction::class]['filterableAttributes'])->toContain('transfer_kind');
 });
+
+it('calls a cash withdrawal "Cash", on the card and in its search', function (): void {
+    [, , $row] = transfersCardFixture();
+    $atm = $row(['check_number' => Transaction::CASH_CHECK_NUMBER, 'plaid_merchant_description' => 'Citibank ATM Withdrawal 4849 1828 N ARLNGTN HTS RD, ARLNGTN HGHT', 'amount' => 500]);
+    $zelle = $row(['check_number' => '1010101', 'plaid_merchant_description' => 'ZELLE DEBIT PAY ID CTIabc ORG ID CTI NAME GRZEGORZ']);
+    $purchase = $row(['plaid_merchant_description' => 'HOME DEPOT #1920', 'amount' => 84.12]);
+
+    expect($atm->paymentLabel())->toBe('Cash')
+        ->and($atm->toSearchableArray()['payment_label'])->toBe('Cash')
+        ->and($zelle->paymentLabel())->toBe('Zelle')
+        ->and($purchase->paymentLabel())->toBeNull()
+        ->and(config('scout.meilisearch.index-settings')[Transaction::class]['searchableAttributes'])->toContain('payment_label');
+});

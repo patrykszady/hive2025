@@ -182,7 +182,7 @@ return [
                     'check_number', 'transfer_kind',
                 ],
                 'sortableAttributes' => ['transaction_date', 'amount'],
-                'searchableAttributes' => ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name', 'amount'],
+                'searchableAttributes' => ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name', 'amount', 'payment_label'],
                 'typoTolerance' => ['enabled' => true],
                 'rankingRules' => ['sort', 'exactness'],
             ],
