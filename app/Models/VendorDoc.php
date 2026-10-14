@@ -136,7 +136,8 @@ class VendorDoc extends Model
             'pending' => ($state['reason'] ?? '') === 'not_tracked_by_ewccv'
                 ? 'EWCCV no longer lists this policy as tracked; it is re-tracked with the next browser session'
                 : 'EWCCV lookup waiting for a browser session: open ewccv.com with the Hive extension and it runs',
-            'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')).self::ewccvSearchNotes($state),
+            'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')).self::ewccvSearchNotes($state)
+                .(in_array($state['reason'] ?? '', EwccvCoverageCheck::NOT_FOUND_REASONS, true) ? $this->previousPolicyNote() : ''),
             'skipped' => 'EWCCV lookup skipped: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
             default => 'EWCCV: '.$state['status'],
         };
@@ -208,6 +209,49 @@ class VendorDoc extends Model
     }
 
     /**
+     * The workers comp certificate this one renewed: the vendor's latest
+     * policy that ended by the day this one started (a day's slack), within
+     * the year before.
+     */
+    public function previousWorkersDoc(): ?self
+    {
+        if (! $this->vendor_id || ! $this->effective_date) {
+            return null;
+        }
+
+        return self::withoutGlobalScopes()
+            ->where('type', 'workers')
+            ->where('vendor_id', $this->vendor_id)
+            ->where('belongs_to_vendor_id', $this->belongs_to_vendor_id)
+            ->whereKeyNot($this->getKey())
+            ->whereNotNull('effective_date')
+            ->whereDate('expiration_date', '<=', $this->effective_date->copy()->addDay())
+            ->whereDate('expiration_date', '>=', $this->effective_date->copy()->subYear())
+            ->orderByDesc('expiration_date')
+            ->first();
+    }
+
+    /**
+     * EWCCV lists a renewal only once the insurer reports it, often weeks
+     * after it starts. Until then the row says how the policy before it
+     * stood on its last day (Patryk, 2026-10-14).
+     */
+    protected function previousPolicyNote(): string
+    {
+        $previous = $this->previousWorkersDoc();
+        if (! $previous) {
+            return '';
+        }
+        if ($check = $previous->latestCoveredCheck()) {
+            return sprintf(' · EWCCV may not list this renewal yet; the previous policy (%s) was covered on %s', $previous->number, $check->coverage_date->format('m/d/Y'));
+        }
+
+        return $previous->pendingCheckNote() !== ''
+            ? sprintf(' · EWCCV may not list this renewal yet; the previous policy (%s) is queued for a check as of its last day', $previous->number)
+            : '';
+    }
+
+    /**
      * When EWCCV matched the employer by name and lists a policy number other
      * than the certificate on file (a renewal, or a wrong match), say so.
      *
@@ -219,6 +263,9 @@ class VendorDoc extends Model
         $ours = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) ($this->attributes['number'] ?? '')));
         if ($theirs === '' || $ours === '' || $theirs === $ours || str_contains($theirs, $ours) || str_contains($ours, $theirs)) {
             return '';
+        }
+        if (($state['match_type'] ?? null) === 'policyNumber' && isset($state['policy_score'])) {
+            return sprintf(' · EWCCV lists policy %s, %d%% alike the certificate\'s %s', (string) $state['matched_policy'], (int) round(((float) $state['policy_score']) * 100), (string) $this->attributes['number']);
         }
 
         return sprintf(' · matched by name (%s); EWCCV lists policy %s, the certificate on file says %s — check it is the same business', (string) ($state['matched_name'] ?? '?'), (string) $state['matched_policy'], (string) $this->attributes['number']);

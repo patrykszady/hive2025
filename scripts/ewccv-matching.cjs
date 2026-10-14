@@ -202,11 +202,64 @@ function nameTokens(name) {
     );
 }
 
+// Every word but the legal suffix and the connectors: an initial ("M Power")
+// and the trade words ("Services") count here, so two firms that share only
+// their distinctive words are told apart.
+const CONNECTORS = new Set(['and', 'the', 'of']);
+
+function fullTokens(name) {
+    return rawTokens(name).filter((t) => !LEGAL_SUFFIXES.has(t.toLowerCase()) && !CONNECTORS.has(t.toLowerCase()));
+}
+
+function overlap(ours, theirs) {
+    if (ours.length === 0) return 0;
+    const oursUnique = Array.from(new Set(ours));
+    const theirSet = new Set(theirs);
+    const shared = oursUnique.filter((t) => theirSet.has(t)).length;
+    return shared / Math.max(oursUnique.length, theirSet.size);
+}
+
 function policiesMatch(aNorm, bNorm) {
     if (!aNorm || !bNorm) return false;
     if (aNorm === bNorm) return true;
     return aNorm.length >= 6 && bNorm.length >= 6 && (aNorm.includes(bNorm) || bNorm.includes(aNorm));
 }
+
+function editDistance(a, b) {
+    let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+        const current = [i];
+        for (let j = 1; j <= b.length; j++) {
+            current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        }
+        previous = current;
+    }
+    return previous[b.length];
+}
+
+/**
+ * How likely two policy numbers are the same policy, 0..1, with case, dashes
+ * and spaces ignored: 1 for the same number, 0.95 when one holds the other
+ * (an insurer's prefix, "AFWCP" + "100134391"), else one minus the edit
+ * distance over the longer length, so a missing or mistyped character in a
+ * 14-character number still scores 0.93 (Patryk, 2026-10-14).
+ */
+function policySimilarity(a, b) {
+    const x = normalizePolicy(a);
+    const y = normalizePolicy(b);
+    if (!x || !y) return 0;
+    if (policiesMatch(x, y)) return x === y ? 1 : 0.95;
+    return 1 - editDistance(x, y) / Math.max(x.length, y.length);
+}
+
+// The same policy, whatever the names say.
+const POLICY_SAME = 0.95;
+// Nearly the same number (a typo, a dropped character): the same policy only
+// when the name agrees as well, since an agency numbers its policies in
+// sequence — M Power's 6JUBA421140425 and PHD Glass's 6JUBA421161325 are
+// three characters apart.
+const POLICY_LIKELY = 0.85;
+const NAME_BACKS_POLICY = 0.5;
 
 // score = shared distinctive tokens / the LARGER of the two token sets, so a
 // candidate that merely contains our one distinctive word scores low: on
@@ -230,18 +283,20 @@ function similarityScore(ourName, theirName) {
     return shared / Math.max(oursUnique.length, theirsUnique.length);
 }
 
-// A name-only match is accepted on its own when the policy numbers agree
-// or we have none on file. When the certificate on file carries a number
-// EWCCV does not list for that employer, the name must be near-identical —
-// a renewal with a new number is fine, "KOT CONSTRUCTION" for "Mariusz Kot
-// Construction" with a different number is a question for a person.
-const STRICT_WHEN_POLICY_DIFFERS = 0.75;
+// The name decides only when there is no policy number to compare: none on
+// the certificate, or EWCCV hiding its own. A certificate whose number EWCCV
+// does not list is never matched by name — "POWER SOLUTION SERVICES INC"
+// scored 1.0 against "M Power Solution Company" on distinctive words and was
+// tracked in its place (Patryk, 2026-10-14: "we should always match the
+// policy number"). Against a hidden number the whole name must agree,
+// initials and trade words included.
+const STRICT_WITHOUT_POLICY = 0.75;
 
 function nameMatchAllowed(candidate, vendorPolicyNorm, threshold) {
     if (candidate.score < threshold) return false;
     if (!vendorPolicyNorm) return true;
-    if (policiesMatch(normalizePolicy(candidate.policy), vendorPolicyNorm)) return true;
-    return candidate.score >= STRICT_WHEN_POLICY_DIFFERS;
+    if (normalizePolicy(candidate.policy)) return false;
+    return candidate.score >= STRICT_WITHOUT_POLICY && candidate.fullScore >= STRICT_WITHOUT_POLICY;
 }
 
 // Tie-break among several same-tier candidates: prefer one whose policy
@@ -284,14 +339,16 @@ function pickMatch(items, vendor) {
         // older certificates), so "Smartech Inc" on file still matches today's name.
         const ourNames = [vendor.businessName, ...(vendor.aliases || [])].filter(Boolean);
         const score = ourNames.length ? Math.max(...ourNames.map((n) => similarityScore(n, name))) : 0;
-        return { item, name, policy, score };
+        const fullScore = ourNames.length ? Math.max(...ourNames.map((n) => overlap(fullTokens(n), fullTokens(name)))) : 0;
+        const policyScore = policySimilarity(vendor.policyNumber, policy);
+        return { item, name, policy, score, fullScore, policyScore };
     });
 
     const candidates = scored
         .slice()
         .sort((a, b) => b.score - a.score)
         .slice(0, 10)
-        .map((s) => ({ employerName: s.name, policyNumber: s.policy, stateCode: s.item.stateCode, score: s.score, fields: scalarFields(s.item) }));
+        .map((s) => ({ employerName: s.name, policyNumber: s.policy, stateCode: s.item.stateCode, score: s.score, policyScore: Number(s.policyScore.toFixed(2)), fields: scalarFields(s.item) }));
 
     const vendorPolicyNorm = normalizePolicy(vendor.policyNumber);
 
@@ -308,13 +365,24 @@ function pickMatch(items, vendor) {
         }
     }
 
-    // Tier 1: policy number containment (both sides >= 6 chars) or equality.
+    // Tier 1: the same policy number (equal, or one holding the other).
+    // Tier 1b: nearly the same number, with the name agreeing.
     if (vendorPolicyNorm) {
-        const policyMatches = scored.filter((s) => policiesMatch(normalizePolicy(s.policy), vendorPolicyNorm));
+        const policyMatches = scored.filter((s) => s.policyScore >= POLICY_SAME);
         if (policyMatches.length > 0) {
             const chosen = pickBest(policyMatches, vendorPolicyNorm);
             return {
-                match: chosen.item, via: 'policyNumber', score: 1,
+                match: chosen.item, via: 'policyNumber', score: 1, policyScore: chosen.policyScore,
+                matchedName: chosen.name, matchedPolicy: chosen.policy, candidates,
+            };
+        }
+        const likely = scored
+            .filter((s) => s.policyScore >= POLICY_LIKELY && Math.max(s.score, s.fullScore) >= NAME_BACKS_POLICY)
+            .sort((a, b) => b.policyScore - a.policyScore || b.score - a.score);
+        if (likely.length > 0) {
+            const chosen = likely[0];
+            return {
+                match: chosen.item, via: 'policyNumber', score: chosen.score, policyScore: chosen.policyScore,
                 matchedName: chosen.name, matchedPolicy: chosen.policy, candidates,
             };
         }
@@ -343,6 +411,7 @@ function pickMatch(items, vendor) {
 }
 
 module.exports = {
+    policySimilarity,
     nameVariants,
     addressVariants,
     pickMatch,

@@ -2746,7 +2746,7 @@ async function requestLoginEmail(page, email) {
                     continue;
                 }
 
-                log(`    Matched: ${picked.matchedName} via ${picked.via} (policy: ${picked.matchedPolicy})`);
+                log(`    Matched: ${picked.matchedName} via ${picked.via} (policy: ${picked.matchedPolicy}${picked.policyScore != null && picked.policyScore < 1 ? `, ${Math.round(picked.policyScore * 100)}% alike` : ''})`);
 
                 // Every field EWCCV returned for the matched employer, kept as-is
                 // so the server can show it next to the vendor on file.
@@ -2759,6 +2759,7 @@ async function requestLoginEmail(page, email) {
                         businessName: vendor.businessName,
                         matchType: picked.via,
                         score: picked.score,
+                        policyScore: picked.policyScore ?? null,
                         matchedName: picked.matchedName,
                         matchedPolicy: picked.matchedPolicy,
                         verifyOnly: true,
@@ -2812,6 +2813,7 @@ async function requestLoginEmail(page, email) {
                         matchedName: picked.matchedName,
                         matchedPolicy: picked.matchedPolicy,
                         score: picked.score,
+                        policyScore: picked.policyScore ?? null,
                         candidates: picked.candidates,
                         details: scalarDetails,
                         tracked: trackResult.tracked,

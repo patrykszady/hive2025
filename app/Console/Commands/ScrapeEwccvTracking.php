@@ -209,6 +209,27 @@ class ScrapeEwccvTracking extends Command
      *
      * @return array<string, list<int>>
      */
+    /**
+     * EWCCV does not list this certificate (a renewal the insurer has not
+     * reported yet, most often): verify the one it renewed instead, as of its
+     * last day, the way an audit checks a policy that ended. The check runs
+     * with the next browser session and shows on that certificate's row.
+     */
+    protected function requestPreviousPolicyCheck(VendorDoc $doc): void
+    {
+        $previous = $doc->previousWorkersDoc();
+        if (! $previous || ! $previous->expiration_date || $previous->latestCoveredCheck()) {
+            return;
+        }
+        $lastDay = $previous->expiration_date->copy()->subDay();
+        if ($lastDay->isFuture() || $lastDay->lt($previous->effective_date)) {
+            return;
+        }
+        if (\App\Models\EwccvCoverageCheck::request((int) $doc->vendor_id, (int) $doc->belongs_to_vendor_id, $lastDay->toDateString())) {
+            $this->line(sprintf('  Queued a check of the previous policy %s as of %s (vendor %d)', $previous->number, $lastDay->format('m/d/Y'), $doc->vendor_id));
+        }
+    }
+
     protected function coverageChecksOption(): array
     {
         $checks = [];
@@ -682,6 +703,8 @@ class ScrapeEwccvTracking extends Command
                     'subscription_id'  => $s['subscriptionId'] ?? null,
                     'matched_name'     => $s['matchedName'] ?? null,
                     'matched_policy'   => $s['matchedPolicy'] ?? null,
+                    // How alike EWCCV's policy number is to the certificate's (1 = the same).
+                    'policy_score'     => isset($s['policyScore']) ? round((float) $s['policyScore'], 2) : null,
                     // Every field EWCCV returned for the matched employer.
                     'ewccv_details'    => is_array($s['details'] ?? null) ? $s['details'] : null,
                 ]);
@@ -694,6 +717,13 @@ class ScrapeEwccvTracking extends Command
                     'searched' => array_slice((array) ($f['searched'] ?? []), 0, 8),
                     'candidates' => array_slice((array) ($f['candidates'] ?? []), 0, 5),
                 ]);
+            }
+            foreach ($results['failed'] ?? [] as $f) {
+                if (in_array($f['reason'] ?? '', \App\Models\EwccvCoverageCheck::NOT_FOUND_REASONS, true)) {
+                    foreach ($vendorDocs->where('vendor_id', (int) $f['vendorId']) as $doc) {
+                        $this->requestPreviousPolicyCheck($doc);
+                    }
+                }
             }
             foreach ($results['skipped'] ?? [] as $sk) {
                 $stamp((int) $sk['vendorId'], [
