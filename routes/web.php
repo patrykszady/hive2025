@@ -619,6 +619,14 @@ Route::get('menards-vnc-auth', function () {
     return response()->noContent();
 })->name('menards.vnc-auth');
 
+// nginx auth_request target guarding /ewccv-vnc/ (scripts/nginx-ewccv-vnc.conf):
+// the EWCCV server browser's viewer, same rule, same plain 403 for guests.
+Route::get('ewccv-vnc-auth', function () {
+    abort_unless(auth()->check() && auth()->user()->can('ewccv-browser'), 403);
+
+    return response()->noContent();
+})->name('ewccv.vnc-auth');
+
 // The server's own Chrome fetches the extension's update manifest and pack
 // here (policy update_url). No session, no CSRF: a secret path segment gates
 // it. See MenardsExtensionUpdateController.
@@ -795,6 +803,7 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //MENARDS REMOTE BROWSER (noVNC viewer for sign-in / challenge clicks)
     Route::get('/menards/browser', \App\Livewire\Menards\MenardsBrowserViewer::class)->name('menards.browser');
+    Route::get('/ewccv/browser', \App\Livewire\Ewccv\EwccvBrowserViewer::class)->name('ewccv.browser');
 
     //CHECKS
     Route::get('/checks', ChecksIndex::class)->name('checks.index');

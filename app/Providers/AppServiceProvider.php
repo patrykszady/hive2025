@@ -457,6 +457,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('menards-browser', fn (User $user): bool => ! $user->is_browsing_as_client
             && (int) $user->primary_vendor_id === (int) config('services.menards.owner_vendor_id')
             && $user->can('viewAny', \App\Models\Bank::class));
+        // The EWCCV server browser is the same company's shared machine: same rule.
+        Gate::define('ewccv-browser', fn (User $user): bool => Gate::forUser($user)->allows('menards-browser'));
 
         // Blade::component('mails.base', \App\View\Components\Base::class);
 
