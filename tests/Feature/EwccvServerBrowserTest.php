@@ -108,3 +108,25 @@ it('logs why the browser did not start, so a Start button press that fails leave
 
     $this->artisan('ewccv:browser', ['action' => 'start'])->assertFailed();
 });
+
+it('drops the cached service worker before Chrome starts, so the extension runs the deployed code', function (): void {
+    $profile = sys_get_temp_dir().'/ewccv-profile-'.uniqid();
+    $browser = new class($profile) extends EwccvRemoteBrowserService
+    {
+        public function __construct(private string $profile) {}
+
+        public function userDataDir(): string
+        {
+            return $this->profile;
+        }
+    };
+    mkdir("{$profile}/Default/Service Worker/ScriptCache", 0777, true);
+    file_put_contents("{$profile}/Default/Service Worker/ScriptCache/old_0", 'let backoffUntil = 0;');
+    file_put_contents("{$profile}/Default/Cookies", 'signed in');
+
+    $browser->clearServiceWorkerCache();
+
+    expect(is_dir("{$profile}/Default/Service Worker"))->toBeFalse()
+        ->and(file_get_contents("{$profile}/Default/Cookies"))->toBe('signed in');
+    exec('rm -rf '.escapeshellarg($profile));
+});

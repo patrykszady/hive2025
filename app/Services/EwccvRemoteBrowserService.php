@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -142,6 +143,7 @@ class EwccvRemoteBrowserService
         $this->stop();
         @mkdir($this->userDataDir(), 0775, true);
         $this->restoreSessionOnStartup();
+        $this->clearServiceWorkerCache();
         $this->writeExtensionDefaults();
         $logs = storage_path('logs');
 
@@ -224,6 +226,18 @@ class EwccvRemoteBrowserService
         @chmod($path, 0600);
 
         return true;
+    }
+
+    /**
+     * Chrome keeps the extension's service worker from an earlier start and
+     * runs that copy, not the files on disk: on 2026-10-14 the server browser
+     * ran the 1.3.0 worker after 1.4.0 was deployed, so neither the retry
+     * wait nor the single tab took effect. The profile holds nothing else
+     * worth keeping there (the sign-in lives in its cookies).
+     */
+    public function clearServiceWorkerCache(): void
+    {
+        File::deleteDirectory($this->userDataDir().'/Default/Service Worker');
     }
 
     /** Restore the last session on startup, and no "Restore pages?" bubble after a hard stop. */

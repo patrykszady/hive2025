@@ -85,11 +85,24 @@ async function seedDefaults() {
         if (bundled.serverUrl) values.serverUrl = bundled.serverUrl;
         if (bundled.token) values.token = bundled.token;
         if (Object.keys(values).length) await chrome.storage.sync.set(values);
-        await chrome.storage.local.set({ singleTab: bundled.singleTab === true });
     } catch (_) { /* no defaults.json: configured by hand */ }
 }
 
 const PARK_URL = 'https://www.ewccv.com/cvs/search';
+
+/**
+ * Read from the bundled defaults.json every time rather than from storage
+ * seeded at startup: Chrome did not fire the startup event in the server
+ * browser on 2026-10-14, the flag was never stored, and four tabs stayed.
+ */
+async function isServerBrowser() {
+    try {
+        const res = await fetch(chrome.runtime.getURL('defaults.json'));
+        return res.ok && (await res.json()).singleTab === true;
+    } catch (_) {
+        return false;
+    }
+}
 
 /**
  * The server browser shows one tab: Chrome restores the last session (so the
@@ -98,8 +111,7 @@ const PARK_URL = 'https://www.ewccv.com/cvs/search';
  * rest. Only where defaults.json says singleTab — never in your own Chrome.
  */
 async function keepOneTab() {
-    const { singleTab } = await chrome.storage.local.get('singleTab');
-    if (!singleTab) return;
+    if (!(await isServerBrowser())) return;
     const tabs = await chrome.tabs.query({});
     if (tabs.length < 2) return;
     const onEwccv = (t) => (t.pendingUrl || t.url || '').startsWith('https://www.ewccv.com/');
