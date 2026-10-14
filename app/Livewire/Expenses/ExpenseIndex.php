@@ -477,30 +477,45 @@ class ExpenseIndex extends Component
         return 'exact';
     }
 
-    private function amountPrefixBounds(): array
+    /** Amount search ranges reach this high: "1" covers $1,000,000.00 – $1,999,999.99, no further. */
+    private const AMOUNT_PREFIX_CEILING = 10_000_000;
+
+    /**
+     * The amounts an unfinished entry can be the start of, as inclusive
+     * [min, max] ranges in dollars (amounts carry two decimals). Patryk,
+     * 2026-10-13: "579.61 shouldn't show for 570 but for 57 yes". Typed
+     * digits are where the amount begins: "57" is 57.00 – 57.99, 570.00 –
+     * 579.99, 5,700.00 – 5,799.99 and so on; "570" leaves 579.61 out. A
+     * decimal point fixes the dollars: "57." is 57.00 – 57.99 and "57.6" is
+     * 57.60 – 57.69. The sign is ignored; the filter covers refunds too.
+     *
+     * @return list<array{0: float, 1: float}>
+     */
+    private function amountPrefixRanges(): array
     {
-        $value = $this->normalizedAmountInput();
-        $val = (float) $value;
-        
+        $value = ltrim($this->normalizedAmountInput(), '+-');
+
         if (str_contains($value, '.')) {
-            $dec = substr(strrchr($value, '.'), 1) ?: '';
-            $places = strlen($dec);
-        } else {
-            $places = 0;
+            [$dollars, $cents] = explode('.', $value, 2);
+            $min = (float) (((int) $dollars).($cents === '' ? '' : '.'.$cents));
+
+            return [[$min, round($min + ($cents === '' ? 0.99 : 0.09), 2)]];
         }
-        
-        if ($places === 0) {
-            $min = $val;
-            $upperExclusive = $val + 1.0; // [val, val+1.0)
-        } elseif ($places === 1) {
-            $min = $val;
-            // add 0.1 to create exclusive upper bound (covers .X0 - .X9)
-            $upperExclusive = round($val + 0.1, 10);
-        } else { // shouldn't happen for prefix, fallback
-            $min = round($val, 2);
-            $upperExclusive = $min + 0.01; // exclusive
+
+        $start = (int) $value;
+        if ($start === 0) {
+            return [[0.0, 0.99]];
         }
-        return [$min, $upperExclusive];
+
+        $ranges = [];
+        $width = 1;
+        do {
+            $ranges[] = [(float) $start, round($start + $width - 0.01, 2)];
+            $start *= 10;
+            $width *= 10;
+        } while ($start <= self::AMOUNT_PREFIX_CEILING);
+
+        return $ranges;
     }
 
     private function normalizedAmountInput(): string
@@ -726,16 +741,19 @@ class ExpenseIndex extends Component
         }
 
         if ($mode === 'prefix') {
-            [$min, $upperExclusive] = $this->amountPrefixBounds();
-            $negMin = -$upperExclusive;
-            $negMax = -$min;
+            // One TO range per condition, never two comparisons joined by AND:
+            // split_amounts is a list, and each comparison may be met by a
+            // different split. "570" found a $1,036.97 expense split 600 + 120
+            // (600 >= 570, 120 < 571) and 39 more like it (2026-10-13).
+            $conditions = [];
+            foreach ($this->amountPrefixRanges() as [$min, $max]) {
+                foreach (['amount', 'split_amounts'] as $field) {
+                    $conditions[] = "{$field} {$min} TO {$max}";
+                    $conditions[] = "{$field} -{$max} TO -{$min}";
+                }
+            }
 
-            return '('
-                . "(amount >= {$min} AND amount < {$upperExclusive})"
-                . " OR (amount > {$negMin} AND amount <= {$negMax})"
-                . " OR (split_amounts >= {$min} AND split_amounts < {$upperExclusive})"
-                . " OR (split_amounts > {$negMin} AND split_amounts <= {$negMax})"
-                . ')';
+            return '('.implode(' OR ', $conditions).')';
         }
 
         return null;
