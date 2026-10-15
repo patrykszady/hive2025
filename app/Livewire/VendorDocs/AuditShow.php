@@ -405,20 +405,18 @@ class AuditShow extends Component
 
                         if (isset($account['statements'])) {
                             foreach ($account['statements'] as $statement) {
-                                $statementDate = Carbon::parse($statement['end_date']);
-                                $startDate = Carbon::parse($this->start_date);
-                                $endDate = Carbon::parse($this->end_date);
+                                $postedOn = self::statementPostedOn($statement);
 
-                                // Include statements that overlap with our audit period
-                                if ($statementDate->between($startDate, $endDate) || 
-                                    Carbon::parse($statement['start_date'])->between($startDate, $endDate)) {
-                                    
+                                if ($postedOn && $postedOn->between(
+                                    Carbon::parse($this->start_date)->startOfDay(),
+                                    Carbon::parse($this->end_date)->addDays(self::STATEMENT_GRACE_DAYS)->endOfDay(),
+                                )) {
                                     $allStatements->push([
                                         'statement_id' => $statement['statement_id'],
                                         'bank_name' => $bank->name,
                                         'bank_id' => $bank->id,
                                         'account_name' => $bankAccount->account_number,
-                                        'statement_date' => $statement['end_date'],
+                                        'statement_date' => $postedOn->toDateString(),
                                         'access_token' => $bank->plaid_access_token,
                                     ]);
                                     $statementsFound++;
@@ -522,6 +520,34 @@ class AuditShow extends Component
             
             $this->toast('An error occurred while downloading statements. Please try again.', 'error');
         }
+    }
+
+    /** A statement posted this long after the audit ends still covers its last weeks. */
+    public const STATEMENT_GRACE_DAYS = 35;
+
+    /**
+     * When the bank posted a statement. Plaid's /statements/list gives each
+     * statement only month, year and date_posted, with no start or end date;
+     * reading end_date threw on the first statement, and the download only
+     * ever said "An error occurred" (2026-10-15).
+     *
+     * @param  array<string, mixed>  $statement
+     */
+    public static function statementPostedOn(array $statement): ?Carbon
+    {
+        $posted = $statement['date_posted'] ?? $statement['posted_date'] ?? null;
+        if (filled($posted)) {
+            try {
+                return Carbon::parse($posted)->startOfDay();
+            } catch (\Throwable) {
+                // fall through to month and year
+            }
+        }
+        if (! empty($statement['year']) && ! empty($statement['month'])) {
+            return Carbon::create((int) $statement['year'], (int) $statement['month'], 1)->endOfMonth()->startOfDay();
+        }
+
+        return null;
     }
 
     private function createStatementsZip($statements, PlaidService $plaidService): ?string
