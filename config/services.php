@@ -288,10 +288,6 @@ return [
         'bridge_token' => env('EWCCV_BRIDGE_TOKEN'),
         // The EWCCV server browser's Chrome for Testing (default: the newest Puppeteer downloaded).
         'chrome_binary' => env('EWCCV_CHROME_BINARY'),
-        // The SOCKS tunnel the Raspberry Pi on Patryk's network holds open to this
-        // server, so the EWCCV server browser leaves through that internet
-        // connection instead of the droplet's address. '' turns it off.
-        'home_tunnel' => env('EWCCV_HOME_TUNNEL', '127.0.0.1:1080'),
         // EWCCV is down midnight–6 am Eastern nightly; nothing is sent to it
         // then (App\Support\Ewccv\ServiceHours). Off in the test suite.
         'service_hours' => (bool) env('EWCCV_SERVICE_HOURS', true),

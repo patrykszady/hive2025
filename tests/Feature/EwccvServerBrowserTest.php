@@ -130,25 +130,3 @@ it('drops the cached service worker before Chrome starts, so the extension runs 
         ->and(file_get_contents("{$profile}/Default/Cookies"))->toBe('signed in');
     exec('rm -rf '.escapeshellarg($profile));
 });
-
-it('leaves through the home tunnel when the Pi holds it open, Google included, and goes direct without it', function (): void {
-    config(['services.ewccv.chrome_binary' => '/opt/chrome', 'app.url' => 'https://hive.contractors']);
-    $server = stream_socket_server('tcp://127.0.0.1:0');
-    $tunnel = stream_socket_get_name($server, false);
-    config(['services.ewccv.home_tunnel' => $tunnel]);
-    $browser = app(EwccvRemoteBrowserService::class);
-
-    expect($browser->homeTunnelUp())->toBeTrue()
-        ->and($browser->status()['home_tunnel'])->toBeTrue()
-        ->and($browser->chromeCommand())
-        ->toContain("--proxy-server='socks5://{$tunnel}'")
-        ->toContain("--proxy-bypass-list='127.0.0.1;localhost;hive.contractors'")
-        ->not->toContain('google');
-
-    fclose($server);
-    expect($browser->homeTunnelUp())->toBeFalse()
-        ->and($browser->chromeCommand())->not->toContain('--proxy-server');
-
-    config(['services.ewccv.home_tunnel' => '']);
-    expect($browser->homeTunnelUp())->toBeFalse();
-});
