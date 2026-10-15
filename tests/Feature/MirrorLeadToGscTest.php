@@ -101,8 +101,11 @@ it('stays quiet when the push is not configured', function () {
 it('queues a catch-up push for every lead born here, and only those', function () {
     Queue::fake();
     $fx = mirrorFixture();
-    $a = hiveBornLead($fx, ['origin' => 'Angi', 'external_source' => null, 'external_id' => null]);
-    hiveBornLead($fx, ['origin' => 'gs.construction', 'external_source' => 'gs.construction', 'external_id' => '2']);
+    // Dated from today: the fixture's fixed 2026-09-15 fell out of the
+    // 30-day window on 2026-10-15.
+    $recent = now()->subDays(3)->toDateTimeString();
+    $a = hiveBornLead($fx, ['origin' => 'Angi', 'external_source' => null, 'external_id' => null, 'date' => $recent]);
+    hiveBornLead($fx, ['origin' => 'gs.construction', 'external_source' => 'gs.construction', 'external_id' => '2', 'date' => $recent]);
     Queue::fake(); // drop the creation-time pushes; count the command's own
 
     $this->artisan('leads:mirror-to-gsc', ['--days' => 30])->assertSuccessful();
