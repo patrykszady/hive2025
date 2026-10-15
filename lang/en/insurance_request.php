@@ -12,6 +12,7 @@ return [
     'number' => 'Number',
     'expiration' => 'Expiration',
     'return_line' => 'Please email the updated certificate back to :email ASAP.',
+    'notice_line' => 'Please list :holder as Certificate Holder with notice of cancellation, and send any cancellation or non-renewal notice to :email.',
     'policy_general' => 'General Liability',
     'policy_professional' => 'Professional Liability',
     'policy_workers' => 'Workers Comp',

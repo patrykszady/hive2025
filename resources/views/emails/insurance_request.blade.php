@@ -27,6 +27,9 @@
 <h1 class="title" style="text-align: center;">{{ __('insurance_request.label_' . $requestType) }}</h1>
 <p class="text" style="margin: 6px 0 0; text-align: center;">{!! $intro !!}</p>
 <p class="text" style="margin: 6px 0 0; text-align: center;">{!! __('insurance_request.return_line', ['email' => '<strong>' . e(config('nylas.certificates_email')) . '</strong>']) !!}</p>
+{{-- Insurers then email their cancellation notices to the certificates
+     mailbox, where CarrierNoticeIntake pins them onto the certificate. --}}
+<p class="text" style="margin: 6px 0 0; text-align: center;">{!! __('insurance_request.notice_line', ['holder' => e($requesting_vendor->name), 'email' => '<strong>' . e(config('nylas.certificates_email')) . '</strong>']) !!}</p>
 </div>
 
 {{-- Insured / Holder — island-card style label/value rows. --}}
