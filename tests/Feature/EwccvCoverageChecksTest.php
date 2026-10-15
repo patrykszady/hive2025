@@ -95,10 +95,10 @@ it('shows on every policy of the audit whether and when its coverage was verifie
     // only policies active today are verified.
     // In an audit each policy carries EWCCV's answer for its own day: both are queued as of 12/29/2025.
     auditPage($f)
-        ->assertSee('waiting for EWCCV as of 12/29/2025')
+        ->assertSee('not checked on EWCCV as of 12/29/2025')
         ->assertDontSee('WC verified 10/12/2026')
         ->assertSee('EWCCV coverage as of 12/29/2025')
-        ->assertSee('2 waiting');
+        ->assertSee('2 not checked');
 
     expect(AuditShow::verificationCell($f['doc']))->toBe('WC verified 10/12/2026 (EWCCV)');
 });
@@ -107,12 +107,14 @@ it('opening an audit asks EWCCV for coverage as of the end date minus two days f
     Queue::fake();
     $f = auditFixture();
 
-    // Opening the audit creates its request and queues the check; no browser session: it waits, the page says so.
+    // Opening the audit creates its request and queues the check; with no
+    // browser session it is not waited on: the package is built at once.
     auditPage($f)
-        ->assertSee('waiting for EWCCV as of 12/29/2025')
-        ->assertSee('1 waiting')
-        ->assertSee('Downloads open when EWCCV has answered for every sub');
+        ->assertSee('not checked on EWCCV as of 12/29/2025')
+        ->assertSee('1 not checked')
+        ->assertSee('is being built and is emailed to you in a few minutes');
     Queue::assertNotPushed(RunPendingEwccvLookups::class);
+    Queue::assertPushed(\App\Jobs\SendAuditWhenReady::class);
 
     $audit = \App\Models\AuditRequest::first();
     expect($audit)->not->toBeNull()
@@ -153,7 +155,7 @@ it('opening an audit asks EWCCV for coverage as of the end date minus two days f
         ->and(\App\Models\AuditRequest::count())->toBe(2);
 });
 
-it('the audit package waits for the EWCCV answers, then is built and emailed with the certificates and the Excel', function () {
+it('the audit package does not wait for EWCCV: it is built and emailed on the certificates, an unanswered check reading not checked', function () {
     Queue::fake();
     \Illuminate\Support\Facades\Mail::fake();
     $f = auditFixture();
@@ -167,13 +169,9 @@ it('the audit package waits for the EWCCV answers, then is built and emailed wit
     $audit = \App\Models\AuditRequest::first();
     expect($audit->status)->toBe('pending')->and($audit->pendingChecks())->toBe(1);
 
-    // Nothing is sent while a check is pending.
-    $this->mock(\App\Services\Audits\CertificateMerger::class)->shouldReceive('merge')->never();
-    (new \App\Jobs\SendAuditWhenReady)->handle(app(\App\Services\Audits\CertificateMerger::class));
-    \Illuminate\Support\Facades\Mail::assertNothingSent();
-
-    // The answer lands: the package is built and emailed, downloads open.
-    EwccvCoverageCheck::where('vendor_id', $f['sub']->id)->first()->update(['status' => 'covered', 'policy_number' => 'WC-KOT-1', 'employer_name' => 'KOT CONSTRUCTION INC', 'checked_at' => now()]);
+    // The check is still unanswered (nothing searched EWCCV): the package
+    // is built and emailed anyway, the policy reading "not checked".
+    expect(AuditReport::auditVerificationCell(auditPage($f)->get('vendors_grouped_checks')->first()['applicable_docs'][0]))->toBe('Not checked on EWCCV as of 12/29/2025');
     $merger = $this->mock(\App\Services\Audits\CertificateMerger::class);
     $merger->shouldReceive('merge')->once()->withArgs(fn (array $files, string $name) => count($files) === 1 && str_ends_with($files[0], 'kot.pdf') && str_starts_with($name, 'Audit-'.$f['gc']->id.'-'))->andReturn('%PDF-1.4 merged');
     (new \App\Jobs\SendAuditWhenReady)->handle($merger);
@@ -183,11 +181,12 @@ it('the audit package waits for the EWCCV answers, then is built and emailed wit
         $rendered = $mail->render();
 
         return $mail->hasTo($f['user']->email)
-            && $mail->counts['covered'] === 1
+            && $mail->counts['covered'] === 0
+            && $mail->counts['pending'] === 1
             && $mail->attach === true
             && count($mail->attachments()) === 2
             && str_contains($mail->envelope()->subject, 'Audit package ready')
-            && str_contains($rendered, 'Covered: 1')
+            && str_contains($rendered, 'Not checked on EWCCV (the certificate on file stands): 1')
             && str_contains($rendered, '/audit/'.$audit->id.'/package/pdf?signature=')
             && str_contains($rendered, 'attached to this email as well');
     });
@@ -643,7 +642,7 @@ it('queues a coverage check two days before a workers comp doc expires, and a co
 
     // Before the answer the doc is unverified (its last lookup failed) and says the check is queued; a covered answer verifies it for that day.
     expect($doc->fresh()->verification_summary['verified_at'])->toBeNull()
-        ->and($doc->fresh()->verification_summary['tip'])->toContain('EWCCV lookup failed: recaptcha failed ui · checked 09/10/26 · EWCCV check as of '.now()->format('m/d/Y').' queued, waiting for a browser session');
+        ->and($doc->fresh()->verification_summary['tip'])->toContain('EWCCV lookup failed: recaptcha failed ui · checked 09/10/26 · EWCCV check as of '.now()->format('m/d/Y').' queued');
     EwccvCoverageCheck::first()->update(['status' => 'covered', 'employer_name' => 'M POWER SOLUTION COMPANY', 'policy_number' => '6JUBA4211404-25', 'checked_at' => now()]);
     $summary = $doc->fresh()->verification_summary;
     expect($summary['verified_at'])->toBe(now()->format('m/d/Y'))

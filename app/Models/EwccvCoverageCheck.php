@@ -140,8 +140,8 @@ class EwccvCoverageCheck extends Model
                 ? sprintf('Not searched for %s: no workers comp policy active today on file%s', $date, $checked)
                 : sprintf('Not found on EWCCV for %s (%s)%s', $date, str_replace('_', ' ', (string) ($this->reason ?: 'no results')), $checked),
             default => $this->reason
-                ? sprintf('Waiting for a browser session to retry (last attempt: %s)', str_replace('_', ' ', $this->reason))
-                : 'Waiting for a browser session: open ewccv.com with the Hive extension and the check runs',
+                ? sprintf('Not checked on EWCCV for %s yet (last attempt: %s); the certificate on file stands', $date, str_replace('_', ' ', $this->reason))
+                : sprintf('Not checked on EWCCV for %s yet; the certificate on file stands', $date),
         };
     }
 }

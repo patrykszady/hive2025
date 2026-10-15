@@ -14,10 +14,12 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Finish every audit whose EWCCV answers are in: build the certificates PDF
- * and the Excel, email them to whoever asked, mark it sent. Runs after each
- * EWCCV run records coverage checks and every fifteen minutes as a backstop
- * (an audit with nothing to check is finished at once).
+ * Finish every audit not yet emailed: build the certificates PDF and the
+ * Excel, email them to whoever asked, mark it sent. It does not wait for
+ * EWCCV: its search needs a person's browser, and nothing may wait on one
+ * (Patryk, 2026-10-14), so a check still unanswered reads "not checked on
+ * EWCCV" and the certificate on file stands. Dispatched when an audit is
+ * opened, and every fifteen minutes as a backstop.
  */
 class SendAuditWhenReady implements ShouldBeUnique, ShouldQueue
 {
@@ -47,9 +49,6 @@ class SendAuditWhenReady implements ShouldBeUnique, ShouldQueue
             ->get();
 
         foreach ($waiting as $audit) {
-            if ($audit->status === AuditRequest::STATUS_PENDING && $audit->pendingChecks() > 0) {
-                continue;
-            }
             try {
                 self::finish($audit, $merger);
             } catch (\Throwable $e) {

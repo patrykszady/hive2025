@@ -134,8 +134,8 @@ class VendorDoc extends Model
                 : 'EWCCV coverage tracking enabled').self::ewccvPolicyDifference($state),
             'cancelled' => 'EWCCV: coverage '.(($notice['kind'] ?? '') === 'nonrenewal' ? 'NOT RENEWED' : 'CANCELLED').($noticeDate ? ' as of '.$noticeDate : '').' — get a new certificate',
             'pending' => ($state['reason'] ?? '') === 'not_tracked_by_ewccv'
-                ? 'EWCCV no longer lists this policy as tracked; it is re-tracked with the next browser session'
-                : 'EWCCV lookup waiting for a browser session: open ewccv.com with the Hive extension and it runs',
+                ? 'EWCCV no longer lists this policy as tracked; it is re-tracked when EWCCV can be searched'
+                : 'Not looked up on EWCCV yet; insurer notices to certificates@ are watched',
             'failed' => 'EWCCV lookup failed: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')).self::ewccvSearchNotes($state)
                 .(in_array($state['reason'] ?? '', EwccvCoverageCheck::NOT_FOUND_REASONS, true) ? $this->previousPolicyNote() : ''),
             'skipped' => 'EWCCV lookup skipped: '.str_replace('_', ' ', (string) ($state['reason'] ?? 'unknown')),
@@ -172,7 +172,7 @@ class VendorDoc extends Model
         ];
     }
 
-    /** " · EWCCV check as of 10/06/2026 queued, waiting for a browser session", or nothing. */
+    /** " · EWCCV check as of 10/06/2026 queued", or nothing. */
     protected function pendingCheckNote(): string
     {
         if (! $this->vendor_id || ! $this->effective_date || ! $this->expiration_date) {
@@ -186,7 +186,7 @@ class VendorDoc extends Model
             ->orderByDesc('coverage_date')
             ->first();
 
-        return $pending ? ' · EWCCV check as of '.$pending->coverage_date->format('m/d/Y').' queued, waiting for a browser session' : '';
+        return $pending ? ' · EWCCV check as of '.$pending->coverage_date->format('m/d/Y').' queued' : '';
     }
 
     /**

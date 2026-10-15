@@ -207,19 +207,19 @@ class AuditShow extends Component
 
         $shown = $this->coverageDate->format('m/d/Y');
         if ($queued === 0) {
-            $this->toast(text: "Every vendor in this audit already has an EWCCV answer for {$shown}, or is waiting for one.", heading: 'EWCCV', duration: 5000);
+            $this->toast(text: "Every vendor in this audit already has an EWCCV answer for {$shown}, or is queued for one.", heading: 'EWCCV', duration: 5000);
 
             return;
         }
 
         if (BridgedSession::canSearch()) {
             RunPendingEwccvLookups::dispatch();
-            $this->toast(text: "Checking {$queued} vendor(s) on EWCCV as of {$shown} now; the package is emailed when every answer is in.", heading: 'EWCCV', duration: 6000);
+            $this->toast(text: "Checking {$queued} vendor(s) on EWCCV as of {$shown} now.", heading: 'EWCCV', duration: 6000);
 
             return;
         }
 
-        $this->toast(text: "{$queued} vendor(s) queued for EWCCV as of {$shown}. They run when a browser session is handed over: open ewccv.com with the Hive extension.", heading: 'EWCCV', duration: 8000, variant: 'warning');
+        $this->toast(text: "{$queued} vendor(s) queued for EWCCV as of {$shown}; the audit package does not wait for them.", heading: 'EWCCV', duration: 6000);
     }
 
     /** @return list<string> the certificate files the package merges */
@@ -236,7 +236,7 @@ class AuditShow extends Component
             return false;
         }
         $this->toast(
-            text: 'EWCCV is still checking coverage for this audit; the package is emailed to you the moment every answer is in.',
+            text: 'The package is being built; it is emailed to you in a few minutes.',
             heading: 'Not ready yet',
             duration: 7000,
             variant: 'warning',

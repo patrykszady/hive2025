@@ -59,11 +59,8 @@
                                     <span class="text-zinc-500">0 not found</span>
                                 @endif
                                 <span class="text-zinc-400">·</span>
-                                <span class="text-amber-600 dark:text-amber-400">{{ $this->coverage_check_counts['pending'] }} waiting</span>
-                                @if($this->coverage_check_counts['unchecked'] > 0)
-                                    <span class="text-zinc-400">·</span>
-                                    <span class="text-zinc-500">{{ $this->coverage_check_counts['unchecked'] }} not checked</span>
-                                @endif
+                                {{-- Unanswered checks are not waited on: the certificate on file stands. --}}
+                                <span class="text-zinc-500">{{ $this->coverage_check_counts['pending'] + $this->coverage_check_counts['unchecked'] }} not checked</span>
                             </div>
                         @endif
                     </div>
@@ -80,7 +77,7 @@
                         @elseif($this->auditRequest->status === 'failed')
                             The package could not be built: {{ $this->auditRequest->error }}
                         @else
-                            Downloads open when EWCCV has answered for every sub; the package (certificates PDF + Excel) is emailed to you then.
+                            The package (certificates PDF + Excel) is being built and is emailed to you in a few minutes.
                         @endif
                     </div>
                 @endif
@@ -208,7 +205,7 @@
                                                 <flux:tooltip :content="$doc->audit_check->label()" position="top">
                                                     <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
                                                         <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0" />
-                                                        waiting for EWCCV as of {{ $doc->audit_check->coverage_date->format('m/d/Y') }}
+                                                        not checked on EWCCV as of {{ $doc->audit_check->coverage_date->format('m/d/Y') }}
                                                     </span>
                                                 </flux:tooltip>
                                             @elseif($doc->audit_check_date ?? null)

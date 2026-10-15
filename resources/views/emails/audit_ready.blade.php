@@ -26,7 +26,7 @@ The files are too large to attach to an email; use the links above.
 - Covered: {{ $counts['covered'] }}
 - Not found on EWCCV: {{ $counts['not_found'] }}
 @if($counts['pending'] + $counts['unchecked'] > 0)
-- Not answered: {{ $counts['pending'] + $counts['unchecked'] }}
+- Not checked on EWCCV (the certificate on file stands): {{ $counts['pending'] + $counts['unchecked'] }}
 @endif
 @endif
 

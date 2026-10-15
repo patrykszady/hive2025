@@ -435,7 +435,7 @@ class AuditReport
             return match ($check->status) {
                 EwccvCoverageCheck::STATUS_COVERED => 'WC verified '.$check->coverage_date->format('m/d/Y').' (EWCCV)',
                 EwccvCoverageCheck::STATUS_NOT_FOUND => 'Not found on EWCCV for '.$check->coverage_date->format('m/d/Y'),
-                default => 'Waiting for EWCCV as of '.$check->coverage_date->format('m/d/Y'),
+                default => 'Not checked on EWCCV as of '.$check->coverage_date->format('m/d/Y'),
             };
         }
         if ($date) {

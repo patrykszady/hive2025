@@ -104,7 +104,7 @@ it('marks a new policy as waiting for a browser session instead of running a loo
     (new LookupEwccvForVendor($tracked->id))->handle($launcher);
 
     expect($doc->fresh()->options['ewccv'])->toMatchArray(['status' => 'pending', 'reason' => 'needs_browser_session'])
-        ->and($doc->fresh()->ewccv_summary['tip'])->toContain('open ewccv.com with the Hive extension')
+        ->and($doc->fresh()->ewccv_summary['tip'])->toContain('Not looked up on EWCCV yet; insurer notices to certificates@ are watched')
         ->and($doc->fresh()->ewccv_summary['tracking'])->toBeFalse()
         ->and($tracked->fresh()->options['ewccv']['status'])->toBe('tracking');
 

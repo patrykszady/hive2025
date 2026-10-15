@@ -121,10 +121,12 @@ class AuditRequest extends Model
             'checks' => $checks,
         ]);
 
-        // Nothing to wait for, or a credential at hand: move it along now.
-        if ($audit->pendingChecks() === 0) {
-            \App\Jobs\SendAuditWhenReady::dispatch();
-        } elseif (\App\Support\Ewccv\BridgedSession::canSearch()) {
+        // The package goes out now, on the certificates on file: EWCCV's
+        // search needs a person's browser, and nothing may wait on one
+        // (Patryk, 2026-10-14). Its answers are included where they exist;
+        // a credential at hand still runs the queued checks.
+        \App\Jobs\SendAuditWhenReady::dispatch();
+        if ($audit->pendingChecks() > 0 && \App\Support\Ewccv\BridgedSession::canSearch()) {
             \App\Jobs\RunPendingEwccvLookups::dispatch();
         }
 
