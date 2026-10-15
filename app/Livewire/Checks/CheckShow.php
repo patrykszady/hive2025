@@ -6,17 +6,22 @@ use App\Models\Check;
 use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\Vendor;
-
+use App\Services\CheckImageUpload;
+use Flux\Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 class CheckShow extends Component
 {
     use AuthorizesRequests;
+    use WithFileUploads;
 
     public Check $check;
+
+    /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
+    public $checkImageFile = null;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -92,6 +97,29 @@ class CheckShow extends Component
             ['label' => 'Amount', 'width' => 'w-[28%] min-w-0'],
             ['label' => 'Distribution', 'width' => 'w-[72%] min-w-0'],
         ];
+    }
+
+    /**
+     * Attach a photo of the check, or the bank's check image PDF (its front
+     * is cut out), to this check; the analyzer then reads it.
+     */
+    public function uploadCheckImage(CheckImageUpload $upload): void
+    {
+        $this->authorize('update', $this->check);
+        $this->validate(
+            ['checkImageFile' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:20480']],
+            ['checkImageFile.mimes' => 'Upload a PDF or a photo (JPG, PNG or WebP).'],
+        );
+
+        $image = $upload->attach($this->check, $this->checkImageFile, 'checkImageFile');
+
+        $this->reset('checkImageFile');
+        $this->modal('upload-check-image')->close();
+        Flux::toast(
+            text: $image->payee ? 'Payee read from the check: '.$image->payee : 'Saved; the payee could not be read from it.',
+            heading: 'Check image added',
+            variant: 'success',
+        );
     }
 
     #[Title('Check')]

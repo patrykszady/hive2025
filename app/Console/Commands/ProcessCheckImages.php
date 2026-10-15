@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\CheckImage;
+use App\Services\CheckImageAnalyzer;
 use App\Services\CheckImageMatcher;
 use App\Services\CheckImagePayeeResolver;
 use App\Services\ContentUnderstandingService;
@@ -77,36 +78,16 @@ class ProcessCheckImages extends Command
             }
 
             try {
-                $raw    = $cu->analyzeBinary(Storage::disk('files')->get($image->file_path), $analyzerId, 'check_images');
-                $fields = ContentUnderstandingService::normalizeFieldValues($raw['result']['contents'][0]['fields'] ?? []);
+                app(CheckImageAnalyzer::class)->analyze($image);
             } catch (Throwable $e) {
                 $this->error("  {$image->image_filename}: analysis failed — {$e->getMessage()}");
                 Log::channel('check_images')->error('Check image analysis failed', [
                     'image' => $image->image_filename,
                     'error' => $e->getMessage(),
                 ]);
+
                 continue;
             }
-
-            $micrAccount = preg_replace('/\D/', '', (string) ($fields['BankInfo']['AccountNumber'] ?? ''));
-
-            // Statement caption is authoritative for number/amount; flag drift.
-            $bankNumber = $fields['CheckNumber']['Bank'] ?? null;
-            if ($bankNumber !== null && $image->check_number !== null && (int) $bankNumber !== (int) $image->check_number) {
-                Log::channel('check_images')->warning('Analyzer check number disagrees with statement caption', [
-                    'image'     => $image->image_filename,
-                    'statement' => $image->check_number,
-                    'analyzer'  => $bankNumber,
-                ]);
-            }
-
-            $image->update([
-                'check_fields'   => $fields,
-                'payee'          => $fields['CheckInfo']['Payee'] ?? null,
-                'account_number' => $micrAccount !== '' ? $micrAccount : $image->account_number,
-                'analyzer_id'    => $analyzerId,
-                'analyzed_at'    => now(),
-            ]);
 
             $this->line("  {$image->image_filename}: payee=" . ($image->payee ?? '—'));
         }

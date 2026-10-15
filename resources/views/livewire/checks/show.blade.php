@@ -232,6 +232,11 @@
         @if($check_images->isNotEmpty())
             <x-details.card :expanded="false" details_text="Details">
                 <x-slot:header_buttons>
+                    @can('update', $check)
+                        <flux:modal.trigger name="upload-check-image">
+                            <flux:button size="sm" variant="ghost" icon="arrow-up-tray" inset="top bottom" title="Upload another check image" aria-label="Upload another check image" />
+                        </flux:modal.trigger>
+                    @endcan
                     <flux:button
                         :href="route('expenses.original_receipt', ['checks', $check_images->first()->image_filename])"
                         target="_blank"
@@ -349,11 +354,38 @@
                     @endforeach
                 </x-slot:details>
             </x-details.card>
+        @elseif(auth()->user()->can('update', $check))
+            {{-- No scan from a statement yet: a photo of the check, or the
+                 bank's check image PDF, can be added by hand. --}}
+            <x-details.card title="Check Image">
+                <x-slot:header_buttons>
+                    <flux:modal.trigger name="upload-check-image">
+                        <flux:button size="sm" icon="arrow-up-tray">Upload</flux:button>
+                    </flux:modal.trigger>
+                </x-slot:header_buttons>
+                <flux:text class="py-2">No check image yet. Upload a photo of the check or the bank's check image PDF.</flux:text>
+            </x-details.card>
         @endif
     </x-page.column>
 
     {{-- Modal host: outside the grid so it can't add a phantom gap. --}}
     <x-slot:offstage>
         <livewire:checks.check-create />
+
+        @can('update', $check)
+            <flux:modal name="upload-check-image" class="md:w-[28rem]">
+                <form wire:submit="uploadCheckImage" class="space-y-6">
+                    <div>
+                        <flux:heading size="lg">Upload check image</flux:heading>
+                        <flux:text class="mt-2">A photo of the check, or the bank's check image PDF: its front is cut out and read like the statement scans.</flux:text>
+                    </div>
+                    <flux:input type="file" wire:model="checkImageFile" accept=".pdf,.jpg,.jpeg,.png,.webp" label="File" />
+                    <div class="flex">
+                        <flux:spacer />
+                        <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="checkImageFile,uploadCheckImage">Upload</flux:button>
+                    </div>
+                </form>
+            </flux:modal>
+        @endcan
     </x-slot:offstage>
 </x-page.shell>
