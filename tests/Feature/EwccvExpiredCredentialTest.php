@@ -55,3 +55,16 @@ it('refuses a credential that has expired or is a minute from it, and takes a li
     $send($live)->assertOk();
     expect(BridgedSession::raw()['access_token'])->toBe($live);
 });
+
+it('stops counting a stored session as fresh once its own expiry passes, well inside the 45 minutes', function () {
+    $this->travelTo('2026-10-14 23:29:17');
+    BridgedSession::store(['access_token' => ewccvJwt(now()->addMinutes(10)->timestamp)]);
+
+    $this->travelTo('2026-10-14 23:35:00');
+    expect(BridgedSession::fresh())->not->toBeNull()
+        ->and(BridgedSession::canSearch())->toBeTrue();
+
+    $this->travelTo('2026-10-14 23:40:00');
+    expect(BridgedSession::fresh())->toBeNull()
+        ->and(BridgedSession::canSearch())->toBeFalse();
+});

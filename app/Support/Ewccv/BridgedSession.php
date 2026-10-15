@@ -147,6 +147,10 @@ class BridgedSession
     }
 
     /**
+     * The stored session while it can still search: younger than
+     * MAX_AGE_MINUTES and short of the expiry EWCCV writes into it, which
+     * comes first — EWCCV's credentials lasted ten minutes on 2026-10-14.
+     *
      * @return array{access_token: string, jwt: ?string, state_token: ?string, received_at: string, age_minutes: int}|null
      */
     public static function fresh(): ?array
@@ -158,6 +162,10 @@ class BridgedSession
 
         $age = (int) Carbon::parse($session['received_at'])->diffInMinutes(now());
         if ($age > self::MAX_AGE_MINUTES) {
+            return null;
+        }
+        $expiresAt = self::expiresAt($session['access_token']);
+        if ($expiresAt && $expiresAt->lte(now())) {
             return null;
         }
 
