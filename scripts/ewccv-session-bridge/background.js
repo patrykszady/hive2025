@@ -136,6 +136,18 @@ async function mintFromTab(tabId) {
     try {
         return await chrome.tabs.sendMessage(tabId, { type: 'hive-ewccv-mint' });
     } catch (e) {
+        // A tab opened before the extension was (re)loaded has no content
+        // script: Chrome injects it only into pages loaded afterwards, and the
+        // button said "Receiving end does not exist" (2026-10-14). Put it
+        // there and ask again rather than have a person refresh the tab.
+        if (/Receiving end does not exist/.test(e.message || '')) {
+            try {
+                await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+                return await chrome.tabs.sendMessage(tabId, { type: 'hive-ewccv-mint' });
+            } catch (retry) {
+                return { ok: false, error: 'Could not reach the EWCCV tab: ' + retry.message };
+            }
+        }
         return { ok: false, error: 'Could not reach the EWCCV tab: ' + e.message };
     }
 }
