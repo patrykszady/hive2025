@@ -28,6 +28,7 @@ use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\XLSX\Writer as XLSXWriter;
 use OpenSpout\Common\Entity\Row;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -72,6 +73,17 @@ class AuditShow extends Component
             ->whereNull('expense_id')
             ->orderBy('transaction_date')
             ->get();
+    }
+
+    /**
+     * An expense was just created from one of the Missing Expenses rows (the
+     * expense form announces the transaction it used): read the list again,
+     * so the row leaves the table without a page reload.
+     */
+    #[On('transaction-used')]
+    public function transactionUsed(int $transactionId): void
+    {
+        unset($this->transactions_no_check);
     }
 
     /** The report behind this page: the same builder the emailed package uses. */
