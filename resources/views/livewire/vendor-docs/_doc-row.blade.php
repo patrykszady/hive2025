@@ -34,9 +34,9 @@
                         <flux:icon.shield-check variant="micro" class="size-3.5 shrink-0 text-emerald-500" />
                         <span class="truncate tabular-nums">{{ $doc->verification_summary['verified_at_short'] }}</span>
                     @elseif(! empty($doc->verification_summary['alert']))
-                        {{-- EWCCV reported the coverage cancelled or not renewed. --}}
+                        {{-- EWCCV or the insurer reported the coverage cancelled, cancelling or not renewed. --}}
                         <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0 text-red-600" />
-                        <span class="text-red-600 dark:text-red-400">cancelled</span>
+                        <span class="text-red-600 dark:text-red-400">{{ $doc->verification_summary['alert_label'] ?? 'cancelled' }}</span>
                     @else
                         <flux:icon.shield-exclamation variant="micro" class="size-3.5 shrink-0 text-amber-500" />
                     @endif

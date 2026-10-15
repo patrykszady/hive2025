@@ -360,7 +360,9 @@ class VendorDoc extends Model
      */
     public function getVerificationSummaryAttribute(): ?array
     {
+        $carrier = $this->carrier_notice_summary;
         $parts = array_values(array_filter([
+            $carrier ? ['ok' => false, 'at' => null, 'tip' => $carrier['tip'], 'name' => 'carrier', 'alert' => $carrier['alert']] : null,
             $this->ewccv_summary ? ['ok' => $this->ewccv_summary['tracking'], 'at' => $this->ewccv_summary['verified_at'], 'tip' => $this->ewccv_summary['tip'], 'name' => 'ewccv', 'alert' => $this->ewccv_summary['alert']] : null,
             $this->trackmyvendor_summary ? ['ok' => $this->trackmyvendor_summary['compliant'], 'at' => $this->trackmyvendor_summary['verified_at'], 'tip' => $this->trackmyvendor_summary['tip'], 'name' => 'trackmyvendor'] : null,
         ]));
@@ -370,13 +372,18 @@ class VendorDoc extends Model
         }
 
         $verified = collect($parts)->contains(fn ($p) => $p['ok']);
+        // The insurer's own notice outranks an earlier confirmation: the
+        // carrier is the one cancelling.
+        if ($carrier && $carrier['alert']) {
+            $verified = false;
+        }
 
         // Newest confirming date wins — m/d/Y sorts wrong as a string, so
         // compare the underlying dates.
-        $verifiedAt = collect($parts)
+        $verifiedAt = $verified ? (collect($parts)
             ->filter(fn ($p) => $p['ok'] && $p['at'])
             ->sortByDesc(fn ($p) => \Carbon\Carbon::createFromFormat('m/d/Y', $p['at'])->timestamp)
-            ->first()['at'] ?? null;
+            ->first()['at'] ?? null) : null;
 
         return [
             'verified' => $verified,
@@ -386,6 +393,39 @@ class VendorDoc extends Model
             'tip' => collect($parts)->pluck('tip')->implode(' · '),
             'sources' => collect($parts)->pluck('name')->all(),
             'alert' => (bool) collect($parts)->contains(fn (array $p) => ! empty($p['alert'])),
+            // What the red label says: the insurer's words when it sent a notice.
+            'alert_label' => $carrier && $carrier['alert'] ? $carrier['label'] : 'cancelled',
+        ];
+    }
+
+    /**
+     * An insurer's notice to the certificate holder, pinned by
+     * CarrierNoticeIntake from the certificates mailbox: cancelled, cancelling
+     * unless paid, not renewed, or reinstated.
+     *
+     * @return array{alert: bool, label: string, tip: string}|null
+     */
+    public function getCarrierNoticeSummaryAttribute(): ?array
+    {
+        $notice = $this->options['carrier_notice'] ?? null;
+        if (! is_array($notice) || empty($notice['kind'])) {
+            return null;
+        }
+        $effective = ! empty($notice['effective_date']) ? \Carbon\Carbon::parse($notice['effective_date'])->format('m/d/Y') : null;
+        $received = ! empty($notice['received_at']) ? \Carbon\Carbon::parse($notice['received_at'])->format('m/d/Y') : null;
+
+        [$label, $what] = match ($notice['kind']) {
+            \App\Support\Insurance\CarrierNotice::CANCELLATION => ['cancelled', 'CANCELLED'.($effective ? ' effective '.$effective : '')],
+            \App\Support\Insurance\CarrierNotice::PENDING_CANCELLATION => ['cancelling', 'cancels'.($effective ? ' on '.$effective : '').' unless the premium is paid'],
+            \App\Support\Insurance\CarrierNotice::NONRENEWAL => ['not renewed', 'NOT RENEWED'.($effective ? ' as of '.$effective : '')],
+            \App\Support\Insurance\CarrierNotice::REINSTATEMENT => ['reinstated', 'reinstated'.($effective ? ' as of '.$effective : '')],
+            default => [(string) $notice['kind'], (string) $notice['kind']],
+        };
+
+        return [
+            'alert' => in_array($notice['kind'], \App\Support\Insurance\CarrierNotice::ALERT_KINDS, true),
+            'label' => $label,
+            'tip' => 'Insurer notice: '.$what.($received ? ' · received '.$received : '').(! empty($notice['from']) ? ' from '.$notice['from'] : ''),
         ];
     }
 }

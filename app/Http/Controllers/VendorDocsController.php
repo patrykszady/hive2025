@@ -70,6 +70,25 @@ class VendorDocsController extends Controller
                 fn (string $attachmentId) => $this->nylasService->downloadAttachment($attachmentId, $grantId, $messageId),
             );
 
+            // An insurer's cancellation, non-renewal or reinstatement notice
+            // (the request asks to be listed as certificate holder) is pinned
+            // onto the certificate it names, never read as a certificate.
+            // One that names no certificate on file goes to Error for a look.
+            $notice = app(\App\Services\CarrierNoticeIntake::class)->handle($message, $documents);
+            if ($notice !== null) {
+                $folderId = $notice['matched'] !== [] ? config('nylas.certificates_saved_folder_id') : config('nylas.certificates_error_folder_id');
+                try {
+                    $this->nylasService->moveEmailToFolder($messageId, $folderId, $grantId);
+                } catch (\Exception $e) {
+                    Log::channel('vendor_docs')->error('Failed to file an insurer notice', ApiErrorFormatter::format($e, [
+                        'message_id' => $messageId,
+                        'target_folder_id' => $folderId,
+                    ]));
+                }
+
+                continue;
+            }
+
             // No usable document: move to the deleted (or error) folder
             if (empty($documents)) {
                 try {
