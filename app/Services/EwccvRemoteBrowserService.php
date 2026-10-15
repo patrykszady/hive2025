@@ -107,12 +107,13 @@ class EwccvRemoteBrowserService
             'env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE DISPLAY=%s %s --user-data-dir=%s '
             .'--no-first-run --no-default-browser-check --disable-session-crashed-bubble '
             .'--load-extension=%s --disable-extensions-except=%s '
-            .'--window-size=1280,900 --start-maximized %s',
+            .'--window-size=1280,900 --start-maximized %s%s',
             escapeshellarg(self::DISPLAY),
             escapeshellarg($this->chromeBinary()),
             escapeshellarg($this->userDataDir()),
             escapeshellarg($extension),
             escapeshellarg($extension),
+            $this->proxyArguments(),
             escapeshellarg(self::PARK_URL),
         );
     }
@@ -161,7 +162,7 @@ class EwccvRemoteBrowserService
         usleep(500000);
         $this->spawn(sprintf('websockify --web=%s 127.0.0.1:%d 127.0.0.1:%d', escapeshellarg((string) config('services.menards.novnc_web', '/usr/share/novnc')), self::WS_PORT, self::VNC_PORT), $logs.'/ewccv-browser-websockify.log');
 
-        Log::channel('ewccv')->info('EWCCV server browser: started', ['display' => self::DISPLAY, 'chrome_pid' => $chromePid]);
+        Log::channel('ewccv')->info('EWCCV server browser: started', ['display' => self::DISPLAY, 'chrome_pid' => $chromePid, 'home_tunnel' => $this->homeTunnelUp()]);
 
         return ['ok' => true, 'vnc_url' => sprintf('http://127.0.0.1:%d/vnc.html?autoconnect=1&resize=scale', self::WS_PORT)];
     }
@@ -193,7 +194,44 @@ class EwccvRemoteBrowserService
             'vnc' => $this->processAlive('x11vnc.*-rfbport '.self::VNC_PORT),
             'viewer' => $this->processAlive('websockify.*'.self::WS_PORT),
             'extension_configured' => is_file($this->extensionDir().'/defaults.json'),
+            'home_tunnel' => $this->homeTunnelUp(),
         ];
+    }
+
+    /**
+     * Whether the Raspberry Pi's tunnel is listening (services.ewccv.home_tunnel).
+     * EWCCV's reCAPTCHA refused every browser on the droplet's address, a
+     * person at the controls included (2026-10-14); through the Pi, EWCCV
+     * and Google see the same internet connection a person's Chrome passes from.
+     */
+    public function homeTunnelUp(): bool
+    {
+        $tunnel = (string) config('services.ewccv.home_tunnel', '');
+        if ($tunnel === '' || ! str_contains($tunnel, ':')) {
+            return false;
+        }
+        [$host, $port] = explode(':', $tunnel, 2);
+        $socket = @fsockopen($host, (int) $port, $errno, $error, 1.0);
+        if (! $socket) {
+            return false;
+        }
+        fclose($socket);
+
+        return true;
+    }
+
+    /**
+     * Everything through the tunnel, Google included: reCAPTCHA scores the
+     * address its own calls come from, so only Hive and loopback stay direct.
+     */
+    protected function proxyArguments(): string
+    {
+        if (! $this->homeTunnelUp()) {
+            return '';
+        }
+        $direct = array_values(array_filter(['127.0.0.1', 'localhost', parse_url((string) config('app.url'), PHP_URL_HOST)]));
+
+        return sprintf('--proxy-server=%s --proxy-bypass-list=%s ', escapeshellarg('socks5://'.config('services.ewccv.home_tunnel')), escapeshellarg(implode(';', $direct)));
     }
 
     /** A PNG of the display, to see what the browser shows without the viewer. */
