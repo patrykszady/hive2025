@@ -49,6 +49,19 @@ function menardsBrowserStub(string &$title, array $landings = []): MenardsRemote
     return $browser;
 }
 
+/** The extension found itself signed out (a 401 or the login page), not walled by Imperva. */
+function lapsedLoginReport(): void
+{
+    Cache::put(MenardsSyncStatusController::CACHE_KEY, [
+        'ok' => false,
+        'error' => '/main/my-account/receipt-lookup/initialize.ajx -> HTTP 401',
+        'receipts' => null,
+        'session_expired' => true,
+        'challenge' => false,
+        'at' => now()->subHours(3)->toIso8601String(),
+    ], now()->addMonth());
+}
+
 function expiredReport(): void
 {
     Cache::put(MenardsSyncStatusController::CACHE_KEY, [
@@ -195,7 +208,9 @@ function menardsCredentials(): void
     ]);
 }
 
-it('signs in before requesting a sync when the extension last reported a dead session', function () {
+it('does not sign in after a wall on the receipt API: it clears that wall and asks for the sync', function () {
+    // 2026-10-15: a sign-in after an API wall met the hCaptcha at the login
+    // page and stuck there. The API's own wall is what the sync clears.
     menardsCredentials();
     expiredReport();
 
@@ -203,17 +218,34 @@ it('signs in before requesting a sync when the extension last reported a dead se
         $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => ACCOUNT_TITLE]);
         $mock->shouldReceive('extensionReportsExpiredSession')->andReturn(true);
         $mock->shouldReceive('automaticSignInPausedSince')->andReturn(null);
-        // A dead-session report forces a real sign-in (true): the page title cannot be trusted.
-        $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret', true)->andReturn(['ok' => true, 'already' => true, 'url' => RECEIPT_TITLE]);
-        // An Imperva report: the API's own wall is cleared after the sign-in check, before the sync.
+        $mock->shouldReceive('login')->never();
         $mock->shouldReceive('clearApiWall')->once()->andReturn(['ok' => true, 'clicked' => true]);
         $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
         $mock->shouldReceive('waitForSyncToStart')->andReturn(true);
     });
 
     $this->artisan('menards:browser', ['action' => 'sync'])
-        ->expectsOutputToContain('checking the sign-in before asking for a sync')
         ->expectsOutputToContain('Clicked the checkbox on the API wall')
+        ->assertSuccessful();
+});
+
+it('signs in before requesting a sync when the extension last reported a lapsed login', function () {
+    menardsCredentials();
+    lapsedLoginReport();
+
+    $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
+        $mock->shouldReceive('status')->andReturn(['running' => true, 'chrome' => true, 'extension' => true, 'configured' => true, 'signed_in' => true, 'posts_to' => '', 'page' => ACCOUNT_TITLE]);
+        $mock->shouldReceive('extensionReportsExpiredSession')->andReturn(true);
+        $mock->shouldReceive('automaticSignInPausedSince')->andReturn(null);
+        // A dead-session report forces a real sign-in (true): the page title cannot be trusted.
+        $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret', true)->andReturn(['ok' => true, 'already' => true, 'url' => RECEIPT_TITLE]);
+        $mock->shouldReceive('clearApiWall')->never();
+        $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->andReturn(true);
+    });
+
+    $this->artisan('menards:browser', ['action' => 'sync'])
+        ->expectsOutputToContain('checking the sign-in before asking for a sync')
         ->assertSuccessful();
 });
 
@@ -236,7 +268,9 @@ it('does not touch the API wall when the dead session was a lapsed login rather 
 
 it('skips the sync and flags the sidebar when the wall still needs a human', function () {
     menardsCredentials();
-    expiredReport();
+    lapsedLoginReport();
+    // What the real sign-in leaves behind when it meets the hCaptcha.
+    Cache::put(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY, ['reason' => 'challenge', 'at' => now()->toIso8601String()], now()->addMonth());
     \Illuminate\Support\Facades\Queue::fake();
 
     $this->mock(MenardsRemoteBrowserService::class, function ($mock) {

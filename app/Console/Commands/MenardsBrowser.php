@@ -399,7 +399,11 @@ class MenardsBrowser extends Command
         $report = \Illuminate\Support\Facades\Cache::get(\App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY);
         $apiChallenged = is_array($report) && ($report['session_expired'] ?? false) && ($report['challenge'] ?? false);
 
-        if ($this->extensionReportsExpiredSession()) {
+        // A wall on the receipt API is not a signed-out session, and a fresh
+        // sign-in does not clear it: on 2026-10-15 the 08:00 sign-in after an
+        // API wall met the hCaptcha at the login page and stuck there. Only a
+        // sign-out (401, a redirect to the login page) signs in again.
+        if ($this->extensionReportsExpiredSession() && ! $apiChallenged) {
             $this->line('The extension last reported a dead session — checking the sign-in before asking for a sync.');
 
             $signin = $this->login($browser, (bool) $this->option('manual'));
