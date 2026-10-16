@@ -195,12 +195,13 @@ it('signs in again by itself once a person clears the wall on screen', function 
     $viewer = Livewire::actingAs(menardsAlertAdmin())->test(MenardsBrowserViewer::class)
         ->assertSee('once it clears, the sign-in starts again by itself');
     $viewer->call('$refresh');
-    Illuminate\Support\Facades\Queue::assertNotPushed(Illuminate\Queue\CallQueuedClosure::class);
+    Illuminate\Support\Facades\Queue::assertNotPushed(App\Jobs\RunMenardsBrowserAction::class);
 
     $viewer->call('$refresh')->assertSee('The security check is cleared — signing in again.');
     $viewer->call('$refresh');
 
-    Illuminate\Support\Facades\Queue::assertPushed(Illuminate\Queue\CallQueuedClosure::class, 1);
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\RunMenardsBrowserAction::class, 1);
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\RunMenardsBrowserAction::class, fn ($job) => $job->action === 'ensure');
 });
 
 it('does not sign in by itself when it never saw the wall go away', function (string $reason, ?bool $showing): void {
@@ -215,7 +216,7 @@ it('does not sign in by itself when it never saw the wall go away', function (st
     if ($reason === 'challenge' && $showing === false) {
         $viewer->assertSee('Hit “Retry sign-in” to finish signing in.');
     }
-    Illuminate\Support\Facades\Queue::assertNotPushed(Illuminate\Queue\CallQueuedClosure::class);
+    Illuminate\Support\Facades\Queue::assertNotPushed(App\Jobs\RunMenardsBrowserAction::class);
 })->with([
     'the wall was already gone when the page opened' => ['challenge', false],
     'no browser window' => ['challenge', null],
@@ -235,3 +236,48 @@ it('tells the wall from Menards\' own error page by the window title', function 
     'signed in' => ['Account Overview at Menards® - Google Chrome', false],
     'no browser window' => ['', null],
 ]);
+
+/*
+ * 2026-10-16: the wall stood on the receipt API (the last sync met it while
+ * signed in; no sign-in flag). Once a person clears it, the receipts are
+ * fetched at once — a sync, not a sign-in, which does not clear this wall.
+ */
+it('fetches the receipts by itself once a person clears a wall the last sync met', function (): void {
+    config(['services.menards.chromium_binary' => '/usr/bin/chromium']);
+    Cache::put(MenardsSyncStatusController::CACHE_KEY, ['ok' => false, 'session_expired' => true, 'challenge' => true, 'at' => now()->toIso8601String()], 600);
+    Illuminate\Support\Facades\Queue::fake();
+    $this->mock(MenardsRemoteBrowserService::class)->shouldReceive('securityCheckShowing')->andReturn(true, false, false);
+
+    $viewer = Livewire::actingAs(menardsAlertAdmin())->test(MenardsBrowserViewer::class)
+        ->assertSee('once it clears, new receipts are fetched by themselves');
+    Illuminate\Support\Facades\Queue::assertNotPushed(App\Jobs\RunMenardsBrowserAction::class);
+
+    $viewer->call('$refresh')->assertSee('The security check is cleared — fetching new receipts now.');
+    $viewer->call('$refresh');
+
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\RunMenardsBrowserAction::class, 1);
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\RunMenardsBrowserAction::class, fn ($job) => $job->action === 'sync' && $job->queue === 'background');
+});
+
+it('fetches the receipts on "Sync now", once per ten minutes', function (): void {
+    config(['services.menards.chromium_binary' => '/usr/bin/chromium']);
+    Illuminate\Support\Facades\Queue::fake();
+
+    Livewire::actingAs(menardsAlertAdmin())->test(MenardsBrowserViewer::class)
+        ->assertSee('wire:click="syncNow"', false)
+        ->call('syncNow')
+        ->call('syncNow');
+
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\RunMenardsBrowserAction::class, 1);
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\RunMenardsBrowserAction::class, fn ($job) => $job->action === 'sync');
+});
+
+it('refuses "Sync now" to another company\'s admin', function (): void {
+    config(['services.menards.chromium_binary' => '/usr/bin/chromium']);
+    Illuminate\Support\Facades\Queue::fake();
+
+    Livewire::actingAs(sec5_menardsNonPlatformAdmin())->test(MenardsBrowserViewer::class)
+        ->assertForbidden();
+
+    Illuminate\Support\Facades\Queue::assertNotPushed(App\Jobs\RunMenardsBrowserAction::class);
+});

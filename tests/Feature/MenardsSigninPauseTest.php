@@ -121,10 +121,13 @@ it('signs in on Retry even while paused', function () {
         $mock->shouldReceive('automaticSignInPausedSince')->never();
         // A person asked: a real sign-in, not a guess from the page title.
         $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret', true)->andReturn(['ok' => true, 'url' => 'Account Overview at Menards® - Google Chrome']);
+        // ...and, once it lands, the receipts are fetched right away (2026-10-16).
+        $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->once()->andReturn(true);
     });
 
     $this->artisan('menards:browser', ['action' => 'ensure', '--manual' => true])
-        ->expectsOutputToContain('Signed in')
+        ->expectsOutputToContain('Reconnected by a person — fetching new receipts now.')
         ->assertSuccessful();
 });
 
@@ -160,10 +163,12 @@ it('signs in on Retry even when a receipt batch arrived within the last day', fu
     $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
         upBrowserMock($mock, ['signed_in' => true, 'page' => 'Account Overview at Menards® - Google Chrome']);
         $mock->shouldReceive('login')->once()->with('patryk@example.test', 'secret', true)->andReturn(['ok' => true, 'url' => 'Account Overview at Menards® - Google Chrome']);
+        $mock->shouldReceive('requestSync')->once()->andReturn(['ok' => true]);
+        $mock->shouldReceive('waitForSyncToStart')->once()->andReturn(true);
     });
 
     $this->artisan('menards:browser', ['action' => 'ensure', '--manual' => true])
-        ->expectsOutputToContain('Signed in')
+        ->expectsOutputToContain('Reconnected by a person — fetching new receipts now.')
         ->assertSuccessful();
 });
 
@@ -194,5 +199,23 @@ it('still leaves a proven session alone on the daily pass', function () {
 
     $this->artisan('menards:browser', ['action' => 'ensure', '--signin' => true])
         ->expectsOutputToContain('the session works; not touching the browser')
+        ->assertSuccessful();
+});
+
+it('fetches right after a sign-in only when a person asked for it, never after the automatic morning one', function () {
+    // Its own storage: an earlier test's receipt batch would make the daily pass skip the sign-in.
+    $this->app->useStoragePath(sys_get_temp_dir().'/menards-pause-test-'.uniqid());
+    pauseTestCredentials();
+
+    $this->mock(MenardsRemoteBrowserService::class, function ($mock) {
+        upBrowserMock($mock, ['signed_in' => true, 'page' => 'Account Overview at Menards® - Google Chrome']);
+        $mock->shouldReceive('automaticSignInPausedSince')->andReturnNull();
+        $mock->shouldReceive('login')->once()->andReturn(['ok' => true, 'url' => 'Account Overview at Menards® - Google Chrome']);
+        // The 07:30 sign-in's own sync, 35 s later, met the receipt API's wall (2026-10-14).
+        $mock->shouldReceive('requestSync')->never();
+    });
+
+    $this->artisan('menards:browser', ['action' => 'ensure', '--signin' => true])
+        ->doesntExpectOutputToContain('fetching new receipts now')
         ->assertSuccessful();
 });

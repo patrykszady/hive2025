@@ -312,6 +312,15 @@ class MenardsBrowser extends Command
             return self::FAILURE;
         }
 
+        // A person reconnected (Retry sign-in, or the viewer saw the wall go
+        // away): fetch the receipts now, not at the next scheduled sync hours
+        // off (2026-10-16). Only for a person — the 07:30 automatic sign-in's
+        // own sync, 35 s later, met the receipt API's wall on 2026-10-14.
+        if ($manual) {
+            $this->line('Reconnected by a person — fetching new receipts now.');
+            $this->sync($browser);
+        }
+
         $this->warnIfNoRecentBatches();
 
         $final = $browser->status();

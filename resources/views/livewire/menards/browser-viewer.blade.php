@@ -9,7 +9,10 @@
             <flux:text class="mt-1">The receipt-sync browser running on the server. When a security challenge or sign-in is needed, complete it right here.</flux:text>
         </div>
         @if($hasBrowserStack)
-            <flux:button wire:click="retrySignin" icon="arrow-path">Retry sign-in</flux:button>
+            <div class="flex items-center gap-2">
+                <flux:button wire:click="syncNow" icon="arrow-down-tray">Sync now</flux:button>
+                <flux:button wire:click="retrySignin" icon="arrow-path">Retry sign-in</flux:button>
+            </div>
         @endif
     </div>
 
@@ -29,6 +32,12 @@
                     The security check is no longer on screen. Hit “Retry sign-in” to finish signing in.
                 @elseif(($needsSignin['reason'] ?? null) === 'challenge')
                     Imperva is showing its security challenge. Click the hCaptcha in the browser below — once it clears, the sign-in starts again by itself.
+                @elseif(($syncStatus['challenge'] ?? false) && $wallShowing === false && $autoResumed)
+                    The security check is cleared — fetching new receipts now. The status below updates on its own.
+                @elseif(($syncStatus['challenge'] ?? false) && $wallShowing === true)
+                    Imperva is showing its security check. Click “I am human” in the browser below — once it clears, new receipts are fetched by themselves.
+                @elseif($syncStatus['challenge'] ?? false)
+                    The last sync met Imperva’s security check. If it is on screen below, click “I am human”; otherwise hit “Sync now”.
                 @elseif($needsSignin !== null)
                     The automated sign-in failed. Finish signing in below, or fix what the page shows and hit “Retry sign-in”.
                 @else
