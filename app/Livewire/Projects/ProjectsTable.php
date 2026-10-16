@@ -146,7 +146,12 @@ class ProjectsTable extends Component
             $filters[] = 'client_id IN ['.implode(',', array_map('intval', $clientIds)).']';
         }
 
-        $statusCodes = $this->projectStatusTitle !== null && $this->projectStatusTitle !== '' ? [$this->projectStatusTitle] : [];
+        // A list of codes from the index's multi-select (one bare code from
+        // older callers still works).
+        $statusCodes = array_values(array_filter(
+            \Illuminate\Support\Arr::wrap($this->projectStatusTitle),
+            fn ($code) => $code !== '' && $code !== null
+        ));
         // Derived, not hardcoded: a literal list here silently dropped the
         // Consult status (9) when it was added.
         $validCodes = array_column(\App\Models\ProjectStatus::selectableStatuses(), 'code');
@@ -253,15 +258,18 @@ class ProjectsTable extends Component
         // is just "latest status == the selected code", which a plain COUNT
         // reproduces far more cheaply than the search round trip — and without
         // it the skeleton was ~180px short of the real first page.
-        $statusCode = $params['projectStatusTitle'] ?? $params['project-status-title'] ?? null;
+        $statusCodes = array_map('intval', array_filter(
+            \Illuminate\Support\Arr::wrap($params['projectStatusTitle'] ?? $params['project-status-title'] ?? null),
+            fn ($code) => is_numeric($code)
+        ));
 
         $rows = filled($clientId)
             ? min(Project::where('client_id', (int) $clientId)->count(), 5)
             : min(
                 Project::query()
-                    ->when(filled($statusCode), fn ($q) => $q->whereHas(
+                    ->when($statusCodes !== [], fn ($q) => $q->whereHas(
                         'latestStatus',
-                        fn ($s) => $s->where('status_code', (int) $statusCode)
+                        fn ($s) => $s->whereIn('status_code', $statusCodes)
                     ))
                     ->count(),
                 static::placeholderRows()

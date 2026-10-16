@@ -12,8 +12,10 @@
     {{-- No projects: show the card heading alone, without empty table headers. --}}
     @if($this->projects->isNotEmpty())
         <flux:table
-            wire:loading.class="opacity-50 text-opacity-50"
-            class="compact-table {{ $view == 'clients.index' ? 'table-fixed min-w-0 w-full' : 'index-table' }} [:where(&)]:p-0 [:where(&)]:space-y-0"
+            {{-- Dims only when a reload outlasts 200ms, and eases in and out:
+                 a fast status switch swaps rows without a blink. --}}
+            wire:loading.delay.class="opacity-60"
+            class="transition-opacity duration-300 ease-out compact-table {{ $view == 'clients.index' ? 'table-fixed min-w-0 w-full' : 'index-table' }} [:where(&)]:p-0 [:where(&)]:space-y-0"
         >
             <flux:table.columns>
                 @if($view == 'clients.index')

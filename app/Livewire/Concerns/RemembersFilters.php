@@ -8,19 +8,21 @@ use Livewire\Livewire;
 use ReflectionProperty;
 
 /**
- * Index pages come back the way they were left. Their filters are cached per
- * user and company on every render, and a visit whose URL carries none of
- * them (the sidebar link, the back button to a bare /projects) restores them
- * instead of the defaults. A link that does carry filters (?client_id=5 from
- * a client page) wins, and becomes what the next bare visit restores.
+ * Index pages come back the way they were left, for a while. Their filters
+ * are cached per user and company on every render, and a visit whose URL
+ * carries none of them (the sidebar link, the back button to a bare
+ * /projects) restores them instead of the defaults — until the page has gone
+ * unused for REMEMBERED_FILTERS_MINUTES, when it opens on its defaults again
+ * (Active on /projects). A link that does carry filters (?client_id=5 from a
+ * client page) wins, and becomes what the next bare visit restores.
  *
  * The component lists its filter properties in rememberedFilters(), and
  * returns none while it is embedded in another page (its parent scopes it).
  */
 trait RemembersFilters
 {
-    /** How long a page's filters are kept after the last change. */
-    public const REMEMBERED_FILTERS_DAYS = 90;
+    /** How long a page's filters are kept after it was last used. */
+    public const REMEMBERED_FILTERS_MINUTES = 15;
 
     /** @return list<string> */
     abstract protected function rememberedFilters(): array;
@@ -67,7 +69,7 @@ trait RemembersFilters
             $values[$property] = $this->{$property};
         }
 
-        Cache::put($this->rememberedFiltersKey(), $values, now()->addDays(self::REMEMBERED_FILTERS_DAYS));
+        Cache::put($this->rememberedFiltersKey(), $values, now()->addMinutes(self::REMEMBERED_FILTERS_MINUTES));
     }
 
     protected function rememberedFiltersKey(): string
@@ -75,7 +77,7 @@ trait RemembersFilters
         $user = auth()->user();
 
         return sprintf(
-            'index-filters:%d:%d:%d:%s',
+            'index-filters:v2:%d:%d:%d:%s',
             $user->id,
             (int) $user->vendor?->id,
             (int) (bool) $user->is_browsing_as_client,

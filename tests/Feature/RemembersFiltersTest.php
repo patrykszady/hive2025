@@ -51,36 +51,36 @@ function filtersUser(): User
     return $user;
 }
 
-it('brings /projects back on the status it was left on, not Active', function () {
+it('brings /projects back on the statuses it was left on, not Active', function () {
     $user = filtersUser();
 
     Livewire::actingAs($user)->test(ProjectsIndex::class)
-        ->set('project_status_title', 3);
+        ->set('project_status_title', [3, 8]);
 
     Livewire::actingAs($user)->test(ProjectsIndex::class)
-        ->assertSet('project_status_title', 3);
+        ->assertSet('project_status_title', [3, 8]);
 });
 
 it('remembers All as well: a bare /projects stays on every status', function () {
     $user = filtersUser();
 
     Livewire::actingAs($user)->test(ProjectsIndex::class)
-        ->set('project_status_title', null);
+        ->set('project_status_title', []);
 
     Livewire::actingAs($user)->test(ProjectsIndex::class)
-        ->assertSet('project_status_title', null);
+        ->assertSet('project_status_title', []);
 });
 
 it('lets a link that carries filters win over the remembered ones', function () {
     $user = filtersUser();
 
     Livewire::actingAs($user)->test(ProjectsIndex::class)
-        ->set('project_status_title', 3);
+        ->set('project_status_title', [3]);
 
     Livewire::actingAs($user)
         ->withQueryParams(['project_status_title' => 6])
         ->test(ProjectsIndex::class)
-        ->assertSet('project_status_title', 6);
+        ->assertSet('project_status_title', [6]);
 });
 
 it('keeps each person\'s filters to themselves', function () {
@@ -151,5 +151,21 @@ it('remembers the filters a link arrived with, for the next bare visit', functio
         ->test(ProjectsIndex::class);
 
     Livewire::actingAs($user)->test(ProjectsIndex::class)
-        ->assertSet('project_status_title', 3);
+        ->assertSet('project_status_title', [3]);
+});
+
+it('forgets the filters after fifteen minutes away: /projects opens on Active again', function () {
+    $user = filtersUser();
+
+    Livewire::actingAs($user)->test(ProjectsIndex::class)
+        ->set('project_status_title', [3]);
+
+    $this->travel(14)->minutes();
+    Livewire::actingAs($user)->test(ProjectsIndex::class)
+        ->assertSet('project_status_title', [3]);
+
+    // That visit renewed the fifteen minutes; now stay away longer.
+    $this->travel(16)->minutes();
+    Livewire::actingAs($user)->test(ProjectsIndex::class)
+        ->assertSet('project_status_title', fn ($statuses) => $statuses !== [3]);
 });

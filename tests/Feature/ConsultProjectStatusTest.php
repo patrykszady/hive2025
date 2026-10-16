@@ -203,7 +203,7 @@ it('keeps Consult as a valid projects-index status filter', function () {
     Livewire::actingAs($fx['admin'])
         ->withQueryParams(['project_status_title' => 9])
         ->test(\App\Livewire\Projects\ProjectsIndex::class)
-        ->assertSet('project_status_title', 9);
+        ->assertSet('project_status_title', [9]);
 });
 
 it('never drags a progressed project back to Consult when another meeting is booked', function () {

@@ -26,7 +26,7 @@
     </div>
 
     <div class="{{ $fieldWrap }}">
-        <flux:select variant="listbox" label="Status" clearable placeholder="All statuses..." wire:model.live="project_status_title">
+        <flux:select variant="listbox" multiple label="Status" clearable placeholder="All statuses..." wire:model.live="project_status_title">
             @foreach(\App\Models\ProjectStatus::selectableStatuses() as $status)
                 <flux:select.option :value="$status['code']">
                     <flux:badge size="md" inset="top bottom" :color="$status['color']">
