@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\VendorDocs\AuditShow;
+use App\Models\AuditRequest;
 use App\Models\Bank;
 use App\Models\BankAccount;
 use App\Models\Transaction;
@@ -56,4 +57,70 @@ it('takes a Missing Expenses row out of the table once an expense has used its t
         ->assertDontSee('ZELLE DEBIT TEST ROW');
 
     expect((new ReflectionMethod(AuditShow::class, 'transactionUsed'))->getAttributes(On::class)[0]->getArguments())->toBe(['transaction-used']);
+});
+
+/**
+ * Every row of one sheet of an Excel workbook, as plain values.
+ *
+ * @return list<list<mixed>>
+ */
+function xlsxSheetRows(string $bytes, string $sheetName): array
+{
+    $path = tempnam(sys_get_temp_dir(), 'audit-test-').'.xlsx';
+    file_put_contents($path, $bytes);
+    $reader = new \OpenSpout\Reader\XLSX\Reader;
+    $reader->open($path);
+
+    $rows = [];
+    foreach ($reader->getSheetIterator() as $sheet) {
+        if ($sheet->getName() === $sheetName) {
+            foreach ($sheet->getRowIterator() as $row) {
+                $rows[] = $row->toArray();
+            }
+        }
+    }
+    $reader->close();
+    @unlink($path);
+
+    return $rows;
+}
+
+// =========================================================================
+// The audit's Excel lists the Missing Expenses too, on a sheet of their own
+// (Patryk, 2026-10-16), and the page's Export builds the workbook afresh, so
+// a row recorded since the package was emailed leaves the sheet.
+// =========================================================================
+
+it('lists the Missing Expenses on their own sheet of the audit Excel', function () {
+    $transaction = missingExpenseRow();
+    $check = Transaction::create([
+        'transaction_date' => '2026-03-02', 'posted_date' => '2026-03-02', 'amount' => 13000, 'bank_account_id' => $transaction->bank_account_id,
+        'check_number' => '2642', 'plaid_merchant_description' => 'CHECK 2642', 'plaid_transaction_id' => uniqid('tx_'),
+    ]);
+
+    $page = Livewire::test(AuditShow::class, ['start_date' => '2025-08-26', 'end_date' => '2026-08-26', 'audit_type' => 'general', 'bank_account_ids' => [$transaction->bank_account_id]]);
+
+    // The package was built and emailed already; its stored workbook is a snapshot.
+    Storage::disk('local')->put('audits/emailed.xlsx', 'the emailed snapshot');
+    AuditRequest::query()->update(['status' => AuditRequest::STATUS_SENT, 'xlsx_path' => 'audits/emailed.xlsx']);
+
+    $page->call('export_xlsx');
+
+    $rows = xlsxSheetRows(base64_decode(data_get($page->effects, 'download.content')), 'Missing Expenses');
+
+    expect($rows)->toBe([
+        ['Date', 'Payment', 'Amount', 'Description'],
+        ['01/16/2026', 'Zelle', money(200), 'ZELLE DEBIT TEST ROW'],
+        ['03/02/2026', 'Check 2642', money(13000), 'CHECK 2642'],
+    ]);
+
+    $check->forceFill(['expense_id' => 999999])->saveQuietly();
+    $transaction->forceFill(['check_id' => 999999])->saveQuietly();
+
+    $page->call('export_xlsx');
+
+    expect(xlsxSheetRows(base64_decode(data_get($page->effects, 'download.content')), 'Missing Expenses'))->toBe([
+        ['Date', 'Payment', 'Amount', 'Description'],
+        ['Every check transaction of the period is in Hive.', '', '', ''],
+    ]);
 });

@@ -8,7 +8,6 @@ use App\Models\Check;
 use App\Models\EwccvCoverageCheck;
 use App\Services\Audits\AuditReport;
 use App\Services\Audits\CertificateMerger;
-use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 use App\Models\BankAccount;
@@ -65,22 +64,15 @@ class AuditShow extends Component
         // You can set default sort directions if desired.
     }
 
+    /** The Missing Expenses card: the same rows as the Excel's Missing Expenses sheet. */
     #[Computed]
     public function transactions_no_check(): Collection
     {
         if (!$this->end_date || empty($this->bank_account_ids)) {
             return collect();
         }
-        $start = $this->start_date;
-        $end = $this->end_date;
 
-        return Transaction::whereBetween('transaction_date', [$start, $end])
-            ->whereIn('bank_account_id', $this->bank_account_ids)
-            ->whereNotNull('check_number')
-            ->whereNull('check_id')
-            ->whereNull('expense_id')
-            ->orderBy('transaction_date')
-            ->get();
+        return $this->report->missingExpenses();
     }
 
     /**
@@ -309,11 +301,6 @@ class AuditShow extends Component
             return;
         }
 
-        $storedXlsx = $this->auditRequest?->xlsx_path;
-        if ($storedXlsx && \Illuminate\Support\Facades\Storage::disk('local')->exists($storedXlsx)) {
-            return \Illuminate\Support\Facades\Storage::disk('local')->download($storedXlsx, basename($storedXlsx));
-        }
-
         $filename = $this->report->filenameBase().'.xlsx';
         $content = $this->report->xlsx();
 
@@ -403,7 +390,7 @@ class AuditShow extends Component
                 return;
             }
 
-            $pdf = $this->mergeStatements($allStatements, $plaidService);
+            ['pdf' => $pdf, 'notInHive' => $notInHive] = $this->mergeStatements($allStatements, $plaidService);
 
             if ($pdf === null) {
                 $this->toast('Failed to build the statements PDF.', 'error');
@@ -421,6 +408,18 @@ class AuditShow extends Component
                 'filename' => $filename,
                 'date_range' => [$this->start_date, $this->end_date],
             ]);
+
+            if ($notInHive !== []) {
+                $this->toast(
+                    text: count($notInHive).' '.Str::plural('check', count($notInHive)).' the bank paid '.(count($notInHive) === 1 ? 'is' : 'are').' not in Hive (yellow in the PDF): '
+                        .collect($notInHive)->take(12)->map(fn (array $check) => '#'.$check['number'].' $'.number_format($check['amount'], 2)
+                            .($check['hive'] !== [] ? ' (Hive has $'.collect($check['hive'])->map(fn ($amount) => number_format((float) $amount, 2))->implode(' / $').')' : ''))->implode(', ')
+                        .(count($notInHive) > 12 ? '…' : ''),
+                    heading: 'Checks to record',
+                    duration: 12000,
+                    variant: 'warning',
+                );
+            }
 
             if ($this->statementGaps !== []) {
                 $this->toast(
@@ -805,11 +804,17 @@ class AuditShow extends Component
      * an auditor reads a year of statements as one document, not a zip of
      * files (2026-10-16). Merged here, not by a third-party service — these
      * are bank statements. A statement Plaid lists twice with identical
-     * bytes is kept once.
+     * bytes is kept once. Each statement's "Checks Paid" rows are tinted
+     * green when Hive has the check and yellow when it does not.
+     *
+     * @return array{pdf: ?string, notInHive: list<array{number: int, amount: float, date: string, hive: list<string>}>}
      */
-    private function mergeStatements(Collection $statements, PlaidService $plaidService): ?string
+    private function mergeStatements(Collection $statements, PlaidService $plaidService): array
     {
         $binaries = [];
+        $notInHive = [];
+        $highlighter = app(\App\Services\Audits\StatementCheckHighlighter::class);
+        $hiveChecks = $this->hiveChecksByAccountNumber();
 
         foreach ($statements->unique('statement_id')->sortBy(fn (array $statement) => $statement['statement_date'].'|'.$statement['account_name'])->values() as $statement) {
             $pdfContent = $plaidService->downloadStatement(
@@ -831,10 +836,63 @@ class AuditShow extends Component
                 continue;
             }
 
-            $binaries[sha1($pdfContent)] = $pdfContent;
+            $key = sha1($pdfContent);
+            if (isset($binaries[$key])) {
+                continue;
+            }
+
+            $amountsByNumber = $hiveChecks[$statement['account_name']] ?? collect();
+            $postedOn = Carbon::parse($statement['statement_date']);
+            $periodStart = Carbon::parse($this->start_date)->startOfDay();
+            $periodEnd = Carbon::parse($this->end_date)->endOfDay();
+
+            // A statement covers its whole month: checks paid before the audit
+            // starts or after it ends are crossed off, not judged (2026-10-16:
+            // #2653, paid 08/27/26, on an audit ending 08/26/26).
+            $marked = $highlighter->highlight($pdfContent, function (int $number, float $amount, string $date) use ($amountsByNumber, $postedOn, $periodStart, $periodEnd): string {
+                $paidOn = \App\Services\Audits\StatementCheckHighlighter::paidOn($date, $postedOn);
+
+                if ($paidOn && ! $paidOn->between($periodStart, $periodEnd)) {
+                    return \App\Services\Audits\StatementCheckHighlighter::OUTSIDE;
+                }
+
+                return collect($amountsByNumber->get($number, []))->contains(fn ($recorded) => abs(abs((float) $recorded) - $amount) < 0.005)
+                    ? \App\Services\Audits\StatementCheckHighlighter::CONFIRMED
+                    : \App\Services\Audits\StatementCheckHighlighter::MISSING;
+            });
+
+            $binaries[$key] = $marked['pdf'];
+            foreach ($marked['checks'] as $check) {
+                if ($check['status'] === \App\Services\Audits\StatementCheckHighlighter::MISSING) {
+                    // Hive's own amount when the number is there but the amount is not ($3,540 vs $3,500).
+                    $notInHive[] = ['number' => $check['number'], 'amount' => $check['amount'], 'date' => $check['date'], 'hive' => $amountsByNumber->get($check['number'], [])];
+                }
+            }
         }
 
-        return \App\Support\PdfMerger::merge(array_values($binaries));
+        return ['pdf' => \App\Support\PdfMerger::merge(array_values($binaries)), 'notInHive' => $notInHive];
+    }
+
+    /**
+     * The checks Hive has on the audit's accounts, by bank account number and
+     * then check number: the same account can sit on more than one bank
+     * connection (an old link and a new one), each with its own row.
+     *
+     * @return Collection<string, Collection<int, list<string>>>
+     */
+    protected function hiveChecksByAccountNumber(): Collection
+    {
+        $accounts = BankAccount::whereIn('id', $this->bank_account_ids)->get(['id', 'account_number']);
+
+        // Real checks only (a transfer's "number" is its id), grouped on the
+        // raw number: the check_number accessor needs check_type loaded.
+        return Check::query()
+            ->whereIn('bank_account_id', $accounts->pluck('id'))
+            ->where('check_type', 'Check')
+            ->whereNotNull('check_number')
+            ->get(['id', 'check_type', 'check_number', 'amount', 'bank_account_id'])
+            ->groupBy(fn (Check $check) => (string) $accounts->firstWhere('id', $check->bank_account_id)?->account_number)
+            ->map(fn (Collection $checks) => $checks->groupBy(fn (Check $check) => (int) $check->getRawOriginal('check_number'))->map(fn (Collection $same) => $same->pluck('amount')->all()));
     }
 
     /** The Coverage column of a policy row in the export: "WC verified 10/12/2026 (EWCCV)" and the like. */

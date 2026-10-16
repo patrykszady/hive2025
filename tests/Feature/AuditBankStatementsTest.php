@@ -79,6 +79,26 @@ beforeEach(function () {
     Carbon::setTestNow('2026-10-16 12:00:00');
 });
 
+/** One page with a "Checks Paid" table: [number, date, amount] rows, one per line. */
+function statementWithChecks(array $rows): string
+{
+    $pdf = new \FPDF('P', 'pt', 'Letter');
+    $pdf->SetCompression(false);
+    $pdf->SetFont('Helvetica', '', 9);
+    $pdf->AddPage();
+    $pdf->Text(280, 292, 'Checks Paid');
+    $pdf->Text(50, 302, 'Check');
+    $pdf->Text(95, 302, 'Date');
+    $pdf->Text(135, 302, 'Amount');
+    foreach ($rows as $line => [$number, $date, $amount]) {
+        $pdf->Text(55, 312 + $line * 10, $number);
+        $pdf->Text(95, 312 + $line * 10, $date);
+        $pdf->Text(135, 312 + $line * 10, $amount);
+    }
+
+    return $pdf->Output('S');
+}
+
 it('reads when a statement was posted, from date_posted or else its month and year', function () {
     expect(AuditShow::statementPostedOn(['statement_id' => 'a', 'month' => 9, 'year' => 2025, 'date_posted' => '2025-09-04'])->toDateString())->toBe('2025-09-04')
         ->and(AuditShow::statementPostedOn(['statement_id' => 'b', 'month' => 2, 'year' => 2026])->toDateString())->toBe('2026-02-28')
@@ -211,4 +231,42 @@ it('records the bank\'s answer when Plaid reports the fetch complete', function 
     expect($refresh['result'])->toBe('SUCCESS')
         ->and($refresh['completed_at'])->not->toBeNull()
         ->and($bank->fresh()->plaid_options['error'])->toBeFalse();
+});
+
+it('highlights the paid checks against Hive and names the ones Hive does not have', function () {
+    ['account' => $account] = statementsAudit();
+    \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => 2457, 'date' => '2026-01-05', 'amount' => 4500,
+        'bank_account_id' => $account->id, 'belongs_to_vendor_id' => $account->vendor_id, 'created_by_user_id' => auth()->id(),
+    ]);
+    \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => 2467, 'date' => '2026-01-07', 'amount' => 3540,
+        'bank_account_id' => $account->id, 'belongs_to_vendor_id' => $account->vendor_id, 'created_by_user_id' => auth()->id(),
+    ]);
+    plaidListsStatements(
+        [['statement_id' => 'jan', 'month' => 1, 'year' => 2026, 'date_posted' => '2026-01-30']],
+        ['jan' => statementWithChecks([['2457', '01/12', '4,500.00'], ['2463', '01/15', '1,960.00'], ['2467', '01/20', '3,500.00']])],
+    );
+
+    statementsAuditPage($account)->call('download_bank_statements')
+        ->assertFileDownloaded()
+        ->assertDispatched('toast-show', fn (string $event, array $params) => str_contains($params['slots']['text'] ?? '', '2 checks the bank paid are not in Hive')
+            && str_contains($params['slots']['text'], '#2463 $1,960.00,')
+            // In Hive, but for a different amount: still yellow, and says what Hive has.
+            && str_contains($params['slots']['text'], '#2467 $3,500.00 (Hive has $3,540.00)')
+            && ! str_contains($params['slots']['text'], '#2457'));
+});
+
+it('crosses off checks paid after the audit ends and leaves them out of the ones to record', function () {
+    ['account' => $account] = statementsAudit();
+    plaidListsStatements(
+        [['statement_id' => 'aug', 'month' => 8, 'year' => 2026, 'date_posted' => '2026-08-31']],
+        ['aug' => statementWithChecks([['2642', '08/03', '13,000.00'], ['2653', '08/27', '3,500.00']])],
+    );
+
+    statementsAuditPage($account, '2025-08-26', '2026-08-26')->call('download_bank_statements')
+        ->assertFileDownloaded()
+        ->assertDispatched('toast-show', fn (string $event, array $params) => str_contains($params['slots']['text'] ?? '', '1 check the bank paid is not in Hive')
+            && str_contains($params['slots']['text'], '#2642 $13,000.00')
+            && ! str_contains($params['slots']['text'], '#2653'));
 });

@@ -4,6 +4,7 @@ namespace App\Services\Audits;
 
 use App\Models\Check;
 use App\Models\EwccvCoverageCheck;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
@@ -82,6 +83,29 @@ class AuditReport
             ->whereDate('coverage_date', '<=', $this->coverageDate)
             ->get()
             ->keyBy(fn (EwccvCoverageCheck $check) => $check->vendor_id.'@'.$check->coverage_date->toDateString());
+    }
+
+    /**
+     * Check, transfer and cash transactions of the audit's accounts that no
+     * check or expense in Hive accounts for yet: the audit page's Missing
+     * Expenses card and the Excel's Missing Expenses sheet.
+     *
+     * @return Collection<int, Transaction>
+     */
+    public function missingExpenses(): Collection
+    {
+        if ($this->bankAccountIds === []) {
+            return collect();
+        }
+
+        return Transaction::query()
+            ->whereBetween('transaction_date', [$this->startDate, $this->endDate])
+            ->whereIn('bank_account_id', $this->bankAccountIds)
+            ->whereNotNull('check_number')
+            ->whereNull('check_id')
+            ->whereNull('expense_id')
+            ->orderBy('transaction_date')
+            ->get();
     }
 
     /**
@@ -462,7 +486,7 @@ class AuditReport
         return null;
     }
 
-    /** The Excel workbook's bytes (By Vendor + All Checks sheets). */
+    /** The Excel workbook's bytes (By Vendor, All Checks and Missing Expenses sheets). */
     public function xlsx(): string
     {
         $authVendorId = $this->companyVendorId;
@@ -541,6 +565,21 @@ class AuditReport
         $writer->addRow(Row::fromValues(['Date', 'Vendor', 'Payment', 'Amount', 'Coverage']));
         foreach ($allChecks as $row) {
             $writer->addRow(Row::fromValuesWithStyles([$row['date'], $row['vendor'], $row['payment'], $row['amount'], $row['coverage']], null, [4 => $styleFor($row['coverage'])]));
+        }
+
+        $writer->addNewSheetAndMakeItCurrent()->setName('Missing Expenses');
+        $writer->addRow(Row::fromValues(['Date', 'Payment', 'Amount', 'Description']));
+        $missingExpenses = $this->missingExpenses();
+        foreach ($missingExpenses as $transaction) {
+            $writer->addRow(Row::fromValues([
+                $transaction->transaction_date->format('m/d/Y'),
+                $transaction->paymentLabel() ?? 'Check '.$transaction->check_number,
+                money($transaction->amount),
+                (string) $transaction->plaid_merchant_description,
+            ]));
+        }
+        if ($missingExpenses->isEmpty()) {
+            $writer->addRow(Row::fromValues(['Every check transaction of the period is in Hive.', null, null, null]));
         }
         $writer->close();
 
