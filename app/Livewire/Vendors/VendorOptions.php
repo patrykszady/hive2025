@@ -34,6 +34,15 @@ class VendorOptions extends Component
     /** @var array<int> Admin user IDs selected to receive inbound calls */
     public array $call_recipients = [];
 
+    /**
+     * Ring a different order when a vendor or sub calls (Patryk, 2026-10-16:
+     * Greg first, then Patryk). Off, they ring the Call Recipients order.
+     */
+    public bool $vendor_call_order_enabled = false;
+
+    /** @var array<int> Admin user IDs rung, in this order, when a vendor or sub calls */
+    public array $vendor_call_recipients = [];
+
     /** @var array<int> Admin user IDs who must sign contracts by default */
     public array $default_contract_signers = [];
 
@@ -137,6 +146,8 @@ class VendorOptions extends Component
 
         // Phone system settings
         $this->call_recipients = (array) data_get($this->vendor->options, 'call_recipients', []);
+        $this->vendor_call_recipients = (array) data_get($this->vendor->options, 'vendor_call_recipients', []);
+        $this->vendor_call_order_enabled = $this->vendor_call_recipients !== [];
         $this->default_contract_signers = (array) data_get($this->vendor->options, 'default_contract_signers', []);
         $this->call_welcome_enabled = (bool) data_get($this->vendor->options, 'call_welcome_enabled', true);
         $this->voicemail_enabled = (bool) data_get($this->vendor->options, 'voicemail_enabled', true);
@@ -173,6 +184,9 @@ class VendorOptions extends Component
             'sms_vendor_enabled' => 'boolean',
             'call_recipients' => 'array',
             'call_recipients.*' => 'integer|exists:users,id',
+            'vendor_call_order_enabled' => 'boolean',
+            'vendor_call_recipients' => 'array',
+            'vendor_call_recipients.*' => 'integer|exists:users,id',
             'default_contract_signers' => 'array',
             'default_contract_signers.*' => 'integer|exists:users,id',
             'call_welcome_enabled' => 'boolean',
@@ -206,10 +220,29 @@ class VendorOptions extends Component
      */
     public function orderedRecipientIds(): array
     {
+        return $this->orderedIds($this->call_recipients);
+    }
+
+    /**
+     * Ticked people of the vendor and sub order, in call order.
+     *
+     * @return array<int, int>
+     */
+    public function orderedVendorRecipientIds(): array
+    {
+        return $this->orderedIds($this->vendor_call_recipients);
+    }
+
+    /**
+     * @param  array<int, int|string>  $ids
+     * @return array<int, int>
+     */
+    protected function orderedIds(array $ids): array
+    {
         $offered = collect($this->adminUsersWithPhones)->pluck('id')->map(fn ($id) => (int) $id)->all();
 
         return array_values(array_unique(array_filter(
-            array_map('intval', $this->call_recipients),
+            array_map('intval', $ids),
             fn (int $id) => in_array($id, $offered, true)
         )));
     }
@@ -222,7 +255,26 @@ class VendorOptions extends Component
      */
     public function recipientRows(): \Illuminate\Support\Collection
     {
-        $order = array_flip($this->orderedRecipientIds());
+        return $this->rowsInOrder($this->orderedRecipientIds());
+    }
+
+    /**
+     * The same, for the vendor and sub order.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\User>
+     */
+    public function vendorRecipientRows(): \Illuminate\Support\Collection
+    {
+        return $this->rowsInOrder($this->orderedVendorRecipientIds());
+    }
+
+    /**
+     * @param  array<int, int>  $callOrder
+     * @return \Illuminate\Support\Collection<int, \App\Models\User>
+     */
+    protected function rowsInOrder(array $callOrder): \Illuminate\Support\Collection
+    {
+        $order = array_flip($callOrder);
 
         return collect($this->adminUsersWithPhones)
             ->sortBy(fn ($user) => $order[(int) $user->id] ?? PHP_INT_MAX)
@@ -247,16 +299,55 @@ class VendorOptions extends Component
 
     protected function moveRecipient(int $userId, int $offset): void
     {
-        $order = $this->orderedRecipientIds();
+        $this->call_recipients = $this->swapped($this->orderedRecipientIds(), $userId, $offset);
+    }
+
+    /**
+     * Moves a ticked person one place earlier in the vendor and sub order.
+     */
+    public function moveVendorRecipientUp(int $userId): void
+    {
+        $this->vendor_call_recipients = $this->swapped($this->orderedVendorRecipientIds(), $userId, -1);
+    }
+
+    /**
+     * Moves a ticked person one place later in the vendor and sub order.
+     */
+    public function moveVendorRecipientDown(int $userId): void
+    {
+        $this->vendor_call_recipients = $this->swapped($this->orderedVendorRecipientIds(), $userId, 1);
+    }
+
+    /**
+     * Turning the vendor and sub order on starts it from the Call Recipients
+     * order, to rearrange from there.
+     */
+    public function updatedVendorCallOrderEnabled(bool $enabled): void
+    {
+        if ($enabled && $this->orderedVendorRecipientIds() === []) {
+            $this->vendor_call_recipients = $this->orderedRecipientIds();
+        }
+    }
+
+    /**
+     * $order with $userId moved $offset places, or unchanged past either end
+     * or for someone not in it.
+     *
+     * @param  array<int, int>  $order
+     * @return array<int, int>
+     */
+    protected function swapped(array $order, int $userId, int $offset): array
+    {
         $index = array_search($userId, $order, true);
         $target = $index === false ? false : $index + $offset;
 
         if ($index === false || $target < 0 || $target >= count($order)) {
-            return;
+            return $order;
         }
 
         [$order[$index], $order[$target]] = [$order[$target], $order[$index]];
-        $this->call_recipients = $order;
+
+        return $order;
     }
 
     public function save(): void
@@ -280,6 +371,8 @@ class VendorOptions extends Component
         // then the next after each unanswered window. The arrows set it; a
         // newly ticked person joins at the end.
         $options['call_recipients'] = $this->orderedRecipientIds();
+        // Empty = vendors and subs ring the Call Recipients order.
+        $options['vendor_call_recipients'] = $this->vendor_call_order_enabled ? $this->orderedVendorRecipientIds() : [];
         $options['default_contract_signers'] = array_map('intval', $this->default_contract_signers);
         $options['call_welcome_enabled'] = $this->call_welcome_enabled;
         $options['voicemail_enabled'] = $this->voicemail_enabled;

@@ -1929,6 +1929,8 @@ it('routes the caller to voicemail when the only joined admin hangs up after ent
             'joined_admin_ids' => [$admin->id],
             'conference_id' => 'conf-uuid-123',
             'conference_name' => 'call_999_test',
+            // Connected a moment ago: gone within seconds, no conversation.
+            'connected_at' => now()->subSeconds(3)->toDateTimeString(),
             'tts_complete' => true,
         ],
     ]);
@@ -3050,9 +3052,11 @@ it('does not restart the cascade when an admin ends a real conversation', functi
         ])),
     ]]])->assertSuccessful();
 
-    // Greg's phone stays silent; the caller gets the voicemail menu instead.
+    // Greg's phone stays silent, and the call ends for the caller too:
+    // no "not available" menu after a conversation.
     Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/calls') && $request->method() === 'POST');
-    Http::assertSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/hangup'));
 });
 
 it('lets a recipient who calls the business line join the live call, without a new call log', function () {
@@ -3496,4 +3500,203 @@ it('rewrites a saved prompt that told people to stay on the line', function () {
     expect(data_get($this->vendor->fresh()->options, 'screening_message'))->toBe('{name} is calling.')
         ->and($migration::withoutStayOnTheLine('Remain on the line to connect.'))->toBeNull()
         ->and($migration::withoutStayOnTheLine('Call from {name}.'))->toBe('Call from {name}.');
+});
+
+// =========================================================================
+// A team member who hangs up while the "Call from…" prompt plays (Patryk,
+// 5 times 2026-10-12–16): Telnyx ends the speak with status call_hangup a
+// moment before the leg's call.hangup. The caller keeps hearing ringback
+// and the next person rings; voicemail comes only after the last one.
+// =========================================================================
+
+/** The call.speak.ended Telnyx sends for a team leg's screening prompt. */
+function screeningPromptEnded(CallLog $callLog, User $admin, string $status): array
+{
+    return ['data' => ['event_type' => 'call.speak.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'cascade-cc-1',
+        'status' => $status,
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_screen',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $admin->id,
+            'conference_id' => null,
+        ])),
+    ]]];
+}
+
+/** The call.hangup of that team leg. */
+function screenedLegHungUp(CallLog $callLog, User $admin): array
+{
+    return ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'cascade-cc-1',
+        'hangup_cause' => 'normal_clearing',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_screen',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $admin->id,
+        ])),
+    ]]];
+}
+
+it('rings the next person when a team member hangs up during the screening prompt, without a conference or voicemail', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Bliss Hansen',
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-1'],
+            'cascade_pending_ids' => [$greg->id],
+            'joined_admin_ids' => [],
+            'tts_complete' => true,
+            'admin_dial_count' => 1,
+        ],
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'call_hangup'))->assertSuccessful();
+
+    // Nothing is bridged for a leg that is gone.
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/playback_stop'));
+
+    $this->postJson('/webhooks/telnyx/voice', screenedLegHungUp($callLog, $patryk))->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+1'.$greg->cell_phone);
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+
+    $metadata = $callLog->fresh()->metadata;
+    expect($metadata['conference_id'] ?? null)->toBeNull()
+        ->and($metadata['cascade_pending_ids'] ?? null)->toBe([]);
+});
+
+it('leaves the next phone ringing when the hangup of a screened leg arrives before its prompt ends', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-1'],
+            'cascade_pending_ids' => [$greg->id],
+            'joined_admin_ids' => [],
+            'tts_complete' => true,
+        ],
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', screenedLegHungUp($callLog, $patryk))->assertSuccessful();
+    // A speak that ended without a status, as the older events did.
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && ($request->data()['to'] ?? null) === '+1'.$greg->cell_phone);
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+});
+
+it('keeps the caller on ringback when a leg dies joining the conference while the cascade has people left', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-1'],
+            'cascade_pending_ids' => [$greg->id],
+            'joined_admin_ids' => [],
+            'tts_complete' => true,
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory);
+    Http::fake([
+        'api.telnyx.com/v2/conferences/*/actions/join' => Http::response(['errors' => [['code' => '90018', 'title' => 'Call has already ended']]], 422),
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-123']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+    Http::assertSent(function ($request) {
+        $state = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+
+        return str_contains($request->url(), 'incoming-cc/actions/playback_start') && ($state['action'] ?? null) === 'caller_waiting';
+    });
+    expect($callLog->fresh()->metadata['cascade_pending_ids'] ?? null)->toBe([$greg->id]);
+});
+
+// =========================================================================
+// The team member hangs up first after a conversation (Erin Abbey, call
+// 2733, 2026-10-16): the caller is hung up, not played the voicemail menu,
+// and the call stays answered, so its recording is kept.
+// =========================================================================
+
+it('ends the call for the caller and files it as answered when the team member hangs up after talking', function () {
+    [$patryk, $greg] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'direction' => 'incoming',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'caller_name' => 'Erin Abbey',
+        'answered_at' => now()->subMinutes(5),
+        'metadata' => [
+            'admin_call_control_ids' => ['cascade-cc-1'],
+            'cascade_pending_ids' => [$greg->id],
+            'joined_admin_ids' => [$patryk->id],
+            'conference_id' => 'conf-live-1',
+            'conference_name' => 'call_x',
+            'connected_at' => now()->subMinutes(5)->toDateTimeString(),
+        ],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'cascade-cc-1',
+        'hangup_cause' => 'normal_clearing',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_ring',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $patryk->id,
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/hangup'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
+
+    // Then the caller's own leg ends.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'incoming-cc',
+        'hangup_cause' => 'normal_clearing',
+    ]]])->assertSuccessful();
+
+    expect($callLog->fresh()->status)->toBe(CallLog::STATUS_COMPLETED);
+});
+
+it('stamps when a team member reaches the caller', function () {
+    [$patryk] = cascadeRecipients();
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => ['admin_call_control_ids' => ['cascade-cc-1'], 'tts_complete' => true],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory);
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-123']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
+
+    expect($callLog->fresh()->metadata['connected_at'] ?? null)->not->toBeNull();
 });

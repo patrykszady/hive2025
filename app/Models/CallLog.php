@@ -345,6 +345,41 @@ class CallLog extends Model
     }
 
     /**
+     * Whether the caller is one of $companyVendorId's vendors or subs: the
+     * number is a vendor's business phone, or belongs to someone on a
+     * vendor's team who is not one of the company's own people.
+     */
+    public function callerIsVendorOf(int $companyVendorId): bool
+    {
+        $digits = substr((string) preg_replace('/\D/', '', (string) $this->from_number), -10);
+        if (strlen($digits) !== 10) {
+            return false;
+        }
+
+        $company = Vendor::withoutGlobalScopes()->find($companyVendorId);
+        $vendorIds = $company ? $company->vendors()->pluck('vendors.id') : collect();
+        if ($vendorIds->isEmpty()) {
+            return false;
+        }
+
+        $isBusinessPhone = Vendor::withoutGlobalScopes()
+            ->whereIn('id', $vendorIds)
+            ->whereNotNull('business_phone')
+            ->pluck('business_phone')
+            ->contains(fn ($phone) => substr((string) preg_replace('/\D/', '', (string) $phone), -10) === $digits);
+
+        if ($isBusinessPhone) {
+            return true;
+        }
+
+        return User::query()
+            ->where('cell_phone', 'LIKE', "%{$digits}")
+            ->whereHas('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->whereIn('vendors.id', $vendorIds))
+            ->whereDoesntHave('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->where('vendors.id', $companyVendorId))
+            ->exists();
+    }
+
+    /**
      * The external party on the call (not the Hive agent).
      * For outgoing calls this is the recipient; for incoming this is the caller.
      */

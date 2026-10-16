@@ -1352,9 +1352,11 @@ class TelnyxWebhookController extends Controller
     /**
      * Called from handleCallSpeakEnded when the admin screening prompt finishes
      * and the admin has stayed on the line. Join existing conference (late
-     * answerer) or claim the bridge lock and create a new one.
+     * answerer) or claim the bridge lock and create a new one. $speakStatus is
+     * Telnyx's reason the prompt ended ("completed", or "call_hangup" when the
+     * team member hung up while it played).
      */
-    protected function handleAdminScreenDone(string $callControlId, array $clientState): JsonResponse
+    protected function handleAdminScreenDone(string $callControlId, array $clientState, ?string $speakStatus = null): JsonResponse
     {
         $callLogId = $clientState['call_log_id'] ?? null;
         $incomingCallControlId = $clientState['incoming_call_control_id'] ?? null;
@@ -1367,10 +1369,24 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        // If this admin leg already hung up while the screening prompt was
-        // playing, Telnyx still fires call.speak.ended for the interrupted
-        // speak. Don't try to bridge a dead admin — route the caller to the
-        // voicemail IVR instead so they aren't left in silence.
+        // The team member hung up while the prompt played: Telnyx ends the
+        // speak with status call_hangup ~80 ms before the leg's call.hangup.
+        // Nothing to connect, and nothing to decide here: that hangup rings
+        // the next person, or plays the voicemail menu after the last one.
+        // Bridging here created a conference for a dead leg, and its rollback
+        // sent the caller to voicemail while the next phone was still ringing
+        // (all 5 dropped answers of 2026-10-12–16).
+        if ($speakStatus === 'call_hangup') {
+            Cache::put("telnyx_admin_dead:{$callControlId}", true, now()->addMinutes(10));
+            Log::channel('telnyx')->info('Team member hung up during the screening prompt — their hangup moves the call on', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'admin_user_id' => $adminUserId,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
         if ($callLogId && Cache::has("telnyx_callback_promised:{$callLogId}")) {
             Log::channel('telnyx')->info('Screening prompt ended after the admin pressed 1 — caller is being told we will call back', [
                 'admin_call_control_id' => $callControlId,
@@ -1392,19 +1408,15 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
+        // The leg's call.hangup was handled first: it already rang the next
+        // person or played the voicemail menu. Voicemail from here as well
+        // would pull the caller away from a phone that is still ringing.
         if (Cache::has("telnyx_admin_dead:{$callControlId}")) {
-            Log::channel('telnyx')->info('Screening prompt ended but admin already hung up — routing caller to voicemail', [
+            Log::channel('telnyx')->info('Screening prompt ended but admin already hung up — their hangup moved the call on', [
                 'admin_call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
                 'incoming_call_control_id' => $incomingCallControlId,
             ]);
-
-            // Best-effort: only trigger voicemail if the caller is still on
-            // the line. triggerVoicemail() is idempotent so it's safe even if
-            // handleAdminRingHangup already triggered it.
-            if (! in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
-                $this->triggerVoicemail($incomingCallControlId, $callLogId);
-            }
 
             return response()->json(['status' => 'ok']);
         }
@@ -1576,7 +1588,11 @@ class TelnyxWebhookController extends Controller
             return;
         }
 
-        // Persist conference id and mark first admin joined.
+        // Persist conference id and mark first admin joined. Read afresh: the
+        // batch above took ~1 s, in which a hangup may have moved the cascade
+        // on; writing the copy read before it put Greg back in the queue, and
+        // his phone rang twice (2026-10-15).
+        $callLog->refresh();
         $metadata = $callLog->metadata ?? [];
         $metadata['conference_id'] = $conferenceId;
         $metadata['conference_name'] = $conferenceName;
@@ -1644,10 +1660,17 @@ class TelnyxWebhookController extends Controller
 
             $this->sendCallCommand($adminCallControlId, 'hangup');
 
-            // If other admin legs are still ringing, let them keep trying.
-            // Otherwise, send the caller to voicemail right now so they aren't
-            // stranded in an empty conference.
-            $stillRinging = ! empty($rollback['admin_call_control_ids']);
+            // The leg's own call.hangup already played the voicemail menu:
+            // leave the caller there, never start ringback over it.
+            if (Cache::has("telnyx_voicemail_triggered:{$callLogId}")) {
+                return;
+            }
+
+            // If other admin legs are still ringing, or the cascade has people
+            // left (this leg's call.hangup rings the next one), the caller
+            // keeps hearing ringback. Otherwise, voicemail right now so they
+            // aren't stranded in an empty conference.
+            $stillRinging = ! empty($rollback['admin_call_control_ids']) || ! empty($rollback['cascade_pending_ids']);
             if (! $stillRinging) {
                 Log::channel('telnyx')->warning('Admin hung up before joining conference — no other admins ringing, triggering voicemail', [
                     'incoming_call_control_id' => $incomingCallControlId,
@@ -1679,6 +1702,8 @@ class TelnyxWebhookController extends Controller
             return;
         }
 
+        $this->markConnected($callLog);
+
         if ($adminUserId) {
             SendCallAnsweredBrowserNotifications::dispatch($callLogId, $adminUserId);
             event(new InboundCallJoined($adminUserId, $callLogId));
@@ -1687,6 +1712,41 @@ class TelnyxWebhookController extends Controller
         // NOTE: we intentionally do NOT hang up other ringing admin legs here.
         // They keep ringing for their original timeout so a second/third recipient
         // can answer and join the conference with the "already connected" prompt.
+    }
+
+    /**
+     * A team member who leaves sooner than this after connecting did not
+     * really take the call (a pocket answer, a slip of the thumb): the caller
+     * still gets the voicemail menu. Longer, and their hangup ends the call.
+     */
+    public const SHORT_CONNECTION_SECONDS = 15;
+
+    /** The moment a team member first reached the caller, read by the hangups that follow. */
+    protected function markConnected(CallLog $callLog): void
+    {
+        $callLog->refresh();
+        $metadata = $callLog->metadata ?? [];
+        if (! empty($metadata['connected_at'])) {
+            return;
+        }
+
+        $metadata['connected_at'] = now()->toDateTimeString();
+        $callLog->update(['metadata' => $metadata]);
+    }
+
+    /**
+     * Whether the caller and the team really talked: connected for at least
+     * SHORT_CONNECTION_SECONDS, or connected before connected_at was kept.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    protected function wasConversation(array $metadata): bool
+    {
+        if (empty($metadata['connected_at'])) {
+            return true;
+        }
+
+        return \Illuminate\Support\Carbon::parse($metadata['connected_at'])->diffInSeconds(now(), true) >= self::SHORT_CONNECTION_SECONDS;
     }
 
     /**
@@ -1722,6 +1782,7 @@ class TelnyxWebhookController extends Controller
             $adminCcIds[] = $adminCallControlId;
         }
         $metadata['admin_call_control_ids'] = array_values(array_unique($adminCcIds));
+        $metadata['connected_at'] ??= now()->toDateTimeString();
 
         $callLog->update(['metadata' => $metadata]);
 
@@ -1888,8 +1949,10 @@ class TelnyxWebhookController extends Controller
             // For incoming calls, "answered_at" means the IVR/system answered — not a human.
             // Only mark as completed if an admin was actually bridged (status was set to transferred).
             $metadata = $callLog->metadata ?? [];
+            // connected_at outlives joined_admin_ids, which empties as team
+            // members hang up: a call they ended is still a call they took.
             $adminWasBridged = $callLog->direction === 'incoming'
-                ? ! empty($metadata['joined_admin_ids'])
+                ? ! empty($metadata['joined_admin_ids']) || ! empty($metadata['connected_at'])
                 : true;
 
             $status = match (true) {
@@ -2011,6 +2074,29 @@ class TelnyxWebhookController extends Controller
         // has a connected party — nothing to do.
         if (! empty($metadata['joined_admin_ids'])) {
             return response()->json(['status' => 'ok']);
+        }
+
+        // The last team member on the call hung up after talking with the
+        // caller: the call is over for the caller too, as with any phone
+        // call. The voicemail menu here told callers "not available" after
+        // a five-minute talk, filed the call as missed and threw away its
+        // recording (14 calls 2026-09-25 to 10-16, e.g. Erin Abbey's).
+        if ($hadJoined && empty($metadata['admin_call_control_ids'])) {
+            if ($this->wasConversation($metadata)) {
+                Log::channel('telnyx')->info('Team member ended the conversation — hanging up the caller', [
+                    'call_log_id' => $callLogId,
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'admin_user_id' => $adminUserId,
+                ]);
+                $this->sendCallCommand($incomingCallControlId, 'hangup');
+
+                return response()->json(['status' => 'ok']);
+            }
+
+            // Gone within seconds: no conversation to keep; the caller gets
+            // the voicemail menu below and the call counts as missed.
+            unset($metadata['connected_at']);
+            $callLog->update(['metadata' => $metadata]);
         }
 
         // If all admin legs have ended (none ringing AND none still joined) → trigger voicemail
@@ -2309,7 +2395,7 @@ class TelnyxWebhookController extends Controller
         }
 
         if ($action === 'admin_screen' || $action === 'admin_screen_done') {
-            return $this->handleAdminScreenDone($callControlId, $clientState ?? []);
+            return $this->handleAdminScreenDone($callControlId, $clientState ?? [], $payload['status'] ?? null);
         }
 
         if ($action === 'welcome_done') {
@@ -3444,7 +3530,7 @@ class TelnyxWebhookController extends Controller
         // TODO: Multi-vendor support — look up vendor by connection_id
         $vendor = Vendor::find(1);
         $vendorOptions = $vendor ? (array) $vendor->options : [];
-        $recipientUserIds = (array) data_get($vendorOptions, 'call_recipients', []);
+        $recipientUserIds = $this->ringOrderFor($callLog, $vendor, $vendorOptions);
 
         // Fall back to config if no recipients configured
         if (empty($recipientUserIds)) {
@@ -3500,6 +3586,30 @@ class TelnyxWebhookController extends Controller
             Log::channel('telnyx')->error('Failed to dial any admins — triggering voicemail');
             $this->triggerVoicemail($incomingCallControlId, $callLogId);
         }
+    }
+
+    /**
+     * Who rings, in order, for this caller: the vendor and sub order when a
+     * vendor or sub calls and Options sets one (Patryk, 2026-10-16: Greg
+     * first, then Patryk), else the Call Recipients order.
+     *
+     * @return array<int, int|string>
+     */
+    protected function ringOrderFor(?CallLog $callLog, ?Vendor $vendor, array $vendorOptions): array
+    {
+        $callRecipients = (array) data_get($vendorOptions, 'call_recipients', []);
+        $vendorOrder = array_values(array_filter(array_map('intval', (array) data_get($vendorOptions, 'vendor_call_recipients', []))));
+
+        if ($vendorOrder === [] || ! $callLog || ! $vendor || ! $callLog->callerIsVendorOf((int) $vendor->id)) {
+            return $callRecipients;
+        }
+
+        Log::channel('telnyx')->info('A vendor or sub is calling — ringing the vendor order', [
+            'call_log_id' => $callLog->id,
+            'ring_order' => $vendorOrder,
+        ]);
+
+        return $vendorOrder;
     }
 
     /**

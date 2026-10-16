@@ -97,3 +97,35 @@ it('lists ticked people first, in call order, with arrows', function () {
         ->assertSee('after 15 seconds without an answer')
         ->assertDontSee('Seconds to ring each person');
 });
+
+it('keeps a separate ring order for vendors and subs, starting from the Call Recipients order', function () {
+    $vendor = ringOrder_phoneVendor();
+    $patryk = ringOrder_admin($vendor, 'Patryk');
+    $greg = ringOrder_admin($vendor, 'Greg');
+
+    $component = Livewire::actingAs($patryk)
+        ->test(VendorOptions::class)
+        ->set('call_recipients', [(string) $patryk->id, (string) $greg->id])
+        ->assertDontSee('moveVendorRecipientUp(', false)
+        ->set('vendor_call_order_enabled', true)
+        ->assertSee('Different order when a vendor or sub calls');
+
+    expect($component->instance()->orderedVendorRecipientIds())->toBe([$patryk->id, $greg->id]);
+
+    $component->call('moveVendorRecipientUp', $greg->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $options = $vendor->fresh()->options;
+    expect(data_get($options, 'vendor_call_recipients'))->toBe([$greg->id, $patryk->id])
+        ->and(data_get($options, 'call_recipients'))->toBe([$patryk->id, $greg->id]);
+
+    // Off again: vendors and subs ring Call Recipients.
+    Livewire::actingAs($patryk->fresh())
+        ->test(VendorOptions::class)
+        ->assertSet('vendor_call_order_enabled', true)
+        ->set('vendor_call_order_enabled', false)
+        ->call('save');
+
+    expect(data_get($vendor->fresh()->options, 'vendor_call_recipients'))->toBe([]);
+});

@@ -193,6 +193,42 @@
                         @endif
                     </div>
 
+                    {{-- Vendors and subs: their own ring order --}}
+                    @if ($adminUsersWithPhones->isNotEmpty())
+                        <div>
+                            <flux:switch wire:model.live="vendor_call_order_enabled" align="left" label="Different order when a vendor or sub calls" description="A caller whose number is a vendor's business phone, or belongs to someone on a vendor's team, rings this order instead." />
+
+                            @if ($vendor_call_order_enabled)
+                                @php
+                                    $vendorCallOrder = $this->orderedVendorRecipientIds();
+                                @endphp
+                                <div class="mt-3 flex flex-col gap-2">
+                                    @foreach ($this->vendorRecipientRows() as $adminUser)
+                                        @php
+                                            $position = array_search((int) $adminUser->id, $vendorCallOrder, true);
+                                        @endphp
+                                        <div wire:key="vendor-call-recipient-{{ $adminUser->id }}" class="flex items-center gap-3">
+                                            <span class="w-5 text-right text-xs font-medium tabular-nums text-zinc-500">{{ $position === false ? '' : $position + 1 }}</span>
+                                            <label class="flex flex-1 items-center gap-3 cursor-pointer min-w-0">
+                                                <flux:checkbox wire:model.live="vendor_call_recipients" value="{{ $adminUser->id }}" />
+                                                <div class="min-w-0 truncate">
+                                                    <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ $adminUser->full_name }}</span>
+                                                    <span class="text-xs text-zinc-500 ml-1">{{ $adminUser->cell_phone }}</span>
+                                                </div>
+                                            </label>
+                                            @if ($position !== false && count($vendorCallOrder) > 1)
+                                                <div class="flex items-center gap-1">
+                                                    <flux:button size="xs" variant="ghost" icon="chevron-up" wire:click="moveVendorRecipientUp({{ $adminUser->id }})" :disabled="$position === 0" title="Call earlier" aria-label="Call {{ $adminUser->full_name }} earlier when a vendor calls" />
+                                                    <flux:button size="xs" variant="ghost" icon="chevron-down" wire:click="moveVendorRecipientDown({{ $adminUser->id }})" :disabled="$position === count($vendorCallOrder) - 1" title="Call later" aria-label="Call {{ $adminUser->full_name }} later when a vendor calls" />
+                                                </div>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
+                        </div>
+                    @endif
+
                     <div class="space-y-2">
                         <div>
                             <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Welcome Message</div>
