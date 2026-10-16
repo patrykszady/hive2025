@@ -82,11 +82,14 @@ class MeetTaskCalendarService
                 ->values()
                 ->all(),
             'when' => $when,
-            'conferencing' => [
+        ];
+
+        if (! $this->isPhoneCall($task)) {
+            $payload['conferencing'] = [
                 'provider' => $conferencingProvider,
                 'autocreate' => (object) [],
-            ],
-        ];
+            ];
+        }
 
         $payload['reminders'] = $isMicrosoft
             ? [
@@ -104,7 +107,7 @@ class MeetTaskCalendarService
 
         $response = $this->nylasService->createEvent($grantId, $payload);
 
-        if (! ($response['success'] ?? false)) {
+        if (! ($response['success'] ?? false) && isset($payload['conferencing'])) {
             $fallbackPayload = $payload;
             unset($fallbackPayload['conferencing']);
 
@@ -702,7 +705,11 @@ class MeetTaskCalendarService
         $vendorFooterName = $vendorShortName !== '' ? $vendorShortName : $vendorBusinessName;
 
         $meetingLocationType = $task->options->meeting_location_type ?? 'in_person';
-        $meetingTypeLabel = $meetingLocationType === 'in_person' ? 'ONSITE' : 'VIRTUAL';
+        $meetingTypeLabel = match ($meetingLocationType) {
+            'in_person' => 'ONSITE',
+            'phone' => 'PHONE CALL',
+            default => 'VIRTUAL',
+        };
 
         $headerLabel = $vendorHeaderName !== '' ? "{$vendorHeaderName} ({$meetingTypeLabel}) Meeting" : '(' . $meetingTypeLabel . ') Meeting';
         if ($vendorBusinessWebsite !== '' && $vendorHeaderName !== '') {
@@ -874,14 +881,27 @@ class MeetTaskCalendarService
      * The event's location line. A virtual meet's venue is the call itself —
      * putting the jobsite address there sends somebody driving to a Teams
      * meeting. The join link is attached by Nylas's autocreated conferencing.
+     * A phone call has no link to join, so its venue is the number to dial.
      */
     private function resolveMeetingLocation(Task $task): ?string
     {
+        if ($this->isPhoneCall($task)) {
+            $clientPhone = $this->resolveClientPhones($task)->first();
+
+            return $clientPhone ? "Phone call: {$clientPhone}" : 'Phone call';
+        }
+
         if (($task->options->meeting_location_type ?? 'in_person') !== 'in_person') {
             return 'Microsoft Teams';
         }
 
         return $this->resolveProjectLocation($task);
+    }
+
+    /** A phone call gets no Teams meeting: "feel free to call me then" is not a video call (2026-10-15). */
+    private function isPhoneCall(Task $task): bool
+    {
+        return ($task->options->meeting_location_type ?? null) === 'phone';
     }
 
     private function resolveProjectLocation(Task $task): ?string

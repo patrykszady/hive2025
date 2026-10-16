@@ -82,7 +82,7 @@ class TaskForm extends Form
     /** The checklist exactly as this form loaded it — the base for merging. */
     public $checklistOriginal = [];
 
-    #[Validate('nullable|in:virtual,in_person')]
+    #[Validate('nullable|in:virtual,in_person,phone')]
     public $meeting_location_type = 'in_person';
 
     #[Validate('nullable|array')]

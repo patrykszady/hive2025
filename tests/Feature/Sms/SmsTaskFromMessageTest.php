@@ -1252,3 +1252,104 @@ it('hides the create-task action for schedule blasts and short messages', functi
 ]);
 
 
+
+it('reads a short reply with the messages before it: "afternoon works best" to "available tomorrow for a chat?" is a phone-call Meet tomorrow afternoon for Patryk', function (): void {
+    config(['services.openai.api_key' => 'test-key']);
+
+    Http::fake([
+        'api.openai.com/*' => Http::response(fakeOpenAiTaskResponse([
+            'has_task' => true,
+            'title' => 'Call',
+            'type' => 'Meet',
+            'meeting_type' => 'phone',
+            'date' => '2026-10-16',
+            'start_time' => '13:00',
+            'end_time' => '17:00',
+            'project_hint' => null,
+            'notes' => 'Yes - afternoon works best. Thanks',
+            'assignee_names' => ['Patryk'],
+            'checklist' => [],
+            'additional_tasks' => [],
+        ])),
+    ]);
+
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction', 'timezone' => 'America/Chicago']);
+    $patryk = User::query()->create([
+        'first_name' => 'Patryk', 'last_name' => 'Szady', 'email' => 'patryk.thread393@example.com',
+        'cell_phone' => '2245550393', 'primary_vendor_id' => $vendor->id,
+    ]);
+    $vendor->users()->attach($patryk->id, ['is_employed' => true, 'role_id' => 1]);
+    $this->actingAs($patryk);
+
+    $william = User::query()->create([
+        'first_name' => 'William', 'last_name' => 'Client', 'email' => 'william.thread393@example.com',
+        'cell_phone' => '8475550393', 'primary_vendor_id' => $vendor->id,
+    ]);
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    Project::query()->create([
+        'project_name' => 'Kitchen', 'client_id' => $client->id, 'belongs_to_vendor_id' => $vendor->id,
+        'address' => '393 Oak Ln', 'city' => 'Northbrook', 'state' => 'IL', 'zip_code' => 60062,
+    ]);
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'William', 'from_number' => '+12245554444', 'participants' => ['+18475550393'],
+        'vendor_id' => $vendor->id, 'client_id' => $client->id, 'last_activity_at' => now(),
+    ]);
+    $message = fn (string $direction, string $text, string $at): SmsMessage => tap(SmsMessage::query()->create([
+        'thread_id' => $thread->id, 'direction' => $direction,
+        'from_number' => $direction === SmsMessage::DIRECTION_OUTBOUND ? '+12245554444' : '+18475550393',
+        'to_numbers' => [$direction === SmsMessage::DIRECTION_OUTBOUND ? '+18475550393' : '+12245554444'],
+        'text' => $text, 'sent_by_user_id' => $direction === SmsMessage::DIRECTION_OUTBOUND ? $patryk->id : null,
+    ]), fn (SmsMessage $sms) => $sms->forceFill(['created_at' => Carbon::parse($at, 'America/Chicago')->utc()])->save());
+    $message(SmsMessage::DIRECTION_OUTBOUND, "Hi William, I'm sorry I missed you last week. Are you available tomorrow for a chat?", '2026-10-15 15:31');
+    $reply = $message(SmsMessage::DIRECTION_INBOUND, 'Yes - afternoon works best. Thanks', '2026-10-15 17:05');
+
+    $payload = null;
+    Livewire::test(SmsConversation::class, ['threadId' => $thread->id])
+        ->call('createTaskFromMessage', $reply->id)
+        ->assertDispatched('prefillTaskFromSms', function (string $event, array $params) use (&$payload, $patryk): bool {
+            $payload = $params['payload'];
+
+            return $payload['type'] === 'Meet'
+                && $payload['meeting_location_type'] === 'phone'
+                && $payload['date'] === '2026-10-16'
+                && $payload['user_ids'] === [$patryk->id];
+        });
+
+    // A call is not a Teams meeting: the modal opens on Phone Call, not Virtual.
+    Livewire::test(TaskCreate::class)
+        ->call('prefillTaskFromSms', $payload)
+        ->assertSet('form.type', 'Meet')
+        ->assertSet('form.meeting_location_type', 'phone');
+
+    // The extractor was shown the question, who asked it and when, then the reply and who sent it.
+    Http::assertSent(function ($request) {
+        $content = (string) data_get($request->data(), 'messages.1.content');
+
+        return data_get($request->data(), 'response_format.json_schema.schema.properties.meeting_type.enum') === ['phone', 'virtual', 'in_person', null]
+            && str_contains($content, 'Earlier messages (context):')
+            && str_contains($content, "Patryk (our team): Hi William, I'm sorry I missed you last week. Are you available tomorrow for a chat?")
+            && str_contains($content, '2026-10-15 15:31 (Thursday)')
+            && str_contains($content, "Message from William, sent 2026-10-15 17:05 (Thursday):\nYes - afternoon works best. Thanks");
+    });
+});
+
+it('keeps a meeting type only on a Meet', function (string $type, ?string $expected): void {
+    config(['services.openai.api_key' => 'test-key']);
+
+    Http::fake([
+        'api.openai.com/*' => Http::response(fakeOpenAiTaskResponse([
+            'has_task' => true,
+            'title' => 'Call',
+            'type' => $type,
+            'meeting_type' => 'phone',
+        ])),
+    ]);
+
+    $result = app(SmsTaskExtractionService::class)->extract('Feel free to call me tomorrow afternoon', Carbon::parse('2026-10-15 17:05'));
+
+    expect($result['meeting_type'])->toBe($expected);
+})->with([
+    'a Meet' => ['Meet', 'phone'],
+    'a Task' => ['Task', null],
+]);

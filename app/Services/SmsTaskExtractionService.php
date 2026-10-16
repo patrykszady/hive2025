@@ -27,10 +27,14 @@ class SmsTaskExtractionService
      *     end_time: ?string,
      *     project_hint: ?string,
      *     assignee_names: array<int, string>,
-     *     checklist: array<int, string>
+     *     checklist: array<int, string>,
+     *     meeting_type: 'phone'|'virtual'|'in_person'|null
      * }|null
+     *
+     * @param  list<array{who: string, sent_at: CarbonInterface, text: string}>  $context  earlier messages of the thread, oldest first
+     * @param  string|null  $speaker  who sent $message ("William", "Patryk (our team)")
      */
-    public function extract(string $message, CarbonInterface $sentAt): ?array
+    public function extract(string $message, CarbonInterface $sentAt, array $context = [], ?string $speaker = null): ?array
     {
         $message = trim($message);
 
@@ -61,11 +65,13 @@ Convert clock ranges to 24-hour times. "7-8am" -> start_time 07:00, end_time 08:
 
 title: a VERY short task name — 2 to 4 words max, a concise noun phrase (e.g. "Grout Repair", "Cabinet Trim", "Outlet Repair", "Roofing"). Name the thing to fix, NOT the symptom or impact. Never restate the sentence. Do NOT include the room, time, person's name, the word "impacting/affecting", or pleasantries. "The new trim on our cabinet is impacting the microwave drawer" -> title "Cabinet Trim" (NOT "Correct Cabinet Trim Impacting Microwave Drawer").
 type: one of Task, Milestone, Meet, Reminder. Use "Meet" for meetings, walkthroughs, consultations, or when the sender wants to talk/discuss something ("to discuss", "your thoughts on", "can we talk about") -> Meet; otherwise default to "Task".
+meeting_type: for a Meet, how it happens. "phone" for a phone call ("call me", "give me a call", "feel free to call me then", or a "chat" or "talk" with no place and no video named). "virtual" only for a video meeting (Teams, Zoom, Google Meet, "video call"). "in_person" for meeting at the house, jobsite, office or showroom (walkthrough, onsite consult, "stop by"). null when type is not Meet.
 project_hint: any room, area, or project name referenced (e.g. "hall bath", "kitchen", "roof") or empty if none.
 assignee_names: ALWAYS capture the first name of any specific person the message names as doing the work, stopping by, picking up, delivering, or being onsite (e.g. "Greg is stopping by" -> ["Greg"]; "Jerry will be there" -> ["Jerry"]; "pickup person is Greg Szady" -> ["Greg"]). Use the first name exactly as written. Ignore people who are only being greeted or thanked, or the sender's own signature line (e.g. "-PS", "-GS"). Empty array only when no person is named as doing something.
 checklist: capture small actionable to-dos as SHORT imperative phrases of 2 to 5 words each. IMPORTANT — when one message reports SEVERAL problems/issues at the same place with no distinct dates, times or crews (a punch list, e.g. "the p trap is dripping... there is also a gap at the shower door... also a gap where the tiles meet the window"), that is ONE visit: return a single task and put EVERY issue in this checklist as its own item, one per issue. Do NOT split those across additional_tasks (e.g. "let's adjust your ring cameras" -> ["Adjust Ring cameras"]; "the trim is impacting the microwave drawer" -> ["Adjust cabinet trim"]). Never copy a full sentence — the original message is kept as the task notes. Do not repeat the title verbatim. Empty array when there are none.
 additional_tasks: ONLY for work that must be scheduled SEPARATELY — a different date, a different time, or a different crew/trade arriving. Several issues found on one visit are NOT additional tasks; they are checklist items (see above). When the message does describe separately-scheduled work, return the first as the main task above and put each OTHER one here. Each has its own title, type, date, start_time, end_time, project_hint, assignee_names, notes (e.g. "we will be there 9am with materials, drywall guys at 10am" -> main task is the 9am materials delivery, additional_tasks has the 10am drywall crew). A numbered or bulleted list ("1)", "2)", "-", "a.") of requests or punch-list items ALWAYS means one task per list item. Empty array when there is only one job.
 notes: for THIS task only, the exact portion of the message that describes it — the specific request/issue text in the client's own words, with any list number/bullet removed. EXCLUDE greetings ("Hi ..."), "hope all is well", sign-offs ("Thanks. Tom"), and the text of OTHER tasks. For a single-task message use the whole relevant sentence(s). Example: for item "1) grout repair at counter/backsplash interface" the notes are "grout repair at counter/backsplash interface".
+CONVERSATION: earlier messages of the thread may come first, for context, each with who sent it and when ("(our team)" marks our side). The task is what the conversation has settled as of the final message. A short reply ("Yes - afternoon works best", "sure thing, call me then") accepts what an earlier message proposed, and the task is that proposal: "Are you available tomorrow for a chat?" answered "afternoon works best" is a Meet titled "Call" with meeting_type "phone", dated the day after the QUESTION's sent date, in the afternoon. Resolve a relative date against the sent date of the message that says it. A part of day with no clock time: morning -> 09:00 to 12:00, afternoon -> 13:00 to 17:00, evening -> 17:00 to 19:00. Put the first name of our team member who proposed or will take the meeting or call in assignee_names. A confirmation that settles an earlier proposal IS a task (has_task true).
 has_task: true whenever the message asks to schedule, perform, fix, repair, replace, inspect, review, or discuss any work — even when NO date or time is given (a request like "please add me to your schedule for the following..." or a punch list of issues still counts). false only for pure chit-chat, greetings, thanks, or confirmations with no actionable work.
 
 Worked example — if the message "Greg is stopping by onsite tomorrow. (Let's adjust your ring cameras on Monday)\n-PS" were sent on 2025-03-01 (Saturday), the correct output is:
@@ -89,11 +95,12 @@ PROMPT;
         $schema = [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['has_task', 'title', 'type', 'date', 'start_time', 'end_time', 'project_hint', 'notes', 'assignee_names', 'checklist', 'additional_tasks'],
+            'required' => ['has_task', 'title', 'type', 'meeting_type', 'date', 'start_time', 'end_time', 'project_hint', 'notes', 'assignee_names', 'checklist', 'additional_tasks'],
             'properties' => [
                 'has_task' => ['type' => 'boolean'],
                 'title' => ['type' => 'string'],
                 'type' => ['type' => 'string', 'enum' => ['Task', 'Milestone', 'Meet', 'Reminder']],
+                'meeting_type' => ['type' => ['string', 'null'], 'enum' => ['phone', 'virtual', 'in_person', null]],
                 'date' => ['type' => ['string', 'null']],
                 'start_time' => ['type' => ['string', 'null']],
                 'end_time' => ['type' => ['string', 'null']],
@@ -130,7 +137,7 @@ PROMPT;
                 'model' => $model,
                 'messages' => [
                     ['role' => 'system', 'content' => $system],
-                    ['role' => 'user', 'content' => "Message:\n{$message}"],
+                    ['role' => 'user', 'content' => $this->userContent($message, $sentAt, $context, $speaker)],
                 ],
                 'response_format' => [
                     'type' => 'json_schema',
@@ -166,6 +173,29 @@ PROMPT;
     }
 
     /**
+     * The final message, after the earlier ones of the thread when there are
+     * any: a reply alone ("Yes - afternoon works best") says neither the day
+     * nor what was agreed (2026-10-15, thread 393).
+     *
+     * @param  list<array{who: string, sent_at: CarbonInterface, text: string}>  $context
+     */
+    protected function userContent(string $message, CarbonInterface $sentAt, array $context, ?string $speaker): string
+    {
+        $stamp = fn (CarbonInterface $at): string => $at->format('Y-m-d H:i (l)');
+        $lines = [];
+        foreach ($context as $earlier) {
+            $text = trim((string) ($earlier['text'] ?? ''));
+            if ($text !== '') {
+                $lines[] = sprintf('[%s] %s: %s', $stamp($earlier['sent_at']), $earlier['who'], $text);
+            }
+        }
+
+        $final = sprintf("Message%s, sent %s:\n%s", $speaker ? " from {$speaker}" : '', $stamp($sentAt), $message);
+
+        return $lines === [] ? $final : "Earlier messages (context):\n".implode("\n", $lines)."\n\n".$final;
+    }
+
+    /**
      * Coerce the raw model output into the documented shape.
      *
     * @param  array<string, mixed>  $parsed
@@ -179,6 +209,7 @@ PROMPT;
      *     project_hint: ?string,
      *     assignee_names: array<int, string>,
      *     checklist: array<int, string>,
+     *     meeting_type: 'phone'|'virtual'|'in_person'|null,
      *     additional_tasks: array<int, array<string, mixed>>
      * }
      */
@@ -202,6 +233,9 @@ PROMPT;
             'has_task' => (bool) ($parsed['has_task'] ?? false),
             'title' => trim((string) ($parsed['title'] ?? '')),
             'type' => $type,
+            'meeting_type' => $type === 'Meet' && in_array($parsed['meeting_type'] ?? null, ['phone', 'virtual', 'in_person'], true)
+                ? $parsed['meeting_type']
+                : null,
             'date' => $date,
             'start_time' => $startTime,
             'end_time' => $endTime,

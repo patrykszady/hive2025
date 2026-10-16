@@ -237,6 +237,12 @@
                                         <span>Virtual</span>
                                     </div>
                                 </flux:radio>
+                                <flux:radio value="phone">
+                                    <div class="flex items-center gap-1.5">
+                                        <flux:icon.phone variant="mini" class="size-4" />
+                                        <span>Phone Call</span>
+                                    </div>
+                                </flux:radio>
                             </flux:radio.group>
 
                             {{-- MEETING PARTICIPANTS --}}

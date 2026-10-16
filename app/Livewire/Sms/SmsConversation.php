@@ -426,6 +426,54 @@ class SmsConversation extends Component
         return str_word_count($text) > 3;
     }
 
+    /** How many earlier messages, and how far back, the task extractor sees. */
+    public const TASK_CONTEXT_MESSAGES = 6;
+
+    public const TASK_CONTEXT_DAYS = 3;
+
+    /**
+     * The messages before this one in the thread, oldest first: "afternoon
+     * works best" only means a call tomorrow next to the question that asked
+     * (thread 393, 2026-10-15).
+     *
+     * @return list<array{who: string, sent_at: \Carbon\CarbonInterface, text: string}>
+     */
+    protected function conversationContext(SmsMessage $message): array
+    {
+        return SmsMessage::where('thread_id', $this->threadId)
+            ->where('id', '!=', $message->id)
+            ->where('created_at', '<=', $message->created_at)
+            ->where('created_at', '>=', $message->created_at->copy()->subDays(self::TASK_CONTEXT_DAYS))
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(self::TASK_CONTEXT_MESSAGES)
+            ->get()
+            ->reverse()
+            ->map(fn (SmsMessage $earlier) => [
+                'who' => $this->contextSpeaker($earlier),
+                'sent_at' => $earlier->created_at->copy()->setTimezone(vendor_timezone()),
+                'text' => trim((string) $earlier->display_text),
+            ])
+            ->filter(fn (array $earlier) => $earlier['text'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /** "Patryk (our team)" for our side, the contact's first name (or "Client") for theirs. */
+    protected function contextSpeaker(SmsMessage $message): string
+    {
+        if ($message->isOutbound()) {
+            return trim(($message->sentByUser?->first_name ?? 'Team').' (our team)');
+        }
+
+        $digits = substr((string) preg_replace('/\D/', '', (string) $message->from_number), -10);
+        $user = $digits !== ''
+            ? User::withoutGlobalScopes()->where('cell_phone', 'like', '%'.$digits)->first()
+            : null;
+
+        return $user?->first_name ?: 'Client';
+    }
+
     /**
      * Use AI to extract a schedulable Hive task from a single message, then open
      * the create-task modal pre-filled for review. Runs only on explicit user
@@ -453,7 +501,7 @@ class SmsConversation extends Component
             ? $this->fallbackExtractFromScheduleReply($message, $sentAt)
             : null;
 
-        $extracted = $extractor->extract($text, $sentAt);
+        $extracted = $extractor->extract($text, $sentAt, $this->conversationContext($message), $this->contextSpeaker($message));
 
         if ($scheduleReplyFallback && ($scheduleReplyFallback['has_task'] ?? false) && ($scheduleReplyFallback['title'] ?? '') !== '') {
             $extracted = $scheduleReplyFallback;
@@ -556,6 +604,7 @@ class SmsConversation extends Component
             'task_id' => $matchedTask?->id ?? ($extracted['task_id'] ?? null),
             'title' => $extracted['title'],
             'type' => $extracted['type'],
+            'meeting_location_type' => $extracted['meeting_type'] ?? null,
             'project_id' => $projectId,
             'client_id' => $client->id,
             'vendor_id' => $vendorId,

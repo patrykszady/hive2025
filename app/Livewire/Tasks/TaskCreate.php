@@ -1757,6 +1757,11 @@ class TaskCreate extends Component
             $this->form->type = $type;
         }
 
+        $meetingLocationType = $payload['meeting_location_type'] ?? null;
+        if (! $existingTask && $this->form->type === 'Meet' && in_array($meetingLocationType, ['in_person', 'virtual', 'phone'], true)) {
+            $this->form->meeting_location_type = $meetingLocationType;
+        }
+
         if (! $existingTask && ! empty($payload['notes']) && trim((string) $this->form->notes) === '') {
             $this->form->notes = trim((string) $payload['notes']);
         }

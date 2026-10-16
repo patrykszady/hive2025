@@ -5,6 +5,7 @@ use App\Models\CompanyEmail;
 use App\Models\Lead;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use App\Models\ProjectVendor;
 use App\Models\ShortLink;
 use App\Models\Task;
 use App\Models\User;
@@ -413,4 +414,37 @@ it('archives a copy of the invite to the company mailbox', function (): void {
 
         return ! in_array('crew@gs.test', $emails, true);
     });
+});
+
+it('books a phone-call Meet without a Teams meeting, located at the client\'s number', function (): void {
+    $fx = meetRecipientFixture(['patryk@gs.test', 'william@example.test']);
+    $client = Client::factory()->create(['business_name' => 'William Johnson', 'home_phone' => '(832) 257-1204']);
+    ProjectVendor::query()->create(['project_id' => $fx['task']->project_id, 'vendor_id' => $fx['vendor']->id, 'client_id' => $client->id]);
+    $fx['task']->update(['options' => array_merge((array) $fx['task']->options, ['meeting_location_type' => 'phone'])]);
+
+    app(MeetTaskCalendarService::class)->createMeetEvent($fx['task']->fresh());
+
+    Http::assertSent(function ($request): bool {
+        if (! str_contains($request->url(), '/events')) {
+            return false;
+        }
+
+        $body = $request->data();
+
+        return ! array_key_exists('conferencing', $body)
+            && $body['location'] === 'Phone call: William Johnson - (832) 257-1204'
+            && str_contains((string) $body['description'], '(PHONE CALL) Meeting');
+    });
+});
+
+it('still books a virtual Meet as a Teams meeting', function (): void {
+    $fx = meetRecipientFixture(['patryk@gs.test', 'william@example.test']);
+    $fx['task']->update(['options' => array_merge((array) $fx['task']->options, ['meeting_location_type' => 'virtual'])]);
+
+    app(MeetTaskCalendarService::class)->createMeetEvent($fx['task']->fresh());
+
+    Http::assertSent(fn ($request): bool => str_contains($request->url(), '/events')
+        && data_get($request->data(), 'conferencing.provider') === 'Microsoft Teams'
+        && $request->data()['location'] === 'Microsoft Teams'
+        && str_contains((string) $request->data()['description'], '(VIRTUAL) Meeting'));
 });
