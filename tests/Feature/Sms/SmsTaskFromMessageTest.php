@@ -144,7 +144,7 @@ it('extracts a hive task from a message via the 3-dot action and prefills the ta
         });
 });
 
-it('builds checklist items from multi-issue message text and carries sms image urls', function (): void {
+it('never turns the message\'s sentences into checklist items, keeps the message as notes, and carries sms image urls', function (): void {
     config(['services.openai.api_key' => 'test-key']);
 
     Http::fake([
@@ -216,10 +216,10 @@ it('builds checklist items from multi-issue message text and carries sms image u
             return $payload['title'] === 'Trim Repair'
                 && (int) $payload['project_id'] === $project->id
                 && (int) $payload['client_id'] === $client->id
-                && is_array($payload['checklist'])
-                && count($payload['checklist']) === 2
-                && str_contains(strtolower((string) ($payload['checklist'][0]['text'] ?? '')), 'trim from hidden pantry fell off')
-                && str_contains(strtolower((string) ($payload['checklist'][1]['text'] ?? '')), 'trim by microwave is rubbing')
+                // Only the to-dos the extractor names go on the checklist: the
+                // message's sentences showed on a sub's page as tasks (2026-10-15).
+                && $payload['checklist'] === []
+                && str_contains(strtolower((string) $payload['notes']), 'trim from hidden pantry fell off')
                 && is_array($payload['sms_media_urls'])
                 && count($payload['sms_media_urls']) === 2
                 && str_contains((string) $payload['sms_media_urls'][0], '/files/sms_media/')

@@ -474,12 +474,10 @@ class SmsConversation extends Component
             ->filter()
             ->values();
 
-        // Only synthesize a checklist from the raw message for single-task
-        // messages. When the message was split into multiple tasks, the extra
-        // "sentences" are the other tasks and greetings, not checklist items.
-        if ($checklistItems->isEmpty() && empty($extracted['additional_tasks'])) {
-            $checklistItems = collect($this->fallbackChecklistFromMessage($text, (string) ($extracted['title'] ?? '')));
-        }
+        // The checklist holds only the to-dos the extractor names. The raw
+        // message is never split into it: its sentences ("Hey Patryk, hope
+        // things have been going well") showed on the sub's page as tasks
+        // (2026-10-15). The message itself is kept as the task's notes.
 
         $smsImageUrls = $this->imagesForTaskFromMessage($message);
 
@@ -635,39 +633,6 @@ class SmsConversation extends Component
             ->unique()
             ->values()
             ->all();
-    }
-
-    /**
-     * Build simple checklist rows from multi-sentence issue reports when AI
-     * does not return checklist items.
-     *
-     * @return array<int, string>
-     */
-    protected function fallbackChecklistFromMessage(string $text, string $title): array
-    {
-        $sentences = preg_split('/[\.!?\n]+/', $text) ?: [];
-        $titleNeedle = Str::lower(trim($title));
-
-        $items = collect($sentences)
-            ->map(fn (string $sentence) => trim($sentence))
-            ->filter(fn (string $sentence) => mb_strlen($sentence) >= 12)
-            ->map(function (string $sentence): string {
-                $sentence = preg_replace('/^\s*(also|and|plus)\b[\s,:-]*/i', '', $sentence) ?? $sentence;
-                $sentence = preg_replace('/^\s*as\s+i\s+indicated\b[\s,:-]*/i', '', $sentence) ?? $sentence;
-
-                return ucfirst(trim($sentence));
-            })
-            ->filter(function (string $sentence) use ($titleNeedle): bool {
-                if ($titleNeedle === '') {
-                    return true;
-                }
-
-                return ! Str::contains(Str::lower($sentence), $titleNeedle);
-            })
-            ->unique()
-            ->values();
-
-        return $items->take(5)->all();
     }
 
     /**
