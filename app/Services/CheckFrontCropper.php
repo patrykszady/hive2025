@@ -31,6 +31,13 @@ class CheckFrontCropper
 
     public const PAD_INCHES = 0.05;
 
+    /**
+     * A check front is about 2.2 times as wide as it is tall. A block taller
+     * than width / this is the front with the back run into it (check 2627's
+     * PDF has no white gap between them), and is cut at the front's bottom edge.
+     */
+    public const MAX_FRONT_HEIGHT_RATIO = 1.6;
+
     public function __construct(protected PdfText $pdfText) {}
 
     /**
@@ -105,17 +112,11 @@ class CheckFrontCropper
             return null;
         }
         [$top, $bottom] = $front;
+        [$left, $right] = $this->inkColumns($inked, $width, $top, $bottom);
 
-        $left = $width;
-        $right = 0;
-        for ($x = 0; $x < $width; $x++) {
-            for ($y = $top; $y <= $bottom; $y += 2) {
-                if ($inked($x, $y)) {
-                    $left = min($left, $x);
-                    $right = max($right, $x);
-                    break;
-                }
-            }
+        if (($bottom - $top) * self::MAX_FRONT_HEIGHT_RATIO > ($right - $left)) {
+            $bottom = $this->frontBottomEdge($inked, $top, $bottom, $left, $right);
+            [$left, $right] = $this->inkColumns($inked, $width, $top, $bottom);
         }
 
         $pad = (int) (self::PAD_INCHES * self::DPI);
@@ -131,6 +132,70 @@ class CheckFrontCropper
         imagepng($crop);
 
         return (string) ob_get_clean();
+    }
+
+    /**
+     * The first and last columns with ink between two rows.
+     *
+     * @return array{0: int, 1: int}
+     */
+    protected function inkColumns(\Closure $inked, int $width, int $top, int $bottom): array
+    {
+        $left = $width;
+        $right = 0;
+        for ($x = 0; $x < $width; $x++) {
+            for ($y = $top; $y <= $bottom; $y += 2) {
+                if ($inked($x, $y)) {
+                    $left = min($left, $x);
+                    $right = max($right, $x);
+                    break;
+                }
+            }
+        }
+
+        return [$left, $right];
+    }
+
+    /**
+     * Where the front ends inside a block that also holds the back: the last
+     * long horizontal line (the check's frame, over 55% of its width) in the
+     * band a check's bottom edge falls in, else the emptiest row of that band.
+     */
+    protected function frontBottomEdge(\Closure $inked, int $top, int $bottom, int $left, int $right): int
+    {
+        $span = max(1, $right - $left);
+        $from = $top + (int) ($span / 3.2);
+        $to = min($bottom, $top + (int) ($span / 1.7));
+        $lastLine = null;
+        $emptiest = null;
+        $fewest = PHP_INT_MAX;
+
+        for ($y = $from; $y <= $to; $y++) {
+            $longest = 0;
+            $run = 0;
+            $gap = 0;
+            $count = 0;
+            for ($x = $left; $x <= $right; $x++) {
+                if ($inked($x, $y)) {
+                    $count++;
+                    $run += 1 + $gap;
+                    $gap = 0;
+                    $longest = max($longest, $run);
+                } elseif ($run > 0 && ++$gap > 3) {
+                    $run = 0;
+                    $gap = 0;
+                }
+            }
+            if ($longest > 0.55 * $span) {
+                $lastLine = $y;
+            }
+            if ($count < $fewest) {
+                $fewest = $count;
+                $emptiest = $y;
+            }
+        }
+
+        return $lastLine ?? $emptiest ?? $to;
     }
 
     /**

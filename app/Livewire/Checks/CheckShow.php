@@ -142,10 +142,16 @@ class CheckShow extends Component
         );
     }
 
-    /** The browser finished sending the file to Livewire's temporary upload. */
+    /**
+     * The browser finished sending the file to Livewire's temporary upload.
+     * No re-render: re-drawing the page closed the upload modal before the
+     * Upload button could be pressed (check 3946, 2026-10-16). The modal's
+     * progress and messages run in the browser.
+     */
     public function updatedCheckImageFile(): void
     {
         Log::channel('check_images')->info('Check image file received', $this->checkImageContext());
+        $this->skipRender();
     }
 
     /**

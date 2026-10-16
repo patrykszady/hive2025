@@ -23,14 +23,14 @@ uses(RefreshDatabase::class);
 // =========================================================================
 
 /** A PDF laid out like Citibank's check image download, drawn with Ghostscript. */
-function citiCheckPdf(bool $withCheck = true): string
+function citiCheckPdf(bool $withCheck = true, bool $backTouchesFront = false): string
 {
     $ps = "/Helvetica findfont 10 scalefont setfont\n"
         ."72 740 moveto (Account     Check #     Post Date     Amount) show\n"
         ."72 720 moveto (Business Checking-4903   2470   Sep 02, 2025   -\$2,700.00) show\n"
         .($withCheck
             ? "2 setlinewidth 60 430 490 220 rectstroke\n80 600 moveto (GS CONSTRUCTION AND REMODELING) show\n"
-                ."60 180 490 220 rectstroke\n"
+                .($backTouchesFront ? "60 208 490 220 rectstroke\n" : "60 180 490 220 rectstroke\n")
             : '')
         ."72 150 moveto (Security Tip: Check Image files may be automatically saved) show\nshowpage\n";
     $psFile = tempnam(sys_get_temp_dir(), 'ps');
@@ -209,4 +209,23 @@ it('logs and shows why an upload was refused, and logs an upload that never reac
         ->toContain('HEIC')
         ->toContain('Check image upload did not reach the server')
         ->and(CheckImage::where('check_id', $check->id)->count())->toBe(0);
+});
+
+it('keeps the upload modal open when the file arrives: the page is not re-drawn until Upload is pressed', function () {
+    $check = uploadableCheck();
+
+    $page = Livewire::test(CheckShow::class, ['check' => $check])
+        ->set('checkImageFile', UploadedFile::fake()->createWithContent('2627 41.79.pdf', citiCheckPdf()));
+
+    // A re-render would carry new HTML and reset the open modal.
+    expect($page->effects['html'] ?? null)->toBeNull();
+});
+
+it('cuts the front off a back that runs straight into it, as in check 2627\'s PDF', function () {
+    $result = app(CheckFrontCropper::class)->fromPdf(citiCheckPdf(backTouchesFront: true));
+    $front = imagecreatefromstring($result['png']);
+
+    // Same 490 x 220 point front as the gapped layout, with the back left off.
+    expect(imagesx($front))->toBeGreaterThan(1350)->toBeLessThan(1420)
+        ->and(imagesy($front))->toBeGreaterThan(600)->toBeLessThan(660);
 });
