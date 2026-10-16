@@ -565,3 +565,42 @@ it('shows a vendor-specific registration cta at the bottom for guests', function
         ->assertSee('Register')
         ->assertSee('Login');
 });
+
+it('shows Waiting for homeowner, not Set Dates, on a service call the homeowner has not picked times for', function (int $statusCode) {
+    $ownerVendor = Vendor::factory()->create(['business_name' => 'GS Construction', 'short_name' => 'GS', 'options' => '{}']);
+    $subjectVendor = Vendor::factory()->create(['business_name' => 'RG Tile', 'short_name' => 'RT', 'availability_token' => 'test-vendor-token-waiting', 'options' => '{}']);
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Tile Repair Project', 'client_id' => Client::factory()->create()->id,
+        'address' => '104 North Plum Grove Road', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+    \App\Models\ProjectStatus::withoutGlobalScopes()->where('project_id', $project->id)->delete();
+    \App\Models\ProjectStatus::create(['project_id' => $project->id, 'belongs_to_vendor_id' => $ownerVendor->id, 'status_code' => $statusCode, 'start_date' => now()]);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Tile Repair', 'type' => 'task', 'order' => 1, 'project_id' => $project->id,
+        'vendor_id' => $subjectVendor->id, 'belongs_to_vendor_id' => $ownerVendor->id, 'created_by_user_id' => 1, 'vendor_status' => null,
+    ]));
+
+    Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
+        ->assertSee('Tile Repair')
+        ->assertSee('Waiting for homeowner')
+        ->assertDontSee('Set Dates / Schedule')
+        ->call('openProposeDatesModal', $task->id)
+        ->assertSet('proposingTaskId', null);
+
+    // Once the homeowner submits times that cover the task, the sub can schedule it.
+    $project->forceFill(['service_availability' => [
+        'slots' => [['date' => now()->addDays(3)->toDateString(), 'time' => 'Anytime']],
+        'submitted_at' => now()->toIso8601String(),
+        'task_ids' => [$task->id],
+    ]])->saveQuietly();
+
+    Livewire::test(AvailabilityIndex::class, ['token' => $subjectVendor->availability_token])
+        ->assertSee('Set Dates / Schedule')
+        ->assertDontSee('Waiting for homeowner')
+        ->call('openProposeDatesModal', $task->id)
+        ->assertSet('proposingTaskId', $task->id);
+})->with([
+    'a Service Call project' => [8],
+    'leftover work on a Complete project (RG Tile\'s tile repair)' => [7],
+]);

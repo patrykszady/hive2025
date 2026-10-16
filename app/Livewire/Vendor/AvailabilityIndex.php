@@ -304,6 +304,25 @@ class AvailabilityIndex extends Component
     /**
      * Open the date proposal modal for a task.
      */
+    /**
+     * An undated service call the homeowner has not picked times for yet: the
+     * sub sees "Waiting for homeowner" and cannot set dates (2026-10-15). A
+     * service call is what the card badges as one: a Service Call project
+     * (status 8) or leftover work on a Complete one (status 7) — RG Tile's
+     * tile repair sat on a Complete project. Regular jobs never wait here.
+     */
+    public static function waitingForHomeowner(Task $task): bool
+    {
+        if (! empty($task->start_date)) {
+            return false;
+        }
+        if (! in_array((int) ($task->project?->latestStatus?->status_code ?? 0), [7, 8], true)) {
+            return false;
+        }
+
+        return ! $task->projectHasHomeownerPreferredTimes() || ! $task->coveredByHomeownerPreferredTimes();
+    }
+
     public function openProposeDatesModal(int $taskId): void
     {
         $task = Task::where('id', $taskId)
@@ -317,7 +336,7 @@ class AvailabilityIndex extends Component
             })
             ->first();
 
-        if (! $task) {
+        if (! $task || self::waitingForHomeowner($task)) {
             return;
         }
 
@@ -421,7 +440,7 @@ class AvailabilityIndex extends Component
             })
             ->first();
 
-        if (! $task) {
+        if (! $task || self::waitingForHomeowner($task)) {
             Flux::toast(
                 text: 'Task not found or already responded.',
                 variant: 'danger',

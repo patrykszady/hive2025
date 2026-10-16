@@ -215,8 +215,15 @@
                                             <x-schedule.task-meta :task="$task" />
                                         </div>
 
-                                        {{-- Footer action --}}
+                                        {{-- Footer action. A Service Call the homeowner has not
+                                             picked times for yet waits on them, not on the sub. --}}
                                         <div class="flex border-t border-zinc-200 dark:border-zinc-700">
+                                            @if(\App\Livewire\Vendor\AvailabilityIndex::waitingForHomeowner($task))
+                                                <div class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-amber-700 dark:text-amber-400">
+                                                    <flux:icon.clock class="size-5" />
+                                                    Waiting for homeowner
+                                                </div>
+                                            @else
                                             <button
                                                 wire:click="openProposeDatesModal({{ $task->id }})"
                                                 wire:loading.attr="disabled"
@@ -227,6 +234,7 @@
                                                 <flux:icon.calendar class="size-5" />
                                                 Set Dates / Schedule
                                             </button>
+                                            @endif
                                         </div>
                                     </div>
                                 @endforeach
