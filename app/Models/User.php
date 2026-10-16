@@ -219,7 +219,7 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
 
     public function clients(): BelongsToMany
     {
-        return $this->belongsToMany(Client::class)->withTimestamps();
+        return $this->belongsToMany(Client::class)->using(ClientUser::class)->withTimestamps();
     }
 
     public function timesheets(): HasMany

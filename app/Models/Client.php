@@ -139,7 +139,7 @@ class Client extends Model
 
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class)->withTimestamps();
+        return $this->belongsToMany(User::class)->using(ClientUser::class)->withTimestamps();
     }
 
     public function vendor(): BelongsTo
@@ -177,6 +177,21 @@ class Client extends Model
     public static function bustDropdownCache(): void
     {
         \Illuminate\Support\Facades\Cache::forget(static::dropdownCacheKey());
+    }
+
+    /**
+     * Forget the cached list of every company this client belongs to, not
+     * only the signed-in user's: people are added to clients from jobs and
+     * lead intake too, where nobody is signed in.
+     */
+    public static function bustDropdownCacheForClient(int $clientId): void
+    {
+        static::bustDropdownCache();
+
+        $vendorIds = static::withoutGlobalScopes()->find($clientId)?->vendors()->withoutGlobalScopes()->pluck('vendors.id') ?? collect();
+        foreach ($vendorIds as $vendorId) {
+            \Illuminate\Support\Facades\Cache::forget("clients:dropdown:v{$vendorId}");
+        }
     }
 
     /**
