@@ -61,6 +61,14 @@ class CardsIndex extends Component
         'month' => 32,
     ];
 
+    /**
+     * Free-text search over every view: a project matching by address, client
+     * or project name keeps all its tasks; otherwise only the tasks whose
+     * title or vendor match stay (see activeProjects).
+     */
+    #[Url(as: 'q', except: '')]
+    public string $search = '';
+
     // Filter properties
     public array $filterProjectIds = [];
     public ?int $filterVendorId = null;
@@ -172,7 +180,7 @@ class CardsIndex extends Component
      */
     protected function rememberedFilters(): array
     {
-        return ['viewMode', 'onlyMine', 'ganttZoom', 'filterDateRange', 'filterProjectIds', 'filterVendorId', 'filterUserIds', 'filterStatusCodes'];
+        return ['viewMode', 'search', 'onlyMine', 'ganttZoom', 'filterDateRange', 'filterProjectIds', 'filterVendorId', 'filterUserIds', 'filterStatusCodes'];
     }
 
     public function mount()
@@ -274,6 +282,7 @@ class CardsIndex extends Component
      */
     public function clearFilters()
     {
+        $this->search = '';
         $this->filterProjectIds = [];
         $this->filterVendorId = null;
         $this->filterUserIds = [];
@@ -291,7 +300,8 @@ class CardsIndex extends Component
         $statusCodes = $this->filterStatusCodes;
         sort($statusCodes);
 
-        return !empty($this->filterProjectIds)
+        return trim($this->search) !== ''
+            || !empty($this->filterProjectIds)
             || $this->filterVendorId !== null
             || !empty($this->filterUserIds)
             || $statusCodes !== self::DEFAULT_STATUS_CODES
@@ -668,6 +678,99 @@ class CardsIndex extends Component
     }
 
     /**
+     * Move a scheduled task's card from one day to another (dragging it in
+     * the Week view). A task listing its days moves just that day — "Drywall
+     * 4/5" dragged to Thursday — and keeps that day's arrival time; a task
+     * spanning a plain start-to-end range shifts whole, the same number of
+     * days. Siblings may not overlap, as with every other date change.
+     */
+    public function moveTaskDay(int $taskId, string $fromDate, string $toDate): void
+    {
+        $task = $this->visibleTask($taskId);
+
+        if (! $task || $task->trashed() || $fromDate === $toDate) {
+            return;
+        }
+
+        try {
+            $from = Carbon::createFromFormat('!Y-m-d', $fromDate);
+            $to = Carbon::createFromFormat('!Y-m-d', $toDate);
+        } catch (\Throwable) {
+            return;
+        }
+
+        if ($from->format('Y-m-d') !== $fromDate || $to->format('Y-m-d') !== $toDate) {
+            return;
+        }
+
+        $options = json_decode(json_encode($task->options ?? []), true) ?: [];
+        $dates = collect((array) ($options['dates'] ?? []))->filter()->map(fn ($date): string => (string) $date)->values();
+
+        if ($dates->isEmpty()) {
+            // A plain range keeps its own weekend rules, so it shifts by its
+            // start and end rather than becoming a list of days.
+            [$first, $last] = $this->taskPlannerDates($task);
+
+            if ($first === null) {
+                return;
+            }
+
+            $shift = (int) $from->diffInDays($to, false);
+            $start = Carbon::parse($first)->addDays($shift);
+            $end = Carbon::parse($last ?? $first)->addDays($shift);
+
+            if ($task->wouldOverlapWithSiblings($start, $end)) {
+                Flux::toast(duration: 4000, position: 'top right', variant: 'danger', heading: 'Cannot move task', text: 'This would overlap with a sibling task.');
+
+                return;
+            }
+
+            $task->update(['start_date' => $start->format('Y-m-d'), 'end_date' => $end->format('Y-m-d')]);
+            Flux::toast(duration: 2500, position: 'top right', variant: 'success', heading: 'Moved', text: $task->title.' · '.$to->format('D, M j'));
+
+            return;
+        }
+
+        if (! $dates->contains($fromDate)) {
+            return;
+        }
+
+        if ($dates->contains($toDate)) {
+            Flux::toast(duration: 3000, position: 'top right', variant: 'warning', heading: 'Already that day', text: $task->title.' is already on '.$to->format('D, M j').'.');
+
+            return;
+        }
+
+        $dates = $dates->map(fn (string $date): string => $date === $fromDate ? $toDate : $date);
+
+        // The day's arrival time travels with it.
+        if (isset($options['time_settings'][$fromDate])) {
+            $options['time_settings'][$toDate] = $options['time_settings'][$fromDate];
+            unset($options['time_settings'][$fromDate]);
+        }
+
+        $dates = $dates->unique()->sort()->values();
+        $start = Carbon::parse($dates->first());
+        $end = Carbon::parse($dates->last());
+
+        if ($task->wouldOverlapWithSiblings($start, $end)) {
+            Flux::toast(duration: 4000, position: 'top right', variant: 'danger', heading: 'Cannot move task', text: 'This would overlap with a sibling task.');
+
+            return;
+        }
+
+        $options['dates'] = $dates->all();
+
+        $task->update([
+            'start_date' => $start->format('Y-m-d'),
+            'end_date' => $end->format('Y-m-d'),
+            'options' => $options,
+        ]);
+
+        Flux::toast(duration: 2500, position: 'top right', variant: 'success', heading: 'Moved', text: $task->title.' · '.$to->format('D, M j'));
+    }
+
+    /**
      * Get active projects with their tasks
      */
     #[Computed]
@@ -750,6 +853,8 @@ class CardsIndex extends Component
                 fn (Task $task) => $task->setRelation('project', $project)
             ));
 
+        $projects = $this->applySearch($projects);
+
         // One activity-log query for every visible card's previous-arrival
         // lookup instead of one per card.
         $allTasks = $projects->flatMap(fn (Project $p) => $p->tasks);
@@ -772,7 +877,72 @@ class CardsIndex extends Component
     }
 
     /**
-     * Get kanban data - days with all active projects showing tasks for each day
+     * Narrow the planner to the search text, in PHP over the projects already
+     * loaded (a few dozen): a project whose address, client or project name
+     * matches keeps every task; otherwise only its tasks whose title or vendor
+     * match stay, and a project left with none drops out.
+     *
+     * @param  Collection<int, Project>  $projects
+     * @return Collection<int, Project>
+     */
+    protected function applySearch(Collection $projects): Collection
+    {
+        $needle = mb_strtolower(trim($this->search));
+
+        if ($needle === '') {
+            return $projects;
+        }
+
+        $matches = fn (?string $haystack): bool => $haystack !== null && str_contains(mb_strtolower($haystack), $needle);
+
+        return $projects
+            ->filter(function (Project $project) use ($matches): bool {
+                if ($matches($project->address) || $matches($project->short_address) || $matches($project->project_name)
+                    || $matches($project->client?->last_names) || $matches($project->client?->business_name)) {
+                    return true;
+                }
+
+                $tasks = $project->tasks->filter(fn (Task $task): bool => $matches($task->title) || $matches($task->vendor?->name));
+                $project->setRelation('tasks', $tasks->values());
+
+                return $tasks->isNotEmpty();
+            })
+            ->values();
+    }
+
+    /** Tasks of a project with no date at all (still to schedule). */
+    protected function undatedTaskCount(Project $project): int
+    {
+        return $project->tasks->filter(function ($task) {
+            $selectedDates = $task->options->dates ?? [];
+
+            return empty($selectedDates) && ! $task->start_date && ! $task->end_date;
+        })->count();
+    }
+
+    /**
+     * The Board's first column: projects with tasks still to schedule or open
+     * to-dos from their calls and texts, in planner order.
+     *
+     * @return Collection<int, object{project: Project, undated: int, actions: int}>
+     */
+    #[Computed]
+    public function boardBacklog(): Collection
+    {
+        $actionCounts = $this->actionItemCounts;
+
+        return $this->activeProjects
+            ->map(fn (Project $project): object => (object) [
+                'project' => $project,
+                'undated' => $this->undatedTaskCount($project),
+                'actions' => (int) ($actionCounts[(int) $project->id] ?? 0),
+            ])
+            ->filter(fn (object $row): bool => $row->undated > 0 || $row->actions > 0)
+            ->values();
+    }
+
+    /**
+     * Get kanban data - each day with the projects that have tasks that day
      */
     #[Computed]
     public function kanbanColumns()
@@ -785,11 +955,7 @@ class CardsIndex extends Component
         // once per project PER DAY COLUMN (the grid is days x projects, so
         // this ran 7-14x more often than it needed to).
         $undatedCounts = $this->activeProjects->mapWithKeys(fn (Project $project) => [
-            $project->id => $project->tasks->filter(function ($task) {
-                $selectedDates = $task->options->dates ?? [];
-
-                return empty($selectedDates) && !$task->start_date && !$task->end_date;
-            })->count(),
+            $project->id => $this->undatedTaskCount($project),
         ]);
 
         $taskDates = $this->taskDateFacts();
@@ -859,27 +1025,25 @@ class CardsIndex extends Component
                     return $hasTime ? '0_' . $startTime : '1';
                 })->values();
 
-                // Calculate next/last task info for this project relative to this specific day
-                $taskGapInfo = null;
-                if ($dayTasks->isEmpty()) {
-                    $taskGapInfo = $this->calculateTaskGapInfo($project, $day);
-                }
-
-                // Return project with tasks (even if no tasks for this day)
                 return (object) [
                     'id' => $project->id,
                     'title' => $project->short_address,
                     'project' => $project,
                     'cards' => $dayTasks,
                     'undated_tasks_count' => $undatedTasksCount,
-                    'task_gap_info' => $taskGapInfo,
                 ];
-            });
-            // Note: No longer filtering here - all projects stay to maintain grid alignment
+            })
+                // A day lists only the projects with work that day. Every
+                // project used to repeat in every column, greyed out where it
+                // had nothing, to keep rows aligned across days (2026-10-16);
+                // the pending tasks moved to the "To schedule" column.
+                ->filter(fn (object $column): bool => $column->cards->isNotEmpty())
+                ->values();
 
             return (object) [
                 'day' => $day,
                 'dayIndex' => $dayIndex,
+                'taskCount' => $projectColumns->sum(fn (object $column): int => $column->cards->count()),
                 'title' => $day->format('D, M j'),
                 'isToday' => $day->isSameDay($today),
                 'isTomorrow' => $day->isSameDay($tomorrow),

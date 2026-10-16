@@ -1,7 +1,9 @@
 {{-- The Week view (default since 2026-10-01): this week and next, one day
      per row with its tasks grouped by project, and the "To schedule" tray
      beside it. A tray task is booked by dragging it onto a day or from its
-     date menu (CardsIndex::scheduleTask); clicking any task opens it. --}}
+     date menu (CardsIndex::scheduleTask); a scheduled card is dragged to
+     another day to move it (CardsIndex::moveTaskDay); clicking any task
+     opens it. --}}
 @php
     $agendaDays = $this->agendaDays;
     $toSchedule = $this->toScheduleByProject;
@@ -35,9 +37,15 @@
                     </flux:text>
                 </div>
                 <div class="flex items-center gap-1 shrink-0">
-                    <flux:button wire:click="agendaPreviousWeek" size="sm" variant="ghost" icon="chevron-left" aria-label="Previous week" />
-                    <flux:button wire:click="agendaThisWeek" size="sm" :variant="$isThisWeek ? 'filled' : 'outline'">This week</flux:button>
-                    <flux:button wire:click="agendaNextWeek" size="sm" variant="ghost" icon="chevron-right" aria-label="Next week" />
+                    <flux:tooltip content="Previous week" kbd="←" position="bottom">
+                        <flux:button wire:click="agendaPreviousWeek" size="sm" variant="ghost" icon="chevron-left" aria-label="Previous week" />
+                    </flux:tooltip>
+                    <flux:tooltip content="Back to this week" kbd="T" position="bottom">
+                        <flux:button wire:click="agendaThisWeek" size="sm" :variant="$isThisWeek ? 'filled' : 'outline'">This week</flux:button>
+                    </flux:tooltip>
+                    <flux:tooltip content="Next week" kbd="→" position="bottom">
+                        <flux:button wire:click="agendaNextWeek" size="sm" variant="ghost" icon="chevron-right" aria-label="Next week" />
+                    </flux:tooltip>
                 </div>
             </div>
 
@@ -106,15 +114,19 @@
                                                         @foreach ($group['tasks'] as $task)
                                                             <flux:kanban.card
                                                                 as="button"
-                                                                class="min-w-0 w-full text-left {{ $task->trashed() ? 'opacity-50' : '' }}"
+                                                                class="min-w-0 w-full text-left {{ $task->trashed() ? 'opacity-50' : 'cursor-grab active:cursor-grabbing' }}"
                                                                 wire:key="agenda-{{ $day['date'] }}-task-{{ $task->id }}"
                                                                 wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
+                                                                draggable="{{ $task->trashed() ? 'false' : 'true' }}"
+                                                                x-on:dragstart="startMove($event, {{ $task->id }}, '{{ $day['date'] }}')"
+                                                                x-bind:class="dragging === {{ $task->id }} && moveFrom === '{{ $day['date'] }}' ? 'opacity-40' : ''"
                                                             >
                                                                 @include('components.upcoming-tasks-list-card-content', [
                                                                     'task' => $task,
                                                                     'date' => $day['date'],
                                                                     'taskUsers' => $task->users,
                                                                     'isWeekend' => $day['isWeekend'],
+                                                                    'compact' => true,
                                                                 ])
                                                             </flux:kanban.card>
                                                         @endforeach
@@ -126,7 +138,7 @@
                                         <div class="text-sm text-zinc-400 dark:text-zinc-500 pt-0.5" x-show="over !== '{{ $day['date'] }}'">Nothing scheduled</div>
                                     @endif
                                     <div class="text-sm font-medium text-indigo-700 dark:text-indigo-300 pt-0.5" x-show="over === '{{ $day['date'] }}'" style="display: none;">
-                                        Drop to schedule on {{ $day['carbon']->format('D, M j') }}
+                                        <span x-text="moveFrom ? 'Drop to move to' : 'Drop to schedule on'">Drop to schedule on</span> {{ $day['carbon']->format('D, M j') }}
                                     </div>
                                 </div>
 

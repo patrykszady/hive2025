@@ -58,32 +58,37 @@
     />
 </div>
 
-<div class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-    {{ $project->client->last_names ?? '' }}{{ $project->project_name ? ' | ' . $project->project_name : '' }}
-</div>
-
-@if (($showPending && $undatedCount > 0) || ($showActions && $actionCount > 0))
-<div class="flex flex-wrap items-center gap-1">
+{{-- Two lines, never three: the client on the left, the two counts as
+     icon chips on the right (their meaning in the tooltip). The third line of
+     "1 pending · 93 from calls & texts" overflowed the timeline's rows. --}}
+<div class="flex items-center gap-1.5 min-w-0">
+    <div class="flex-1 min-w-0 text-xs text-zinc-500 dark:text-zinc-400 truncate">
+        {{ $project->client->last_names ?? '' }}{{ $project->project_name ? ' | ' . $project->project_name : '' }}
+    </div>
     @if ($showPending && $undatedCount > 0)
-        <button
-            type="button"
-            x-on:click="window.dispatchEvent(new CustomEvent('open-undated-tasks', { detail: { projectId: {{ (int) $projectId }} } }))"
-            class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
-        >
-            {{ $undatedCount }} pending
-        </button>
+        <flux:tooltip :content="$undatedCount . ' ' . \Illuminate\Support\Str::plural('task', $undatedCount) . ' to schedule'" position="top">
+            <button
+                type="button"
+                x-on:click="window.dispatchEvent(new CustomEvent('open-undated-tasks', { detail: { projectId: {{ (int) $projectId }} } }))"
+                class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium tabular-nums rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
+                aria-label="{{ $undatedCount }} {{ \Illuminate\Support\Str::plural('task', $undatedCount) }} to schedule"
+            >
+                <flux:icon.calendar variant="micro" class="size-3" />{{ $undatedCount }}
+            </button>
+        </flux:tooltip>
     @endif
     @if ($showActions && $actionCount > 0)
         {{-- What the client's calls and texts asked for (ProjectActionItem). --}}
-        <button
-            type="button"
-            x-on:click="window.dispatchEvent(new CustomEvent('open-action-items', { detail: { projectId: {{ (int) $projectId }} } }))"
-            class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:hover:bg-sky-900/50 transition-colors"
-            title="Action items from calls and texts"
-        >
-            {{ $actionCount }} from calls &amp; texts
-        </button>
+        <flux:tooltip :content="$actionCount . ' ' . \Illuminate\Support\Str::plural('to-do', $actionCount) . ' from calls & texts'" position="top">
+            <button
+                type="button"
+                x-on:click="window.dispatchEvent(new CustomEvent('open-action-items', { detail: { projectId: {{ (int) $projectId }} } }))"
+                class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium tabular-nums rounded-md bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:hover:bg-sky-900/50 transition-colors"
+                aria-label="{{ $actionCount }} {{ \Illuminate\Support\Str::plural('to-do', $actionCount) }} from calls and texts"
+            >
+                <flux:icon.chat-bubble-left-right variant="micro" class="size-3" />{{ $actionCount }}
+            </button>
+        </flux:tooltip>
     @endif
 </div>
-@endif
 </div>

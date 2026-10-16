@@ -1,15 +1,28 @@
-@php
-    $firstDayIsWeekend = (bool) data_get($kanbanColumns->first(), 'isWeekend', false);
-@endphp
-
-<div class="flex flex-col h-full min-h-0">
+{{-- Keyboard: N new task, T today, ← / → a week back or on, / search
+     (plannerKeys; ignored while typing or with a modal open). --}}
+<div class="flex flex-col h-full min-h-0" x-data="plannerKeys()" x-on:keydown.window="onKey($event)">
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden bg-zinc-100 dark:bg-zinc-800">
         {{-- Top toolbar: filters (left) + view controls (right) --}}
         <div class="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
-        {{-- Desktop filters (wrap onto a second row rather than scroll out of sight) --}}
-        <div class="hidden lg:flex flex-wrap items-center gap-2 flex-1 min-w-0">
-            {{-- Filters (hidden in list view — they live inside the table column headers) --}}
-            @if($viewMode !== 'list')
+        {{-- Desktop filters: search first, then the same four filters on every
+             view (List included — they used to hide in its column headers; its
+             Due window sits on the list itself),
+             each sized to fit its label and clearable on its own, then Mine and
+             Clear all. One row at 1440px; it wraps rather than scroll away. --}}
+        <div class="hidden lg:flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+            {{-- Fixed wrapper: flux:input's own class lands on the <input>,
+                 and its wrapper would otherwise stretch across the row. --}}
+            <div class="w-36 shrink-0" title="Search (/)">
+                <flux:input
+                    wire:model.live.debounce.300ms="search"
+                    size="sm"
+                    icon="magnifying-glass"
+                    placeholder="Search…"
+                    clearable
+                    aria-label="Search the planner"
+                />
+            </div>
+
             {{-- Project Filter (Multi-select) --}}
             <flux:select
                 wire:model.live.debounce.400ms="filterProjectIds"
@@ -19,8 +32,10 @@
                 variant="listbox"
                 searchable
                 multiple
+                clearable
                 size="sm"
-                class="w-auto max-w-52 min-w-40"
+                class="w-32 shrink-0"
+                options:class="min-w-72"
             >
                 @foreach($projects as $project)
                     <flux:select.option value="{{ $project->id }}">
@@ -44,36 +59,16 @@
                 selected-suffix="statuses"
                 variant="listbox"
                 multiple
+                clearable
                 size="sm"
-                class="w-auto max-w-52 min-w-40"
+                class="w-48 shrink-0"
+                options:class="min-w-48"
             >
                 @foreach($this->statusOptions as $status)
                     <flux:select.option value="{{ $status['code'] }}">
                         <flux:badge size="sm" inset="top bottom" :color="$status['color']">
                             {{ $status['label'] }}
                         </flux:badge>
-                    </flux:select.option>
-                @endforeach
-            </flux:select>
-
-            {{-- Vendor Filter (with avatars) --}}
-            <flux:select
-                wire:model.live.debounce.400ms="filterVendorId"
-                placeholder="All"
-                prefix="Vendor"
-                variant="listbox"
-                searchable
-                clearable
-                size="sm"
-                class="w-auto max-w-52 min-w-40"
-                options:class="min-w-64"
-            >
-                @foreach($vendors as $vendor)
-                    <flux:select.option value="{{ $vendor->id }}">
-                        <div class="flex items-center gap-2 whitespace-nowrap">
-                            <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
-                            {{ $vendor->name }}
-                        </div>
                     </flux:select.option>
                 @endforeach
             </flux:select>
@@ -87,8 +82,10 @@
                 variant="listbox"
                 searchable
                 multiple
+                clearable
                 size="sm"
-                class="w-auto max-w-52 min-w-40"
+                class="w-28 shrink-0"
+                options:class="min-w-64"
             >
                 @foreach($employees as $employee)
                     <flux:select.option value="{{ $employee->id }}">
@@ -99,7 +96,28 @@
                     </flux:select.option>
                 @endforeach
             </flux:select>
-            @endif
+
+            {{-- Vendor Filter (with avatars) --}}
+            <flux:select
+                wire:model.live.debounce.400ms="filterVendorId"
+                placeholder="All"
+                prefix="Vendor"
+                variant="listbox"
+                searchable
+                clearable
+                size="sm"
+                class="w-32 shrink-0"
+                options:class="min-w-64"
+            >
+                @foreach($vendors as $vendor)
+                    <flux:select.option value="{{ $vendor->id }}">
+                        <div class="flex items-center gap-2 whitespace-nowrap">
+                            <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
+                            {{ $vendor->name }}
+                        </div>
+                    </flux:select.option>
+                @endforeach
+            </flux:select>
 
             {{-- Only my own tasks (my name is on them) — works in every view. --}}
             <flux:button
@@ -113,16 +131,18 @@
                 Mine
             </flux:button>
 
-            {{-- Clear Filters Button --}}
             @if($this->hasActiveFilters)
-                <flux:button
-                    wire:click="clearFilters"
-                    variant="subtle"
-                    size="sm"
-                    icon="x-mark"
-                >
-                    Clear Filters
-                </flux:button>
+                <flux:tooltip content="Clear all filters" position="bottom">
+                    <flux:button
+                        wire:click="clearFilters"
+                        variant="subtle"
+                        size="sm"
+                        square
+                        icon="x-mark"
+                        class="shrink-0"
+                        aria-label="Clear all filters"
+                    />
+                </flux:tooltip>
             @endif
         </div>
 
@@ -145,14 +165,19 @@
         <div class="flex items-center gap-2 shrink-0 ml-auto">
         {{-- New task, from anywhere on the page --}}
         <div class="hidden lg:block shrink-0">
-            <flux:button
-                wire:click="$dispatchTo('tasks.task-create', 'addTask', {})"
-                variant="primary"
-                size="sm"
-                icon="plus"
-            >
-                New task
-            </flux:button>
+            {{-- Words on the widest screens, the + below (one toolbar row at 1440px). --}}
+            <flux:tooltip content="New task" kbd="N" position="bottom">
+                <flux:button
+                    wire:click="$dispatchTo('tasks.task-create', 'addTask', {})"
+                    variant="primary"
+                    size="sm"
+                    icon="plus"
+                    class="max-2xl:px-2"
+                >
+                    <span class="hidden 2xl:inline">New task</span>
+                    <span class="sr-only 2xl:hidden">New task</span>
+                </flux:button>
+            </flux:tooltip>
         </div>
 
         {{-- View Toggle (desktop only — mobile uses the agenda view). Words,
@@ -174,11 +199,13 @@
                         variant="subtle"
                         size="sm"
                         :icon="$view['icon']"
-                        :class="$viewMode === $mode ? 'bg-zinc-200/80 dark:bg-zinc-700/80 !text-zinc-900 dark:!text-white' : ''"
+                        :class="'max-2xl:px-2 ' . ($viewMode === $mode ? 'bg-zinc-200/80 dark:bg-zinc-700/80 !text-zinc-900 dark:!text-white' : '')"
                         aria-pressed="{{ $viewMode === $mode ? 'true' : 'false' }}"
                     >
-                        <span class="hidden xl:inline">{{ $view['label'] }}</span>
-                        <span class="sr-only xl:hidden">{{ $view['label'] }}</span>
+                        {{-- Words on the widest screens; below, icons with these
+                             tooltips, so search and every filter fit one row. --}}
+                        <span class="hidden 2xl:inline">{{ $view['label'] }}</span>
+                        <span class="sr-only 2xl:hidden">{{ $view['label'] }}</span>
                     </flux:button>
                 </flux:tooltip>
             @endforeach
@@ -201,6 +228,14 @@
     <flux:modal wire:model="showMobileFilters" name="mobile-filters" class="max-w-sm">
         <div class="space-y-6">
             <flux:heading size="lg">Filters</flux:heading>
+
+            <flux:input
+                wire:model.live.debounce.300ms="search"
+                icon="magnifying-glass"
+                placeholder="Search projects, tasks, vendors…"
+                clearable
+                aria-label="Search the planner"
+            />
 
             {{-- Time Window Filter (list view only) --}}
             @if($viewMode === 'list')
@@ -329,9 +364,15 @@
 
     <!-- Planner Cards - 14 Day Kanban View -->
     @if ($viewMode === 'cards')
+    {{-- Board: a "To schedule" column, then one column per day listing only
+         the projects with work that day (they used to repeat in every column,
+         greyed out where empty, to keep rows aligned — 2026-10-16). The
+         scroll mixin finds days by data-day-index / data-today. --}}
     <div
         x-data="plannerScroll()"
         x-init="init()"
+        x-on:planner-today.window="scrollToToday()"
+        x-on:planner-step.window="stepWeek($event.detail.direction)"
         class="relative flex-1 min-h-0 flex flex-col bg-zinc-100 dark:bg-zinc-800"
     >
         {{-- Loading indicator (left edge) --}}
@@ -356,7 +397,6 @@
             </div>
         </div>
 
-        {{-- Main scrollable area - x-cloak hides via CSS before Alpine loads, x-show + transition reveals after opacity classes are applied --}}
         <div
             x-ref="scrollContainer"
             @scroll.passive="onScroll($event)"
@@ -367,227 +407,120 @@
             x-transition:enter-end="opacity-100"
             class="flex-1 min-h-0 overflow-x-scroll overflow-y-auto"
         >
-            @php
-                $projectCount = $kanbanColumns->first()?->columns->count() ?? 0;
-            @endphp
-            @php
-                // Build a grid that can have a 16px spacer between most days,
-                // but *no* spacer between Saturday and Sunday.
-                $dayColumnIndices = [];
-                $spacerAfterDayColumnIndices = [];
-                $gridTemplateColumns = 'auto ';
+            <div class="flex items-start gap-3 min-w-max p-4">
+                {{-- To schedule: tasks with no date yet, and the to-dos the
+                     clients' calls and texts asked for, per project. --}}
+                @if ($this->boardBacklog->isNotEmpty())
+                    {{-- Pinned at the left while the days scroll under it. --}}
+                    <div wire:key="board-backlog" x-ref="boardBacklog" class="w-72 shrink-0 self-stretch sticky left-0 z-20 -ml-4 -my-4 pl-4 pr-3 py-4 flex flex-col gap-2 bg-zinc-100 dark:bg-zinc-800 border-r border-zinc-200 dark:border-zinc-700">
+                        <div class="sticky top-0 z-10 -mx-1 px-1 pb-1 bg-zinc-100 dark:bg-zinc-800">
+                            <div class="flex items-center gap-2 pt-1">
+                                <flux:heading size="lg" class="whitespace-nowrap">To schedule</flux:heading>
+                                <flux:badge color="amber" size="sm">{{ $this->boardBacklog->sum('undated') }}</flux:badge>
+                            </div>
+                            <flux:text size="sm" class="mt-0.5">Tasks without a date, and asks from calls &amp; texts.</flux:text>
+                        </div>
 
-                $currentGridCol = 2; // col 1 is the left spacer
-                $totalDays = $kanbanColumns->count();
-
-                foreach ($kanbanColumns as $index => $dayData) {
-                    $dayColumnIndices[$index] = $currentGridCol;
-                    $gridTemplateColumns .= 'auto ';
-                    $currentGridCol++;
-
-                    $isLast = ($index === $totalDays - 1);
-                    // Always add a spacer after each day (except the last) so Sat/Sun have spacing,
-                    // while weekend background can still span across the spacer.
-                    $addSpacerAfterThisDay = ! $isLast;
-
-                    if ($addSpacerAfterThisDay) {
-                        $spacerAfterDayColumnIndices[$index] = $currentGridCol;
-                        $gridTemplateColumns .= '1rem '; // matches Tailwind w-4
-                        $currentGridCol++;
-                    }
-                }
-
-                $gridTemplateColumns .= 'auto'; // right spacer
-
-                // Build contiguous weekend runs (typically Sat+Sun)
-                $weekendRuns = [];
-                $runStart = null;
-                foreach ($kanbanColumns as $index => $dayData) {
-                    if ($dayData->isWeekend) {
-                        if ($runStart === null) {
-                            $runStart = $index;
-                        }
-                    } else {
-                        if ($runStart !== null) {
-                            $weekendRuns[] = [$runStart, $index - 1];
-                            $runStart = null;
-                        }
-                    }
-                }
-                if ($runStart !== null) {
-                    $weekendRuns[] = [$runStart, $totalDays - 1];
-                }
-            @endphp
-
-            <div class="grid min-w-max" style="grid-template-columns: {{ $gridTemplateColumns }}; grid-template-rows: auto repeat({{ $projectCount }}, auto);">
-            {{-- Left spacer --}}
-            <div class="w-4 shrink-0 {{ $firstDayIsWeekend ? 'bg-zinc-200 dark:bg-zinc-700' : '' }}" style="grid-column: 1; grid-row: 1 / -1;"></div>
-
-            {{-- Weekend background blocks (full height, behind content) --}}
-            @foreach ($weekendRuns as [$startIndex, $endIndex])
-                @php
-                    $startCol = $dayColumnIndices[$startIndex];
-                    $endColExclusive = $dayColumnIndices[$endIndex] + 1;
-
-                    // If weekend starts at first day, extend background to include left spacer (col 1)
-                    if ($startIndex === 0) {
-                        $startCol = 1;
-                    }
-
-                    // Optional half-width extensions into adjacent spacer columns,
-                    // to match the "bleed" effect from the original layout.
-                    $leftSpacerCol = null;
-                    if ($startIndex > 0 && array_key_exists($startIndex - 1, $spacerAfterDayColumnIndices)) {
-                        $leftSpacerCol = $spacerAfterDayColumnIndices[$startIndex - 1];
-                    }
-                    $rightSpacerCol = null;
-                    if (array_key_exists($endIndex, $spacerAfterDayColumnIndices)) {
-                        $rightSpacerCol = $spacerAfterDayColumnIndices[$endIndex];
-                    }
-                @endphp
-
-                @if ($leftSpacerCol)
-                    <div
-                        aria-hidden="true"
-                        class="pointer-events-none z-0 relative"
-                        style="grid-column: {{ $leftSpacerCol }}; grid-row: 1 / -1;"
-                    >
-                        <div class="absolute inset-y-0 right-0 w-1/2 bg-zinc-200 dark:bg-zinc-700"></div>
+                        @foreach ($this->boardBacklog as $row)
+                            <flux:kanban.column wire:key="board-backlog-{{ $row->project->id }}" class="!w-full !max-w-full bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                                <div class="p-2 pb-0">
+                                    <div class="px-3 pt-1">
+                                        @include('livewire.planner._project-sidebar', [
+                                            'project'      => $row->project,
+                                            'projectId'    => $row->project->id,
+                                            'title'        => $row->project->short_address,
+                                            'undatedCount' => $row->undated,
+                                            'showPending'  => false,
+                                            'showActions'  => false,
+                                        ])
+                                    </div>
+                                </div>
+                                <flux:kanban.column.cards>
+                                    @include('livewire.planner._pending-tasks-card', ['projectId' => $row->project->id, 'count' => $row->undated])
+                                    @include('livewire.planner._action-items-card', ['projectId' => $row->project->id, 'count' => $row->actions])
+                                </flux:kanban.column.cards>
+                            </flux:kanban.column>
+                        @endforeach
                     </div>
                 @endif
 
-                <div
-                    aria-hidden="true"
-                    class="bg-zinc-200 dark:bg-zinc-700 pointer-events-none z-0"
-                    style="grid-column: {{ $startCol }} / {{ $endColExclusive }}; grid-row: 1 / -1;"
-                ></div>
-
-                @if ($rightSpacerCol)
-                    <div
-                        aria-hidden="true"
-                        class="pointer-events-none z-0 relative"
-                        style="grid-column: {{ $rightSpacerCol }}; grid-row: 1 / -1;"
-                    >
-                        <div class="absolute inset-y-0 left-0 w-1/2 bg-zinc-200 dark:bg-zinc-700"></div>
-                    </div>
-                @endif
-            @endforeach
-
-            @foreach ($kanbanColumns as $dayData)
-                @php
-                    $dayColIndex = $dayColumnIndices[$loop->index];
-                    $isWeekend = $dayData->isWeekend;
-                @endphp
-                <div
-                    wire:key="day-header-{{ $dayData->day->format('Y-m-d') }}-idx{{ $loop->index }}"
-                    data-day-index="{{ $loop->index }}"
-                    @if($dayData->isToday) data-today="true" @endif
-                    class="shrink-0 relative z-20 sticky top-0 {{ $isWeekend ? 'w-52 bg-zinc-200 dark:bg-zinc-700' : 'w-80 bg-zinc-100 dark:bg-zinc-800' }}"
-                    style="grid-column: {{ $dayColIndex }}; grid-row: 1;"
-                >
-                    {{-- Day Header --}}
-                    <div class="p-3 mb-3 {{ $isWeekend ? 'opacity-75' : '' }}">
-                        <flux:heading size="lg" class="whitespace-nowrap {{ $dayData->isToday ? 'text-indigo-600 dark:text-indigo-400' : '' }}">
-                            {{ $dayData->title }}
-                        </flux:heading>
-                        @if ($dayData->isToday)
-                            <flux:badge color="indigo" size="sm" class="mt-1">Today</flux:badge>
-                        @elseif ($dayData->isTomorrow && ! $dayData->isWeekend)
-                            <flux:badge color="zinc" size="sm" class="mt-1">Tomorrow</flux:badge>
-                        @endif
-                    </div>
-                </div>
-                
-                {{-- Project Cells for this day --}}
-                @foreach ($dayData->columns as $projectColumn)
+                @foreach ($kanbanColumns as $dayData)
                     @php
-                        $dayIndex = $dayData->dayIndex;
-                        // +2 because row 1 is header
-                        $projectRowIndex = $loop->index + 2;
-                        $hasTasks = $projectColumn->cards->count() > 0;
-                        $hasUndatedTasks = ($projectColumn->undated_tasks_count ?? 0) > 0;
                         $isWeekend = $dayData->isWeekend;
+                        $dayFormat = $dayData->day->format('Y-m-d');
                     @endphp
                     <div
-                        wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
-                        class="min-w-0 pb-2 relative z-10 group/cell {{ $isWeekend ? 'w-52' : 'w-80' }} {{ $dayData->isToday ? 'bg-indigo-100/70 dark:bg-indigo-900/25' : '' }}"
-                        style="grid-column: {{ $dayColIndex }}; grid-row: {{ $projectRowIndex }};"
+                        wire:key="board-day-{{ $dayFormat }}"
+                        data-day-index="{{ $loop->index }}"
+                        @if($dayData->isToday) data-today="true" @endif
+                        class="shrink-0 flex flex-col gap-2 rounded-xl p-2 {{ $isWeekend ? 'w-56 bg-zinc-200/70 dark:bg-zinc-700/50' : 'w-80' }} {{ $dayData->isToday ? 'bg-indigo-100/70 dark:bg-indigo-900/25' : '' }}"
                     >
-                        <flux:kanban
-                            class="w-full [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-1"
-                            x-bind:class="getOpacityClass({{ $isWeekend ? 'true' : 'false' }}, {{ $hasTasks ? 'true' : 'false' }}, {{ $hasUndatedTasks ? 'true' : 'false' }}, {{ $dayIndex }})"
-                        >
-                            <flux:kanban.column class="!w-full !max-w-full {{ $dayData->isToday ? 'bg-transparent!' : 'bg-white dark:bg-zinc-900' }} rounded-lg border border-zinc-200 dark:border-zinc-700">
-                                            {{-- Shared project column — the same partial as the
-                                                 table/gantt sidebars, so the header can't drift.
-                                                 The pending affordance here is the shared CARD in
-                                                 the column below (chip off); add button prefills
-                                                 this column's day. --}}
-                                            <div class="p-2 pb-0">
-                                                <div class="px-3 pt-1">
-                                                    @include('livewire.planner._project-sidebar', [
-                                                        'project'       => $projectColumn->project,
-                                                        'projectId'     => $projectColumn->id,
-                                                        'title'         => $projectColumn->title,
-                                                        'undatedCount'  => $projectColumn->undated_tasks_count ?? 0,
-                                                        'date'          => $dayData->day->format('Y-m-d'),
-                                                        'revealOnHover' => true,
-                                                        'showStatus'    => ! $dayData->isWeekend,
-                                                        'showPending'   => false,
-                                                        'showActions'   => false,
-                                                    ])
+                        {{-- Day header: stays in view while the column scrolls. --}}
+                        <div class="sticky top-0 z-10 -mx-2 -mt-2 rounded-t-xl px-3 pt-2 pb-1.5 backdrop-blur-sm {{ $dayData->isToday ? 'bg-indigo-100/90 dark:bg-indigo-950/80' : ($isWeekend ? 'bg-zinc-200/90 dark:bg-zinc-700/80' : 'bg-zinc-100/90 dark:bg-zinc-800/90') }}">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <flux:heading size="lg" class="whitespace-nowrap {{ $dayData->isToday ? 'text-indigo-600 dark:text-indigo-400' : '' }} {{ $isWeekend ? 'opacity-75' : '' }}">
+                                        {{ $dayData->title }}
+                                    </flux:heading>
+                                    @if ($dayData->isToday)
+                                        <flux:badge color="indigo" size="sm">Today</flux:badge>
+                                    @elseif ($dayData->isTomorrow && ! $isWeekend)
+                                        <flux:badge color="zinc" size="sm">Tomorrow</flux:badge>
+                                    @endif
+                                </div>
+                                @if ($dayData->taskCount > 0)
+                                    <flux:text size="sm" class="shrink-0 tabular-nums">{{ $dayData->taskCount }} {{ \Illuminate\Support\Str::plural('task', $dayData->taskCount) }}</flux:text>
+                                @endif
+                            </div>
+                        </div>
 
-                                                    {{-- Task gap info (next/last task) — cards-view only, hidden on weekends --}}
-                                                    @if ($projectColumn->task_gap_info && !$dayData->isWeekend)
-                                                        <div
-                                                            wire:key="task-gap-{{ $projectColumn->id }}-idx{{ $dayIndex }}"
-                                                            x-show="firstVisibleDayIndex === {{ $dayIndex }}"
-                                                            x-cloak
-                                                            class="text-xs italic mt-0.5"
-                                                        >
-                                                            @if ($projectColumn->task_gap_info->type === 'both')
-                                                                <span class="text-amber-600 dark:text-amber-400">{{ $projectColumn->task_gap_info->last->label }}</span>
-                                                                <span class="mx-1 text-zinc-400">·</span>
-                                                                <span class="text-indigo-600 dark:text-indigo-400">{{ $projectColumn->task_gap_info->next->label }}</span>
-                                                            @elseif ($projectColumn->task_gap_info->type === 'next')
-                                                                <span class="text-indigo-600 dark:text-indigo-400">{{ $projectColumn->task_gap_info->label }}</span>
-                                                            @else
-                                                                <span class="text-amber-600 dark:text-amber-400">{{ $projectColumn->task_gap_info->label }}</span>
-                                                            @endif
-                                                        </div>
-                                                    @endif
-                                                </div>
-                                            </div>
-                                            <flux:kanban.column.cards>
-                                                @include('livewire.planner._pending-tasks-card', [
-                                                    'projectId' => $projectColumn->id,
-                                                    'count'     => $projectColumn->undated_tasks_count ?? 0,
-                                                    'dayIndex'  => $dayIndex,
-                                                ])
-                                                @include('livewire.planner._action-items-card', [
-                                                    'projectId' => $projectColumn->id,
-                                                    'count'     => $this->actionItemCounts[(int) $projectColumn->id] ?? 0,
-                                                    'dayIndex'  => $dayIndex,
-                                                ])
-
-                                                @foreach ($projectColumn->cards as $task)
-                                                    <livewire:planner.planner-task-card
-                                                        :task-id="$task->id"
-                                                        :day-format="$dayData->day->format('Y-m-d')"
-                                                        :project-id="$projectColumn->id"
-                                                        :is-weekend="$isWeekend"
-                                                        :is-today="$dayData->isToday"
-                                                        :key="'task-card-' . $task->id . '-' . $dayData->day->format('Y-m-d') . '-' . $projectColumn->id"
-                                                    />
-                                                @endforeach
-                                            </flux:kanban.column.cards>
-                                        </flux:kanban.column>
-                                    </flux:kanban>
+                        @forelse ($dayData->columns as $projectColumn)
+                            <flux:kanban.column
+                                wire:key="board-{{ $projectColumn->id }}-{{ $dayFormat }}"
+                                class="group/cell !w-full !max-w-full {{ $dayData->isToday ? 'bg-white/80 dark:bg-zinc-900/80' : 'bg-white dark:bg-zinc-900' }} rounded-lg border border-zinc-200 dark:border-zinc-700"
+                            >
+                                <div class="p-2 pb-0">
+                                    <div class="px-3 pt-1">
+                                        @include('livewire.planner._project-sidebar', [
+                                            'project'       => $projectColumn->project,
+                                            'projectId'     => $projectColumn->id,
+                                            'title'         => $projectColumn->title,
+                                            'undatedCount'  => $projectColumn->undated_tasks_count ?? 0,
+                                            'date'          => $dayFormat,
+                                            'revealOnHover' => true,
+                                            'showStatus'    => ! $isWeekend,
+                                            'showPending'   => false,
+                                            'showActions'   => false,
+                                        ])
+                                    </div>
+                                </div>
+                                <flux:kanban.column.cards>
+                                    @foreach ($projectColumn->cards as $task)
+                                        <livewire:planner.planner-task-card
+                                            :task-id="$task->id"
+                                            :day-format="$dayFormat"
+                                            :project-id="$projectColumn->id"
+                                            :is-weekend="$isWeekend"
+                                            :is-today="$dayData->isToday"
+                                            :key="'task-card-' . $task->id . '-' . $dayFormat . '-' . $projectColumn->id"
+                                        />
+                                    @endforeach
+                                </flux:kanban.column.cards>
+                            </flux:kanban.column>
+                        @empty
+                            {{-- An empty day offers to fill itself. --}}
+                            <button
+                                type="button"
+                                wire:key="board-empty-{{ $dayFormat }}"
+                                wire:click="$dispatchTo('tasks.task-create', 'addTask', { date: '{{ $dayFormat }}' })"
+                                class="group/empty flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-300 px-3 py-6 text-sm text-zinc-400 transition-colors hover:border-zinc-400 hover:bg-white/60 hover:text-zinc-600 dark:border-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-900/40 dark:hover:text-zinc-300"
+                            >
+                                <span class="group-hover/empty:hidden">Nothing scheduled</span>
+                                <span class="hidden items-center gap-1 group-hover/empty:inline-flex"><flux:icon.plus variant="micro" class="size-4" /> Add task</span>
+                            </button>
+                        @endforelse
                     </div>
                 @endforeach
-            @endforeach
-            {{-- Right spacer --}}
-            <div class="w-4 shrink-0" style="grid-column: -1; grid-row: 1 / -1;"></div>
             </div>
         </div>
     </div>
@@ -602,6 +535,8 @@
     <div
         x-data="plannerTableScroll()"
         x-init="init()"
+        x-on:planner-today.window="scrollToToday()"
+        x-on:planner-step.window="stepWeek($event.detail.direction)"
         class="relative flex-1 min-h-0"
     >
         {{-- Loading indicator (left edge) --}}
@@ -677,6 +612,7 @@
                                 {{ $dayHeader->isWeekend ? $dayWeekendBgClass . ' ' . $dayWeekendTextClass : $dayWeekdayTextClass }}
                                 {{ $dayHeader->isToday ? $dayTodayTextClass : '' }}"
                             style="height: 32px;"
+                            data-grid-day
                             @if ($dayHeader->isToday) data-today @endif
                         >
                             <div class="flex flex-col items-center leading-tight">
@@ -752,6 +688,7 @@
                                                     'date'           => $entry->first_day_format,
                                                     'isWeekend'      => false,
                                                     'hideDayCounter' => $entry->span > 1,
+                                                    'compact'        => true,
                                                 ])
                                             </div>
                                         </flux:kanban.card>
@@ -812,128 +749,30 @@
         $listToday = browser_today()->format('Y-m-d');
         $vline = 'border-r border-zinc-200 dark:border-zinc-700';
     @endphp
+    {{-- The list's own window (the other views page by date), on the list
+         itself rather than in the shared toolbar. --}}
+    <div class="shrink-0 hidden lg:flex items-center justify-between gap-3 px-4 py-2 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
+        <flux:radio.group wire:model.live="filterDateRange" variant="segmented" size="sm">
+            <flux:radio value="upcoming" label="Today &amp; upcoming" />
+            <flux:radio value="past" label="Past" />
+            <flux:radio value="all" label="All dates" />
+        </flux:radio.group>
+        <flux:text size="sm" class="tabular-nums">{{ number_format($this->taskList->count()) }} {{ \Illuminate\Support\Str::plural('task', $this->taskList->count()) }}</flux:text>
+    </div>
     <div class="flex-1 min-h-0 overflow-auto bg-white dark:bg-zinc-900">
         <flux:table>
             <flux:table.columns>
                 <flux:table.column class="{{ $vline }} align-top">Task</flux:table.column>
 
-                <flux:table.column class="{{ $vline }} align-top min-w-56">
-                    <div class="space-y-1.5">
-                        <span>Project</span>
-                        <flux:select
-                            wire:model.live.debounce.400ms="filterProjectIds"
-                            placeholder="All Projects"
-                            variant="listbox"
-                            searchable
-                            multiple
-                            size="sm"
-                            class="w-full font-normal"
-                        >
-                            @foreach($projects as $project)
-                                <flux:select.option value="{{ $project->id }}">
-                                    <div class="flex items-center gap-2 w-full">
-                                        <span class="flex-1 min-w-0 truncate">{{ $project->short_address }}</span>
-                                        @if($project->latestStatus)
-                                            <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom" class="shrink-0">
-                                                {{ $project->latestStatus->title }}
-                                            </flux:badge>
-                                        @endif
-                                    </div>
-                                </flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </div>
-                </flux:table.column>
-
-                <flux:table.column class="{{ $vline }} align-top min-w-44">
-                    <div class="space-y-1.5">
-                        <span>Status</span>
-                        <flux:select
-                            wire:model.live.debounce.400ms="filterStatusCodes"
-                            placeholder="All Statuses"
-                            selected-suffix="statuses"
-                            variant="listbox"
-                            multiple
-                            size="sm"
-                            class="w-full font-normal"
-                        >
-                            @foreach($this->statusOptions as $status)
-                                <flux:select.option value="{{ $status['code'] }}">
-                                    <flux:badge size="sm" inset="top bottom" :color="$status['color']">
-                                        {{ $status['label'] }}
-                                    </flux:badge>
-                                </flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </div>
-                </flux:table.column>
-
-                <flux:table.column class="{{ $vline }} align-top min-w-44">
-                    <div class="space-y-1.5">
-                        <span>Due</span>
-                        <flux:select
-                            wire:model.live="filterDateRange"
-                            variant="listbox"
-                            size="sm"
-                            class="w-full font-normal"
-                        >
-                            <flux:select.option value="upcoming">Today &amp; upcoming</flux:select.option>
-                            <flux:select.option value="past">Past</flux:select.option>
-                            <flux:select.option value="all">All dates</flux:select.option>
-                        </flux:select>
-                    </div>
-                </flux:table.column>
-
+                {{-- Plain headers: the filters live in the toolbar for every
+                     view now, and the selects' minimum widths here pushed the
+                     table wider than the screen. --}}
+                <flux:table.column class="{{ $vline }} align-top">Project</flux:table.column>
+                <flux:table.column class="{{ $vline }} align-top">Status</flux:table.column>
+                <flux:table.column class="{{ $vline }} align-top">Due</flux:table.column>
                 <flux:table.column class="{{ $vline }} align-top">Type</flux:table.column>
-
-                <flux:table.column class="{{ $vline }} align-top min-w-52">
-                    <div class="space-y-1.5">
-                        <span>Assigned</span>
-                        <flux:select
-                            wire:model.live.debounce.400ms="filterUserIds"
-                            placeholder="All Team Members"
-                            variant="listbox"
-                            searchable
-                            multiple
-                            clearable
-                            size="sm"
-                            class="w-full font-normal"
-                        >
-                            @foreach($employees as $employee)
-                                <flux:select.option value="{{ $employee->id }}">
-                                    <div class="flex items-center gap-2 whitespace-nowrap">
-                                        <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}" />
-                                        {{ $employee->full_name }}
-                                    </div>
-                                </flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </div>
-                </flux:table.column>
-
-                <flux:table.column class="{{ $vline }} align-top min-w-52">
-                    <div class="space-y-1.5">
-                        <span>Vendor</span>
-                        <flux:select
-                            wire:model.live.debounce.400ms="filterVendorId"
-                            placeholder="All Vendors"
-                            variant="listbox"
-                            searchable
-                            clearable
-                            size="sm"
-                            class="w-full font-normal"
-                        >
-                            @foreach($vendors as $vendor)
-                                <flux:select.option value="{{ $vendor->id }}">
-                                    <div class="flex items-center gap-2 whitespace-nowrap">
-                                        <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
-                                        {{ $vendor->name }}
-                                    </div>
-                                </flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </div>
-                </flux:table.column>
+                <flux:table.column class="{{ $vline }} align-top">Assigned</flux:table.column>
+                <flux:table.column class="{{ $vline }} align-top">Vendor</flux:table.column>
 
                 <flux:table.column class="align-top">Task Status</flux:table.column>
             </flux:table.columns>
@@ -983,8 +822,9 @@
                                     $start = \Carbon\Carbon::parse($row->first_date);
                                     $end = $row->last_date ? \Carbon\Carbon::parse($row->last_date) : $start;
                                 @endphp
-                                <span class="tabular-nums {{ $isOverdue ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-zinc-600 dark:text-zinc-400' }}">
-                                    {{ $start->format('M j, Y') }}@if (! $start->isSameDay($end)) <span class="text-zinc-400">&ndash;</span> {{ $end->format('M j, Y') }}@endif
+                                {{-- "Oct 15 – 16": the year only when it isn't this one. --}}
+                                <span class="tabular-nums whitespace-nowrap {{ $isOverdue ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-zinc-600 dark:text-zinc-400' }}">
+                                    {{ $start->format($start->isCurrentYear() ? 'M j' : 'M j, Y') }}@if (! $start->isSameDay($end)) <span class="text-zinc-400">&ndash;</span> {{ $end->format($start->isSameMonth($end) ? 'j' : 'M j') }}{{ $end->isCurrentYear() ? '' : $end->format(', Y') }}@endif
                                 </span>
                             @else
                                 <flux:badge size="sm" color="zinc" inset="top bottom">No date</flux:badge>
@@ -1146,6 +986,7 @@
                                 'arrivalTimeLabel' => null,
                                 'previousArrivalTimeLabel' => null,
                                 'isWeekend' => false,
+                                'compact' => true,
                             ])
                         </flux:kanban.card>
                     @endforeach
@@ -1245,27 +1086,94 @@
 @script
 <script>
 // Week view: drag a "To schedule" task onto a day, or pick a date for it.
+Alpine.data('plannerKeys', () => ({
+    onKey(event) {
+        if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+
+        const target = event.target;
+        const search = document.querySelector('input[aria-label="Search the planner"]');
+
+        // Typing anywhere (search, a select, the task modal) is never a shortcut.
+        if (target.closest?.('input, textarea, select, [contenteditable="true"], ui-select, ui-combobox, [role="listbox"], [role="menu"], [role="dialog"]')) {
+            if (event.key === 'Escape' && target === search) search.blur();
+            return;
+        }
+        if (document.querySelector('dialog[open]')) return;
+
+        const view = this.$wire.viewMode;
+
+        switch (event.key) {
+            case 'n':
+            case 'N':
+                event.preventDefault();
+                this.$wire.$dispatchTo('tasks.task-create', 'addTask', {});
+                break;
+            case 't':
+            case 'T':
+                event.preventDefault();
+                if (view === 'week') this.$wire.agendaThisWeek();
+                else window.dispatchEvent(new CustomEvent('planner-today'));
+                break;
+            case 'ArrowLeft':
+            case 'ArrowRight': {
+                const direction = event.key === 'ArrowRight' ? 1 : -1;
+                if (view === 'week') {
+                    event.preventDefault();
+                    direction > 0 ? this.$wire.agendaNextWeek() : this.$wire.agendaPreviousWeek();
+                } else if (view !== 'list') {
+                    event.preventDefault();
+                    window.dispatchEvent(new CustomEvent('planner-step', { detail: { direction } }));
+                }
+                break;
+            }
+            case '/':
+                if (search && search.offsetParent) {
+                    event.preventDefault();
+                    search.focus();
+                }
+                break;
+        }
+    },
+}));
+
 Alpine.data('plannerAgenda', () => ({
     dragging: null,
+    // The day a scheduled card is dragged FROM; null while dragging from the tray.
+    moveFrom: null,
     over: null,
     pickFor: null,
     pickTitle: '',
 
     start(event, taskId) {
         this.dragging = taskId;
+        this.moveFrom = null;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', String(taskId));
+    },
+
+    startMove(event, taskId, fromDate) {
+        this.dragging = taskId;
+        this.moveFrom = fromDate;
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', String(taskId));
     },
 
     end() {
         this.dragging = null;
+        this.moveFrom = null;
         this.over = null;
     },
 
     drop(event, date) {
         const id = parseInt(event.dataTransfer.getData('text/plain') || this.dragging, 10);
+        const from = this.moveFrom;
         this.end();
-        if (id) {
+        if (! id) {
+            return;
+        }
+        if (from) {
+            if (from !== date) this.$wire.moveTaskDay(id, from, date);
+        } else {
             this.$wire.scheduleTask(id, date);
         }
     },
@@ -1351,6 +1259,27 @@ Alpine.data('plannerTableScroll', () => ({
         const target = todayCell.offsetLeft - (cellWidth * 2);
         container.scrollLeft = Math.max(0, target);
     },
+
+    scrollToToday() {
+        const container = this.$refs.tableScrollContainer;
+        const todayCell = container?.querySelector('[data-today]');
+        if (!todayCell) return;
+        const cellWidth = todayCell.getBoundingClientRect().width || 0;
+        container.scrollTo({ left: Math.max(0, todayCell.offsetLeft - (cellWidth * 2)), behavior: 'smooth' });
+    },
+
+    // A week back or on: the day seven columns from the first one in view
+    // lands at the left edge, beside the pinned project column.
+    stepWeek(direction) {
+        const container = this.$refs.tableScrollContainer;
+        const days = [...(container?.querySelectorAll('[data-grid-day]') || [])];
+        if (days.length === 0) return;
+        const origin = days[0].offsetLeft;
+        let first = days.findIndex((day) => day.offsetLeft - origin >= container.scrollLeft - 1);
+        if (first < 0) first = days.length - 1;
+        const target = days[Math.min(days.length - 1, Math.max(0, first + 7 * direction))];
+        container.scrollTo({ left: Math.max(0, target.offsetLeft - origin), behavior: 'smooth' });
+    },
 }));
 
 Alpine.data('plannerScroll', () => ({
@@ -1371,23 +1300,32 @@ Alpine.data('plannerScroll', () => ({
     
     init() {
         this._initInfiniteScroll();
+        // Shown first, then scrolled: a hidden (x-show) container has no
+        // layout, so the scroll to today used to land on 0 every time.
+        this.ready = true;
         this.$nextTick(() => {
-            this.updateFirstVisible();
-            this.updateEdgeState();
             this.setupAxisLocking();
             this._scrollToTodayInitial();
-            this.ready = true;
         });
+    },
+
+    // Today right after the pinned "To schedule" column (or two days in,
+    // without one), so the board opens on what's next.
+    todayScrollLeft() {
+        const container = this.$refs.scrollContainer;
+        const todayCol = container?.querySelector('[data-today]');
+        if (!todayCol) return null;
+        const backlog = this.$refs.boardBacklog;
+        const offset = backlog
+            ? backlog.getBoundingClientRect().width + 12
+            : (todayCol.getBoundingClientRect().width || 0) * 2;
+        return Math.max(0, todayCol.offsetLeft - offset);
     },
 
     _scrollToTodayInitial() {
         const container = this.$refs.scrollContainer;
-        if (!container) return;
-        const todayCol = container.querySelector('[data-today]');
-        if (!todayCol) return;
-        const colWidth = todayCol.getBoundingClientRect().width || 0;
-        const target = todayCol.offsetLeft - (colWidth * 2);
-        container.scrollLeft = Math.max(0, target);
+        const target = this.todayScrollLeft();
+        if (container && target !== null) container.scrollLeft = target;
         this.updateFirstVisible();
         this.updateEdgeState();
     },
@@ -1506,11 +1444,22 @@ Alpine.data('plannerScroll', () => ({
     
     scrollToToday() {
         const container = this.$refs.scrollContainer;
-        if (!container) return;
-        const todayCol = container.querySelector('[data-today]');
-        if (todayCol) {
-            todayCol.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-        }
+        const target = this.todayScrollLeft();
+        if (container && target !== null) container.scrollTo({ left: target, behavior: 'smooth' });
+    },
+
+    // A week back or on: the day seven columns from the first one in view
+    // lands right after the pinned "To schedule" column.
+    stepWeek(direction) {
+        const container = this.$refs.scrollContainer;
+        const days = [...(container?.querySelectorAll('[data-day-index]') || [])];
+        if (days.length === 0) return;
+        const backlog = this.$refs.boardBacklog;
+        const inset = backlog ? backlog.getBoundingClientRect().width + 12 : 16;
+        let first = days.findIndex((day) => day.offsetLeft - inset >= container.scrollLeft - 1);
+        if (first < 0) first = days.length - 1;
+        const target = days[Math.min(days.length - 1, Math.max(0, first + 7 * direction))];
+        container.scrollTo({ left: Math.max(0, target.offsetLeft - inset), behavior: 'smooth' });
     },
     
     onScroll(e) {
@@ -1519,15 +1468,6 @@ Alpine.data('plannerScroll', () => ({
         this.onInfiniteScroll();
     },
     
-    getOpacityClass(isWeekend, hasTasks, hasUndatedTasks, dayIndex) {
-        const isFirstVisible = this.firstVisibleDayIndex === dayIndex;
-        const showTasks = hasTasks || (hasUndatedTasks && isFirstVisible);
-        
-        if (isWeekend && !showTasks) return 'opacity-30 hover:opacity-60';
-        if (isWeekend) return 'opacity-75';
-        if (!showTasks) return 'opacity-40 hover:opacity-70';
-        return '';
-    }
 }));
 </script>
 @endscript

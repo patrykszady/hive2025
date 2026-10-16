@@ -26,6 +26,8 @@
      travels in data attributes and is re-read after every morph. --}}
 <div
     x-data="plannerGantt()"
+    x-on:planner-today.window="scrollToToday()"
+    x-on:planner-step.window="stepWeek($event.detail.direction)"
     data-px-per-day="{{ $pxPerDay }}"
     data-first-day="{{ $firstDay->format('Y-m-d') }}"
     data-last-day="{{ $days->last()->format('Y-m-d') }}"
@@ -635,6 +637,16 @@
             const elRect = el.getBoundingClientRect();
             const scRect = scroller.getBoundingClientRect();
             scroller.scrollLeft += (elRect.left - scRect.left) - (scRect.width / 3);
+        },
+
+        // A week back or on (the planner's ← / → keys). An instant jump: the
+        // window loader resets scrollLeft from where it was when it fired, so a
+        // smooth scroll still in flight snapped back.
+        stepWeek(direction) {
+            const scroller = this.$refs.scroller;
+            const pxPerDay = parseFloat(this.$root.dataset.pxPerDay) || 0;
+            if (!scroller || !pxPerDay) return;
+            scroller.scrollLeft += direction * 7 * pxPerDay;
         },
 
         // Return the {x,y} of a task's "edge" in grid coords. Used only by the

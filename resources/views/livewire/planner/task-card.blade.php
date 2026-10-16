@@ -18,6 +18,7 @@
             'arrivalTimeLabel' => $this->arrivalTimeLabel,
             'previousArrivalTimeLabel' => $this->previousArrivalTimeLabel,
             'isWeekend' => $this->isWeekend,
+            'compact' => true,
         ])
     </flux:kanban.card>
 @endif
