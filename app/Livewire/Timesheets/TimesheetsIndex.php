@@ -14,11 +14,12 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 // #[Lazy]
 class TimesheetsIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, RemembersFilters;
 
     /**
      * How many skeleton rows the loading placeholder should paint — the card's
@@ -292,6 +293,16 @@ class TimesheetsIndex extends Component
                     $group->sum_hours = $group->sum('hours');
                 });
             });
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return ['search', 'user_id', 'paid_statuses'];
     }
 
     #[Title('Timesheets')]

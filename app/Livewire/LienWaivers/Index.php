@@ -17,10 +17,11 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 class Index extends Component
 {
-    use WithPagination;
+    use WithPagination, RemembersFilters;
 
     public ?Project $project = null;
 
@@ -1929,6 +1930,17 @@ class Index extends Component
         Flux::toast(text: 'Lien waiver deleted.', variant: 'success');
 
         unset($this->waivers);
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     * None when a project page embeds this list (scoped).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return $this->scoped ? [] : ['statusFilter', 'search'];
     }
 
     #[Title('Lien Waivers')]

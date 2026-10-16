@@ -20,11 +20,12 @@ use Livewire\Attributes\Lazy;
 use Livewire\Attributes\On;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
+use App\Livewire\Concerns\RemembersFilters;
 
 // #[Lazy]
 class CardsIndex extends Component
 {
-    use \App\Livewire\Concerns\TogglesTaskChecklist;
+    use \App\Livewire\Concerns\TogglesTaskChecklist, RemembersFilters;
 
     public $vendors = [];
     public $employees = [];
@@ -161,6 +162,17 @@ class CardsIndex extends Component
 
         unset($this->criticalPathTaskIds);
         $this->renderIsland('gantt');
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     * The week shown ('from') is left out: a remembered Monday goes stale.
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return ['viewMode', 'onlyMine', 'ganttZoom', 'filterDateRange', 'filterProjectIds', 'filterVendorId', 'filterUserIds', 'filterStatusCodes'];
     }
 
     public function mount()

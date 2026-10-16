@@ -10,10 +10,11 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 class VendorsIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, RemembersFilters;
 
     /**
      * How many skeleton rows the loading placeholder should paint — the card's
@@ -182,6 +183,16 @@ class VendorsIndex extends Component
             $this->sortBy = $column;
             $this->sortDirection = 'asc';
         }
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return ['business_name', 'vendor_type'];
     }
 
     #[Title('Vendors')]

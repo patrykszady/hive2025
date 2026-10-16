@@ -13,11 +13,12 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 // #[Lazy]
 class ChecksIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, RemembersFilters;
 
     /**
      * How many skeleton rows the loading placeholder should paint — the card's
@@ -152,6 +153,17 @@ class ChecksIndex extends Component
                 ->paginate($paginate_number);
 
         return $checks;
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     * None when vendor and expense pages embed this list (view set).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return $this->view !== null ? [] : ['bank', 'check_number', 'amount', 'check_type', 'vendor'];
     }
 
     #[Title('Checks')]

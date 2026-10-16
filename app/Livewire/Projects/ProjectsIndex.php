@@ -12,10 +12,11 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 class ProjectsIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, RemembersFilters;
 
     public $project_name_search = '';
     public $client_id = null;
@@ -156,6 +157,17 @@ class ProjectsIndex extends Component
     {
         return ! $this->client_id
             || EmailTracking::clientFacing()->forClientAndItsLeads($this->client_id)->exists();
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     * None when the client page embeds this list (view set).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return $this->view ? [] : ['project_name_search', 'client_id', 'project_status_title'];
     }
 
     #[Title('Projects')]

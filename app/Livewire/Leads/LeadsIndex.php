@@ -11,10 +11,11 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 class LeadsIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, RemembersFilters;
 
     #[Url(except: '')]
     public $origin = '';
@@ -314,6 +315,16 @@ class LeadsIndex extends Component
     public function clientForLead(Lead $lead): ?Client
     {
         return $lead->resolveClient();
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return ['origin', 'statuses', 'search'];
     }
 
     #[Title('Leads')]

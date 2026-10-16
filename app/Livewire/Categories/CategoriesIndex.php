@@ -8,11 +8,12 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use App\Livewire\Concerns\RemembersFilters;
 
 #[Title('Vendor Categories')]
 class CategoriesIndex extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, RemembersFilters;
 
     #[Url]
     public string $search = '';
@@ -51,6 +52,16 @@ class CategoriesIndex extends Component
     public function loadMore(): void
     {
         $this->perPage += 25;
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return ['search', 'year'];
     }
 
     public function render()

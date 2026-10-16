@@ -14,10 +14,11 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 class PaymentsIndex extends Component
 {
-    use AuthorizesRequests, WithPagination, HasToJsonMethod;
+    use AuthorizesRequests, WithPagination, HasToJsonMethod, RemembersFilters;
 
     /** Columns the client is allowed to sort by — never pass $sortBy straight to orderBy(). */
     private const SORTABLE_COLUMNS = ['amount', 'date', 'reference', 'created_at'];
@@ -234,6 +235,17 @@ class PaymentsIndex extends Component
             $this->sortBy = $column;
             $this->sortDirection = 'asc';
         }
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     * None when project and lien waiver pages embed this list (view set).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return $this->view !== null ? [] : ['amount', 'project_filter', 'client_filter', 'status_filter'];
     }
 
     #[Title('Payments')]

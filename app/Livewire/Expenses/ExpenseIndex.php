@@ -25,10 +25,11 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Livewire\Concerns\RemembersFilters;
 
 class ExpenseIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, RemembersFilters;
 
     /**
      * Values expense_statuses (a client-writable #[Url] array) is allowed to
@@ -1015,6 +1016,17 @@ class ExpenseIndex extends Component
         $this->executeReceiptSearch();
 
         return $this->receiptExpenseIds;
+    }
+
+    /**
+     * The filters this page keeps between visits (see RemembersFilters).
+     * None when project, vendor and check pages embed this list (view set).
+     *
+     * @return list<string>
+     */
+    protected function rememberedFilters(): array
+    {
+        return $this->view !== null ? [] : ['amount', 'expense_vendor', 'project_id', 'expense_statuses', 'receipt_search', 'transaction_search', 'reimbursement_filter'];
     }
 
     #[Title('Expenses')]
