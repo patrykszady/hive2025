@@ -48,6 +48,18 @@ class EmailTrackingTable extends Component
     /** Rows per page on the standalone index (also the skeleton's row ceiling). */
     public const PER_PAGE = 10;
 
+    /**
+     * Sends of one email type this close together are ONE email: a Signing
+     * Invite to a couple is two 'sent' rows a second apart.
+     */
+    public const SAME_SEND_SECONDS = 120;
+
+    /**
+     * Rows an embedded card shows before its history toggle: with only the
+     * latest one, two follow-ups looked like one (project 432, 2026-10-15).
+     */
+    public const VISIBLE_ROWS = 2;
+
     public static function placeholderRows(): int
     {
         return self::PER_PAGE;
@@ -67,7 +79,7 @@ class EmailTrackingTable extends Component
         //  - Template   the longest values ("Estimate Follow Up") — give it the
         //               slack, it's the only column that truncates in practice
         //  - Recipients a first name plus a "+N" ("Jason +1") — needs little
-        //  - Date       "03/23/26", or "2 hours ago" on a project card
+        //  - Sent       when the email went out: "03/23/26", or "2h ago" on a card
         // narrow = embedded in a ~500px card; scoped = project card, where the
         // Project column is implied and its share goes to Template/Recipients.
         // Narrow (a ~480px embedded card, .narrow-table paddings) is budgeted
@@ -85,7 +97,7 @@ class EmailTrackingTable extends Component
         }
 
         $columns[] = ['label' => 'Recipients', 'width' => ($scoped ? 'w-[21%]' : ($narrow ? 'w-[19%]' : 'w-[22%]')).' min-w-0', 'skeletonWidth' => 'w-20'];
-        $columns[] = ['label' => 'Date', 'width' => ($scoped ? 'w-[24%]' : ($narrow ? 'w-[20%]' : 'w-[14%]')).' min-w-0', 'skeletonWidth' => 'w-16'];
+        $columns[] = ['label' => 'Sent', 'width' => ($scoped ? 'w-[24%]' : ($narrow ? 'w-[20%]' : 'w-[14%]')).' min-w-0', 'skeletonWidth' => 'w-16'];
 
         return $columns;
     }
@@ -199,20 +211,25 @@ class EmailTrackingTable extends Component
             $inferredSentIdByEventId[$event->id] = (int) $best->id;
         }
 
+        $sendKeyBySentId = $this->sendKeysBySentId($allEvents);
+        $sendKey = fn (int $sentId): string => 'sent:' . ($sendKeyBySentId[$sentId] ?? $sentId);
+
+        // One row per email sent — its type AND when it went out. Every event
+        // of a send (delivered, opened, replied…) folds into that send's row.
         $events = $allEvents
-            ->groupBy(function ($event) use ($inferredSentIdByEventId) {
+            ->groupBy(function ($event) use ($inferredSentIdByEventId, $sendKey) {
                 if ($event->event_type === 'sent') {
-                    return 'sent:' . $event->id;
+                    return $sendKey((int) $event->id);
                 }
 
                 $linkedSentId = is_array($event->metadata) ? ($event->metadata['linked_sent_id'] ?? null) : null;
                 if (is_numeric($linkedSentId) && (int) $linkedSentId > 0) {
-                    return 'sent:' . (int) $linkedSentId;
+                    return $sendKey((int) $linkedSentId);
                 }
 
                 $inferredSentId = $inferredSentIdByEventId[$event->id] ?? null;
                 if (is_int($inferredSentId) && $inferredSentId > 0) {
-                    return 'sent:' . $inferredSentId;
+                    return $sendKey($inferredSentId);
                 }
 
                 $mailtrapMessageId = is_array($event->metadata)
@@ -225,7 +242,7 @@ class EmailTrackingTable extends Component
 
                 return $event->thread_id ?: $event->message_id ?: ('email_tracking:' . $event->id);
             })
-            ->map(function ($threadEvents) use ($usersByEmail, $vendorTeamEmails, $excludedRecipientEmails) {
+            ->map(function ($threadEvents, $groupKey) use ($usersByEmail, $vendorTeamEmails, $excludedRecipientEmails) {
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
 
                 // "Replied" is the thread's status only while the reply is the
@@ -324,10 +341,14 @@ class EmailTrackingTable extends Component
                 $mainEvent->recipient_users = $users;
                 $mainEvent->all_recipient_emails = ! empty($eventRecipientEmails) ? $eventRecipientEmails : $threadRecipientEmails;
                 $mainEvent->event_count = $eventCount;
+                $mainEvent->has_known_send = str_starts_with((string) $groupKey, 'sent:');
+                $mainEvent->sent_at = $threadEvents->where('event_type', 'sent')->pluck('event_at')->filter()->min();
 
                 return $mainEvent;
             })
-            ->sortByDesc('event_at')
+            // Newest send first: the Sent column reads in order, and an old
+            // email opened today stays where it was sent.
+            ->sortByDesc(fn ($row) => ($row->sent_at ?? $row->event_at)?->getTimestamp() ?? 0)
             ->values();
 
         $collapsed = collect();
@@ -339,8 +360,14 @@ class EmailTrackingTable extends Component
                 continue;
             }
 
+            // Only opens with no recorded send merge here. Opens of two
+            // different sends of one type stay two rows: one "Signing Invite ·
+            // Opened x14" hid that the latest invite was opened twice and the
+            // other twelve opens were of older invites (2026-10-15).
             $canCollapseOpened = ($current->event_type === 'opened')
                 && ($event->event_type === 'opened')
+                && ! $current->has_known_send
+                && ! $event->has_known_send
                 && ((int) $current->project_id === (int) $event->project_id)
                 && ((string) $current->email_template_name === (string) $event->email_template_name);
 
@@ -402,6 +429,39 @@ class EmailTrackingTable extends Component
         );
     }
 
+    /**
+     * Each 'sent' event's send: the id of the first send of the same project
+     * and email type that went out within SAME_SEND_SECONDS before it.
+     *
+     * @param  \Illuminate\Support\Collection<int, EmailTracking>  $events
+     * @return array<int, int>
+     */
+    protected function sendKeysBySentId($events): array
+    {
+        $sendKeyBySentId = [];
+
+        $events
+            ->where('event_type', 'sent')
+            ->filter(fn (EmailTracking $sent) => $sent->event_at !== null)
+            ->sortBy(fn (EmailTracking $sent) => $sent->event_at->getTimestamp())
+            ->groupBy(fn (EmailTracking $sent) => (string) $sent->project_id . '|' . (string) $sent->lead_id . '|' . (string) $sent->email_template_name)
+            ->each(function ($sends) use (&$sendKeyBySentId): void {
+                $previous = null;
+                $key = null;
+
+                foreach ($sends as $sent) {
+                    if (! $previous || $previous->event_at->diffInSeconds($sent->event_at) > self::SAME_SEND_SECONDS) {
+                        $key = (int) $sent->id;
+                    }
+
+                    $sendKeyBySentId[(int) $sent->id] = $key;
+                    $previous = $sent;
+                }
+            });
+
+        return $sendKeyBySentId;
+    }
+
     public function render()
     {
         return view('livewire.projects.email-tracking-table');
@@ -435,7 +495,7 @@ class EmailTrackingTable extends Component
             'embedded' => $embedded,
             'clientId' => $clientId,
             'rows' => $rows,
-            'historyCount' => $embedded ? max($threads - 1, 0) : 0,
+            'historyCount' => $embedded ? max($threads - self::VISIBLE_ROWS, 0) : 0,
             'footer' => ! $embedded && $threads > self::PER_PAGE,
         ]);
     }
@@ -444,7 +504,7 @@ class EmailTrackingTable extends Component
      * Skeleton row count that matches what will actually paint: a COUNT is far
      * cheaper than the query the skeleton stands in for, so no card ever
      * flashes more (or fewer) fake rows than it ends up with. Scoped cards
-     * collapse to a single visible row; the paginated variant shows one row
+     * collapse to VISIBLE_ROWS rows; the paginated variant shows one row
      * per email thread, which each 'sent' event roots.
      */
     public static function placeholderRowsFor(?int $projectId = null, ?int $leadId = null, ?int $clientId = null): int
@@ -463,9 +523,9 @@ class EmailTrackingTable extends Component
             return static::placeholderRows();
         }
 
-        // Collapsed card: the latest event is the only visible row.
+        // Collapsed card: the newest sends are the only visible rows.
         if ($projectId || $leadId || $clientId) {
-            return $query->exists() ? 1 : 0;
+            return min(static::threadCountFor(projectId: $projectId, leadId: $leadId, clientId: $clientId), self::VISIBLE_ROWS);
         }
 
         return min(static::threadCountFor(clientId: $clientId), static::placeholderRows());

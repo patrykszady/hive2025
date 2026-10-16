@@ -15,7 +15,7 @@
          header row measures identically in both states. --}}
     <x-slot:badge>
         @if(($historyCount ?? 0) > 0)
-            <flux:badge color="zinc" size="sm">{{ $historyCount + 1 }}</flux:badge>
+            <flux:badge color="zinc" size="sm">{{ $historyCount + \App\Livewire\Projects\EmailTrackingTable::VISIBLE_ROWS }}</flux:badge>
         @endif
     </x-slot:badge>
     <x-slot:actions>

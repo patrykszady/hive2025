@@ -116,16 +116,28 @@
          juts past the table edge, and that overhang IS the card's horizontal
          scrollbar on narrow embedded cards (lead modal, client page). --}}
     <flux:table.cell class="whitespace-nowrap min-w-0 overflow-hidden">
-        @if($event->event_at)
+        @if($event->sent_at ?? $event->event_at)
             @php
-                $daysAgo = $event->event_at->diffInDays(now());
+                // When the email went out, in the company's time (the DB is
+                // UTC, so a 7 pm send read as the next day). The hover adds
+                // the latest event: "Sent 10/15/26 6:50 PM · Opened …".
+                $sentAt = ($event->sent_at ?? $event->event_at)->copy()->timezone(vendor_timezone());
+                $daysAgo = $sentAt->diffInDays(now());
                 $dateLabel = $daysAgo > 14
-                    ? $event->event_at->format('m/d/y')
-                    : $event->event_at->diffForHumans(['short' => (bool) $shortDate]);
+                    ? $sentAt->format('m/d/y')
+                    : $sentAt->diffForHumans(['short' => (bool) $shortDate]);
+                $dateTooltip = $event->sent_at
+                    ? 'Sent '.$sentAt->format('m/d/y g:i A')
+                    : ucfirst($event->event_type).' '.$sentAt->format('m/d/y g:i A');
+                if ($event->sent_at && $event->event_type !== 'sent' && $event->event_at) {
+                    $dateTooltip .= ' · '.ucfirst($event->event_type).' '.$event->event_at->copy()->timezone(vendor_timezone())->format('m/d/y g:i A');
+                }
             @endphp
-            <x-truncate-tooltip :content="$event->event_at->format('m/d/y g:i A')">
-                <div class="text-sm text-zinc-700 dark:text-zinc-300 truncate">{{ $dateLabel }}</div>
-            </x-truncate-tooltip>
+            {{-- Always on, unlike the clipped-only tooltips: it carries the
+                 latest event's time, which the cell itself does not show. --}}
+            <flux:tooltip :content="$dateTooltip" position="top" class="block min-w-0">
+                <div class="text-sm text-zinc-700 dark:text-zinc-300 cursor-default truncate">{{ $dateLabel }}</div>
+            </flux:tooltip>
         @else
             <span class="text-gray-400">-</span>
         @endif

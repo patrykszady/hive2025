@@ -5,12 +5,13 @@
 <div wire:transition>
 @php
     // ONE presentation for every embedded card — project, lead AND client: the
-    // latest event, with the rest collapsed behind the header toggle. Only the
+    // newest sends, with the rest collapsed behind the header toggle. Only the
     // standalone /email-tracking index paginates.
     $embeddedId = $projectId ?? $leadId ?? $clientId ?? null;
     $events = collect($this->emailTrackingEvents->items());
-    $latestEvent = $embeddedId ? $events->first() : null;
-    $olderEvents = $embeddedId ? $events->slice(1)->values() : collect();
+    $visibleRows = \App\Livewire\Projects\EmailTrackingTable::VISIBLE_ROWS;
+    $latestEvents = $embeddedId ? $events->take($visibleRows) : collect();
+    $olderEvents = $embeddedId ? $events->slice($visibleRows)->values() : collect();
     $hasAccordion = $embeddedId && $olderEvents->isNotEmpty();
 
     // The Project column is implied on a project card, meaningful everywhere
@@ -49,7 +50,7 @@
         @if($embeddedId)
             @include('livewire.projects.partials.email-tracking-table', [
                 'columns' => $columns,
-                'events' => $latestEvent ? collect([$latestEvent]) : collect(),
+                'events' => $latestEvents,
                 'header' => true,
                 'floor' => false,
                 'projectId' => $projectId,
