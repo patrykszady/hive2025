@@ -379,7 +379,21 @@
                         <flux:heading size="lg">Upload check image</flux:heading>
                         <flux:text class="mt-2">A photo of the check, or the bank's check image PDF: its front is cut out and read like the statement scans.</flux:text>
                     </div>
-                    <flux:input type="file" wire:model="checkImageFile" accept=".pdf,.jpg,.jpeg,.png,.webp" label="File" />
+                    {{-- Upload progress and failures are shown, and a failure that
+                         never reaches the server is logged (check_images). --}}
+                    <div
+                        x-data="{ uploading: false, progress: 0, failed: false }"
+                        x-on:livewire-upload-start="uploading = true; failed = false; progress = 0"
+                        x-on:livewire-upload-progress="progress = $event.detail.progress"
+                        x-on:livewire-upload-finish="uploading = false"
+                        x-on:livewire-upload-cancel="uploading = false"
+                        x-on:livewire-upload-error="uploading = false; failed = true; $wire.logCheckImageUploadFailure('livewire-upload-error')"
+                    >
+                        <flux:input type="file" wire:model="checkImageFile" accept=".pdf,.jpg,.jpeg,.png,.webp" label="File" />
+                        <flux:error name="checkImageFile" />
+                        <flux:text x-show="uploading" x-cloak class="mt-2">Uploading… <span x-text="progress"></span>%</flux:text>
+                        <flux:text x-show="failed" x-cloak class="mt-2 text-red-600 dark:text-red-400">The file did not reach Hive. Try again, or try a smaller file.</flux:text>
+                    </div>
                     <div class="flex">
                         <flux:spacer />
                         <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="checkImageFile,uploadCheckImage">Upload</flux:button>

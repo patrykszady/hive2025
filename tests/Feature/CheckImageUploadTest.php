@@ -166,3 +166,47 @@ it('lets only an admin of the company that wrote the check upload to it', functi
 
     Livewire::test(CheckShow::class, ['check' => $check])->assertForbidden();
 });
+
+/** Point the check_images log at a temp file and return its path. */
+function checkImageLog(): string
+{
+    $path = tempnam(sys_get_temp_dir(), 'check_images_log');
+    config(['logging.channels.check_images' => ['driver' => 'single', 'path' => $path, 'level' => 'debug']]);
+    app('log')->forgetChannel('check_images');
+
+    return $path;
+}
+
+it('logs each step of an upload: the file arriving, the submit, and the saved image', function () {
+    $check = uploadableCheck();
+    analyzerReads('SMART TECH ELECTRIC');
+    $log = checkImageLog();
+
+    Livewire::test(CheckShow::class, ['check' => $check])
+        ->set('checkImageFile', UploadedFile::fake()->createWithContent('Citibank Account Dashboard 2700.pdf', citiCheckPdf()))
+        ->call('uploadCheckImage')
+        ->assertHasNoErrors();
+
+    expect(file_get_contents($log))
+        ->toContain('Check image file received')
+        ->toContain('Check image upload submitted')
+        ->toContain('Check image upload saved')
+        ->toContain('"check_id":'.$check->id);
+});
+
+it('logs and shows why an upload was refused, and logs an upload that never reached the server', function () {
+    $check = uploadableCheck();
+    $log = checkImageLog();
+
+    Livewire::test(CheckShow::class, ['check' => $check])
+        ->set('checkImageFile', UploadedFile::fake()->createWithContent('IMG_0001.heic', 'not an image'))
+        ->call('uploadCheckImage')
+        ->assertHasErrors(['checkImageFile' => 'mimes'])
+        ->call('logCheckImageUploadFailure', 'livewire-upload-error');
+
+    expect(file_get_contents($log))
+        ->toContain('Check image upload refused')
+        ->toContain('HEIC')
+        ->toContain('Check image upload did not reach the server')
+        ->and(CheckImage::where('check_id', $check->id)->count())->toBe(0);
+});

@@ -9,6 +9,8 @@ use App\Models\Vendor;
 use App\Services\CheckImageUpload;
 use Flux\Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -106,12 +108,30 @@ class CheckShow extends Component
     public function uploadCheckImage(CheckImageUpload $upload): void
     {
         $this->authorize('update', $this->check);
-        $this->validate(
-            ['checkImageFile' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:20480']],
-            ['checkImageFile.mimes' => 'Upload a PDF or a photo (JPG, PNG or WebP).'],
-        );
+        $context = $this->checkImageContext();
+        Log::channel('check_images')->info('Check image upload submitted', $context);
 
-        $image = $upload->attach($this->check, $this->checkImageFile, 'checkImageFile');
+        try {
+            $this->validate(
+                ['checkImageFile' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:20480']],
+                [
+                    'checkImageFile.required' => 'Choose a file first; if you did, it is still uploading or the upload failed.',
+                    'checkImageFile.mimes' => 'Upload a PDF or a photo (JPG, PNG or WebP). iPhone HEIC photos are not supported.',
+                ],
+            );
+            $image = $upload->attach($this->check, $this->checkImageFile, 'checkImageFile');
+        } catch (ValidationException $e) {
+            Log::channel('check_images')->warning('Check image upload refused', $context + ['errors' => $e->errors()]);
+
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::channel('check_images')->error('Check image upload failed', $context + ['error' => $e->getMessage(), 'at' => $e->getFile().':'.$e->getLine()]);
+            Flux::toast(text: 'The check image could not be added: '.$e->getMessage(), heading: 'Upload failed', variant: 'danger');
+
+            return;
+        }
+
+        Log::channel('check_images')->info('Check image upload saved', $context + ['check_image_id' => $image->id, 'image' => $image->image_filename, 'payee' => $image->payee]);
 
         $this->reset('checkImageFile');
         $this->modal('upload-check-image')->close();
@@ -120,6 +140,39 @@ class CheckShow extends Component
             heading: 'Check image added',
             variant: 'success',
         );
+    }
+
+    /** The browser finished sending the file to Livewire's temporary upload. */
+    public function updatedCheckImageFile(): void
+    {
+        Log::channel('check_images')->info('Check image file received', $this->checkImageContext());
+    }
+
+    /**
+     * The browser reported that the file never reached Livewire's temporary
+     * upload (a network error, a refused request): logged here, since nothing
+     * on the server would otherwise know it was tried.
+     */
+    public function logCheckImageUploadFailure(string $reason = ''): void
+    {
+        Log::channel('check_images')->warning('Check image upload did not reach the server', $this->checkImageContext() + [
+            'reason' => mb_substr($reason, 0, 300),
+            'user_agent' => mb_substr((string) request()->userAgent(), 0, 200),
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    protected function checkImageContext(): array
+    {
+        $file = $this->checkImageFile;
+
+        return [
+            'check_id' => $this->check->id,
+            'user_id' => auth()->id(),
+            'file' => is_object($file) && method_exists($file, 'getClientOriginalName') ? $file->getClientOriginalName() : null,
+            'size' => is_object($file) && method_exists($file, 'getSize') ? $file->getSize() : null,
+            'mime' => is_object($file) && method_exists($file, 'getMimeType') ? $file->getMimeType() : null,
+        ];
     }
 
     #[Title('Check')]
