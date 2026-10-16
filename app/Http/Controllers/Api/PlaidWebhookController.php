@@ -79,6 +79,7 @@ class PlaidWebhookController extends Controller
         match ($webhookType) {
             'TRANSACTIONS' => $this->handleTransactionsWebhook($bank, $webhookCode, $payload),
             'ITEM' => $this->handleItemWebhook($bank, $webhookCode, $payload),
+            'STATEMENTS' => $this->handleStatementsWebhook($bank, (string) $webhookCode, $payload),
             default => Log::channel('plaid_skips')->info('Unhandled webhook type', [
                 'webhook_type' => $webhookType,
                 'webhook_code' => $webhookCode,
@@ -110,6 +111,39 @@ class PlaidWebhookController extends Controller
         }
 
         return PlaidWebhookVerifier::fromConfig()->verify($jwt, (string) $request->getContent());
+    }
+
+    /**
+     * STATEMENTS_REFRESH_COMPLETE: the statements an audit asked the bank for
+     * (AuditShow::fetchMissingStatements) are in /statements/list, or the
+     * bank could not give them. The result lands on the oldest request still
+     * waiting, which the audit page shows beside the missing months.
+     */
+    private function handleStatementsWebhook(Bank $bank, string $webhookCode, array $payload): void
+    {
+        if ($webhookCode !== 'STATEMENTS_REFRESH_COMPLETE') {
+            return;
+        }
+
+        $options = is_array($bank->plaid_options) ? $bank->plaid_options : [];
+        $refreshes = (array) ($options['statement_refreshes'] ?? []);
+
+        foreach ($refreshes as $index => $refresh) {
+            if (($refresh['result'] ?? null) === null) {
+                $refreshes[$index]['result'] = (string) ($payload['result'] ?? 'UNKNOWN');
+                $refreshes[$index]['completed_at'] = now()->toIso8601String();
+                break;
+            }
+        }
+
+        $options['statement_refreshes'] = $refreshes;
+        $bank->plaid_options = $options;
+        $bank->save();
+
+        Log::channel('plaid_statements')->info('Statements refresh complete', [
+            'bank_id' => $bank->id,
+            'result' => $payload['result'] ?? null,
+        ]);
     }
 
     /**

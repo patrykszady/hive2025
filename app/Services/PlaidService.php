@@ -390,6 +390,24 @@ class PlaidService
         return $products === null || in_array('statements', $products, true);
     }
 
+    /**
+     * Ask the bank, through Plaid, for the statements posted between two
+     * dates (up to two years back). Asynchronous: STATEMENTS /
+     * STATEMENTS_REFRESH_COMPLETE arrives when they are in /statements/list.
+     * Billed per statement extracted, and again for any range requested
+     * twice, so callers ask only for months they don't have.
+     */
+    public function refreshStatements(string $accessToken, string $startDate, string $endDate, array $logContext = []): array
+    {
+        return $this->makeRequest($this->baseUrl.'/statements/refresh', [
+            'client_id' => $this->clientId,
+            'secret' => $this->secret,
+            'access_token' => $accessToken,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+        ], $logContext, 'Plaid statement refresh failed.');
+    }
+
     public function downloadStatement($accessToken, $statementId, array $logContext = [])
     {
         $url = $this->baseUrl . '/statements/download';

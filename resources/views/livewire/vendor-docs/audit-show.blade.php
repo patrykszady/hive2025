@@ -1,4 +1,50 @@
 <div class="max-w-lg space-y-4">
+    {{-- Months the audit needs that Plaid has no statement for (found by
+         Download Bank Statements, which also asks the bank for them right
+         away). The button is only for asking again after the bank failed, or
+         Plaid refused: Plaid bills per statement, so a range already asked
+         for is never asked for twice (AuditShow::requestMissingStatements). --}}
+    @php
+        $fetchable = collect($statementGaps)->filter(fn ($gap) => ! $gap['requested_at'] || $gap['result'] === 'FAILURE')->groupBy('bank_id');
+    @endphp
+    @if($statementGaps !== [])
+        <flux:callout icon="exclamation-triangle" color="amber">
+            <flux:callout.heading>Bank statements missing from the download</flux:callout.heading>
+            <flux:callout.text>
+                <ul class="space-y-1">
+                    @foreach($statementGaps as $gap)
+                        <li wire:key="statement-gap-{{ $gap['bank_id'] }}-{{ $gap['from'] }}">
+                            <span class="font-medium">{{ $gap['bank_name'] }}: {{ $gap['label'] }}</span>
+                            &mdash;
+                            @if(! $gap['requested_at'])
+                                not requested yet: Plaid refused the request.
+                            @elseif($gap['result'] === null)
+                                asked {{ \Carbon\Carbon::parse($gap['requested_at'])->timezone(vendor_timezone())->format('M j, g:i A') }}; waiting for the bank.
+                            @elseif($gap['result'] === 'SUCCESS')
+                                fetched, but the bank had no statement for these months.
+                            @else
+                                the bank couldn't provide them; you can ask again.
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+            </flux:callout.text>
+            @if($fetchable->isNotEmpty())
+                <x-slot name="actions">
+                    @foreach($fetchable as $bankId => $gaps)
+                        <flux:button
+                            size="sm"
+                            wire:click="fetchMissingStatements({{ (int) $bankId }})"
+                            wire:confirm="Plaid bills per statement it fetches. Ask {{ $gaps->first()['bank_name'] }} for {{ $gaps->pluck('label')->implode(', ') }}?"
+                        >
+                            {{ $gaps->contains('result', 'FAILURE') ? 'Try again with' : 'Request from' }} {{ $gaps->first()['bank_name'] }}
+                        </flux:button>
+                    @endforeach
+                </x-slot>
+            @endif
+        </flux:callout>
+    @endif
+
     {{-- class="!print:hidden" --}}
     <x-details.card title="Audit" :accordion="false">
         <x-slot:header_buttons>

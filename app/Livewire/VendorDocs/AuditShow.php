@@ -50,6 +50,14 @@ class AuditShow extends Component
 
     public ?string $view = null;
 
+    /**
+     * Months the audit needs that the bank has not given Plaid, per bank,
+     * found by the last statements download: list<array{bank_id: int,
+     * bank_name: string, from: string, to: string, label: string,
+     * requested_at: ?string, result: ?string}>.
+     */
+    public array $statementGaps = [];
+
 
     public function mount(): void
     {
@@ -331,130 +339,33 @@ class AuditShow extends Component
             $plaidService = app(PlaidService::class);
             $currentVendor = auth()->user()->vendor;
             $vendorNameSlug = Str::slug($currentVendor->name);
-            
-            // Get bank accounts with their banks, only where the bank has a plaid_access_token
-            $bankAccounts = BankAccount::whereIn('id', $this->bank_account_ids)
-                ->with('bank')
-                ->whereHas('bank', function($query) {
-                    $query->whereNotNull('plaid_access_token');
-                })
-                ->get()
-                ->groupBy('bank_id');
 
-            // Track banks without Plaid connection (but don't log or show errors)
-            $allBankAccounts = BankAccount::whereIn('id', $this->bank_account_ids)
-                ->with('bank')
-                ->get();
-            
-            $skippedBanks = $allBankAccounts->filter(function($account) {
-                return !$account->bank || !$account->bank->plaid_access_token;
-            });
+            ['statements' => $allStatements, 'banks' => $banks, 'errors' => $errors] = $this->listStatements($plaidService);
 
-            $allStatements = collect();
-            $errors = collect();
-
-            foreach ($bankAccounts as $bankId => $accounts) {
-                $bank = $accounts->first()->bank;
-
-                // Get statements for this bank
-                $statementsResponse = $plaidService->getStatements(
-                    $bank->plaid_access_token,
-                    null,
-                    ['bank_id' => $bank->id],
-                );
-                
-                if (isset($statementsResponse['error'])) {
-                    $errorMessage = $statementsResponse['error_message'] ?? 'Unknown error';
-                    $errorBody = $statementsResponse['error_body'] ?? null;
-                    
-                    // More specific error handling
-                    if ($errorBody && isset($errorBody['error_code'])) {
-                        switch ($errorBody['error_code']) {
-                            case 'INVALID_ACCESS_TOKEN':
-                                $errorMessage = "Bank connection expired - please reconnect '{$bank->name}'";
-                                break;
-                            case 'ITEM_NOT_SUPPORTED':
-                                $errorMessage = "Bank statements not supported for '{$bank->name}'";
-                                break;
-                            case 'PRODUCT_NOT_READY':
-                                $errorMessage = "Bank statements not yet available for '{$bank->name}' - try again later";
-                                break;
-                            case 'PRODUCT_NOT_ENABLED':
-                                $errorMessage = "Bank statements not enabled for '{$bank->name}' - please reconnect with statements access";
-                                break;
-                            default:
-                                $defaultMessage = $errorBody['error_message'] ?? $errorMessage;
-                                $errorMessage = "Error getting statements for '{$bank->name}': {$defaultMessage}";
-                        }
-                    } else if (str_contains($errorMessage, "'statements' product is not enabled")) {
-                        $errorMessage = "Bank statements not enabled for '{$bank->name}' - please reconnect with statements access";
-                    }
-                    
-                    $errors->push($errorMessage);
-                    
-                    // Log detailed error for debugging
-                    \Log::channel('plaid_statements')->error('Plaid statements API error', [
-                        'bank_id' => $bank->id,
-                        'bank_name' => $bank->name,
-                        'bank_account_ids' => $accounts->pluck('id')->toArray(),
-                        'account_numbers' => $accounts->pluck('account_number')->toArray(),
-                        'vendor_id' => auth()->user()->vendor->id,
-                        'date_range' => [$this->start_date, $this->end_date],
-                        'error_response' => $statementsResponse,
-                        'user_friendly_message' => $errorMessage,
-                    ]);
-                    
-                    continue;
-                }
-
-                // Filter statements within our date range and for our accounts
-                if (isset($statementsResponse['accounts'])) {
-                    $statementsFound = 0;
-                    foreach ($statementsResponse['accounts'] as $account) {
-                        // Check if this account is in our selected bank accounts
-                        $bankAccount = $accounts->firstWhere('plaid_account_id', $account['account_id']);
-                        if (!$bankAccount) continue;
-
-                        if (isset($account['statements'])) {
-                            foreach ($account['statements'] as $statement) {
-                                $postedOn = self::statementPostedOn($statement);
-
-                                if ($postedOn && $postedOn->between(
-                                    Carbon::parse($this->start_date)->startOfDay(),
-                                    Carbon::parse($this->end_date)->addDays(self::STATEMENT_GRACE_DAYS)->endOfDay(),
-                                )) {
-                                    $allStatements->push([
-                                        'statement_id' => $statement['statement_id'],
-                                        'bank_name' => $bank->name,
-                                        'bank_id' => $bank->id,
-                                        'account_name' => $bankAccount->account_number,
-                                        'statement_date' => $postedOn->toDateString(),
-                                        'access_token' => $bank->plaid_access_token,
-                                    ]);
-                                    $statementsFound++;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Log successful statement retrieval
-                    \Log::channel('plaid_statements')->info('Statements successfully retrieved from bank', [
-                        'bank_id' => $bank->id,
-                        'bank_name' => $bank->name,
-                        'bank_account_ids' => $accounts->pluck('id')->toArray(),
-                        'statements_found' => $statementsFound,
-                        'vendor_id' => auth()->user()->vendor->id,
-                        'date_range' => [$this->start_date, $this->end_date],
-                    ]);
-                }
-            }
+            // Every statement the audit needs: months Plaid has not got are
+            // asked of the bank right away, each range only once (2026-10-16).
+            $requested = $this->requestMissingStatements($banks, $plaidService);
+            $this->statementGaps = $this->statementGapsFor($this->withSavedRefreshes($banks));
 
             if ($allStatements->isEmpty()) {
+                if ($this->statementGaps !== []) {
+                    $this->toast(
+                        text: $requested !== []
+                            ? 'Plaid had none of these statements yet, so they were requested from the bank ('.implode(', ', $requested).'). They usually arrive within minutes; download again then.'
+                            : 'Plaid has no statements for this period yet; see the note at the top.',
+                        heading: 'Statements on the way',
+                        duration: 10000,
+                        variant: 'warning',
+                    );
+
+                    return;
+                }
+
                 // Only show actual API errors, skip banks not connected to Plaid
                 $connectionErrors = collect();
                 $configurationErrors = collect();
                 $otherErrors = collect();
-                
+
                 foreach ($errors as $error) {
                     if (str_contains($error, 'not enabled') || str_contains($error, 'reconnect with statements access')) {
                         $configurationErrors->push($error);
@@ -464,17 +375,17 @@ class AuditShow extends Component
                         $otherErrors->push($error);
                     }
                 }
-                
+
                 $messages = collect()
                     ->merge($connectionErrors)
                     ->merge($configurationErrors)
                     ->merge($otherErrors);
-                
+
                 if ($messages->isNotEmpty()) {
-                    $errorMessage = $messages->count() === 1 
+                    $errorMessage = $messages->count() === 1
                         ? $messages->first()
                         : "Multiple issues found:\n• " . $messages->implode("\n• ");
-                    
+
                     $this->toast(
                         text: $errorMessage,
                         heading: 'Cannot Download Statements',
@@ -492,29 +403,40 @@ class AuditShow extends Component
                 return;
             }
 
-            // If we have statements to download, create a ZIP file
-            $zipContent = $this->createStatementsZip($allStatements, $plaidService);
-            
-            if ($zipContent === null) {
-                $this->toast('Failed to create statements archive.', 'error');
+            $pdf = $this->mergeStatements($allStatements, $plaidService);
+
+            if ($pdf === null) {
+                $this->toast('Failed to build the statements PDF.', 'error');
                 return;
             }
 
-            $filename = 'Bank-Statements-' . $currentVendor->id . '-' . $vendorNameSlug . '-' . $this->start_date . '-to-' . $this->end_date . '.zip';
+            // An incomplete year says so in its name, so it is not sent on as the full set.
+            $filename = 'Bank-Statements-' . $currentVendor->id . '-' . $vendorNameSlug . '-' . $this->start_date . '-to-' . $this->end_date . ($this->statementGaps !== [] ? '-partial' : '') . '.pdf';
 
-            // Log successful download
             \Log::channel('plaid_statements')->info('Bank statements download successful', [
                 'vendor_id' => $currentVendor->id,
                 'total_statements' => $allStatements->count(),
                 'banks_processed' => $allStatements->pluck('bank_name')->unique()->values()->toArray(),
+                'missing' => collect($this->statementGaps)->map(fn (array $gap) => $gap['bank_name'].' '.$gap['label'])->all(),
                 'filename' => $filename,
                 'date_range' => [$this->start_date, $this->end_date],
             ]);
 
-            return response()->streamDownload(function () use ($zipContent) {
-                echo $zipContent;
+            if ($this->statementGaps !== []) {
+                $this->toast(
+                    text: 'Missing '.collect($this->statementGaps)->map(fn (array $gap) => $gap['label'])->implode(', ').($requested !== []
+                        ? '; requested from the bank just now. They usually arrive within minutes; download again then.'
+                        : '; see the note at the top.'),
+                    heading: 'Partial statements',
+                    duration: 10000,
+                    variant: 'warning',
+                );
+            }
+
+            return response()->streamDownload(function () use ($pdf) {
+                echo $pdf;
             }, $filename, [
-                'Content-Type' => 'application/zip',
+                'Content-Type' => 'application/pdf',
             ]);
 
         } catch (\Exception $e) {
@@ -529,9 +451,325 @@ class AuditShow extends Component
                     'trace' => $e->getTraceAsString(),
                 ],
             ]);
-            
+
             $this->toast('An error occurred while downloading statements. Please try again.', 'error');
         }
+    }
+
+    /**
+     * Ask again for months the bank failed to give (the note's "Try again").
+     * Months asked for and still pending are never asked twice: Plaid bills
+     * per statement extracted, and again for a range requested twice.
+     */
+    public function fetchMissingStatements(int $bankId): void
+    {
+        $plaidService = app(PlaidService::class);
+        ['banks' => $banks] = $this->listStatements($plaidService, $bankId);
+
+        $requested = $this->requestMissingStatements($banks, $plaidService, retryFailed: true);
+
+        if ($requested !== []) {
+            $this->toast(
+                text: 'Asked the bank again for '.implode(', ', $requested).'. They usually arrive within minutes; download again then.',
+                heading: 'Statements requested',
+                duration: 8000,
+                variant: 'success',
+            );
+        }
+
+        $this->statementGaps = collect($this->statementGaps)
+            ->reject(fn (array $gap) => $gap['bank_id'] === $bankId)
+            ->merge($this->statementGapsFor($this->withSavedRefreshes($banks)))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Request each bank's missing months (statementGapsFor) from Plaid, skipping
+     * ranges already asked for — and, unless retrying, ones the bank failed.
+     *
+     * @param  array<int, array{name: string, posted: list<string>, refreshes: list<array<string, mixed>>}>  $banks
+     * @return list<string> labels of the months requested ("Citibank Aug 2025 – Mar 2026")
+     */
+    protected function requestMissingStatements(array $banks, PlaidService $plaidService, bool $retryFailed = false): array
+    {
+        $requested = [];
+        $earliest = today()->subYears(2)->addDay();
+
+        foreach (collect($this->statementGapsFor($banks))->groupBy('bank_id') as $bankId => $gaps) {
+            $bank = \App\Models\Bank::query()
+                ->whereKey($bankId)
+                ->where('vendor_id', auth()->user()->vendor->id)
+                ->whereNotNull('plaid_access_token')
+                ->first();
+
+            if (! $bank) {
+                continue;
+            }
+
+            $options = is_array($bank->plaid_options) ? $bank->plaid_options : [];
+            $added = false;
+
+            foreach ($gaps as $gap) {
+                if ($gap['requested_at'] && ! ($retryFailed && $gap['result'] === 'FAILURE')) {
+                    continue;
+                }
+
+                // Plaid picks statements by posted date: the month's last day or
+                // the next few days, so the range runs a few days past the month.
+                $start = Carbon::parse($gap['from'].'-01')->max($earliest);
+                $end = Carbon::parse($gap['to'].'-01')->endOfMonth()->addDays(3)->min(today());
+
+                if ($start->gt($end)) {
+                    continue;
+                }
+
+                $response = $plaidService->refreshStatements($bank->plaid_access_token, $start->toDateString(), $end->toDateString(), ['bank_id' => $bank->id, 'source' => 'audit']);
+
+                if (($response['error'] ?? false) === true) {
+                    $this->toast(
+                        text: 'Plaid would not fetch '.$gap['label'].' from '.$bank->name.': '.($response['error_message'] ?? 'unknown error'),
+                        heading: 'Could not request statements',
+                        duration: 10000,
+                        variant: 'danger',
+                    );
+
+                    continue;
+                }
+
+                $options['statement_refreshes'][] = [
+                    'start' => $start->toDateString(),
+                    'end' => $end->toDateString(),
+                    'requested_at' => now()->toIso8601String(),
+                    'requested_by' => auth()->id(),
+                    'request_id' => $response['request_id'] ?? null,
+                    'result' => null,
+                ];
+                $added = true;
+                $requested[] = $bank->name.' '.$gap['label'];
+
+                \Log::channel('plaid_statements')->info('Statements refresh requested', [
+                    'bank_id' => $bank->id,
+                    'range' => [$start->toDateString(), $end->toDateString()],
+                    'vendor_id' => auth()->user()->vendor->id,
+                ]);
+            }
+
+            if ($added) {
+                $bank->plaid_options = $options;
+                $bank->save();
+            }
+        }
+
+        return $requested;
+    }
+
+    /**
+     * The listed banks with the refresh requests now saved on them.
+     *
+     * @param  array<int, array{name: string, posted: list<string>, refreshes: list<array<string, mixed>>}>  $banks
+     * @return array<int, array{name: string, posted: list<string>, refreshes: list<array<string, mixed>>}>
+     */
+    protected function withSavedRefreshes(array $banks): array
+    {
+        $saved = \App\Models\Bank::query()->whereIn('id', array_keys($banks))->get()->keyBy('id');
+
+        foreach ($banks as $bankId => $bank) {
+            $banks[$bankId]['refreshes'] = (array) ($saved[$bankId]?->plaid_options['statement_refreshes'] ?? []);
+        }
+
+        return $banks;
+    }
+
+    /**
+     * The selected accounts' statements from Plaid: those posted in the audit
+     * period (plus STATEMENT_GRACE_DAYS), and, per bank whose accounts Plaid
+     * lists, every posted date it has, for finding missing months.
+     *
+     * @return array{statements: Collection, banks: array<int, array{name: string, posted: list<string>, refreshes: list<array<string, mixed>>}>, errors: Collection}
+     */
+    protected function listStatements(PlaidService $plaidService, ?int $onlyBankId = null): array
+    {
+        $bankAccounts = BankAccount::whereIn('id', $this->bank_account_ids)
+            ->with('bank')
+            ->whereHas('bank', function ($query) {
+                $query->whereNotNull('plaid_access_token');
+            })
+            ->when($onlyBankId, fn ($query) => $query->where('bank_id', $onlyBankId))
+            ->get()
+            ->groupBy('bank_id');
+
+        $allStatements = collect();
+        $errors = collect();
+        $banks = [];
+
+        foreach ($bankAccounts as $bankId => $accounts) {
+            $bank = $accounts->first()->bank;
+
+            $statementsResponse = $plaidService->getStatements(
+                $bank->plaid_access_token,
+                null,
+                ['bank_id' => $bank->id],
+            );
+
+            if (isset($statementsResponse['error'])) {
+                $errorMessage = $statementsResponse['error_message'] ?? 'Unknown error';
+                $errorBody = $statementsResponse['error_body'] ?? null;
+
+                if ($errorBody && isset($errorBody['error_code'])) {
+                    $errorMessage = match ($errorBody['error_code']) {
+                        'INVALID_ACCESS_TOKEN' => "Bank connection expired - please reconnect '{$bank->name}'",
+                        'ITEM_NOT_SUPPORTED' => "Bank statements not supported for '{$bank->name}'",
+                        'PRODUCT_NOT_READY' => "Bank statements not yet available for '{$bank->name}' - try again later",
+                        'PRODUCT_NOT_ENABLED' => "Bank statements not enabled for '{$bank->name}' - please reconnect with statements access",
+                        default => "Error getting statements for '{$bank->name}': ".($errorBody['error_message'] ?? $errorMessage),
+                    };
+                } elseif (str_contains($errorMessage, "'statements' product is not enabled")) {
+                    $errorMessage = "Bank statements not enabled for '{$bank->name}' - please reconnect with statements access";
+                }
+
+                $errors->push($errorMessage);
+
+                \Log::channel('plaid_statements')->error('Plaid statements API error', [
+                    'bank_id' => $bank->id,
+                    'bank_name' => $bank->name,
+                    'bank_account_ids' => $accounts->pluck('id')->toArray(),
+                    'account_numbers' => $accounts->pluck('account_number')->toArray(),
+                    'vendor_id' => auth()->user()->vendor->id,
+                    'date_range' => [$this->start_date, $this->end_date],
+                    'error_response' => $statementsResponse,
+                    'user_friendly_message' => $errorMessage,
+                ]);
+
+                continue;
+            }
+
+            $statementsFound = 0;
+            foreach ($statementsResponse['accounts'] ?? [] as $account) {
+                // Only the selected accounts; one Plaid lists for this bank.
+                $bankAccount = $accounts->firstWhere('plaid_account_id', $account['account_id']);
+                if (! $bankAccount) {
+                    continue;
+                }
+
+                $banks[$bank->id] ??= [
+                    'name' => $bank->name,
+                    'posted' => [],
+                    'refreshes' => (array) ($bank->plaid_options['statement_refreshes'] ?? []),
+                ];
+
+                foreach ($account['statements'] ?? [] as $statement) {
+                    $postedOn = self::statementPostedOn($statement);
+                    if (! $postedOn) {
+                        continue;
+                    }
+
+                    $banks[$bank->id]['posted'][] = $postedOn->toDateString();
+
+                    if ($postedOn->between(
+                        Carbon::parse($this->start_date)->startOfDay(),
+                        Carbon::parse($this->end_date)->addDays(self::STATEMENT_GRACE_DAYS)->endOfDay(),
+                    )) {
+                        $allStatements->push([
+                            'statement_id' => $statement['statement_id'],
+                            'bank_name' => $bank->name,
+                            'bank_id' => $bank->id,
+                            'account_name' => $bankAccount->account_number,
+                            'statement_date' => $postedOn->toDateString(),
+                            'access_token' => $bank->plaid_access_token,
+                        ]);
+                        $statementsFound++;
+                    }
+                }
+            }
+
+            \Log::channel('plaid_statements')->info('Statements successfully retrieved from bank', [
+                'bank_id' => $bank->id,
+                'bank_name' => $bank->name,
+                'bank_account_ids' => $accounts->pluck('id')->toArray(),
+                'statements_found' => $statementsFound,
+                'vendor_id' => auth()->user()->vendor->id,
+                'date_range' => [$this->start_date, $this->end_date],
+            ]);
+        }
+
+        return ['statements' => $allStatements, 'banks' => $banks, 'errors' => $errors];
+    }
+
+    /**
+     * @param  array<int, array{name: string, posted: list<string>, refreshes: list<array<string, mixed>>}>  $banks
+     * @return list<array{bank_id: int, bank_name: string, from: string, to: string, label: string, requested_at: ?string, result: ?string}>
+     */
+    protected function statementGapsFor(array $banks): array
+    {
+        $gaps = [];
+
+        foreach ($banks as $bankId => $bank) {
+            foreach (self::missingStatementMonths($bank['posted'], (string) $this->start_date, (string) $this->end_date) as $run) {
+                $runStart = Carbon::parse($run['from'].'-01');
+                $runEnd = Carbon::parse($run['to'].'-01')->endOfMonth();
+                $request = collect($bank['refreshes'])
+                    ->filter(fn (array $refresh) => Carbon::parse($refresh['start'])->lte($runEnd) && Carbon::parse($refresh['end'])->gte($runStart))
+                    ->sortByDesc('requested_at')
+                    ->first();
+
+                $gaps[] = [
+                    'bank_id' => (int) $bankId,
+                    'bank_name' => $bank['name'],
+                    'from' => $run['from'],
+                    'to' => $run['to'],
+                    'label' => $run['from'] === $run['to']
+                        ? $runStart->format('M Y')
+                        : $runStart->format('M Y').' – '.$runEnd->format('M Y'),
+                    'requested_at' => $request['requested_at'] ?? null,
+                    'result' => $request['result'] ?? null,
+                ];
+            }
+        }
+
+        return $gaps;
+    }
+
+    /**
+     * The audit's months (start through end, but none still running) with no
+     * statement posted for them, as runs of consecutive months. A statement
+     * posted in a month's first days covers the month before.
+     *
+     * @param  list<string>  $postedDates
+     * @return list<array{from: string, to: string}>
+     */
+    public static function missingStatementMonths(array $postedDates, string $start, string $end): array
+    {
+        $covered = collect($postedDates)
+            ->map(fn (string $date) => Carbon::parse($date))
+            ->map(fn (Carbon $date) => ($date->day <= 5 ? $date->copy()->subMonthNoOverflow() : $date)->format('Y-m'))
+            ->unique();
+
+        $lastClosedMonth = today()->startOfMonth()->subMonth();
+        $last = Carbon::parse($end)->startOfMonth()->min($lastClosedMonth);
+        $runs = [];
+        $run = null;
+
+        for ($month = Carbon::parse($start)->startOfMonth(); $month->lte($last); $month->addMonth()) {
+            $key = $month->format('Y-m');
+
+            if ($covered->contains($key)) {
+                if ($run) {
+                    $runs[] = $run;
+                    $run = null;
+                }
+
+                continue;
+            }
+
+            $run = $run ? ['from' => $run['from'], 'to' => $key] : ['from' => $key, 'to' => $key];
+        }
+
+        if ($run) {
+            $runs[] = $run;
+        }
+
+        return $runs;
     }
 
     /** A statement posted this long after the audit ends still covers its last weeks. */
@@ -562,66 +800,41 @@ class AuditShow extends Component
         return null;
     }
 
-    private function createStatementsZip($statements, PlaidService $plaidService): ?string
+    /**
+     * Every statement in one PDF, oldest first (then by account), each once:
+     * an auditor reads a year of statements as one document, not a zip of
+     * files (2026-10-16). Merged here, not by a third-party service — these
+     * are bank statements. A statement Plaid lists twice with identical
+     * bytes is kept once.
+     */
+    private function mergeStatements(Collection $statements, PlaidService $plaidService): ?string
     {
-        $zip = new \ZipArchive();
-        $tempZipPath = tempnam(sys_get_temp_dir(), 'bank_statements_');
-        
-        if ($zip->open($tempZipPath, \ZipArchive::CREATE) !== TRUE) {
-            return null;
-        }
+        $binaries = [];
 
-        foreach ($statements as $statement) {
-            try {
-                $pdfContent = $plaidService->downloadStatement(
-                    $statement['access_token'], 
-                    $statement['statement_id'],
-                    ['bank_id' => $statement['bank_id'] ?? null],
-                );
+        foreach ($statements->unique('statement_id')->sortBy(fn (array $statement) => $statement['statement_date'].'|'.$statement['account_name'])->values() as $statement) {
+            $pdfContent = $plaidService->downloadStatement(
+                $statement['access_token'],
+                $statement['statement_id'],
+                ['bank_id' => $statement['bank_id'] ?? null],
+            );
 
-                if (is_array($pdfContent) && isset($pdfContent['error'])) {
-                    \Log::channel('plaid_statements')->warning('Failed to download individual statement', [
-                        'statement_id' => $statement['statement_id'],
-                        'bank_name' => $statement['bank_name'],
-                        'account_name' => $statement['account_name'],
-                        'statement_date' => $statement['statement_date'],
-                        'error' => $pdfContent,
-                        'vendor_id' => auth()->user()->vendor->id,
-                    ]);
-                    continue;
-                }
-
-                $filename = sprintf(
-                    '%s_%s_%s.pdf',
-                    Str::slug($statement['bank_name']),
-                    $statement['account_name'],
-                    $statement['statement_date']
-                );
-
-                $zip->addFromString($filename, $pdfContent);
-                
-            } catch (\Exception $e) {
-                \Log::channel('plaid_statements')->error('Error processing individual statement for ZIP', [
+            if (! is_string($pdfContent) || ! str_starts_with($pdfContent, '%PDF')) {
+                \Log::channel('plaid_statements')->warning('Failed to download individual statement', [
                     'statement_id' => $statement['statement_id'],
                     'bank_name' => $statement['bank_name'],
                     'account_name' => $statement['account_name'],
                     'statement_date' => $statement['statement_date'],
+                    'error' => is_array($pdfContent) ? $pdfContent : 'not a PDF',
                     'vendor_id' => auth()->user()->vendor->id,
-                    'exception' => [
-                        'message' => $e->getMessage(),
-                        'file' => $e->getFile(),
-                        'line' => $e->getLine(),
-                    ],
                 ]);
+
+                continue;
             }
+
+            $binaries[sha1($pdfContent)] = $pdfContent;
         }
 
-        $zip->close();
-        
-        $content = file_get_contents($tempZipPath);
-        unlink($tempZipPath);
-        
-        return $content;
+        return \App\Support\PdfMerger::merge(array_values($binaries));
     }
 
     /** The Coverage column of a policy row in the export: "WC verified 10/12/2026 (EWCCV)" and the like. */
