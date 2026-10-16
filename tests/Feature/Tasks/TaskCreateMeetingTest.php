@@ -3,6 +3,7 @@
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\Task;
+use App\Models\User;
 use App\Models\Vendor;
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Tasks\TaskCreate;
@@ -292,4 +293,164 @@ it('does not push a late Meet into the next day', function (): void {
 
     // 00:15 tomorrow is not an end time for today's meeting — keep the mirror.
     expect($component->get("form.time_settings.{$date}.end_time"))->toBe('23:45');
+});
+
+it('participantSearchResults is exactly availableMeetingContacts (minus selected) until a search narrows it', function (): void {
+    $ownerVendor = Vendor::factory()->create();
+    $client = Client::factory()->create();
+    $clientContact = User::factory()->create([
+        'first_name' => 'Mark',
+        'last_name' => 'Brodson',
+        'email' => 'mark.brodson@example.test',
+    ]);
+    $client->users()->attach($clientContact->id);
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => '3154 Violet',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+    // Project::client() reads this pivot, not projects.client_id — the same
+    // row ProjectObserver::created() writes outside of withoutEvents().
+    $project->vendors()->attach($ownerVendor->id, ['client_id' => $client->id]);
+
+    $component = Livewire::test(TaskCreate::class)
+        ->set('form.type', 'Meet')
+        ->set('form.project_id', $project->id);
+
+    // Mark is the client's contact, so he's auto-selected as a participant
+    // already (client contacts are always invited by default) — exactly
+    // today's behavior, untouched by widening the search.
+    expect($component->get('form.meeting_participants'))->toContain('mark.brodson@example.test');
+
+    $selected = $component->get('form.meeting_participants');
+    $expected = collect($component->instance()->availableMeetingContacts)
+        ->reject(fn (array $contact) => in_array($contact['email'], $selected, true))
+        ->values()
+        ->all();
+
+    // With nothing typed, the dropdown is exactly what it has always been:
+    // the project's people minus whoever is already a pill.
+    expect($component->instance()->participantSearchResults)->toBe($expected);
+});
+
+it('participantSearchResults finds anyone the company knows once a search term narrows it down, and nobody else', function (): void {
+    $ownerVendor = Vendor::factory()->create();
+    $creator = User::factory()->create(['primary_vendor_id' => $ownerVendor->id]);
+    $ownerVendor->users()->attach($creator->id, ['role_id' => 1, 'is_employed' => 1]);
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => '3154 Violet',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+
+    // Known to the company, though not to this project: another client's
+    // homeowner, a vendor's employee, a past employee.
+    $otherClient = Client::factory()->create();
+    $otherClient->vendors()->attach($ownerVendor->id);
+    $otherHomeowner = User::factory()->create(['first_name' => 'Zyxariana', 'last_name' => 'Homeowner', 'email' => 'zyxariana.homeowner@example.test']);
+    $otherClient->users()->attach($otherHomeowner->id);
+
+    $sub = Vendor::factory()->create();
+    $ownerVendor->vendors()->attach($sub->id);
+    $subEmployee = User::factory()->create(['first_name' => 'Zyxariana', 'last_name' => 'Plumber', 'email' => 'zyxariana.plumber@example.test']);
+    $sub->users()->attach($subEmployee->id, ['role_id' => 2, 'is_employed' => 1]);
+
+    $pastEmployee = User::factory()->create(['first_name' => 'Zyxariana', 'last_name' => 'Former', 'email' => 'zyxariana.former@example.test']);
+    $ownerVendor->users()->attach($pastEmployee->id, ['role_id' => 2, 'is_employed' => 0]);
+
+    // Another company's people stay out of reach.
+    $otherCompany = Vendor::factory()->create();
+    $strangersClient = Client::factory()->create();
+    $strangersClient->vendors()->attach($otherCompany->id);
+    $strangerHomeowner = User::factory()->create(['first_name' => 'Zyxariana', 'last_name' => 'Stranger', 'email' => 'zyxariana.stranger@example.test']);
+    $strangersClient->users()->attach($strangerHomeowner->id);
+    $strangerStaff = User::factory()->create(['first_name' => 'Zyxariana', 'last_name' => 'Rival', 'email' => 'zyxariana.rival@example.test']);
+    $otherCompany->users()->attach($strangerStaff->id, ['role_id' => 1, 'is_employed' => 1]);
+    $unattached = User::factory()->create(['first_name' => 'Zyxariana', 'last_name' => 'Nobody', 'email' => 'zyxariana.nobody@example.test']);
+
+    $component = Livewire::actingAs($creator)
+        ->test(TaskCreate::class)
+        ->set('form.type', 'Meet')
+        ->set('form.project_id', $project->id)
+        ->set('participantSearch', 'zyxari');
+
+    expect(collect($component->instance()->participantSearchResults)->pluck('email')->sort()->values()->all())
+        ->toBe(['zyxariana.former@example.test', 'zyxariana.homeowner@example.test', 'zyxariana.plumber@example.test']);
+
+    // A stranger's email typed in by hand is still invited, but their name is not given away.
+    $component->call('addMeetingParticipant', $strangerHomeowner->email);
+    expect($component->instance()->meetingParticipantDisplayName($strangerHomeowner->email))->toBe($strangerHomeowner->email);
+});
+
+it('a Meet task saves with a participant found through the search, not just the project\'s people', function (): void {
+    $ownerVendor = Vendor::factory()->create();
+
+    // TaskObserver::creating() stamps belongs_to_vendor_id/created_by_user_id
+    // from the signed-in user — a real save needs one, same as production.
+    $creator = User::factory()->create(['primary_vendor_id' => $ownerVendor->id]);
+    $ownerVendor->users()->attach($creator->id, ['role_id' => 1, 'is_employed' => 1]);
+
+    $client = Client::factory()->create();
+
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => '3154 Violet',
+        'client_id' => $client->id,
+        'address' => '3154 Violet Ln',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $ownerVendor->id,
+    ]));
+    $project->vendors()->attach($ownerVendor->id, ['client_id' => $client->id]);
+
+    // The homeowner of another of the company's clients.
+    $outsider = User::factory()->create([
+        'first_name' => 'Zyxariana',
+        'last_name' => 'Quilborne',
+        'email' => 'zyxariana.quilborne@example.test',
+    ]);
+    $otherClient = Client::factory()->create();
+    $otherClient->vendors()->attach($ownerVendor->id);
+    $otherClient->users()->attach($outsider->id);
+
+    $component = Livewire::actingAs($creator)
+        ->test(TaskCreate::class)
+        ->call('addTask', $project->id)
+        ->set('form.type', 'Meet')
+        ->set('form.title', 'Brodson Review')
+        ->set('participantSearch', 'zyxari');
+
+    // Found by the search...
+    expect(collect($component->instance()->participantSearchResults)->pluck('email'))
+        ->toContain($outsider->email);
+
+    // ...added like any other suggestion...
+    $component->call('addMeetingParticipant', $outsider->email);
+
+    expect($component->get('form.meeting_participants'))->toContain($outsider->email);
+    // The search box clears, and the pill reads their name, not the raw email.
+    expect($component->get('participantSearch'))->toBe('');
+    $component->assertSee('Zyxariana Quilborne');
+
+    // ...and persisted when the task is actually created.
+    $component->call('save');
+
+    $task = Task::query()
+        ->where('project_id', $project->id)
+        ->where('title', 'Brodson Review')
+        ->first();
+
+    expect($task)->not->toBeNull();
+    expect((array) ($task->options->meeting_participants ?? []))->toContain($outsider->email);
 });

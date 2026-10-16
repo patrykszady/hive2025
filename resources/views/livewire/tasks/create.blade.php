@@ -254,8 +254,7 @@
                                     <div class="flex flex-wrap gap-1.5 mt-1">
                                         @foreach($form->meeting_participants as $index => $email)
                                             @php
-                                                $contact = collect($this->availableMeetingContacts)->firstWhere('email', $email);
-                                                $displayName = ($contact && $contact['name']) ? $contact['name'] : $email;
+                                                $displayName = $this->meetingParticipantDisplayName($email);
                                             @endphp
                                             <span wire:key="participant-{{ $index }}" class="inline-flex items-center gap-1 rounded-md bg-zinc-100 dark:bg-zinc-700 px-2 py-1 text-sm text-zinc-700 dark:text-zinc-200">
                                                 {{ $displayName }}
@@ -267,17 +266,28 @@
                                     </div>
                                 @endif
 
-                                {{-- Searchable dropdown to add participants --}}
+                                {{-- Searchable dropdown to add participants. With nothing
+                                     typed this is just the project's people, same as
+                                     always; typing two or more characters also searches
+                                     every user the company knows by name or email (not
+                                     only people already tied to this project) — see
+                                     TaskCreate::participantSearchResults(). Filtering is
+                                     disabled on the autocomplete (:filter="false") because
+                                     the options it's given are already the matches. --}}
                                 @php
-                                    $unselectedContacts = collect($this->availableMeetingContacts)
-                                        ->reject(fn ($c) => in_array($c['email'], $form->meeting_participants))
-                                        ->values();
+                                    $participantOptions = collect($this->participantSearchResults);
                                 @endphp
                                 <div x-data="{ newEmail: '' }" class="flex gap-2 mt-2">
-                                    @if($unselectedContacts->isNotEmpty())
+                                    @if($participantOptions->isNotEmpty() || trim($participantSearch) !== '')
                                         <div class="flex-1">
-                                            <flux:autocomplete placeholder="Add participant..." size="sm" class="w-full">
-                                                @foreach($unselectedContacts as $contact)
+                                            <flux:autocomplete
+                                                wire:model.live.debounce.300ms="participantSearch"
+                                                :filter="false"
+                                                placeholder="Search participants..."
+                                                size="sm"
+                                                class="w-full"
+                                            >
+                                                @foreach($participantOptions as $contact)
                                                     <flux:autocomplete.item
                                                         wire:key="contact-add-{{ $loop->index }}"
                                                         value="{{ $contact['email'] }}"

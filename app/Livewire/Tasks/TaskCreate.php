@@ -63,6 +63,12 @@ class TaskCreate extends Component
     /** How long a Meet runs by default — the same half hour a consult books. */
     public const MEET_MINUTES = 30;
 
+    /** Shortest search term that triggers a platform-wide participant search. */
+    private const PARTICIPANT_SEARCH_MIN_LENGTH = 2;
+
+    /** Most participant search results rendered at once (Flux options are ~1.3KB each). */
+    private const PARTICIPANT_SEARCH_LIMIT = 20;
+
     /**
      * Predecessors chosen before the task exists, applied by save().
      *
@@ -90,6 +96,9 @@ class TaskCreate extends Component
     public ?int $homeownerSlotIndex = null;
 
     public ?string $homeownerExactTime = null;
+
+    /** The "add participant" search box — see participantSearchResults(). */
+    public string $participantSearch = '';
 
     /**
      * Maps a homeowner-selected time frame to concrete arrival start/end times.
@@ -298,13 +307,101 @@ class TaskCreate extends Component
             }
         }
 
-        // Deliberately no "every other platform user" fallback here anymore:
-        // this used to list every signed-up user's name and email address
-        // platform-wide (any company's staff, any homeowner) in the "add
+        // No "every other platform user" fallback here: that used to list
+        // every signed-up user's name and email platform-wide (any
+        // company's staff, any homeowner) on every load of the "add
         // participant" autocomplete. Team members, this project's client,
-        // and the assigned vendor above already cover every legitimate
-        // suggestion; anyone else can still be typed in by email.
+        // and the assigned vendor above are what's offered with nothing
+        // typed; participantSearchResults() below widens the search to the
+        // company's own people (knownUsers()) once a term is typed.
         return $contacts->unique('email')->values()->all();
+    }
+
+    /**
+     * Participants offered in the "add participant" dropdown.
+     *
+     * With nothing typed, this is exactly availableMeetingContacts() —
+     * the project's client, team, and assigned vendor, same as always.
+     * Once a search term is typed, it also matches every user the company
+     * knows (knownUsers()) by name or email, so a Meet can invite anyone
+     * from another project, a past employee or a vendor's people, not only
+     * those tied to this project. Results are capped so a broad query never
+     * renders hundreds of Flux options.
+     *
+     * @return array<int, array{email: string, name: string, group: string}>
+     */
+    #[Computed]
+    public function participantSearchResults(): array
+    {
+        $selected = collect((array) $this->form->meeting_participants)
+            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->all();
+
+        $projectContacts = collect($this->availableMeetingContacts)
+            ->reject(fn (array $contact) => in_array($contact['email'], $selected, true));
+
+        $query = trim($this->participantSearch);
+
+        if ($query === '' || mb_strlen($query) < self::PARTICIPANT_SEARCH_MIN_LENGTH) {
+            return $projectContacts->values()->all();
+        }
+
+        $needle = strtolower($query);
+        $matchingProjectContacts = $projectContacts->filter(
+            fn (array $contact) => str_contains(strtolower($contact['name']), $needle)
+                || str_contains($contact['email'], $needle)
+        );
+
+        $excludedEmails = $matchingProjectContacts->pluck('email')->merge($selected)->unique()->all();
+
+        $platformUsers = $this->knownUsers()
+            ->where(function ($userQuery) use ($query): void {
+                $userQuery->where('email', 'like', "%{$query}%")
+                    ->orWhereRaw("LOWER(CONCAT(first_name, ' ', last_name)) LIKE ?", ['%'.strtolower($query).'%']);
+            })
+            ->whereNotIn('email', $excludedEmails)
+            ->orderBy('first_name')
+            ->limit(self::PARTICIPANT_SEARCH_LIMIT)
+            ->get()
+            ->filter(fn (User $user) => $user->hasRoutableEmail())
+            ->map(fn (User $user) => [
+                'email' => strtolower(trim((string) $user->email)),
+                'name' => trim($user->full_name),
+                'group' => 'User',
+            ])
+            ->values();
+
+        return $matchingProjectContacts
+            ->merge($platformUsers)
+            ->unique('email')
+            ->take(self::PARTICIPANT_SEARCH_LIMIT)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Every user the signed-in company knows: its own people (past ones
+     * too), the people of the vendors it works with, and its clients'
+     * users. Never another company's staff or homeowners; nobody without a
+     * company of its own.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<User>
+     */
+    protected function knownUsers(): \Illuminate\Database\Eloquent\Builder
+    {
+        if (! auth()->user()?->vendor) {
+            return User::query()->whereRaw('1 = 0');
+        }
+
+        // Both lists come through the global scopes: the company and its
+        // vendors (VendorScope), the company's clients (ClientScope).
+        $vendorIds = Vendor::query()->pluck('vendors.id');
+        $clientIds = \App\Models\Client::query()->pluck('clients.id');
+
+        return User::query()->where(function ($known) use ($vendorIds, $clientIds): void {
+            $known->whereHas('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->whereIn('vendors.id', $vendorIds))
+                ->orWhereHas('clients', fn ($clients) => $clients->withoutGlobalScopes()->whereIn('clients.id', $clientIds));
+        });
     }
 
     /**
@@ -788,6 +885,8 @@ class TaskCreate extends Component
 
         $this->form->meeting_participants[] = $email;
         $this->resetErrorBag('form.meeting_participants');
+        // Back to the project's people until the next search.
+        $this->participantSearch = '';
     }
 
     /**
@@ -813,6 +912,27 @@ class TaskCreate extends Component
     }
 
     /**
+     * The name shown on a participant's pill: the project contact's name
+     * when there is one (client, team, assigned vendor), otherwise a user
+     * the company knows with that email (added via participantSearchResults())
+     * — otherwise the email itself, for a hand-typed address.
+     */
+    public function meetingParticipantDisplayName(string $email): string
+    {
+        $email = strtolower(trim($email));
+
+        $contact = collect($this->availableMeetingContacts)->firstWhere('email', $email);
+
+        if ($contact && filled($contact['name'])) {
+            return $contact['name'];
+        }
+
+        $name = trim((string) ($this->knownUsers()->where('email', $email)->first()?->full_name));
+
+        return $name !== '' ? $name : $email;
+    }
+
+    /**
      * Reset form and dependency fields to initial state
      */
     private function resetFormFields()
@@ -828,6 +948,7 @@ class TaskCreate extends Component
         $this->dependencyType = 'finish_to_start';
         $this->homeownerSlotIndex = null;
         $this->homeownerExactTime = null;
+        $this->participantSearch = '';
         $this->lagDays = 0;
     }
 
