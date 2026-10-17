@@ -19,14 +19,15 @@ it('invite participant modal can be opened and closed', function () {
     // was asserting the bug.
     Livewire::test(CallStatusBadge::class)
         ->set('activeCallId', 123)
-        ->set('selectedParticipantId', 7)
+        ->set('participantSearch', 'gre')
         ->call('openAddParticipantModal')
         ->assertDispatched('modal-show')
-        // Opening clears any stale selection from a previous invite.
-        ->assertSet('selectedParticipantId', null)
+        // Opening clears any stale search term from a previous invite.
+        ->assertSet('participantSearch', '')
+        ->set('participantSearch', 'gre')
         ->call('closeAddParticipantModal')
         ->assertDispatched('modal-close')
-        ->assertSet('selectedParticipantId', null);
+        ->assertSet('participantSearch', '');
 });
 
 it('invite participant modal is hidden when no call is active', function () {

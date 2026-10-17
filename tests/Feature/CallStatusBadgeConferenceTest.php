@@ -70,8 +70,8 @@ it('offers the configured GS call_recipients as participants to add', function (
     $admin = badgeUser('Patryk');
     $teammate = badgeUser('Greg');
 
-    // Vendor 1 is the canonical GS roster the component's availableParticipants
-    // and the phone-9 shortcut both read (Vendor::find(1)). Pin the id.
+    // Vendor 1 is the canonical GS roster the component's team-roster search
+    // result and the phone-9 shortcut both read (Vendor::find(1)). Pin the id.
     // options is NOT in Vendor::$fillable, so set it explicitly, not via create().
     $vendor = Vendor::query()->updateOrCreate(
         ['id' => 1],
@@ -88,11 +88,12 @@ it('offers the configured GS call_recipients as participants to add', function (
         'metadata' => ['conference_id' => 'conf-z', 'joined_admin_ids' => [$admin->id]],
     ]);
 
-    $component = Livewire::actingAs($admin)->test(CallStatusBadge::class);
+    $component = Livewire::actingAs($admin)->test(CallStatusBadge::class)->call('openAddParticipantModal');
 
-    $ids = collect($component->instance()->availableParticipants)->pluck('id');
+    $keys = collect($component->instance()->participantSearchResults)->pluck('key');
 
-    // The teammate is offered; the admin themselves is excluded.
-    expect($ids)->toContain($teammate->id)
-        ->and($ids)->not->toContain($admin->id);
+    // The teammate is offered as a Team result; the admin themselves (already
+    // on the call) is excluded.
+    expect($keys)->toContain("user:{$teammate->id}")
+        ->and($keys)->not->toContain("user:{$admin->id}");
 });

@@ -97,3 +97,45 @@ it("never takes another company's vendor for one of ours", function () {
 
     expect(vendorRingOrder_firstRung('+18472123894'))->toBe('+1'.$this->patryk->cell_phone);
 });
+
+it('rings everyone at once when a vendor calls and Options says so', function () {
+    $this->company->forceFill(['options' => (object) array_merge((array) $this->company->options, ['vendor_call_ring_all' => true])])->save();
+    $sub = Vendor::withoutSyncingToSearch(fn () => Vendor::factory()->create(['business_name' => 'Smart Tech Electric', 'business_phone' => '8472123894']));
+    $this->company->vendors()->attach($sub->id);
+
+    Http::swap(new \Illuminate\Http\Client\Factory);
+    Http::fake([
+        'api.telnyx.com/v2/calls' => Http::sequence()
+            ->push(['data' => ['call_control_id' => 'greg-leg']])
+            ->push(['data' => ['call_control_id' => 'patryk-leg']]),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    vendorRingOrder_firstRung('+18472123894');
+
+    $dialed = collect(Http::recorded())
+        ->filter(fn ($pair) => str_ends_with($pair[0]->url(), '/v2/calls') && $pair[0]->method() === 'POST')
+        ->map(fn ($pair) => $pair[0]->data()['to'] ?? null)
+        ->values()
+        ->all();
+    expect($dialed)->toBe(['+1'.$this->greg->cell_phone, '+1'.$this->patryk->cell_phone]);
+
+    $callLog = CallLog::query()->latest('id')->first();
+    expect($callLog->metadata['admin_call_control_ids'] ?? [])->toBe(['greg-leg', 'patryk-leg'])
+        ->and($callLog->metadata['cascade_pending_ids'] ?? null)->toBe([]);
+
+    // Greg's phone gives up while Patryk's still rings: no voicemail yet.
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.hangup', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'greg-leg',
+        'hangup_cause' => 'timeout',
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_ring',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => $callLog->call_control_id,
+            'admin_user_id' => $this->greg->id,
+        ])),
+    ]]])->assertSuccessful();
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'actions/gather_using_speak'));
+    expect($callLog->fresh()->metadata['admin_call_control_ids'] ?? [])->toBe(['patryk-leg']);
+});

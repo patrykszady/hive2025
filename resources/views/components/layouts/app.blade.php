@@ -97,6 +97,15 @@
             <flux:text class="mt-2 mb-6 text-base">Here's what's new today</flux:text>
             <flux:separator variant="subtle" /> --}}
 
+            {{-- "In a call" bar on every page for GS Construction's team, the
+                 company whose numbers the phone line uses (vendor 1). Not on
+                 /messages, which renders its own copy above the threads. Only
+                 that team: every other company's users would otherwise reload
+                 it on each call event of a line that is not theirs. --}}
+            @if ((int) auth()->user()?->primary_vendor_id === 1 && ! Route::is('sms.index'))
+                <livewire:sms.call-status-badge wire:key="app-call-status-badge" />
+            @endif
+
             <div data-page-fade class="transition-opacity duration-[250ms] {{ isset($fullscreenClasses) ? 'h-full min-h-0 flex flex-col' : '' }}">
                 {{ $slot }}
             </div>

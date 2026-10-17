@@ -400,7 +400,13 @@ trait HasCallActions
         return phone_display($phone);
     }
 
-    public function inviteParticipantToCall(int $callLogId, int $participantId, string $participantPhone, string $participantName): void
+    /**
+     * Dial someone into a live conference. $participantId is a User id when
+     * inviting a known team/client/vendor contact, and null for a vendor's
+     * bare business line or a hand-typed phone number — it is only used for
+     * logging here.
+     */
+    public function inviteParticipantToCall(int $callLogId, ?int $participantId, string $participantPhone, string $participantName): void
     {
         $user = auth()->user();
         if (!$user) {
@@ -450,11 +456,23 @@ trait HasCallActions
                 'from_display_name' => 'GS Construction',
                 'timeout_secs' => 30,
                 'preferred_codecs' => config('services.telnyx.preferred_codecs'),
+                // Same detection the team legs use (ADMIN_LEG_AMD_CONFIG): an
+                // invited client, vendor, or hand-typed number can just as
+                // easily reach a voicemail box, and a voicemail box must
+                // never join a live conference.
+                'answering_machine_detection' => 'premium',
+                'answering_machine_detection_config' => \App\Http\Controllers\Api\TelnyxWebhookController::ADMIN_LEG_AMD_CONFIG,
                 'client_state' => base64_encode(json_encode([
                     'action' => 'conference_invite',
                     'call_log_id' => $callLogId,
                     'conference_name' => $metadata['conference_name'] ?? null,
                     'caller_name' => $user->first_name ?? 'Someone',
+                    'invited_by_user_id' => $user->id,
+                    // Carried through so the intro TTS and the AMD-machine
+                    // toast can name this leg without a non-user phone
+                    // number (a vendor line, a hand-typed number) having to
+                    // be re-resolved from the Telnyx API after the fact.
+                    'participant_name' => $participantName,
                 ])),
                 'webhook_url' => config('app.url') . '/webhooks/telnyx/voice',
             ]);

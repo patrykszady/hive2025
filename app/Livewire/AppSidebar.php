@@ -41,10 +41,12 @@ class AppSidebar extends Component
         $sidebarData['accountingExpanded'] = request()->is('banks*', 'distributions*', 'sheets*', 'vendors/categories*', 'lien-waivers*')
             || request()->routeIs('banks*', 'distributions*', 'sheets*', 'categories*', 'lien-waivers*');
         $sidebarData['globalActionsExpanded'] = request()->is('transactions/match_vendor', 'agents');
-        $sidebarData['settingsExpanded'] = request()->is('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*')
-            || request()->routeIs('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*');
+        $sidebarData['settingsExpanded'] = request()->is('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*', 'options', 'phone-system')
+            || request()->routeIs('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*', 'phone_system*');
         // Always set outside cache to handle stale cached entries missing this key.
         $sidebarData['primaryVendorId'] = $user->primary_vendor_id;
+        // The phone system belongs to the company whose numbers the line uses (vendor 1).
+        $sidebarData['canViewPhoneSystem'] = (int) $user->primary_vendor_id === 1 && ($sidebarData['canViewOptions'] ?? false);
 
         return view('livewire.app-sidebar', $sidebarData);
     }

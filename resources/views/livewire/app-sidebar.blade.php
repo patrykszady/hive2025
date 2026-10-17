@@ -110,6 +110,9 @@
                     <flux:sidebar.group expandable heading="Settings" class="grid" icon="cog-6-tooth" :expanded="$settingsExpanded">
                         @if($canViewOptions)
                             <flux:sidebar.item wire:navigate.hover href="/options" icon="adjustments-horizontal">Options</flux:sidebar.item>
+                            @if($canViewPhoneSystem)
+                                <flux:sidebar.item wire:navigate.hover href="/phone-system" icon="phone">Phone System</flux:sidebar.item>
+                            @endif
                         @endif
                         @if($canViewTemplates)
                             <flux:sidebar.item wire:navigate.hover href="/templates" icon="envelope-open">Templates</flux:sidebar.item>

@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\SendInboundSmsBrowserNotifications;
+use App\Events\ConferenceInviteDeclined;
 use App\Events\InboundCallJoined;
 use App\Jobs\SendCallAnsweredBrowserNotifications;
 use App\Jobs\SendIncomingCallBrowserNotifications;
 use App\Jobs\SendVoicemailBrowserNotifications;
+use App\Jobs\ConnectAfterDetection;
 use App\Jobs\StoreCallRecording;
 use App\Jobs\StoreSmsMedia;
 use App\Models\BlockedCaller;
@@ -1027,10 +1029,15 @@ class TelnyxWebhookController extends Controller
         $conferenceName = $clientState['conference_name'] ?? null;
         $callerName = $clientState['caller_name'] ?? 'Someone';
 
-        // Resolve the invited person's name from the webhook call's "to" number
-        // The webhook payload isn't available here, so look up from CallLog invited numbers
+        // The inviter already knows who they dialed — a vendor's bare
+        // business line or a hand-typed number has no User record for the
+        // call-control lookup below to resolve, so the invite carries the
+        // name forward. Only fall back to the (fragile, API-round-trip) "to"
+        // number lookup for an older in-flight call that predates this field.
         $callLog = $callLogId ? CallLog::find($callLogId) : null;
-        $participantName = $this->resolveNameFromCallControlId($callControlId, $callLog) ?? 'Someone';
+        $participantName = $clientState['participant_name']
+            ?? $this->resolveNameFromCallControlId($callControlId, $callLog)
+            ?? 'Someone';
 
         $vendor = Vendor::find(1);
         $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'GS Construction');
@@ -1133,7 +1140,7 @@ class TelnyxWebhookController extends Controller
                     'vendor_timezone' => $vendor->timezone,
                 ]);
                 $afterHoursMessage = data_get($vendorOptions, 'after_hours_message')
-                    ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_AFTER_HOURS;
+                    ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_AFTER_HOURS;
                 $this->triggerVoicemail($callControlId, $callLogId, $afterHoursMessage);
 
                 return response()->json(['status' => 'ok']);
@@ -1146,10 +1153,10 @@ class TelnyxWebhookController extends Controller
         $isKnownCaller = ! empty($callerName);
         if ($isKnownCaller) {
             $welcomeTemplate = data_get($vendorOptions, 'welcome_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_WELCOME;
         } else {
             $welcomeTemplate = data_get($vendorOptions, 'welcome_message_unknown')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME_UNKNOWN;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_WELCOME_UNKNOWN;
         }
         // Append recording disclosure after the welcome (kept short to satisfy
         // IL two-party consent). The phrase is captured in the recording
@@ -1297,7 +1304,7 @@ class TelnyxWebhookController extends Controller
         $shortName = data_get($vendorOptions, 'short_name') ?: ($vendor?->business_name ?? 'our team');
         $greeting = $this->buildTimeGreeting();
         $template = data_get($vendorOptions, 'screening_message')
-            ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_SCREENING;
+            ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_SCREENING;
         $promptText = $this->renderPrompt($template, [
             '{name}' => $callerLabel,
             '{company}' => $shortName,
@@ -1310,7 +1317,7 @@ class TelnyxWebhookController extends Controller
         // That is what premium answering machine detection on every team leg
         // is for — a machine verdict drops the leg while the prompt plays
         // (handleAdminLegAmdResult). 1 during the prompt texts the caller back.
-        $promptText = trim($promptText.' '.\App\Livewire\Vendors\VendorOptions::SCREENING_INSTRUCTION);
+        $promptText = trim($promptText.' '.\App\Livewire\Vendors\PhoneSystemOptions::SCREENING_INSTRUCTION);
 
         Log::channel('telnyx')->info('Playing admin screening prompt (stay on the line to connect)', [
             'admin_call_control_id' => $callControlId,
@@ -1348,6 +1355,38 @@ class TelnyxWebhookController extends Controller
         'after_greeting_silence_millis' => 800,
         'total_analysis_time_millis' => 5000,
     ];
+
+    /**
+     * How long a team member who heard the whole prompt waits for answering
+     * machine detection before being connected without its verdict.
+     */
+    public const VERDICT_GRACE_SECONDS = 3;
+
+    /**
+     * Connect a team leg whose prompt ended while detection was still
+     * listening: on a person verdict, or from ConnectAfterDetection when
+     * none came. Once per leg; nothing when the leg is no longer waiting
+     * (connected already, dropped as a machine, or hung up).
+     */
+    public function connectAfterScreening(string $callControlId, string $reason): void
+    {
+        if (! Cache::has("telnyx_admin_awaiting_verdict:{$callControlId}")
+            || ! Cache::add("telnyx_admin_connect_once:{$callControlId}", true, now()->addMinutes(2))) {
+            return;
+        }
+
+        $clientState = Cache::pull("telnyx_admin_awaiting_verdict:{$callControlId}");
+        if (! is_array($clientState)) {
+            return;
+        }
+
+        Log::channel('telnyx')->info('Connecting the screened team member — '.$reason, [
+            'admin_call_control_id' => $callControlId,
+            'call_log_id' => $clientState['call_log_id'] ?? null,
+        ]);
+
+        $this->handleAdminScreenDone($callControlId, $clientState);
+    }
 
     /**
      * Called from handleCallSpeakEnded when the admin screening prompt finishes
@@ -1421,6 +1460,23 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
+        // The (now short) prompt ended before answering machine detection
+        // heard a person: connect on its verdict (handleAdminLegAmdResult),
+        // so a voicemail box is still dropped rather than connected. If no
+        // verdict comes, ConnectAfterDetection connects after a short grace.
+        if ($speakStatus === 'completed' && ! Cache::has("telnyx_admin_person:{$callControlId}")) {
+            Cache::put("telnyx_admin_awaiting_verdict:{$callControlId}", $clientState, now()->addMinutes(2));
+            ConnectAfterDetection::dispatch($callControlId)->delay(now()->addSeconds(self::VERDICT_GRACE_SECONDS));
+
+            Log::channel('telnyx')->info('Screening prompt ended before detection — connecting on its verdict', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'admin_user_id' => $adminUserId,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
         // If the caller disconnected during the screening prompt, hang up the admin.
         if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
             Log::channel('telnyx')->info('Screening prompt done but caller disconnected — hanging up admin', [
@@ -1468,7 +1524,7 @@ class TelnyxWebhookController extends Controller
     {
         $callLogId = $callLog->id;
 
-        Log::channel('telnyx')->info('First admin answered — bridging without prompt', [
+        Log::channel('telnyx')->info('First team member connecting — creating the conference', [
             'admin_call_control_id' => $callControlId,
             'incoming_call_control_id' => $incomingCallControlId,
             'call_log_id' => $callLogId,
@@ -2533,7 +2589,7 @@ class TelnyxWebhookController extends Controller
                 ]);
 
                 $greetingTemplate = data_get($retryVendor->options ?? [], 'voicemail_greeting')
-                    ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_GREETING;
+                    ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_VOICEMAIL_GREETING;
                 $this->sendCallCommand($callControlId, 'speak', [
                     'payload' => $this->renderPrompt($greetingTemplate, [
                         '{name}' => '',
@@ -2700,6 +2756,25 @@ class TelnyxWebhookController extends Controller
                     'status' => $callLog->status,
                 ]);
                 $this->sendCallCommand($callControlId, 'hangup');
+            } elseif (Cache::has("telnyx_invite_machine:{$callControlId}")) {
+                // Detection called this leg a voicemail box while the intro
+                // played (handleConferenceInviteAmdResult already hung it
+                // up) — never join a machine to a live conference.
+                Log::channel('telnyx')->info('Conference invite intro done on a leg detection called a machine — not joining', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+            } elseif (! Cache::has("telnyx_invite_person:{$callControlId}")) {
+                // The intro ended before detection heard a person: join on
+                // its verdict, so a voicemail box never reaches the live
+                // call; ConnectAfterDetection joins after a short grace if
+                // no verdict comes.
+                Cache::put("telnyx_invite_awaiting_verdict:{$callControlId}", ['call_log_id' => $callLogId, 'conference_id' => $conferenceId], now()->addMinutes(2));
+                ConnectAfterDetection::dispatch($callControlId)->delay(now()->addSeconds(self::VERDICT_GRACE_SECONDS));
+                Log::channel('telnyx')->info('Conference invite intro ended before detection — joining on its verdict', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
             } else {
                 $this->joinAdminToConference($callControlId, $callLogId, null, $conferenceId);
             }
@@ -2889,6 +2964,10 @@ class TelnyxWebhookController extends Controller
 
         if (! $isMachine) {
             Log::channel('telnyx')->info('Detection: a person answered the team leg', $context);
+            Cache::put("telnyx_admin_person:{$callControlId}", true, now()->addMinutes(10));
+
+            // Their prompt already ended: they have been waiting on this.
+            $this->connectAfterScreening($callControlId, 'detection heard a person');
 
             return response()->json(['status' => 'ok']);
         }
@@ -2910,9 +2989,92 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * Join an invited person whose intro ended while detection was still
+     * listening: on a person verdict, or from ConnectAfterDetection when
+     * none came. Once per leg; nothing when the leg is no longer waiting.
+     */
+    public function joinInviteAfterDetection(string $callControlId, string $reason): void
+    {
+        if (! Cache::has("telnyx_invite_awaiting_verdict:{$callControlId}")
+            || ! Cache::add("telnyx_invite_join_once:{$callControlId}", true, now()->addMinutes(2))) {
+            return;
+        }
+
+        $waiting = Cache::pull("telnyx_invite_awaiting_verdict:{$callControlId}");
+        if (! is_array($waiting) || empty($waiting['call_log_id']) || empty($waiting['conference_id'])) {
+            return;
+        }
+
+        Log::channel('telnyx')->info('Joining the invited person — '.$reason, [
+            'call_control_id' => $callControlId,
+            'call_log_id' => $waiting['call_log_id'],
+        ]);
+
+        $this->joinAdminToConference($callControlId, (int) $waiting['call_log_id'], null, (string) $waiting['conference_id']);
+    }
+
+    /**
+     * A detection verdict on a conference-invite leg (a client, a vendor, or
+     * a hand-typed number dialed into a live call). Same rule as a team leg:
+     * a machine verdict drops the leg before it ever reaches the conference
+     * (the conference_invite_intro_done guard skips joining it); a verdict
+     * that arrives after the leg already joined is ignored — a person
+     * answered and detection was late or wrong.
+     *
+     * @param  array<string, mixed>  $clientState
+     */
+    protected function handleConferenceInviteAmdResult(string $callControlId, ?string $result, bool $isMachine, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $invitedByUserId = $clientState['invited_by_user_id'] ?? null;
+        $participantName = $clientState['participant_name'] ?? 'Someone';
+
+        $context = [
+            'invite_call_control_id' => $callControlId,
+            'call_log_id' => $callLogId,
+            'invited_by_user_id' => $invitedByUserId,
+            'participant_name' => $participantName,
+            'result' => $result,
+        ];
+
+        if (! $isMachine) {
+            Log::channel('telnyx')->info('Detection: a person answered the conference invite leg', $context);
+            Cache::put("telnyx_invite_person:{$callControlId}", true, now()->addMinutes(10));
+
+            // Their intro already ended: they have been waiting on this.
+            $this->joinInviteAfterDetection($callControlId, 'detection heard a person');
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        if (Cache::has("telnyx_bridged:{$callControlId}")) {
+            Log::channel('telnyx')->info('Detection called a conference invite leg a machine after it had already joined — ignoring', $context);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        Log::channel('telnyx')->info('Detection: a voicemail box answered the conference invite leg — dropping it', $context);
+        Cache::put("telnyx_invite_machine:{$callControlId}", true, now()->addMinutes(10));
+        Cache::forget("telnyx_invite_awaiting_verdict:{$callControlId}");
+        $this->sendCallCommand($callControlId, 'hangup');
+
+        if (is_numeric($callLogId) && is_numeric($invitedByUserId)) {
+            event(new ConferenceInviteDeclined(
+                callLogId: (int) $callLogId,
+                invitedByUserId: (int) $invitedByUserId,
+                participantName: (string) $participantName,
+            ));
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
      * Handle answering machine detection result.
      * A machine on a team leg drops that leg (handleAdminLegAmdResult); a
-     * machine on a click-to-call target ends the attempt and tells the user.
+     * machine on a conference-invite leg drops it the same way
+     * (handleConferenceInviteAmdResult); a machine on a click-to-call target
+     * ends the attempt and tells the user.
      */
     protected function handleAmdEnded(array $data): JsonResponse
     {
@@ -2939,6 +3101,11 @@ class TelnyxWebhookController extends Controller
         // ── Team leg (inbound cascade or press-9 invite) ──
         if (in_array($action, ['admin_ring', 'admin_screen', 'admin_waiting_for_tts'], true)) {
             return $this->handleAdminLegAmdResult($callControlId, $result, $isMachine, $clientState ?? []);
+        }
+
+        // ── Conference-invite leg (anyone dialed into a live call) ──
+        if ($action === 'conference_invite') {
+            return $this->handleConferenceInviteAmdResult($callControlId, $result, $isMachine, $clientState ?? []);
         }
 
         // ── Click-to-call target: AMD result ──
@@ -3218,7 +3385,7 @@ class TelnyxWebhookController extends Controller
      */
     protected function sendMissedYouText(CallLog $callLog, string $targetPhone): bool
     {
-        return $this->sendTextFromCall($callLog, $targetPhone, $this->vendorText('missed_call_text', \App\Livewire\Vendors\VendorOptions::DEFAULT_MISSED_CALL_TEXT));
+        return $this->sendTextFromCall($callLog, $targetPhone, $this->vendorText('missed_call_text', \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_MISSED_CALL_TEXT));
     }
 
     /** The vendor's short name for prompts and texts. */
@@ -3267,7 +3434,7 @@ class TelnyxWebhookController extends Controller
             return; // another admin pressed 1 first
         }
 
-        $sent = $this->sendTextFromCall($callLog, $callerPhone, $this->vendorText('inbound_callback_text', \App\Livewire\Vendors\VendorOptions::DEFAULT_INBOUND_CALLBACK_TEXT));
+        $sent = $this->sendTextFromCall($callLog, $callerPhone, $this->vendorText('inbound_callback_text', \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_INBOUND_CALLBACK_TEXT));
         Log::channel('telnyx')->info('Admin pressed 1 — caller promised a callback by text', [
             'admin_call_control_id' => $adminCallControlId,
             'call_log_id' => $callLogId,
@@ -3530,7 +3697,10 @@ class TelnyxWebhookController extends Controller
         // TODO: Multi-vendor support — look up vendor by connection_id
         $vendor = Vendor::find(1);
         $vendorOptions = $vendor ? (array) $vendor->options : [];
-        $recipientUserIds = $this->ringOrderFor($callLog, $vendor, $vendorOptions);
+        $isVendorCall = $this->vendorOrderApplies($callLog, $vendor, $vendorOptions);
+        $recipientUserIds = $isVendorCall
+            ? (array) data_get($vendorOptions, 'vendor_call_recipients', [])
+            : (array) data_get($vendorOptions, 'call_recipients', []);
 
         // Fall back to config if no recipients configured
         if (empty($recipientUserIds)) {
@@ -3579,7 +3749,22 @@ class TelnyxWebhookController extends Controller
             fn ($id) => in_array($id, $viableIds, true)
         ));
 
-        $dialed = $this->dialNextAdminInCascade($callLog, $incomingCallControlId, $callLogId, $queue, $originalCaller);
+        // Options → vendor order "Everyone at once": every phone rings
+        // together. The first to answer gets the caller; the others can
+        // still answer and join, as late answerers always could.
+        if ($isVendorCall && (bool) data_get($vendorOptions, 'vendor_call_ring_all', false)) {
+            $dialed = null;
+            foreach ($queue as $userId) {
+                $dialed = $this->dialNextAdminInCascade($callLog, $incomingCallControlId, $callLogId, [$userId], $originalCaller) ?? $dialed;
+            }
+
+            Log::channel('telnyx')->info('A vendor or sub is calling — ringing everyone at once', [
+                'call_log_id' => $callLogId,
+                'recipients' => $queue,
+            ]);
+        } else {
+            $dialed = $this->dialNextAdminInCascade($callLog, $incomingCallControlId, $callLogId, $queue, $originalCaller);
+        }
 
         // If no admins were successfully dialed, trigger voicemail
         if (! $dialed) {
@@ -3589,27 +3774,24 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Who rings, in order, for this caller: the vendor and sub order when a
-     * vendor or sub calls and Options sets one (Patryk, 2026-10-16: Greg
-     * first, then Patryk), else the Call Recipients order.
-     *
-     * @return array<int, int|string>
+     * Whether this caller rings the vendor and sub order: a vendor or sub
+     * is calling and Options sets one (Patryk, 2026-10-16: Greg first, then
+     * Patryk, or both at once). Otherwise the Call Recipients order rings.
      */
-    protected function ringOrderFor(?CallLog $callLog, ?Vendor $vendor, array $vendorOptions): array
+    protected function vendorOrderApplies(?CallLog $callLog, ?Vendor $vendor, array $vendorOptions): bool
     {
-        $callRecipients = (array) data_get($vendorOptions, 'call_recipients', []);
-        $vendorOrder = array_values(array_filter(array_map('intval', (array) data_get($vendorOptions, 'vendor_call_recipients', []))));
+        $vendorOrder = array_filter(array_map('intval', (array) data_get($vendorOptions, 'vendor_call_recipients', [])));
 
         if ($vendorOrder === [] || ! $callLog || ! $vendor || ! $callLog->callerIsVendorOf((int) $vendor->id)) {
-            return $callRecipients;
+            return false;
         }
 
         Log::channel('telnyx')->info('A vendor or sub is calling — ringing the vendor order', [
             'call_log_id' => $callLog->id,
-            'ring_order' => $vendorOrder,
+            'ring_order' => array_values($vendorOrder),
         ]);
 
-        return $vendorOrder;
+        return true;
     }
 
     /**
@@ -3799,7 +3981,7 @@ class TelnyxWebhookController extends Controller
             ?: ($vendor?->business_name ?? 'us');
 
         $template = data_get($vendor?->options ?? [], 'spam_message')
-            ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_SPAM;
+            ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_SPAM;
 
         $ivrPrompt = $this->renderPrompt($template, [
             '{name}' => '',
@@ -3902,11 +4084,11 @@ class TelnyxWebhookController extends Controller
 
         if ($isKnownCaller && ! $afterHours) {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_VOICEMAIL;
             $validDigits = '12';
         } else {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message_unknown')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_UNKNOWN;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_VOICEMAIL_UNKNOWN;
             $validDigits = '2';
         }
 
@@ -3970,10 +4152,10 @@ class TelnyxWebhookController extends Controller
 
         if ($isKnownCaller) {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_VOICEMAIL;
         } else {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message_unknown')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_UNKNOWN;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_VOICEMAIL_UNKNOWN;
         }
 
         $ivrPrompt = $this->renderPrompt($ivrTemplate, [
@@ -4089,7 +4271,7 @@ class TelnyxWebhookController extends Controller
             $vendor = Vendor::find(1);
             $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'the team');
             $press1Template = data_get($vendor?->options ?? [], 'ivr_press1_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS1;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_IVR_PRESS1;
             $press1Payload = $this->renderPrompt($press1Template, [
                 '{name}' => $callerName ?? '',
                 '{company}' => $shortName,
@@ -4117,7 +4299,7 @@ class TelnyxWebhookController extends Controller
             $vendor = Vendor::find(1);
             $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'the team');
             $press2Template = data_get($vendor?->options ?? [], 'ivr_press2_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS2;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_IVR_PRESS2;
             $press2Payload = $this->renderPrompt($press2Template, [
                 '{name}' => $callerName ?? '',
                 '{company}' => $shortName,
@@ -4196,7 +4378,7 @@ class TelnyxWebhookController extends Controller
             $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'us');
 
             $greetingTemplate = data_get($vendor?->options ?? [], 'voicemail_greeting')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_GREETING;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_VOICEMAIL_GREETING;
             $greetingPayload = $this->renderPrompt($greetingTemplate, [
                 '{name}' => $callerName ?? '',
                 '{company}' => $shortName,
@@ -4245,7 +4427,7 @@ class TelnyxWebhookController extends Controller
             $this->sendEmergencyContactsSms($originalCaller);
 
             $press1Template = data_get($vendor?->options ?? [], 'ivr_press1_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS1;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_IVR_PRESS1;
             $press1Payload = $this->renderPrompt($press1Template, [
                 '{name}' => $callerName ?? '',
                 '{company}' => $shortName,
@@ -4270,7 +4452,7 @@ class TelnyxWebhookController extends Controller
             $this->sendCallbackSms($callLogId, $originalCaller);
 
             $press2Template = data_get($vendor?->options ?? [], 'ivr_press2_message')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS2;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_IVR_PRESS2;
             $press2Payload = $this->renderPrompt($press2Template, [
                 '{name}' => $callerName ?? '',
                 '{company}' => $shortName,
@@ -4300,7 +4482,7 @@ class TelnyxWebhookController extends Controller
             ]);
 
             $greetingTemplate = data_get($vendor?->options ?? [], 'voicemail_greeting')
-                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_GREETING;
+                ?: \App\Livewire\Vendors\PhoneSystemOptions::DEFAULT_VOICEMAIL_GREETING;
             $greetingPayload = $this->renderPrompt($greetingTemplate, [
                 '{name}' => $callerName ?? '',
                 '{company}' => $shortName,

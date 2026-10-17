@@ -3313,7 +3313,8 @@ it('tells the answering phone to stay on the line, with nothing to press', funct
         $state = json_decode(base64_decode($data['client_state'] ?? ''), true);
 
         return str_contains((string) $data['payload'], 'Andzelina Szady')
-            && str_contains((string) $data['payload'], 'Stay on the line to connect, or press 1 to text them back.')
+            && str_contains((string) $data['payload'], 'Press 1 to text them back.')
+            && ! str_contains((string) $data['payload'], 'Stay on the line')
             && ! str_contains((string) $data['payload'], 'Press 5')
             && ($state['action'] ?? null) === 'admin_screen';
     });
@@ -3619,6 +3620,8 @@ it('keeps the caller on ringback when a leg dies joining the conference while th
         'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
     ]);
 
+    // Detection already heard a person.
+    Cache::put('telnyx_admin_person:cascade-cc-1', true);
     $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
 
     Http::assertNotSent(fn ($request) => str_contains($request->url(), 'incoming-cc/actions/gather_using_speak'));
@@ -3696,7 +3699,172 @@ it('stamps when a team member reaches the caller', function () {
         'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
     ]);
 
+    Cache::put('telnyx_admin_person:cascade-cc-1', true);
     $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
 
     expect($callLog->fresh()->metadata['connected_at'] ?? null)->not->toBeNull();
+});
+
+// =========================================================================
+// Faster pickup (2026-10-16): the prompt is "Call from {name}. Press 1 to
+// text them back." and the team member is connected the moment it has
+// ended and detection has heard a person — on whichever comes last.
+// =========================================================================
+
+/** A detection verdict on the screened team leg. */
+function teamLegVerdict(CallLog $callLog, User $admin, string $result): array
+{
+    return ['data' => ['event_type' => 'call.machine.premium.detection.ended', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'cascade-cc-1',
+        'result' => $result,
+        'client_state' => base64_encode(json_encode([
+            'action' => 'admin_screen',
+            'call_log_id' => $callLog->id,
+            'incoming_call_control_id' => 'incoming-cc',
+            'admin_user_id' => $admin->id,
+        ])),
+    ]]];
+}
+
+function screenedCall(): CallLog
+{
+    return CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => ['admin_call_control_ids' => ['cascade-cc-1'], 'joined_admin_ids' => [], 'tts_complete' => true],
+    ]);
+}
+
+function conferenceCreated(): bool
+{
+    foreach (Http::recorded() as [$request]) {
+        if (str_ends_with($request->url(), '/v2/conferences')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+it('connects at the end of the prompt when detection already heard a person', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    [$patryk] = cascadeRecipients();
+    $callLog = screenedCall();
+
+    $this->postJson('/webhooks/telnyx/voice', teamLegVerdict($callLog, $patryk, 'human_residence'))->assertSuccessful();
+    expect(conferenceCreated())->toBeFalse();
+
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
+    expect(conferenceCreated())->toBeTrue();
+    \Illuminate\Support\Facades\Queue::assertNotPushed(\App\Jobs\ConnectAfterDetection::class);
+});
+
+it('waits for detection when the prompt ends first, and connects on its person verdict', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    [$patryk] = cascadeRecipients();
+    $callLog = screenedCall();
+
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
+    expect(conferenceCreated())->toBeFalse();
+    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ConnectAfterDetection::class, fn ($job) => $job->callControlId === 'cascade-cc-1');
+
+    $this->postJson('/webhooks/telnyx/voice', teamLegVerdict($callLog, $patryk, 'not_sure'))->assertSuccessful();
+    expect(conferenceCreated())->toBeTrue();
+
+    // The grace job finds nothing left to do.
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+    (new \App\Jobs\ConnectAfterDetection('cascade-cc-1'))->handle(app(\App\Http\Controllers\Api\TelnyxWebhookController::class));
+    expect(conferenceCreated())->toBeFalse();
+});
+
+it('drops a voicemail box that answered while the team member was waiting for detection', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    [$patryk] = cascadeRecipients();
+    $callLog = screenedCall();
+
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
+    $this->postJson('/webhooks/telnyx/voice', teamLegVerdict($callLog, $patryk, 'machine'))->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'cascade-cc-1/actions/hangup'));
+
+    (new \App\Jobs\ConnectAfterDetection('cascade-cc-1'))->handle(app(\App\Http\Controllers\Api\TelnyxWebhookController::class));
+    expect(conferenceCreated())->toBeFalse();
+});
+
+it('connects anyway when no detection verdict comes', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    [$patryk] = cascadeRecipients();
+    $callLog = screenedCall();
+
+    $this->postJson('/webhooks/telnyx/voice', screeningPromptEnded($callLog, $patryk, 'completed'))->assertSuccessful();
+    expect(conferenceCreated())->toBeFalse();
+
+    (new \App\Jobs\ConnectAfterDetection('cascade-cc-1'))->handle(app(\App\Http\Controllers\Api\TelnyxWebhookController::class));
+    expect(conferenceCreated())->toBeTrue();
+});
+
+// =========================================================================
+// An invited person (client, vendor, typed number) joins the live call only
+// once detection heard a person: a voicemail box never reaches the call.
+// =========================================================================
+
+function inviteLegEvent(string $eventType, CallLog $callLog, string $action, array $payload = []): array
+{
+    return ['data' => ['event_type' => $eventType, 'record_type' => 'event', 'payload' => $payload + [
+        'call_control_id' => 'invite-leg',
+        'client_state' => base64_encode(json_encode([
+            'action' => $action,
+            'call_log_id' => $callLog->id,
+            'conference_name' => 'call_x',
+            'invited_by_user_id' => 77,
+            'participant_name' => 'Mary Simon',
+        ])),
+    ]]];
+}
+
+function liveConferenceCall(): CallLog
+{
+    return CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => ['conference_id' => 'conf-live', 'conference_name' => 'call_x', 'joined_admin_ids' => [1], 'admin_call_control_ids' => ['admin-leg']],
+    ]);
+}
+
+function inviteJoined(): bool
+{
+    foreach (Http::recorded() as [$request]) {
+        if (str_contains($request->url(), 'conferences/conf-live/actions/join')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+it('joins an invited person on the person verdict when their intro ended first', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    $callLog = liveConferenceCall();
+
+    $this->postJson('/webhooks/telnyx/voice', inviteLegEvent('call.speak.ended', $callLog, 'conference_invite_intro_done', ['status' => 'completed']))->assertSuccessful();
+    expect(inviteJoined())->toBeFalse();
+    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ConnectAfterDetection::class);
+
+    $this->postJson('/webhooks/telnyx/voice', inviteLegEvent('call.machine.premium.detection.ended', $callLog, 'conference_invite', ['result' => 'human_residence']))->assertSuccessful();
+    expect(inviteJoined())->toBeTrue();
+});
+
+it('drops an invited voicemail box and tells the inviter, never joining it', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    \Illuminate\Support\Facades\Event::fake([\App\Events\ConferenceInviteDeclined::class]);
+    $callLog = liveConferenceCall();
+
+    $this->postJson('/webhooks/telnyx/voice', inviteLegEvent('call.speak.ended', $callLog, 'conference_invite_intro_done', ['status' => 'completed']))->assertSuccessful();
+    $this->postJson('/webhooks/telnyx/voice', inviteLegEvent('call.machine.premium.detection.ended', $callLog, 'conference_invite', ['result' => 'machine']))->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'invite-leg/actions/hangup'));
+    \Illuminate\Support\Facades\Event::assertDispatched(\App\Events\ConferenceInviteDeclined::class, fn ($event) => $event->participantName === 'Mary Simon' && $event->invitedByUserId === 77);
+
+    (new \App\Jobs\ConnectAfterDetection('invite-leg'))->handle(app(\App\Http\Controllers\Api\TelnyxWebhookController::class));
+    expect(inviteJoined())->toBeFalse();
 });

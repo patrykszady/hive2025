@@ -967,6 +967,7 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //VENDOR OPTIONS
     Route::get('/options', VendorOptions::class)->name('vendor_options.index');
+    Route::get('/phone-system', \App\Livewire\Vendors\PhoneSystemOptions::class)->name('phone_system.index');
 });
 
 };
