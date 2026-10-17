@@ -749,6 +749,10 @@
                     swipeStartX: null,
 
                     convertUrl(url) {
+                        // Nothing open yet: no src at all, rather than a
+                        // request for /files/sms_media/ that 404s on every
+                        // load of /messages.
+                        if (! url) return '';
                         if (url.startsWith('http')) return url;
                         // Just pass relative paths directly - route() will handle them
                         const filename = url.startsWith('/storage/')
