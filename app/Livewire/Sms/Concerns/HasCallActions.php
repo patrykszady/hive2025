@@ -43,7 +43,6 @@ trait HasCallActions
     public function markAsSpam(int $callId): void
     {
         $user = auth()->user();
-        $vendorId = $user->vendor?->id;
 
         // find($callId) alone had no tenant check at all — any signed-in
         // vendor user could pass any call id.
@@ -52,27 +51,11 @@ trait HasCallActions
             return;
         }
 
-        $phone = $call->direction === 'outgoing' ? $call->to_number : $call->from_number;
+        $phone = app(\App\Services\Calls\CallHistory::class)->block($user, $call);
         if (! $phone) {
             Flux::toast(variant: 'danger', heading: 'Error', text: 'No phone number found for this call.', duration: 3000, position: 'top right');
             return;
         }
-
-        // Scoped to this vendor: the old firstOrCreate() had no vendor_id at
-        // all, which BlockedCaller::isBlocked() treats as a GLOBAL block —
-        // one company's "spam" silently blocked the number for every
-        // company, and the update below reclassified every company's call
-        // history for that number as blocked.
-        BlockedCaller::firstOrCreate(
-            ['phone_number' => $phone, 'vendor_id' => $vendorId],
-            ['reason' => 'Manually marked as spam', 'blocked_by_user_id' => auth()->id(), 'auto_blocked' => false]
-        );
-
-        CallLog::query()
-            ->visibleToMessagesUser($user)
-            ->where('from_number', $phone)
-            ->where('status', '!=', CallLog::STATUS_BLOCKED)
-            ->update(['status' => CallLog::STATUS_BLOCKED]);
 
         Flux::toast(variant: 'success', heading: 'Marked as Spam', text: $this->formatPhone($phone) . ' has been blocked.', duration: 5000, position: 'top right');
     }
@@ -81,9 +64,7 @@ trait HasCallActions
     {
         // Scoped to this vendor's own block so one company can't remove a
         // block another company (or a global block) put in place.
-        $deleted = BlockedCaller::where('phone_number', $phone)
-            ->where('vendor_id', auth()->user()->vendor?->id)
-            ->delete();
+        $deleted = app(\App\Services\Calls\CallHistory::class)->unblock(auth()->user(), $phone);
 
         if (! $deleted) {
             Flux::toast(variant: 'warning', heading: 'Not Blocked', text: $this->formatPhone($phone) . ' is not currently blocked.', duration: 4000, position: 'top right');

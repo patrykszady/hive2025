@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
+use App\Http\Controllers\Api\App\V1\CallLogController as AppCallLogController;
 use App\Http\Controllers\Api\App\V1\ThreadController as AppThreadController;
 use App\Http\Controllers\Api\App\V1\ThreadMessageController as AppThreadMessageController;
 use App\Http\Controllers\Api\App\V1\VoiceController as AppVoiceController;
@@ -67,6 +68,12 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
 
         Route::get('voice/token', [AppVoiceController::class, 'token'])->name('voice.token');
         Route::post('calls', [AppVoiceController::class, 'store'])->middleware('throttle:30,1')->name('calls.store');
+
+        // The Calls tab: the web calls dashboard's list, detail and blocking.
+        Route::get('calls', [AppCallLogController::class, 'index'])->name('calls.index');
+        Route::post('calls/unblock', [AppCallLogController::class, 'unblock'])->name('calls.unblock');
+        Route::get('calls/{call}', [AppCallLogController::class, 'show'])->whereNumber('call')->name('calls.show');
+        Route::post('calls/{call}/block', [AppCallLogController::class, 'block'])->whereNumber('call')->name('calls.block');
     });
 });
 

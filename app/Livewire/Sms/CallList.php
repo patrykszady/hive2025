@@ -2,6 +2,8 @@
 
 namespace App\Livewire\Sms;
 
+use App\Services\Calls\CallHistory;
+
 use App\Livewire\Sms\Concerns\HasCallActions;
 use App\Models\BlockedCaller;
 use App\Models\CallLog;
@@ -214,49 +216,10 @@ class CallList extends Component
     #[Computed]
     public function calls(): mixed
     {
-        $user = auth()->user();
-        $ourNumbers = config('services.telnyx.numbers', []);
-
-        // Resolve a full-text search to a set of matching call IDs via
-        // Meilisearch (covers caller name, phone numbers, notes, and the
-        // transcript). Falls back to a SQL LIKE if the index is unavailable.
-        $search = trim($this->search);
-        $searchIds = null;
-        $searchFailed = false;
-        if ($search !== '') {
-            try {
-                $searchIds = CallLog::search($search)
-                    ->take(200)
-                    ->keys()
-                    ->map(fn ($id) => (int) $id)
-                    ->all();
-            } catch (\Throwable $e) {
-                report($e);
-                $searchFailed = true;
-            }
-        }
-
-        $rawCalls = CallLog::query()
+        // Filters, search and visibility: CallHistory, shared with the app.
+        $rawCalls = app(CallHistory::class)
+            ->query(auth()->user(), (string) $this->callFilter, (string) $this->search)
             ->with('transcript')
-            ->visibleToMessagesUser($user)
-            ->when($search !== '' && ! $searchFailed, fn ($q) => $q->whereIn('id', $searchIds ?? []))
-            ->when($search !== '' && $searchFailed, fn ($q) => $q->where(function ($inner) use ($search) {
-                $like = '%' . $search . '%';
-                $inner->where('caller_name', 'like', $like)
-                    ->orWhere('from_number', 'like', $like)
-                    ->orWhere('to_number', 'like', $like)
-                    ->orWhere('notes', 'like', $like);
-            }))
-            ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
-            ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
-            ->when($this->callFilter === 'blocked', fn ($q) => $q->where('status', CallLog::STATUS_BLOCKED))
-            ->when(! in_array($this->callFilter, ['blocked']), fn ($q) => $q->where('status', '!=', CallLog::STATUS_BLOCKED))
-            ->when(! empty($ourNumbers), fn ($q) => $q->where(function ($q) use ($ourNumbers) {
-                // Exclude phantom/loopback legs where from_number is one of our own Telnyx numbers
-                $q->where('direction', '!=', 'incoming')
-                    ->orWhereNotIn('from_number', $ourNumbers);
-            }))
-            ->orderByDesc('created_at')
             ->limit($this->limit)
             ->get();
 
@@ -364,16 +327,7 @@ class CallList extends Component
      */
     public function effectiveStatus(CallLog $call): string
     {
-        if ($call->status === CallLog::STATUS_BLOCKED) {
-            return 'blocked';
-        }
-
-        $metadata = is_array($call->metadata) ? $call->metadata : (is_string($call->metadata) ? json_decode($call->metadata, true) : []);
-        if (! empty($metadata['blocked_reason'])) {
-            return 'blocked';
-        }
-
-        return $call->status;
+        return CallHistory::effectiveStatus($call);
     }
 
     /**

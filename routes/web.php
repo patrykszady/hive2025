@@ -108,6 +108,22 @@ Route::get('m/sms/{filename}', [VendorDocsController::class, 'smsMediaPublic'])
     ->where('filename', '.*')
     ->name('sms.media.public');
 
+// A call recording for the Hive Contractors app: a time-limited signed link
+// handed out by /api/app/v1/calls/{id} to a team member who can see the call,
+// so the app's audio player can stream it (with Range support) without a web
+// session.
+Route::get('calls/{call}/recording/signed', function (\App\Models\CallLog $call) {
+    abort_unless($call->recording_path && $call->recording_disk, 404);
+    $disk = \Illuminate\Support\Facades\Storage::disk($call->recording_disk);
+    abort_unless($disk->exists($call->recording_path), 404);
+
+    return response()->file($disk->path($call->recording_path), [
+        'Content-Type' => str_ends_with((string) $call->recording_path, '.wav') ? 'audio/wav' : 'audio/mpeg',
+        'Accept-Ranges' => 'bytes',
+        'Cache-Control' => 'private, max-age=3600',
+    ]);
+})->middleware('signed')->name('calls.recording.signed');
+
 // Serve audio files with proper range request support (required for Telnyx streaming)
 Route::get('telnyx-audio/{filename}', function (string $filename) {
     $path = public_path("audio/{$filename}");
