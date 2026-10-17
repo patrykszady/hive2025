@@ -652,5 +652,27 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });
 
+        // App login-code requests: per IP (keeps one phone/network from
+        // mailing codes to arbitrary addresses) AND per email (keeps a
+        // single address from being re-mailed faster than the server-side
+        // resend cooldown already allows).
+        RateLimiter::for('app-login-code', function (Request $request) {
+            return [
+                Limit::perMinute(5)->by('app-login-code-ip:' . $request->ip()),
+                Limit::perMinute(3)->by('app-login-code-email:' . strtolower((string) $request->input('email'))),
+            ];
+        });
+
+        // App login (code verification): looser than the send-code limiter —
+        // OneTimeLoginCodes::MAX_ATTEMPTS (5) is the real brake on guessing a
+        // single code, and it must be reachable within one minute, or a
+        // legitimate user's wrong guesses would get 429s instead of the
+        // "too many wrong codes" message that actually explains what to do.
+        RateLimiter::for('app-login', function (Request $request) {
+            return [
+                Limit::perMinute(20)->by('app-login-ip:' . $request->ip()),
+                Limit::perMinute(10)->by('app-login-email:' . strtolower((string) $request->input('email'))),
+            ];
+        });
     }
 }

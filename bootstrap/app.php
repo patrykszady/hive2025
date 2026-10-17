@@ -61,6 +61,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'telnyx.signature' => \App\Http\Middleware\VerifyTelnyxSignature::class,
             // /api/admin/v1's bearer-token guard (ss-systems is the only caller).
             'admin.api.auth' => \SsSystems\Platform\Http\Admin\AuthenticateAdminApi::class,
+            // Sanctum's own ability checks, used by /api/app/v1 (the Hive
+            // Contractors app): 'abilities' requires every ability listed,
+            // 'ability' requires any one of them.
+            'abilities' => \Laravel\Sanctum\Http\Middleware\CheckAbilities::class,
+            'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,
+            // /api/app/v1's team gate — see EnsureAppUserAllowed's docblock.
+            'app.access' => \App\Http\Middleware\EnsureAppUserAllowed::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

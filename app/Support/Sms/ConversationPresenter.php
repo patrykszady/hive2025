@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Services\SmsTranslationService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 /**
@@ -489,26 +490,51 @@ class ConversationPresenter
 
         $extra = $thumb ? ['thumb' => 1] : [];
 
-        // If it's an old /storage/sms-media/... path, extract just the path after the prefix
-        if (str_starts_with($url, '/storage/sms-media/')) {
-            $path = substr($url, strlen('/storage/sms-media/'));
+        return route('sms.media', ['filename' => static::mediaFilename($url)] + $extra);
+    }
 
-            return route('sms.media', ['filename' => $path] + $extra);
+    /**
+     * The session-less equivalent of mediaUrl(): a 30-day HMAC-signed link to
+     * the same public streaming endpoint outbound MMS already uses (see
+     * SendGroupMms::buildPublicSignedLink() and
+     * VendorDocsController::smsMediaPublic()), so a client with no web
+     * session or cookie — the app — can still load the image.
+     */
+    public static function publicMediaUrl(string $url, bool $thumb = false): string
+    {
+        if (str_starts_with($url, 'http')) {
+            return $url;
+        }
+
+        $extra = $thumb ? ['thumb' => 1] : [];
+
+        return URL::signedRoute('sms.media.public', ['filename' => static::mediaFilename($url)] + $extra, now()->addDays(30));
+    }
+
+    /**
+     * Normalise a stored media_urls entry — an old absolute /storage/...
+     * path, a bare filename, or an already-relative sms-media/sms-attachments
+     * path — to the relative "filename" both the sms.media and
+     * sms.media.public routes expect.
+     */
+    private static function mediaFilename(string $url): string
+    {
+        // Old /storage/sms-media/... path — extract just the path after the prefix.
+        if (str_starts_with($url, '/storage/sms-media/')) {
+            return substr($url, strlen('/storage/sms-media/'));
         }
 
         if (str_starts_with($url, '/storage/sms-attachments/')) {
-            $path = substr($url, strlen('/storage/sms-attachments/'));
-
-            return route('sms.media', ['filename' => 'sms-attachments/' . $path] + $extra);
+            return 'sms-attachments/' . substr($url, strlen('/storage/sms-attachments/'));
         }
 
-        // If it's a relative path starting with sms-media/ or sms-attachments/, use as-is
+        // Already a relative path starting with sms-media/ or sms-attachments/.
         if (str_starts_with($url, 'sms-media/') || str_starts_with($url, 'sms-attachments/')) {
-            return route('sms.media', ['filename' => $url] + $extra);
+            return $url;
         }
 
-        // Otherwise assume it's a bare filename that goes in sms-media/
-        return route('sms.media', ['filename' => 'sms-media/' . $url] + $extra);
+        // Otherwise assume it's a bare filename that goes in sms-media/.
+        return 'sms-media/' . $url;
     }
 
     /* ─── Names & contacts ────────────────────────────────────────── */
