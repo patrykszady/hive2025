@@ -70,6 +70,24 @@ it('links an incoming-call notification to the call, not to /calls', function ()
     }
 });
 
+it('sends one notification per incoming call, not two', function (): void {
+    ['call' => $call] = makeCallNotificationFixture();
+
+    $payloads = [];
+    $this->mock(WebPushService::class, function ($mock) use (&$payloads) {
+        $mock->shouldReceive('sendToSubscriptions')
+            ->andReturnUsing(function ($subscriptions, array $payload) use (&$payloads) {
+                $payloads[] = $payload;
+            });
+    });
+
+    (new SendIncomingCallBrowserNotifications($call->id))->handle(app(WebPushService::class));
+
+    expect($payloads)->toHaveCount(1)
+        ->and($payloads[0]['title'])->toEndWith('is Calling')
+        ->and($payloads[0]['tag'])->toBe("incoming-call-{$call->id}");
+});
+
 it('links an answered-call notification to the call too', function (): void {
     ['user' => $user, 'call' => $call] = makeCallNotificationFixture();
 
