@@ -1416,21 +1416,42 @@ class SendScheduleModal extends Component
      */
     public function send(GroupSmsService $smsService, SmsTranslationService $translator): void
     {
-        if (empty($this->editableMessage)) {
-            Flux::toast(variant: 'warning', heading: 'No Message', text: 'No message to send.', duration: 4000, position: 'top right');
+        $result = $this->deliver($smsService, $translator);
+
+        Flux::toast(variant: $result['variant'], heading: $result['heading'], text: $result['text'], duration: $result['ok'] ? 4000 : 5000, position: 'top right');
+
+        if (! $result['ok']) {
             return;
+        }
+
+        $this->showModal = false;
+        $this->scheduleWithoutDate = false;
+        $this->dispatch('messageSent');
+        $this->dispatch('refreshMessages');
+    }
+
+    /**
+     * Send the drafted schedule (editableMessage) to the thread and mark the
+     * vendor's tasks requested. Shared by the modal and the Hive Contractors
+     * app (/api/app/v1/threads/{thread}/schedule), which opens the component
+     * with open() and calls this directly.
+     *
+     * @return array{ok: bool, variant: string, heading: string, text: string}
+     */
+    public function deliver(GroupSmsService $smsService, SmsTranslationService $translator): array
+    {
+        if (empty($this->editableMessage)) {
+            return ['ok' => false, 'variant' => 'warning', 'heading' => 'No Message', 'text' => 'No message to send.'];
         }
 
         $thread = $this->thread;
 
         if (! $thread) {
-            Flux::toast(variant: 'danger', heading: 'Error', text: 'Thread not found.', duration: 4000, position: 'top right');
-            return;
+            return ['ok' => false, 'variant' => 'danger', 'heading' => 'Error', 'text' => 'Thread not found.'];
         }
 
         if ($thread->hasPendingOptIn()) {
-            Flux::toast(variant: 'warning', heading: 'Awaiting START Replies', text: 'Each recipient must reply START before sending.', duration: 5000, position: 'top right');
-            return;
+            return ['ok' => false, 'variant' => 'warning', 'heading' => 'Awaiting START Replies', 'text' => 'Each recipient must reply START before sending.'];
         }
 
         $viewerLanguage = $translator->normalizeLanguage((string) (auth()->user()?->preferred_language ?: 'English'));
@@ -1474,16 +1495,9 @@ class SendScheduleModal extends Component
                 ]);
         }
 
-        if ($this->scheduleWithoutDate) {
-            Flux::toast(variant: 'success', heading: 'Scheduled', text: 'Message scheduled without date. Use send now to send it.', duration: 4000, position: 'top right');
-        } else {
-            Flux::toast(variant: 'success', heading: 'Sent', text: 'Schedule message sent.', duration: 4000, position: 'top right');
-        }
-
-        $this->showModal = false;
-        $this->scheduleWithoutDate = false;
-        $this->dispatch('messageSent');
-        $this->dispatch('refreshMessages');
+        return $this->scheduleWithoutDate
+            ? ['ok' => true, 'variant' => 'success', 'heading' => 'Scheduled', 'text' => 'Message scheduled without date. Use send now to send it.']
+            : ['ok' => true, 'variant' => 'success', 'heading' => 'Sent', 'text' => 'Schedule message sent.'];
     }
 
     public function render(): \Illuminate\View\View

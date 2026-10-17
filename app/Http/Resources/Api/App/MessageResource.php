@@ -29,23 +29,23 @@ class MessageResource extends JsonResource
                 ->all(),
             'status' => $this->status,
             'sent_at' => $this->created_at?->toIso8601String(),
+            // Waiting to go out (the composer's "Schedule send"), or saved as
+            // "schedule only" until someone sends it by hand.
+            'scheduled_at' => $this->scheduled_at?->toIso8601String(),
             'sender_name' => $this->isOutbound() ? $this->outboundSenderName() : null,
         ];
     }
 
     /**
-     * The sender shown above an outbound bubble: the acting user's name, or
-     * "GS Crew" for an automated send (sent_by_user_id null — consent/welcome
-     * prompts, scheduled blasts sent by the system).
+     * The sender shown above an outbound bubble, as the web conversation
+     * shows it: the acting user's nickname or first name, or "GS Crew" for an
+     * automated send (sent_by_user_id null — consent/welcome prompts,
+     * scheduled blasts sent by the system).
      */
     private function outboundSenderName(): string
     {
         $sender = $this->sentByUser;
 
-        if (! $sender) {
-            return 'GS Crew';
-        }
-
-        return trim(($sender->nickname ?: $sender->first_name) . ' ' . $sender->last_name);
+        return $sender ? (string) ($sender->nickname ?: $sender->first_name) : 'GS Crew';
     }
 }

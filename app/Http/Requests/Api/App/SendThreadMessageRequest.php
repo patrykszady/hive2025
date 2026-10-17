@@ -31,6 +31,8 @@ class SendThreadMessageRequest extends FormRequest
             'body' => ['nullable', 'required_without:media', 'string', 'max:1600'],
             'media' => ['nullable', 'array', 'max:10'],
             'media.*' => SmsConversation::attachmentValidationRule(),
+            // The web composer's "Schedule send" presets (America/Chicago).
+            'send_at' => ['nullable', 'string', 'in:1hr,2hr,tomorrow_8am,tomorrow_12pm'],
         ];
     }
 }

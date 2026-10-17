@@ -147,7 +147,7 @@ it('reads a thread\'s messages oldest first, with stripped signatures and media'
     expect($data[1]['id'])->toBe($outbound->id)
         // Crew signature stripped from the body, same as the web conversation.
         ->and($data[1]['body'])->toBe('Second message')
-        ->and($data[1]['sender_name'])->toBe('Patryk Crew');
+        ->and($data[1]['sender_name'])->toBe('Patryk');
 });
 
 it('pages older messages with ?before=', function () {
@@ -198,7 +198,7 @@ it('sends a message the same way the web composer does', function () {
         ->and($message->status)->toBe('sent'); // SendGroupMms ran synchronously (QUEUE_CONNECTION=sync)
 
     expect($response->json('data.body'))->toBe('On our way')
-        ->and($response->json('data.sender_name'))->toBe('Patryk Crew');
+        ->and($response->json('data.sender_name'))->toBe('Patryk');
 
     // Exactly the request SendGroupMms::sendSms() sends for a single
     // recipient — same from-number, same endpoint, same body.
@@ -372,4 +372,28 @@ it('opens one thread by id, for links and notification taps, and only a visible 
 
     $this->getJson("/api/app/v1/threads/{$other->id}")->assertForbidden();
     $this->getJson('/api/app/v1/threads/999999')->assertNotFound();
+});
+
+it('keeps a message scheduled for later in the thread, marked with its send time', function () {
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    $thread = appMessagingThread($vendor);
+    Sanctum::actingAs($user, ['app']);
+
+    $scheduled = SmsMessage::query()->create([
+        'thread_id' => $thread->id,
+        'direction' => SmsMessage::DIRECTION_OUTBOUND,
+        'from_number' => '+12247354200',
+        'to_numbers' => ['+12245550001'],
+        'text' => "See you tomorrow\n-GSC",
+        'status' => 'scheduled',
+        'scheduled_at' => now()->addDay()->setTime(8, 0),
+        'sent_by_user_id' => $user->id,
+    ]);
+
+    $response = $this->getJson("/api/app/v1/threads/{$thread->id}/messages")->assertOk();
+
+    $row = collect($response->json('data'))->firstWhere('id', $scheduled->id);
+    expect($row)->not->toBeNull()
+        ->and($row['status'])->toBe('scheduled')
+        ->and($row['scheduled_at'])->not->toBeNull();
 });

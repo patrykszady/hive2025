@@ -34,9 +34,11 @@ class ThreadMessageController extends Controller
 
         $before = $request->query('before');
 
+        // Scheduled messages stay in the list (status 'scheduled', with
+        // scheduled_at): the app shows them in place, marked with their send
+        // time, where the web tracks them in a separate panel.
         $messages = SmsMessage::query()
             ->where('thread_id', $thread)
-            ->where('status', '!=', 'scheduled')
             ->with('sentByUser:id,first_name,last_name,nickname')
             ->when(filled($before), fn ($q) => $q->where('id', '<', (int) $before))
             ->orderByDesc('id')
@@ -81,7 +83,24 @@ class ThreadMessageController extends Controller
             $mediaUrls[] = '/storage/' . $path;
         }
 
-        $message = $smsService->sendToThread($smsThread, $messageWithSig, $mediaUrls, $user->id);
+        // "Schedule send": the same presets and clock as the web composer.
+        $now = now('America/Chicago');
+        $scheduledAt = match ($request->validated('send_at')) {
+            '1hr' => $now->copy()->addHour()->utc(),
+            '2hr' => $now->copy()->addHours(2)->utc(),
+            'tomorrow_8am' => $now->copy()->addDay()->setTime(8, 0)->utc(),
+            'tomorrow_12pm' => $now->copy()->addDay()->setTime(12, 0)->utc(),
+            default => null,
+        };
+
+        $message = $smsService->sendToThread(
+            $smsThread,
+            $messageWithSig,
+            $mediaUrls,
+            $user->id,
+            $scheduledAt,
+            $scheduledAt ? ['original_text' => $text, 'source' => 'app_schedule_menu'] : null,
+        );
 
         // sendToThread() dispatches the send job, which (on the sync queue
         // tests use, and sometimes in production before this returns) can
