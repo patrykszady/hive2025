@@ -2269,112 +2269,23 @@ class SmsConversation extends Component
      */
     private function initiateCallWithTargets(array $targetPhones): void
     {
-        $user = auth()->user();
-        $userPhone = $user->routeNotificationForTelnyx();
+        $result = app(\App\Services\Voice\ClickToCall::class)->start(auth()->user(), $targetPhones);
 
-        if (! $userPhone) {
-            Flux::toast(variant: 'danger', heading: 'No Phone', text: 'You don\'t have a cell phone on file.', duration: 5000, position: 'top right');
+        if (! $result['ok']) {
+            Flux::toast(variant: 'danger', heading: 'Call Failed', text: (string) $result['error'], duration: 5000, position: 'top right');
+
             return;
         }
 
-        $apiKey = config('services.telnyx.api_key');
-        $connectionId = config('services.telnyx.connection_id');
-        $from = config('services.telnyx.from');
-
-        $normalizedTargets = collect($targetPhones)
-            ->map(fn ($phone) => $this->normalizeDialTarget($phone))
-            ->filter(fn ($phone) => is_string($phone) && $phone !== '')
-            ->reject(fn ($phone) => GroupSmsService::isOurNumber($phone))
-            ->unique()
-            ->values();
-
-        if ($normalizedTargets->isEmpty()) {
-            Flux::toast(variant: 'danger', heading: 'No Valid Numbers', text: 'No callable recipients found in this thread.', duration: 5000, position: 'top right');
-            return;
-        }
-
-        $primaryTarget = $normalizedTargets->first();
-        $targetCount = $normalizedTargets->count();
-
-        if (! $apiKey || ! $connectionId) {
-            Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Voice calling is not configured.', duration: 5000, position: 'top right');
-            return;
-        }
-
-        // Create a call log for this outbound call
-        $callLog = CallLog::create([
-            'direction' => 'outgoing',
-            'from_number' => $from,
-            'to_number' => $primaryTarget,
-            'status' => CallLog::STATUS_INITIATED,
-            'user_id' => $user->id,
-            'vendor_id' => $user->vendor?->id,
-            'metadata' => [
-                'type' => $targetCount > 1 ? 'click_to_call_multi' : 'click_to_call',
-                'target_phone' => $primaryTarget,
-                'target_phones' => $normalizedTargets->all(),
-                'target_count' => $targetCount,
-                'user_phone' => $userPhone,
-            ],
-        ]);
-
-        try {
-            // Step 1: Call the logged-in user's cell phone first
-            $response = Http::withToken($apiKey)
-                ->post('https://api.telnyx.com/v2/calls', [
-                    'connection_id' => $connectionId,
-                    'to' => $userPhone,
-                    'from' => $from,
-                    'from_display_name' => 'GS Construction',
-                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
-                    'preferred_codecs' => config('services.telnyx.preferred_codecs'),
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'click_to_call',
-                        'target_phone' => $primaryTarget,
-                        'target_phones' => $normalizedTargets->all(),
-                        'call_log_id' => $callLog->id,
-                    ])),
-                    'webhook_url' => $this->telnyxWebhookUrl(),
-                ]);
-
-            if ($response->successful()) {
-                $data = $response->json('data');
-                $callLog->update([
-                    'call_control_id' => $data['call_control_id'] ?? null,
-                    'call_session_id' => $data['call_session_id'] ?? null,
-                    'call_leg_id' => $data['call_leg_id'] ?? null,
-                ]);
-
-                Log::channel('telnyx')->info('Click-to-call initiated', [
-                    'call_log_id' => $callLog->id,
-                    'user_phone' => $userPhone,
-                    'target_phone' => $primaryTarget,
-                    'target_count' => $targetCount,
-                    'call_control_id' => $data['call_control_id'] ?? null,
-                ]);
-
-                Flux::toast(
-                    variant: 'success',
-                    heading: 'Calling',
-                    text: $targetCount > 1
-                        ? 'Your phone will ring shortly, then all recipients will be called.'
-                        : 'Your phone will ring shortly...',
-                    duration: 8000,
-                    position: 'top right'
-                );
-            } else {
-                $callLog->update(['status' => CallLog::STATUS_FAILED]);
-                Log::channel('telnyx')->error('Click-to-call API failed', [
-                    'status' => $response->status(),
-                    'error' => $response->json(),
-                ]);
-                Flux::toast(variant: 'danger', heading: 'Call Failed', text: 'Could not initiate the call.', duration: 5000, position: 'top right');
-            }
-        } catch (\Exception $e) {
-            $callLog->update(['status' => CallLog::STATUS_FAILED]);
-            Log::channel('telnyx')->error('Click-to-call exception', ['error' => $e->getMessage()]);
-            Flux::toast(variant: 'danger', heading: 'Call Failed', text: 'Could not initiate the call.', duration: 5000, position: 'top right');
-        }
+        Flux::toast(
+            variant: 'success',
+            heading: 'Calling',
+            text: count($result['targets']) > 1
+                ? 'Your phone will ring shortly, then all recipients will be called.'
+                : 'Your phone will ring shortly...',
+            duration: 8000,
+            position: 'top right'
+        );
     }
 
     private function normalizeDialTarget(?string $phone): ?string
@@ -2466,24 +2377,6 @@ class SmsConversation extends Component
     protected function normalizeLanguage(string $language): string
     {
         return app(SmsTranslationService::class)->normalizeLanguage($language);
-    }
-
-    /**
-     * Build a publicly reachable webhook URL for Telnyx voice callbacks.
-     */
-    protected function telnyxWebhookUrl(): string
-    {
-        $appUrl = config('app.url');
-
-        if (str_contains($appUrl, '127.0.0.1') || str_contains($appUrl, 'localhost')) {
-            $publicUrl = config('services.telnyx.public_url');
-
-            if ($publicUrl) {
-                return rtrim($publicUrl, '/') . '/webhooks/telnyx/voice';
-            }
-        }
-
-        return rtrim($appUrl, '/') . '/webhooks/telnyx/voice';
     }
 
     public function render()

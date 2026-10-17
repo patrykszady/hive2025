@@ -16,94 +16,15 @@ trait HasCallActions
 {
     public function callBack(string $phone, array $recipientIds = []): void
     {
-        $user = auth()->user();
-        $userPhone = $user->routeNotificationForTelnyx();
+        $result = app(\App\Services\Voice\ClickToCall::class)->start(auth()->user(), [$phone], $recipientIds);
 
-        if (! $userPhone) {
-            Flux::toast(variant: 'danger', heading: 'No Phone', text: 'You don\'t have a cell phone on file.', duration: 5000, position: 'top right');
+        if (! $result['ok']) {
+            Flux::toast(variant: 'danger', heading: 'Call Failed', text: (string) $result['error'], duration: 5000, position: 'top right');
+
             return;
         }
 
-        $apiKey = config('services.telnyx.api_key');
-        $connectionId = config('services.telnyx.connection_id');
-        $from = config('services.telnyx.from');
-
-        if (GroupSmsService::isOurNumber($phone)) {
-            Log::channel('telnyx')->warning('Click-to-call blocked: target is own Telnyx number', [
-                'target_phone' => $phone,
-            ]);
-            Flux::toast(variant: 'danger', heading: 'Invalid Number', text: 'Cannot call the company phone number.', duration: 5000, position: 'top right');
-            return;
-        }
-
-        if (! $apiKey || ! $connectionId) {
-            Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Voice calling is not configured.', duration: 5000, position: 'top right');
-            return;
-        }
-
-        // Store selected call recipients in metadata for the webhook to use
-        $metadata = [
-            'type' => 'click_to_call',
-            'target_phone' => $phone,
-            'user_phone' => $userPhone,
-        ];
-
-        if (! empty($recipientIds)) {
-            // Validate that all recipient IDs belong to users with phones
-            $validRecipients = User::whereIn('id', $recipientIds)
-                ->whereNotNull('cell_phone')
-                ->where('cell_phone', '!=', '')
-                ->pluck('id')
-                ->all();
-            $metadata['click_to_call_recipient_ids'] = $validRecipients;
-        }
-
-        $callLog = CallLog::create([
-            'direction' => 'outgoing',
-            'from_number' => $from,
-            'to_number' => $phone,
-            'status' => CallLog::STATUS_INITIATED,
-            'user_id' => $user->id,
-            'vendor_id' => $user->vendor?->id,
-            'metadata' => $metadata,
-        ]);
-
-        try {
-            $response = Http::withToken($apiKey)
-                ->post('https://api.telnyx.com/v2/calls', [
-                    'connection_id' => $connectionId,
-                    'to' => $userPhone,
-                    'from' => $from,
-                    'from_display_name' => 'GS Construction',
-                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
-                    'preferred_codecs' => config('services.telnyx.preferred_codecs'),
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'click_to_call',
-                        'target_phone' => $phone,
-                        'call_log_id' => $callLog->id,
-                    ])),
-                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
-                ]);
-
-            if ($response->successful()) {
-                $data = $response->json('data');
-                $callLog->update([
-                    'call_control_id' => $data['call_control_id'] ?? null,
-                    'call_session_id' => $data['call_session_id'] ?? null,
-                    'call_leg_id' => $data['call_leg_id'] ?? null,
-                ]);
-
-                Flux::toast(variant: 'success', heading: 'Calling', text: 'Your phone will ring shortly...', duration: 8000, position: 'top right');
-            } else {
-                $callLog->update(['status' => CallLog::STATUS_FAILED]);
-                Log::channel('telnyx')->error('Click-to-call failed', ['status' => $response->status(), 'error' => $response->json()]);
-                Flux::toast(variant: 'danger', heading: 'Call Failed', text: 'Could not initiate the call.', duration: 5000, position: 'top right');
-            }
-        } catch (\Exception $e) {
-            $callLog->update(['status' => CallLog::STATUS_FAILED]);
-            Log::channel('telnyx')->error('Click-to-call exception', ['error' => $e->getMessage()]);
-            Flux::toast(variant: 'danger', heading: 'Error', text: 'Something went wrong initiating the call.', duration: 5000, position: 'top right');
-        }
+        Flux::toast(variant: 'success', heading: 'Calling', text: 'Your phone will ring shortly...', duration: 8000, position: 'top right');
     }
 
     public function textBack(string $phone): void

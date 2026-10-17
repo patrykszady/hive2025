@@ -241,7 +241,13 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
     {
         return $this->hasOne(NotificationSetting::class);
     }
-    
+
+    /** Their Hive Contractors app calling login, once they have signed in to the app. */
+    public function voiceCredential(): HasOne
+    {
+        return $this->hasOne(UserVoiceCredential::class);
+    }
+
     /**
      * Get the user's vendor relationship for the primary vendor
      */

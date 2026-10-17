@@ -181,6 +181,12 @@ return [
         'numbers' => array_values(array_unique(array_filter(array_map('trim', explode(',', env('TELNYX_NUMBERS', env('TELNYX_FROM', ''))))))),
         'dev_to' => env('TELNYX_DEV_TO'),
         'connection_id' => env('TELNYX_CONNECTION_ID'),
+        // The "Hive Contractors app" credential connection (2026-10-16): each
+        // team member's app/browser signs in with a telephony credential on
+        // it, and Hive rings them at sip:<username>@sip.telnyx.com. It has no
+        // outbound profile of its own, so every app call goes out through
+        // Hive (logged, recorded, from the business number).
+        'app_connection_id' => env('TELNYX_APP_CONNECTION_ID'),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
         // How long a click-to-call target rings before we give up. Carriers

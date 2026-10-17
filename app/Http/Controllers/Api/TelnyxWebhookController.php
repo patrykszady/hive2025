@@ -1241,6 +1241,8 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
+        $this->hangUpPersonsOtherLegs($callLog->id, $adminUserId ? (int) $adminUserId : null, $callControlId);
+
         // Play a screening prompt to the answering admin: "Call from {name}.
         // Stay on the line to connect, or press 1 to text them back." On
         // speak.ended (admin_screen) we'll either join the existing
@@ -1258,8 +1260,9 @@ class TelnyxWebhookController extends Controller
         // was 6–7 s of every inbound pickup (2026-09-17 log review). The
         // hang-up-to-voicemail behaviour is unchanged.
         $vendorOptions = (array) (Vendor::find(1)?->options ?? []);
-        if (! (bool) data_get($vendorOptions, 'screening_enabled', true)) {
-            Log::channel('telnyx')->info('Screening off — connecting the answering admin straight away', [
+        $isAppLeg = ($clientState['leg'] ?? null) === 'app';
+        if ($isAppLeg || ! (bool) data_get($vendorOptions, 'screening_enabled', true)) {
+            Log::channel('telnyx')->info($isAppLeg ? 'Answered in the app — connecting straight away' : 'Screening off — connecting the answering admin straight away', [
                 'admin_call_control_id' => $callControlId,
                 'call_log_id' => $callLog->id,
                 'admin_user_id' => $adminUserId,
@@ -3774,6 +3777,75 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * The person's Hive Contractors app (or browser) rings alongside their
+     * cell, when they have one (Patryk, 2026-10-16: app and cell together;
+     * answering one stops the other). No answering machine detection and no
+     * screening prompt on it: the app shows who is calling and has no
+     * carrier voicemail. Returns the leg's call_control_id, or null.
+     */
+    protected function dialPersonAppLeg(User $person, ?CallLog $callLog, string $incomingCallControlId, ?int $callLogId, ?string $originalCaller, ?string $cellCallControlId): ?string
+    {
+        $credentials = app(\App\Services\Voice\AppVoiceCredentials::class);
+        $sipUri = $credentials->enabled() ? $credentials->sipUriFor($person) : null;
+        if (! $sipUri) {
+            return null;
+        }
+
+        try {
+            $response = $this->telnyxHttp(0)->post('https://api.telnyx.com/v2/calls', [
+                'connection_id' => config('services.telnyx.connection_id'),
+                'to' => $sipUri,
+                'from' => config('services.telnyx.from'),
+                'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
+                'timeout_secs' => self::RING_SECONDS,
+                'custom_headers' => [
+                    ['name' => 'X-Hive-Call-Log', 'value' => (string) $callLogId],
+                    ['name' => 'X-Hive-Caller-Number', 'value' => (string) ($callLog?->from_number ?? $originalCaller)],
+                ],
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_ring',
+                    'leg' => 'app',
+                    'call_log_id' => $callLogId,
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'admin_user_id' => $person->id,
+                ])),
+                'webhook_url' => $this->telnyxBaseUrl().'/webhooks/telnyx/voice',
+            ]);
+        } catch (\Throwable $exception) {
+            Log::channel('telnyx')->warning('Could not ring the team member\'s app', ['admin_user_id' => $person->id, 'error' => $exception->getMessage()]);
+
+            return null;
+        }
+
+        $appCallControlId = $response->successful() ? ($response->json('data.call_control_id') ?: null) : null;
+        if (! $appCallControlId) {
+            Log::channel('telnyx')->warning('Could not ring the team member\'s app', ['admin_user_id' => $person->id, 'status' => $response->status()]);
+
+            return null;
+        }
+
+        Cache::put("telnyx_person_legs:{$callLogId}:{$person->id}", array_values(array_filter([$cellCallControlId, $appCallControlId])), now()->addMinutes(10));
+        Log::channel('telnyx')->info('Ringing the team member\'s app too', ['admin_user_id' => $person->id, 'app_call_control_id' => $appCallControlId, 'call_log_id' => $callLogId]);
+
+        return $appCallControlId;
+    }
+
+    /** A person answered one of their legs (app or cell): the other stops ringing. */
+    protected function hangUpPersonsOtherLegs(?int $callLogId, ?int $personId, string $answeredCallControlId): void
+    {
+        if (! $callLogId || ! $personId) {
+            return;
+        }
+
+        foreach ((array) Cache::get("telnyx_person_legs:{$callLogId}:{$personId}", []) as $otherLeg) {
+            if ($otherLeg !== $answeredCallControlId && ! Cache::has("telnyx_admin_dead:{$otherLeg}")) {
+                Log::channel('telnyx')->info('Answered on one device — stopping the other', ['answered' => $answeredCallControlId, 'stopped' => $otherLeg, 'admin_user_id' => $personId]);
+                $this->sendCallCommand($otherLeg, 'hangup');
+            }
+        }
+    }
+
+    /**
      * Whether this caller rings the vendor and sub order: a vendor or sub
      * is calling and Options sets one (Patryk, 2026-10-16: Greg first, then
      * Patryk, or both at once). Otherwise the Call Recipients order rings.
@@ -3819,6 +3891,7 @@ class TelnyxWebhookController extends Controller
         // actual caller is surfaced via `from_display_name` (CNAM).
         $queueUserIds = array_values(array_unique(array_map('intval', $queueUserIds)));
         $dialedCcId = null;
+        $appLegs = [];
         $triedPhones = [];
         // A recipient phoning the line is the caller: never ring their own
         // phone (with call waiting it would ring through their own call).
@@ -3865,6 +3938,8 @@ class TelnyxWebhookController extends Controller
                         'admin_call_control_id' => $dialedCcId,
                         'remaining_in_cascade' => count($queueUserIds),
                     ]);
+
+                    $appLegs[] = $this->dialPersonAppLeg($adminUser, $callLog, $incomingCallControlId, $callLogId, $originalCaller, $dialedCcId);
                 } else {
                     Log::channel('telnyx')->error('Failed to dial admin', [
                         'admin_user_id' => $adminUser->id,
@@ -3887,6 +3962,9 @@ class TelnyxWebhookController extends Controller
             if ($dialedCcId) {
                 $legIds = $metadata['admin_call_control_ids'] ?? [];
                 $legIds[] = $dialedCcId;
+                foreach (array_filter($appLegs) as $appLeg) {
+                    $legIds[] = $appLeg;
+                }
                 $metadata['admin_call_control_ids'] = array_values(array_unique($legIds));
             }
             $metadata['cascade_pending_ids'] = $queueUserIds;

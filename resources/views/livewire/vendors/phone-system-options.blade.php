@@ -11,6 +11,9 @@
     @play-tts-preview.window="playTts($event.detail.audioData)"
 >
     <x-island-card heading="Phone System" subheading="Who inbound calls ring, and what callers and your team hear" :separator="true">
+        <x-slot:actions>
+            <flux:button size="sm" variant="ghost" icon="phone" href="{{ route('phone_system.app_calling') }}" wire:navigate>Try app calling</flux:button>
+        </x-slot:actions>
 
         <form wire:submit="save" class="space-y-6">
             <flux:field>
