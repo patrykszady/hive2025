@@ -2,10 +2,13 @@
 
 use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
 use App\Http\Controllers\Api\App\V1\CallLogController as AppCallLogController;
+use App\Http\Controllers\Api\App\V1\ClientController as AppClientController;
+use App\Http\Controllers\Api\App\V1\ProjectController as AppProjectController;
 use App\Http\Controllers\Api\App\V1\ThreadController as AppThreadController;
 use App\Http\Controllers\Api\App\V1\ThreadMessageController as AppThreadMessageController;
 use App\Http\Controllers\Api\App\V1\ThreadToolsController as AppThreadToolsController;
 use App\Http\Controllers\Api\App\V1\VoiceController as AppVoiceController;
+use App\Http\Controllers\Api\App\V1\WebSessionController as AppWebSessionController;
 use App\Http\Controllers\Api\LeadsController;
 use App\Http\Controllers\Api\MailboxesController;
 use App\Http\Controllers\Api\ProjectZipCountsController;
@@ -81,6 +84,25 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
         Route::post('calls/unblock', [AppCallLogController::class, 'unblock'])->name('calls.unblock');
         Route::get('calls/{call}', [AppCallLogController::class, 'show'])->whereNumber('call')->name('calls.show');
         Route::post('calls/{call}/block', [AppCallLogController::class, 'block'])->whereNumber('call')->name('calls.block');
+
+        // The Projects tab — same cards, filters, search and status change
+        // as the web Projects index/page. 'statuses' is registered ahead of
+        // the numeric {project} routes for clarity, though whereNumber()
+        // alone already keeps it from being swallowed as an id.
+        Route::get('projects/statuses', [AppProjectController::class, 'statuses'])->name('projects.statuses');
+        Route::get('projects', [AppProjectController::class, 'index'])->name('projects.index');
+        Route::get('projects/{project}', [AppProjectController::class, 'show'])->whereNumber('project')->name('projects.show');
+        Route::post('projects/{project}/status', [AppProjectController::class, 'updateStatus'])->whereNumber('project')->name('projects.status.update');
+
+        // The Clients tab — same list, search and detail as the web
+        // Clients index/show pages.
+        Route::get('clients', [AppClientController::class, 'index'])->name('clients.index');
+        Route::get('clients/{client}', [AppClientController::class, 'show'])->whereNumber('client')->name('clients.show');
+        Route::get('clients/{client}/thread', [AppClientController::class, 'thread'])->whereNumber('client')->name('clients.thread');
+
+        // The "open full page" hand-off into a signed-in web session — see
+        // WebSessionController and routes/web.php's web-session.consume.
+        Route::post('web-session', [AppWebSessionController::class, 'store'])->name('web-session.store');
     });
 });
 

@@ -124,6 +124,23 @@ Route::get('calls/{call}/recording/signed', function (\App\Models\CallLog $call)
     ]);
 })->middleware('signed')->name('calls.recording.signed');
 
+// A timelapse frame for the Hive Contractors app: a time-limited signed link
+// handed out by GET /api/app/v1/projects/{id} (see ProjectResource), so the
+// app's project detail screen can show the latest photos without a web
+// session. The `signed` middleware alone is the gate — see
+// TimelapseController::frameSigned().
+Route::get('timelapse/frames/{frame}/signed', [\App\Http\Controllers\TimelapseController::class, 'frameSigned'])
+    ->middleware('signed')
+    ->name('projects.timelapse.frame.signed');
+
+// The Hive Contractors app's "open full page" hand-off: a one-time signed
+// link from POST /api/app/v1/web-session that logs its user into THIS web
+// session (no session yet, so this must sit outside the 'auth' group) and
+// redirects into the normal authenticated routes below.
+Route::get('app/web-session/{nonce}', [\App\Http\Controllers\WebSessionLoginController::class, 'consume'])
+    ->middleware('signed')
+    ->name('web-session.consume');
+
 // Serve audio files with proper range request support (required for Telnyx streaming)
 Route::get('telnyx-audio/{filename}', function (string $filename) {
     $path = public_path("audio/{$filename}");

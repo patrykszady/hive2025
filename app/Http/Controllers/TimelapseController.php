@@ -93,6 +93,28 @@ class TimelapseController extends Controller
 
         Gate::authorize('view', $project);
 
+        return $this->streamFrame($frame);
+    }
+
+    /**
+     * The Hive Contractors app's session-less equivalent of frame(): a
+     * time-limited signed link handed out by GET /api/app/v1/projects/{id}
+     * (see ProjectResource::latestPhotos()), gated on the route's own
+     * `signed` middleware alone — same pattern as calls.recording.signed —
+     * rather than a session/cookie the app never carries.
+     */
+    public function frameSigned(ProjectTimelapseFrame $frame)
+    {
+        return $this->streamFrame($frame);
+    }
+
+    /**
+     * Shared streaming logic for frame() and frameSigned(): resolves the
+     * registered/raw copy, serves a cached thumb on ?thumb=1, and supports
+     * ?download=1.
+     */
+    protected function streamFrame(ProjectTimelapseFrame $frame)
+    {
         $disk = Storage::disk($frame->disk);
 
         // The registered (aligned) copy when one exists — the sequence is
