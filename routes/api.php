@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
 use App\Http\Controllers\Api\App\V1\CallLogController as AppCallLogController;
 use App\Http\Controllers\Api\App\V1\ThreadController as AppThreadController;
 use App\Http\Controllers\Api\App\V1\ThreadMessageController as AppThreadMessageController;
+use App\Http\Controllers\Api\App\V1\ThreadToolsController as AppThreadToolsController;
 use App\Http\Controllers\Api\App\V1\VoiceController as AppVoiceController;
 use App\Http\Controllers\Api\LeadsController;
 use App\Http\Controllers\Api\MailboxesController;
@@ -66,10 +67,16 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
         Route::post('threads/{thread}/messages', [AppThreadMessageController::class, 'store'])->name('threads.messages.store');
         Route::post('threads/{thread}/read', [AppThreadMessageController::class, 'markRead'])->name('threads.read');
 
+        // The web conversation's composer tools.
+        Route::get('threads/{thread}/schedule', [AppThreadToolsController::class, 'schedulePreview'])->whereNumber('thread')->name('threads.schedule.preview');
+        Route::post('threads/{thread}/schedule', [AppThreadToolsController::class, 'sendSchedule'])->whereNumber('thread')->name('threads.schedule.send');
+        Route::post('threads/{thread}/consult-draft', [AppThreadToolsController::class, 'consultDraft'])->whereNumber('thread')->name('threads.consult-draft');
+
         Route::get('voice/token', [AppVoiceController::class, 'token'])->name('voice.token');
         Route::post('calls', [AppVoiceController::class, 'store'])->middleware('throttle:30,1')->name('calls.store');
 
         // The Calls tab: the web calls dashboard's list, detail and blocking.
+        Route::get('calls/ringing', [AppVoiceController::class, 'ringing'])->name('calls.ringing');
         Route::get('calls', [AppCallLogController::class, 'index'])->name('calls.index');
         Route::post('calls/unblock', [AppCallLogController::class, 'unblock'])->name('calls.unblock');
         Route::get('calls/{call}', [AppCallLogController::class, 'show'])->whereNumber('call')->name('calls.show');

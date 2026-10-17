@@ -3791,26 +3791,37 @@ class TelnyxWebhookController extends Controller
             return null;
         }
 
+        // The app leg carries the caller's own number and name: that is what
+        // the phone's call screen shows (a SIP leg to our own credential may
+        // carry any caller ID; the business number is the fallback).
+        $callerNumber = \App\Services\Voice\ClickToCall::normalize((string) ($callLog?->from_number ?? $originalCaller));
+        $displayName = self::telnyxDisplayName($callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'));
+        $appLeg = fn (string $from) => [
+            'connection_id' => config('services.telnyx.connection_id'),
+            'to' => $sipUri,
+            'from' => $from,
+            'from_display_name' => $displayName,
+            'timeout_secs' => self::RING_SECONDS,
+            'custom_headers' => [
+                ['name' => 'X-Hive-Call-Log', 'value' => (string) $callLogId],
+                ['name' => 'X-Hive-Caller-Number', 'value' => (string) ($callerNumber ?? '')],
+            ],
+            'client_state' => base64_encode(json_encode([
+                'action' => 'admin_ring',
+                'leg' => 'app',
+                'call_log_id' => $callLogId,
+                'incoming_call_control_id' => $incomingCallControlId,
+                'admin_user_id' => $person->id,
+            ])),
+            'webhook_url' => $this->telnyxBaseUrl().'/webhooks/telnyx/voice',
+        ];
+
         try {
-            $response = $this->telnyxHttp(0)->post('https://api.telnyx.com/v2/calls', [
-                'connection_id' => config('services.telnyx.connection_id'),
-                'to' => $sipUri,
-                'from' => config('services.telnyx.from'),
-                'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
-                'timeout_secs' => self::RING_SECONDS,
-                'custom_headers' => [
-                    ['name' => 'X-Hive-Call-Log', 'value' => (string) $callLogId],
-                    ['name' => 'X-Hive-Caller-Number', 'value' => (string) ($callLog?->from_number ?? $originalCaller)],
-                ],
-                'client_state' => base64_encode(json_encode([
-                    'action' => 'admin_ring',
-                    'leg' => 'app',
-                    'call_log_id' => $callLogId,
-                    'incoming_call_control_id' => $incomingCallControlId,
-                    'admin_user_id' => $person->id,
-                ])),
-                'webhook_url' => $this->telnyxBaseUrl().'/webhooks/telnyx/voice',
-            ]);
+            $response = $this->telnyxHttp(0)->post('https://api.telnyx.com/v2/calls', $appLeg($callerNumber ?: (string) config('services.telnyx.from')));
+            if (! $response->successful() && $callerNumber && $response->status() < 500) {
+                Log::channel('telnyx')->info('App leg refused with the caller\'s number as caller ID — ringing from the business number', ['admin_user_id' => $person->id, 'status' => $response->status()]);
+                $response = $this->telnyxHttp(0)->post('https://api.telnyx.com/v2/calls', $appLeg((string) config('services.telnyx.from')));
+            }
         } catch (\Throwable $exception) {
             Log::channel('telnyx')->warning('Could not ring the team member\'s app', ['admin_user_id' => $person->id, 'error' => $exception->getMessage()]);
 
@@ -3825,9 +3836,24 @@ class TelnyxWebhookController extends Controller
         }
 
         Cache::put("telnyx_person_legs:{$callLogId}:{$person->id}", array_values(array_filter([$cellCallControlId, $appCallControlId])), now()->addMinutes(10));
+        // What is ringing this person's app right now, for the app's call
+        // screen when the push carried too little (GET /api/app/v1/calls/ringing).
+        Cache::put("telnyx_app_ringing:{$person->id}", ['call_log_id' => $callLogId, 'app_call_control_id' => $appCallControlId], now()->addSeconds(self::RING_SECONDS + 10));
         Log::channel('telnyx')->info('Ringing the team member\'s app too', ['admin_user_id' => $person->id, 'app_call_control_id' => $appCallControlId, 'call_log_id' => $callLogId]);
 
         return $appCallControlId;
+    }
+
+    /**
+     * A caller ID name Telnyx accepts: letters, digits, spaces and -_~!.+
+     * only, at most 128 characters ("Patryk Szady (test)" was refused for
+     * the parentheses, 2026-10-17).
+     */
+    public static function telnyxDisplayName(?string $name): string
+    {
+        $clean = trim((string) preg_replace('/\s+/', ' ', (string) preg_replace('/[^A-Za-z0-9 \-_~!.+]/', ' ', (string) $name)));
+
+        return $clean !== '' ? mb_substr($clean, 0, 128) : 'Incoming Call';
     }
 
     /** A person answered one of their legs (app or cell): the other stops ringing. */

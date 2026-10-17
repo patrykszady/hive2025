@@ -4,10 +4,13 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\PlaceAppCallRequest;
+use App\Models\CallLog;
+use App\Services\Calls\CallHistory;
 use App\Services\Voice\AppVoiceCredentials;
 use App\Services\Voice\ClickToCall;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Calling for the Hive Contractors app. The app's Telnyx SDK signs in with
@@ -32,6 +35,30 @@ class VoiceController extends Controller
             'sip_username' => $credential->sip_username,
             'caller_id' => (string) config('services.telnyx.from'),
         ]);
+    }
+
+    /**
+     * The inbound call ringing this person's app right now, for the phone's
+     * call screen when the push carried too little (the caller's name and
+     * number, and the call log to open). Null once it is answered or gone.
+     */
+    public function ringing(Request $request, CallHistory $history): JsonResponse
+    {
+        $ringing = Cache::get("telnyx_app_ringing:{$request->user()->id}");
+        $call = is_array($ringing) && ! empty($ringing['call_log_id']) ? CallLog::query()->visibleToMessagesUser($request->user())->find($ringing['call_log_id']) : null;
+
+        if (! $call || in_array($call->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED, CallLog::STATUS_FAILED, CallLog::STATUS_BLOCKED], true)) {
+            return response()->json(['data' => null]);
+        }
+
+        $history->resolveNumbers([$call]);
+        $phone = $history->otherPartyNumber($call);
+
+        return response()->json(['data' => [
+            'call_log_id' => $call->id,
+            'caller' => ['name' => $history->nameFor($phone) ?? $call->caller_name, 'phone' => $phone],
+            'started_at' => $call->created_at?->toIso8601String(),
+        ]]);
     }
 
     /** Place a call: Hive rings the app (or the person's cell), then dials the number. */

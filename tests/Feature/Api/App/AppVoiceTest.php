@@ -78,3 +78,19 @@ it('rings the person\'s cell instead when the app asks, as Expo Go does before t
 
     Http::assertSent(fn ($request) => $request['to'] === '+12249993880');
 });
+
+it('tells the app what is ringing it right now, and nothing once the call is over', function () {
+    Sanctum::actingAs($this->member, ['app']);
+    $this->getJson('/api/app/v1/calls/ringing')->assertOk()->assertExactJson(['data' => null]);
+
+    $call = CallLog::factory()->create(['vendor_id' => 1, 'direction' => 'incoming', 'from_number' => '+17735550111', 'to_number' => '+12247354200', 'status' => CallLog::STATUS_ANSWERED, 'caller_name' => 'Erin Abbey']);
+    \Illuminate\Support\Facades\Cache::put('telnyx_app_ringing:'.$this->member->id, ['call_log_id' => $call->id, 'app_call_control_id' => 'app-leg'], 60);
+
+    $this->getJson('/api/app/v1/calls/ringing')->assertOk()
+        ->assertJsonPath('data.call_log_id', $call->id)
+        ->assertJsonPath('data.caller.phone', '+17735550111')
+        ->assertJsonPath('data.caller.name', 'Erin Abbey');
+
+    $call->update(['status' => CallLog::STATUS_COMPLETED]);
+    $this->getJson('/api/app/v1/calls/ringing')->assertExactJson(['data' => null]);
+});

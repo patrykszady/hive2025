@@ -117,7 +117,14 @@ it('rings a team member\'s app alongside their cell, and answering the app conne
         'client_state' => base64_encode(json_encode(['action' => 'welcome_or_ring', 'call_log_id' => $callLog->id, 'original_caller' => '+17735550111'])),
     ]]])->assertSuccessful();
 
-    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls') && $request['to'] === 'sip:gencredpatryk@sip.telnyx.com' && ! isset($request['answering_machine_detection']));
+    // The app leg carries the caller's own number and a Telnyx-clean name:
+    // that is what the phone's call screen shows.
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/calls')
+        && $request['to'] === 'sip:gencredpatryk@sip.telnyx.com'
+        && $request['from'] === '+17735550111'
+        && $request['from_display_name'] === 'Erin Abbey'
+        && ! isset($request['answering_machine_detection']));
+    expect(\Illuminate\Support\Facades\Cache::get('telnyx_app_ringing:'.$this->patryk->id)['call_log_id'] ?? null)->toBe($callLog->id);
     expect($callLog->fresh()->metadata['admin_call_control_ids'])->toBe(['cell-leg', 'app-leg']);
 
     // Patryk answers in the app (after the caller's welcome finished).
@@ -148,4 +155,28 @@ it('opens the app calling page for GS Construction\'s team only, and places call
 
     $other = User::factory()->create(['primary_vendor_id' => Vendor::factory()->create()->id]);
     Livewire::actingAs($other)->test(AppCalling::class)->assertStatus(404);
+});
+
+it('cleans a caller name for Telnyx, and falls back to the business number when the caller\'s is refused', function () {
+    expect(\App\Http\Controllers\Api\TelnyxWebhookController::telnyxDisplayName('Patryk Szady (test) <x>'))->toBe('Patryk Szady test x')
+        ->and(\App\Http\Controllers\Api\TelnyxWebhookController::telnyxDisplayName('   '))->toBe('Incoming Call');
+
+    UserVoiceCredential::factory()->create(['user_id' => $this->patryk->id, 'sip_username' => 'gencredpatryk']);
+    Http::fake([
+        'api.telnyx.com/v2/calls' => Http::sequence()
+            ->push(['data' => ['call_control_id' => 'cell-leg']])
+            ->push(['errors' => [['code' => '10015', 'title' => 'Invalid from']]], 422)
+            ->push(['data' => ['call_control_id' => 'app-leg']]),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $callLog = CallLog::factory()->create(['call_control_id' => 'incoming-cc', 'status' => CallLog::STATUS_ANSWERED, 'from_number' => '+17735550111', 'caller_name' => 'Erin Abbey']);
+    $this->postJson('/webhooks/telnyx/voice', ['data' => ['event_type' => 'call.answered', 'record_type' => 'event', 'payload' => [
+        'call_control_id' => 'incoming-cc',
+        'client_state' => base64_encode(json_encode(['action' => 'welcome_or_ring', 'call_log_id' => $callLog->id, 'original_caller' => '+17735550111'])),
+    ]]])->assertSuccessful();
+
+    $appLegs = collect(Http::recorded())->filter(fn ($pair) => str_ends_with($pair[0]->url(), '/v2/calls') && str_starts_with((string) $pair[0]['to'], 'sip:'))->map(fn ($pair) => $pair[0]['from'])->values()->all();
+    expect($appLegs)->toBe(['+17735550111', '+12247354200'])
+        ->and($callLog->fresh()->metadata['admin_call_control_ids'])->toBe(['cell-leg', 'app-leg']);
 });
