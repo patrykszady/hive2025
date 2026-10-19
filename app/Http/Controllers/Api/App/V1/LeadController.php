@@ -115,7 +115,13 @@ class LeadController extends Controller
             $match = $finder->find($email, $phone, $vendorId);
 
             if ($match !== null) {
-                return response()->json(['duplicate' => $match], 409);
+                // 'message' (ApiError.message on the app) carries the human
+                // label for a plain alert; 'duplicate' is the structured
+                // match for a client that wants to act on it directly.
+                return response()->json([
+                    'message' => $match['label'].' — create this lead anyway?',
+                    'duplicate' => $match,
+                ], 409);
             }
         }
 
