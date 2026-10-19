@@ -13,12 +13,23 @@ class LeadsSidebarBadge extends Component
     public function refreshBadge(): void
     {
         // Bust so the re-render Livewire performs sees the fresh count.
-        \Illuminate\Support\Facades\Cache::forget(static::countCacheKey());
+        static::bustBadgeCache();
     }
 
-    protected static function countCacheKey(): string
+    protected static function countCacheKey(?int $vendorId = null): string
     {
-        return 'leads:badge:v'.(auth()->user()?->vendor?->id ?? 0);
+        return 'leads:badge:v'.($vendorId ?? auth()->user()?->vendor?->id ?? 0);
+    }
+
+    /**
+     * Bust the count for a vendor (defaults to the current user's) — called
+     * by the web's event listener above and by the Hive Contractors app's
+     * LeadController after any write that can move a lead into or out of
+     * "New", so the app's badge never reads a stale count either.
+     */
+    public static function bustBadgeCache(?int $vendorId = null): void
+    {
+        \Illuminate\Support\Facades\Cache::forget(static::countCacheKey($vendorId));
     }
 
     /**

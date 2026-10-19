@@ -1211,56 +1211,11 @@ class LeadCreate extends Component
      */
     protected function findExistingContact(): ?array
     {
-        $email = strtolower(trim((string) $this->email));
-        $digits = preg_replace('/\D/', '', (string) $this->phone) ?: null;
-        if ($digits && strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            $digits = substr($digits, 1);
-        }
-
-        $vendorId = auth()->user()->vendor->id;
-
-        $lead = Lead::withoutGlobalScopes()
-            ->where('belongs_to_vendor_id', $vendorId)
-            ->where(function ($q) use ($email, $digits) {
-                $q->when($email !== '', fn ($inner) => $inner->where('lead_data->email', $email));
-                $q->when($digits, fn ($inner) => $inner->orWhere('lead_data->phone', $digits));
-            })
-            ->latest('id')
-            ->first();
-
-        if ($lead) {
-            return [
-                'kind' => 'lead',
-                'label' => trim((string) ($lead->lead_data['name'] ?? 'a lead')).' — '.($lead->last_status?->title ?? 'lead').' since '.$lead->date?->format('M j'),
-                'lead_id' => $lead->id,
-                'client_id' => null,
-            ];
-        }
-
-        $user = \App\Models\User::query()
-            ->where(function ($q) use ($email, $digits) {
-                $q->when($email !== '', fn ($inner) => $inner->whereRaw('LOWER(email) = ?', [$email]));
-                $q->when($digits, fn ($inner) => $inner->orWhere('cell_phone', $digits));
-            })
-            ->first();
-
-        if ($user) {
-            // Scoped to THIS tenant — otherwise the label below could name a
-            // client that belongs to a different company entirely.
-            $client = $user->clients()
-                ->withoutGlobalScopes()
-                ->whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendorId))
-                ->first();
-
-            return [
-                'kind' => $client ? 'client' : 'user',
-                'label' => trim($user->full_name).($client ? ' — existing client '.$client->name : ' — existing contact'),
-                'lead_id' => null,
-                'client_id' => $client?->id,
-            ];
-        }
-
-        return null;
+        return app(\App\Services\Leads\LeadDuplicateFinder::class)->find(
+            $this->email,
+            $this->phone,
+            auth()->user()->vendor->id,
+        );
     }
 
     /** "Create anyway" from the duplicate warning. */
@@ -1305,67 +1260,21 @@ class LeadCreate extends Component
      * first gets the consent prompt (compliance owns that flow), and the
      * toast says so instead of pretending the link went out.
      */
-    public function textScheduleLink(\App\Services\GroupSmsService $sms): void
+    public function textScheduleLink(\App\Services\Leads\LeadScheduleLinkTexter $texter): void
     {
         if (! $this->lead) {
             return;
         }
 
-        $digits = preg_replace('/\D/', '', (string) ($this->lead->lead_data['phone'] ?? ''));
-        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            $digits = substr($digits, 1);
-        }
+        $result = $texter->text($this->lead, $this->client, auth()->user());
 
-        if (strlen($digits) !== 10) {
-            Flux::toast(duration: 5000, position: 'top right', variant: 'warning',
-                heading: 'No phone number', text: 'Add a phone number to this lead first.');
-
-            return;
-        }
-
-        $e164 = \App\Services\GroupSmsService::formatE164($digits);
-
-        $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
-        $contractor = trim((string) (data_get($vendor?->options, 'short_name') ?: $vendor?->name)) ?: config('app.name');
-
-        $thread = \App\Models\SmsGroupThread::query()
-            ->accessibleTo(auth()->user())
-            ->whereJsonContains('participants', $e164)
-            ->whereJsonLength('participants', 1)
-            ->latest('last_activity_at')
-            ->first();
-
-        // Same shape as the Send Schedule modal's invite: greeting line, then
-        // the ask — one voice wherever the link goes out. A thread the client
-        // shares is greeted by everyone on it.
-        $firstName = $thread && $this->client
-            ? \App\Services\ConsultScheduleLinkTexter::greetingNames($thread, $this->client, (string) ($this->lead->lead_data['name'] ?? ''))
-            : strtok(trim((string) ($this->lead->lead_data['name'] ?? '')), ' ');
-        $text = 'Hi'.($firstName ? " {$firstName}" : '').","
-            ."\n\nPick a consultation time with {$contractor} here: ".$this->scheduleLink();
-
-        if ($thread && $thread->hasPendingOptIn()) {
-            Flux::toast(duration: 6000, position: 'top right', variant: 'warning',
-                heading: 'Awaiting START reply',
-                text: 'This number has not replied START yet — the link can go out once they do.');
-
-            return;
-        }
-
-        if ($thread) {
-            $sms->sendToThread($thread, $text, [], auth()->id());
-
-            Flux::toast(duration: 4000, position: 'top right', variant: 'success',
-                heading: 'Texted', text: 'Schedule link sent to '.phone_display($digits).'.');
-
-            return;
-        }
-
-        $sms->sendNewGroup([$e164], $text, null, $this->client?->id, auth()->id(), auth()->user()->vendor?->id);
-
-        Flux::toast(duration: 7000, position: 'top right', variant: 'success',
-            heading: 'Consent request sent',
-            text: 'New number — they get the START prompt first. Text the link from Messages once they opt in.');
+        Flux::toast(
+            duration: $result['ok'] ? 4000 : 6000,
+            position: 'top right',
+            variant: $result['variant'],
+            heading: $result['heading'],
+            text: $result['text'],
+        );
     }
 
     /**

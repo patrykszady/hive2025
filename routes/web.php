@@ -155,6 +155,47 @@ Route::get('expenses/receipts/{receipt}/signed', [\App\Http\Controllers\ReceiptC
     ->whereNumber('receipt')
     ->name('expenses.receipts.signed');
 
+// A lead's inquiry attachment for the Hive Contractors app: a time-limited
+// signed link handed out by GET /api/app/v1/leads/{id} (see LeadResource),
+// so the app's lead detail screen can show it without a web session. Same
+// handler as the web's auth-gated leads.file route above (the Lead global
+// scope is skipped for a guest request, same as every signed route here —
+// the `signed` middleware alone is the gate, since we only ever mint this
+// signature for a lead the requesting app user could already see).
+Route::get('leads/{lead}/file/{index}/signed', function (\App\Models\Lead $lead, int $index) {
+    $file = $lead->lead_data['attachments'][$index] ?? null;
+    $disk = \Illuminate\Support\Facades\Storage::disk('files');
+
+    abort_unless(is_array($file) && ($file['path'] ?? '') !== '' && $disk->exists($file['path']), 404);
+
+    if (request()->boolean('thumb') && str_starts_with((string) $file['mime'], 'image/')) {
+        $thumb = \App\Support\ImageThumbs::path(
+            'lead:'.$file['path'].':'.$disk->size($file['path']),
+            fn () => $disk->path($file['path']),
+        );
+
+        if ($thumb) {
+            return response()->file($thumb, \App\Support\ImageThumbs::headers());
+        }
+    }
+
+    return response()->file($disk->path($file['path']), [
+        'Content-Type' => (string) ($file['mime'] ?? 'application/octet-stream'),
+        'Content-Disposition' => 'inline; filename="'.addslashes((string) ($file['name'] ?? 'attachment')).'"',
+        'Cache-Control' => 'private, max-age=604800, immutable',
+    ]);
+})->middleware('signed')->whereNumber('index')->name('leads.file.signed');
+
+// A lien waiver's PDF for the Hive Contractors app: a time-limited signed
+// link handed out by GET /api/app/v1/lien-waivers/{id} (see
+// LienWaiverResource), so the app's detail screen can show/download it
+// without a web session. Same LienWaiverController::download() the web's
+// auth-gated lien-waivers.download route uses — the `signed` middleware
+// alone is the gate, same reasoning as the route above.
+Route::get('lien-waivers/{lienWaiver}/download/signed', [\App\Http\Controllers\LienWaiverController::class, 'download'])
+    ->middleware('signed')
+    ->name('lien-waivers.download.signed');
+
 // The Hive Contractors app's "open full page" hand-off: a one-time signed
 // link from POST /api/app/v1/web-session that logs its user into THIS web
 // session (no session yet, so this must sit outside the 'auth' group) and

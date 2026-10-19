@@ -497,39 +497,21 @@ class Index extends Component
 
         $this->validate($rules, ['newAmount.gte' => 'Amount cannot be negative.']);
 
-        $notesPayload = ['manual' => true];
-
-        if (! $isSub) {
-            $notesPayload['payer'] = [
-                'name' => trim($this->newPayerName),
-                'address' => trim($this->newPayerAddress),
-                'city_state_zip' => trim($this->newPayerCityStateZip),
-            ];
-        }
-
-        if ($this->newNotes !== '') {
-            $notesPayload['note'] = trim($this->newNotes);
-        }
-
-        $jurisdiction = $this->projectJurisdiction();
-
-        LienWaiver::create([
-            // Payer is always the contractor of record; claimant is the GC (own
-            // waiver) or the selected sub/supplier.
-            'belongs_to_vendor_id' => $contractor->id,
-            'vendor_id' => $claimantId,
-            'project_id' => $this->project->id,
-            'check_id' => null,
-            'payment_id' => null,
-            'type' => $type,
-            'status' => LienWaiverStatus::Draft,
-            'amount' => $isPaidInFull ? 0 : $this->newAmount,
-            'exceptions_amount' => 0,
-            'through_date' => $this->newThroughDate,
-            'jurisdiction' => $jurisdiction,
-            'notes' => json_encode($notesPayload),
-            'created_by_user_id' => $user->id,
-        ]);
+        app(\App\Services\LienWaivers\LienWaiverCreator::class)->create(
+            $this->project,
+            $contractor,
+            $type,
+            $claimantId,
+            $this->newAmount,
+            $this->newThroughDate,
+            [
+                'name' => $this->newPayerName,
+                'address' => $this->newPayerAddress,
+                'city_state_zip' => $this->newPayerCityStateZip,
+            ],
+            $this->newNotes,
+            $user->id,
+        );
 
         // Close and clear the form immediately so a stale re-open can't resubmit.
         $this->showCreate = false;
@@ -749,11 +731,7 @@ class Index extends Component
     /** Map the project's state to a lien-waiver jurisdiction code. */
     protected function projectJurisdiction(): string
     {
-        $state = strtoupper((string) $this->project->state);
-
-        return in_array($state, ['CA', 'AZ', 'FL', 'GA', 'IL', 'MS', 'NV', 'TX', 'UT', 'WY'], true)
-            ? 'US-' . $state
-            : 'US-GENERIC';
+        return app(\App\Services\LienWaivers\LienWaiverCreator::class)->jurisdictionFor($this->project);
     }
 
     /**
