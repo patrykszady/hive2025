@@ -3,6 +3,7 @@
 namespace App\Livewire\Notifications;
 
 use App\Models\AppNotification;
+use App\Services\Notifications\AppNotificationFeed;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -24,9 +25,7 @@ class NotificationIndex extends Component
 
     public function markAllAsRead(): void
     {
-        AppNotification::where('user_id', auth()->id())
-            ->whereNull('read_at')
-            ->update(['read_at' => now()]);
+        app(AppNotificationFeed::class)->markAllRead((int) auth()->id());
 
         $this->dispatch('notification-read');
     }
@@ -67,26 +66,13 @@ class NotificationIndex extends Component
     #[Computed]
     public function grouped()
     {
-        return $this->notifications->getCollection()
-            ->groupBy(fn (AppNotification $n) => $n->created_at->toDateString())
-            ->map(fn ($day) => $day
-                ->groupBy(fn (AppNotification $n) => $n->type.'|'.$n->title.'|'.$n->body)
-                ->map(fn ($group) => [
-                    'notification' => $group->first(),
-                    'count' => $group->count(),
-                    'ids' => $group->pluck('id')->all(),
-                    'unread' => $group->contains(fn (AppNotification $n) => ! $n->isRead()),
-                ])
-                ->values());
+        return app(AppNotificationFeed::class)->groupedByDay($this->notifications->getCollection());
     }
 
     /** Mark every notification in a collapsed group read. */
     public function markGroupAsRead(array $ids): void
     {
-        AppNotification::where('user_id', auth()->id())
-            ->whereIn('id', $ids)
-            ->whereNull('read_at')
-            ->update(['read_at' => now()]);
+        app(AppNotificationFeed::class)->markIds((int) auth()->id(), $ids);
 
         $this->dispatch('notification-read');
     }
@@ -111,9 +97,7 @@ class NotificationIndex extends Component
     #[Computed]
     public function unreadCount(): int
     {
-        return AppNotification::where('user_id', auth()->id())
-            ->whereNull('read_at')
-            ->count();
+        return app(AppNotificationFeed::class)->unreadCount((int) auth()->id());
     }
 
     #[Title('Notifications')]
