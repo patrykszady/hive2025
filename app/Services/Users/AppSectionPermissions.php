@@ -5,15 +5,21 @@ namespace App\Services\Users;
 use App\Models\Bank;
 use App\Models\Check;
 use App\Models\Client;
+use App\Models\CompanyEmail;
+use App\Models\EmailTemplate;
 use App\Models\Estimate;
 use App\Models\Expense;
 use App\Models\Hour;
 use App\Models\Lead;
+use App\Models\LineItem;
 use App\Models\LienWaiver;
 use App\Models\Payment;
+use App\Models\Project;
+use App\Models\Task;
 use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Models\VendorDoc;
 
 /**
  * Which sections of Hive the signed-in person may open, for the app's
@@ -54,6 +60,21 @@ class AppSectionPermissions
             'lien_waivers' => $user->can('viewAny', LienWaiver::class),
             'banks' => $user->can('viewAny', Bank::class),
             'phone_system' => (int) $user->primary_vendor_id === 1 && $user->can('viewOptions', Vendor::class),
+            'projects_create' => $user->can('create', Project::class),
+            'tasks_create' => $user->can('create', Task::class),
+            'line_items' => $user->can('viewAny', LineItem::class),
+            // The sidebar's Banks group: Distributions, Sheets and Categories
+            // all sit under the one canViewBanks gate there.
+            'distributions' => $user->can('viewAny', Bank::class),
+            'sheets' => $user->can('viewAny', Bank::class),
+            'categories' => $user->can('viewAny', Bank::class),
+            'options' => $user->can('viewOptions', Vendor::class),
+            'templates' => $user->can('viewAny', EmailTemplate::class),
+            'company_emails' => $user->can('viewAny', CompanyEmail::class),
+            // The sidebar shows Vendor Match under the same gate as Email Accounts.
+            'vendor_match' => $user->can('viewAny', CompanyEmail::class),
+            'vendor_docs' => $user->can('viewAny', VendorDoc::class),
+            'agents' => $user->id === 1,
         ];
     }
 }
