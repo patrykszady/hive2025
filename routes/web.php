@@ -144,6 +144,17 @@ Route::get('checks/images/{image}/signed', function (\App\Models\CheckImage $ima
     return app(\App\Http\Controllers\ReceiptController::class)->original_receipt('checks', $image->image_filename);
 })->middleware('signed')->name('checks.image.signed');
 
+// An expense receipt scan for the Hive Contractors app: a time-limited
+// signed link handed out by GET/POST /api/app/v1/expenses/{id} (see
+// ExpenseResource), so the app's expense detail screen can show the
+// receipt image/PDF without a web session. The `signed` middleware alone
+// is the gate, same as the timelapse frame route above — see
+// ReceiptController::receiptSigned().
+Route::get('expenses/receipts/{receipt}/signed', [\App\Http\Controllers\ReceiptController::class, 'receiptSigned'])
+    ->middleware('signed')
+    ->whereNumber('receipt')
+    ->name('expenses.receipts.signed');
+
 // The Hive Contractors app's "open full page" hand-off: a one-time signed
 // link from POST /api/app/v1/web-session that logs its user into THIS web
 // session (no session yet, so this must sit outside the 'auth' group) and

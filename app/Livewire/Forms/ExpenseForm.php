@@ -84,47 +84,28 @@ class ExpenseForm extends Form
     }
 
     /**
-     * The "material order" owner vendor is client-chosen (form.belongs_to_vendor_id),
-     * so it must be whitelisted to a vendor the auth tenant can legitimately
-     * attribute an expense to: itself, or a vendor already linked to it
-     * (VendorScope — the same set the "Belongs To Vendor" dropdown offers).
-     * Anything else is refused rather than silently falling back, so a
-     * tampered id surfaces as an error instead of quietly mis-attributing.
+     * The "material order" owner vendor is client-chosen (form.belongs_to_vendor_id).
+     * Delegates to App\Services\Expenses\ExpenseAccessGuard — the same
+     * whitelisting rule the Hive Contractors app's own expense endpoints
+     * enforce, so a tampered id is refused identically on both surfaces.
      */
     protected function resolveOwnerVendorId(int $hubVendorId): int
     {
-        if (! $this->is_material_order || ! $this->belongs_to_vendor_id) {
-            return $hubVendorId;
-        }
-
-        if (! Vendor::whereKey($this->belongs_to_vendor_id)->exists()) {
-            throw ValidationException::withMessages([
-                'belongs_to_vendor_id' => 'Invalid vendor selected for material order.',
-            ]);
-        }
-
-        return (int) $this->belongs_to_vendor_id;
+        return app(\App\Services\Expenses\ExpenseAccessGuard::class)->resolveOwnerVendorId(
+            $hubVendorId,
+            $this->is_material_order,
+            $this->belongs_to_vendor_id ? (int) $this->belongs_to_vendor_id : null,
+        );
     }
 
     /**
-     * project_id/distribution_id come from a client-chosen selector — check
-     * them against what this tenant can actually see (ProjectScope allows
-     * projects shared with an invited sub, so this stays permissive for
-     * legitimate collaborators while refusing an id from outside that set).
+     * project_id/distribution_id come from a client-chosen selector.
+     * Delegates to App\Services\Expenses\ExpenseAccessGuard — see
+     * resolveOwnerVendorId()'s docblock above.
      */
     protected function assertProjectAccessible(?int $projectId, ?int $distributionId): void
     {
-        if ($projectId && ! Project::whereKey($projectId)->exists()) {
-            throw ValidationException::withMessages([
-                'project_id' => 'Invalid project selected.',
-            ]);
-        }
-
-        if ($distributionId && ! Distribution::whereKey($distributionId)->exists()) {
-            throw ValidationException::withMessages([
-                'project_id' => 'Invalid distribution selected.',
-            ]);
-        }
+        app(\App\Services\Expenses\ExpenseAccessGuard::class)->assertProjectAccessible($projectId, $distributionId);
     }
 
     protected $messages = [
@@ -684,53 +665,12 @@ class ExpenseForm extends Form
         return true;
     }
 
+    /**
+     * Delegates to App\Services\Expenses\ExpenseAccessGuard — see
+     * resolveOwnerVendorId()'s docblock above.
+     */
     private function attachCrossVendorRelationships(Expense $expense): void
     {
-        $hubVendorId = auth()->user()->vendor->id;
-        $ownerVendorId = $expense->belongs_to_vendor_id;
-
-        if ((int) $ownerVendorId === (int) $hubVendorId) {
-            return;
-        }
-
-        // Scoped: resolveOwnerVendorId() already checked this id is either the
-        // hub vendor or one already linked to it — never an arbitrary vendor.
-        $ownerVendor = Vendor::find($ownerVendorId);
-        if (! $ownerVendor) {
-            return;
-        }
-
-        // Attach the expense vendor (e.g. Home Depot) to the owner's vendor list
-        if ($expense->vendor_id && ! $ownerVendor->vendors()->where('vendor_id', $expense->vendor_id)->exists()) {
-            $ownerVendor->vendors()->attach($expense->vendor_id);
-        }
-
-        // Attach the project to the owner vendor with Invited status.
-        // Scoped: assertProjectAccessible() already checked this project is
-        // visible to the auth tenant.
-        if ($expense->project_id) {
-            $project = Project::find($expense->project_id);
-
-            if ($project && ! $project->vendors()->withoutGlobalScopes()->where('vendor_id', $ownerVendorId)->exists()) {
-                $project->vendors()->withoutGlobalScopes()->attach($ownerVendorId, ['client_id' => $project->client_id]);
-
-                if ($project->client_id && ! DB::table('client_vendor')->where('client_id', $project->client_id)->where('vendor_id', $ownerVendorId)->exists()) {
-                    DB::table('client_vendor')->insert([
-                        'client_id' => $project->client_id,
-                        'vendor_id' => $ownerVendorId,
-                        'source' => 'auto-attach',
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                }
-
-                ProjectStatus::create([
-                    'project_id' => $project->id,
-                    'belongs_to_vendor_id' => $ownerVendorId,
-                    'status_code' => ProjectStatus::getCodeForLabel('Invited') ?? 1,
-                    'start_date' => today()->format('Y-m-d'),
-                ]);
-            }
-        }
+        app(\App\Services\Expenses\ExpenseAccessGuard::class)->attachCrossVendorRelationships($expense);
     }
 }

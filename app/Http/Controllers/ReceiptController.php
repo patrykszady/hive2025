@@ -2810,6 +2810,21 @@ class ReceiptController extends Controller
      */
     public const SERVED_FOLDERS = ['receipts', 'checks', 'checks/files', 'vendor_docs'];
 
+    /**
+     * A receipt scan for the Hive Contractors app, reached only through a
+     * time-limited signed link (routes/web.php's expenses.receipts.signed —
+     * the `signed` middleware is the only gate, matching how
+     * TimelapseController::frameSigned() and the app's call-recording route
+     * work: the link is only ever handed out after ExpenseResource's own
+     * view-authorization check already ran). Delegates straight to
+     * original_receipt() so this serves the exact same bytes, with the
+     * exact same PDF/image handling, as the web's signed-in download link.
+     */
+    public function receiptSigned(ExpenseReceipts $receipt)
+    {
+        return $this->original_receipt('receipts', $receipt->receipt_filename);
+    }
+
     public function original_receipt($folder, $filename)
     {
         if (! in_array((string) $folder, self::SERVED_FOLDERS, true)) {
