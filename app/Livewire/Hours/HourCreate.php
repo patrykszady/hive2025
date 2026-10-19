@@ -6,10 +6,8 @@ use App\Livewire\Forms\HourForm;
 use App\Models\Hour;
 use App\Models\Project;
 use App\Models\Task;
-use App\Models\Timesheet;
+use App\Services\Hours\HourWeekLock;
 
-use Carbon\CarbonInterval;
-use Carbon\CarbonPeriod;
 use Flux;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -62,28 +60,7 @@ class HourCreate extends Component
         // Get the start of the week containing the min date to include all relevant timesheets
         $minDateWeekStart = browser_today()->subMonths(12)->startOfMonth()->startOfWeek(Carbon::MONDAY);
 
-        $confirmed_weeks =
-            Timesheet::orderBy('date', 'DESC')
-                ->where('user_id', auth()->user()->id)
-                ->where('date', '>=', $minDateWeekStart)
-                ->get()
-                ->groupBy('date');
-
-        if (! $confirmed_weeks->isEmpty()) {
-            foreach ($confirmed_weeks as $confirmed_week) {
-                $week_days = new \DatePeriod(
-                    $confirmed_week->first()->date->startOfWeek(Carbon::MONDAY),
-                    CarbonInterval::day(),
-                    $confirmed_week->first()->date->endOfWeek(Carbon::SUNDAY)
-                );
-
-                foreach ($week_days as $confirmed_date) {
-                    $confirmed_week_days[] = $confirmed_date->format('Y-m-d');
-                }
-            }
-        } else {
-            $confirmed_week_days[] = null;
-        }
+        $confirmed_week_days = app(HourWeekLock::class)->confirmedWeekDates(auth()->user(), $minDateWeekStart);
 
         $this->days = implode(',', $confirmed_week_days);
 
