@@ -13,6 +13,7 @@ use App\Livewire\Estimates\EstimatesIndex;
 use App\Support\ProjectDocumentGenerator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Mail\EstimateSigningInvite;
+use App\Services\Estimates\EstimateSectionWriter;
 
 use Flux;
 
@@ -274,25 +275,9 @@ class EstimateShow extends Component
 
     public function create_new_section($name = null, $estimate_id = null)
     {
-        $targetEstimateId = $this->estimate->id ?? $estimate_id;
-        $currentMaxOrder = EstimateSection::query()
-            ->where('estimate_id', $targetEstimateId)
-            ->where('order', '<', 999999)
-            ->max('order');
+        $estimate = $this->estimate ?? Estimate::findOrFail($estimate_id);
 
-        $nextOrder = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
-
-        $section = EstimateSection::create([
-            'estimate_id' => $targetEstimateId,
-            'order' => $nextOrder,
-            'name' => $name,
-            'total' => 0.00,
-            'deleted_at' => null,
-        ]);
-
-        $this->maybeCreateChangeOrderBid($section);
-
-        return $section;
+        return app(EstimateSectionWriter::class)->addSection($estimate, $name);
     }
 
     public function sectionAdd()
@@ -318,45 +303,7 @@ class EstimateShow extends Component
         $this->authorize('update', $this->estimate);
 
         $section = $this->estimate->estimate_sections()->withTrashed()->findOrFail($sectionId);
-        $section->restore();
-
-        $currentMaxOrder = EstimateSection::query()
-            ->where('estimate_id', $section->estimate_id)
-            ->where('order', '<', 999999)
-            ->max('order');
-
-        $section->order = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
-        $section->save();
-
-        // Restore the line items without triggering observers that mutate section totals.
-        EstimateLineItem::withoutEvents(function () use ($section) {
-            $section->estimate_line_items()->onlyTrashed()->restore();
-        });
-
-        $section->total = $section->estimate_line_items()->sum('total');
-        $section->save();
-
-        $bid = $section->bid;
-        
-        // If the section had a bid_id but the bid was deleted, create a new change order bid
-        if (! $bid && $section->bid_id) {
-            $section->bid_id = null;
-            $section->save();
-            // Create a new change order bid for this restored section
-            $this->maybeCreateChangeOrderBid($section);
-            // Refresh section to get updated bid_id
-            $section->refresh();
-            $bid = $section->bid;
-        }
-        
-        if ($bid) {
-            $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
-            $bid->save();
-
-            if ((float) $bid->amount === 0.0) {
-                $bid->delete();
-            }
-        }
+        app(EstimateSectionWriter::class)->restoreSection($section);
 
         $this->estimate_refresh();
         $this->refreshFinancialIslands();
@@ -377,26 +324,7 @@ class EstimateShow extends Component
         $section_data = $this->sections[$section_index];
         $section = $this->estimate->estimate_sections()->findOrFail($section_data['id']);
 
-        // Push deleted sections to the end so restores can be reinserted cleanly.
-        $section->order = 999999;
-        $section->save();
-
-        // Disable the section and its line items, but don't mutate stored totals.
-        EstimateLineItem::withoutEvents(function () use ($section) {
-            $section->estimate_line_items()->delete();
-        });
-
-        $section->delete();
-
-        $bid = $section->bid;
-        if ($bid) {
-            $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
-            $bid->save();
-
-            if ((float) $bid->amount === 0.0) {
-                $bid->delete();
-            }
-        }
+        app(EstimateSectionWriter::class)->deleteSection($section);
 
         $this->estimate_refresh();
         $this->refreshFinancialIslands();
@@ -415,8 +343,7 @@ class EstimateShow extends Component
         $this->authorize('update', $this->estimate);
 
         $section = $this->estimate->estimate_sections()->findOrFail($this->sections[$section_index]['id']);
-        $section->name = $this->sections[$section_index]['name'];
-        $section->save();
+        $section = app(EstimateSectionWriter::class)->renameSection($section, $this->sections[$section_index]['name']);
         $this->estimate_refresh();
 
         Flux::toast(
@@ -429,55 +356,14 @@ class EstimateShow extends Component
         );
     }
 
+    /**
+     * A section is only a change order once the contract exists. Delegates to
+     * EstimateSectionWriter, the single source of this logic shared with the
+     * Hive Contractors app's API.
+     */
     protected function maybeCreateChangeOrderBid(EstimateSection $section): void
     {
-        $estimate = $section->estimate;
-        $project = $estimate?->project;
-        $projectId = $estimate?->project_id;
-        $vendorId = $estimate?->belongs_to_vendor_id;
-
-        if (! $projectId || ! $vendorId || ! $project) {
-            return;
-        }
-
-        // Ensure latestStatus is loaded
-        $project->loadMissing('latestStatus');
-
-        // Only auto-create change order bids for Active or Service Call projects
-        $statusTitle = $project->latestStatus?->title;
-        $activeStatuses = ['Active', 'Service Call'];
-
-        if (! in_array($statusTitle, $activeStatuses, true)) {
-            return;
-        }
-
-        // A section is only a change order once the contract exists — the base
-        // (type 1) bid is created when the estimate is accepted/signed. Before
-        // that, new sections are simply part of the still-unsigned estimate
-        // (otherwise the finances double-count: the section sums into the
-        // estimate fallback AND its CO bid).
-        $hasBaseBid = Bid::where('project_id', $projectId)
-            ->where('vendor_id', $vendorId)
-            ->where('type', 1)
-            ->exists();
-
-        if (! $hasBaseBid) {
-            return;
-        }
-
-        $nextType = (int) (Bid::where('project_id', $projectId)
-            ->where('vendor_id', $vendorId)
-            ->max('type') ?? 1) + 1;
-
-        $bid = Bid::create([
-            'amount' => 0.00,
-            'type' => $nextType,
-            'project_id' => $projectId,
-            'vendor_id' => $vendorId,
-        ]);
-
-        $section->bid_id = $bid->id;
-        $section->save();
+        app(EstimateSectionWriter::class)->maybeCreateChangeOrderBid($section);
     }
 
     public function sendInvite(): void

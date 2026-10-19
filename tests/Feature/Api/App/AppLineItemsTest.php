@@ -1,0 +1,176 @@
+<?php
+
+use App\Models\LineItem;
+use App\Models\User;
+use App\Models\Vendor;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+
+uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    config(['scout.driver' => null]);
+});
+
+/**
+ * GS Construction is vendor id 1 — pinned explicitly, same reasoning as
+ * AppAuthTest's appTeamUser(). $role is the vendor_user pivot's role_id
+ * (1 = Admin, 2 = Member) — LineItemPolicy gates everything on it.
+ *
+ * @return array{vendor: Vendor, user: User}
+ */
+function appLineItemsTeamUser(int $role = 1): array
+{
+    $vendor = Vendor::query()->find(1) ?? Vendor::factory()->create(['id' => 1, 'business_name' => 'GS Construction', 'business_type' => 'Sub']);
+    $user = User::factory()->create(['primary_vendor_id' => $vendor->id]);
+    $vendor->users()->attach($user->id, ['role_id' => $role]);
+
+    return compact('vendor', 'user');
+}
+
+/**
+ * Must run after Sanctum::actingAs() for that vendor's admin —
+ * LineItemObserver::creating() stamps belongs_to_vendor_id from
+ * auth()->user()->vendor, same as the web.
+ */
+function appLineItemsRow(array $overrides = []): LineItem
+{
+    return LineItem::create(array_merge([
+        'name' => 'Floor Tile',
+        'desc' => 'Porcelain floor tile, installed',
+        'notes' => null,
+        'category' => 'Tiles',
+        'sub_category' => 'Floor',
+        'unit_type' => 'sq.ft.',
+        'cost' => 12.50,
+    ], $overrides));
+}
+
+it('needs a token to list the catalog', function () {
+    $this->getJson('/api/app/v1/line-items')->assertUnauthorized();
+});
+
+it('refuses a Member browsing the catalog, like the web', function () {
+    ['user' => $member] = appLineItemsTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson('/api/app/v1/line-items')->assertForbidden();
+});
+
+it('lists the catalog newest first, scoped to the vendor, with allowances', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $older = appLineItemsRow(['name' => 'Baseboard', 'desc' => 'Baseboard trim', 'created_at' => now()->subMinute()]);
+    $newer = appLineItemsRow(['name' => 'Crown Molding', 'desc' => 'Crown molding trim']);
+    $newer->allowances()->create(['description' => 'Standard', 'pricing_mode' => 'per_unit', 'unit_amount' => 3, 'belongs_to_vendor_id' => $newer->belongs_to_vendor_id]);
+
+    $response = $this->getJson('/api/app/v1/line-items')->assertOk();
+
+    expect(collect($response->json('data'))->pluck('id')->all())->toBe([$newer->id, $older->id])
+        ->and($response->json('data.0.allowances.0.description'))->toBe('Standard');
+});
+
+it('searches the catalog by name, description and notes', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $tile = appLineItemsRow(['name' => 'Floor Tile']);
+    appLineItemsRow(['name' => 'Drywall', 'desc' => 'Drywall install']);
+
+    $response = $this->getJson('/api/app/v1/line-items?search=tile')->assertOk();
+
+    expect(collect($response->json('data'))->pluck('id')->all())->toBe([$tile->id]);
+});
+
+it('never surfaces another vendor\'s line items — the catalog has no tenant scope of its own', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+    $own = appLineItemsRow(['name' => 'Mine']);
+
+    $otherVendor = Vendor::factory()->create(['business_type' => 'Sub']);
+    $otherAdmin = User::factory()->create(['primary_vendor_id' => $otherVendor->id]);
+    $otherVendor->users()->attach($otherAdmin->id, ['role_id' => 1]);
+    Sanctum::actingAs($otherAdmin, ['app']);
+    $foreign = appLineItemsRow(['name' => 'Theirs']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson('/api/app/v1/line-items')->assertOk();
+
+    expect(collect($response->json('data'))->pluck('id')->all())->toBe([$own->id]);
+
+    $this->getJson("/api/app/v1/line-items/{$foreign->id}")->assertForbidden();
+});
+
+it('creates a catalog line item with allowances, stamping the vendor from the session', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/line-items', [
+        'name' => 'Shower Rough Plumbing',
+        'desc' => 'Rough plumbing for a shower',
+        'category' => 'Plumbing',
+        'unit_type' => 'pieces',
+        'cost' => 1050,
+        'allowances' => [
+            ['description' => 'Fixture allowance', 'pricing_mode' => 'lump_sum', 'amount' => 400],
+        ],
+    ])->assertCreated();
+
+    expect($response->json('data.name'))->toBe('Shower Rough Plumbing')
+        ->and($response->json('data.allowances.0.description'))->toBe('Fixture allowance');
+
+    $created = LineItem::findOrFail($response->json('data.id'));
+    expect((int) $created->belongs_to_vendor_id)->toBe($vendor->id);
+});
+
+it('refuses a Member creating a catalog item, like the web', function () {
+    ['user' => $member] = appLineItemsTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson('/api/app/v1/line-items', [
+        'name' => 'Nope',
+        'desc' => 'Should not be created',
+        'category' => 'Nope',
+        'unit_type' => 'pieces',
+        'cost' => 1,
+    ])->assertForbidden();
+
+    expect(LineItem::where('name', 'Nope')->exists())->toBeFalse();
+});
+
+it('updates a catalog item, syncing allowances', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lineItem = appLineItemsRow(['name' => 'Floor Tile', 'cost' => 12.50]);
+    $allowance = $lineItem->allowances()->create(['description' => 'Old', 'pricing_mode' => 'lump_sum', 'amount' => 100, 'belongs_to_vendor_id' => $lineItem->belongs_to_vendor_id]);
+
+    $response = $this->putJson("/api/app/v1/line-items/{$lineItem->id}", [
+        'name' => 'Floor Tile',
+        'desc' => $lineItem->desc,
+        'category' => $lineItem->category,
+        'unit_type' => $lineItem->unit_type,
+        'cost' => 15.00,
+        'allowances' => [
+            ['id' => $allowance->id, 'description' => 'Updated', 'pricing_mode' => 'lump_sum', 'amount' => 150],
+        ],
+    ])->assertOk()
+        ->assertJsonPath('data.allowances.0.description', 'Updated');
+
+    expect((float) $response->json('data.cost'))->toBe(15.0)
+        ->and((float) $lineItem->fresh()->cost)->toBe(15.0);
+});
+
+it('validation rejects a cost with more than 2 decimal places, like the web', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/line-items', [
+        'name' => 'Bad Cost',
+        'desc' => 'Bad cost format',
+        'category' => 'Misc',
+        'unit_type' => 'pieces',
+        'cost' => '12.999',
+    ])->assertStatus(422)->assertJsonValidationErrors(['cost']);
+});
