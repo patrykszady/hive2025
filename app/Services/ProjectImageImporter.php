@@ -189,6 +189,59 @@ class ProjectImageImporter
     }
 
     /**
+     * iPhone "before" shots arrive as HEIC, and nothing downstream reads
+     * it — GD, OpenCV and browsers are all JPEG-world. Converts at the
+     * door (full resolution, EXIF carried over, so the shot date and GPS
+     * survive) so everything after this call is one format. Shared by the
+     * web studio's file picker (App\Livewire\Projects\TimelapseStudio) and
+     * the Hive Contractors app's photo upload, which both accept HEIC.
+     */
+    public static function convertHeicToJpeg(string $sourcePath): ?string
+    {
+        $base = tempnam(sys_get_temp_dir(), 'heic-frame-');
+
+        if ($base === false) {
+            return null;
+        }
+
+        $jpeg = $base.'.jpg';
+
+        $python = (string) config('services.timelapse_align.python');
+        $attempts = array_filter([
+            is_executable($python)
+                ? [$python, base_path('scripts/heic_convert.py'), $sourcePath, $jpeg]
+                : null,
+            // `[0]` picks the container's primary image — iPhone HEICs can
+            // carry auxiliary frames, and without the index every one would
+            // land as its own numbered JPEG.
+            ['convert', $sourcePath.'[0]', '-auto-orient', '-quality', '92', $jpeg],
+        ]);
+
+        foreach ($attempts as $command) {
+            $process = new \Symfony\Component\Process\Process($command);
+            $process->setTimeout(30);
+            $process->run();
+
+            if ($process->isSuccessful() && is_file($jpeg) && filesize($jpeg) > 0) {
+                @unlink($base);
+
+                return $jpeg;
+            }
+
+            \Illuminate\Support\Facades\Log::channel('timelapse')->warning('HEIC conversion attempt failed', [
+                'tool' => basename($command[0]),
+                'exit' => $process->getExitCode(),
+                'stderr' => mb_substr($process->getErrorOutput(), 0, 500),
+            ]);
+        }
+
+        @unlink($base);
+        @unlink($jpeg);
+
+        return null;
+    }
+
+    /**
      * EXIF stores coordinates as degree/minute/second rationals ("41/1",
      * "52/1", "3456/100") with a hemisphere letter.
      */

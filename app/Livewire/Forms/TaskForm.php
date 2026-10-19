@@ -5,6 +5,7 @@ namespace App\Livewire\Forms;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Task;
+use App\Services\Tasks\TaskWriter;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Validate;
 use Livewire\Form;
@@ -172,6 +173,16 @@ class TaskForm extends Form
         $this->refreshTaskWithDependencies($task->id);
     }
 
+    /**
+     * The duplicate-submit guard, sibling-overlap check and options
+     * assembly — the actual record-writing logic — live in
+     * App\Services\Tasks\TaskWriter so the Hive Contractors app's task
+     * screens write identical rows. This form's own job stays the same:
+     * validate(), then the scoped-field check below (left here, not moved,
+     * so an invalid project/parent/user still shows as an inline form error
+     * exactly as before rather than a thrown exception changing this
+     * component's control flow).
+     */
     public function update()
     {
         $this->validate();
@@ -180,48 +191,22 @@ class TaskForm extends Form
             return false;
         }
 
-        // Calculate start and end dates from selected dates array
-        $startDate = null;
-        $endDate = null;
-
-        if (!empty($this->dates)) {
-            sort($this->dates); // Ensure dates are in order
-            $startDate = $this->dates[0];
-            $endDate = end($this->dates);
-        }
-
-        if ($startDate && $endDate && $this->task->wouldOverlapWithSiblings($startDate, $endDate)) {
-            $this->addError('dates', 'This task would overlap with a sibling task.');
-            return false;
-        }
-
-        // Prepare options array - preserve existing options and update dates
-        $options = (array) ($this->task->options ?? []);
-        $options['dates'] = $this->dates;
-        $options['checklist'] = \App\Models\Task::mergeChecklist(
-            data_get($this->task->fresh()?->options, 'checklist', []),
-            $this->checklistOriginal,
-            $this->checklist,
-        );
-        $options['time_settings'] = $this->time_settings;
-        $options['meeting_location_type'] = $this->type === 'Meet' ? $this->meeting_location_type : null;
-        $options['meeting_participants'] = $this->type === 'Meet' ? array_values(array_filter($this->meeting_participants)) : [];
-
-        $this->task->update([
-            'start_date' => $startDate,
-            'end_date' => $endDate,
-            'project_id' => $this->project_id,
-            'vendor_id' => $this->vendor_id,
-            'type' => $this->type,
-            'user_ids' => collect($this->user_ids)->map(fn ($id) => (string) $id)->values()->all(),
+        return app(\App\Services\Tasks\TaskWriter::class)->update($this->task, [
             'title' => $this->title,
+            'project_id' => $this->project_id,
+            'dates' => $this->dates,
+            'time_settings' => $this->time_settings,
+            'vendor_id' => $this->vendor_id,
+            'user_ids' => $this->user_ids,
+            'type' => $this->type,
             'notes' => $this->notes,
-            'order' => $this->order ?? $this->task->order ?? 0, // Preserve existing order or default to 0
-            'options' => $options,
+            'order' => $this->order,
+            'meeting_location_type' => $this->meeting_location_type,
+            'meeting_participants' => $this->meeting_participants,
             'parent_task_id' => $this->parent_task_id,
+            'checklist' => $this->checklist,
+            'checklist_original' => $this->checklistOriginal,
         ]);
-
-        return $this->task;
     }
 
     public function store()
@@ -232,65 +217,20 @@ class TaskForm extends Form
             return false;
         }
 
-        // Calculate start and end dates from selected dates array
-        $startDate = null;
-        $endDate = null;
-
-        if (!empty($this->dates)) {
-            sort($this->dates); // Ensure dates are in order
-            $startDate = $this->dates[0];
-            $endDate = end($this->dates);
-        }
-
-        if ($startDate && $endDate && $this->parent_task_id) {
-            $tempTask = new Task([
-                'id' => 0,
-                'project_id' => $this->project_id,
-                'parent_task_id' => $this->parent_task_id,
-            ]);
-
-            if ($tempTask->wouldOverlapWithSiblings($startDate, $endDate)) {
-                $this->addError('dates', 'This task would overlap with a sibling task.');
-                return false;
-            }
-        }
-
-        // Prevent duplicate creation (double-click / double-submit)
-        $recentDuplicate = Task::withoutGlobalScopes()
-            ->where('project_id', $this->project_id)
-            ->where('title', $this->title)
-            ->where('start_date', $startDate)
-            ->where('created_at', '>=', now()->subSeconds(10))
-            ->first();
-
-        if ($recentDuplicate) {
-            return $recentDuplicate;
-        }
-
-        // Store dates array in options
-        $options = [
-            'dates' => $this->dates,
-            'checklist' => $this->checklist,
-            'time_settings' => $this->time_settings,
-            'meeting_location_type' => $this->type === 'Meet' ? $this->meeting_location_type : null,
-            'meeting_participants' => $this->type === 'Meet' ? array_values(array_filter($this->meeting_participants)) : [],
-        ];
-
-        $task = Task::create([
-            'start_date' => $startDate,
-            'end_date' => $endDate,
-            'project_id' => $this->project_id,
-            'vendor_id' => $this->vendor_id,
-            'type' => $this->type,
-            'user_ids' => collect($this->user_ids)->map(fn ($id) => (string) $id)->values()->all(),
+        return app(\App\Services\Tasks\TaskWriter::class)->store([
             'title' => $this->title,
+            'project_id' => $this->project_id,
+            'dates' => $this->dates,
+            'time_settings' => $this->time_settings,
+            'vendor_id' => $this->vendor_id,
+            'user_ids' => $this->user_ids,
+            'type' => $this->type,
             'notes' => $this->notes,
-            'order' => 0,
-            'options' => $options,
+            'meeting_location_type' => $this->meeting_location_type,
+            'meeting_participants' => $this->meeting_participants,
             'parent_task_id' => $this->parent_task_id,
+            'checklist' => $this->checklist,
         ]);
-
-        return $task;
     }
 
     /**

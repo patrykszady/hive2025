@@ -1116,49 +1116,14 @@ class TimelapseStudio extends Component
      * that date), falling back to ImageMagick's libheif delegate, which
      * converts the pixels but drops the metadata.
      */
+    /**
+     * The actual shell-out lives in App\Services\ProjectImageImporter so the
+     * Hive Contractors app's photo upload (which also accepts HEIC) shares
+     * it rather than forking its own copy.
+     */
     protected function convertHeicToJpeg(string $sourcePath): ?string
     {
-        $base = tempnam(sys_get_temp_dir(), 'heic-frame-');
-
-        if ($base === false) {
-            return null;
-        }
-
-        $jpeg = $base.'.jpg';
-
-        $python = (string) config('services.timelapse_align.python');
-        $attempts = array_filter([
-            is_executable($python)
-                ? [$python, base_path('scripts/heic_convert.py'), $sourcePath, $jpeg]
-                : null,
-            // `[0]` picks the container's primary image — iPhone HEICs can
-            // carry auxiliary frames, and without the index every one would
-            // land as its own numbered JPEG.
-            ['convert', $sourcePath.'[0]', '-auto-orient', '-quality', '92', $jpeg],
-        ]);
-
-        foreach ($attempts as $command) {
-            $process = new \Symfony\Component\Process\Process($command);
-            $process->setTimeout(30);
-            $process->run();
-
-            if ($process->isSuccessful() && is_file($jpeg) && filesize($jpeg) > 0) {
-                @unlink($base);
-
-                return $jpeg;
-            }
-
-            \Illuminate\Support\Facades\Log::channel('timelapse')->warning('HEIC conversion attempt failed', [
-                'tool' => basename($command[0]),
-                'exit' => $process->getExitCode(),
-                'stderr' => mb_substr($process->getErrorOutput(), 0, 500),
-            ]);
-        }
-
-        @unlink($base);
-        @unlink($jpeg);
-
-        return null;
+        return \App\Services\ProjectImageImporter::convertHeicToJpeg($sourcePath);
     }
 
     protected function storeFrame($upload, ?string $originalName = null, ?array $meta = null, ?ProjectTimelapse $target = null): void
