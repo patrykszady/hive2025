@@ -112,6 +112,13 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
         // The "open full page" hand-off into a signed-in web session — see
         // WebSessionController and routes/web.php's web-session.consume.
         Route::post('web-session', [AppWebSessionController::class, 'store'])->name('web-session.store');
+
+        // Every further section of the app's API (expenses, payments,
+        // vendors, …) lives in its own file under routes/api-app/, loaded
+        // here so it inherits this group's prefix, name and middleware.
+        foreach (glob(base_path('routes/api-app/*.php')) ?: [] as $appSectionRoutes) {
+            require $appSectionRoutes;
+        }
     });
 });
 
