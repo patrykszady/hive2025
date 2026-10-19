@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Api\App;
 
+use App\Services\Users\AppSectionPermissions;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -23,6 +24,7 @@ class UserResource extends JsonResource
             'last_name' => $this->last_name,
             'email' => $this->email,
             'cell_phone' => $this->cell_phone,
+            'permissions' => AppSectionPermissions::for($this->resource),
         ];
     }
 }
