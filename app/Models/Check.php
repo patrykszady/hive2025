@@ -115,6 +115,21 @@ class Check extends Model
     }
 
     /**
+     * Every expense linked to this check, by either column (expenses.check_id)
+     * or the many-to-many pivot (check_expense) — the two sources CheckShow
+     * and the app's check-detail breakdown both read from.
+     *
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    public function linkedExpenseIds(): \Illuminate\Support\Collection
+    {
+        return Expense::where('check_id', $this->id)->pluck('id')
+            ->merge($this->expensesMany()->pluck('expenses.id'))
+            ->unique()
+            ->values();
+    }
+
+    /**
      * Is this expense a DEDUCTION on this check (a reimbursement being settled
      * by it), as opposed to something the check is paying for?
      *

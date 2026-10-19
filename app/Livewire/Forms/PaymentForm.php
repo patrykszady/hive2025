@@ -4,6 +4,7 @@ namespace App\Livewire\Forms;
 
 use App\Models\Payment;
 use App\Models\Project;
+use App\Services\Payments\PaymentRecorder;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Rule;
 use Livewire\Form;
@@ -69,38 +70,17 @@ class PaymentForm extends Form
     public function store()
     {
         $this->validate();
-        $projects = collect($this->component->projects ?? [])
-            ->filter(function ($p) {
-                if (!is_array($p)) { return false; }
-                return $this->parseAmount($p['amount'] ?? null) !== 0.0
-                    && $this->isProjectAccessible($p['id'] ?? null);
-            })
-            ->values();
 
-        if ($projects->isEmpty()) {
-            return null; // upstream component enforces non-zero total
-        }
-
-        $parentPaymentId = null;
-        $lastPayment = null;
-        foreach ($projects as $index => $project) {
-            $amount = $this->parseAmount($project['amount'] ?? null);
-            $payload = [
-                'amount' => $amount,
-                'project_id' => $project['id'],
-                'date' => $this->date,
-                'reference' => (string) $this->invoice,
-                'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                'note' => $this->note,
-                'created_by_user_id' => auth()->user()->id,
-                'parent_client_payment_id' => $parentPaymentId,
-            ];
-            $lastPayment = Payment::create($payload);
-            if ($index === 0) {
-                $parentPaymentId = $lastPayment->id; // Subsequent become children of first
-            }
-        }
-        return $lastPayment;
+        // The creation logic (filtering, amount parsing, parent/child
+        // grouping) lives in PaymentRecorder, shared with the Hive
+        // Contractors app's PaymentController::store() — see its docblock.
+        return app(PaymentRecorder::class)->record(
+            auth()->user(),
+            $this->component->projects ?? [],
+            (string) $this->date,
+            (string) $this->invoice,
+            $this->note,
+        );
     }
 
     public function update()

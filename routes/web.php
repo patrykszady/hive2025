@@ -133,6 +133,17 @@ Route::get('timelapse/frames/{frame}/signed', [\App\Http\Controllers\TimelapseCo
     ->middleware('signed')
     ->name('projects.timelapse.frame.signed');
 
+// A scanned check image for the Hive Contractors app: a time-limited signed
+// link handed out by GET /api/app/v1/checks/{id} (see CheckResource), so the
+// app's check detail screen can show it without a web session. Same
+// folder/filename resolution ReceiptController::original_receipt() already
+// does for the web's checks.* routes — reused here rather than duplicated.
+Route::get('checks/images/{image}/signed', function (\App\Models\CheckImage $image) {
+    abort_unless($image->image_filename, 404);
+
+    return app(\App\Http\Controllers\ReceiptController::class)->original_receipt('checks', $image->image_filename);
+})->middleware('signed')->name('checks.image.signed');
+
 // The Hive Contractors app's "open full page" hand-off: a one-time signed
 // link from POST /api/app/v1/web-session that logs its user into THIS web
 // session (no session yet, so this must sit outside the 'auth' group) and
