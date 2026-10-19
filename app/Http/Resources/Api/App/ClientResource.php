@@ -58,7 +58,20 @@ class ClientResource extends JsonResource
             return $row;
         }
 
+        $actingUser = $request->user();
+
         return $row + [
+            // Edit-screen fields — App\Livewire\Forms\ClientForm::update().
+            // Note: unlike the web's edit form (which leaves Business Name
+            // blank until retyped — ClientForm::setClient() never prefills
+            // it, so an unmodified web edit actually clears the name), the
+            // app prefills this from the current value so saving without
+            // changes never wipes it.
+            'business_name' => $this->business_name,
+            'source' => $this->resource->source,
+            'can_edit' => $actingUser->can('update', $this->resource),
+            'can_delete' => $actingUser->can('delete', $this->resource),
+            'can_add_person' => $actingUser->can('create_client_member', [User::class, $this->resource]),
             'projects' => $this->resource->projects->map(fn (Project $project) => [
                 'id' => $project->id,
                 'name' => $project->project_name,
