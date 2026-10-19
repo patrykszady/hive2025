@@ -4,6 +4,7 @@ namespace App\Livewire\Timesheets;
 
 use App\Livewire\Forms\TimesheetForm;
 use App\Models\Hour;
+use App\Services\Timesheets\TimesheetConfirmation;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -25,11 +26,9 @@ class TimesheetCreate extends Component
         $this->week = $this->hour->date;
         $this->user = $this->hour->user;
 
-        $this->weekly_hours = Hour::with('project')
-            ->where('user_id', $this->user->id)
-            ->whereNull('timesheet_id')
-            ->whereBetween('date', [$this->week->startOfWeek()->format('Y-m-d'), $this->week->endOfWeek()->format('Y-m-d')])
-            ->get();
+        // Shared with the app's TimesheetCreateController — see
+        // TimesheetConfirmation::weeklyHours().
+        $this->weekly_hours = app(TimesheetConfirmation::class)->weeklyHours($this->user, $this->week);
 
         if ($this->weekly_hours->isEmpty()) {
             //7-6-2022 redirect with message ... week either has no hours or has already been confirmed

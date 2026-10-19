@@ -2,16 +2,13 @@
 
 namespace App\Livewire\Vendors;
 
-use App\Jobs\SendVendorPaymentEmailJob;
 use App\Livewire\Forms\VendorPaymentForm;
+use App\Services\Vendors\VendorPaymentOptions;
 use App\Traits\HandlesChecks;
 
-use App\Models\BankAccount;
 use App\Models\Check;
-use App\Models\Expense;
 use App\Models\Project;
 use App\Models\Vendor;
-use Carbon\Carbon;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 
@@ -98,38 +95,29 @@ class VendorPaymentCreate extends Component
         // check-writing entry point — this page had no policy check at all.
         $this->authorize('create', Check::class);
 
-        //09-05-2023 if proejct not active ...add in dropdown
-        $projectsCollection = Project::where('created_at', '>', Carbon::now()->subYears(2)->format('Y-m-d'))
-            ->status([6, 7, 8]) // Active, Complete, Service Call
-            ->with('latestStatus')
-            ->get()
-            ->sortBy([
-                ['latestStatus.status_code', 'asc'],
-                ['latestStatus.start_date', 'desc'],
-            ]);
+        // Shared with the app's VendorPaymentController — see
+        // VendorPaymentOptions::projectsFor().
+        $options = app(VendorPaymentOptions::class);
 
         $order = 0;
-        $this->projects = $projectsCollection->mapWithKeys(function ($p) use (&$order) {
-            $expensesSum = $p->expenses()->where('vendor_id', $this->vendor->id)->sum('amount');
-            $bidsSum = $p->bids()->vendorBids($this->vendor->id)->sum('amount');
-            $balance = $bidsSum - $expensesSum;
-            $hasOutstandingBalance = $balance > 0;
+        $this->projects = collect($options->projectsFor($this->vendor))->mapWithKeys(function (array $p) use (&$order) {
+            $hasOutstandingBalance = $p['has_outstanding_balance'];
 
             if ($hasOutstandingBalance) {
                 $order++;
             }
 
             return [
-                $p->id => [
-                    'id' => $p->id,
-                    'address' => $p->address,
-                    'project_name' => $p->project_name,
+                $p['id'] => [
+                    'id' => $p['id'],
+                    'address' => $p['address'],
+                    'project_name' => $p['name'],
                     'show' => $hasOutstandingBalance,
                     'disabled' => $hasOutstandingBalance,
                     'order' => $hasOutstandingBalance ? $order : 0,
-                    'vendor_expenses_sum' => (float) $expensesSum,
-                    'vendor_bids_sum' => (float) $bidsSum,
-                    'balance' => (float) $balance,
+                    'vendor_expenses_sum' => $p['vendor_expenses_sum'],
+                    'vendor_bids_sum' => $p['vendor_bids_sum'],
+                    'balance' => $p['balance'],
                     'amount' => null,
                 ],
             ];
@@ -137,17 +125,12 @@ class VendorPaymentCreate extends Component
 
         $this->payment_projects_count = $order;
         // Date will be set by browser's local date via Alpine.js
-        $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->get();
+        $this->employees = $options->employeesFor(auth()->user());
 
         // Unsettled reimbursements this vendor owes the company — deducted from
         // the payment when selected. Same "unsettled = no check yet" rule as
         // timesheet payments; default unselected.
-        $this->vendor_reimbursement_expenses =
-            Expense::where('reimbursment', 'V:'.$this->vendor->id)
-                ->whereNull('paid_by')
-                ->whereNull('check_id')
-                ->orderBy('date', 'DESC')
-                ->get();
+        $this->vendor_reimbursement_expenses = $options->reimbursementExpensesFor($this->vendor);
         $this->selectedVendorReimbursementExpenses = $this->vendor_reimbursement_expenses
             ->pluck('id')
             ->mapWithKeys(fn ($id) => [$id => false])
@@ -345,26 +328,19 @@ class VendorPaymentCreate extends Component
     {
         $this->authorize('create', Check::class);
         $this->validate();
+        // VendorPaymentRecorder::record() does the actual write: creates the
+        // check (or settles via paid_by), recalculates its amount, and
+        // queues the payment-notification email — shared with the app's
+        // VendorPaymentController so both surfaces have the exact same
+        // side effects.
         $check = $this->form->store();
 
-        //09-06-2023 move somewhere else?
-        //send email to vendor being paid...
         if (! is_null($check)) {
-            // Check total = project expenses − attached vendor reimbursements
-            // (centralized in Check::recalculateAmount)
-            $check->recalculateAmount();
-
-            //queue email job
-            $auth_user = auth()->user();
             $vendor = $this->vendor;
 
-            // A payment made in the evening shouldn't email the sub at 9 PM —
-            // outside the paying company's business hours, hold the email
-            // until they next open (e.g. 7:00 AM next working day).
-            $sendAt = $auth_user->vendor->nextBusinessHoursOpening();
-
-            SendVendorPaymentEmailJob::dispatch($auth_user, $vendor, $check)
-                ->delay($sendAt);
+            // Toast copy only, mirroring the same delay the already-queued
+            // email job used — nothing here dispatches a second email.
+            $sendAt = auth()->user()->vendor->nextBusinessHoursOpening();
 
             if ($sendAt->isFuture()) {
                 \Flux\Flux::toast(

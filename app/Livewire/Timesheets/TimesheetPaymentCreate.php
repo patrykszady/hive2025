@@ -3,13 +3,13 @@
 namespace App\Livewire\Timesheets;
 
 // Removed unused BankAccount import (not referenced in this component)
-use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\Vendor;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 
+use App\Services\Timesheets\TimesheetPaymentOptions;
 use App\Traits\HandlesChecks;
 
 use Livewire\Component;
@@ -83,53 +83,24 @@ class TimesheetPaymentCreate extends Component
         // direct user relationships on checks  (e.g. timesheet detail views & policies relying on user_id).
         // The form logic now ignores viaVendor for the actual Check record; payee display still uses viaVendor.
 
-        // Use scopeEmployed() and whereKeyNot() for clarity
-        $this->employees = auth()->user()->vendor
-            ->users()
-            ->employed()
-            ->whereKeyNot($this->user->getKey())
-            ->get();
+        // Shared with the app's TimesheetPaymentController — see
+        // TimesheetPaymentOptions::forUser().
+        $options = app(TimesheetPaymentOptions::class)->forUser(auth()->user(), $this->user);
 
-        // Resolve via vendor once using accessor (may be null)
+        $this->employees = $options['employees'];
         $this->viaVendor = $this->user->via_vendor;
-        $this->payeeName = $this->viaVendor
-            ? trim($this->viaVendor->business_name)
-            : $this->user->full_name;
+        $this->payeeName = $options['payee_name'];
 
-        $this->weekly_timesheets =
-            Timesheet::where('user_id', $this->user->id)
-                ->whereNull('check_id')
-                ->whereNull('paid_by')
-                ->whereNull('deleted_at')
-                ->orderBy('date', 'DESC')
-                ->get();
+        $this->weekly_timesheets = $options['weekly_timesheets'];
         $this->selectedWeeklyTimesheets = $this->weekly_timesheets->pluck('id')->mapWithKeys(fn ($id) => [$id => true])->toArray();
 
-        $this->employee_weekly_timesheets =
-                Timesheet::with('user')
-                    ->where('paid_by', $this->user->id)
-                    ->whereNull('check_id')
-                    ->whereNull('deleted_at')
-                    ->orderBy('date', 'DESC')
-                    ->get();
+        $this->employee_weekly_timesheets = $options['employee_weekly_timesheets'];
         $this->selectedEmployeeWeeklyTimesheets = $this->employee_weekly_timesheets->pluck('id')->mapWithKeys(fn ($id) => [$id => true])->toArray();
 
-        $this->user_paid_expenses =
-            Expense::where('paid_by', $this->user->id)
-                ->where(function ($query) {
-                    $query->whereNull('reimbursment')->orWhere('reimbursment', 'Client');
-                })
-                ->whereNull('check_id')
-                ->orderBy('date', 'DESC')
-                ->get();
+        $this->user_paid_expenses = $options['paid_expenses'];
         $this->selectedUserPaidExpenses = $this->user_paid_expenses->pluck('id')->mapWithKeys(fn ($id) => [$id => false])->toArray();
 
-        $this->user_reimbursement_expenses =
-            Expense::where('reimbursment', (string) $this->user->id)
-                ->whereNull('paid_by')
-                ->whereNull('check_id')
-                ->orderBy('date', 'DESC')
-                ->get();
+        $this->user_reimbursement_expenses = $options['reimbursement_expenses'];
         $this->selectedUserReimbursementExpenses = $this->user_reimbursement_expenses->pluck('id')->mapWithKeys(fn ($id) => [$id => false])->toArray();
 
         if ($this->weekly_timesheets->isEmpty()) { $this->weekly_timesheets = collect(); }
@@ -209,16 +180,13 @@ class TimesheetPaymentCreate extends Component
         $this->validate();
 
 
-        $redirect_route = $this->form->store();
+        $check = $this->form->store();
 
-        if ($redirect_route == 'timesheets') {
+        if (! $check) {
             return $this->redirect(route('timesheets.payments'), navigate: true);
-        } else {
-            $check = $redirect_route;
-            $check->amount = $check->amount; // already recalculated in form->store
-            $check->save();
-            return $this->redirect(route('checks.show', $check->id), navigate: true);
         }
+
+        return $this->redirect(route('checks.show', $check->id), navigate: true);
     }
 
     #[Title('Timesheets Payment')]

@@ -2,8 +2,7 @@
 
 namespace App\Livewire\Forms;
 
-use App\Models\Project;
-use App\Models\Timesheet;
+use App\Services\Timesheets\TimesheetConfirmation;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Form;
 
@@ -31,36 +30,14 @@ class TimesheetForm extends Form
         $this->amount = $user->amount;
     }
 
+    /** @see TimesheetConfirmation::confirm() — the actual write, shared with the app's TimesheetCreateController. */
     public function store()
     {
-        $weekly_projects = $this->component->weekly_hours->groupBy('project.id');
-        $hourly = $this->hourly;
-
-        //update updated_at timestamp only if hourly_rate has changed
-        $this->component->user->vendors()
-            ->updateExistingPivot(auth()->user()->vendor->id, ['hourly_rate' => $hourly]);
-
-        foreach ($weekly_projects as $project_id => $project_weekly_hours) {
-            $project = Project::findOrFail($project_id);
-
-            $hours = $project_weekly_hours->sum('hours');
-            $timesheet = Timesheet::create([
-                'date' => $this->component->week->startOfWeek()->format('Y-m-d'),
-                'user_id' => $this->component->user->id,
-                'vendor_id' => auth()->user()->vendor->id,
-                'project_id' => $project_id,
-                'hours' => $hours,
-                'amount' => $hourly * $hours,
-                'hourly' => $hourly,
-                'created_by_user_id' => auth()->user()->id,
-            ]);
-
-            //get $weekly_hours->pluck('id') and associate $timesheet->id with each...
-            foreach ($project_weekly_hours as $hour) {
-                $hour->timesheet()->associate($timesheet)->save();
-            }
-        }
-
-        return $timesheet;
+        return app(TimesheetConfirmation::class)->confirm(
+            auth()->user(),
+            $this->component->user,
+            $this->component->week,
+            (float) $this->hourly,
+        );
     }
 }
