@@ -4,11 +4,12 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Sheet;
-use App\Services\Sheets\MonthlyTrend;
+use App\Services\Dashboard\MonthlyFinancialSummary;
 use App\Services\Sheets\ProfitAndLossFigures;
 use App\Services\Sheets\SheetBankOptions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 /**
  * The app's Sheets tab — read-only, same figures as the web's
@@ -114,11 +115,14 @@ class SheetController extends Controller
         ]);
     }
 
-    public function monthly(MonthlyTrend $trend): JsonResponse
+    public function monthly(MonthlyFinancialSummary $monthlySummary): JsonResponse
     {
         $this->authorize('viewAny', Sheet::class);
 
-        return response()->json(['data' => $trend->trailingMonths()]);
+        // No browser cookie to read "today" from here — same reasoning as
+        // AppHomeAgenda::today() / HomeController's own call into this
+        // service: Chicago is where the business runs.
+        return response()->json(['data' => $monthlySummary->months(Carbon::now('America/Chicago')->startOfDay())]);
     }
 
     /**

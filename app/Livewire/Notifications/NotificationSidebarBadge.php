@@ -2,7 +2,7 @@
 
 namespace App\Livewire\Notifications;
 
-use App\Models\AppNotification;
+use App\Services\Notifications\AppNotificationFeed;
 use Livewire\Component;
 
 class NotificationSidebarBadge extends Component
@@ -25,9 +25,7 @@ class NotificationSidebarBadge extends Component
         $count = 0;
 
         if (auth()->check()) {
-            $count = AppNotification::where('user_id', auth()->id())
-                ->whereNull('read_at')
-                ->count();
+            $count = app(AppNotificationFeed::class)->unreadCount((int) auth()->id());
         }
 
         return view('livewire.notifications.notification-sidebar-badge', [

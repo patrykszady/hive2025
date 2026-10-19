@@ -2,7 +2,7 @@
 
 namespace App\Livewire\Sheets;
 
-use App\Services\Sheets\MonthlyTrend;
+use App\Services\Dashboard\MonthlyFinancialSummary;
 use Livewire\Attributes\Lazy;
 use Livewire\Component;
 
@@ -11,9 +11,9 @@ class SheetMonthly extends Component
 {
     public $months = [];
 
-    public function mount(MonthlyTrend $trend)
+    public function mount()
     {
-        $this->months = $trend->trailingMonths();
+        $this->months = app(MonthlyFinancialSummary::class)->months(browser_today());
     }
 
     public function render()
