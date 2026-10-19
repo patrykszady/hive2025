@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
 use App\Http\Controllers\Api\App\V1\CallLogController as AppCallLogController;
 use App\Http\Controllers\Api\App\V1\ClientController as AppClientController;
+use App\Http\Controllers\Api\App\V1\PlannerController as AppPlannerController;
 use App\Http\Controllers\Api\App\V1\ProjectController as AppProjectController;
 use App\Http\Controllers\Api\App\V1\ThreadController as AppThreadController;
 use App\Http\Controllers\Api\App\V1\ThreadMessageController as AppThreadMessageController;
@@ -93,6 +94,14 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
         Route::get('projects', [AppProjectController::class, 'index'])->name('projects.index');
         Route::get('projects/{project}', [AppProjectController::class, 'show'])->whereNumber('project')->name('projects.show');
         Route::post('projects/{project}/status', [AppProjectController::class, 'updateStatus'])->whereNumber('project')->name('projects.status.update');
+
+        // The Planner tab — the same week agenda, "To schedule" tray and
+        // action-items-from-calls-and-texts list as the web planner
+        // (App\Livewire\Planner\CardsIndex), via AppPlannerAgenda.
+        Route::get('planner', [AppPlannerController::class, 'index'])->name('planner.index');
+        Route::get('action-items', [AppPlannerController::class, 'actionItems'])->name('action-items.index');
+        Route::post('action-items/{item}/done', [AppPlannerController::class, 'markDone'])->whereNumber('item')->name('action-items.done');
+        Route::post('action-items/{item}/dismiss', [AppPlannerController::class, 'dismiss'])->whereNumber('item')->name('action-items.dismiss');
 
         // The Clients tab — same list, search and detail as the web
         // Clients index/show pages.
