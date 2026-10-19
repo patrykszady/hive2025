@@ -322,7 +322,8 @@ it('warns instead of texting when the lead has no phone number', function () {
 
     $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null])]);
 
-    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/text-schedule-link")->assertStatus(422);
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/text-schedule-link")->assertOk();
 
-    expect($response->json('heading'))->toBe('No phone number');
+    expect($response->json('ok'))->toBeFalse()
+        ->and($response->json('heading'))->toBe('No phone number');
 });

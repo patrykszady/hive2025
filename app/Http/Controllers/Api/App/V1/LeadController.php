@@ -234,7 +234,13 @@ class LeadController extends Controller
         return response()->json(['url' => $shortener->shorten($found->availabilityUrl())]);
     }
 
-    /** Mirrors LeadCreate::textScheduleLink() via App\Services\Leads\LeadScheduleLinkTexter. */
+    /**
+     * Mirrors LeadCreate::textScheduleLink() via
+     * App\Services\Leads\LeadScheduleLinkTexter. Always 200: "no phone on
+     * file" or "awaiting their START reply" are business outcomes (the same
+     * ones the web shows as a warning toast, not a validation error), not a
+     * rejection of the request itself — `ok` tells the app which it got.
+     */
     public function textScheduleLink(Request $request, int $lead, LeadScheduleLinkTexter $texter): JsonResponse
     {
         $this->authorize('viewAny', Lead::class);
@@ -242,7 +248,7 @@ class LeadController extends Controller
         $found = $this->findOrFail($lead);
         $result = $texter->text($found, $found->resolveClient(), $request->user());
 
-        return response()->json($result, $result['ok'] ? 200 : 422);
+        return response()->json($result);
     }
 
     /** A lead the current vendor may see: 404 when it doesn't exist (LeadScope already keeps this tenant-only). */
