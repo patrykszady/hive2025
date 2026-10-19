@@ -187,10 +187,10 @@ class CheckShow extends Component
         $this->authorize('view', $this->check);
         //paid_by user_id 60 = Robert, find vendor_id on vendor_user table "team members"(include previous/all
 
-        // Get expense IDs from both check_id and many-to-many relationship
-        $expenseIdsFromCheckId = Expense::where('check_id', $this->check->id)->pluck('id');
-        $expenseIdsFromPivot = $this->check->expensesMany()->pluck('expenses.id');
-        $allExpenseIds = $expenseIdsFromCheckId->merge($expenseIdsFromPivot)->unique();
+        // Every expense linked to this check, by either column or pivot —
+        // see Check::linkedExpenseIds(), shared with the app's check-detail
+        // breakdown (App\Services\Checks\AppCheckBreakdown).
+        $allExpenseIds = $this->check->linkedExpenseIds();
 
         // EXPENSES
         $vendor_expenses =
