@@ -3,13 +3,9 @@
 namespace App\Livewire\Sheets;
 
 use App\Models\Category;
-use App\Models\Check;
 use App\Models\Expense;
-use App\Models\Payment;
 use App\Models\Sheet;
-use App\Models\Vendor;
-use App\Models\Transaction;
-use App\Models\Timesheet;
+use App\Services\Sheets\ProfitAndLossFigures;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -46,442 +42,106 @@ class SheetShow extends Component
     public $basis = 'accrual';
 
     /**
-     * Apply cash-basis filtering to an Expense query builder.
-     * Only includes expenses that have been paid through bank (direct transaction or check→transaction).
+     * The P&L figures for the current filter state — same constructor
+     * params as App\Services\Sheets\ProfitAndLossFigures, memoized for the
+     * life of this component instance (Livewire re-renders build a fresh
+     * instance per request, so this never goes stale mid-request).
      */
-    private ?array $cashBasisExpenseIds = null;
+    private ?ProfitAndLossFigures $figuresCache = null;
 
-    private function getCashBasisExpenseIds(): array
+    private function figures(): ProfitAndLossFigures
     {
-        if ($this->cashBasisExpenseIds === null) {
-            // Get expense IDs that have direct transactions in selected bank accounts
-            $directIds = \DB::table('transactions')
-                ->whereIn('bank_account_id', $this->bank_account_ids)
-                ->whereNotNull('expense_id')
-                ->pluck('expense_id')
-                ->toArray();
-
-            // Get expense IDs linked via checks that have transactions in selected bank accounts
-            $checkIds = \DB::table('transactions')
-                ->whereIn('bank_account_id', $this->bank_account_ids)
-                ->whereNotNull('check_id')
-                ->pluck('check_id')
-                ->toArray();
-
-            $checkExpenseIds = $checkIds
-                ? \DB::table('expenses')
-                    ->whereIn('check_id', $checkIds)
-                    ->pluck('id')
-                    ->toArray()
-                : [];
-
-            $this->cashBasisExpenseIds = array_unique(array_merge($directIds, $checkExpenseIds));
-        }
-
-        return $this->cashBasisExpenseIds;
-    }
-
-    private function applyCashBasisFilter($query)
-    {
-        if ($this->basis !== 'cash') {
-            return $query;
-        }
-
-        return $query->whereIn('expenses.id', $this->getCashBasisExpenseIds());
+        return $this->figuresCache ??= new ProfitAndLossFigures(
+            (string) $this->start_date,
+            (string) $this->end_date,
+            (array) $this->bank_account_ids,
+            (string) $this->cash,
+            (string) $this->basis,
+        );
     }
 
     #[Computed]
     public function transactions_no_associations()
     {
-        if (!$this->end_date || empty($this->bank_account_ids)) {
-            return collect();
-        }
-
-        $start = $this->start_date;
-        $end = $this->end_date;
-
-        return Transaction::whereBetween('transaction_date', [$start, $end])
-            ->whereIn('bank_account_id', $this->bank_account_ids)
-            ->whereNull('check_id')
-            ->whereNull('expense_id')
-            ->where(function ($q) {
-                // Include non-deposits OR deposits without payments
-                $q->whereNull('deposit')
-                  ->orWhere('deposit', 0)
-                  ->orWhere(function ($qq) {
-                      $qq->where('deposit', 1)->doesntHave('payments');
-                  });
-            })
-            ->orderBy('transaction_date')
-            ->get();
+        return $this->figures()->transactionsNoAssociations();
     }
 
     #[Computed]
     public function revenue()
     {
-        // Build base payment scope for date and valid projects
-        $base = Payment::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereHas('project', function ($query) {
-                $query->whereHas('latestStatus', function ($query) {
-                    $query->where('status_code', '!=', 11); // Exclude VIEW ONLY projects
-                });
-            });
-
-        if ($this->cash === 'hide') {
-            // Exclude cash payments and require transactions for non-cash in selected bank accounts
-            return (clone $base)
-                ->where('reference', '!=', 'Cash')
-                ->whereHas('transaction', function ($query) {
-                    $query->whereIn('bank_account_id', $this->bank_account_ids);
-                })
-                ->sum('amount');
-        }
-
-        // Include cash payments (no bank account filter) + non-cash payments with bank transactions
-        $nonCash = (clone $base)
-            ->where('reference', '!=', 'Cash')
-            ->whereHas('transaction', function ($query) {
-                $query->whereIn('bank_account_id', $this->bank_account_ids);
-            })
-            ->sum('amount');
-
-        $cashSum = (clone $base)
-            ->where('reference', '=', 'Cash')
-            ->sum('amount');
-
-        return $nonCash + $cashSum;
+        return $this->figures()->revenue();
     }
 
     #[Computed]
     public function materialVendorIds()
     {
-        return Vendor::where('sheets_type', 'Materials')->pluck('id');
+        return $this->figures()->materialVendorIds();
     }
 
     #[Computed]
     public function subVendorIds()
     {
-        return Vendor::whereNot('business_type', 'Retail')->pluck('id');
+        return $this->figures()->subVendorIds();
     }
 
     #[Computed]
     public function costOfLaborVendors()
     {
-        // Get checks for non-retail subcontractors
-        $checksQuery = Check::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereHas('vendor', function ($query) {
-                $query->where('business_type', '!=', 'Retail')
-                      ->where('id', '!=', auth()->user()->vendor->id);
-            });
-
-        // groupBy('vendor.business_name') dereferences the relation per row —
-        // without this eager load that was one vendor query per check (130 on
-        // a full-year sheet).
-        $checkVendors = $checksQuery
-            ->with('vendor:id,business_name')
-            ->get()
-            ->groupBy('vendor.business_name')
-            ->toBase();
-
-        // Get timesheets for users who work via via_vendor_id relationship
-        $viaVendorUsers = \DB::table('user_vendor')
-            ->where('vendor_id', auth()->user()->vendor->id)
-            ->whereNotNull('via_vendor_id')
-            ->get(['user_id', 'via_vendor_id']);
-
-        $timesheetVendors = collect();
-        
-        if ($viaVendorUsers->isNotEmpty()) {
-            // Group by user_id first to avoid duplicates when users have multiple via_vendor relationships
-            $userIds = $viaVendorUsers->pluck('user_id')->unique()->toArray();
-            
-            // One query each instead of a find() per user inside the loop.
-            $viaVendorsById = \App\Models\Vendor::whereIn('id', $viaVendorUsers->pluck('via_vendor_id')->unique()->filter())
-                ->get()
-                ->keyBy('id');
-            $usersById = \App\Models\User::with('distributions')
-                ->whereIn('id', $userIds)
-                ->get()
-                ->keyBy('id');
-
-            // The seven aggregates below used to run PER USER inside this loop.
-            // Same filters, one grouped query each, keyed for lookup.
-            $vendorIdForSums = auth()->user()->vendor->id;
-            $periodStart = $this->start_date;
-            $periodEnd = $this->end_date;
-            $userIdStrings = array_map('strval', $userIds);
-            $distributionIds = $usersById
-                ->map(fn ($u) => $u->distributions->first()->id ?? null)
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-
-            $inCheckWindow = fn ($query) => $query->whereBetween('date', [$periodStart, $periodEnd]);
-
-            $timesheetsPaidByUser = Timesheet::whereIn('user_id', $userIds)
-                ->where('vendor_id', $vendorIdForSums)
-                ->whereNull('paid_by')
-                ->whereHas('check', $inCheckWindow)
-                ->groupBy('user_id')
-                ->selectRaw('user_id, SUM(amount) as total')
-                ->pluck('total', 'user_id');
-
-            $timesheetsPaidByOtherByUser = Timesheet::withoutGlobalScopes()
-                ->whereIn('user_id', $userIds)
-                ->where('vendor_id', $vendorIdForSums)
-                ->whereNotNull('paid_by')
-                ->whereHas('check', fn ($query) => $query->withoutGlobalScopes()->whereBetween('date', [$periodStart, $periodEnd]))
-                ->groupBy('user_id')
-                ->selectRaw('user_id, SUM(amount) as total')
-                ->pluck('total', 'user_id');
-
-            $reimbursementsByUser = Expense::whereNull('paid_by')
-                ->whereIn('reimbursment', $userIdStrings)
-                ->whereHas('check', $inCheckWindow)
-                ->groupBy('reimbursment')
-                ->selectRaw('reimbursment, SUM(amount) as total')
-                ->pluck('total', 'reimbursment');
-
-            $reimbursementsPaidByOtherByUser = Expense::whereNotNull('paid_by')
-                ->whereIn('reimbursment', $userIdStrings)
-                ->whereHas('check', $inCheckWindow)
-                ->groupBy('reimbursment')
-                ->selectRaw('reimbursment, SUM(amount) as total')
-                ->pluck('total', 'reimbursment');
-
-            $expensesPaidByUser = Expense::whereIn('paid_by', $userIds)
-                ->whereHas('check', $inCheckWindow)
-                ->groupBy('paid_by')
-                ->selectRaw('paid_by, SUM(amount) as total')
-                ->pluck('total', 'paid_by');
-
-            $distributionChecksById = empty($distributionIds) ? collect() : Expense::whereIn('distribution_id', $distributionIds)
-                ->whereHas('check', $inCheckWindow)
-                ->groupBy('distribution_id')
-                ->selectRaw('distribution_id, SUM(amount) as total')
-                ->pluck('total', 'distribution_id');
-
-            $distributionExpensesById = empty($distributionIds) ? collect() : Expense::whereIn('distribution_id', $distributionIds)
-                ->whereNull('check_id')
-                ->whereBetween('date', [$periodStart, $periodEnd])
-                ->groupBy('distribution_id')
-                ->selectRaw('distribution_id, SUM(amount) as total')
-                ->pluck('total', 'distribution_id');
-
-            // Calculate net amounts per user using exact UserFinances logic
-            foreach ($userIds as $userId) {
-                $userVendorRel = $viaVendorUsers->where('user_id', $userId)->first();
-                if ($userVendorRel) {
-                    $viaVendor = $viaVendorsById->get($userVendorRel->via_vendor_id);
-                    if ($viaVendor) {
-                        // Use exact UserFinances "TOTAL CHECKS FOR USER" logic
-                        $timesheetsPaid = (float) ($timesheetsPaidByUser[$userId] ?? 0);
-                        
-                        $timesheetsPaidBy = (float) ($timesheetsPaidByOtherByUser[$userId] ?? 0);
-                        
-                        $userReimbursementExpenses = (float) ($reimbursementsByUser[(string) $userId] ?? 0);
-                        
-                        $userReimbursementPaidBy = (float) ($reimbursementsPaidByOtherByUser[(string) $userId] ?? 0);
-                        
-                        $user = $usersById->get($userId);
-                        $userDistribution = $user?->distributions->first()->id ?? null;
-                        $distributionChecks = $userDistribution
-                            ? (float) ($distributionChecksById[$userDistribution] ?? 0)
-                            : 0;
-                        
-                        // Calculate "TOTAL CHECKS FOR USER" using exact UserFinances formula
-                        $totalChecksForUser = $timesheetsPaid 
-                            + $timesheetsPaidBy 
-                            + $distributionChecks
-                            - $userReimbursementExpenses 
-                            - $userReimbursementPaidBy;
-                        
-                        // Check if user has expenses paid
-                        $expensesPaid = (float) ($expensesPaidByUser[$userId] ?? 0);
-                        
-                        // If user has expenses paid, use "TOTAL FOR USER" calculation
-                        // Otherwise use "TOTAL CHECKS FOR USER" calculation
-                        if ($expensesPaid > 0) {
-                            // Use "TOTAL FOR USER" calculation (like Cezary)
-                            $distributionExpenses = $userDistribution
-                                ? (float) ($distributionExpensesById[$userDistribution] ?? 0)
-                                : 0;
-                            
-                            $finalAmount = $timesheetsPaid
-                                - $expensesPaid
-                                + $distributionChecks
-                                + $distributionExpenses
-                                + $timesheetsPaidBy;
-                        } else {
-                            // Use "TOTAL CHECKS FOR USER" calculation (like Klaudiusz)
-                            $finalAmount = $totalChecksForUser;
-                        }
-                        
-                        if ($finalAmount > 0) {
-                            $netEntry = (object) [
-                                'amount' => $finalAmount,
-                                'user_id' => $userId,
-                                'vendor_id' => $viaVendor->id,
-                            ];
-                            
-                            if (!$timesheetVendors->has($viaVendor->business_name)) {
-                                $timesheetVendors->put($viaVendor->business_name, collect());
-                            }
-                            
-                            $timesheetVendors->get($viaVendor->business_name)->push($netEntry);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Merge check vendors and timesheet vendors
-        $allVendors = $checkVendors;
-        foreach ($timesheetVendors as $vendorName => $timesheets) {
-            if ($allVendors->has($vendorName)) {
-                // If vendor already exists from checks, add timesheet amounts
-                $allVendors->get($vendorName)->push(...$timesheets);
-            } else {
-                // New vendor from timesheets only
-                $allVendors->put($vendorName, $timesheets);
-            }
-        }
-            
-        // Sort vendors by sum
-        return $allVendors->sortByDesc(function($vendor) {
-            return $vendor->sum('amount');
-        })->toBase();
+        return $this->figures()->costOfLaborVendors();
     }
 
     #[Computed]
     public function costOfLaborSum()
     {
-        return $this->costOfLaborVendors->flatten()->sum('amount');
+        return $this->figures()->costOfLaborSum();
     }
 
     #[Computed]
     public function costOfMaterialsVendors()
     {
-        $vendors = Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereIn('vendor_id', $this->materialVendorIds())
-                ->with(['vendor'])
-                ->get()
-            ->groupBy('vendor.business_name')
-            ->toBase();
-            
-        // Sort vendors by sum
-        return $vendors->sortByDesc(function($vendor) {
-            return $vendor->sum('amount');
-        })->toBase();
+        return $this->figures()->costOfMaterialsVendors();
     }
 
     #[Computed]
     public function costOfMaterialsSum()
     {
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereIn('vendor_id', $this->materialVendorIds())
-                ->sum('amount');
+        return $this->figures()->costOfMaterialsSum();
     }
 
     #[Computed]
     public function generalExpenses()
     {
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
-                ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
-                ->sum('amount');
+        return $this->figures()->generalExpenses();
     }
 
     #[Computed]
     public function generalExpenseCategories()
     {
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
-                ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
-                ->with(['category', 'vendor'])
-                ->get()
-            ->groupBy('category.friendly_primary')
-            ->toBase();
+        return $this->figures()->generalExpenseCategories();
     }
 
     #[Computed]
     public function sortedExpenseCategories()
     {
-        $sortedCategories = [];
-        
-        foreach ($this->generalExpenseCategories() as $categoryPrimaryName => $generalExpenseCategory) {
-            $sortedDetailedCategories = [];
-            
-            foreach ($generalExpenseCategory->groupBy('category.friendly_detailed') as $categoryFriendlyDetailed => $categoryFriendlyExpenses) {
-                $sortedVendors = [];
-                
-                foreach ($categoryFriendlyExpenses->groupBy('vendor.business_name') as $vendorName => $generalExpenseVendorExpenses) {
-                    $sortedVendors[] = [
-                        'name' => $vendorName ?: 'Unknown Vendor',
-                        'sum' => $generalExpenseVendorExpenses->sum('amount'),
-                        'vendor_id' => $generalExpenseVendorExpenses->first()->vendor_id ?? null,
-                    ];
-                }
-                
-                // Sort vendors by amount (descending)
-                usort($sortedVendors, function($a, $b) {
-                    return $b['sum'] <=> $a['sum'];
-                });
-                
-                $sortedDetailedCategories[] = [
-                    'name' => $categoryFriendlyDetailed ?: 'Uncategorized',
-                    'sum' => $categoryFriendlyExpenses->sum('amount'),
-                    'vendors' => $sortedVendors
-                ];
-            }
-            
-            // Sort detailed categories by amount (descending)
-            usort($sortedDetailedCategories, function($a, $b) {
-                return $b['sum'] <=> $a['sum'];
-            });
-            
-            $sortedCategories[$categoryPrimaryName] = [
-                'subcategories' => $sortedDetailedCategories,
-                'sum' => $generalExpenseCategory->sum('amount'),
-                'name' => $categoryPrimaryName
-            ];
-        }
-        
-        // Sort primary categories by sum (descending)
-        uasort($sortedCategories, function($a, $b) {
-            return $b['sum'] <=> $a['sum'];
-        });
-        
-        return $sortedCategories;
+        return $this->figures()->sortedExpenseCategories();
     }
 
     #[Computed]
     public function uncategorizedExpenses()
     {
-        if (!$this->end_date) {
-            return collect();
-        }
-
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereNull('category_id')
-                ->with(['vendor'])
-                ->orderByDesc('amount')
-                ->get();
+        return $this->figures()->uncategorizedExpenses();
     }
 
     #[Computed]
     public function uncategorizedTransactionsSum(): float
     {
-        return round((float) $this->transactions_no_associations->sum('amount'), 2);
+        return $this->figures()->uncategorizedTransactionsSum();
     }
 
     #[Computed]
     public function availableCategories()
     {
-        return Category::orderBy('friendly_primary')
-            ->orderBy('friendly_detailed')
-            ->get();
+        return $this->figures()->availableCategories();
     }
 
     public function categorizeExpense(int $expenseId, ?string $categoryId): void

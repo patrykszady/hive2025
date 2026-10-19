@@ -4,6 +4,7 @@ namespace App\Livewire\Distributions;
 
 use App\Livewire\Forms\DistributionForm;
 use App\Models\Distribution;
+use App\Services\Distributions\DistributionFigures;
 use Flux;
 use Livewire\Component;
 
@@ -21,9 +22,7 @@ class DistributionCreate extends Component
 
     public function mount()
     {
-        $vendor = auth()->user()->vendor;
-
-        $this->form->users = $vendor->users()->whereDoesntHave('distributions')->employed()->wherePivot('role_id', 1)->get();
+        $this->form->users = app(DistributionFigures::class)->eligibleUsers(auth()->user()->vendor);
     }
 
     public function newDistribution()
