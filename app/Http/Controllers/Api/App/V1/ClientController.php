@@ -4,10 +4,16 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Api\App\V1\Concerns\LoadsThreadForApp;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\AddClientPersonRequest;
+use App\Http\Requests\Api\App\LookupClientPersonRequest;
+use App\Http\Requests\Api\App\StoreClientRequest;
+use App\Http\Requests\Api\App\UpdateClientRequest;
 use App\Http\Resources\Api\App\ClientResource;
 use App\Http\Resources\Api\App\ThreadResource;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
+use App\Models\User;
+use App\Services\Clients\AppClientDirectory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,7 +48,111 @@ class ClientController extends Controller
         return response()->json([
             'data' => $page->getCollection()->map(fn (Client $client) => (new ClientResource($client))->toArray($request))->all(),
             'next_cursor' => $page->nextCursor()?->encode(),
+            // The web's "New Client" button — @can('create', Client::class)
+            // on resources/views/livewire/clients/partials/table-actions.blade.php.
+            'can_create_client' => $request->user()->can('create', Client::class),
         ]);
+    }
+
+    /**
+     * Step one of "New Client": look up the contact person by phone —
+     * App\Livewire\Users\UserCreate::user_cell_find() — and, if they
+     * already belong to one of our clients, offer those instead of letting
+     * an admin create a duplicate (App\Livewire\Clients\ClientCreate::addUser()'s
+     * "Existing Clients" picker).
+     */
+    public function lookupPerson(LookupClientPersonRequest $request, AppClientDirectory $directory): JsonResponse
+    {
+        $this->authorize('create', Client::class);
+
+        $person = $directory->findPersonByPhone($request->validated('cell_phone'));
+
+        if (! $person) {
+            return response()->json(['data' => ['person' => null, 'existing_clients' => []]]);
+        }
+
+        $existingClients = $directory->existingClientsFor($person);
+
+        return response()->json([
+            'data' => [
+                'person' => [
+                    'id' => $person->id,
+                    'first_name' => $person->first_name,
+                    'last_name' => $person->last_name,
+                    'email' => $person->email,
+                    'cell_phone' => $person->cell_phone,
+                ],
+                'existing_clients' => $existingClients->map(fn (Client $client) => [
+                    'id' => $client->id,
+                    'name' => $client->name,
+                    'address' => $client->address,
+                ])->values()->all(),
+            ],
+        ]);
+    }
+
+    /**
+     * "New Client" — App\Livewire\Clients\ClientCreate::save() +
+     * App\Livewire\Forms\ClientForm::store(). `existing_client_id` mirrors
+     * picking one of the "Existing Clients" radio options: nothing is
+     * created, we just hand back that client (the web redirects to it).
+     */
+    public function store(StoreClientRequest $request, AppClientDirectory $directory): JsonResponse
+    {
+        $existingClientId = $request->validated('existing_client_id');
+
+        if ($existingClientId) {
+            $client = $this->visibleClient((int) $existingClientId);
+
+            return response()->json([
+                'data' => (new ClientResource($client))->withDetail()->toArray($request),
+            ]);
+        }
+
+        $this->authorize('create', Client::class);
+
+        $client = $directory->createClient($request->user(), $request->validated());
+        $client->load(['users', 'projects.latestStatus']);
+
+        return response()->json([
+            'data' => (new ClientResource($client))->withDetail()->toArray($request),
+        ], 201);
+    }
+
+    /** "Edit Client" — App\Livewire\Forms\ClientForm::update(). */
+    public function update(UpdateClientRequest $request, int $client, AppClientDirectory $directory): JsonResponse
+    {
+        $found = $this->visibleClient($client);
+        $this->authorize('update', $found);
+
+        $directory->updateClient($found, $request->user(), $request->validated());
+        $found->refresh()->load(['users', 'projects.latestStatus']);
+
+        return response()->json([
+            'data' => (new ClientResource($found))->withDetail()->toArray($request),
+        ]);
+    }
+
+    /**
+     * "Add Member" on a client — the client branch of
+     * App\Livewire\Users\UserCreate::save() for an existing client id.
+     */
+    public function addPerson(AddClientPersonRequest $request, int $client, AppClientDirectory $directory): JsonResponse
+    {
+        $found = $this->visibleClient($client);
+        $this->authorize('create_client_member', [User::class, $found]);
+
+        $person = $directory->addPerson($found, $request->validated());
+
+        return response()->json([
+            'data' => [
+                'id' => $person->id,
+                'first_name' => $person->first_name,
+                'last_name' => $person->last_name,
+                'cell_phone' => $person->cell_phone,
+                'email' => $person->email,
+            ],
+        ], 201);
     }
 
     public function show(Request $request, int $client): JsonResponse
