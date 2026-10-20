@@ -153,11 +153,49 @@ class VendorTransactionRuleService
 
     public function formatOptions(?string $value): string
     {
-        if ($value === null || trim($value) === '') {
+        $clean = $this->unwrapOptions($value);
+
+        if ($clean === '') {
             return json_encode('/i');
         }
 
-        return json_encode(trim($value).'/i');
+        return json_encode($clean.'/i');
+    }
+
+    /**
+     * Strip a value back down to the plain text a person typed before
+     * formatOptions() wraps it again.
+     *
+     * The edit modal (and the app's equivalent screen) preload this field
+     * from the column's own already-`json_encode(trim($value).'/i')`
+     * contents — editVendorTransaction() sets `$this->options` straight
+     * from `$transaction->options`. Re-running formatOptions() on that
+     * without unwrapping first doubles the wrapping on every re-save
+     * (`"text\/i"` -> `"\"text\/i\"\/i"` -> ...), so this undoes any
+     * wrapping already present — however many layers a rule picked up
+     * before this fix — leaving only the human-typed text.
+     */
+    private function unwrapOptions(?string $value): string
+    {
+        $value = trim((string) $value);
+
+        for ($i = 0; $i < 5 && $value !== ''; $i++) {
+            $decoded = json_decode($value, true);
+
+            if (! is_string($decoded) || ! str_ends_with($decoded, '/i')) {
+                break;
+            }
+
+            $next = trim(substr($decoded, 0, -2));
+
+            if ($next === $value) {
+                break;
+            }
+
+            $value = $next;
+        }
+
+        return $value;
     }
 
     private function normalizeValue(string $field, mixed $value): mixed

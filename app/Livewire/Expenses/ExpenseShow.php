@@ -6,6 +6,7 @@ use App\Models\Check;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\ReceiptLineItemDesc;
+use App\Services\Expenses\ExpenseAssociationService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
@@ -90,18 +91,9 @@ class ExpenseShow extends Component
 
         $check = Check::findOrFail($checkId);
 
-        if ((int) $this->expense->check_id === (int) $check->id) {
-            $this->expense->check_id = null;
-            $this->expense->save();
-        }
-
-        if ($this->expense->checks()->where('checks.id', $check->id)->exists()) {
-            $this->expense->checks()->detach($check->id);
-            $this->expense->searchable();
-        }
-
-        // Reimbursement deductions must stay negative — use the shared recalc
-        $check->recalculateAmount();
+        // Extracted to ExpenseAssociationService, shared with the Hive
+        // Contractors app's ExpenseAssociationController.
+        app(ExpenseAssociationService::class)->removeFromCheck($this->expense, $check);
 
         $this->expense->refresh();
         $this->expense->load(['checks.bank_account.bank']);
@@ -325,30 +317,12 @@ class ExpenseShow extends Component
     }
 
     /**
-     * Other expenses paid by the same check(s) as this expense — via both the
-     * legacy expenses.check_id FK and the check_expense pivot.
+     * Other expenses paid by the same check(s) as this expense — extracted
+     * to ExpenseAssociationService, shared with the Hive Contractors app's
+     * ExpenseAssociationController.
      */
     protected function checkAssociatedExpenses()
     {
-        $checkIds = $this->expense->checks()->pluck('checks.id')
-            ->when($this->expense->check_id, fn ($ids) => $ids->push($this->expense->check_id))
-            ->unique()
-            ->values();
-
-        if ($checkIds->isEmpty()) {
-            return collect();
-        }
-
-        return Expense::query()
-            ->where('id', '!=', $this->expense->id)
-            ->where(function ($query) use ($checkIds) {
-                $query->whereIn('check_id', $checkIds)
-                    ->orWhereHas('checks', fn ($q) => $q->whereIn('checks.id', $checkIds));
-            })
-            ->with('project')
-            ->orderBy('date')
-            ->get()
-            ->unique('id')
-            ->values();
+        return app(ExpenseAssociationService::class)->checkAssociatedExpenses($this->expense);
     }
 }

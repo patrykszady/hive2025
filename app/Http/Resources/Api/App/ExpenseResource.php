@@ -2,10 +2,12 @@
 
 namespace App\Http\Resources\Api\App;
 
+use App\Models\Check;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\ExpenseSplits;
 use App\Models\User;
+use App\Services\Expenses\ExpenseAssociationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\URL;
@@ -74,6 +76,41 @@ class ExpenseResource extends JsonResource
                 'note' => $split->note,
             ])->values()->all() : [],
             'receipts' => $expense->receipts->map(fn (ExpenseReceipts $receipt) => $this->receiptPayload($receipt))->values()->all(),
+            'checks' => app(ExpenseAssociationService::class)->linkedChecks($expense)->map(fn (Check $check) => $this->checkPayload($check))->values()->all(),
+            'check_associated_expenses' => app(ExpenseAssociationService::class)->checkAssociatedExpenses($expense)->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
+            'associated_expenses' => $expense->associated_expenses->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
+        ];
+    }
+
+    /**
+     * @return array{id: int, check_number: ?string, date: ?string, amount: float, bank: ?string}
+     */
+    private function checkPayload(Check $check): array
+    {
+        return [
+            'id' => $check->id,
+            'check_number' => $check->check_number,
+            'date' => $check->date?->format('Y-m-d'),
+            'amount' => (float) $check->amount,
+            'bank' => $check->bank_account?->bank?->name,
+        ];
+    }
+
+    /**
+     * A sibling expense in "Linked Expenses" or "Associated Expenses" (other
+     * expenses paid by the same check) — just enough to list and open it.
+     *
+     * @return array{id: int, amount: float, date: ?string, vendor: ?string, project: ?string, web_path: string}
+     */
+    private function associatedPayload(Expense $expense): array
+    {
+        return [
+            'id' => $expense->id,
+            'amount' => (float) $expense->amount,
+            'date' => $expense->date?->format('Y-m-d'),
+            'vendor' => $expense->vendor?->business_name,
+            'project' => $expense->project?->project_name,
+            'web_path' => '/expenses/'.$expense->id,
         ];
     }
 

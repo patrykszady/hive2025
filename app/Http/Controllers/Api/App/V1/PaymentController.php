@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\StorePaymentRequest;
+use App\Http\Requests\Api\App\UpdatePaymentRequest;
 use App\Http\Resources\Api\App\PaymentResource;
 use App\Models\Client;
 use App\Models\Payment;
@@ -141,6 +142,58 @@ class PaymentController extends Controller
         return response()->json([
             'data' => (new PaymentResource($payment))->withDetail()->toArray($request),
         ], 201);
+    }
+
+    /**
+     * Mirrors App\Livewire\Payments\PaymentCreate::update(): the same
+     * "projects sum to $0.00" guard before delegating to PaymentRecorder,
+     * whose update() does the grouping/collapsing logic PaymentForm::update()
+     * shares with this endpoint.
+     */
+    public function update(UpdatePaymentRequest $request, PaymentRecorder $recorder, int $payment): JsonResponse
+    {
+        $found = $this->visiblePayment($payment);
+        $this->authorize('view', $found);
+
+        /** @var list<array{id: int, amount: mixed}> $projects */
+        $projects = $request->validated('projects');
+
+        $total = round(collect($projects)->sum(fn (array $project) => $recorder->parseAmount($project['amount'] ?? null)), 2);
+
+        if ($total === 0.0) {
+            return response()->json([
+                'message' => 'Payment total needs to include at least 1 project and not equal $0.00',
+            ], 422);
+        }
+
+        $updated = $recorder->update(
+            $found,
+            $projects,
+            (string) $request->validated('date'),
+            (string) $request->validated('reference'),
+            $request->validated('note'),
+            $request->user(),
+        );
+
+        $updated->load(['project.client.users']);
+
+        return response()->json([
+            'data' => (new PaymentResource($updated))->withDetail()->toArray($request),
+        ]);
+    }
+
+    /**
+     * Deletes exactly this one payment row — mirrors
+     * PaymentCreate::remove(), which deletes only $this->payment (the row
+     * the edit modal was opened for), never its whole group of siblings.
+     */
+    public function destroy(Request $request, int $payment): JsonResponse
+    {
+        $found = $this->visiblePayment($payment);
+        $this->authorize('view', $found);
+        $found->delete();
+
+        return response()->json(['data' => ['deleted' => true]]);
     }
 
     private function filteredQuery(Request $request): \Illuminate\Database\Eloquent\Builder

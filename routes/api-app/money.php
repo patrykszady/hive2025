@@ -22,6 +22,12 @@ Route::get('payments/eligible-projects', [AppPaymentController::class, 'eligible
 Route::get('payments', [AppPaymentController::class, 'index'])->name('payments.index');
 Route::post('payments', [AppPaymentController::class, 'store'])->name('payments.store');
 Route::get('payments/{payment}', [AppPaymentController::class, 'show'])->whereNumber('payment')->name('payments.show');
+Route::put('payments/{payment}', [AppPaymentController::class, 'update'])->whereNumber('payment')->name('payments.update');
+Route::delete('payments/{payment}', [AppPaymentController::class, 'destroy'])->whereNumber('payment')->name('payments.destroy');
 
 Route::get('checks', [AppCheckController::class, 'index'])->name('checks.index');
 Route::get('checks/{check}', [AppCheckController::class, 'show'])->whereNumber('check')->name('checks.show');
+// Mirrors App\Livewire\Checks\CheckShow::uploadCheckImage() — see
+// CheckController::uploadImage()'s docblock for why editing/creating a
+// check itself stays web-only while this does not.
+Route::post('checks/{check}/images', [AppCheckController::class, 'uploadImage'])->whereNumber('check')->name('checks.images.store');

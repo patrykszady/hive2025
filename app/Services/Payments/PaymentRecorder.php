@@ -62,6 +62,94 @@ class PaymentRecorder
     }
 
     /**
+     * Updates an existing client payment and its grouped siblings —
+     * extracted from App\Livewire\Forms\PaymentForm::update() (which now
+     * calls here), so the app's PaymentController::update() shares the
+     * exact same edit logic.
+     *
+     * $projectAmounts is the full set of projects the edit form offered
+     * (same shape record() takes): a project that isn't among the ones
+     * with a non-zero, accessible amount loses its existing payment in
+     * this group (deleted); one that previously had no payment but now
+     * has an amount gets a new child payment. When exactly one project
+     * ends up selected, $payment itself becomes that project's payment
+     * (ungrouped) rather than staying split across siblings.
+     */
+    public function update(Payment $payment, array $projectAmounts, string $date, string $reference, ?string $note, User $user): Payment
+    {
+        $rootId = $payment->parent_client_payment_id ?: $payment->id;
+        $currentGroup = $payment->payments;
+        $existingByProject = $currentGroup->keyBy('project_id');
+
+        $selected = collect($projectAmounts)
+            ->filter(fn ($project) => is_array($project)
+                && $this->parseAmount($project['amount'] ?? null) !== 0.0
+                && $this->isProjectAccessible($project['id'] ?? null))
+            ->unique('id')
+            ->values();
+        $selectedProjectIds = $selected->pluck('id')->all();
+
+        if (count($selectedProjectIds) === 1) {
+            $project = $selected->first();
+            $payment->fill([
+                'amount' => $this->parseAmount($project['amount'] ?? null),
+                'project_id' => $project['id'],
+                'date' => $date,
+                'reference' => $reference,
+                'note' => $note,
+                'belongs_to_vendor_id' => $user->vendor->id,
+                'parent_client_payment_id' => null,
+            ])->save();
+
+            return $payment;
+        }
+
+        foreach ($selected as $project) {
+            $payload = [
+                'amount' => $this->parseAmount($project['amount'] ?? null),
+                'project_id' => $project['id'],
+                'date' => $date,
+                'reference' => $reference,
+                'note' => $note,
+                'belongs_to_vendor_id' => $user->vendor->id,
+            ];
+
+            if ($existingByProject->has($project['id'])) {
+                $existingByProject[$project['id']]->fill($payload)->save();
+
+                continue;
+            }
+
+            // Extra guard: an existing row for this project may already be
+            // in the group in the database even though it wasn't loaded
+            // onto $existingByProject (e.g. $payment was passed in stale).
+            $dbExisting = Payment::query()
+                ->where(fn ($query) => $query->where('id', $rootId)->orWhere('parent_client_payment_id', $rootId))
+                ->where('project_id', $project['id'])
+                ->first();
+
+            if ($dbExisting) {
+                $dbExisting->fill($payload)->save();
+
+                continue;
+            }
+
+            Payment::create(array_merge($payload, [
+                'parent_client_payment_id' => $rootId,
+                'created_by_user_id' => $user->id,
+            ]));
+        }
+
+        foreach ($currentGroup as $existing) {
+            if (! in_array($existing->project_id, $selectedProjectIds, true)) {
+                $existing->delete();
+            }
+        }
+
+        return Payment::find($rootId) ?? $payment->fresh();
+    }
+
+    /**
      * project_id rides in on a caller-controlled array — check it against
      * what this tenant can see (ProjectScope) rather than trusting it, so a
      * payment can't be recorded against a project outside the tenant.

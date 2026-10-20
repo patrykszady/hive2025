@@ -3,7 +3,6 @@
 namespace App\Livewire\Forms;
 
 use App\Models\Payment;
-use App\Models\Project;
 use App\Services\Payments\PaymentRecorder;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Rule;
@@ -12,17 +11,6 @@ use Livewire\Form;
 class PaymentForm extends Form
 {
     use AuthorizesRequests;
-
-    /**
-     * project_id rides in on a client-controlled array (component->projects)
-     * — check it against what this tenant can see (ProjectScope) rather than
-     * trusting it, so a payment can't be recorded against a project outside
-     * the tenant.
-     */
-    protected function isProjectAccessible($projectId): bool
-    {
-        return $projectId && Project::whereKey($projectId)->exists();
-    }
 
     public ?Payment $payment;
 
@@ -87,100 +75,18 @@ class PaymentForm extends Form
     {
         $this->validate();
 
-        // Determine the group root id (parent) for grouping
-        $rootId = $this->payment->parent_client_payment_id ?: $this->payment->id;
-
-        // Current grouped payments (collection)
-        $currentGroup = $this->payment->payments; // includes parent+children
-
-        // Build a quick index of existing payments by project_id
-        $existingByProject = $currentGroup->keyBy('project_id');
-
-        // Gather selected projects with an amount
-        $component = $this->component;
-        $selected = collect($component->projects ?? [])
-            ->filter(fn($p) => is_array($p)
-                && $this->parseAmount($p['amount'] ?? null) !== 0.0
-                && $this->isProjectAccessible($p['id'] ?? null))
-            ->unique('id')
-            ->values();
-        $selectedProjectIds = $selected->pluck('id')->all();
-
-        // If switching to a single project, just update this payment record in place.
-        if (count($selectedProjectIds) === 1) {
-            $proj = $selected->first();
-            $amount = $this->parseAmount($proj['amount'] ?? null);
-            $this->payment->fill([
-                'amount' => $amount,
-                'project_id' => $proj['id'],
-                'date' => $this->date,
-                'reference' => (string) $this->invoice,
-                'note' => $this->note,
-                'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                'parent_client_payment_id' => null,
-            ])->save();
-            return $this->payment->fresh();
-        }
-
-        // Update existing or create new payments for selected projects
-        foreach ($selected as $proj) {
-            $amount = $this->parseAmount($proj['amount'] ?? null);
-            $payload = [
-                'amount' => $amount,
-                'project_id' => $proj['id'],
-                'date' => $this->date,
-                'reference' => (string) $this->invoice,
-                'note' => $this->note,
-                'belongs_to_vendor_id' => auth()->user()->vendor->id,
-            ];
-
-            if ($existingByProject->has($proj['id'])) {
-                // Update existing payment for this project
-                $existing = $existingByProject[$proj['id']];
-                $existing->fill($payload)->save();
-            } else {
-                // Extra guard: check DB for existing payment in this group with same project
-                $dbExisting = Payment::where(function ($q) use ($rootId) {
-                        $q->where('id', $rootId)->orWhere('parent_client_payment_id', $rootId);
-                    })
-                    ->where('project_id', $proj['id'])
-                    ->first();
-
-                if ($dbExisting) {
-                    $dbExisting->fill($payload)->save();
-                } else {
-                    // Create a new child payment in this group
-                    Payment::create(array_merge($payload, [
-                        'parent_client_payment_id' => $rootId,
-                        'created_by_user_id' => auth()->id(),
-                    ]));
-                }
-            }
-        }
-
-        // Delete payments that are no longer selected (only within this group)
-        foreach ($currentGroup as $existing) {
-            if (!in_array($existing->project_id, $selectedProjectIds, true)) {
-                $existing->delete();
-            }
-        }
-
-        // Return the parent (or current) payment fresh for redirection context
-        return Payment::find($rootId) ?? $this->payment->fresh();
-    }
-
-    private function parseAmount($value): float
-    {
-        if ($value === null || $value === '') {
-            return 0.0;
-        }
-
-        $clean = preg_replace('/[^0-9.\-]/', '', (string) $value);
-        if ($clean === null || $clean === '' || $clean === '-' || $clean === '.') {
-            return 0.0;
-        }
-
-        return (float) $clean;
+        // The edit logic (which projects stay/go, parent/child grouping,
+        // collapsing to a single project) lives in PaymentRecorder, shared
+        // with the Hive Contractors app's PaymentController::update() — see
+        // its docblock.
+        return app(PaymentRecorder::class)->update(
+            $this->payment,
+            $this->component->projects ?? [],
+            (string) $this->date,
+            (string) $this->invoice,
+            $this->note,
+            auth()->user(),
+        );
     }
 
     private function formatAmount($value): ?string

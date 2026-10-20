@@ -9,6 +9,7 @@ use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
 use App\Models\User;
+use App\Services\Transactions\VendorTransactionRuleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
@@ -346,4 +347,58 @@ it('renders the match vendor page with a deferred vendor transactions panel', fu
         ->get(route('transactions.match_vendor'))
         ->assertOk()
         ->assertSee('Loading vendor transactions...');
+});
+
+// Bug: VendorTransactionEditModal::editVendorTransaction() loads $this->options
+// straight from the column's own already-wrapped `json_encode(trim($value).'/i')`
+// contents, and save() ran that back through formatOptions() unchanged — so a
+// rule edited a second time (changing some other field, leaving Options alone)
+// got wrapped again on top of itself. formatOptions() must unwrap before it
+// re-wraps, no matter how many times a rule has been re-saved.
+it('does not double-wrap the options column when a rule is edited more than once', function () {
+    actingAsVendorTransactionModalAdmin();
+    $firstVendor = Vendor::factory()->create(['business_name' => 'First Vendor']);
+    $secondVendor = Vendor::factory()->create(['business_name' => 'Second Vendor']);
+
+    $vendorTransaction = VendorTransaction::create([
+        'vendor_id' => null,
+        'deposit_check' => null,
+        'amount_sign' => null,
+        'plaid_inst_id' => null,
+        'desc' => 'DOUBLE WRAP TEST',
+        'options' => json_encode('double wrap test/i'),
+    ]);
+
+    Livewire::test(VendorTransactionEditModal::class)
+        ->call('editVendorTransaction', $vendorTransaction->id)
+        ->set('vendor_id', (string) $firstVendor->id)
+        ->call('save');
+
+    $afterFirstSave = $vendorTransaction->refresh()->options;
+
+    Livewire::test(VendorTransactionEditModal::class)
+        ->call('editVendorTransaction', $vendorTransaction->id)
+        ->set('vendor_id', (string) $secondVendor->id)
+        ->call('save');
+
+    $vendorTransaction->refresh();
+
+    expect($afterFirstSave)->toBe(json_encode('double wrap test/i'))
+        ->and($vendorTransaction->options)->toBe(json_encode('double wrap test/i'))
+        ->and($vendorTransaction->options)->not->toBe(json_encode(json_encode('double wrap test/i').'/i'));
+});
+
+it('unwraps an already-wrapped value no matter how many times it was previously double-wrapped', function () {
+    $rules = app(VendorTransactionRuleService::class);
+
+    $onceWrapped = json_encode('store number/i');
+    $twiceWrapped = json_encode($onceWrapped.'/i');
+    $thriceWrapped = json_encode($twiceWrapped.'/i');
+
+    expect($rules->formatOptions('store number'))->toBe($onceWrapped)
+        ->and($rules->formatOptions($onceWrapped))->toBe($onceWrapped)
+        ->and($rules->formatOptions($twiceWrapped))->toBe($onceWrapped)
+        ->and($rules->formatOptions($thriceWrapped))->toBe($onceWrapped)
+        ->and($rules->formatOptions(null))->toBe(json_encode('/i'))
+        ->and($rules->formatOptions(''))->toBe(json_encode('/i'));
 });
