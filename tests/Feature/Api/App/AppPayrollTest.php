@@ -111,6 +111,25 @@ it('needs a token for every payroll route', function () {
 
 // --- Confirming a week's hours into a Timesheet -------------------------
 
+it('lists pending weeks: a Member sees only their own, an Admin everyone\'s', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appPayrollAdmin();
+    $member = appPayrollMember($vendor);
+    $project = appPayrollProject($vendor);
+    appPayrollHour($vendor, $member, $project, '2026-05-11', 8);
+    appPayrollHour($vendor, $admin, $project, '2026-05-18', 6);
+
+    Sanctum::actingAs($member, ['app']);
+    $asMember = $this->getJson('/api/app/v1/timesheets/create')->assertOk();
+    expect($asMember->json('data'))->toHaveCount(1)
+        ->and($asMember->json('data.0.user.id'))->toBe($member->id)
+        ->and((float) $asMember->json('data.0.hours'))->toBe(8.0);
+
+    auth()->forgetGuards();
+    Sanctum::actingAs($admin, ['app']);
+    $asAdmin = $this->getJson('/api/app/v1/timesheets/create')->assertOk();
+    expect($asAdmin->json('data'))->toHaveCount(2);
+});
+
 it('lets any team member see their own unconfirmed week and confirm it', function () {
     ['vendor' => $vendor] = appPayrollAdmin();
     $member = appPayrollMember($vendor);

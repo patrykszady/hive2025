@@ -25,6 +25,17 @@ use Illuminate\Support\Collection;
  */
 class TimesheetCreateController extends Controller
 {
+    /**
+     * The "Confirm Weekly Timesheets" card at the top of the web's
+     * TimesheetsIndex — every week with unconfirmed Hours this person can
+     * see (HourScope), each carrying the Hour id the create screen opens
+     * with. See TimesheetConfirmation::pendingWeeks().
+     */
+    public function pending(TimesheetConfirmation $confirmation): JsonResponse
+    {
+        return response()->json(['data' => $confirmation->pendingWeeks()]);
+    }
+
     public function show(Request $request, int $hour, TimesheetConfirmation $confirmation): JsonResponse
     {
         $found = $this->visibleHour($hour);

@@ -90,4 +90,39 @@ class TimesheetConfirmation
 
         return $timesheet;
     }
+
+    /**
+     * Every week with unconfirmed Hours, grouped by employee then by week —
+     * mirrors TimesheetsIndex::weeklyHoursToConfirm() exactly (same
+     * HourScope visibility: a Member sees only their own, an Admin the
+     * whole company), reshaped to group by user id rather than first name
+     * so two team members sharing a first name are never merged together.
+     *
+     * @return list<array{user: array{id: int, name: string}, week_start_date: string, hours: float, representative_hour_id: int}>
+     */
+    public function pendingWeeks(): array
+    {
+        $hours = Hour::query()
+            ->orderByDesc('date')
+            ->whereNull('timesheet_id')
+            ->with('user:id,first_name,last_name')
+            ->get();
+
+        $rows = [];
+
+        foreach ($hours->groupBy('user_id') as $userHours) {
+            foreach ($userHours->groupBy(fn (Hour $hour) => $hour->date->startOfWeek()->format('Y-m-d')) as $weekStart => $weekHours) {
+                $user = $weekHours->first()->user;
+
+                $rows[] = [
+                    'user' => ['id' => $user->id, 'name' => trim($user->first_name.' '.$user->last_name)],
+                    'week_start_date' => $weekStart,
+                    'hours' => (float) $weekHours->sum('hours'),
+                    'representative_hour_id' => $weekHours->first()->id,
+                ];
+            }
+        }
+
+        return $rows;
+    }
 }
