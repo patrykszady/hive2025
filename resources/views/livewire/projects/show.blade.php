@@ -158,6 +158,15 @@
                     @endif
                 @endcan
 
+                @can('update', $project)
+                    {{-- COMMUNICATIONS — calls, texts and emails with this
+                         project's stakeholders. Ties with Email Tracking on
+                         order-5; DOM order (right below it) breaks the tie. --}}
+                    <div class="order-5">
+                        <livewire:projects.project-communications :project="$project" lazy />
+                    </div>
+                @endcan
+
                 {{-- PROJECT LIFESPAN --}}
                 <div class="order-3">
                     <livewire:project-status.status-create :project="$project" lazy />
