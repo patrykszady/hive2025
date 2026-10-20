@@ -48,6 +48,15 @@ Schedule::command('emails:sync')
 // The AI read for any stored email still without one: the first sync's
 // backfill, and anything a queue outage dropped. SummarizeEmailMessage is
 // unique per email, so an email already queued is not queued twice.
+// The app's sheet exports and bank statements live under storage/app/exports
+// behind 10-minute signed links; nothing needs them after that.
+Schedule::command('exports:prune')
+    ->hourly()
+    ->name('prune-app-exports')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('emails:summarize --missing')
     ->everyFifteenMinutes()
     ->name('summarize-stakeholder-emails')
