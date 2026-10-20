@@ -111,3 +111,22 @@
         </flux:modal>
     @endif
 </div>
+
+@if ($returnTo ?? null)
+    {{-- Only ever rendered when the Hive Contractors app opened this exact
+         page (banks.show, with its own `return_to`) inside its in-app
+         browser via the signed web-session hand-off — never for a normal
+         web visit. `bankReconnected` fires once Link finishes successfully
+         (plaid_link_item_update / plaid_link_item_relink); hand control
+         straight back to the app the same way the Nylas popup flow does
+         for the app's mailbox connect (CompanyEmailController::
+         nylasAuthResponse()), just via a Livewire event instead of an HTTP
+         redirect, since there's no full page load to hook here. --}}
+    @script
+    <script>
+    $wire.on('bankReconnected', () => {
+        window.location = @js($returnTo);
+    });
+    </script>
+    @endscript
+@endif

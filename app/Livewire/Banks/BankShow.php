@@ -7,6 +7,7 @@ use App\Models\BankAccount;
 use App\Models\Transaction;
 use App\Services\Banks\BankAccountsGrouper;
 use App\Services\PlaidService;
+use App\Support\AppReturnTo;
 use Flux;
 
 use Carbon\Carbon;
@@ -275,6 +276,10 @@ class BankShow extends Component
 
         $this->render();
 
+        // The app's in-app-browser bridge (show.blade.php's @script): a
+        // no-op for every normal web visit, where `returnTo` is never set.
+        $this->dispatch('bankReconnected', bankId: $this->bank->id);
+
         $this->dispatch('confirmProcessStep', 'banks_registered')->to('entry.vendor-registration');
     }
 
@@ -407,6 +412,10 @@ class BankShow extends Component
             heading: $this->bank->name.' reconnected',
             variant: 'success',
         );
+
+        // The app's in-app-browser bridge (show.blade.php's @script): a
+        // no-op for every normal web visit, where `returnTo` is never set.
+        $this->dispatch('bankReconnected', bankId: $this->bank->id);
 
         $this->redirect(route('banks.show', $this->bank), navigate: true);
     }
@@ -555,6 +564,17 @@ class BankShow extends Component
     public function render()
     {
         $this->authorize('create', Bank::class);
-        return view('livewire.banks.show');
+
+        return view('livewire.banks.show', [
+            // Only ever present when the Hive Contractors app opened this
+            // exact page (banks.show, not nested on /banks) inside its
+            // in-app browser via the signed web-session hand-off — see
+            // show.blade.php's own @script, which sends the browser back to
+            // the app once `bankReconnected` fires. Null for every normal
+            // web visit, same as today.
+            'returnTo' => AppReturnTo::isValid(request()->query('return_to'))
+                ? request()->query('return_to')
+                : null,
+        ]);
     }
 }

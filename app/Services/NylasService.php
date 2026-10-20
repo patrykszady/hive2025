@@ -31,19 +31,27 @@ class NylasService
     /**
      * Get the authentication URL to redirect the user to Nylas' Connect API.
      *
+     * @param  string|null  $returnTo  The Hive Contractors app's own
+     *     "hivecontractors://…" deep link (already validated by the
+     *     caller — see App\Rules\AppReturnToUrl) to hand back to once
+     *     CompanyEmailController::nylasAuthResponse() finishes, when this
+     *     flow was started from the app's in-app browser rather than the
+     *     web's popup. Round-tripped through `state`, the same way `popup`
+     *     and `csrf` already are.
      * @return array
      */
-    public function getAuthUrl(): array
+    public function getAuthUrl(?string $returnTo = null): array
     {
         // Manually build the authentication URL
         $url = $this->baseUrl . '/connect/auth';
-        
+
         // Encode popup flag and CSRF token in state parameter
         $state = json_encode([
             'csrf' => csrf_token(),
             'popup' => true,
+            'return_to' => $returnTo,
         ]);
-        
+
         $params = [
             'client_id' => config('nylas.client_id'),
             'redirect_uri' => config('nylas.redirect_uri'),
