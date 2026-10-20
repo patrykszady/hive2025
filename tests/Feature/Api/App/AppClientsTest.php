@@ -156,13 +156,55 @@ it('shows the full detail shape, including each person\'s email and their projec
         ->assertJsonPath('data.notes', [])
         ->assertJsonPath('data.projects.0.id', $project->id)
         ->assertJsonPath('data.projects.0.status.code', 6)
+        ->assertJsonPath('data.projects.0.latest_status_date', now()->format('Y-m-d'))
         ->assertJsonPath('data.web_path', '/clients/'.$client->id)
         ->assertJsonStructure([
             'data' => [
                 'id', 'name', 'address', 'home_phone', 'people', 'projects_count', 'created_at',
-                'web_path', 'projects', 'upcoming_tasks', 'notes',
+                'web_path', 'projects' => [['id', 'name', 'address', 'status', 'latest_status_date']], 'upcoming_tasks', 'notes',
             ],
         ]);
+});
+
+it('sorts the client\'s projects by latest status date desc, like ProjectsTable::projects()', function () {
+    ['vendor' => $vendor, 'user' => $user] = appClientsTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = appClientFixture($vendor, ['business_name' => 'Johnson Household']);
+
+    $projectFixture = function (string $name) use ($client, $vendor) {
+        $project = Project::withoutEvents(fn () => Project::create([
+            'project_name' => $name,
+            'client_id' => $client->id,
+            'address' => '1 Oak St',
+            'city' => 'Northbrook',
+            'state' => 'IL',
+            'zip_code' => '60062',
+            'belongs_to_vendor_id' => $vendor->id,
+        ]));
+        $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+
+        return $project;
+    };
+
+    // Created oldest-id-first, but statused out of id order — the sort
+    // must follow the status date, not creation/id order (what the app
+    // used to fall back to before this field existed).
+    $oldestId = $projectFixture('Deck');
+    $newestStatus = $projectFixture('Kitchen');
+    $middleStatus = $projectFixture('Bath');
+
+    ProjectStatus::create(['project_id' => $oldestId->id, 'belongs_to_vendor_id' => $vendor->id, 'status_code' => 6, 'start_date' => '2026-01-01']);
+    ProjectStatus::create(['project_id' => $newestStatus->id, 'belongs_to_vendor_id' => $vendor->id, 'status_code' => 6, 'start_date' => '2026-03-01']);
+    ProjectStatus::create(['project_id' => $middleStatus->id, 'belongs_to_vendor_id' => $vendor->id, 'status_code' => 6, 'start_date' => '2026-02-01']);
+
+    // A project with no status at all sorts last.
+    $noStatus = $projectFixture('Garage');
+
+    $response = $this->getJson('/api/app/v1/clients/'.$client->id)->assertOk();
+
+    expect(collect($response->json('data.projects'))->pluck('id')->all())
+        ->toBe([$newestStatus->id, $middleStatus->id, $oldestId->id, $noStatus->id]);
 });
 
 it('tenant isolation: a client visible to one vendor is invisible to another', function () {

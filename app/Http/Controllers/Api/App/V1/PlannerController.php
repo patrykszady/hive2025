@@ -23,13 +23,6 @@ class PlannerController extends Controller
         $fromInput = $request->validated('from');
         $toInput = $request->validated('to');
 
-        if (is_string($fromInput) && is_string($toInput)) {
-            $from = Carbon::createFromFormat('!Y-m-d', $fromInput, AppPlannerAgenda::TIMEZONE);
-            $to = Carbon::createFromFormat('!Y-m-d', $toInput, AppPlannerAgenda::TIMEZONE);
-        } else {
-            [$from, $to] = $agenda->defaultRange();
-        }
-
         $filters = [
             'search' => trim((string) $request->validated('search', '')),
             'project_ids' => array_map('intval', (array) $request->validated('project_ids', [])),
@@ -39,7 +32,39 @@ class PlannerController extends Controller
             'mine' => $request->boolean('mine'),
         ];
 
-        return response()->json(['data' => $agenda->agenda($request->user(), $from, $to, $filters)]);
+        if (is_string($fromInput) && is_string($toInput)) {
+            // Legacy explicit range: every day in it shows, same as before —
+            // no tri-state filtering and no paging affordance apply to a
+            // caller-picked window.
+            $from = Carbon::createFromFormat('!Y-m-d', $fromInput, AppPlannerAgenda::TIMEZONE);
+            $to = Carbon::createFromFormat('!Y-m-d', $toInput, AppPlannerAgenda::TIMEZONE);
+            $when = 'all';
+            $daysBack = $from->lessThan($agenda->today()) ? (int) $from->diffInDays($agenda->today()) : 0;
+            $daysForward = $to->greaterThan($agenda->today()) ? (int) $agenda->today()->diffInDays($to) : 0;
+            $hidePending = false;
+            $canLoadEarlier = false;
+            $canLoadLater = false;
+        } else {
+            $when = $request->validated('when') ?? 'upcoming';
+            $requestedBack = $request->validated('days_back') !== null ? (int) $request->validated('days_back') : null;
+            $requestedForward = $request->validated('days_forward') !== null ? (int) $request->validated('days_forward') : null;
+
+            [$from, $to, $daysBack, $daysForward] = $agenda->resolveWindow($when, $requestedBack, $requestedForward);
+
+            $hidePending = $when === 'past';
+            $canLoadEarlier = $when !== 'upcoming' && $daysBack < AppPlannerAgenda::MAX_WINDOW_DAYS;
+            $canLoadLater = $when !== 'past' && $daysForward < AppPlannerAgenda::MAX_WINDOW_DAYS;
+        }
+
+        $data = $agenda->agenda($request->user(), $from, $to, $filters, $hidePending);
+
+        return response()->json(['data' => $data + [
+            'when' => $when,
+            'days_back' => $daysBack,
+            'days_forward' => $daysForward,
+            'can_load_earlier' => $canLoadEarlier,
+            'can_load_later' => $canLoadLater,
+        ]]);
     }
 
     public function actionItems(Request $request, AppPlannerAgenda $agenda): JsonResponse

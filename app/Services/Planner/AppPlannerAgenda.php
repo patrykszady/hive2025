@@ -47,6 +47,21 @@ class AppPlannerAgenda
      */
     private const STATUS_PRIORITY = [6 => 1, 8 => 2, 4 => 3, 5 => 4];
 
+    /**
+     * How far a fresh "upcoming"/"past"/"all" window reaches before the app
+     * asks to load more — mirrors CardsIndex's initial
+     * previousDaysLoaded/futureDaysLoaded (7 each). Picked slightly larger
+     * here since the app has no desktop week-view fortnight to pad the
+     * mobile agenda out to.
+     */
+    public const DEFAULT_WINDOW_DAYS = 14;
+
+    /**
+     * The window on either side of today never grows past this many days —
+     * mirrors CardsIndex::MAX_DAYS_LOADED.
+     */
+    public const MAX_WINDOW_DAYS = 120;
+
     /** "Today" for the agenda, independent of any browser-timezone cookie — the app carries no such cookie. */
     public function today(): Carbon
     {
@@ -54,8 +69,8 @@ class AppPlannerAgenda
     }
 
     /**
-     * This week, Monday to Sunday, in the agenda's timezone — the default
-     * range when the request gives neither `from` nor `to`.
+     * This week, Monday to Sunday, in the agenda's timezone — kept for an
+     * explicit `from`/`to` request with neither given (legacy callers).
      *
      * @return array{0: Carbon, 1: Carbon}
      */
@@ -67,6 +82,42 @@ class AppPlannerAgenda
     }
 
     /**
+     * Resolves the mobile agenda's day window from the same tri-state
+     * filter the web's mobile agenda uses (App\Livewire\Planner\
+     * CardsIndex::$filterDateRange — 'upcoming' | 'past' | 'all'): each
+     * direction has its own natural default span and its own independently
+     * growable size ($daysBack/$daysForward, null meaning "use the
+     * default"), mirroring CardsIndex's previousDaysLoaded/futureDaysLoaded
+     * paging in day-count form instead of a fixed calendar week.
+     *
+     * @return array{0: Carbon, 1: Carbon, 2: int, 3: int} [from, to, daysBack, daysForward]
+     */
+    public function resolveWindow(string $when, ?int $daysBack, ?int $daysForward): array
+    {
+        $today = $this->today();
+
+        $back = $daysBack ?? match ($when) {
+            'past', 'all' => self::DEFAULT_WINDOW_DAYS,
+            default => 0,
+        };
+        $forward = $daysForward ?? match ($when) {
+            'upcoming', 'all' => self::DEFAULT_WINDOW_DAYS,
+            default => 0,
+        };
+
+        $back = max(0, min(self::MAX_WINDOW_DAYS, $back));
+        $forward = max(0, min(self::MAX_WINDOW_DAYS, $forward));
+
+        $from = $today->copy()->subDays($back);
+        $to = match ($when) {
+            'past' => $today->copy()->subDay(),
+            default => $today->copy()->addDays($forward), // 'upcoming' and 'all'
+        };
+
+        return [$from, $to, $back, $forward];
+    }
+
+    /**
      * The week agenda for $user's vendor between $from and $to (inclusive),
      * plus the undated "To schedule" tray — narrowed by $filters exactly
      * like the web planner's filter toolbar/mobile Filters modal
@@ -74,10 +125,14 @@ class AppPlannerAgenda
      * name OR task title/vendor), project_ids, status_codes, vendor_id,
      * user_ids and mine all combine with AND, same as there.
      *
+     * $hidePending mirrors CardsIndex::mobileUnscheduledTasks() hiding the
+     * "To schedule" tray entirely while viewing Past only — true when the
+     * caller resolved $when === 'past'.
+     *
      * @param  array{search?: string, project_ids?: list<int>, status_codes?: list<int>, vendor_id?: ?int, user_ids?: list<int>, mine?: bool}  $filters
-     * @return array{from: string, to: string, today: string, days: list<array{date: string, is_today: bool, is_weekend: bool, groups: list<array{project: array, tasks: list<array>}>}>, to_schedule: list<array{project: array, tasks: list<array>}>}
+     * @return array{from: string, to: string, today: string, days: list<array{date: string, is_today: bool, is_weekend: bool, groups: list<array{project: array, tasks: list<array>}>}>, to_schedule: list<array{project: array, tasks: list<array>}>, task_count: int, pending_task_count: int}
      */
-    public function agenda(User $user, Carbon $from, Carbon $to, array $filters = []): array
+    public function agenda(User $user, Carbon $from, Carbon $to, array $filters = [], bool $hidePending = false): array
     {
         $vendorId = (int) $user->vendor->id;
         $userId = (int) $user->id;
@@ -157,7 +212,21 @@ class AppPlannerAgenda
             ->values()
             ->all();
 
-        $toSchedule = collect($toScheduleByProject)
+        // mobileTaskCount()/mobileUnscheduledTasks() equivalents: counted
+        // from the raw Task objects (before they're reshaped into payload
+        // arrays) so a task booked on several visible days is still counted
+        // once. $hidePending mirrors mobileUnscheduledTasks() returning
+        // empty while viewing Past only.
+        $pendingTaskIds = collect($toScheduleByProject)
+            ->flatMap(fn (array $group): array => collect($group['tasks'])->map(fn (Task $task): int => $task->id)->all())
+            ->unique();
+
+        $scheduledTaskIds = collect($byDate)
+            ->flatMap(fn (array $projectGroups): array => collect($projectGroups)->all())
+            ->flatMap(fn (array $group): array => collect($group['tasks'])->map(fn (Task $task): int => $task->id)->all())
+            ->unique();
+
+        $toSchedule = $hidePending ? [] : collect($toScheduleByProject)
             ->map(fn (array $group): array => [
                 'project' => $this->projectPayload($group['project'], $vendorId),
                 'tasks' => collect($group['tasks'])->map(fn (Task $task): array => $this->undatedTaskPayload($task))->values()->all(),
@@ -171,6 +240,8 @@ class AppPlannerAgenda
             'today' => $today,
             'days' => $days,
             'to_schedule' => $toSchedule,
+            'task_count' => $scheduledTaskIds->merge($hidePending ? collect() : $pendingTaskIds)->unique()->count(),
+            'pending_task_count' => $hidePending ? 0 : $pendingTaskIds->count(),
         ];
     }
 
@@ -450,7 +521,7 @@ class AppPlannerAgenda
     }
 
     /**
-     * @return array{id: int, name: ?string, short_address: ?string, status: ?array{code: int, title: string, color: string}}
+     * @return array{id: int, name: ?string, short_address: ?string, status: ?array{code: int, title: string, color: string}, subtitle: ?string}
      */
     private function projectPayload(Project $project, int $vendorId): array
     {
@@ -465,7 +536,27 @@ class AppPlannerAgenda
                 'title' => $status->title,
                 'color' => $status->badge_color,
             ] : null,
+            'subtitle' => $this->projectSubtitle($project),
         ];
+    }
+
+    /**
+     * "Abbey | Kitchen" — the client's last name(s) and the project name,
+     * joined like the web agenda's card
+     * (resources/views/livewire/planner/_agenda.blade.php:
+     * `$project->client?->last_names` ' | ' `$project->project_name`); null
+     * when neither is set.
+     */
+    private function projectSubtitle(Project $project): ?string
+    {
+        $lastNames = trim((string) ($project->client?->last_names ?? ''));
+        $name = trim((string) ($project->project_name ?? ''));
+
+        if ($lastNames === '' && $name === '') {
+            return null;
+        }
+
+        return $lastNames !== '' && $name !== '' ? "{$lastNames} | {$name}" : ($lastNames ?: $name);
     }
 
     /** @return array{id: int, name: ?string, short_address: ?string} */
@@ -479,7 +570,7 @@ class AppPlannerAgenda
     }
 
     /**
-     * @return array{id: int, title: string, type: ?string, arrival: ?string, day_counter: ?array{current: int, total: int}, progress: ?int, notes: ?string, vendor: ?string, users: list<string>, is_meet: bool}
+     * @return array{id: int, title: string, type: ?string, arrival: ?string, day_counter: ?array{current: int, total: int}, progress: ?int, notes: ?string, vendor: ?string, users: list<string>, is_meet: bool, checklist_done: int, checklist_total: int}
      */
     private function taskPayload(Task $task, string $date): array
     {
@@ -494,10 +585,11 @@ class AppPlannerAgenda
             'vendor' => $task->vendor?->name,
             'users' => $this->taskUserNames($task),
             'is_meet' => $task->type === 'Meet',
+            ...$this->checklistCounts($task),
         ];
     }
 
-    /** @return array{id: int, title: string, type: ?string, vendor: ?string, users: list<string>} */
+    /** @return array{id: int, title: string, type: ?string, vendor: ?string, users: list<string>, checklist_done: int, checklist_total: int} */
     private function undatedTaskPayload(Task $task): array
     {
         return [
@@ -506,6 +598,30 @@ class AppPlannerAgenda
             'type' => $task->type,
             'vendor' => $task->vendor?->name,
             'users' => $this->taskUserNames($task),
+            ...$this->checklistCounts($task),
+        ];
+    }
+
+    /**
+     * How many of a task's checklist boxes are ticked — the same "X/Y
+     * to-dos" count the web's compact planner card shows
+     * (resources/views/components/upcoming-tasks-list-card-content.blade.php's
+     * $compactChecklist), lighter than the full interactive list the Home
+     * tab sends (App\Services\Dashboard\AppHomeAgenda::checklistPayload()):
+     * the planner's agenda can carry many tasks at once, so this sends only
+     * the two counts rather than every item's text.
+     *
+     * @return array{checklist_done: int, checklist_total: int}
+     */
+    private function checklistCounts(Task $task): array
+    {
+        $items = collect((array) data_get($task->options, 'checklist', []))
+            ->map(fn ($item) => is_scalar($item) ? ['text' => $item] : (array) $item)
+            ->filter(fn (array $item): bool => trim((string) ($item['text'] ?? '')) !== '');
+
+        return [
+            'checklist_done' => $items->where('completed', true)->count(),
+            'checklist_total' => $items->count(),
         ];
     }
 
