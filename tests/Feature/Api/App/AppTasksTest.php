@@ -247,3 +247,148 @@ it('404s a nonexistent task and 403s a task on an invisible project', function (
 
     $this->getJson("/api/app/v1/tasks/{$otherTask->id}")->assertForbidden();
 });
+
+// --- Checklist (App\Livewire\Tasks\TaskCreate's Notes tab checklist, mirrored via App\Services\Tasks\TaskWriter) ---
+
+it('creates a task with a checklist, with no merge needed for a brand-new row', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+
+    $response = $this->postJson('/api/app/v1/tasks', [
+        'title' => 'Install cabinets',
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'dates' => [],
+        'checklist' => [
+            ['text' => 'Measure twice'],
+            ['text' => 'Order hardware', 'completed' => true],
+        ],
+    ])->assertCreated();
+
+    $task = Task::query()->findOrFail($response->json('data.id'));
+    // Raw storage: TaskWriter::store() writes a brand-new checklist exactly
+    // as given (nothing to merge against — same as TaskForm::store()), so an
+    // item posted without `completed` (as a hand-built test payload might,
+    // unlike the real app screen's always-shaped items) stays absent here;
+    // the uid/completed defaults only apply on normalized read — see the
+    // response assertions below, which are what an app screen actually sees.
+    $stored = json_decode(json_encode($task->options->checklist), true);
+
+    expect($stored)->toHaveCount(2)
+        ->and($stored[0]['text'])->toBe('Measure twice')
+        ->and($stored[1]['text'])->toBe('Order hardware')
+        ->and($stored[1]['completed'])->toBeTrue();
+
+    $response->assertJsonCount(2, 'data.checklist')
+        ->assertJsonPath('data.checklist.0.text', 'Measure twice')
+        ->assertJsonPath('data.checklist.0.completed', false)
+        ->assertJsonPath('data.checklist.1.completed', true);
+
+    expect($response->json('data.checklist.0.uid'))->not->toBe('');
+});
+
+it('reads a normalized checklist back, with a uid even for a legacy item saved without one', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'project_id' => $project->id,
+        'title' => 'Legacy task',
+        'type' => 'Task',
+        'order' => 0,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+        'options' => ['checklist' => [['text' => 'Pre-uid item', 'completed' => false]]],
+    ]));
+
+    $response = $this->getJson("/api/app/v1/tasks/{$task->id}")->assertOk();
+
+    expect($response->json('data.checklist.0.text'))->toBe('Pre-uid item')
+        ->and($response->json('data.checklist.0.uid'))->not->toBe('');
+});
+
+it('updates a checklist by adding, completing and removing items', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'project_id' => $project->id,
+        'title' => 'Install cabinets',
+        'type' => 'Task',
+        'order' => 0,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+        'options' => ['checklist' => [
+            ['uid' => 'c1', 'text' => 'Measure twice', 'completed' => false],
+            ['uid' => 'c2', 'text' => 'Order hardware', 'completed' => false],
+        ]],
+    ]));
+
+    // The screen loaded with both items unchecked (checklist_original), ticks
+    // the first, drops the second, and adds a third.
+    $original = [
+        ['uid' => 'c1', 'text' => 'Measure twice', 'completed' => false],
+        ['uid' => 'c2', 'text' => 'Order hardware', 'completed' => false],
+    ];
+    $incoming = [
+        ['uid' => 'c1', 'text' => 'Measure twice', 'completed' => true],
+        ['uid' => 'c3', 'text' => 'Sweep up', 'completed' => false],
+    ];
+
+    $this->postJson("/api/app/v1/tasks/{$task->id}", [
+        'title' => $task->title,
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'dates' => [],
+        'checklist' => $incoming,
+        'checklist_original' => $original,
+    ])->assertOk();
+
+    $stored = json_decode(json_encode($task->fresh()->options->checklist), true);
+    $byUid = collect($stored)->keyBy('uid');
+
+    expect($stored)->toHaveCount(2)
+        ->and($byUid->has('c2'))->toBeFalse()
+        ->and($byUid['c1']['completed'])->toBeTrue()
+        ->and($byUid['c3']['text'])->toBe('Sweep up');
+});
+
+it("keeps a box ticked elsewhere while this screen was open, instead of reverting it (Task::mergeChecklist())", function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'project_id' => $project->id,
+        'title' => 'Install cabinets',
+        'type' => 'Task',
+        'order' => 0,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+        'options' => ['checklist' => [['uid' => 'c1', 'text' => 'Measure twice', 'completed' => false]]],
+    ]));
+
+    // This screen loaded with the box unchecked...
+    $original = [['uid' => 'c1', 'text' => 'Measure twice', 'completed' => false]];
+
+    // ...then, before this screen saves, a task card ticks it in the DB...
+    $task->update(['options' => ['checklist' => [['uid' => 'c1', 'text' => 'Measure twice', 'completed' => true]]]]);
+
+    // ...and this screen now saves, never having touched that box itself
+    // (incoming === original for that item).
+    $this->postJson("/api/app/v1/tasks/{$task->id}", [
+        'title' => $task->title,
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'dates' => [],
+        'checklist' => $original,
+        'checklist_original' => $original,
+    ])->assertOk()->assertJsonPath('data.checklist.0.completed', true);
+
+    $stored = json_decode(json_encode($task->fresh()->options->checklist), true);
+    expect($stored[0]['completed'])->toBeTrue();
+});

@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Api\App;
 
+use App\Models\Task;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -48,6 +49,13 @@ class TaskResource extends JsonResource
             'start_date' => $this->start_date?->toDateString(),
             'end_date' => $this->end_date?->toDateString(),
             'time_settings' => (array) ($this->options->time_settings ?? []),
+            // Normalized (every item carries a stable uid, even a legacy
+            // row saved before uids existed) — the app sends this same list
+            // back as `checklist_original` on save, so
+            // App\Services\Tasks\TaskWriter::update()'s three-way merge
+            // (Task::mergeChecklist()) can tell an untouched box from one
+            // this screen actually changed.
+            'checklist' => Task::normalizeChecklist($this->options->checklist ?? []),
             'notes' => $this->notes,
             'progress' => $this->progress !== null ? (int) $this->progress : null,
             'order' => $this->order,
