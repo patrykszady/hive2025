@@ -149,9 +149,13 @@ class EstimateLineItemController extends Controller
 
         $existing = $found->estimate_line_items()->findOrFail($lineItem);
 
-        $credit = $writer->creditToChangeOrder($existing, (float) $existing->quantity, (float) $existing->cost);
+        $credit = $writer->creditToChangeOrder(
+            $existing,
+            (float) ($request->validated('quantity') ?? $existing->quantity),
+            (float) ($request->validated('cost') ?? $existing->cost),
+        );
 
-        abort_unless($credit, 422, 'This line item is not locked into a signed contract.');
+        abort_unless($credit, 422, 'This line item can\'t be credited.');
 
         return response()->json(['data' => $this->lineItemArray($credit->fresh('allowances'))], 201);
     }

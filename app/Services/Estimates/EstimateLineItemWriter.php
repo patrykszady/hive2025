@@ -196,20 +196,36 @@ class EstimateLineItemWriter
     }
 
     /**
-     * Create an offsetting "Credit" copy of a line item locked into the
-     * signed contract — the way to back it out of the contract without
-     * touching the original. Returns null when the item isn't actually
-     * locked (credits only exist for signed-contract items) — the shared
-     * body of App\Livewire\LineItems\EstimateLineItemCreate::creditToChangeOrder()
+     * Whether a line item can be credited into a change order: one locked
+     * into a signed contract, or any line of an estimate not fully signed
+     * yet (2026-10-20 — Patryk wanted credits on active, unsigned estimates
+     * too). A credit itself never is, and neither is a change-order line of
+     * a signed contract (still editable directly).
+     */
+    public function canCredit(EstimateLineItem $lineItem): bool
+    {
+        if ($lineItem->credit_for_id || ! $lineItem->section) {
+            return false;
+        }
+
+        return $lineItem->section->isLocked() || ! $lineItem->estimate?->isFullySigned();
+    }
+
+    /**
+     * Create an offsetting "Credit" copy of a line item in a change-order
+     * section below — the way to back it out of the scope without touching
+     * the original. Returns null when the item can't be credited (see
+     * canCredit()) — the shared body of
+     * App\Livewire\LineItems\EstimateLineItemCreate::creditToChangeOrder()
      * and the Hive Contractors app's EstimateLineItemController::credit().
      */
     public function creditToChangeOrder(EstimateLineItem $original, float $quantity, float $cost): ?EstimateLineItem
     {
-        if (! $original->section?->isLocked()) {
+        if (! $this->canCredit($original)) {
             return null;
         }
 
-        $section = app(EstimateSectionWriter::class)->resolveChangeOrderSection($original->estimate);
+        $section = app(EstimateSectionWriter::class)->resolveChangeOrderSection($original->estimate, $original->section_id);
 
         $quantity = $quantity ?: ($original->quantity ?: 1);
         $total = number_format($quantity * $cost, 2, '.', '');

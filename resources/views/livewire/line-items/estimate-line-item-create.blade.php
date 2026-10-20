@@ -1,6 +1,8 @@
 @php
     $section = $section_id ? $estimate->estimate_sections->find($section_id) : null;
     $isLocked = $edit_line_item && $section?->isLocked();
+    $canCredit = $edit_line_item && $estimate_line_item instanceof \App\Models\EstimateLineItem
+        && app(\App\Services\Estimates\EstimateLineItemWriter::class)->canCredit($estimate_line_item);
 @endphp
 <x-form-modal name="estimate_line_item_form_modal" :title="$view_text['card_title']">
     <form id="estimate_line_item_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
@@ -237,10 +239,9 @@
 
         <flux:spacer />
 
-        {{-- Credits only apply to line items locked into the signed contract
-             (same condition that renders "Hide") — change-order items added
-             after signing are editable directly. --}}
-        @if($isLocked)
+        {{-- Credit: a signed contract's locked line, or any line of an
+             estimate not signed yet (EstimateLineItemWriter::canCredit()). --}}
+        @if($canCredit)
             <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
                 <flux:button
                     wire:click="creditToChangeOrder"

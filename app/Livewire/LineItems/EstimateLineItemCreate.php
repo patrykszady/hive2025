@@ -324,8 +324,7 @@ class EstimateLineItemCreate extends Component
 
         $credit = app(EstimateLineItemWriter::class)->creditToChangeOrder($original, $quantity, $cost);
 
-        // Credits only exist for line items locked into the signed contract —
-        // items in post-signing sections (change orders) are simply editable.
+        // Null when the line can't be credited (see EstimateLineItemWriter::canCredit()).
         if (! $credit) {
             return;
         }

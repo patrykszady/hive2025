@@ -17,8 +17,18 @@ class CreditEstimateLineItemRequest extends FormRequest
         return (bool) $this->user()?->can('create', LineItem::class);
     }
 
+    /**
+     * Optional quantity/cost for a partial credit — the web credits whatever
+     * the line item's form holds (EstimateLineItemCreate::creditToChangeOrder()).
+     * Left out, the whole line is credited.
+     *
+     * @return array<string, array<int, string>>
+     */
     public function rules(): array
     {
-        return [];
+        return [
+            'quantity' => ['nullable', 'numeric', 'gt:0'],
+            'cost' => ['nullable', 'numeric', 'min:0'],
+        ];
     }
 }

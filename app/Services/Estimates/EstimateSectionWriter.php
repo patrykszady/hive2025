@@ -247,14 +247,15 @@ class EstimateSectionWriter
      * and EstimateLineItemWriter::creditToChangeOrder(). Unlike
      * maybeCreateChangeOrderBid() (which only fires once a base bid exists),
      * this is unconditional — crediting is an explicit change-order action.
+     * $exceptSectionId keeps a credit out of the very section it credits.
      */
-    public function resolveChangeOrderSection(Estimate $estimate): EstimateSection
+    public function resolveChangeOrderSection(Estimate $estimate, ?int $exceptSectionId = null): EstimateSection
     {
         $existing = $estimate->estimate_sections()
             ->with('bid')
             ->orderByDesc('order')
             ->get()
-            ->first(fn ($section) => $section->bid && (int) $section->bid->type >= 2 && ! $section->isLocked());
+            ->first(fn ($section) => $section->bid && (int) $section->bid->type >= 2 && ! $section->isLocked() && $section->id !== $exceptSectionId);
 
         if ($existing) {
             return $existing;

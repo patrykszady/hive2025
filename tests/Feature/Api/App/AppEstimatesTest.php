@@ -1256,7 +1256,7 @@ it('credits a line item locked into the signed contract, like EstimateLineItemCr
         ->and((float) $lineItem->fresh()->total)->toBe(500.0);
 });
 
-it('refuses crediting a line item that is not locked', function () {
+it('credits a line item on an estimate not signed yet, and says which lines can be credited', function () {
     ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);
 
@@ -1267,9 +1267,34 @@ it('refuses crediting a line item that is not locked', function () {
     $catalogItem = appEstimatesCatalogItem(['cost' => 500]);
     $lineItem = appEstimatesLineItemRow($estimate, $section, $catalogItem, ['quantity' => 1, 'cost' => 500, 'total' => 500]);
 
-    $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/credit")->assertStatus(422);
+    $this->getJson("/api/app/v1/estimates/{$estimate->id}")
+        ->assertOk()
+        ->assertJsonPath('data.sections.0.line_items.0.can_credit', true);
 
-    expect(EstimateLineItem::where('estimate_id', $estimate->id)->count())->toBe(1);
+    $credit = $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/credit")->assertCreated();
+    expect((float) $credit->json('data.total'))->toBe(-500.0);
+
+    // A credit can't itself be credited.
+    $creditId = $credit->json('data.id');
+    $creditRow = collect($this->getJson("/api/app/v1/estimates/{$estimate->id}")->json('data.sections'))
+        ->flatMap(fn ($s) => $s['line_items'])
+        ->firstWhere('id', $creditId);
+    expect($creditRow['can_credit'])->toBeFalse();
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$creditId}/credit")->assertStatus(422);
+});
+
+it('credits part of a line item when the quantity is given, like the web form', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $estimate = appEstimatesRow($vendor, appEstimatesProject($vendor, appEstimatesClient($vendor)));
+    $section = appEstimatesSection($estimate, ['total' => 1000]);
+    $lineItem = appEstimatesLineItemRow($estimate, $section, appEstimatesCatalogItem(['cost' => 100]), ['quantity' => 10, 'cost' => 100, 'total' => 1000]);
+
+    $credit = $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/credit", ['quantity' => 3])->assertCreated();
+
+    expect((float) $credit->json('data.quantity'))->toBe(3.0)
+        ->and((float) $credit->json('data.total'))->toBe(-300.0);
 });
 
 it('refuses a Member crediting a line item, like the web', function () {

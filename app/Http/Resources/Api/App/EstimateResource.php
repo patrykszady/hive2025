@@ -118,18 +118,32 @@ class EstimateResource extends JsonResource
      */
     protected function sectionArray(EstimateSection $section): array
     {
+        $locked = $section->isLocked();
+        // EstimateLineItemWriter::canCredit(), worked out once per section:
+        // a signed contract's locked lines, or any line while not fully signed.
+        $creditable = $locked || ! $this->fullySigned();
+
         return [
             'id' => $section->id,
             'name' => $section->name,
             'order' => $section->order,
             'total' => round((float) $section->total, 2),
-            'locked' => $section->isLocked(),
+            'locked' => $locked,
             'line_items' => $section->estimate_line_items
                 ->sortBy('order')
                 ->values()
-                ->map(fn (EstimateLineItem $lineItem) => $this->lineItemArray($lineItem))
+                ->map(fn (EstimateLineItem $lineItem) => $this->lineItemArray($lineItem) + [
+                    'can_credit' => $creditable && ! $lineItem->credit_for_id,
+                ])
                 ->all(),
         ];
+    }
+
+    private ?bool $fullySigned = null;
+
+    protected function fullySigned(): bool
+    {
+        return $this->fullySigned ??= $this->resource->isFullySigned();
     }
 
     /**
