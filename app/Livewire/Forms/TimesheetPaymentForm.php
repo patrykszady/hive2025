@@ -2,8 +2,7 @@
 
 namespace App\Livewire\Forms;
 
-use App\Models\Check;
-use App\Models\Vendor;
+use App\Services\Timesheets\TimesheetPaymentRecorder;
 
 use Illuminate\Validation\Rule;
 use Livewire\Form;
@@ -38,85 +37,43 @@ class TimesheetPaymentForm extends Form
         // Date will be set by browser's local date via Alpine.js
     }
 
+    /**
+     * @see TimesheetPaymentRecorder::record() — the actual write, shared
+     * with the app's TimesheetPaymentController. Returns the Check written,
+     * or null when the payment settled entirely through `paid_by` (the web
+     * component's save() tells the two apart by null, not the old
+     * 'timesheets' string sentinel).
+     */
     public function store()
     {
-        // Use resolved viaVendor from parent component (if present) instead of dynamic pivot property
-        $via_vendor = $this->component->viaVendor; // may be null
+        $selection = [
+            'weekly_timesheet_ids' => $this->selectedIds($this->component->selectedWeeklyTimesheets),
+            'employee_weekly_timesheet_ids' => $this->selectedIds($this->component->selectedEmployeeWeeklyTimesheets),
+            'paid_expense_ids' => $this->selectedIds($this->component->selectedUserPaidExpenses),
+            'reimbursement_expense_ids' => $this->selectedIds($this->component->selectedUserReimbursementExpenses),
+        ];
 
-        // Previous behavior: when a user was payable "via" a vendor we created the check with vendor_id only
-        // (user_id null). This caused checks (e.g. 3521 / 3522) to lack the direct employee user_id reference.
-        // Updated behavior: always attribute the check to the user (user_id) so downstream logic (timesheets,
-        // ownership, filtering) consistently finds the employee. We intentionally leave vendor_id null here to
-        // preserve the invariant that a payment check is either to a user OR a vendor, not both, unless we later
-        // introduce an explicit via_vendor_id column.
-        if ($via_vendor) {
-            $check_user_id = $this->component->user->id;    // ensure employee captured
-            $check_vendor_id = null;                        // do not set intermediary vendor on the check
-        } else {
-            $check_user_id = $this->component->user->id;
-            $check_vendor_id = null;
-        }
+        return app(TimesheetPaymentRecorder::class)->record(
+            auth()->user(),
+            $this->component->user,
+            $selection,
+            (string) $this->date,
+            $this->component->check_type ?: null,
+            $this->toNullableInt($this->component->check_number),
+            $this->toNullableInt($this->component->bank_account_id),
+            $this->toNullableInt($this->paid_by),
+            $this->invoice,
+        );
+    }
 
-        if (empty($this->paid_by)) {
-            $check = Check::create([
-                'check_type' => $this->component->check_type,
-                'check_number' => $this->component->check_number,
-                'date' => $this->date,
-                'bank_account_id' => $this->component->bank_account_id,
-                'user_id' => $check_user_id,
-                'vendor_id' => $check_vendor_id,
-                //via_vendor_id....
-                'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                'created_by_user_id' => auth()->user()->id,
-            ]);
-        }
+    /** @return list<int> */
+    private function selectedIds(array $selection): array
+    {
+        return array_keys(array_filter($selection));
+    }
 
-        // Helper closures to test selection arrays (safe default false)
-        $isSelectedTimesheet = fn($id) => (bool) ($this->component->selectedWeeklyTimesheets[$id] ?? false);
-        $isSelectedEmployeeTimesheet = fn($id) => (bool) ($this->component->selectedEmployeeWeeklyTimesheets[$id] ?? false);
-        $isSelectedPaidExpense = fn($id) => (bool) ($this->component->selectedUserPaidExpenses[$id] ?? false);
-        $isSelectedReimbExpense = fn($id) => (bool) ($this->component->selectedUserReimbursementExpenses[$id] ?? false);
-
-        // Weekly timesheets (user's own)
-        foreach ($this->component->weekly_timesheets as $weekly_timesheet) {
-            if (! $isSelectedTimesheet($weekly_timesheet->id)) { continue; }
-            $weekly_timesheet->check_id = isset($check) ? $check->id : null;
-            $weekly_timesheet->paid_by = isset($check) ? null : $this->paid_by;
-            $weekly_timesheet->invoice = isset($check) ? null : $this->invoice;
-            $weekly_timesheet->save();
-        }
-
-        // Employee timesheets paid by user (must always attach to created check when paying)
-        if (isset($check)) {
-            foreach ($this->component->employee_weekly_timesheets as $weekly_timesheet) {
-                if (! $isSelectedEmployeeTimesheet($weekly_timesheet->id)) { continue; }
-                $weekly_timesheet->check_id = $check->id;
-                $weekly_timesheet->save();
-            }
-        }
-
-        // User paid expenses
-        foreach ($this->component->user_paid_expenses as $expense) {
-            if (! $isSelectedPaidExpense($expense->id)) { continue; }
-            $expense->check_id = isset($check) ? $check->id : null;
-            $expense->save();
-        }
-
-        // User reimbursement expenses (deductions)
-        foreach ($this->component->user_reimbursement_expenses as $expense) {
-            if (! $isSelectedReimbExpense($expense->id)) { continue; }
-            $expense->check_id = isset($check) ? $check->id : null;
-            $expense->paid_by = isset($check) ? null : $this->paid_by;
-            $expense->save();
-        }
-
-        if (isset($check)) {
-            // Recalculate check amount from attached relations — reimbursement
-            // expenses count as deductions (centralized in Check::recalculateAmount)
-            $check->recalculateAmount();
-            return $check;
-        }
-
-        return 'timesheets';
+    private function toNullableInt(mixed $value): ?int
+    {
+        return ($value === null || $value === '') ? null : (int) $value;
     }
 }

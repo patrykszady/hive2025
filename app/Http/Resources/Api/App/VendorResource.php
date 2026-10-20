@@ -24,6 +24,8 @@ class VendorResource extends JsonResource
 
     protected bool $canManage = false;
 
+    protected bool $canPay = false;
+
     /**
      * Whether the viewer may manage this vendor (VendorPolicy::update) — the
      * same gate the web's YTD-paid figure and vendor-docs card use. Passed
@@ -33,6 +35,20 @@ class VendorResource extends JsonResource
     public function canManage(bool $canManage): static
     {
         $this->canManage = $canManage;
+
+        return $this;
+    }
+
+    /**
+     * Whether the viewer may write a payment check to this vendor
+     * (CheckPolicy::create) — a different, narrower gate than canManage():
+     * an Admin whose own vendor is 1099 can manage records but may never
+     * write a check (CheckPolicy::create's business_type check), exactly
+     * like VendorPaymentCreate::mount()'s own authorize() call.
+     */
+    public function canPay(bool $canPay): static
+    {
+        $this->canPay = $canPay;
 
         return $this;
     }
@@ -77,6 +93,11 @@ class VendorResource extends JsonResource
             'business_website' => $isRetail ? null : $vendor->business_website,
             'ytd_paid' => $showYtdPaid ? (float) $vendor->ytd_expense_sum : null,
             'can_manage' => $this->canManage,
+            // vendor-details.blade's "Make Payment" button: never your own
+            // company, never a Retail vendor, and (unlike the web's button,
+            // which shows unconditionally and lets the destination page
+            // 403) only when CheckPolicy::create genuinely allows it.
+            'can_pay' => $this->canPay && $vendor->id !== $viewerVendorId && ! $isRetail,
             'web_path' => '/vendors/'.$vendor->id,
         ];
 
