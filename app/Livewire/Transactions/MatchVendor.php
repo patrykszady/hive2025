@@ -3,11 +3,11 @@
 namespace App\Livewire\Transactions;
 
 use App\Http\Controllers\TransactionController;
-use App\Models\Expense;
 use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Services\Transactions\UnmatchedTransactionCards;
 use App\Services\VendorSuggestionService;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -71,53 +71,7 @@ class MatchVendor extends Component
     #[Computed]
     public function merchantCards(): Collection
     {
-        // transactionsSinVendor() drops Transaction's own tenant scope (it
-        // needs to match against every bank's history), so re-apply it here:
-        // only the signed-in company's own bank accounts. Queried with
-        // withoutGlobalScopes() + an explicit vendor_id filter rather than
-        // BankAccountScope directly — that scope dereferences
-        // auth()->user()->vendor unconditionally and fatals for a guest or a
-        // user with no vendor.
-        $vendorId = auth()->user()?->vendor?->id;
-        $bankAccountIds = $vendorId
-            ? \App\Models\BankAccount::withoutGlobalScopes()->where('vendor_id', $vendorId)->pluck('id')
-            : collect();
-
-        return Transaction::transactionsSinVendor()
-            ->whereIn('bank_account_id', $bankAccountIds)
-            ->select([
-                'id',
-                'amount',
-                'transaction_date',
-                'plaid_merchant_description',
-                'plaid_merchant_name',
-                'bank_account_id',
-                // Lean location columns — the whole details JSON would drag
-                // every Plaid payload through the render. On MySQL a JSON null
-                // arrives as the string "null"; filtered below.
-                'details->location->city as plaid_city',
-                'details->location->region as plaid_region',
-            ])
-            ->with([
-                // withoutGlobalScopes at EVERY nesting level — a scoped nested
-                // load would drop sibling companies' bank names.
-                'bank_account' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bank_id', 'type'])->with([
-                    'bank' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'vendor_id', 'name', 'plaid_ins_id'])->with([
-                        'vendor' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'business_name']),
-                    ]),
-                ]),
-            ])
-            ->orderBy('plaid_merchant_description')
-            ->get()
-            ->each(function (Transaction $transaction): void {
-                $parts = collect([$transaction->plaid_city, $transaction->plaid_region])
-                    ->filter(fn ($part) => filled($part) && $part !== 'null');
-
-                // Display-only; these models never leave this request.
-                $transaction->setAttribute('card_location', $parts->implode(', '));
-            })
-            ->groupBy('plaid_merchant_description')
-            ->toBase();
+        return app(UnmatchedTransactionCards::class)->merchantCards(auth()->user());
     }
 
     /**
@@ -128,26 +82,7 @@ class MatchVendor extends Component
     #[Computed]
     public function expenseCards(): Collection
     {
-        $vendorId = auth()->user()?->vendor?->id;
-
-        if (! $vendorId) {
-            return collect();
-        }
-
-        return Expense::withoutGlobalScopes()
-            ->with(['receipts' => fn ($query) => $query->latest('id')])
-            ->whereNull('deleted_at')
-            ->where('vendor_id', 0)
-            ->where('belongs_to_vendor_id', $vendorId)
-            ->get()
-            ->groupBy(function (Expense $expense): string {
-                $receipt = $expense->receipts->first();
-
-                return is_array($receipt?->receipt_items) && isset($receipt->receipt_items['merchant_name'])
-                    ? (string) $receipt->receipt_items['merchant_name']
-                    : '';
-            })
-            ->toBase();
+        return app(UnmatchedTransactionCards::class)->expenseCards(auth()->user());
     }
 
     /**

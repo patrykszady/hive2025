@@ -3,8 +3,7 @@
 namespace App\Livewire\Transactions;
 
 use App\Models\Bank;
-use App\Models\Vendor;
-use App\Models\VendorTransaction;
+use App\Services\Transactions\VendorTransactionRuleService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -28,13 +27,7 @@ class VendorTransactionsPanel extends Component
 
     public array $new_vendor_transaction = [];
 
-    public array $depositCheckOptions = [
-        '' => 'None',
-        '1' => 'Deposit',
-        '2' => 'Check Paid',
-        '3' => 'Transfer/Zelle Out',
-        '4' => 'Cash Withdrawal',
-    ];
+    public array $depositCheckOptions = [];
 
     /** Filters the table by vendor name or description. */
     public string $search = '';
@@ -42,6 +35,7 @@ class VendorTransactionsPanel extends Component
 
     public function mount(): void
     {
+        $this->depositCheckOptions = app(VendorTransactionRuleService::class)->depositCheckOptions();
         $this->resetNewVendorTransaction();
     }
 
@@ -84,24 +78,16 @@ class VendorTransactionsPanel extends Component
             'new_vendor_transaction.options' => 'nullable|string',
         ]);
 
-        $payload = [
-            'vendor_id' => $this->normalizeVendorTransactionValue('vendor_id', $validated['new_vendor_transaction']['vendor_id'] ?? ''),
-            'deposit_check' => $this->normalizeVendorTransactionValue('deposit_check', $validated['new_vendor_transaction']['deposit_check'] ?? ''),
-            'amount_sign' => $this->normalizeVendorTransactionValue('amount_sign', $validated['new_vendor_transaction']['amount_sign'] ?? ''),
-            'plaid_inst_id' => ($validated['new_vendor_transaction']['plaid_inst_id'] ?? '') !== ''
-                ? trim((string) $validated['new_vendor_transaction']['plaid_inst_id'])
-                : null,
-            'desc' => trim((string) $validated['new_vendor_transaction']['desc']),
-            'options' => $this->formatVendorTransactionOptions($validated['new_vendor_transaction']['options'] ?? null),
-        ];
+        $rules = app(VendorTransactionRuleService::class);
+        $payload = $rules->buildPayload($validated['new_vendor_transaction']);
 
-        if ($this->vendorTransactionExists($payload)) {
+        if ($rules->exists($payload)) {
             $this->addError('new_vendor_transaction.desc', 'A matching vendor transaction already exists.');
 
             return;
         }
 
-        VendorTransaction::create($payload);
+        $rules->create($payload);
 
         $this->resetNewVendorTransaction();
         $this->loadVendorTransactions();
@@ -121,45 +107,7 @@ class VendorTransactionsPanel extends Component
     #[Computed]
     public function vendor_transactions(): LengthAwarePaginator
     {
-        $term = trim($this->search);
-
-        return VendorTransaction::query()
-            ->select([
-                'vendor_transactions.id',
-                'vendor_transactions.vendor_id',
-                'vendor_transactions.deposit_check',
-                'vendor_transactions.amount_sign',
-                'vendor_transactions.plaid_inst_id',
-                'vendor_transactions.desc',
-                'vendor_transactions.options',
-            ])
-            ->leftJoin('vendors', 'vendors.id', '=', 'vendor_transactions.vendor_id')
-            ->with(['vendor', 'bank'])
-            ->when($term !== '', fn ($query) => $query->where(fn ($where) => $where
-                ->where('vendor_transactions.desc', 'like', "%{$term}%")
-                ->orWhere('vendors.business_name', 'like', "%{$term}%")))
-            ->orderByRaw('vendors.business_name IS NULL')
-            ->orderByRaw('LOWER(vendors.business_name)')
-            ->orderBy('vendor_transactions.id')
-            ->paginate(self::PER_PAGE)
-            ->through(fn (VendorTransaction $transaction): array => [
-                'id' => $transaction->id,
-                'vendor' => $transaction->vendor ? [
-                    'id' => $transaction->vendor->id,
-                    'business_name' => $transaction->vendor->business_name,
-                ] : null,
-                'bank' => $transaction->bank ? [
-                    'id' => $transaction->bank->id,
-                    'name' => $transaction->bank->name,
-                    'plaid_ins_id' => $transaction->bank->plaid_ins_id,
-                ] : null,
-                'desc' => $transaction->desc,
-                'deposit_check' => $transaction->deposit_check,
-                'deposit_check_label' => $this->depositCheckLabel($transaction->deposit_check),
-                'amount_sign' => $transaction->amount_sign,
-                'plaid_inst_id' => $transaction->plaid_inst_id,
-                'options' => $transaction->options,
-            ]);
+        return app(VendorTransactionRuleService::class)->paginate($this->search, self::PER_PAGE);
     }
 
     protected function resetNewVendorTransaction(): void
@@ -172,53 +120,6 @@ class VendorTransactionsPanel extends Component
             'plaid_inst_id' => '',
             'options' => '',
         ];
-    }
-
-    protected function depositCheckLabel(?int $value): string
-    {
-        return $this->depositCheckOptions[(string) $value] ?? 'Unknown';
-    }
-
-    protected function formatVendorTransactionOptions(?string $value): ?string
-    {
-        if ($value === null || trim($value) === '') {
-            return json_encode('/i');
-        }
-
-        return json_encode(trim($value).'/i');
-    }
-
-    protected function normalizeVendorTransactionValue(string $field, mixed $value): mixed
-    {
-        if ($value === '') {
-            return null;
-        }
-
-        if (in_array($field, ['vendor_id', 'deposit_check', 'amount_sign'], true)) {
-            return (int) $value;
-        }
-
-        return $value;
-    }
-
-    protected function vendorTransactionExists(array $payload): bool
-    {
-        return VendorTransaction::query()
-            ->where('desc', $payload['desc'])
-            ->where('options', $payload['options'])
-            ->where(fn ($query) => $payload['vendor_id'] === null
-                ? $query->whereNull('vendor_id')
-                : $query->where('vendor_id', $payload['vendor_id']))
-            ->where(fn ($query) => $payload['deposit_check'] === null
-                ? $query->whereNull('deposit_check')
-                : $query->where('deposit_check', $payload['deposit_check']))
-            ->where(fn ($query) => $payload['amount_sign'] === null
-                ? $query->whereNull('amount_sign')
-                : $query->where('amount_sign', $payload['amount_sign']))
-            ->where(fn ($query) => $payload['plaid_inst_id'] === null
-                ? $query->whereNull('plaid_inst_id')
-                : $query->where('plaid_inst_id', $payload['plaid_inst_id']))
-            ->exists();
     }
 
     public function placeholder()

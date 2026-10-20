@@ -5,6 +5,7 @@ namespace App\Livewire\Banks;
 use App\Models\Bank;
 use App\Models\BankAccount;
 use App\Models\Transaction;
+use App\Services\Banks\BankAccountsGrouper;
 use App\Services\PlaidService;
 use Flux;
 
@@ -72,33 +73,10 @@ class BankShow extends Component
             return;
         }
 
-        // Group accounts by account_number and type, and include account options and checks
-        $this->accounts = $this->bank->accounts()->withTrashed()->get()
-            ->groupBy('account_number')
-            ->map(function ($accountsByNumber) {
-                return $accountsByNumber->groupBy('type')->map(function ($accountsByType) {
-                    // Find the latest account (most recently updated) to use for this account type
-                    $latestAccount = $accountsByType->sortByDesc('updated_at')->first();
-
-                    // Create a result structure with a single representative account
-                    $result = [
-                        'account' => $latestAccount, // Use the latest account as THE account
-                        'checks' => $accountsByType->flatMap(function ($account) {
-                            // Check::owner reads user + the user's vendor pivot
-                            // per row — eager load both so the card doesn't
-                            // fire 2 queries per check.
-                            return $account->checks()
-                                ->with(['user.vendors', 'vendor'])
-                                ->whereIn('check_type', ['Transfer', 'Check'])
-                                ->whereYear('date', '>=', 2024)
-                                ->whereDoesntHave('transactions')
-                                ->get();
-                        })
-                    ];
-
-                    return $result;
-                });
-            });
+        // Same grouping BankIndex batches across every bank — see
+        // BankAccountsGrouper for the account_number -> type -> {account,
+        // checks} shape.
+        $this->accounts = app(BankAccountsGrouper::class)->forBank($this->bank->id);
     }
 
     /**

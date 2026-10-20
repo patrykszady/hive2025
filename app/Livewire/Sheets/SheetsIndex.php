@@ -2,9 +2,9 @@
 
 namespace App\Livewire\Sheets;
 
-use App\Models\Bank;
 use App\Models\Sheet;
 use App\Models\BankAccount;
+use App\Services\Sheets\SheetBankOptions;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -82,15 +82,7 @@ class SheetsIndex extends Component
     #[Computed]
     public function availableBanks()
     {
-        return Bank::whereNotNull('plaid_access_token')
-            ->with(['accounts' => function ($query) {
-                $query->whereIn('type', ['Checking', 'Savings']);
-            }])
-            ->whereHas('accounts', function ($query) {
-                return $query->whereIn('type', ['Checking', 'Savings']);
-            })
-            ->get()
-            ->keyBy('id');
+        return app(SheetBankOptions::class)->available();
     }
 
     public function run()

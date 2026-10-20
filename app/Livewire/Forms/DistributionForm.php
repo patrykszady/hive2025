@@ -3,6 +3,7 @@
 namespace App\Livewire\Forms;
 
 use App\Models\Distribution;
+use App\Services\Distributions\DistributionFigures;
 use Livewire\Attributes\Rule;
 // use Livewire\Attributes\Validate;
 use Livewire\Form;
@@ -17,14 +18,8 @@ class DistributionForm extends Form
     #[Rule('required|min:3')]
     public $name = null;
 
-    public function store()
+    public function store(): Distribution
     {
-        $distribution = Distribution::create([
-            'vendor_id' => auth()->user()->vendor->id,
-            'name' => $this->name,
-            'user_id' => $this->user_id,
-        ]);
-
-        return $distribution;
+        return app(DistributionFigures::class)->create(auth()->user()->vendor, (int) $this->user_id, $this->name);
     }
 }

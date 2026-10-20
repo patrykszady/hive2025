@@ -6,6 +6,7 @@ use App\Models\Bank;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Services\Transactions\VendorTransactionRuleService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -29,13 +30,12 @@ class VendorTransactionEditModal extends Component
 
     public string $options = '';
 
-    public array $depositCheckOptions = [
-        '' => 'None',
-        '1' => 'Deposit',
-        '2' => 'Check Paid',
-        '3' => 'Transfer/Zelle Out',
-        '4' => 'Cash Withdrawal',
-    ];
+    public array $depositCheckOptions = [];
+
+    public function mount(): void
+    {
+        $this->depositCheckOptions = app(VendorTransactionRuleService::class)->depositCheckOptions();
+    }
 
     #[Computed]
     public function vendors()
@@ -91,28 +91,23 @@ class VendorTransactionEditModal extends Component
             return;
         }
 
-        $payload = [
-            'vendor_id' => $this->vendor_id === '' ? null : (int) $this->vendor_id,
-            'desc' => trim($this->desc),
-            'deposit_check' => $this->deposit_check === '' ? null : (int) $this->deposit_check,
-            'amount_sign' => $this->amount_sign === '' ? null : (int) $this->amount_sign,
-            'plaid_inst_id' => $this->plaid_inst_id === '' ? null : trim($this->plaid_inst_id),
-            'options' => $this->normalizedOptions($this->options),
-        ];
+        $rules = app(VendorTransactionRuleService::class);
+        $payload = $rules->buildPayload([
+            'vendor_id' => $this->vendor_id,
+            'desc' => $this->desc,
+            'deposit_check' => $this->deposit_check,
+            'amount_sign' => $this->amount_sign,
+            'plaid_inst_id' => $this->plaid_inst_id,
+            'options' => $this->options,
+        ]);
 
-        if ($this->vendorTransactionExists($payload, $transaction->id)) {
+        if ($rules->exists($payload, $transaction->id)) {
             $this->addError('desc', 'A matching vendor transaction already exists.');
 
             return;
         }
 
-        $transaction->vendor_id = $payload['vendor_id'];
-        $transaction->desc = $payload['desc'];
-        $transaction->deposit_check = $payload['deposit_check'];
-        $transaction->amount_sign = $payload['amount_sign'];
-        $transaction->plaid_inst_id = $payload['plaid_inst_id'];
-        $transaction->options = $payload['options'];
-        $transaction->save();
+        $rules->update($transaction, $payload);
 
         $this->modal('vendor_transaction_edit_modal')->close();
 
@@ -132,7 +127,7 @@ class VendorTransactionEditModal extends Component
             return;
         }
 
-        $transaction->delete();
+        app(VendorTransactionRuleService::class)->delete($transaction);
 
         $this->transaction_id = null;
         $this->vendor_id = '';
@@ -145,36 +140,6 @@ class VendorTransactionEditModal extends Component
         $this->modal('vendor_transaction_edit_modal')->close();
 
         $this->dispatch('refreshComponent')->to(VendorTransactionsPanel::class);
-    }
-
-    protected function normalizedOptions(?string $value): string
-    {
-        if ($value === null || trim($value) === '') {
-            return json_encode('/i');
-        }
-
-        return json_encode(trim($value).'/i');
-    }
-
-    protected function vendorTransactionExists(array $payload, int $ignoreId): bool
-    {
-        return VendorTransaction::query()
-            ->where('id', '!=', $ignoreId)
-            ->where('desc', $payload['desc'])
-            ->where('options', $payload['options'])
-            ->where(fn ($query) => $payload['vendor_id'] === null
-                ? $query->whereNull('vendor_id')
-                : $query->where('vendor_id', $payload['vendor_id']))
-            ->where(fn ($query) => $payload['deposit_check'] === null
-                ? $query->whereNull('deposit_check')
-                : $query->where('deposit_check', $payload['deposit_check']))
-            ->where(fn ($query) => $payload['amount_sign'] === null
-                ? $query->whereNull('amount_sign')
-                : $query->where('amount_sign', $payload['amount_sign']))
-            ->where(fn ($query) => $payload['plaid_inst_id'] === null
-                ? $query->whereNull('plaid_inst_id')
-                : $query->where('plaid_inst_id', $payload['plaid_inst_id']))
-            ->exists();
     }
 
     public function render()
