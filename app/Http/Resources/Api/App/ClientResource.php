@@ -7,6 +7,7 @@ use App\Models\Task;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Carbon;
 
 /**
  * A client as the app's Clients tab shows it. With withDetail() it adds
@@ -72,19 +73,27 @@ class ClientResource extends JsonResource
             'can_edit' => $actingUser->can('update', $this->resource),
             'can_delete' => $actingUser->can('delete', $this->resource),
             'can_add_person' => $actingUser->can('create_client_member', [User::class, $this->resource]),
-            'projects' => $this->resource->projects->map(fn (Project $project) => [
-                'id' => $project->id,
-                'name' => $project->project_name,
-                'address' => [
-                    'line1' => $project->address,
-                    'line2' => $project->address_2,
-                    'city' => $project->city,
-                    'state' => $project->state,
-                    'zip' => $project->zip_code,
-                    'short' => $project->short_address,
-                ],
-                'status' => $this->projectStatus($project),
-            ])->values()->all(),
+            // Newest status first, same as the web's Client Projects table
+            // (App\Livewire\Projects\ProjectsTable::projects()'s
+            // Project::scopedSearch(..., 'latest_status_date', 'desc')); a
+            // project with no status at all sorts last.
+            'projects' => $this->resource->projects
+                ->sortByDesc(fn (Project $project) => $project->latestStatus?->start_date ?? Carbon::createFromTimestamp(0))
+                ->values()
+                ->map(fn (Project $project) => [
+                    'id' => $project->id,
+                    'name' => $project->project_name,
+                    'address' => [
+                        'line1' => $project->address,
+                        'line2' => $project->address_2,
+                        'city' => $project->city,
+                        'state' => $project->state,
+                        'zip' => $project->zip_code,
+                        'short' => $project->short_address,
+                    ],
+                    'status' => $this->projectStatus($project),
+                    'latest_status_date' => $project->latestStatus?->start_date?->toDateString(),
+                ])->values()->all(),
             'upcoming_tasks' => $this->upcomingTasks(),
             // Hive has no client-notes table (checked the schema — there is
             // no `notes` or `client_notes` table at all), so this is always

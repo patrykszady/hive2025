@@ -10,11 +10,18 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * GET /api/app/v1/planner — both `from` and `to` are optional (the
- * controller defaults to this week), but given at all they must come as a
- * pair, be real Y-m-d dates, keep `from` on or before `to`, and span no
- * more than 31 days (the agenda loads every candidate project's tasks into
- * memory, so an unbounded range is a real cost, not just a display problem).
+ * GET /api/app/v1/planner — either an explicit `from`/`to` pair (legacy;
+ * both given or neither, real Y-m-d dates, `from` on or before `to`, no
+ * more than 31 days apart — the agenda loads every candidate project's
+ * tasks into memory, so an unbounded range is a real cost, not just a
+ * display problem), or the mobile agenda's own tri-state window: `when`
+ * ('upcoming' | 'past' | 'all', default 'upcoming' — mirrors the web's
+ * App\Livewire\Planner\CardsIndex::$filterDateRange segmented control)
+ * plus how many days each direction currently reaches
+ * (`days_back`/`days_forward`, each 0-120 — mirrors CardsIndex's
+ * previousDaysLoaded/futureDaysLoaded/MAX_DAYS_LOADED paging), which the
+ * app grows in "Load more"/"Load earlier" steps instead of paging whole
+ * calendar weeks.
  *
  * The rest mirror the web planner's own filter toolbar/mobile Filters modal
  * (App\Livewire\Planner\CardsIndex) — search, project_ids, status_codes,
@@ -57,6 +64,9 @@ class PlannerIndexRequest extends FormRequest
                     }
                 },
             ],
+            'when' => ['nullable', Rule::in(['upcoming', 'past', 'all'])],
+            'days_back' => ['nullable', 'integer', 'min:0', 'max:120'],
+            'days_forward' => ['nullable', 'integer', 'min:0', 'max:120'],
             'search' => ['nullable', 'string', 'max:255'],
             'project_ids' => ['nullable', 'array'],
             'project_ids.*' => ['integer'],

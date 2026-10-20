@@ -128,20 +128,83 @@ it('needs a token for the planner and for action items', function () {
     $this->postJson('/api/app/v1/action-items/1/done')->assertUnauthorized();
 });
 
-it('defaults to this week, Monday to Sunday, in America/Chicago', function () {
+it('defaults to the "Upcoming" window: today through 14 days ahead, in America/Chicago', function () {
     ['user' => $user] = appPlannerTeam();
     Sanctum::actingAs($user, ['app']);
 
     $response = $this->getJson('/api/app/v1/planner')->assertOk();
 
-    expect($response->json('data.from'))->toBe('2026-10-12')
-        ->and($response->json('data.to'))->toBe('2026-10-18')
+    expect($response->json('data.when'))->toBe('upcoming')
+        ->and($response->json('data.from'))->toBe('2026-10-15')
+        ->and($response->json('data.to'))->toBe('2026-10-29')
         ->and($response->json('data.today'))->toBe('2026-10-15')
-        ->and($response->json('data.days'))->toHaveCount(7)
-        ->and($response->json('data.days.0.date'))->toBe('2026-10-12')
-        ->and($response->json('data.days.0.is_weekend'))->toBeFalse()
-        ->and($response->json('data.days.3.is_today'))->toBeTrue()
-        ->and($response->json('data.days.6.is_weekend'))->toBeTrue();
+        ->and($response->json('data.days'))->toHaveCount(15)
+        ->and($response->json('data.days.0.date'))->toBe('2026-10-15')
+        ->and($response->json('data.days.0.is_today'))->toBeTrue()
+        ->and($response->json('data.days_back'))->toBe(0)
+        ->and($response->json('data.days_forward'))->toBe(14)
+        ->and($response->json('data.can_load_earlier'))->toBeFalse()
+        ->and($response->json('data.can_load_later'))->toBeTrue();
+});
+
+it('defaults "Past" to 14 days back through yesterday, hiding the to-schedule tray', function () {
+    ['user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $response = $this->getJson('/api/app/v1/planner?when=past')->assertOk();
+
+    expect($response->json('data.when'))->toBe('past')
+        ->and($response->json('data.from'))->toBe('2026-10-01')
+        ->and($response->json('data.to'))->toBe('2026-10-14')
+        ->and($response->json('data.days'))->toHaveCount(14)
+        ->and($response->json('data.days_back'))->toBe(14)
+        ->and($response->json('data.days_forward'))->toBe(0)
+        ->and($response->json('data.can_load_earlier'))->toBeTrue()
+        ->and($response->json('data.can_load_later'))->toBeFalse()
+        ->and($response->json('data.to_schedule'))->toBe([])
+        ->and($response->json('data.pending_task_count'))->toBe(0);
+});
+
+it('defaults "All" to 14 days back through 14 days ahead', function () {
+    ['user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
+
+    expect($response->json('data.when'))->toBe('all')
+        ->and($response->json('data.from'))->toBe('2026-10-01')
+        ->and($response->json('data.to'))->toBe('2026-10-29')
+        ->and($response->json('data.days'))->toHaveCount(29)
+        ->and($response->json('data.can_load_earlier'))->toBeTrue()
+        ->and($response->json('data.can_load_later'))->toBeTrue();
+});
+
+it('422s an invalid when value', function () {
+    ['user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $this->getJson('/api/app/v1/planner?when=yesterday')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['when']);
+});
+
+it('grows the window on request (paging), capped at days_back/days_forward=120', function () {
+    ['user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $response = $this->getJson('/api/app/v1/planner?when=upcoming&days_forward=28')->assertOk();
+
+    expect($response->json('data.days_forward'))->toBe(28)
+        ->and($response->json('data.to'))->toBe('2026-11-12')
+        ->and($response->json('data.days'))->toHaveCount(29);
+
+    $this->getJson('/api/app/v1/planner?days_forward=121')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['days_forward']);
+
+    $capped = $this->getJson('/api/app/v1/planner?when=all&days_back=120&days_forward=120')->assertOk();
+    expect($capped->json('data.can_load_earlier'))->toBeFalse()
+        ->and($capped->json('data.can_load_later'))->toBeFalse();
 });
 
 it('accepts an explicit from/to range', function () {
@@ -193,7 +256,14 @@ it('books a multi-date task on every picked day, with a day_counter, carrying pr
 
     $task = appPlannerTask($project, $user, [
         'title' => 'Tile Install',
-        'options' => ['dates' => ['2026-10-13', '2026-10-15']],
+        'options' => [
+            'dates' => ['2026-10-13', '2026-10-15'],
+            'checklist' => [
+                ['text' => 'Pick up tile', 'completed' => true],
+                ['text' => 'Grout', 'completed' => false],
+                ['text' => ''], // blank rows never count, same as the web's $compactChecklist filter.
+            ],
+        ],
         'start_date' => '2026-10-13',
         'end_date' => '2026-10-15',
         'vendor_id' => $tileVendor->id,
@@ -201,7 +271,7 @@ it('books a multi-date task on every picked day, with a day_counter, carrying pr
         'notes' => 'Watch the dog',
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
     $days = collect($response->json('data.days'))->keyBy('date');
 
     $day13Task = $days['2026-10-13']['groups'][0]['tasks'][0];
@@ -213,6 +283,8 @@ it('books a multi-date task on every picked day, with a day_counter, carrying pr
         ->and($day13Task['notes'])->toBe('Watch the dog')
         ->and($day13Task['vendor'])->toBe($tileVendor->name)
         ->and($day13Task['is_meet'])->toBeFalse()
+        ->and($day13Task['checklist_done'])->toBe(1)
+        ->and($day13Task['checklist_total'])->toBe(2)
         ->and($day15Task['day_counter'])->toBe(['current' => 2, 'total' => 2])
         ->and($days['2026-10-14']['groups'])->toBe([]);
 });
@@ -232,7 +304,7 @@ it('books a start/end-span task on every day in between, with no day_counter', f
         'end_date' => '2026-10-14',
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
     $days = collect($response->json('data.days'))->keyBy('date');
 
     foreach (['2026-10-12', '2026-10-13', '2026-10-14'] as $date) {
@@ -270,7 +342,7 @@ it('marks a Meet task is_meet, with its arrival time label', function () {
     $expectedArrival = $task->getArrivalTimeLabel('2026-10-16');
     expect($expectedArrival)->not->toBeNull();
 
-    $response = $this->getJson('/api/app/v1/planner')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
     $days = collect($response->json('data.days'))->keyBy('date');
     $row = $days['2026-10-16']['groups'][0]['tasks'][0];
 
@@ -297,7 +369,7 @@ it('puts undated tasks in to_schedule instead of any day, grouped by project', f
         'vendor_id' => $subVendor->id,
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
     $data = $response->json('data');
 
     expect(appPlannerAllDayTasks($data)->pluck('id'))->not->toContain($undated->id);
@@ -313,6 +385,8 @@ it('puts undated tasks in to_schedule instead of any day, grouped by project', f
         'type' => 'Task',
         'vendor' => $subVendor->name,
         'users' => [],
+        'checklist_done' => 0,
+        'checklist_total' => 0,
     ]);
 });
 
@@ -334,7 +408,7 @@ it('excludes a quiet, non-planner-status project, but includes one with a task t
         'end_date' => '2026-10-13',
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
     $data = $response->json('data');
 
     $allProjectIds = collect($data['days'])
@@ -346,6 +420,24 @@ it('excludes a quiet, non-planner-status project, but includes one with a task t
 
     $days = collect($data['days'])->keyBy('date');
     expect(collect($days['2026-10-13']['groups'][0]['tasks'])->pluck('id'))->toContain($task->id);
+});
+
+it('gives each project a "client last name(s) | project name" subtitle, like the web agenda card', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create(['business_name' => 'Abbey Household']);
+    $project = appPlannerProject($vendor, $client, ['project_name' => 'Kitchen']);
+    appPlannerStatus($project, $vendor, 6, Carbon::parse('2026-10-10'));
+
+    appPlannerTask($project, $user, [
+        'title' => 'Framing', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
+    ]);
+
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
+    $days = collect($response->json('data.days'))->keyBy('date');
+
+    expect($days['2026-10-13']['groups'][0]['project']['subtitle'])->toBe('Abbey Household | Kitchen');
 });
 
 it('resolves task users from the user_ids column', function () {
@@ -366,11 +458,44 @@ it('resolves task users from the user_ids column', function () {
         'user_ids' => [$crew->id],
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
     $days = collect($response->json('data.days'))->keyBy('date');
     $row = collect($days['2026-10-13']['groups'][0]['tasks'])->firstWhere('id', $task->id);
 
     expect($row['users'])->toBe(['Alex']);
+});
+
+it('counts task_count across scheduled + pending tasks, and pending_task_count across pending only', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appPlannerProject($vendor, $client, ['project_name' => 'Elm Remodel']);
+    appPlannerStatus($project, $vendor, 6, Carbon::parse('2026-10-10'));
+
+    // Booked on two days — counted once, like CardsIndex::mobileTaskCount().
+    appPlannerTask($project, $user, [
+        'title' => 'Tile Install',
+        'options' => ['dates' => ['2026-10-13', '2026-10-15']],
+        'start_date' => '2026-10-13',
+        'end_date' => '2026-10-15',
+    ]);
+    appPlannerTask($project, $user, ['title' => 'Pending One', 'options' => []]);
+    appPlannerTask($project, $user, ['title' => 'Pending Two', 'options' => []]);
+
+    $all = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
+    expect($all->json('data.task_count'))->toBe(3)
+        ->and($all->json('data.pending_task_count'))->toBe(2);
+
+    // Past hides the to-schedule tray entirely (mirrors
+    // CardsIndex::mobileUnscheduledTasks() returning empty for 'past') — the
+    // two pending tasks drop out, leaving just the Tile Install task's
+    // 2026-10-13 occurrence (its 2026-10-15 one falls on today, outside the
+    // past window, which ends yesterday).
+    $past = $this->getJson('/api/app/v1/planner?when=past&days_back=30')->assertOk();
+    expect($past->json('data.task_count'))->toBe(1)
+        ->and($past->json('data.pending_task_count'))->toBe(0)
+        ->and($past->json('data.to_schedule'))->toBe([]);
 });
 
 // --- Filters (App\Livewire\Planner\CardsIndex's toolbar/mobile Filters modal) ---
@@ -392,7 +517,7 @@ it('narrows the agenda by search, matching a task\'s own title/vendor OR its pro
         'title' => 'Framing', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner?search=Tile')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?search=Tile&when=all')->assertOk();
     $data = $response->json('data');
     $titles = appPlannerAllDayTasks($data)->pluck('title');
 
@@ -417,7 +542,7 @@ it('narrows the agenda to project_ids', function () {
         'title' => 'Framing', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner?project_ids[]='.$elm->id)->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?project_ids[]='.$elm->id.'&when=all')->assertOk();
     $data = $response->json('data');
     $projectIds = collect($data['days'])->flatMap(fn (array $day) => collect($day['groups'])->pluck('project.id'));
 
@@ -442,7 +567,7 @@ it('narrows the agenda by vendor_id', function () {
         'title' => 'Framing', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner?vendor_id='.$tileVendor->id)->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?vendor_id='.$tileVendor->id.'&when=all')->assertOk();
     $titles = appPlannerAllDayTasks($response->json('data'))->pluck('title');
 
     expect($titles->all())->toBe(['Tile Install']);
@@ -465,7 +590,7 @@ it('narrows the agenda to only the signed-in person\'s tasks with mine=1', funct
         'title' => 'Not Mine', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13', 'user_ids' => [$crew->id],
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner?mine=1')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?mine=1&when=all')->assertOk();
     $titles = appPlannerAllDayTasks($response->json('data'))->pluck('title');
 
     expect($titles->all())->toBe(['Mine']);
@@ -495,7 +620,7 @@ it('never shows another vendor\'s project, even an Active one with a task this w
         'end_date' => '2026-10-13',
     ]);
 
-    $response = $this->getJson('/api/app/v1/planner')->assertOk();
+    $response = $this->getJson('/api/app/v1/planner?when=all')->assertOk();
     $data = $response->json('data');
 
     $allProjectIds = collect($data['days'])

@@ -2,11 +2,13 @@
 
 namespace App\Http\Resources\Api\App;
 
+use App\Models\Bid;
 use App\Models\ProjectStatus;
 use App\Models\ProjectTimelapseFrame;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Services\LienWaivers\DrawPackageService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\URL;
@@ -107,16 +109,31 @@ class ProjectResource extends JsonResource
                 // Calls, texts and emails with the project's stakeholders —
                 // Admin-only, like the web page's Communications card.
                 'view_communications' => (bool) $user?->can('update', $this->resource),
+                // "Edit Bid" on the web's Project Finances card is gated by
+                // BidPolicy::create (vendor Admin, non-1099) —
+                // resources/views/livewire/projects/partials/finances-actions.blade.php's
+                // @can('create', App\Models\Bid::class).
+                'edit_bids' => (bool) $user?->can('create', Bid::class),
             ],
             // Project has no areas relation or table at all (checked the
             // model and the schema), so this is always empty rather than
             // fabricated; kept as a plain string[] so the app doesn't need
             // a special case if areas are added later.
             'areas' => [],
+            // Lien waivers stay hidden on the web's project card until the
+            // base (type 1) bid exists at estimate acceptance —
+            // App\Livewire\LienWaivers\Index::hasSignedContract(), the same
+            // gate resources/views/livewire/lien-waivers/index.blade.php's
+            // project-scoped variant uses (@elseif($this->hasSignedContract)).
+            'has_signed_contract' => app(DrawPackageService::class)->hasSignedContract($this->resource, $user?->vendor),
             'vendors' => $this->resource->vendors->map(fn (Vendor $vendor) => [
                 'id' => $vendor->id,
                 'business_name' => $vendor->business_name,
                 'business_phone' => $vendor->business_phone,
+                // Short name + invitation/response status badge, same as
+                // resources/views/livewire/projects/project-vendors.blade.php's row.
+                'short_name' => $vendor->short_name,
+                'status' => $this->vendorStatusArray($this->resource->latestVendorStatus($vendor->id)),
             ])->values()->all(),
             'upcoming_tasks' => $this->upcomingTasks(),
             // The web's "Pending Tasks" accordion on the project page
@@ -146,6 +163,19 @@ class ProjectResource extends JsonResource
             'title' => $status->title,
             'color' => $status->badge_color,
         ];
+    }
+
+    /**
+     * A vendor's invitation/response status on this project — same badge
+     * resources/views/livewire/projects/project-vendors.blade.php's row
+     * shows ($project->latestVendorStatus($vendor->id)), null until that
+     * vendor has any status history here at all.
+     *
+     * @return array{code: int, title: string, color: string}|null
+     */
+    private function vendorStatusArray(?ProjectStatus $status): ?array
+    {
+        return $status ? $this->statusArray($status) : null;
     }
 
     /**
@@ -275,12 +305,13 @@ class ProjectResource extends JsonResource
      * (see TimelapseController::frameSigned()) so the app can show them
      * without a web session or cookie.
      *
-     * @return list<array{id: int, url: string, taken_at: ?string}>
+     * @return list<array{id: int, url: string, taken_at: ?string, taken_by: ?string}>
      */
     private function latestPhotos(): array
     {
         return ProjectTimelapseFrame::query()
             ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->id))
+            ->with('takenBy')
             ->orderByDesc('id')
             ->limit(6)
             ->get()
@@ -292,6 +323,10 @@ class ProjectResource extends JsonResource
                     ['frame' => $frame->id, 'thumb' => 1]
                 ),
                 'taken_at' => $frame->shot_at?->toIso8601String(),
+                // "Last photo X ago by NAME" on the web's project card —
+                // resources/views/livewire/projects/project-timelapse-card.blade.php's
+                // $this->latestFrame->taker_name.
+                'taken_by' => $frame->taker_name,
             ])
             ->values()
             ->all();
