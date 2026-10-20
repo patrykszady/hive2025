@@ -149,3 +149,21 @@ it('pays an expense only once however often the schedule runs', function () {
         ->and(app(UnenteredCheckMatcher::class)->run())->toBe(0)
         ->and(Check::withoutGlobalScopes()->count())->toBe(2);
 });
+
+it('counts the bank lines of every check paying the expense in its status', function () {
+    $fx = unentered_fixture();
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Bates', 'client_id' => 1, 'address' => '1400 Kenilwood Lane',
+        'city' => 'Kenilworth', 'state' => 'IL', 'zip_code' => 60043, 'belongs_to_vendor_id' => $fx['company']->id,
+    ]));
+    $fx['expense']->forceFill(['project_id' => $project->id])->save();
+
+    expect($fx['expense']->fresh()->status)->toBe('No Transaction');
+
+    unentered_charge($fx, '2662', 8000.00, '2026-09-18');
+    unentered_charge($fx, '2683', 6742.50, '2026-10-16');
+    app(UnenteredCheckMatcher::class)->run();
+
+    // https://hive.contractors/checks/3994 showed "No Transaction" (2026-10-20).
+    expect($fx['expense']->fresh()->status)->toBe('Complete');
+});

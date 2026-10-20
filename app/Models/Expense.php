@@ -134,10 +134,13 @@ class Expense extends Model
             && is_null($this->distribution_id)
             && ! $this->splits()->exists();
 
-        // A transaction can be directly attached to the expense or via a related check
+        // A transaction can be directly attached to the expense or via a related
+        // check — the single check_id or any of the checks paying it together
+        // (check_expense: expense 28901's deposit and balance checks).
         $hasTransactions = $this->transactions()->exists()
             || $this->sharedTransactions()->exists()
             || $this->check()->whereHas('transactions')->exists()
+            || $this->checks()->whereHas('transactions')->exists()
             || ! is_null($this->paid_by);
 
         // Rules:

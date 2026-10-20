@@ -141,11 +141,11 @@ class Transaction extends Model
                 }
             }
             
-            // Re-index expenses linked via check
+            // Re-index expenses linked via check (check_id or check_expense)
             if ($transaction->check_id) {
                 $check = Check::withoutGlobalScopes()->find($transaction->check_id);
                 if ($check) {
-                    foreach ($check->expenses as $expense) {
+                    foreach ($check->expenses->concat($check->expensesMany)->unique('id') as $expense) {
                         $expense->searchable();
                     }
                 }
@@ -161,11 +161,11 @@ class Transaction extends Model
                 }
             }
             
-            // Re-index expenses linked via check
+            // Re-index expenses linked via check (check_id or check_expense)
             if ($transaction->check_id) {
                 $check = Check::withoutGlobalScopes()->find($transaction->check_id);
                 if ($check) {
-                    foreach ($check->expenses as $expense) {
+                    foreach ($check->expenses->concat($check->expensesMany)->unique('id') as $expense) {
                         $expense->searchable();
                     }
                 }
