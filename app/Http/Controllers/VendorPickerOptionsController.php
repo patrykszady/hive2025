@@ -30,9 +30,10 @@ class VendorPickerOptionsController extends Controller
         $user = $request->user();
         $all = $request->boolean('all') && $user->vendor_role === 'Admin';
         $projectId = $request->integer('project') ?: null;
+        $byYearSpend = $request->query('order') === 'ytd';
         $fingerprint = $this->fingerprint();
 
-        $key = sprintf('vendor-picker:%s:%s:%s:%s', $user->vendor?->id ?? 0, $all ? 'all' : 'mine', $projectId ?? 0, $fingerprint);
+        $key = sprintf('vendor-picker:%s:%s:%s:%s:%s', $user->vendor?->id ?? 0, $all ? 'all' : 'mine', $projectId ?? 0, $byYearSpend ? 'ytd' : 'name', $fingerprint);
         $etag = '"'.md5($key).'"';
         $headers = ['ETag' => $etag, 'Cache-Control' => 'private, max-age=300'];
 
@@ -40,7 +41,7 @@ class VendorPickerOptionsController extends Controller
             return response()->noContent(304, $headers);
         }
 
-        $vendors = Cache::remember($key, self::CACHE_SECONDS, fn () => $this->vendors($all, $projectId));
+        $vendors = Cache::remember($key, self::CACHE_SECONDS, fn () => $this->vendors($all, $projectId, $byYearSpend));
 
         return response()->json(['version' => $fingerprint, 'vendors' => $vendors], 200, $headers);
     }
@@ -56,7 +57,7 @@ class VendorPickerOptionsController extends Controller
     /**
      * @return list<array{id: int, name: string, legal: string, city: ?string, state: ?string, type: ?string}>
      */
-    protected function vendors(bool $all, ?int $projectId): array
+    protected function vendors(bool $all, ?int $projectId, bool $byYearSpend = false): array
     {
         $query = $all ? Vendor::withoutGlobalScopes() : Vendor::query();
 
@@ -64,6 +65,11 @@ class VendorPickerOptionsController extends Controller
             ->select(['id', 'business_name', 'city', 'state', 'business_type'])
             // Embedded on a project page: only vendors billed to that project.
             ->when($projectId, fn ($q) => $q->whereHas('expenses', fn ($e) => $e->where('project_id', $projectId)))
+            // The task modal's order: most spent with over the last year first,
+            // so the vendors the crew actually uses open the list.
+            ->when($byYearSpend, fn ($q) => $q
+                ->withSum(['expenses as year_spend' => fn ($e) => $e->where('date', '>=', today()->subYear())], 'amount')
+                ->orderByDesc('year_spend'))
             ->orderBy('business_name')
             ->get()
             ->map(fn (Vendor $vendor) => [

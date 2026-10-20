@@ -193,17 +193,6 @@ class TaskCreate extends Component
     }
 
     #[Computed]
-    public function vendors()
-    {
-        // Use Scout search to sort by ytd_expense_sum
-        // Must specify take() to override Scout's default limit of 20
-        return Vendor::search('*')
-            ->orderBy('ytd_expense_sum', 'desc')
-            ->take(1000)
-            ->get();
-    }
-
-    #[Computed]
     public function employees()
     {
         $vendor = auth()->user()?->vendor;
@@ -814,11 +803,8 @@ class TaskCreate extends Component
             return;
         }
 
-        // The modal's Vendor select is scoped the same way $this->vendors is
-        // (VendorScope, Vendor's own global scope) — queried directly here
-        // rather than through $this->vendors itself, since that computed
-        // goes through Scout and a remembered vendor id should not go stale
-        // just because the search index hasn't caught up.
+        // The modal's vendor picker (/vendors/picker-options) is scoped by
+        // VendorScope, Vendor's own global scope — the same set queried here.
         $selectableVendorIds = Vendor::query()->pluck('id')->map(fn ($id) => (int) $id)->all();
 
         $vendorId = TaskTitleSuggestions::dominantVendorId($title, $selectableVendorIds);

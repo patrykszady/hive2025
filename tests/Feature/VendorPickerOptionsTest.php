@@ -79,6 +79,22 @@ it('narrows to the vendors billed to a project when asked', function (): void {
     expect($ids)->toBe([$billed->id]);
 });
 
+it('lists the most spent with over the last year first when asked, for the task modal', function (): void {
+    [$user, $company, $visible] = pickerActor();
+    $busy = Vendor::factory()->create(['business_name' => 'Zeta Tile LLC']);
+    $quiet = Vendor::factory()->create(['business_name' => 'Alpha Supply LLC']);
+    $company->vendors()->attach([$busy->id, $quiet->id]);
+    $expense = fn (Vendor $vendor, float $amount, string $date) => Expense::create(['amount' => $amount, 'date' => $date, 'project_id' => 4321, 'distribution_id' => null, 'created_by_user_id' => $user->id, 'belongs_to_vendor_id' => $company->id, 'vendor_id' => $vendor->id, 'note' => null, 'invoice' => null]);
+    $expense($busy, 5000, today()->subMonth()->toDateString());
+    $expense($quiet, 9000, today()->subYears(2)->toDateString()); // outside the year
+
+    $byYear = collect($this->actingAs($user)->getJson(route('vendors.picker-options', ['order' => 'ytd']))->assertOk()->json('vendors'))->pluck('id')->all();
+    $byName = collect($this->actingAs($user)->getJson(route('vendors.picker-options'))->assertOk()->json('vendors'))->pluck('id')->all();
+
+    expect($byYear[0])->toBe($busy->id)
+        ->and(array_search($quiet->id, $byName, true))->toBeLessThan(array_search($busy->id, $byName, true));
+});
+
 it('requires a signed-in user', function (): void {
     $this->getJson(route('vendors.picker-options'))->assertUnauthorized();
 });

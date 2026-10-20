@@ -15,7 +15,9 @@
      - extra:      static choices first, [['value' => '0', 'label' => 'NO VENDOR'], …]
      - details:    show "Name — City, ST" to tell same-name vendors apart
      - all:        every vendor, not only the ones visible to the company (Admins)
-     - project-id: only vendors billed to that project --}}
+     - project-id: only vendors billed to that project
+     - order:      "ytd" lists the most spent with over the last year first
+                   (before any search) instead of A–Z --}}
 @props([
     'label' => null,
     'placeholder' => 'Choose vendor...',
@@ -25,6 +27,7 @@
     'details' => false,
     'all' => false,
     'projectId' => null,
+    'order' => null,
     'size' => null,
 ])
 @php
@@ -56,7 +59,7 @@
     // attribute makes Alpine start the picker over (and forget the value)
     // when Livewire morphs the page after a pick.
     $config = [
-        'url' => route('vendors.picker-options', array_filter(['all' => $all ? 1 : null, 'project' => $projectId ?: null])),
+        'url' => route('vendors.picker-options', array_filter(['all' => $all ? 1 : null, 'project' => $projectId ?: null, 'order' => $order ?: null])),
         'extra' => $extra,
         'details' => (bool) $details,
         'template' => $optionTemplate,

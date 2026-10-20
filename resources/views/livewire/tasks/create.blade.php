@@ -151,24 +151,17 @@
                         @endif
                     </x-forms.project-select>
 
-                    {{-- VENDOR --}}
-                    <flux:select
+                    {{-- VENDOR — the site's vendor picker: the list loads once in
+                         the browser, so a modal update (every arrival time
+                         pick) no longer re-sends 856 rendered vendors (1.8 MB).
+                         Most used over the last year first, like before. --}}
+                    <x-vendor-picker
                         wire:model.live="form.vendor_id"
-                        variant="listbox"
-                        searchable
-                        clearable
                         label="Vendor"
                         placeholder="Assign vendor..."
-                    >
-                        @foreach($this->vendors as $vendor)
-                            <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">
-                                <div class="flex items-center gap-2 whitespace-nowrap">
-                                    <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
-                                    {{$vendor->name}}
-                                </div>
-                            </flux:select.option>
-                        @endforeach
-                    </flux:select>
+                        clearable
+                        order="ytd"
+                    />
 
                     @if($view_text['form_submit'] === 'edit' && $form->task && $form->task->vendor_id)
                         @php
