@@ -303,6 +303,26 @@ it('lists eligible projects for a client: Active always, Completed only with a b
         ->and($ids)->not->toContain($completedPaidOff->id);
 });
 
+it('sorts the project a payment was opened from first and flags it, like the web\'s "This project" badge', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $first = appPaymentsProject($vendor, $client, ['project_name' => 'First Job']);
+    appPaymentsStatus($first, $vendor, 6);
+    $openedFrom = appPaymentsProject($vendor, $client, ['project_name' => 'Opened From Job']);
+    appPaymentsStatus($openedFrom, $vendor, 6);
+
+    $response = $this->getJson("/api/app/v1/payments/eligible-projects?client_id={$client->id}&opened_from_project_id={$openedFrom->id}")
+        ->assertOk();
+
+    $data = collect($response->json('data'));
+
+    expect($data->pluck('id')->first())->toBe($openedFrom->id)
+        ->and($data->firstWhere('id', $openedFrom->id)['is_current_project'])->toBeTrue()
+        ->and($data->firstWhere('id', $first->id)['is_current_project'])->toBeFalse();
+});
+
 it('refuses a Member requesting eligible projects (part of the create flow), like the web', function () {
     ['vendor' => $vendor, 'user' => $member] = appPaymentsTeamUser(role: 2);
     $client = appPaymentsClient($vendor);

@@ -19,7 +19,7 @@ use Carbon\Carbon;
 class AppProjectMaterialsReader
 {
     /**
-     * @return list<array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string}>}>
+     * @return list<array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string, receipt_id: int, item_index: int}>}>
      */
     public function listFor(Project $project): array
     {
@@ -50,7 +50,7 @@ class AppProjectMaterialsReader
      * is OCR'd — same shape as a `listFor()` row, for the one expense just
      * created by App\Services\Projects\ProjectMaterialsUploader.
      *
-     * @return array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string}>}|null
+     * @return array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string, receipt_id: int, item_index: int}>}|null
      */
     public function one(Expense $expense): ?array
     {
@@ -67,7 +67,7 @@ class AppProjectMaterialsReader
 
     /**
      * @param  \Illuminate\Support\Collection<string, ReceiptLineItemDesc>  $descsByKey
-     * @return array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string}>}|null
+     * @return array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string, receipt_id: int, item_index: int}>}|null
      */
     private function transform(Expense $expense, $descsByKey): ?array
     {
@@ -92,6 +92,11 @@ class AppProjectMaterialsReader
                 'eta' => $item['ETA'] ?? null,
                 'area' => $item['Area'] ?? $desc?->area,
                 'image_url' => $item['image_url'] ?? $desc?->product_image_url,
+                // Lets the app ask for this item's full detail (price history,
+                // product image) via GET expenses/{expense}/receipts/{receipt}/
+                // items/{index} — mirrors ProjectMaterials::selectItem($expenseId, $itemIndex).
+                'receipt_id' => $receipt->id,
+                'item_index' => $index,
             ];
         })->values()->all();
 
