@@ -2,10 +2,9 @@
 
 namespace App\Livewire\VendorDocs;
 
-use App\Models\Agent;
 use App\Models\Vendor;
 
-use App\Jobs\SendVendorDocRequestEmail;
+use App\Services\VendorDocs\VendorDocRequester;
 
 use App\Traits\ProcessesVendorDocs;
 
@@ -43,21 +42,14 @@ class VendorDocCreate extends Component
 
     public function requestDocument(Vendor $vendor)
     {
-        $doc_types = VendorDoc::withoutGlobalScopes()
-            ->where('vendor_id', $vendor->id)
-            ->orderBy('expiration_date', 'DESC')
-            ->with('agent')
-            ->get()
-            ->groupBy('type');
+        // Defense in depth: the blade only shows this button when
+        // $canCreateDoc, but this callable method had no server-side check
+        // of its own.
+        $this->authorize('create', VendorDoc::class);
 
-        $latest_docs = collect();
-        foreach ($doc_types as $type_certificates) {
-            if ($type_certificates->first()->expiration_date <= today()) {
-                $latest_docs->push($type_certificates->first());
-            }
-        }
+        $result = app(VendorDocRequester::class)->requestExpired($vendor, auth()->user()->vendor);
 
-        if ($latest_docs->isEmpty()) {
+        if (! $result['sent']) {
             Flux::toast(
                 duration: 5000,
                 position: 'top right',
@@ -69,83 +61,13 @@ class VendorDocCreate extends Component
             return;
         }
 
-        $requesting_vendor = auth()->user()->vendor;
-
-        // 1) State license docs (anything that's not an insurance policy type)
-        //    go to vendor business email.
-        $licenseDocs = $latest_docs->filter(function ($doc) {
-            return ! in_array(strtolower((string) $doc->getRawOriginal('type')), ['general', 'professional', 'workers'], true);
-        });
-
-        if ($licenseDocs->isNotEmpty()) {
-            SendVendorDocRequestEmail::dispatch(
-                $licenseDocs,
-                $vendor,
-                $requesting_vendor,
-                $vendor->business_email
-            );
-        }
-
-        // 2) Workers docs should go to agent when available; if missing on latest,
-        //    use the most recent workers doc that still has an agent.
-        $workersDocs = $latest_docs->filter(function ($doc) {
-            return strtolower((string) $doc->getRawOriginal('type')) === 'workers';
-        });
-
-        if ($workersDocs->isNotEmpty()) {
-            $workersAgentEmail = $workersDocs->first()->agent?->email;
-
-            if (empty($workersAgentEmail)) {
-                $workersAgentEmail = VendorDoc::withoutGlobalScopes()
-                    ->where('vendor_id', $vendor->id)
-                    ->where('type', 'workers')
-                    ->whereNotNull('agent_id')
-                    ->with('agent')
-                    ->orderByDesc('expiration_date')
-                    ->first()?->agent?->email;
-            }
-
-            SendVendorDocRequestEmail::dispatch(
-                $workersDocs,
-                $vendor,
-                $requesting_vendor,
-                $workersAgentEmail ?: $vendor->business_email
-            );
-        }
-
-        // 3) Remaining expired docs route by agent grouping (existing behavior).
-        $remainingDocs = $latest_docs
-            ->reject(function ($doc) {
-                return ! in_array(strtolower((string) $doc->getRawOriginal('type')), ['general', 'professional', 'workers'], true)
-                    || strtolower((string) $doc->getRawOriginal('type')) === 'workers';
-            });
-
-        $agent_ids = $remainingDocs->groupBy('agent_id');
-
-        foreach ($agent_ids as $agent_id => $agent_expired_docs) {
-            $agent = Agent::find($agent_id);
-
-            //if no agent, send to Vendor only
-            if (! is_null($agent)) {
-                $agent_email = $agent->email;
-            } else {
-                $agent_email = $vendor->business_email;
-            }
-
-            //send email to agent, vendor, and auth()->vendor() with all $agent_expired_docs
-            SendVendorDocRequestEmail::dispatch($agent_expired_docs, $vendor, $requesting_vendor, $agent_email);
-
-        }
-
-        if ($latest_docs->isNotEmpty()) {
-                Flux::toast(
-                    duration: 5000,
-                    position: 'top right',
-                    variant: 'success',
-                    heading: 'Vendor Document Requests Sent',
-                    text: 'License and insurance requests were routed to the appropriate recipients.',
-                );
-            }
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Vendor Document Requests Sent',
+            text: 'License and insurance requests were routed to the appropriate recipients.',
+        );
     }
 
     public function store()

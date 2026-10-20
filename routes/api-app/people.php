@@ -34,3 +34,4 @@ Route::get('users/me/notification-settings', [AppUserController::class, 'notific
 Route::put('users/me/notification-settings', [AppUserController::class, 'updateNotificationSettings'])->name('users.notification-settings.update');
 Route::get('users/{user}', [AppUserController::class, 'show'])->whereNumber('user')->name('users.show');
 Route::put('users/{user}', [AppUserController::class, 'update'])->whereNumber('user')->name('users.update');
+Route::delete('users/{user}', [AppUserController::class, 'destroy'])->whereNumber('user')->name('users.destroy');

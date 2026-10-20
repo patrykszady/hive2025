@@ -66,6 +66,11 @@ class TeamUserResource extends JsonResource
             ] : null,
             'can_edit' => $canEdit,
             'can_view_finances' => $canEdit && $isEmployed,
+            // "Remove User from Vendor" menu item — users/show.blade's own,
+            // narrower gate (VendorPolicy::update on the PERSON'S OWN primary
+            // vendor), not UserPolicy::update: an Admin of a different
+            // company that merely shares this sub never sees it.
+            'can_remove' => $isEmployed && $this->resource->vendor && $actingUser->can('update', $this->resource->vendor),
             'clients' => $this->resource->clients->map(fn (Client $client) => [
                 'id' => $client->id,
                 'name' => $client->name,
