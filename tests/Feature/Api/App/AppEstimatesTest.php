@@ -233,6 +233,27 @@ it('shows an estimate\'s sections, line items, allowances and signing status', f
         ->and($response->json('data.signing.is_fully_signed'))->toBeFalse();
 });
 
+it('shows one Address row when the jobsite and billing addresses match, and both when they differ', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $address = ['address' => '12 Elm St', 'address_2' => null, 'city' => 'Arlington Heights', 'state' => 'IL', 'zip_code' => '60004'];
+    $client = appEstimatesClient($vendor, $address);
+    $sameProject = appEstimatesProject($vendor, $client, $address);
+    $otherProject = appEstimatesProject($vendor, $client, ['address' => '400 Oak Ave', 'address_2' => 'Unit 2', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067']);
+
+    $same = $this->getJson('/api/app/v1/estimates/'.appEstimatesRow($vendor, $sameProject)->id)->assertOk();
+
+    expect($same->json('data.addresses.same'))->toBeTrue()
+        ->and($same->json('data.addresses.jobsite'))->toBe(['12 Elm St', 'Arlington Heights, IL 60004']);
+
+    $different = $this->getJson('/api/app/v1/estimates/'.appEstimatesRow($vendor, $otherProject)->id)->assertOk();
+
+    expect($different->json('data.addresses.same'))->toBeFalse()
+        ->and($different->json('data.addresses.jobsite'))->toBe(['400 Oak Ave', 'UNIT 2', 'Palatine, IL 60067'])
+        ->and($different->json('data.addresses.billing'))->toBe(['12 Elm St', 'Arlington Heights, IL 60004']);
+});
+
 // --- Create / destroy / restore ----------------------------------------
 
 it('creates a blank estimate with its first section, like EstimateCreate + EstimateShow::mount()', function () {
@@ -555,7 +576,8 @@ it('returns email compose options with recipients, from addresses and a filled-i
 
     expect($response->json('data.to'))->toContain('client@example.test')
         ->and($response->json('data.subject'))->toContain('Kitchen Remodel')
-        ->and($response->json('data.body'))->toContain('Acme Co');
+        ->and($response->json('data.body'))->toContain('Acme Co')
+        ->and($response->json('data.project_id'))->toBe($project->id);
 });
 
 it('queues SendEstimateEmailJob exactly like the web\'s EstimateEmail::send()', function () {

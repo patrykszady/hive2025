@@ -2,9 +2,11 @@
 
 namespace App\Http\Resources\Api\App;
 
+use App\Models\Client;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateLineItemAllowance;
 use App\Models\EstimateSection;
+use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -72,12 +74,32 @@ class EstimateResource extends JsonResource
             ],
             'payments' => $this->payments,
             'reimbursements' => round((float) ($this->reimbursments ?? 0), 2),
+            'addresses' => $this->addresses($project, $client),
             'signing' => [
                 'is_vendor_signed' => $this->resource->isVendorSigned(),
                 'is_fully_signed' => $this->resource->isFullySigned(),
                 'is_signed' => $this->resource->isSigned(),
                 'signed_contract_available' => $this->signed_contract_path !== null,
             ],
+        ];
+    }
+
+    /**
+     * The jobsite (project) and billing (client) address lines, shown as one
+     * "Address" row when they match — the same rule as
+     * resources/views/livewire/estimates/estimate-details.blade.php.
+     *
+     * @return array{jobsite: list<string>|null, billing: list<string>|null, same: bool}
+     */
+    protected function addresses(?Project $project, ?Client $client): array
+    {
+        $jobsite = $project?->full_address;
+        $billing = $client?->full_address;
+
+        return [
+            'jobsite' => $jobsite ? explode('<br>', $jobsite) : null,
+            'billing' => $billing ? explode('<br>', $billing) : null,
+            'same' => $jobsite === $billing,
         ];
     }
 

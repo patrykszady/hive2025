@@ -78,6 +78,7 @@ class EstimateEmailController extends Controller
                 'subject' => $defaultTemplate ? $placeholders->replace($defaultTemplate->subject, $found, $defaultFrom, $adminUsers) : '',
                 'body' => $defaultTemplate ? $placeholders->replace($defaultTemplate->body, $found, $defaultFrom, $adminUsers) : '',
                 'has_reimbursements' => $reimbursementsTotal > 0,
+                'project_id' => $found->project?->id,
             ],
         ]);
     }
