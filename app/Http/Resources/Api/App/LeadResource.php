@@ -1,0 +1,124 @@
+<?php
+
+namespace App\Http\Resources\Api\App;
+
+use App\Models\Lead;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\URL;
+
+/**
+ * A lead as the app's Leads tab shows it — same statuses, filters and
+ * detail fields as App\Livewire\Leads\LeadsIndex/LeadCreate. With
+ * withDetail() it adds the message, attachments, availability and delete
+ * impact the detail screen needs beyond the list row.
+ *
+ * @mixin \App\Models\Lead
+ */
+class LeadResource extends JsonResource
+{
+    protected bool $detail = false;
+
+    public function withDetail(): static
+    {
+        $this->detail = true;
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        /** @var Lead $lead */
+        $lead = $this->resource;
+        $client = $lead->resolveClient();
+        $addressParts = $lead->shortAddressParts();
+        $status = $lead->last_status?->title ?? 'New';
+
+        $row = [
+            'id' => $lead->id,
+            'date' => $lead->date?->toIso8601String(),
+            'origin' => $lead->origin,
+            'status' => [
+                'code' => $status,
+                'label' => $status,
+                'color' => Lead::statusColor($status),
+            ],
+            'name' => trim((string) ($lead->lead_data['name'] ?? '')),
+            'email' => $lead->lead_data['email'] ?? null,
+            'phone' => $lead->lead_data['phone'] ?? null,
+            'address' => [
+                'city' => $addressParts['city'],
+                'street' => $addressParts['street'],
+                'full' => $lead->lead_data['address'] ?? null,
+            ],
+            'client' => $client ? ['id' => $client->id, 'name' => $client->name] : null,
+            'feedback_count' => $this->whenCounted('feedback', fn () => $this->feedback_count, null),
+            'has_feedback' => $lead->relationLoaded('feedback') ? $lead->feedback->isNotEmpty() : null,
+            'created_at' => $lead->created_at?->toIso8601String(),
+            'web_path' => '/leads?lead='.$lead->id,
+        ];
+
+        if (! $this->detail) {
+            return $row;
+        }
+
+        $hasReplied = $status === 'Replied' && ! $this->lastEmailBounced($lead);
+
+        return $row + [
+            'message' => $lead->lead_data['message'] ?? null,
+            'notes' => $lead->notes,
+            'reply_to_email' => $lead->lead_data['reply_to_email'] ?? null,
+            'attachments' => $this->attachments($lead),
+            'availability' => $lead->usableAvailability(),
+            'has_rescheduled' => $lead->hasRescheduled(),
+            'allows_consult_within_the_hour' => $lead->allowsConsultWithinTheHour(),
+            'status_history' => $lead->statuses->sortByDesc('id')->map(fn ($status) => [
+                'title' => $status->title,
+                'created_at' => $status->created_at?->toIso8601String(),
+            ])->values()->all(),
+            'feedback' => $lead->feedback->map(fn ($feedback) => [
+                'id' => $feedback->id,
+                'rating' => $feedback->rating,
+                'message' => $feedback->message,
+                'created_at' => $feedback->created_at?->toIso8601String(),
+            ])->values()->all(),
+            'has_replied' => $hasReplied,
+            'can_delete' => ! $hasReplied,
+            'delete_impact' => $lead->deleteImpact(),
+        ];
+    }
+
+    /**
+     * @return list<array{index: int, name: string, mime: ?string, url: string}>
+     */
+    private function attachments(Lead $lead): array
+    {
+        $files = (array) ($lead->lead_data['attachments'] ?? []);
+
+        return collect($files)
+            ->values()
+            ->map(fn ($file, int $index) => [
+                'index' => $index,
+                'name' => (string) ($file['name'] ?? 'attachment'),
+                'mime' => $file['mime'] ?? null,
+                'url' => URL::temporarySignedRoute('leads.file.signed', now()->addHours(24), ['lead' => $lead->id, 'index' => $index]),
+            ])
+            ->all();
+    }
+
+    /** Mirrors LeadCreate::lastEmailBounced() — judged on the latest delivery outcome only. */
+    private function lastEmailBounced(Lead $lead): bool
+    {
+        $outcome = \App\Models\EmailTracking::withoutGlobalScopes()
+            ->where('lead_id', $lead->id)
+            ->whereIn('event_type', ['bounced', 'delivered', 'opened', 'clicked'])
+            ->orderByDesc('event_at')
+            ->orderByDesc('id')
+            ->value('event_type');
+
+        return $outcome === 'bounced';
+    }
+}
