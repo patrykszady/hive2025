@@ -3,22 +3,25 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\BankAccount;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Services\Checks\CheckNumberSuggester;
 use App\Services\Expenses\AppExpenseDirectory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * The expense create/edit form's "Paid By", "Reimbursement" and "Attach to
- * Existing Check" picker options — mirrors
+ * The expense create/edit form's "Paid By", "Reimbursement", "Attach to
+ * Existing Check" and "Record a New Check" picker options — mirrors
  * App\Livewire\Expenses\ExpenseCreate's employees()/reimbursment_vendors()/
- * available_checks() computed properties exactly (see
+ * available_checks() computed properties and App\Traits\HandlesChecks'
+ * bank_accounts/autoCheckNumber() exactly (see
  * App\Services\Expenses\AppExpenseDirectory for the shared query logic).
  */
 class ExpenseFormOptionsController extends Controller
 {
-    public function __invoke(Request $request, AppExpenseDirectory $directory): JsonResponse
+    public function __invoke(Request $request, AppExpenseDirectory $directory, CheckNumberSuggester $suggester): JsonResponse
     {
         $user = $request->user();
 
@@ -32,6 +35,11 @@ class ExpenseFormOptionsController extends Controller
                 'name' => $vendor->business_name,
             ])->values()->all(),
             'checks' => $directory->checkOptions(),
+            'bank_accounts' => $directory->bankAccounts()->map(fn (BankAccount $account) => [
+                'id' => $account->id,
+                'label' => $account->getNameAndType(),
+                'next_check_number' => $suggester->next($account),
+            ])->values()->all(),
         ]]);
     }
 }

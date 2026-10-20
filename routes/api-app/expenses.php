@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\App\V1\ExpenseAssociationController;
 use App\Http\Controllers\Api\App\V1\ExpenseController;
 use App\Http\Controllers\Api\App\V1\ExpenseFormOptionsController;
+use App\Http\Controllers\Api\App\V1\ExpenseReceiptItemController;
 use App\Http\Controllers\Api\App\V1\ExpenseVendorOptionsController;
 use App\Http\Controllers\Api\App\V1\QuickReceiptController;
 use App\Http\Controllers\Api\App\V1\TransactionLinkController;
@@ -35,6 +36,13 @@ Route::get('expenses/{expense}', [ExpenseController::class, 'show'])->whereNumbe
 // for on a PUT).
 Route::post('expenses/{expense}', [ExpenseController::class, 'update'])->whereNumber('expense')->name('expenses.update');
 Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy'])->whereNumber('expense')->name('expenses.destroy');
+
+// A receipt line item's detail (price history and product image) — mirrors
+// App\Livewire\Expenses\ExpenseShow::selectReceiptItem()'s item-detail modal,
+// via App\Services\Expenses\ReceiptLineItemDetail and ExpenseReceiptItemController.
+Route::get('expenses/{expense}/receipts/{receipt}/items/{index}', [ExpenseReceiptItemController::class, 'show'])
+    ->whereNumber(['expense', 'receipt', 'index'])
+    ->name('expenses.receipts.items.show');
 
 // "Linked Expenses" (App\Livewire\Expenses\ExpensesAssociated) and removing
 // an expense from a check it was paid by (ExpenseShow::removeFromCheck) —
