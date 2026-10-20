@@ -42,6 +42,12 @@ class TaskResource extends JsonResource
                 'id' => $this->resource->vendor->id,
                 'business_name' => $this->resource->vendor->business_name,
             ] : null,
+            // The vendor-availability toggle TaskCreate's Vendor field shows
+            // next to the select (confirm/reset there; reject is the same
+            // vendor_status transition, offered here too — see
+            // App\Services\Tasks\TaskVendorAvailability).
+            'vendor_status' => $this->vendor_status,
+            'vendor_status_ui' => $this->vendor_status_ui,
             'user_ids' => collect($this->user_ids ?? [])->map(fn ($id) => (int) $id)->values()->all(),
             'users' => collect($this->user_ids ?? [])
                 ->map(fn ($id) => User::query()->withoutGlobalScopes()->find($id))
@@ -68,6 +74,11 @@ class TaskResource extends JsonResource
             'meeting_participants' => (array) ($this->options->meeting_participants ?? []),
             'predecessor_dependencies' => $this->dependencyList($this->resource->predecessorDependencies ?? collect(), 'predecessor'),
             'successor_dependencies' => $this->dependencyList($this->resource->successorDependencies ?? collect(), 'successor'),
+            // Task::visibleTo() (used by show/update/destroy) includes
+            // trashed tasks, same as the web's edit modal reopening on one
+            // — the task screen needs to know, to offer Restore instead of
+            // (or alongside) Delete.
+            'trashed' => $this->resource->trashed(),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

@@ -9,9 +9,13 @@ use App\Http\Requests\Api\App\UpdateTaskRequest;
 use App\Http\Resources\Api\App\TaskResource;
 use App\Jobs\CreateMeetTaskCalendarEvent;
 use App\Jobs\UpdateMeetTaskCalendarEvent;
+use App\Models\Project;
 use App\Models\ProjectActionItem;
 use App\Models\Task;
+use App\Services\Tasks\MeetingContactsFinder;
 use App\Services\Tasks\TaskDependencyWriter;
+use App\Services\Tasks\TaskPreferredTimes;
+use App\Services\Tasks\TaskVendorAvailability;
 use App\Services\Tasks\TaskWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -90,15 +94,137 @@ class TaskController extends Controller
         return response()->json(['data' => (new TaskResource($updated))->toArray($request)]);
     }
 
-    /** Mirrors the web's delete: authorize, soft-delete (App\Observers\TaskObserver::deleted() handles the rest). */
+    /**
+     * Mirrors TaskCreate::removeTask() exactly: soft-delete, or — reopening
+     * an already-trashed task and deleting it again — a permanent
+     * forceDelete (App\Observers\TaskObserver::deleted()/forceDeleted()
+     * handle the rest).
+     */
     public function destroy(Request $request, int $task): JsonResponse
     {
         $found = $this->visibleTask($task);
         Gate::authorize('delete', $found);
 
-        $found->delete();
+        if ($found->trashed()) {
+            $found->forceDelete();
+        } else {
+            $found->delete();
+        }
 
         return response()->json(['data' => ['id' => $found->id, 'deleted' => true]]);
+    }
+
+    /**
+     * Mirrors TaskCreate::restoreTask(): a trashed task, same tenant check
+     * as every other task route (Task carries no scope of its own).
+     */
+    public function restore(Request $request, int $task): JsonResponse
+    {
+        $found = $this->visibleTask($task);
+        abort_unless($found->trashed(), 404);
+
+        Gate::authorize('restore', $found);
+
+        $found->restore();
+
+        return response()->json(['data' => (new TaskResource($found))->toArray($request)]);
+    }
+
+    /**
+     * Mirrors TaskCreate::confirmVendorAvailability()/
+     * rejectVendorAvailability()/resetVendorAvailability() — the Vendor
+     * Status toggle next to the task's Vendor field — via the shared
+     * App\Services\Tasks\TaskVendorAvailability. TaskCreate's own blade
+     * only wires confirm (requested/proposed → confirmed) and reset
+     * (confirmed → requested) to a button; reject (requested/proposed →
+     * rejected) is the same component method, offered here too since a GC
+     * admin may need to mark a sub as declined without waiting on their SMS
+     * reply.
+     */
+    public function confirmVendorAvailability(Request $request, int $task, TaskVendorAvailability $service): JsonResponse
+    {
+        return $this->respondToVendorAvailability($request, $task, fn (Task $found) => $service->confirm($found));
+    }
+
+    public function rejectVendorAvailability(Request $request, int $task, TaskVendorAvailability $service): JsonResponse
+    {
+        return $this->respondToVendorAvailability($request, $task, fn (Task $found) => $service->reject($found));
+    }
+
+    public function resetVendorAvailability(Request $request, int $task, TaskVendorAvailability $service): JsonResponse
+    {
+        return $this->respondToVendorAvailability($request, $task, fn (Task $found) => $service->reset($found));
+    }
+
+    /** @param  callable(Task): Task  $transition */
+    private function respondToVendorAvailability(Request $request, int $task, callable $transition): JsonResponse
+    {
+        $found = $this->visibleTask($task);
+        Gate::authorize('update', $found);
+
+        try {
+            $transition($found);
+        } catch (ValidationException $exception) {
+            return response()->json(['message' => $exception->getMessage(), 'errors' => $exception->errors()], 422);
+        }
+
+        return response()->json(['data' => (new TaskResource($found->refresh()))->toArray($request)]);
+    }
+
+    /**
+     * Homeowner-submitted scheduling times for a project — mirrors
+     * TaskCreate::servicePreferredSlots()/showAwaitingClientAvailabilityCard()/
+     * servicePreferredSubmittedAt()/homeownerAvailability() via the shared
+     * App\Services\Tasks\TaskPreferredTimes. `applied` is left for the
+     * caller to compute against its own in-progress dates/time_settings
+     * (there is no saved form state to check here) — same reasoning as
+     * the "apply" actions themselves, which stay pure client-side form
+     * edits on both the web and the app until Save is pressed.
+     *
+     * `task` is optional — omitted while creating a task (no row yet, same
+     * as TaskCreate's own create-mode); when given, it must already be
+     * visible to this tenant.
+     */
+    public function preferredTimes(Request $request, TaskPreferredTimes $service): JsonResponse
+    {
+        $project = Project::query()->whereKey($request->integer('project_id'))->first();
+        abort_unless($project, 404);
+
+        $taskId = $request->integer('task_id') ?: null;
+        $task = $taskId ? Task::visibleTo($taskId) : null;
+        abort_if($taskId && ! $task, 403, 'You do not have access to this task.');
+
+        $groupedSlots = $service->groupedSlots($project, $task);
+
+        return response()->json(['data' => [
+            'service_preferred_slots' => $groupedSlots,
+            'show_awaiting_client_availability_card' => $service->showAwaitingCard($project, $task, $groupedSlots),
+            'service_preferred_submitted_at' => $service->submittedAt($project),
+            'homeowner_availability' => (string) $request->query('type') === 'Meet'
+                ? $service->homeownerAvailability($project)
+                : null,
+        ]]);
+    }
+
+    /**
+     * Meeting-participant contacts to pick from — mirrors
+     * TaskCreate::availableMeetingContacts()/participantSearchResults()
+     * via the shared App\Services\Tasks\MeetingContactsFinder. `project_id`
+     * and `vendor_id` are optional (a brand-new Meet may not have either
+     * chosen yet); `search` narrows to everyone the company knows, same as
+     * typing into the web's autocomplete.
+     */
+    public function meetingContacts(Request $request, MeetingContactsFinder $finder): JsonResponse
+    {
+        $projectId = $request->integer('project_id') ?: null;
+        $vendorId = $request->integer('vendor_id') ?: null;
+        $search = (string) $request->string('search');
+
+        $selected = collect((array) $request->input('selected', []))
+            ->map(fn ($email) => (string) $email)
+            ->all();
+
+        return response()->json(['data' => $finder->searchResults($projectId, $vendorId, $selected, $search)]);
     }
 
     /**

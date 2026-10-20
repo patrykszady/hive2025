@@ -228,6 +228,99 @@ it('lets the owning company update and delete a task, and 403s another company',
     $this->deleteJson("/api/app/v1/tasks/{$secondTask->id}")->assertForbidden();
 });
 
+// --- Restore (App\Livewire\Tasks\TaskCreate::restoreTask()) ---
+
+it('needs a token to restore a task', function () {
+    $this->postJson('/api/app/v1/tasks/1/restore')->assertUnauthorized();
+});
+
+it('restores a deleted task, like TaskCreate::restoreTask()', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'project_id' => $project->id,
+        'title' => 'Undo me',
+        'type' => 'Task',
+        'order' => 0,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+    ]));
+
+    $this->deleteJson("/api/app/v1/tasks/{$task->id}")->assertOk();
+    expect($task->fresh()->trashed())->toBeTrue();
+
+    $response = $this->postJson("/api/app/v1/tasks/{$task->id}/restore")->assertOk();
+
+    expect($task->fresh()->trashed())->toBeFalse()
+        ->and($response->json('data.trashed'))->toBeFalse()
+        ->and($response->json('data.title'))->toBe('Undo me');
+});
+
+it('404s restoring a task that was never deleted', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'project_id' => $project->id,
+        'title' => 'Never deleted',
+        'type' => 'Task',
+        'order' => 0,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+    ]));
+
+    $this->postJson("/api/app/v1/tasks/{$task->id}/restore")->assertNotFound();
+});
+
+it('403s another company trying to restore a task they cannot update', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+
+    $project = appJobsTasksProject($vendor);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'project_id' => $project->id,
+        'title' => 'Not yours',
+        'type' => 'Task',
+        'order' => 0,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+    ]));
+    $task->delete();
+
+    $otherVendor = Vendor::factory()->create();
+    $otherUser = User::factory()->create(['primary_vendor_id' => $otherVendor->id]);
+    $otherVendor->users()->attach($otherUser->id, ['role_id' => 1]);
+
+    Sanctum::actingAs($otherUser, ['app']);
+
+    $this->postJson("/api/app/v1/tasks/{$task->id}/restore")->assertForbidden();
+    expect($task->fresh()->trashed())->toBeTrue();
+});
+
+it('permanently deletes a task that is reopened and deleted again, like removeTask()\'s force-delete branch', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+    $task = Task::withoutEvents(fn () => Task::create([
+        'project_id' => $project->id,
+        'title' => 'Doomed',
+        'type' => 'Task',
+        'order' => 0,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+    ]));
+
+    $this->deleteJson("/api/app/v1/tasks/{$task->id}")->assertOk();
+    expect($task->fresh()->trashed())->toBeTrue();
+
+    $this->deleteJson("/api/app/v1/tasks/{$task->id}")->assertOk();
+
+    expect(Task::withTrashed()->whereKey($task->id)->exists())->toBeFalse();
+});
+
 it('404s a nonexistent task and 403s a task on an invisible project', function () {
     ['user' => $user] = appJobsTasksTeamUser(1);
     Sanctum::actingAs($user, ['app']);

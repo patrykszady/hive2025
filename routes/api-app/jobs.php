@@ -104,3 +104,23 @@ Route::delete('tasks/{task}', [AppTaskController::class, 'destroy'])->whereNumbe
 Route::get('tasks/{task}/available-predecessors', [AppTaskController::class, 'availablePredecessors'])->whereNumber('task')->name('tasks.available-predecessors');
 Route::post('tasks/{task}/dependencies', [AppTaskController::class, 'storeDependency'])->whereNumber('task')->name('tasks.dependencies.store');
 Route::delete('tasks/{task}/dependencies/{dependency}', [AppTaskController::class, 'destroyDependency'])->whereNumber(['task', 'dependency'])->name('tasks.dependencies.destroy');
+
+// TASK RESTORE — undo a delete, like TaskCreate::restoreTask() ("Restore"
+// button next to "Remove" when editing an already-trashed task).
+Route::post('tasks/{task}/restore', [AppTaskController::class, 'restore'])->whereNumber('task')->name('tasks.restore');
+
+// TASK VENDOR AVAILABILITY — the confirm/reject/reset toggle next to the
+// task's Vendor field (App\Livewire\Tasks\TaskCreate::
+// confirmVendorAvailability()/rejectVendorAvailability()/resetVendorAvailability(),
+// via App\Services\Tasks\TaskVendorAvailability).
+Route::post('tasks/{task}/vendor-availability/confirm', [AppTaskController::class, 'confirmVendorAvailability'])->whereNumber('task')->name('tasks.vendor-availability.confirm');
+Route::post('tasks/{task}/vendor-availability/reject', [AppTaskController::class, 'rejectVendorAvailability'])->whereNumber('task')->name('tasks.vendor-availability.reject');
+Route::post('tasks/{task}/vendor-availability/reset', [AppTaskController::class, 'resetVendorAvailability'])->whereNumber('task')->name('tasks.vendor-availability.reset');
+
+// TASK SCHEDULING HELPERS — homeowner-submitted preferred times
+// (App\Livewire\Tasks\TaskCreate::servicePreferredSlots()/
+// homeownerAvailability(), via App\Services\Tasks\TaskPreferredTimes) and
+// the Meet participant contact picker (TaskCreate::availableMeetingContacts()/
+// participantSearchResults(), via App\Services\Tasks\MeetingContactsFinder).
+Route::get('tasks/preferred-times', [AppTaskController::class, 'preferredTimes'])->name('tasks.preferred-times');
+Route::get('tasks/meeting-contacts', [AppTaskController::class, 'meetingContacts'])->name('tasks.meeting-contacts');
