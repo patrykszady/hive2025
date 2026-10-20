@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Services\People\AppPersonResolver;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Collection;
 use Laravel\Scout\EngineManager;
 
@@ -41,14 +42,59 @@ class AppVendorDirectory
     public const DEFAULT_TYPE = 'Sub';
 
     /**
+     * The columns the web's Vendors table can sort by — VendorsIndex's own
+     * `sort()` targets (resources/views/livewire/vendors/index.blade.php's
+     * three sortable `flux:table.column`s: Vendor/YTD Paid/Since).
+     *
+     * @var list<string>
+     */
+    public const SORTS = ['business_name', 'ytd_expense_sum', 'attached_at'];
+
+    /** VendorsIndex's own default: $sortBy/$sortDirection, applied for every viewer regardless of the YTD Paid column's own visibility gate. */
+    public const DEFAULT_SORT = 'ytd_expense_sum';
+
+    public const DEFAULT_DIRECTION = 'desc';
+
+    /**
      * Vendors visible to the signed-in user's company (via VendorScope),
      * filtered to $type (All = no filter) and $search (business name —
-     * Meilisearch first, a plain LIKE if that index call fails), each
-     * carrying its year-to-date paid total for the detail/list screens that
-     * are allowed to show it.
+     * Meilisearch first, a plain LIKE if that index call fails), sorted by
+     * $sortBy/$sortDirection, each carrying its year-to-date paid total for
+     * the detail/list screens that are allowed to show it.
+     *
+     * Mirrors VendorsIndex::vendors() exactly, including its special case:
+     * sorting by `attached_at` (the pivot's `created_at` — this company's
+     * "Since" column) or `ytd_expense_sum` can't be sourced from the
+     * Meilisearch index, so both fall back to the same Eloquent join/withSum
+     * query the web uses, which also selects `attached_at` directly off the
+     * join — the only sort mode that doesn't need a separate
+     * {@see attachedAtMap()} lookup afterward.
      */
-    public function query(string $type, string $search): Builder
+    public function query(Vendor $viewerCompany, string $type, string $search, string $sortBy, string $sortDirection): Builder
     {
+        if (in_array($sortBy, ['attached_at', 'ytd_expense_sum'], true)) {
+            $query = Vendor::query()
+                ->join('vendors_vendor as vv', function (JoinClause $join) use ($viewerCompany): void {
+                    $join->on('vv.vendor_id', '=', 'vendors.id')
+                        ->where('vv.belongs_to_vendor_id', '=', $viewerCompany->id);
+                })
+                ->select('vendors.*', 'vv.created_at as attached_at')
+                ->withSum(['expenses as ytd_expense_sum' => function (Builder $expenses): void {
+                    $expenses->where('date', '>=', today()->subYear());
+                }], 'amount');
+
+            if ($type !== '' && $type !== 'All') {
+                $query->where('vendors.business_type', $type);
+            }
+
+            $search = trim($search);
+            if ($search !== '') {
+                $query->where('vendors.business_name', 'like', '%'.$search.'%');
+            }
+
+            return $query->orderBy($sortBy === 'attached_at' ? 'vv.created_at' : 'ytd_expense_sum', $sortDirection);
+        }
+
         $query = Vendor::query()
             ->withSum(['expenses as ytd_expense_sum' => function (Builder $expenses): void {
                 $expenses->where('date', '>=', today()->subYear());
@@ -60,7 +106,28 @@ class AppVendorDirectory
 
         $this->applySearch($query, trim($search));
 
-        return $query->orderBy('business_name')->orderBy('id');
+        return $query->orderBy('business_name', $sortDirection)->orderBy('id');
+    }
+
+    /**
+     * Each $vendorIds vendor's "Since" date — the pivot's own `created_at`
+     * on $viewerCompany's directory, exactly like VendorsIndex::attachedMap().
+     * Only needed when {@see query()} didn't already select `attached_at`
+     * off its join (i.e. every sort mode except `attached_at`/`ytd_expense_sum`).
+     *
+     * @param  list<int>  $vendorIds
+     * @return array<int, string>
+     */
+    public function attachedAtMap(Vendor $viewerCompany, array $vendorIds): array
+    {
+        if (empty($vendorIds)) {
+            return [];
+        }
+
+        return $viewerCompany->vendors()
+            ->whereIn('vendors.id', $vendorIds)
+            ->pluck('vendors_vendor.created_at', 'vendors.id')
+            ->toArray();
     }
 
     /**
@@ -72,6 +139,22 @@ class AppVendorDirectory
         $type = is_string($value) ? $value : self::DEFAULT_TYPE;
 
         return in_array($type, self::TYPES, true) ? $type : self::DEFAULT_TYPE;
+    }
+
+    /**
+     * Normalizes a `sort` query param to one of self::SORTS, falling back to
+     * the web's own default (VendorsIndex::$sortBy) when missing or
+     * unrecognized.
+     */
+    public function normalizeSort(mixed $value): string
+    {
+        return is_string($value) && in_array($value, self::SORTS, true) ? $value : self::DEFAULT_SORT;
+    }
+
+    /** Normalizes a `direction` query param, falling back to the web's own default (VendorsIndex::$sortDirection). */
+    public function normalizeDirection(mixed $value): string
+    {
+        return in_array($value, ['asc', 'desc'], true) ? $value : self::DEFAULT_DIRECTION;
     }
 
     private function applySearch(Builder $query, string $search): void

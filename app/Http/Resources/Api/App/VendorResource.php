@@ -8,8 +8,12 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
+use App\Services\Dashboard\AppHomeAgenda;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * A vendor as the app's Vendors tab shows it. With withDetail() it adds
@@ -27,6 +31,8 @@ class VendorResource extends JsonResource
     protected bool $canManage = false;
 
     protected bool $canPay = false;
+
+    protected ?string $since = null;
 
     /**
      * Whether the viewer may manage this vendor (VendorPolicy::update) — the
@@ -63,6 +69,20 @@ class VendorResource extends JsonResource
     }
 
     /**
+     * The "Since" column on the web's Vendors table — when this vendor was
+     * attached to the viewer's directory (the `vendors_vendor` pivot's own
+     * `created_at`), as a raw datetime string ready for the client to
+     * format/diff. Null for a vendor with no pivot row (viewing one's own
+     * company, which is never attached to itself).
+     */
+    public function since(?string $since): static
+    {
+        $this->since = $since;
+
+        return $this;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array
@@ -94,6 +114,9 @@ class VendorResource extends JsonResource
             'business_email' => $isRetail ? null : $vendor->business_email,
             'business_website' => $isRetail ? null : $vendor->business_website,
             'ytd_paid' => $showYtdPaid ? (float) $vendor->ytd_expense_sum : null,
+            // The Vendors index table's "Since" column — null when this
+            // vendor was never attached via the pivot (one's own company).
+            'since' => $this->since,
             'can_manage' => $this->canManage,
             // vendor-details.blade's "Make Payment" button: never your own
             // company, never a Retail vendor, and (unlike the web's button,
@@ -107,9 +130,13 @@ class VendorResource extends JsonResource
             return $row;
         }
 
+        $tasks = $isRetail ? null : $this->tasksCard($vendor, $viewerVendorId);
+
         return $row + [
             'contacts' => $isRetail ? [] : $this->contacts($vendor),
-            'upcoming_tasks' => $isRetail ? [] : $this->upcomingTasks($vendor),
+            'task_count' => $tasks['task_count'] ?? 0,
+            'pending_tasks' => $tasks['pending_tasks'] ?? [],
+            'upcoming_tasks' => $tasks['upcoming_tasks'] ?? [],
             // Insurance/vendor-document status: only Sub/DBA vendors carry
             // documents at all, and only an admin (VendorDocPolicy) sees them
             // — matches show.blade's @can('update', $vendor) wrapping the
@@ -150,45 +177,143 @@ class VendorResource extends JsonResource
     }
 
     /**
-     * The next 10 scheduled tasks for this vendor — same window as
-     * VendorTaskList's groupedTasks(), flattened to a simple upcoming list
-     * (the web's 8-day grid doesn't translate to a phone card).
+     * The vendor show page's "Tasks" card — mirrors
+     * App\Livewire\Vendors\VendorTaskList exactly: $taskCount is the 7-day
+     * (today..+6) scheduled count for the card's heading badge,
+     * pending_tasks is the "Pending Tasks" accordion (unscheduled tasks),
+     * and upcoming_tasks is the scheduled tasks grouped by day across the
+     * 8-day window (yesterday..+6) with the same Today/Tomorrow/Yesterday
+     * flags the web's upcoming-tasks-list-day.blade.php badges. Tasks
+     * beyond that window ("Later", on the web) are deliberately left out —
+     * a vendor profile's own secondary accordion, lower priority than the
+     * pending/day split this mirrors.
      *
-     * @return list<array{id: int, title: string, project: array{id: int, short_address: ?string}, date: string, start_time: ?string, end_time: ?string}>
+     * @return array{task_count: int, pending_tasks: list<array<string, mixed>>, upcoming_tasks: list<array{date: string, is_today: bool, is_yesterday: bool, is_tomorrow: bool, tasks: list<array<string, mixed>>}>}
      */
-    private function upcomingTasks(Vendor $vendor): array
+    private function tasksCard(Vendor $vendor, int $viewerVendorId): array
     {
-        $viewerVendorId = (int) auth()->user()?->vendor?->id;
+        $today = Carbon::now(AppHomeAgenda::TIMEZONE)->startOfDay();
+        $cutoffStr = $today->copy()->subDay()->format('Y-m-d');
+        $windowEndStr = $today->copy()->addDays(6)->format('Y-m-d');
+        $todayStr = $today->format('Y-m-d');
+        $yesterdayStr = $cutoffStr;
+        $tomorrowStr = $today->copy()->addDay()->format('Y-m-d');
 
-        $tasks = Task::withTrashed()
+        $baseQuery = fn (): Builder => Task::withTrashed()
             ->where('vendor_id', $vendor->id)
             ->where('belongs_to_vendor_id', $viewerVendorId)
-            ->where(function ($query): void {
+            ->where(function (Builder $query): void {
                 $query->where('type', '!=', 'Reminder')->orWhereNull('type');
-            })
+            });
+
+        $taskCount = $baseQuery()
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->where('end_date', '>=', today())
+            ->whereDate('start_date', '<=', $windowEndStr)
+            ->whereDate('end_date', '>=', $todayStr)
+            ->count();
+
+        $scheduled = $baseQuery()
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('start_date', '<=', $windowEndStr)
+            ->whereDate('end_date', '>=', $cutoffStr)
             ->with('project:id,project_name,address,address_2,city,state,zip_code')
             ->orderBy('start_date')
             ->orderBy('end_date')
-            ->limit(10)
-            ->get();
+            ->get()
+            ->filter(fn (Task $task) => $task->project !== null);
 
-        return $tasks->filter(fn (Task $task) => $task->project !== null)->map(function (Task $task): array {
-            $dateKey = $task->start_date->format('Y-m-d');
-            $daySettings = data_get($task->options, "time_settings.{$dateKey}", null);
-            $usesTime = (bool) data_get($daySettings, 'use_time', false);
+        $this->primeTaskUsers($scheduled);
+
+        $grouped = collect();
+        foreach ($scheduled as $task) {
+            $selectedDates = (array) data_get($task->options, 'dates', []);
+            $dates = $selectedDates !== [] ? $selectedDates : [$task->start_date->format('Y-m-d')];
+
+            foreach ($dates as $dateStr) {
+                if ($dateStr >= $cutoffStr && $dateStr <= $windowEndStr) {
+                    $grouped[$dateStr] ??= collect();
+                    $grouped[$dateStr]->push($task);
+                }
+            }
+        }
+
+        $upcomingTasks = $grouped->sortKeys()->map(function (Collection $dayTasks, string $dateStr) use ($todayStr, $yesterdayStr, $tomorrowStr): array {
+            $sorted = $dayTasks->sortBy(function (Task $task) use ($dateStr) {
+                $startTime = (string) data_get($task->options, "time_settings.$dateStr.start_time", '');
+                $usesTime = (bool) data_get($task->options, "time_settings.$dateStr.use_time", false);
+
+                return $usesTime && $startTime !== '' ? '0_'.$startTime : '1';
+            })->values();
 
             return [
-                'id' => $task->id,
-                'title' => $task->title,
-                'project' => ['id' => $task->project->id, 'short_address' => $task->project->short_address],
-                'date' => $dateKey,
-                'start_time' => $usesTime ? (data_get($daySettings, 'start_time') ?: null) : null,
-                'end_time' => $usesTime ? (data_get($daySettings, 'end_time') ?: null) : null,
+                'date' => $dateStr,
+                'is_today' => $dateStr === $todayStr,
+                'is_yesterday' => $dateStr === $yesterdayStr,
+                'is_tomorrow' => $dateStr === $tomorrowStr,
+                'tasks' => $sorted->map(fn (Task $task) => $this->taskRow($task, $dateStr))->values()->all(),
             ];
         })->values()->all();
+
+        $pending = $baseQuery()
+            ->whereNull('start_date')
+            ->with('project:id,project_name,address,address_2,city,state,zip_code')
+            ->orderBy('created_at')
+            ->get()
+            ->filter(fn (Task $task) => $task->project !== null);
+
+        $this->primeTaskUsers($pending);
+
+        return [
+            'task_count' => $taskCount,
+            'pending_tasks' => $pending->map(fn (Task $task) => $this->taskRow($task, null))->values()->all(),
+            'upcoming_tasks' => $upcomingTasks,
+        ];
+    }
+
+    /**
+     * @return array{id: int, title: string, project: array{id: int, short_address: ?string}, date: ?string, start_time: ?string, end_time: ?string, users: list<string>}
+     */
+    private function taskRow(Task $task, ?string $dateKey): array
+    {
+        $dateKey ??= $task->start_date?->format('Y-m-d');
+        $daySettings = $dateKey ? data_get($task->options, "time_settings.{$dateKey}", null) : null;
+        $usesTime = (bool) data_get($daySettings, 'use_time', false);
+
+        return [
+            'id' => $task->id,
+            'title' => $task->title,
+            'project' => ['id' => $task->project->id, 'short_address' => $task->project->short_address],
+            'date' => $dateKey,
+            'start_time' => $usesTime ? (data_get($daySettings, 'start_time') ?: null) : null,
+            'end_time' => $usesTime ? (data_get($daySettings, 'end_time') ?: null) : null,
+            'users' => $task->users->map(fn (User $user): string => trim($user->first_name.' '.$user->last_name))->values()->all(),
+        ];
+    }
+
+    /**
+     * Attaches each task's assigned User models onto its "users" relation —
+     * VendorTaskList::hydrateAssignedUsers() exactly.
+     *
+     * @param  Collection<int, Task>  $tasks
+     */
+    private function primeTaskUsers(Collection $tasks): void
+    {
+        $allUserIds = $tasks->pluck('user_ids')->flatten()->filter()->unique()->values();
+
+        $usersById = $allUserIds->isNotEmpty()
+            ? User::query()->whereIn('id', $allUserIds)->get()->keyBy('id')
+            : collect();
+
+        foreach ($tasks as $task) {
+            $assignedUsers = collect($task->user_ids ?? [])
+                ->map(fn ($userId) => $usersById->get($userId))
+                ->filter()
+                ->values();
+
+            $task->setRelation('users', $assignedUsers);
+        }
     }
 
     /**

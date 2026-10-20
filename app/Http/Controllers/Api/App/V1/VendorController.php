@@ -38,30 +38,63 @@ class VendorController extends Controller
         $canManage = Gate::allows('create', Vendor::class);
         $canPay = Gate::allows('create', Check::class);
         $type = $directory->normalizeType($request->query('type'));
+        $sortBy = $directory->normalizeSort($request->query('sort'));
+        $sortDirection = $directory->normalizeDirection($request->query('direction'));
+        $company = $request->user()->vendor;
 
-        $page = $directory->query($type, (string) $request->query('search', ''))
-            ->cursorPaginate(self::PER_PAGE);
+        $query = $directory->query($company, $type, (string) $request->query('search', ''), $sortBy, $sortDirection);
+
+        // The `attached_at`/`ytd_expense_sum` branch orders by a joined
+        // pivot column and a withSum() alias, neither of which a keyset
+        // cursor can safely re-compare in a WHERE clause — same reasoning
+        // VendorsIndex sidesteps by falling back to a plain Eloquent
+        // ->paginate() instead of Meilisearch there. The cursor stays an
+        // opaque string to the app either way: a page number here, a real
+        // keyset cursor otherwise.
+        if (in_array($sortBy, ['attached_at', 'ytd_expense_sum'], true)) {
+            $requestedPage = max(1, (int) $request->query('cursor', 1));
+            $paginator = $query->paginate(self::PER_PAGE, ['*'], 'page', $requestedPage);
+            $vendors = $paginator->getCollection();
+            $nextCursor = $paginator->hasMorePages() ? (string) ($requestedPage + 1) : null;
+        } else {
+            $paginator = $query->cursorPaginate(self::PER_PAGE);
+            $vendors = $paginator->getCollection();
+            $nextCursor = $paginator->nextCursor()?->encode();
+        }
+
+        // Every other sort already selected `attached_at` straight off its
+        // join; only the business_name/Meilisearch branch needs this
+        // separate lookup for the "Since" column.
+        $attachedAtMap = $sortBy === 'business_name'
+            ? $directory->attachedAtMap($company, $vendors->pluck('id')->all())
+            : [];
 
         return response()->json([
-            'data' => $page->getCollection()
-                ->map(fn (Vendor $vendor) => (new VendorResource($vendor))->canManage($canManage)->canPay($canPay)->toArray($request))
+            'data' => $vendors
+                ->map(fn (Vendor $vendor) => (new VendorResource($vendor))
+                    ->canManage($canManage)
+                    ->canPay($canPay)
+                    ->since($vendor->attached_at ?? $attachedAtMap[$vendor->id] ?? null)
+                    ->toArray($request))
                 ->all(),
-            'next_cursor' => $page->nextCursor()?->encode(),
+            'next_cursor' => $nextCursor,
             // The web's "Add New Vendor" button —
             // @can('create', App\Models\Vendor::class) on
             // resources/views/livewire/vendors/partials/index-actions.blade.php.
             'can_create_vendor' => $canManage,
+            'sort' => $sortBy,
+            'direction' => $sortDirection,
         ]);
     }
 
-    public function show(Request $request, int $vendor): JsonResponse
+    public function show(Request $request, int $vendor, AppVendorDirectory $directory): JsonResponse
     {
         $found = $this->visibleVendor($request, $vendor);
         $canManage = $request->user()->can('update', $found);
         $canPay = $request->user()->can('create', Check::class);
 
         return response()->json([
-            'data' => (new VendorResource($found))->canManage($canManage)->canPay($canPay)->withDetail()->toArray($request),
+            'data' => (new VendorResource($found))->canManage($canManage)->canPay($canPay)->since($this->sinceFor($request, $found, $directory))->withDetail()->toArray($request),
         ]);
     }
 
@@ -134,7 +167,7 @@ class VendorController extends Controller
         $canPay = $request->user()->can('create', Check::class);
 
         return response()->json([
-            'data' => (new VendorResource($vendor))->canManage($canManage)->canPay($canPay)->withDetail()->toArray($request),
+            'data' => (new VendorResource($vendor))->canManage($canManage)->canPay($canPay)->since($this->sinceFor($request, $vendor, $directory))->withDetail()->toArray($request),
         ], 201);
     }
 
@@ -149,7 +182,7 @@ class VendorController extends Controller
         $canPay = $request->user()->can('create', Check::class);
 
         return response()->json([
-            'data' => (new VendorResource($found->refresh()))->canManage($canManage)->canPay($canPay)->withDetail()->toArray($request),
+            'data' => (new VendorResource($found->refresh()))->canManage($canManage)->canPay($canPay)->since($this->sinceFor($request, $found, $directory))->withDetail()->toArray($request),
         ]);
     }
 
@@ -170,7 +203,7 @@ class VendorController extends Controller
         $directory->linkVendor($request->user()->vendor, $found);
 
         return response()->json([
-            'data' => (new VendorResource($found))->canManage($request->user()->can('update', $found))->canPay($request->user()->can('create', Check::class))->withDetail()->toArray($request),
+            'data' => (new VendorResource($found))->canManage($request->user()->can('update', $found))->canPay($request->user()->can('create', Check::class))->since($this->sinceFor($request, $found, $directory))->withDetail()->toArray($request),
         ]);
     }
 
@@ -204,6 +237,18 @@ class VendorController extends Controller
         return response()->json([
             'data' => $tracking->recentEvents($request->user()->vendor, ['Lien Waiver Signing Request'], $found->id),
         ]);
+    }
+
+    /** This vendor's "Since" date on the signed-in user's own company directory — null when there is no pivot row (one's own company). */
+    private function sinceFor(Request $request, Vendor $vendor, AppVendorDirectory $directory): ?string
+    {
+        $company = $request->user()->vendor;
+
+        if (! $company) {
+            return null;
+        }
+
+        return $directory->attachedAtMap($company, [$vendor->id])[$vendor->id] ?? null;
     }
 
     /**

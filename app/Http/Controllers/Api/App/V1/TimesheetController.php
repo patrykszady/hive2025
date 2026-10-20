@@ -62,6 +62,18 @@ class TimesheetController extends Controller
         ]);
     }
 
+    /**
+     * The member filter's options — TimesheetsIndex::mount()'s `$employees`
+     * list, which (unlike the Team tab) includes anyone with timesheet/hour
+     * history, even a terminated member.
+     */
+    public function employees(AppTimesheetDirectory $directory): JsonResponse
+    {
+        $this->authorize('viewAny', Timesheet::class);
+
+        return response()->json(['data' => $directory->employees()]);
+    }
+
     public function show(Request $request, int $timesheet, AppTimesheetDirectory $directory): JsonResponse
     {
         $found = $this->visibleTimesheet($timesheet);

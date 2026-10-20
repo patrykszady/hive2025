@@ -316,3 +316,44 @@ it('shows the payable list only to an Admin', function () {
     Sanctum::actingAs($member, ['app']);
     $this->getJson('/api/app/v1/timesheets/payable')->assertForbidden();
 });
+
+it('lists every member with timesheet/hour history for the filter, including one no longer on the team', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    $member = appFieldTimesheetsMember($vendor);
+
+    // No longer attached to the vendor at all (left the company) — still
+    // has a confirmed timesheet row, so TimesheetsIndex::mount() (and this
+    // mirror of it) must still offer them in the filter.
+    $former = User::factory()->create(['first_name' => 'Former', 'last_name' => 'Employee']);
+    appFieldTimesheetFixture($vendor, $former, ['date' => '2026-04-06']);
+    appFieldTimesheetFixture($vendor, $member, ['date' => '2026-05-11']);
+
+    // Someone with an unconfirmed Hour row but no Timesheet yet also counts.
+    $hourOnly = User::factory()->create(['first_name' => 'Hour', 'last_name' => 'Only']);
+    $client = \App\Models\Client::factory()->create();
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Hour Only Job', 'client_id' => $client->id, 'address' => '1 Elm St',
+        'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601', 'belongs_to_vendor_id' => $vendor->id,
+    ]));
+    Hour::forceCreate([
+        'date' => now()->format('Y-m-d'),
+        'user_id' => $hourOnly->id,
+        'vendor_id' => $vendor->id,
+        'project_id' => $project->id,
+        'hours' => 8,
+        'timesheet_id' => null,
+        'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson('/api/app/v1/timesheets/employees')->assertOk();
+    $ids = collect($response->json('data'))->pluck('id');
+
+    expect($ids)->toContain($former->id)
+        ->and($ids)->toContain($member->id)
+        ->and($ids)->toContain($hourOnly->id);
+});
+
+it('needs the viewAny ability to list timesheet employees', function () {
+    $this->getJson('/api/app/v1/timesheets/employees')->assertUnauthorized();
+});

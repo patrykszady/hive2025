@@ -25,6 +25,37 @@ class AppTimesheetDirectory
     private const PER_PAGE = 20;
 
     /**
+     * Everyone who has ever appeared in a Timesheet row or an unconfirmed
+     * Hour row — TimesheetsIndex::mount()'s own `$employees` list for the
+     * member filter, deliberately NOT limited to currently-employed staff:
+     * a terminated member's history should still be filterable by name,
+     * unlike App\Services\Users\AppTeamDirectory::teamMembers() (the Team
+     * tab's own employed-only roster).
+     *
+     * @return list<array{id: int, first_name: ?string, last_name: ?string}>
+     */
+    public function employees(): array
+    {
+        $userIds = Timesheet::query()->distinct()->pluck('user_id')
+            ->merge(Hour::query()->whereNull('timesheet_id')->distinct()->pluck('user_id'))
+            ->filter()
+            ->unique()
+            ->values();
+
+        return User::withoutGlobalScopes()
+            ->whereIn('id', $userIds)
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name'])
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * One row per person-week (the per-project rows summed) — mirrors
      * TimesheetsIndex::timesheets()'s grouping, including its text search
      * (Meilisearch — user name/note/invoice/amount, same as $search there),

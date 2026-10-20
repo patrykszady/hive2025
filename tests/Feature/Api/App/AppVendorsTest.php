@@ -103,6 +103,69 @@ it('searches by business name when Meilisearch is unavailable', function () {
     expect($ids->all())->toBe([$acme->id]);
 });
 
+it('sorts vendors by YTD Paid descending by default, like VendorsIndex', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $low = Vendor::factory()->create(['business_name' => 'Low Paid', 'business_type' => 'Sub']);
+    $high = Vendor::factory()->create(['business_name' => 'High Paid', 'business_type' => 'Sub']);
+    appFieldAttach($company, $low);
+    appFieldAttach($company, $high);
+
+    Expense::withoutEvents(fn () => Expense::create([
+        'amount' => 50, 'date' => now()->format('Y-m-d'), 'vendor_id' => $low->id,
+        'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]));
+    Expense::withoutEvents(fn () => Expense::create([
+        'amount' => 500, 'date' => now()->format('Y-m-d'), 'vendor_id' => $high->id,
+        'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]));
+
+    $response = $this->getJson('/api/app/v1/vendors?type=All')->assertOk();
+    $ids = collect($response->json('data'))->pluck('id')->values()->all();
+
+    expect(array_search($high->id, $ids, true))->toBeLessThan(array_search($low->id, $ids, true))
+        ->and($response->json('sort'))->toBe('ytd_expense_sum')
+        ->and($response->json('direction'))->toBe('desc');
+});
+
+it('sorts vendors by business name and by Since (attached date), and carries Since on every row', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $zebra = Vendor::factory()->create(['business_name' => 'Zebra Roofing', 'business_type' => 'Sub']);
+    $acme = Vendor::factory()->create(['business_name' => 'Acme Drywall', 'business_type' => 'Sub']);
+    appFieldAttach($company, $zebra);
+    appFieldAttach($company, $acme);
+
+    \Illuminate\Support\Facades\DB::table('vendors_vendor')
+        ->where('belongs_to_vendor_id', $company->id)->where('vendor_id', $zebra->id)
+        ->update(['created_at' => now()->subDays(5)]);
+    \Illuminate\Support\Facades\DB::table('vendors_vendor')
+        ->where('belongs_to_vendor_id', $company->id)->where('vendor_id', $acme->id)
+        ->update(['created_at' => now()->subDay()]);
+
+    $byName = $this->getJson('/api/app/v1/vendors?type=All&sort=business_name&direction=asc')->assertOk();
+    $byNameRows = collect($byName->json('data'))->keyBy('id');
+    expect($byNameRows->keys()->search($acme->id))->toBeLessThan($byNameRows->keys()->search($zebra->id))
+        ->and($byNameRows[$acme->id]['since'])->not->toBeNull()
+        ->and($byNameRows[$zebra->id]['since'])->not->toBeNull();
+
+    $bySince = $this->getJson('/api/app/v1/vendors?type=All&sort=attached_at&direction=asc')->assertOk();
+    $sinceIds = collect($bySince->json('data'))->pluck('id')->values();
+    expect($sinceIds->search($zebra->id))->toBeLessThan($sinceIds->search($acme->id));
+});
+
+it('falls back to the web default sort/direction when given an unrecognized one', function () {
+    ['user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/vendors?sort=nonsense&direction=nonsense')->assertOk();
+
+    expect($response->json('sort'))->toBe('ytd_expense_sum')
+        ->and($response->json('direction'))->toBe('desc');
+});
+
 it('403s a vendor outside the company tree and 404s a nonexistent one', function () {
     ['user' => $admin] = appFieldAdmin();
     Sanctum::actingAs($admin, ['app']);
@@ -185,7 +248,7 @@ it('hides contacts, address and documents for a Retail vendor, but still lists t
         ->assertJsonPath('data.contacts.0.role', 'Member');
 });
 
-it('includes a vendor\'s upcoming tasks on the detail screen', function () {
+it('groups a vendor\'s upcoming tasks by day, with a Pending Tasks split, like VendorTaskList', function () {
     ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
     Sanctum::actingAs($admin, ['app']);
 
@@ -204,18 +267,47 @@ it('includes a vendor\'s upcoming tasks on the detail screen', function () {
     ]));
     $project->vendors()->attach($company->id, ['client_id' => $client->id]);
 
+    $tomorrow = now()->addDay()->format('Y-m-d');
     Task::factory()->create([
         'project_id' => $project->id,
         'vendor_id' => $sub->id,
         'belongs_to_vendor_id' => $company->id,
-        'start_date' => now()->addDay()->format('Y-m-d'),
-        'end_date' => now()->addDay()->format('Y-m-d'),
+        'start_date' => $tomorrow,
+        'end_date' => $tomorrow,
+    ]);
+    Task::factory()->create([
+        'project_id' => $project->id,
+        'vendor_id' => $sub->id,
+        'belongs_to_vendor_id' => $company->id,
+        'start_date' => null,
+        'end_date' => null,
     ]);
 
-    $this->getJson('/api/app/v1/vendors/'.$sub->id)
-        ->assertOk()
+    $response = $this->getJson('/api/app/v1/vendors/'.$sub->id)->assertOk();
+
+    $response
+        ->assertJsonPath('data.task_count', 1)
+        ->assertJsonCount(1, 'data.pending_tasks')
         ->assertJsonCount(1, 'data.upcoming_tasks')
-        ->assertJsonPath('data.upcoming_tasks.0.project.id', $project->id);
+        ->assertJsonPath('data.upcoming_tasks.0.date', $tomorrow)
+        ->assertJsonPath('data.upcoming_tasks.0.is_tomorrow', true)
+        ->assertJsonPath('data.upcoming_tasks.0.is_today', false)
+        ->assertJsonCount(1, 'data.upcoming_tasks.0.tasks')
+        ->assertJsonPath('data.upcoming_tasks.0.tasks.0.project.id', $project->id);
+});
+
+it('has no tasks card for a Retail vendor', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $retail = Vendor::factory()->create(['business_type' => 'Retail']);
+    appFieldAttach($company, $retail);
+
+    $this->getJson('/api/app/v1/vendors/'.$retail->id)
+        ->assertOk()
+        ->assertJsonPath('data.task_count', 0)
+        ->assertJsonPath('data.pending_tasks', [])
+        ->assertJsonPath('data.upcoming_tasks', []);
 });
 
 it('shows a non-Retail vendor\'s payment history, scoped to the company\'s own checks', function () {
