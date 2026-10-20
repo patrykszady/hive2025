@@ -101,6 +101,10 @@ Route::delete('tasks/{task}', [AppTaskController::class, 'destroy'])->whereNumbe
 
 // TASK DEPENDENCIES — predecessor/lag/type, like the web's Dependencies
 // panel (App\Livewire\Tasks\TaskCreate, via App\Services\Tasks\TaskDependencyWriter).
+// Candidates for a task that doesn't exist yet — registered ahead of the
+// numeric {task} route below, though whereNumber() alone already keeps it
+// from being swallowed as an id.
+Route::get('tasks/available-predecessors', [AppTaskController::class, 'availablePredecessorsForNewTask'])->name('tasks.available-predecessors-for-new');
 Route::get('tasks/{task}/available-predecessors', [AppTaskController::class, 'availablePredecessors'])->whereNumber('task')->name('tasks.available-predecessors');
 Route::post('tasks/{task}/dependencies', [AppTaskController::class, 'storeDependency'])->whereNumber('task')->name('tasks.dependencies.store');
 Route::delete('tasks/{task}/dependencies/{dependency}', [AppTaskController::class, 'destroyDependency'])->whereNumber(['task', 'dependency'])->name('tasks.dependencies.destroy');
@@ -124,3 +128,8 @@ Route::post('tasks/{task}/vendor-availability/reset', [AppTaskController::class,
 // participantSearchResults(), via App\Services\Tasks\MeetingContactsFinder).
 Route::get('tasks/preferred-times', [AppTaskController::class, 'preferredTimes'])->name('tasks.preferred-times');
 Route::get('tasks/meeting-contacts', [AppTaskController::class, 'meetingContacts'])->name('tasks.meeting-contacts');
+
+// TITLE AUTOCOMPLETE + remembered vendor — mirrors TaskCreate's Title field
+// (App\Services\TaskTitleSuggestions).
+Route::get('tasks/title-suggestions', [AppTaskController::class, 'titleSuggestions'])->name('tasks.title-suggestions');
+Route::get('tasks/title-vendor-suggestion', [AppTaskController::class, 'titleVendorSuggestion'])->name('tasks.title-vendor-suggestion');

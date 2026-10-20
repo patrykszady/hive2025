@@ -20,6 +20,10 @@ use Illuminate\Support\Facades\Route;
 // keeps any of them from being swallowed as an id.
 Route::get('leads/badge', [AppLeadController::class, 'badge'])->name('leads.badge');
 Route::get('leads/origins', [AppLeadController::class, 'origins'])->name('leads.origins');
+// The "User" dropdown's candidates for a lead that doesn't exist yet —
+// mirrors LeadCreate::userChoices() in create mode. See leads/{lead}/
+// contact-candidates below for an existing lead's equivalent.
+Route::get('leads/contact-candidates', [AppLeadController::class, 'createContactCandidates'])->name('leads.create-contact-candidates');
 Route::post('leads/bulk-status', [AppLeadController::class, 'bulkStatus'])->name('leads.bulk-status');
 Route::post('leads/bulk-delete-impact', [AppLeadController::class, 'bulkDeleteImpact'])->name('leads.bulk-delete-impact');
 Route::post('leads/bulk-delete', [AppLeadController::class, 'bulkDelete'])->name('leads.bulk-delete');
@@ -55,6 +59,7 @@ Route::post('leads/{lead}/send-consult-invite', [AppLeadController::class, 'send
 
 Route::get('lien-waivers/projects', [AppLienWaiverController::class, 'eligibleProjects'])->name('lien-waivers.projects');
 Route::get('lien-waivers/sub-vendors', [AppLienWaiverController::class, 'subVendors'])->name('lien-waivers.sub-vendors');
+Route::get('lien-waivers/payer-defaults', [AppLienWaiverController::class, 'payerDefaults'])->name('lien-waivers.payer-defaults');
 Route::get('lien-waivers', [AppLienWaiverController::class, 'index'])->name('lien-waivers.index');
 Route::post('lien-waivers', [AppLienWaiverController::class, 'store'])->name('lien-waivers.store');
 Route::get('lien-waivers/{lienWaiver}', [AppLienWaiverController::class, 'show'])->whereNumber('lienWaiver')->name('lien-waivers.show');

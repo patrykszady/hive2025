@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\App;
 
+use App\Models\User;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -30,7 +31,7 @@ class StoreTeamMemberRequest extends FormRequest
             'last_name' => ['nullable', 'string', 'min:2'],
             'email' => ['nullable', 'email', 'min:4'],
             'nickname' => ['nullable', 'string', 'max:255'],
-            'preferred_language' => ['nullable', 'string', 'max:255'],
+            'preferred_language' => ['nullable', 'string', Rule::in(User::PREFERRED_LANGUAGES)],
             'role' => ['required', Rule::in([1, 2])],
             'hourly_rate' => ['required_with:role', 'numeric', 'min:0'],
             // "Member Type" on the web (form.blade.php's via_vendor radio

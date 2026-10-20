@@ -35,7 +35,14 @@ class StoreLeadRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:30'],
             'address' => ['nullable', 'string', 'max:255'],
             'message' => ['nullable', 'string'],
-            'origin' => ['nullable', 'string', 'max:255'],
+            // No 'origin' rule: like LeadCreate's disabled Origin field, a
+            // hand-entered lead's origin is always "Manual" — never
+            // client-chosen (see LeadController::store()).
+            // An existing user to link BEFORE provisioning runs, like
+            // LeadCreate's "User" dropdown (userChoices()/attachUser()) —
+            // LeadController::store() resolves it through the same
+            // vendor-scoped candidate query the dropdown itself lists.
+            'user_id' => ['nullable', 'integer'],
             'consult_within_the_hour' => ['nullable', 'boolean'],
             'force' => ['nullable', 'boolean'],
         ];
@@ -44,6 +51,16 @@ class StoreLeadRequest extends FormRequest
     public function withValidator(\Illuminate\Validation\Validator $validator): void
     {
         $validator->after(function ($validator) {
+            // A picked `user_id` (LeadCreate::attachUser()'s create-mode
+            // branch) may still supply an email/phone the typed form left
+            // blank — LeadController::store() resolves that candidate and
+            // re-checks reachability itself once the fallback has run,
+            // same as the web (attachUser() fills the properties save()'s
+            // own check reads, before this validation would ever fire).
+            if ($this->filled('user_id')) {
+                return;
+            }
+
             if (blank($this->input('email')) && blank($this->input('phone'))) {
                 $validator->errors()->add('email', 'An email or phone number is needed to reach them.');
             }

@@ -229,7 +229,7 @@ class AppVendorDirectory
             'city' => $data['city'] ?? null,
             'state' => $data['state'] ?? null,
             'zip_code' => $data['zip_code'] ?? null,
-            'business_phone' => $data['business_phone'] ?? null,
+            'business_phone' => isset($data['business_phone']) ? $this->formatBusinessPhone($data['business_phone']) : null,
             'business_email' => $data['business_email'] ?? null,
             'business_website' => $data['business_website'] ?? null,
             'timezone' => VendorOptions::timezoneFromState($data['state'] ?? null),
@@ -254,30 +254,55 @@ class AppVendorDirectory
 
     /**
      * "Edit Vendor" — App\Livewire\Forms\VendorForm::update() exactly.
-     * business_type is deliberately never written here: the web's edit
-     * form keeps that radio group disabled once a vendor exists
-     * (form.blade.php's `:disabled="$view_text['form_submit'] === 'edit'"`),
-     * so this mirrors that by reusing $vendor's own value.
+     * business_type and business_name are deliberately never written here:
+     * the web's edit form keeps the type radio group disabled once a
+     * vendor exists (form.blade.php's `:disabled="$view_text['form_submit']
+     * === 'edit'"`) AND keeps the Business Name input disabled once it has
+     * a value (`x-bind:disabled="$wire.form.business_name"` — every
+     * existing vendor has one, StoreVendorRequest requires it), so this
+     * mirrors both by reusing $vendor's own values. Business email/phone/
+     * website are only ever rendered (and so only ever submitted with a
+     * real value) for a Sub/DBA on the web — Retail/1099 never show them —
+     * but nothing here needs to re-enforce that: a type that can't reach
+     * this form field at all just never sends one.
      *
-     * @param  array{business_name: string, address?: ?string, address_2?: ?string, city?: ?string, state?: ?string, zip_code?: ?string, business_phone?: ?string, business_email?: ?string, business_website?: ?string}  $data
+     * @param  array{address?: ?string, address_2?: ?string, city?: ?string, state?: ?string, zip_code?: ?string, business_phone?: ?string, business_email?: ?string, business_website?: ?string}  $data
      */
     public function updateVendor(Vendor $vendor, array $data): Vendor
     {
         $vendor->update([
-            'business_name' => $data['business_name'],
+            'business_name' => $vendor->business_name,
             'business_type' => $vendor->business_type,
             'address' => $data['address'] ?? null,
             'address_2' => $data['address_2'] ?? null,
             'city' => $data['city'] ?? null,
             'state' => $data['state'] ?? null,
             'zip_code' => $data['zip_code'] ?? null,
-            'business_phone' => $data['business_phone'] ?? null,
+            'business_phone' => isset($data['business_phone']) ? $this->formatBusinessPhone($data['business_phone']) : null,
             'business_email' => $data['business_email'] ?? null,
             'business_website' => $data['business_website'] ?? null,
             'timezone' => VendorOptions::timezoneFromState($data['state'] ?? null),
         ]);
 
         return $vendor;
+    }
+
+    /**
+     * (999) 999-9999 — mirrors the web's `x-mask="(999) 999-9999"` on the
+     * Business Phone input: StoreVendorRequest/UpdateVendorRequest validate
+     * 10 raw digits, but the web never stores the raw digits, only the
+     * masked display string, so this formats them the same way before
+     * saving.
+     */
+    private function formatBusinessPhone(?string $phone): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $phone);
+
+        if (strlen((string) $digits) !== 10) {
+            return null;
+        }
+
+        return sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
     }
 
     /**

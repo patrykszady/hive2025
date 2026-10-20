@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\App;
 use App\Models\Task;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * POST /api/app/v1/tasks — mirrors App\Livewire\Forms\TaskForm's own rules
@@ -52,6 +53,17 @@ class StoreTaskRequest extends FormRequest
             // (actionItemToTask()'s mobile equivalent) — settled by the
             // controller, same as TaskCreate::save().
             'action_item_id' => ['nullable', 'integer'],
+            // Predecessors chosen before this task existed — mirrors
+            // TaskCreate::addDependency()'s not-yet-saved branch
+            // ($pendingDependencies), flushed by the controller once the
+            // task has an id (TaskCreate::save()'s own flush). Each is
+            // independently validated (self/circular/visibility) there via
+            // App\Services\Tasks\TaskDependencyWriter::add() — one that no
+            // longer qualifies is skipped rather than failing the create.
+            'pending_dependencies' => ['nullable', 'array'],
+            'pending_dependencies.*.predecessor_task_id' => ['required', 'integer'],
+            'pending_dependencies.*.type' => ['required', Rule::in(['finish_to_start', 'start_to_start', 'finish_to_finish', 'start_to_finish'])],
+            'pending_dependencies.*.lag_days' => ['nullable', 'integer'],
         ];
     }
 }

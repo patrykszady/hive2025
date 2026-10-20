@@ -4,7 +4,6 @@ namespace App\Livewire\Users;
 
 use App\Models\NotificationSetting;
 use App\Models\User;
-use Carbon\Carbon;
 use Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -120,31 +119,13 @@ class UserNotificationSettings extends Component
         $this->realtime_end = $this->normalizeRealtimeTime($this->realtime_end);
     }
 
+    /**
+     * Delegates to App\Services\Users\NotificationTimeNormalizer, the
+     * service shared with the Hive Contractors app's notification-settings
+     * endpoint.
+     */
     protected function normalizeRealtimeTime(string $value): string
     {
-        $trimmed = trim($value);
-
-        if ($trimmed === '') {
-            return $trimmed;
-        }
-
-        $formats = [
-            'H:i',
-            'H:i:s',
-            'g:i A',
-            'g:iA',
-            'g:i:s A',
-            'g:i:sA',
-        ];
-
-        foreach ($formats as $format) {
-            try {
-                return Carbon::createFromFormat($format, strtoupper($trimmed))->format('H:i');
-            } catch (\Exception $e) {
-                continue;
-            }
-        }
-
-        return $trimmed;
+        return \App\Services\Users\NotificationTimeNormalizer::normalize($value);
     }
 }

@@ -2,20 +2,31 @@
 
 namespace App\Http\Requests\Api\App;
 
+use App\Services\Users\NotificationTimeNormalizer;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * App\Livewire\Users\UserNotificationSettings::save(). The web also
- * accepts free-text times like "7:00 AM" and normalizes them before this
- * same rule runs; the app's own time picker always supplies H:i directly,
- * so that normalization step has no equivalent here.
+ * App\Livewire\Users\UserNotificationSettings::save(). The web accepts
+ * free-text times like "7:00 AM" and normalizes them (normalizeRealtimeTime())
+ * before the date_format:H:i rule ever runs — this does the same via the
+ * shared App\Services\Users\NotificationTimeNormalizer, so the app's time
+ * picker (or any other H:i-or-12-hour caller) is accepted identically.
  */
 class UpdateNotificationSettingsRequest extends FormRequest
 {
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        foreach (['realtime_start', 'realtime_end'] as $field) {
+            if ($this->filled($field)) {
+                $this->merge([$field => NotificationTimeNormalizer::normalize((string) $this->input($field))]);
+            }
+        }
     }
 
     /**

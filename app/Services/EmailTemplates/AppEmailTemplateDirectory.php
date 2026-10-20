@@ -86,7 +86,7 @@ class AppEmailTemplateDirectory
             'vendor_id' => $vendorId,
             'name' => $data['name'],
             'type' => $data['type'],
-            'subject' => $data['type'] === 'contract' ? ($data['subject'] ?? null) : $data['subject'],
+            'subject' => $this->fixSubject($data),
             'body' => $this->fixMojibake($data['body']),
         ]);
     }
@@ -99,10 +99,26 @@ class AppEmailTemplateDirectory
         $template->update([
             'name' => $data['name'],
             'type' => $data['type'],
-            'subject' => $data['type'] === 'contract' ? ($data['subject'] ?? null) : $data['subject'],
+            'subject' => $this->fixSubject($data),
             'body' => $this->fixMojibake($data['body']),
         ]);
 
         return $template;
+    }
+
+    /**
+     * The subject gets the same mojibake cleanup as the body — mirrors
+     * EmailTemplateForm::save(): `$this->subject = $this->fixMojibake((string) $this->subject);`
+     * runs unconditionally, before the contract-vs-email null/required
+     * branch even applies. Only the cleanup is new here — the existing
+     * null-for-a-subject-less-contract-template behavior is unchanged.
+     *
+     * @param  array{subject: ?string, type: string}  $data
+     */
+    private function fixSubject(array $data): ?string
+    {
+        $subject = $data['type'] === 'contract' ? ($data['subject'] ?? null) : $data['subject'];
+
+        return $subject === null ? null : $this->fixMojibake($subject);
     }
 }

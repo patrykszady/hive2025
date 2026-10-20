@@ -18,3 +18,7 @@ Route::get('line-items', [LineItemController::class, 'index'])->name('line-items
 Route::post('line-items', [LineItemController::class, 'store'])->name('line-items.store');
 Route::get('line-items/{lineItem}', [LineItemController::class, 'show'])->whereNumber('lineItem')->name('line-items.show');
 Route::put('line-items/{lineItem}', [LineItemController::class, 'update'])->whereNumber('lineItem')->name('line-items.update');
+// "Previously used" allowance suggestions — mirrors EstimateLineItemCreate::
+// previousAllowances(), the autocomplete under each allowance row when
+// adding this catalog item to an estimate.
+Route::get('line-items/{lineItem}/allowance-suggestions', [LineItemController::class, 'allowanceSuggestions'])->whereNumber('lineItem')->name('line-items.allowance-suggestions');

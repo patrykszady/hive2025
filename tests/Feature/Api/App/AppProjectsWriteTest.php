@@ -227,6 +227,30 @@ it('lets an Admin update a project, repointing the client pivot and re-indexing 
         ->assertJsonPath('data.client.id', $newClient->id);
 });
 
+it("doesn't require an address or city when updating a project, unlike create's required_if", function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsProjectsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $client = appJobsProjectsClient($vendor);
+    $project = appJobsProjectsProject($vendor, $client, ['project_name' => 'Old Name', 'address' => '1 Main St', 'city' => 'Chicago']);
+
+    // ProjectForm::update() validates only client_id/project_name — address/
+    // city live on the component, outside the Form's own validate() call —
+    // so an Update Project submission with neither still saves.
+    $this->postJson("/api/app/v1/projects/{$project->id}", [
+        'client_id' => $client->id,
+        'project_name' => 'New Name',
+    ])->assertOk();
+
+    $project->refresh();
+    // Omitting address/city doesn't blank them — they're NOT NULL columns,
+    // and "not required" means a partial update leaves them as they were,
+    // same as the position/nickname fallback elsewhere in this app.
+    expect($project->project_name)->toBe('New Name')
+        ->and($project->address)->toBe('1 Main St')
+        ->and($project->city)->toBe('Chicago');
+});
+
 it('blocks a Member from updating a project, like the web\'s Admin-only ProjectPolicy::update', function () {
     ['vendor' => $vendor, 'user' => $admin] = appJobsProjectsTeamUser(1);
     $client = appJobsProjectsClient($vendor);

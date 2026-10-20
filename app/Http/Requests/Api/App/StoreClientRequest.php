@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests\Api\App;
 
+use App\Models\User;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * "New Client" — App\Livewire\Clients\ClientCreate::save() +
@@ -34,7 +36,7 @@ class StoreClientRequest extends FormRequest
             'last_name' => ['nullable', 'string', 'min:2'],
             'email' => ['nullable', 'email', 'min:4'],
             'nickname' => ['nullable', 'string', 'max:255'],
-            'preferred_language' => ['nullable', 'string', 'max:255'],
+            'preferred_language' => ['nullable', 'string', Rule::in(User::PREFERRED_LANGUAGES)],
 
             'business_name' => ['nullable', 'string', 'min:3'],
             'address' => ['nullable', 'string', 'max:255'],

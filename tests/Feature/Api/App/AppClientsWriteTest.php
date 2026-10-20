@@ -227,6 +227,65 @@ it('422s adding a person already on the client, and a member is refused', functi
         ->assertJsonValidationErrors('cell_phone');
 });
 
+it('saves nickname and preferred language for a new client person, and rejects an unlisted language', function () {
+    ['user' => $admin] = appPeopleClientsTeam();
+    Sanctum::actingAs($admin, ['app']);
+
+    $email = 'carrie-'.uniqid().'@example.test';
+    $response = $this->postJson('/api/app/v1/clients', [
+        'cell_phone' => '2245551111',
+        'first_name' => 'Carrie',
+        'last_name' => 'Smith',
+        'nickname' => 'Care',
+        'preferred_language' => 'Spanish',
+        'email' => $email,
+        'business_name' => 'Smith Household',
+    ])->assertCreated();
+
+    $person = User::where('email', $email)->firstOrFail();
+    expect($person->nickname)->toBe('Care')
+        ->and($person->preferred_language)->toBe('Spanish')
+        ->and($response->json('data.id'))->not->toBeNull();
+
+    $this->postJson('/api/app/v1/clients', [
+        'cell_phone' => '2245551122',
+        'first_name' => 'Someone',
+        'last_name' => 'Else',
+        'preferred_language' => 'Klingon',
+        'email' => 'someone-'.uniqid().'@example.test',
+        'business_name' => 'Nope Household',
+    ])->assertStatus(422)->assertJsonValidationErrors('preferred_language');
+});
+
+it('saves nickname and preferred language when adding a person to an existing client, and rejects an unlisted language', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleClientsTeam();
+    $client = appPeopleClientFixture($vendor, ['business_name' => 'Smith Household']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $email = 'new-person-'.uniqid().'@example.test';
+
+    $response = $this->postJson("/api/app/v1/clients/{$client->id}/people", [
+        'cell_phone' => '2245556666',
+        'first_name' => 'New',
+        'last_name' => 'Person',
+        'nickname' => 'Newb',
+        'preferred_language' => 'Polish',
+        'email' => $email,
+    ])->assertCreated();
+
+    $person = User::where('email', $email)->firstOrFail();
+    expect($person->nickname)->toBe('Newb')
+        ->and($person->preferred_language)->toBe('Polish');
+
+    $this->postJson("/api/app/v1/clients/{$client->id}/people", [
+        'cell_phone' => '2245556677',
+        'first_name' => 'Nope',
+        'last_name' => 'Person',
+        'preferred_language' => 'Klingon',
+        'email' => 'nope-'.uniqid().'@example.test',
+    ])->assertStatus(422)->assertJsonValidationErrors('preferred_language');
+});
+
 it('refuses to add a person to a vendor-linked client', function () {
     ['vendor' => $vendor, 'user' => $admin] = appPeopleClientsTeam();
     $client = appPeopleClientFixture($vendor, ['business_name' => 'Linked']);

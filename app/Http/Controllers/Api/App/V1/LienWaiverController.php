@@ -15,6 +15,7 @@ use App\Models\Payment;
 use App\Models\Project;
 use App\Models\Vendor;
 use App\Services\LienWaivers\LienWaiverCreator;
+use App\Services\LienWaivers\LienWaiverPayerDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -135,6 +136,25 @@ class LienWaiverController extends Controller
             ->all();
 
         return response()->json(['data' => $vendors]);
+    }
+
+    /**
+     * The GC's own waiver's payer fields, defaulted from the project client
+     * — mirrors App\Livewire\LienWaivers\Index::prefillPayerFromProject()
+     * via App\Services\LienWaivers\LienWaiverPayerDefaults, the service the
+     * two share. `has_client` tells the app whether to show these as the
+     * web does: read-only when the project has a client (the only payer a
+     * GC waiver can have, same as the web's disabled radio), editable free
+     * text when it doesn't (the web's own manual-entry fallback).
+     */
+    public function payerDefaults(Request $request, LienWaiverPayerDefaults $defaults): JsonResponse
+    {
+        $this->authorize('create', LienWaiver::class);
+
+        $project = Project::query()->find($request->query('project_id'));
+        abort_unless($project, 404);
+
+        return response()->json(['data' => $defaults->forProject($project)]);
     }
 
     /**

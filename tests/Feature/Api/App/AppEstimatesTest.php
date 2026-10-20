@@ -490,6 +490,60 @@ it('adds a line item from the catalog with allowances, computing the total serve
     expect($section->fresh()->total)->toEqual(250.00);
 });
 
+it('derives a per-unit allowance total from unit_amount × quantity server-side, ignoring a stale client amount, like recalculateAllowanceAmounts()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalogItem = appEstimatesCatalogItem();
+
+    $response = $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items", [
+        'section_id' => $section->id,
+        'line_item_id' => $catalogItem->id,
+        'category' => $catalogItem->category,
+        'unit_type' => $catalogItem->unit_type,
+        'quantity' => 20,
+        'cost' => 12.50,
+        'desc' => 'Kitchen floor tile',
+        'allowances' => [
+            // A stale total (as if the caller only recalculated on unit_amount
+            // change and never re-derived it after bumping quantity) — the
+            // server must recompute 25 * 20 = 500, not trust the 100 sent.
+            ['description' => 'Tile allowance', 'pricing_mode' => 'per_unit', 'unit_amount' => 25, 'amount' => 100],
+        ],
+    ])->assertCreated();
+
+    expect((float) $response->json('data.allowances.0.amount'))->toBe(500.0)
+        ->and((float) $response->json('data.allowances.0.unit_amount'))->toBe(25.0);
+
+    $lineItem = EstimateLineItem::findOrFail($response->json('data.id'));
+
+    $update = $this->putJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}", [
+        'section_id' => $section->id,
+        'category' => $catalogItem->category,
+        'unit_type' => $catalogItem->unit_type,
+        'quantity' => 10,
+        'cost' => 12.50,
+        'desc' => 'Kitchen floor tile',
+        'allowances' => [
+            [
+                'id' => $lineItem->allowances()->sole()->id,
+                'description' => 'Tile allowance',
+                'pricing_mode' => 'per_unit',
+                'unit_amount' => 25,
+                // Still a stale total — the quantity dropped to 10 but this
+                // wasn't recalculated to 250 before sending.
+                'amount' => 500,
+            ],
+        ],
+    ])->assertOk();
+
+    expect((float) $update->json('data.allowances.0.amount'))->toBe(250.0);
+});
+
 it('refuses a Member adding a line item (gated by the catalog, not the estimate), like the web', function () {
     ['vendor' => $vendor, 'user' => $member] = appEstimatesTeamUser(role: 2);
     $client = appEstimatesClient($vendor);

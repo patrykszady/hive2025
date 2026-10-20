@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\App;
 
+use App\Models\User;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,7 +30,7 @@ class UpdateUserRequest extends FormRequest
             'first_name' => ['required', 'string', 'min:2'],
             'last_name' => ['required', 'string', 'min:2'],
             'nickname' => ['nullable', 'string', 'max:255'],
-            'preferred_language' => ['required', 'string', 'max:255'],
+            'preferred_language' => ['required', 'string', Rule::in(User::PREFERRED_LANGUAGES)],
             'email' => [
                 'required',
                 'email',

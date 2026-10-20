@@ -35,6 +35,9 @@ class TaskWriter
     {
         $this->assertScopedFieldsAreValid($data);
 
+        $type = $data['type'] ?? 'Task';
+        $data = $this->normalizeMeetDates($data, $type);
+
         [$startDate, $endDate] = $this->dateRange($data['dates'] ?? []);
 
         if ($startDate && $endDate && ! empty($data['parent_task_id'])) {
@@ -62,8 +65,6 @@ class TaskWriter
             return $recentDuplicate;
         }
 
-        $type = $data['type'] ?? 'Task';
-
         return Task::create([
             'start_date' => $startDate,
             'end_date' => $endDate,
@@ -88,13 +89,14 @@ class TaskWriter
     {
         $this->assertScopedFieldsAreValid($data);
 
+        $type = $data['type'] ?? $task->type;
+        $data = $this->normalizeMeetDates($data, $type);
+
         [$startDate, $endDate] = $this->dateRange($data['dates'] ?? []);
 
         if ($startDate && $endDate && $task->wouldOverlapWithSiblings($startDate, $endDate)) {
             throw ValidationException::withMessages(['dates' => 'This task would overlap with a sibling task.']);
         }
-
-        $type = $data['type'] ?? $task->type;
 
         $checklist = array_key_exists('checklist', $data) && array_key_exists('checklist_original', $data)
             ? Task::mergeChecklist(
@@ -133,6 +135,38 @@ class TaskWriter
             'meeting_location_type' => $type === 'Meet' ? ($data['meeting_location_type'] ?? 'in_person') : null,
             'meeting_participants' => $type === 'Meet' ? array_values(array_filter($data['meeting_participants'] ?? [])) : [],
         ];
+    }
+
+    /**
+     * A Meet is one appointment on one day — mirrors
+     * App\Livewire\Tasks\TaskCreate::updatedFormDates()/updatedFormType():
+     * a task saved as Meet with several dates keeps only the last one, and
+     * `time_settings` entries for every other date are dropped with it.
+     * The web enforces this interactively as dates/type change; this is the
+     * write-time backstop so any caller — including the app, which has no
+     * such live wiring — can't persist a multi-day Meet.
+     *
+     * @param  array{dates?: list<string>, time_settings?: array<string, array{use_time?: bool, start_time?: ?string, end_time?: ?string}>}  $data
+     * @return array{dates?: list<string>, time_settings?: array<string, array{use_time?: bool, start_time?: ?string, end_time?: ?string}>}
+     */
+    private function normalizeMeetDates(array $data, string $type): array
+    {
+        $dates = $data['dates'] ?? [];
+
+        if ($type !== 'Meet' || count($dates) <= 1) {
+            return $data;
+        }
+
+        sort($dates);
+        $keep = end($dates);
+
+        $data['dates'] = [$keep];
+        $data['time_settings'] = array_intersect_key(
+            (array) ($data['time_settings'] ?? []),
+            [$keep => true],
+        );
+
+        return $data;
     }
 
     /** @return array{0: ?string, 1: ?string} */

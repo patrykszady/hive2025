@@ -82,6 +82,89 @@ it('lists same-project scheduled tasks as candidates, excluding itself', functio
     expect($candidate)->not->toBeNull();
 });
 
+it('needs a token to list available predecessors for a task that does not exist yet', function () {
+    $this->getJson('/api/app/v1/tasks/available-predecessors?project_id=1')->assertUnauthorized();
+});
+
+it('lists candidates for a brand-new task, excluding ones already picked this session', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTaskDepsTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTaskDepsProject($vendor);
+    $candidateA = appJobsTaskDepsTask($project, $vendor, $user, [
+        'title' => 'Candidate A', 'start_date' => now()->addDay()->format('Y-m-d'), 'end_date' => now()->addDay()->format('Y-m-d'),
+    ]);
+    $candidateB = appJobsTaskDepsTask($project, $vendor, $user, [
+        'title' => 'Candidate B', 'start_date' => now()->addDays(2)->format('Y-m-d'), 'end_date' => now()->addDays(2)->format('Y-m-d'),
+    ]);
+
+    $response = $this->getJson("/api/app/v1/tasks/available-predecessors?project_id={$project->id}")->assertOk();
+    expect(collect($response->json('data'))->pluck('id')->all())->toBe([$candidateA->id, $candidateB->id]);
+
+    // Excludes whatever's already chosen this session, same as the web's
+    // own $pendingDependencies-filtered list.
+    $filtered = $this->getJson("/api/app/v1/tasks/available-predecessors?project_id={$project->id}&exclude[]={$candidateA->id}")->assertOk();
+    expect(collect($filtered->json('data'))->pluck('id')->all())->toBe([$candidateB->id]);
+});
+
+it('404s available predecessors for a nonexistent project', function () {
+    ['user' => $user] = appJobsTaskDepsTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $this->getJson('/api/app/v1/tasks/available-predecessors?project_id=999999')->assertNotFound();
+});
+
+it('writes predecessors chosen before the task existed, like TaskCreate::save()\'s pendingDependencies flush', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTaskDepsTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTaskDepsProject($vendor);
+    $predecessor = appJobsTaskDepsTask($project, $vendor, $user, [
+        'title' => 'Framing', 'start_date' => now()->format('Y-m-d'), 'end_date' => now()->format('Y-m-d'),
+    ]);
+
+    $response = $this->postJson('/api/app/v1/tasks', [
+        'title' => 'Drywall',
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'dates' => [now()->addDay()->format('Y-m-d')],
+        'pending_dependencies' => [
+            ['predecessor_task_id' => $predecessor->id, 'type' => 'finish_to_start', 'lag_days' => 1],
+        ],
+    ])->assertCreated();
+
+    $task = Task::findOrFail($response->json('data.id'));
+    $dependency = TaskDependency::where('successor_task_id', $task->id)->sole();
+    expect($dependency->predecessor_task_id)->toBe($predecessor->id)
+        ->and($dependency->type)->toBe('finish_to_start')
+        ->and($dependency->lag_days)->toBe(1);
+});
+
+it('skips a pending dependency that would be circular instead of failing the whole create', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTaskDepsTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTaskDepsProject($vendor);
+    $existing = appJobsTaskDepsTask($project, $vendor, $user, ['title' => 'Existing']);
+
+    $response = $this->postJson('/api/app/v1/tasks', [
+        'title' => 'New Task',
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'dates' => [],
+        // A nonexistent predecessor id never resolves (Task::visibleTo()
+        // fails), so TaskDependencyWriter::add() throws and this is
+        // skipped — the create itself must still succeed.
+        'pending_dependencies' => [
+            ['predecessor_task_id' => 999999, 'type' => 'finish_to_start'],
+        ],
+    ])->assertCreated();
+
+    $task = Task::findOrFail($response->json('data.id'));
+    expect(TaskDependency::where('successor_task_id', $task->id)->count())->toBe(0);
+    expect($existing)->not->toBeNull();
+});
+
 it('needs a token to add a dependency', function () {
     $this->postJson('/api/app/v1/tasks/1/dependencies', [])->assertUnauthorized();
 });
