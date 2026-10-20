@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\App\V1;
 use App\Http\Controllers\Api\App\V1\Concerns\ResolvesAppThread;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\SendThreadMessageRequest;
+use App\Http\Requests\Api\App\UpdateScheduledMessageRequest;
 use App\Http\Resources\Api\App\MessageResource;
 use App\Livewire\Sms\SmsNewThread;
 use App\Models\SmsMessage;
@@ -87,8 +88,12 @@ class ThreadMessageController extends Controller
         }
 
         // "Schedule send": the same presets and clock as the web composer.
+        // 'schedule_only' is the web's "Schedule Only (manual send)" — saved
+        // as a draft with no send time, sent later by hand (sendNow()).
         $now = now('America/Chicago');
-        $scheduledAt = match ($request->validated('send_at')) {
+        $sendAt = $request->validated('send_at');
+        $scheduleOnly = $sendAt === 'schedule_only';
+        $scheduledAt = match ($sendAt) {
             '1hr' => $now->copy()->addHour()->utc(),
             '2hr' => $now->copy()->addHours(2)->utc(),
             'tomorrow_8am' => $now->copy()->addDay()->setTime(8, 0)->utc(),
@@ -102,7 +107,8 @@ class ThreadMessageController extends Controller
             $mediaUrls,
             $user->id,
             $scheduledAt,
-            $scheduledAt ? ['original_text' => $text, 'source' => 'app_schedule_menu'] : null,
+            ($scheduledAt || $scheduleOnly) ? ['original_text' => $text, 'source' => 'app_schedule_menu', 'schedule_only' => $scheduleOnly] : null,
+            $scheduleOnly,
         );
 
         // sendToThread() dispatches the send job, which (on the sync queue
@@ -129,6 +135,25 @@ class ThreadMessageController extends Controller
         }
 
         return response()->json(['read' => true]);
+    }
+
+    /**
+     * Edit a scheduled (not-yet-sent) message's text —
+     * App\Livewire\Sms\SmsConversation::saveEditedScheduledMessage(). Only
+     * the body can change; the send time is never editable, on the web either.
+     */
+    public function update(UpdateScheduledMessageRequest $request, int $thread, int $message, ScheduledMessageActions $scheduledActions, SmsTranslationService $translator): JsonResponse
+    {
+        $this->resolveAppThread($thread, $request->user());
+
+        $smsMessage = SmsMessage::where('id', $message)
+            ->where('thread_id', $thread)
+            ->where('status', 'scheduled')
+            ->firstOrFail();
+
+        $scheduledActions->edit($smsMessage, (string) $request->validated('body'), $translator);
+
+        return response()->json(['data' => new MessageResource($smsMessage->fresh('sentByUser'))]);
     }
 
     /**

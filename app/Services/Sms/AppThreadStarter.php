@@ -34,7 +34,10 @@ class AppThreadStarter
     }
 
     /**
-     * @param  array<int, string>  $phones  Ignored when $clientId or $vendorId is given.
+     * @param  array<int, string>  $phones  With $clientId or $vendorId: the web's finer
+     *     per-person picker (GET recipient-presets) narrows to this subset of the
+     *     client's/vendor's own numbers; empty (the default) still means "everyone",
+     *     same as before this picker existed.
      */
     public function start(array $phones, ?int $clientId, string $body, User $actingUser, ?int $vendorId = null): SmsGroupThread
     {
@@ -49,11 +52,13 @@ class AppThreadStarter
                 throw ValidationException::withMessages(['vendor_id' => 'The selected vendor is invalid.']);
             }
 
-            $phones = $this->vendorPhones($vendor);
+            $allowedPhones = $this->vendorPhones($vendor);
 
-            if ($phones === []) {
+            if ($allowedPhones === []) {
                 throw ValidationException::withMessages(['vendor_id' => 'This vendor has no phone numbers on file.']);
             }
+
+            $phones = $this->resolveRequestedPhones($phones, $allowedPhones);
         } elseif ($clientId) {
             // withoutGlobalScopes(): the client may be hidden by ClientScope
             // in the acting user's vendor context — same reasoning as
@@ -64,11 +69,13 @@ class AppThreadStarter
                 throw ValidationException::withMessages(['client_id' => 'The selected client is invalid.']);
             }
 
-            $phones = $this->clientPhones($client);
+            $allowedPhones = $this->clientPhones($client);
 
-            if ($phones === []) {
+            if ($allowedPhones === []) {
                 throw ValidationException::withMessages(['client_id' => 'This client has no phone numbers on file.']);
             }
+
+            $phones = $this->resolveRequestedPhones($phones, $allowedPhones);
         } else {
             $phones = collect($phones)
                 ->map(fn (string $phone): string => GroupSmsService::formatE164($phone))
@@ -92,6 +99,30 @@ class AppThreadStarter
             $actingUser->vendor?->id,
             $vendorId,
         );
+    }
+
+    /**
+     * Narrow to the caller's requested numbers when they picked specific
+     * ones (the recipient-presets picker) — but only the subset that
+     * actually belongs to this client/vendor, so a caller can never slip in
+     * an unrelated number by hand. An empty/entirely-foreign request falls
+     * back to every number on file, same as before this picker existed.
+     *
+     * @param  array<int, string>  $requested
+     * @param  array<int, string>  $allowed
+     * @return array<int, string>
+     */
+    private function resolveRequestedPhones(array $requested, array $allowed): array
+    {
+        $requested = collect($requested)
+            ->map(fn (string $phone): string => GroupSmsService::formatE164($phone))
+            ->unique()
+            ->values()
+            ->all();
+
+        $filtered = array_values(array_intersect($requested, $allowed));
+
+        return $filtered !== [] ? $filtered : $allowed;
     }
 
     /**

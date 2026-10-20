@@ -65,7 +65,8 @@ class VoiceController extends Controller
     public function store(PlaceAppCallRequest $request, ClickToCall $clickToCall): JsonResponse
     {
         $ringsApp = $request->validated('ring', 'app') !== 'cell';
-        $result = $clickToCall->start($request->user(), [$request->validated('to')], ringApp: $ringsApp);
+        $recipientIds = array_map('intval', (array) $request->validated('recipient_ids', []));
+        $result = $clickToCall->start($request->user(), [$request->validated('to')], $recipientIds, ringApp: $ringsApp);
 
         if (! $result['ok']) {
             return response()->json(['message' => $result['error']], 422);

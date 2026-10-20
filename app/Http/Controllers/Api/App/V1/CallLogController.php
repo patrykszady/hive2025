@@ -7,6 +7,7 @@ use App\Http\Requests\Api\App\UnblockNumberRequest;
 use App\Http\Resources\Api\App\CallLogResource;
 use App\Models\CallLog;
 use App\Models\User;
+use App\Services\Calls\CallContactDirectory;
 use App\Services\Calls\CallHistory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -67,6 +68,31 @@ class CallLogController extends Controller
         }
 
         return response()->json(['blocked' => false, 'phone' => $phone]);
+    }
+
+    /**
+     * Known contacts for the "New Call" picker (team/clients/subs — CallList::
+     * contactUsers()) plus this vendor's admins for the multi-admin ring
+     * recipient choice (CallList::callRecipients()).
+     */
+    public function contacts(Request $request, CallContactDirectory $directory): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'contacts' => $directory->contacts($user)->map(fn (User $contact) => $this->contactRow($contact))->values(),
+            'recipients' => $directory->ringRecipients($user)->map(fn (User $contact) => $this->contactRow($contact))->values(),
+        ]);
+    }
+
+    /** @return array{id: int, name: string, phone: ?string} */
+    protected function contactRow(User $contact): array
+    {
+        return [
+            'id' => $contact->id,
+            'name' => trim((string) $contact->full_name) ?: (string) $contact->cell_phone,
+            'phone' => $contact->routeNotificationForTelnyx() ?? $contact->cell_phone,
+        ];
     }
 
     /** A call the person may see: 404 when it doesn't exist, 403 when it isn't theirs to see. */

@@ -3,22 +3,93 @@
 namespace App\Services\Sms;
 
 use App\Livewire\Sms\SmsNewThread;
+use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\Task;
+use App\Services\SmsTranslationService;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Cancel / send-now for a scheduled (not yet delivered) message — shared by
- * the web conversation
- * (App\Livewire\Sms\SmsConversation::cancelScheduledMessage()/sendScheduledNow())
- * and the app's thread message endpoints. Only ever called on a message
- * whose status is still 'scheduled'.
+ * Cancel / send-now / edit for a scheduled (not yet delivered) message —
+ * shared by the web conversation
+ * (App\Livewire\Sms\SmsConversation::cancelScheduledMessage()/sendScheduledNow()/
+ * saveEditedScheduledMessage()) and the app's thread message endpoints. Only
+ * ever called on a message whose status is still 'scheduled'.
  */
 class ScheduledMessageActions
 {
     public function cancel(SmsMessage $message): void
     {
         $message->delete();
+    }
+
+    /**
+     * Edit a scheduled message's text before it sends — the web composer's
+     * only scheduled-edit: the send time itself is never editable here, only
+     * the body. Re-translates when sender/recipient languages differ (reusing
+     * the languages the message was originally scheduled with when known)
+     * and re-appends the crew signature line the original text carried.
+     */
+    public function edit(SmsMessage $message, string $newText, SmsTranslationService $translator): SmsMessage
+    {
+        $newOriginalText = trim($newText);
+        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
+
+        $senderLanguage = $translator->normalizeLanguage((string) (
+            $rawPayload['sender_language'] ?? (auth()->user()?->preferred_language ?: 'English')
+        ));
+        $recipientLanguage = $translator->normalizeLanguage((string) (
+            $rawPayload['recipient_language'] ?? $this->fallbackRecipientLanguage($message->thread)
+        ));
+
+        $outboundText = $newOriginalText;
+        if ($newOriginalText !== '' && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
+            $outboundText = $translator->translate($newOriginalText, $recipientLanguage, $senderLanguage);
+        }
+
+        $signatureLine = $this->extractSignatureLine((string) ($message->text ?? ''));
+        if ($signatureLine !== null) {
+            $outboundText .= "\n{$signatureLine}";
+        }
+
+        $rawPayload['original_text'] = $newOriginalText;
+        $rawPayload['sender_language'] = $senderLanguage;
+        $rawPayload['recipient_language'] = $recipientLanguage;
+
+        $message->update([
+            'text' => $outboundText,
+            'raw_payload' => $rawPayload,
+        ]);
+
+        return $message->fresh();
+    }
+
+    /**
+     * Mirrors App\Livewire\Sms\SmsConversation::threadRecipientLanguage()'s
+     * fallback when the message's own raw_payload has no recipient_language
+     * recorded yet.
+     */
+    private function fallbackRecipientLanguage(?SmsGroupThread $thread): string
+    {
+        if (! $thread) {
+            return 'English';
+        }
+
+        if ($thread->subject_vendor_id) {
+            $language = $thread->subjectVendor?->users
+                ?->pluck('preferred_language')
+                ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+                ->first();
+
+            return (string) ($language ?: 'English');
+        }
+
+        $language = $thread->client?->users
+            ?->pluck('preferred_language')
+            ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+            ->first();
+
+        return (string) ($language ?: 'English');
     }
 
     /**

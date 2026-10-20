@@ -32,6 +32,12 @@ class PlaceAppCallRequest extends FormRequest
             // Which of the caller's phones Hive rings first: the app (default),
             // or their cell (Expo Go, before the app has its own calling).
             'ring' => ['nullable', 'string', 'in:app,cell'],
+            // The web's multi-admin ring recipient choice (CallList's "New
+            // Call" modal): other admin team members to ring in alongside
+            // this call — App\Services\Voice\ClickToCall::start()'s
+            // $recipientIds. Invalid/non-admin ids are silently dropped there.
+            'recipient_ids' => ['nullable', 'array'],
+            'recipient_ids.*' => ['integer'],
         ];
     }
 }
