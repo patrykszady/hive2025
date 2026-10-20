@@ -235,6 +235,20 @@ Route::get('estimates/{estimate}/pdf/signed', [\App\Http\Controllers\EstimatePdf
     ->whereNumber('estimate')
     ->name('estimates.pdf.signed');
 
+// A project's reimbursements PDF for the Hive Contractors app: a
+// time-limited signed link handed out by GET /api/app/v1/projects/{id}/
+// finances/reimbursements-pdf-url (see
+// Api\App\V1\ProjectFinancesController::reimbursementsPdfUrl), so the
+// app's Project Finances card can download the same
+// App\Support\ProjectDocumentGenerator::generateReimbursements() PDF
+// ProjectFinances::print_reimbursements() streams on the web, without a
+// web session. The `signed` middleware alone is the gate — see
+// ProjectReimbursementsPdfController::signed().
+Route::get('projects/{project}/finances/reimbursements/signed', [\App\Http\Controllers\ProjectReimbursementsPdfController::class, 'signed'])
+    ->middleware('signed')
+    ->whereNumber('project')
+    ->name('projects.finances.reimbursements.signed');
+
 // A vendor document/certificate scan for the Hive Contractors app: a
 // time-limited signed link handed out by GET /api/app/v1/vendor-docs/{vendor}
 // (see VendorDocResource), so the app's Vendor Documents screen can show it

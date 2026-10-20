@@ -71,6 +71,58 @@ class ProjectWriter
     }
 
     /**
+     * Updates a project exactly like App\Livewire\Forms\ProjectForm::update()
+     * — the web's Update Project modal always gives the address directly
+     * (no 'NEW'/'CLIENT_PROJECT'/existing-id selector; that's a create-only
+     * concept), so this takes the resolved address as-is rather than
+     * re-running resolveAddress(). When the client changes, the
+     * project_vendor pivot's client_id is repointed and the project is
+     * re-indexed — same two side effects the web form has always had.
+     *
+     * @param  array{address?: ?string, address_2?: ?string, city?: ?string, state?: ?string, zip_code?: ?string}  $address
+     */
+    public function update(Project $project, int $clientId, string $projectName, array $address): Project
+    {
+        $this->assertClientAccessible($clientId);
+
+        $oldClientId = $project->client_id;
+
+        $project->update([
+            'project_name' => $projectName,
+            'client_id' => $clientId,
+            'address' => $address['address'] ?? null,
+            'address_2' => $address['address_2'] ?? null,
+            'city' => $address['city'] ?? null,
+            'state' => $address['state'] ?? null,
+            'zip_code' => $address['zip_code'] ?? null,
+        ]);
+
+        if ($oldClientId != $clientId) {
+            \DB::table('project_vendor')
+                ->where('project_id', $project->id)
+                ->update(['client_id' => $clientId]);
+
+            $project->searchable();
+        }
+
+        return $project;
+    }
+
+    /**
+     * Soft-deletes a project exactly like App\Livewire\Forms\ProjectForm::
+     * delete() — NEVER forceDelete here (see that method's docblock for
+     * why). The caller is responsible for the 'delete' policy check
+     * (App\Policies\ProjectPolicy::delete already blocks a project that
+     * has payments/timesheets/hours/tasks/expenses/distributions).
+     */
+    public function delete(Project $project): Project
+    {
+        $project->delete();
+
+        return $project;
+    }
+
+    /**
      * Resolves the final address the same three ways ProjectForm::store()
      * does: a brand new address given on the request ('NEW'), the client's
      * own stored address ('CLIENT_PROJECT' — offered when the client has no

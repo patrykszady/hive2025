@@ -6,6 +6,7 @@ use App\Livewire\Forms\BidForm;
 use App\Models\Bid;
 use App\Models\Project;
 use App\Models\Vendor;
+use App\Services\Bids\BidWriter;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 // use Livewire\Attributes\Computed;
 // use Livewire\Attributes\Lazy;
@@ -115,19 +116,21 @@ class BidCreate extends Component
         $this->bids[] = $bid;
     }
 
+    /**
+     * The actual removal logic — scoped to this project's own bids for
+     * this vendor, blocked for the Original Bid or one an estimate already
+     * references — lives in App\Services\Bids\BidWriter::delete() so the
+     * web's "Remove" button and the Hive Contractors app's bids screen
+     * delete the same row the same way.
+     */
     public function removeChangeOrder($index)
     {
         $bid = $this->bids[$index];
         if (isset($bid['id'])) {
-            // $this->bids[$index]['id'] is a client-controlled array value:
-            // resolve it through this project's own bids for this vendor so
-            // it can't be swapped for another tenant's bid id.
-            $bid = $this->project->bids()->where('vendor_id', $this->vendor->id)->findOrFail($bid['id']);
-            $bid->delete();
+            app(BidWriter::class)->delete($this->project, $this->vendor, (int) $bid['id'], (int) auth()->user()->vendor->id);
         }
 
         unset($this->bids[$index]);
-        // $this->bids->forget($index);
     }
 
     public function save()

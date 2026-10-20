@@ -23,12 +23,16 @@ use Illuminate\Support\Facades\Route;
 | docblock for the web component/policy it mirrors.
 */
 
-// PROJECTS — creating one. index/show/statuses/status stay in routes/api.php.
+// PROJECTS — creating, editing and deleting one. index/show/statuses/status
+// stay in routes/api.php.
 Route::post('projects', [AppProjectController::class, 'store'])->name('projects.store');
+Route::post('projects/{project}', [AppProjectController::class, 'update'])->whereNumber('project')->name('projects.update');
+Route::delete('projects/{project}', [AppProjectController::class, 'destroy'])->whereNumber('project')->name('projects.destroy');
 
 // PROJECT SECTIONS the app didn't show yet — each Admin-only, same as the
 // web project page's own gates (see each controller's docblock).
 Route::get('projects/{project}/finances', [AppProjectFinancesController::class, 'show'])->whereNumber('project')->name('projects.finances.show');
+Route::get('projects/{project}/finances/reimbursements-pdf-url', [AppProjectFinancesController::class, 'reimbursementsPdfUrl'])->whereNumber('project')->name('projects.finances.reimbursements-pdf-url');
 Route::get('projects/{project}/vendors', [AppProjectVendorsController::class, 'index'])->whereNumber('project')->name('projects.vendors.index');
 Route::post('projects/{project}/vendors', [AppProjectVendorsController::class, 'store'])->whereNumber('project')->name('projects.vendors.store');
 Route::get('projects/{project}/materials', [AppProjectMaterialsController::class, 'index'])->whereNumber('project')->name('projects.materials.index');
@@ -44,6 +48,7 @@ Route::post('projects/{project}/photos', [AppProjectPhotoController::class, 'sto
 // own tenant — see App\Services\Bids\AppBidDirectory/BidWriter).
 Route::get('projects/{project}/vendors/{vendor}/bids', [AppBidController::class, 'index'])->whereNumber(['project', 'vendor'])->name('bids.index');
 Route::post('projects/{project}/vendors/{vendor}/bids', [AppBidController::class, 'store'])->whereNumber(['project', 'vendor'])->name('bids.store');
+Route::delete('projects/{project}/vendors/{vendor}/bids/{bid}', [AppBidController::class, 'destroy'])->whereNumber(['project', 'vendor', 'bid'])->name('bids.destroy');
 
 // TASKS — create, edit, delete and schedule. The planner's own read routes
 // (planner.index, action-items.*) stay in routes/api.php.

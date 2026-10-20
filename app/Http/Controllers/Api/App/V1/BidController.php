@@ -55,6 +55,27 @@ class BidController extends Controller
         ], 201);
     }
 
+    /**
+     * Remove a bid/change order exactly like
+     * App\Livewire\Bids\BidCreate::removeChangeOrder() — see
+     * App\Services\Bids\BidWriter::delete() for the shared guard (never
+     * the Original Bid, never one an estimate already references).
+     * App\Policies\BidPolicy::delete is the same Admin/non-1099 gate as
+     * create.
+     */
+    public function destroy(Request $request, int $project, int $vendor, int $bid, BidWriter $writer): JsonResponse
+    {
+        $foundProject = $this->visibleProject($project);
+        $foundVendor = Vendor::query()->findOrFail($vendor);
+        $foundBid = $foundProject->bids()->where('vendor_id', $foundVendor->id)->findOrFail($bid);
+
+        $this->authorize('delete', $foundBid);
+
+        $writer->delete($foundProject, $foundVendor, $foundBid->id, (int) $request->user()->vendor->id);
+
+        return response()->json(['data' => ['deleted' => true]]);
+    }
+
     /** A project the person may see: 404 when it doesn't exist, 403 when it isn't theirs. */
     private function visibleProject(int $id): Project
     {

@@ -373,6 +373,113 @@ it('resolves task users from the user_ids column', function () {
     expect($row['users'])->toBe(['Alex']);
 });
 
+// --- Filters (App\Livewire\Planner\CardsIndex's toolbar/mobile Filters modal) ---
+
+it('narrows the agenda by search, matching a task\'s own title/vendor OR its project', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $elm = appPlannerProject($vendor, $client, ['project_name' => 'Elm Remodel']);
+    appPlannerStatus($elm, $vendor, 6, Carbon::parse('2026-10-10'));
+    $oak = appPlannerProject($vendor, $client, ['project_name' => 'Oak Remodel']);
+    appPlannerStatus($oak, $vendor, 6, Carbon::parse('2026-10-10'));
+
+    appPlannerTask($elm, $user, [
+        'title' => 'Tile Install', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
+    ]);
+    appPlannerTask($oak, $user, [
+        'title' => 'Framing', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
+    ]);
+
+    $response = $this->getJson('/api/app/v1/planner?search=Tile')->assertOk();
+    $data = $response->json('data');
+    $titles = appPlannerAllDayTasks($data)->pluck('title');
+
+    expect($titles)->toContain('Tile Install')
+        ->and($titles)->not->toContain('Framing');
+});
+
+it('narrows the agenda to project_ids', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $elm = appPlannerProject($vendor, $client, ['project_name' => 'Elm Remodel']);
+    appPlannerStatus($elm, $vendor, 6, Carbon::parse('2026-10-10'));
+    $oak = appPlannerProject($vendor, $client, ['project_name' => 'Oak Remodel']);
+    appPlannerStatus($oak, $vendor, 6, Carbon::parse('2026-10-10'));
+
+    appPlannerTask($elm, $user, [
+        'title' => 'Tile Install', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
+    ]);
+    appPlannerTask($oak, $user, [
+        'title' => 'Framing', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
+    ]);
+
+    $response = $this->getJson('/api/app/v1/planner?project_ids[]='.$elm->id)->assertOk();
+    $data = $response->json('data');
+    $projectIds = collect($data['days'])->flatMap(fn (array $day) => collect($day['groups'])->pluck('project.id'));
+
+    expect($projectIds->all())->toBe([$elm->id]);
+});
+
+it('narrows the agenda by vendor_id', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $tileVendor = Vendor::factory()->create(['business_name' => 'Ace Tile Co']);
+    $vendor->vendors()->attach($tileVendor->id);
+
+    $client = Client::factory()->create();
+    $project = appPlannerProject($vendor, $client, ['project_name' => 'Elm Remodel']);
+    appPlannerStatus($project, $vendor, 6, Carbon::parse('2026-10-10'));
+
+    appPlannerTask($project, $user, [
+        'title' => 'Tile Install', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13', 'vendor_id' => $tileVendor->id,
+    ]);
+    appPlannerTask($project, $user, [
+        'title' => 'Framing', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13',
+    ]);
+
+    $response = $this->getJson('/api/app/v1/planner?vendor_id='.$tileVendor->id)->assertOk();
+    $titles = appPlannerAllDayTasks($response->json('data'))->pluck('title');
+
+    expect($titles->all())->toBe(['Tile Install']);
+});
+
+it('narrows the agenda to only the signed-in person\'s tasks with mine=1', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $crew = User::factory()->create(['primary_vendor_id' => $vendor->id, 'first_name' => 'Alex', 'last_name' => 'Helper', 'nickname' => null]);
+
+    $client = Client::factory()->create();
+    $project = appPlannerProject($vendor, $client, ['project_name' => 'Elm Remodel']);
+    appPlannerStatus($project, $vendor, 6, Carbon::parse('2026-10-10'));
+
+    appPlannerTask($project, $user, [
+        'title' => 'Mine', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13', 'user_ids' => [$user->id],
+    ]);
+    appPlannerTask($project, $user, [
+        'title' => 'Not Mine', 'options' => ['dates' => ['2026-10-13']], 'start_date' => '2026-10-13', 'end_date' => '2026-10-13', 'user_ids' => [$crew->id],
+    ]);
+
+    $response = $this->getJson('/api/app/v1/planner?mine=1')->assertOk();
+    $titles = appPlannerAllDayTasks($response->json('data'))->pluck('title');
+
+    expect($titles->all())->toBe(['Mine']);
+});
+
+it('422s an invalid status code in status_codes[]', function () {
+    ['user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $this->getJson('/api/app/v1/planner?status_codes[]=999')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['status_codes.0']);
+});
+
 it('never shows another vendor\'s project, even an Active one with a task this week', function () {
     ['user' => $user] = appPlannerTeam();
     Sanctum::actingAs($user, ['app']);

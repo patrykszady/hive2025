@@ -63,11 +63,22 @@ class BidPolicy
     /**
      * Determine whether the user can delete the model.
      *
+     * Same rule as create() — removing a change order is as much a write
+     * to the project's bids as adding one.
+     *
      * @return \Illuminate\Auth\Access\Response|bool
      */
     public function delete(User $user, Bid $bid): bool
     {
-        //
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
+        if ($user->vendor && $user->vendor->business_type === '1099') {
+            return false;
+        }
+
+        return true;
     }
 
     /**

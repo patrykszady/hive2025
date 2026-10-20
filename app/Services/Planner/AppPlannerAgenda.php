@@ -68,18 +68,35 @@ class AppPlannerAgenda
 
     /**
      * The week agenda for $user's vendor between $from and $to (inclusive),
-     * plus the undated "To schedule" tray.
+     * plus the undated "To schedule" tray — narrowed by $filters exactly
+     * like the web planner's filter toolbar/mobile Filters modal
+     * (App\Livewire\Planner\CardsIndex): search (project address/client/
+     * name OR task title/vendor), project_ids, status_codes, vendor_id,
+     * user_ids and mine all combine with AND, same as there.
      *
+     * @param  array{search?: string, project_ids?: list<int>, status_codes?: list<int>, vendor_id?: ?int, user_ids?: list<int>, mine?: bool}  $filters
      * @return array{from: string, to: string, today: string, days: list<array{date: string, is_today: bool, is_weekend: bool, groups: list<array{project: array, tasks: list<array>}>}>, to_schedule: list<array{project: array, tasks: list<array>}>}
      */
-    public function agenda(User $user, Carbon $from, Carbon $to): array
+    public function agenda(User $user, Carbon $from, Carbon $to, array $filters = []): array
     {
         $vendorId = (int) $user->vendor->id;
+        $userId = (int) $user->id;
         $fromStr = $from->format('Y-m-d');
         $toStr = $to->format('Y-m-d');
         $today = $this->today()->format('Y-m-d');
 
-        $projects = $this->candidateProjects($fromStr, $toStr);
+        $projects = $this->candidateProjects($fromStr, $toStr, $filters)
+            ->map(function (Project $project) use ($filters, $userId): Project {
+                $project->setRelation(
+                    'tasks',
+                    $project->tasks->filter(fn (Task $task): bool => $this->taskMatchesFilters($task, $project, $filters, $userId))->values(),
+                );
+
+                return $project;
+            })
+            ->filter(fn (Project $project): bool => $project->tasks->isNotEmpty())
+            ->values();
+
         Project::primeLatestVendorStatuses($projects);
 
         $allTasks = $projects->flatMap(fn (Project $project): Collection => $project->tasks);
@@ -243,11 +260,16 @@ class AppPlannerAgenda
     /**
      * Projects whose latest status is a planner status, OR which have a
      * task touching [$fromStr, $toStr] — see the class docblock for why
-     * this is start_date/end_date only, no JSON function.
+     * this is start_date/end_date only, no JSON function. $filters'
+     * project_ids/status_codes narrow this further at the query level;
+     * search/vendor_id/user_ids/mine are applied per-task afterwards (see
+     * taskMatchesFilters()), since they can match on a task's own fields.
+     *
+     * @param  array{project_ids?: list<int>, status_codes?: list<int>}  $filters
      */
-    private function candidateProjects(string $fromStr, string $toStr): Collection
+    private function candidateProjects(string $fromStr, string $toStr, array $filters = []): Collection
     {
-        return Project::query()
+        $query = Project::query()
             ->where(function (Builder $query) use ($fromStr, $toStr): void {
                 $query->whereHas('latestStatus', fn (Builder $statusQuery) => $statusQuery->whereIn('status_code', CardsIndex::PLANNER_PROJECT_STATUS_CODES))
                     ->orWhereHas('tasks', function (Builder $taskQuery) use ($fromStr, $toStr): void {
@@ -260,8 +282,61 @@ class AppPlannerAgenda
                         });
                     });
             })
-            ->with(['tasks' => fn ($query) => $query->with('vendor')->orderBy('start_date')])
-            ->get();
+            ->with(['client', 'tasks' => fn ($query) => $query->with('vendor')->orderBy('start_date')]);
+
+        if (! empty($filters['project_ids'])) {
+            $query->whereIn('id', $filters['project_ids']);
+        }
+
+        if (! empty($filters['status_codes'])) {
+            $query->whereHas('latestStatus', fn (Builder $statusQuery) => $statusQuery->whereIn('status_code', $filters['status_codes']));
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * Whether $task (on $project) passes every active filter — AND'd
+     * together, same as the web's filter toolbar. An empty $filters value
+     * for any key is "no restriction", matching the web's "All ___"
+     * placeholder.
+     *
+     * @param  array{search?: string, vendor_id?: ?int, user_ids?: list<int>, mine?: bool}  $filters
+     */
+    private function taskMatchesFilters(Task $task, Project $project, array $filters, int $userId): bool
+    {
+        if (! empty($filters['vendor_id']) && (int) $task->vendor_id !== (int) $filters['vendor_id']) {
+            return false;
+        }
+
+        $taskUserIds = collect($task->user_ids ?? [])->map(fn ($id): int => (int) $id);
+
+        if (! empty($filters['user_ids']) && $taskUserIds->intersect($filters['user_ids'])->isEmpty()) {
+            return false;
+        }
+
+        if (! empty($filters['mine']) && ! $taskUserIds->contains($userId)) {
+            return false;
+        }
+
+        $search = trim((string) ($filters['search'] ?? ''));
+
+        if ($search !== '') {
+            $needle = Str::lower($search);
+
+            $projectMatches = Str::contains(Str::lower((string) $project->project_name), $needle)
+                || Str::contains(Str::lower((string) $project->short_address), $needle)
+                || Str::contains(Str::lower((string) ($project->client?->name ?? '')), $needle);
+
+            $taskMatches = Str::contains(Str::lower((string) $task->title), $needle)
+                || Str::contains(Str::lower((string) ($task->vendor?->name ?? '')), $needle);
+
+            if (! $projectMatches && ! $taskMatches) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** Same card order as CardsIndex::activeProjects(): status priority, then status start date, then address. */

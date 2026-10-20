@@ -5,6 +5,7 @@ namespace App\Services\Bids;
 use App\Models\Bid;
 use App\Models\Project;
 use App\Models\Vendor;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Saves a project's bids for a vendor exactly like
@@ -56,5 +57,38 @@ class BidWriter
             'project_id' => $project->id,
             'vendor_id' => $vendor->id,
         ]);
+    }
+
+    /**
+     * Removes a bid/change order exactly like
+     * App\Livewire\Bids\BidCreate::removeChangeOrder() — scoped through
+     * this project's own bids for this vendor, so a forged id can never
+     * reach another tenant's row. Blocked the same two ways the web's
+     * "Remove" button is hidden (bids/form.blade.php): never the Original
+     * Bid (type 1, the loop's first row), and never a bid the viewing
+     * vendor's own estimate sections already reference — the web only
+     * skips that second guard in 'payment' context, which this project-page
+     * endpoint is not.
+     */
+    public function delete(Project $project, Vendor $vendor, int $bidId, int $viewingVendorId): void
+    {
+        $bid = $project->bids()->where('vendor_id', $vendor->id)->with('estimate_sections')->findOrFail($bidId);
+
+        if ((int) $bid->type === 1) {
+            throw ValidationException::withMessages([
+                'id' => 'The original bid cannot be removed.',
+            ]);
+        }
+
+        $belongsToViewingVendor = (int) $bid->vendor_id === $viewingVendorId;
+        $hasEstimateSections = $bid->estimate_sections->where('bid_id', $bid->id)->isNotEmpty();
+
+        if ($belongsToViewingVendor && $hasEstimateSections) {
+            throw ValidationException::withMessages([
+                'id' => 'This bid is referenced by an estimate and cannot be removed.',
+            ]);
+        }
+
+        $bid->delete();
     }
 }

@@ -30,7 +30,16 @@ class PlannerController extends Controller
             [$from, $to] = $agenda->defaultRange();
         }
 
-        return response()->json(['data' => $agenda->agenda($request->user(), $from, $to)]);
+        $filters = [
+            'search' => trim((string) $request->validated('search', '')),
+            'project_ids' => array_map('intval', (array) $request->validated('project_ids', [])),
+            'status_codes' => array_map('intval', (array) $request->validated('status_codes', [])),
+            'vendor_id' => $request->validated('vendor_id') !== null ? (int) $request->validated('vendor_id') : null,
+            'user_ids' => array_map('intval', (array) $request->validated('user_ids', [])),
+            'mine' => $request->boolean('mine'),
+        ];
+
+        return response()->json(['data' => $agenda->agenda($request->user(), $from, $to, $filters)]);
     }
 
     public function actionItems(Request $request, AppPlannerAgenda $agenda): JsonResponse

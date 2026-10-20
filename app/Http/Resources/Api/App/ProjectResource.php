@@ -119,6 +119,10 @@ class ProjectResource extends JsonResource
                 'business_phone' => $vendor->business_phone,
             ])->values()->all(),
             'upcoming_tasks' => $this->upcomingTasks(),
+            // The web's "Pending Tasks" accordion on the project page
+            // (App\Livewire\Projects\UpcomingTasks::unscheduledTasks()) —
+            // tasks with no date yet, same project.
+            'pending_tasks' => $this->pendingTasks(),
             'status_history' => $this->statusHistory(),
             'counts' => [
                 'estimates' => $this->resource->estimates()->count(),
@@ -201,6 +205,40 @@ class ProjectResource extends JsonResource
                 'vendor' => $task->vendor ? ['id' => $task->vendor->id, 'business_name' => $task->vendor->business_name] : null,
             ];
         })->values()->all();
+    }
+
+    /**
+     * Tasks with no date yet — mirrors UpcomingTasks::unscheduledTasks()
+     * (oldest-created first, same as the web's Pending Tasks accordion).
+     *
+     * @return list<array{id: int, title: string, type: string, users: list<string>, vendor: array{id: int, business_name: string}|null}>
+     */
+    private function pendingTasks(): array
+    {
+        $tasks = Task::query()
+            ->where('project_id', $this->id)
+            ->whereNull('start_date')
+            ->with('vendor:id,business_name')
+            ->orderBy('created_at')
+            ->get();
+
+        $userIds = $tasks->pluck('user_ids')->flatten()->filter()->unique()->values();
+        $usersById = $userIds->isNotEmpty()
+            ? User::query()->whereIn('id', $userIds)->get(['id', 'first_name', 'last_name', 'nickname'])->keyBy('id')
+            : collect();
+
+        return $tasks->map(fn (Task $task): array => [
+            'id' => $task->id,
+            'title' => $task->title,
+            'type' => $task->type,
+            'users' => collect($task->user_ids ?? [])
+                ->map(fn ($id) => $usersById->get($id))
+                ->filter()
+                ->map(fn (User $user) => trim((string) ($user->nickname ?: $user->first_name).' '.$user->last_name))
+                ->values()
+                ->all(),
+            'vendor' => $task->vendor ? ['id' => $task->vendor->id, 'business_name' => $task->vendor->business_name] : null,
+        ])->values()->all();
     }
 
     /**

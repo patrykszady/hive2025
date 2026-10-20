@@ -2,10 +2,12 @@
 
 namespace App\Http\Requests\Api\App;
 
+use App\Models\ProjectStatus;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * GET /api/app/v1/planner — both `from` and `to` are optional (the
@@ -13,6 +15,10 @@ use Illuminate\Foundation\Http\FormRequest;
  * pair, be real Y-m-d dates, keep `from` on or before `to`, and span no
  * more than 31 days (the agenda loads every candidate project's tasks into
  * memory, so an unbounded range is a real cost, not just a display problem).
+ *
+ * The rest mirror the web planner's own filter toolbar/mobile Filters modal
+ * (App\Livewire\Planner\CardsIndex) — search, project_ids, status_codes,
+ * vendor_id, user_ids and mine all narrow the same agenda, same as there.
  */
 class PlannerIndexRequest extends FormRequest
 {
@@ -51,6 +57,15 @@ class PlannerIndexRequest extends FormRequest
                     }
                 },
             ],
+            'search' => ['nullable', 'string', 'max:255'],
+            'project_ids' => ['nullable', 'array'],
+            'project_ids.*' => ['integer'],
+            'status_codes' => ['nullable', 'array'],
+            'status_codes.*' => ['integer', Rule::in(array_column(ProjectStatus::selectableStatuses(), 'code'))],
+            'vendor_id' => ['nullable', 'integer'],
+            'user_ids' => ['nullable', 'array'],
+            'user_ids.*' => ['integer'],
+            'mine' => ['nullable', 'boolean'],
         ];
     }
 
