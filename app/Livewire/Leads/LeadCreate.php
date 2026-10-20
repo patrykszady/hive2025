@@ -1260,12 +1260,16 @@ class LeadCreate extends Component
      * first gets the consent prompt (compliance owns that flow), and the
      * toast says so instead of pretending the link went out.
      */
-    public function textScheduleLink(\App\Services\Leads\LeadScheduleLinkTexter $texter): void
+    public function textScheduleLink(\App\Services\GroupSmsService $sms): void
     {
         if (! $this->lead) {
             return;
         }
 
+        // The texting itself is shared with the app (LeadScheduleLinkTexter);
+        // the method keeps taking the SMS service so callers and tests that
+        // hand one in keep working.
+        $texter = new \App\Services\Leads\LeadScheduleLinkTexter($sms, app(\App\Services\UrlShortener::class));
         $result = $texter->text($this->lead, $this->client, auth()->user());
 
         Flux::toast(
