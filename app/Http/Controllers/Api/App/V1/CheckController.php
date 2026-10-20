@@ -87,7 +87,7 @@ class CheckController extends Controller
         $found = $this->visibleCheck($check);
         $this->authorize('view', $found);
 
-        $found->load(['bank_account.bank', 'vendor', 'user']);
+        $found->load(['bank_account.bank', 'vendor', 'user', 'transactions.bank_account.bank']);
 
         return response()->json(['data' => (new CheckResource($found))->withDetail()->toArray($request)]);
     }
@@ -131,7 +131,7 @@ class CheckController extends Controller
         // array, so this does the same from the raw request input.
         $updates->update($found, $request->validated() + ['check_type' => $request->input('check_type')]);
 
-        $found->refresh()->load(['bank_account.bank', 'vendor', 'user']);
+        $found->refresh()->load(['bank_account.bank', 'vendor', 'user', 'transactions.bank_account.bank']);
 
         return response()->json(['data' => (new CheckResource($found))->withDetail()->toArray($request)]);
     }
@@ -184,7 +184,7 @@ class CheckController extends Controller
 
         Log::channel('check_images')->info('Check image upload saved (app)', $context + ['check_image_id' => $image->id, 'image' => $image->image_filename, 'payee' => $image->payee]);
 
-        $found->refresh()->load(['bank_account.bank', 'vendor', 'user']);
+        $found->refresh()->load(['bank_account.bank', 'vendor', 'user', 'transactions.bank_account.bank']);
 
         return response()->json(['data' => (new CheckResource($found))->withDetail()->toArray($request)], 201);
     }

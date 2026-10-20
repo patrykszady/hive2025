@@ -76,6 +76,10 @@ Route::post('transactions/apply-suggestion', [TransactionMatchController::class,
 // TransactionBulkMatch (App\Livewire\BulkMatch\*), which has no web route
 // at all (dead code: BulkMatchIndex::store() calls dd()) and is not
 // mirrored here.
+// "bank-options" is registered ahead of {vendorTransaction} in spirit only
+// — whereNumber() on that route already keeps it from being swallowed as
+// an id, since "bank-options" is not numeric.
+Route::get('vendor-transactions/bank-options', [VendorTransactionController::class, 'bankOptions'])->name('vendor-transactions.bank-options');
 Route::get('vendor-transactions', [VendorTransactionController::class, 'index'])->name('vendor-transactions.index');
 Route::post('vendor-transactions', [VendorTransactionController::class, 'store'])->name('vendor-transactions.store');
 Route::put('vendor-transactions/{vendorTransaction}', [VendorTransactionController::class, 'update'])->whereNumber('vendorTransaction')->name('vendor-transactions.update');

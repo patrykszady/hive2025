@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\StoreVendorTransactionRequest;
+use App\Models\Bank;
 use App\Models\TransactionBulkMatch;
 use App\Models\VendorTransaction;
 use App\Services\Transactions\VendorTransactionRuleService;
@@ -80,5 +81,31 @@ class VendorTransactionController extends Controller
         $rules->delete($rule);
 
         return response()->json(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * The rule form's searchable "Bank" select — the exact same source as
+     * the web's VendorTransactionEditModal::banks() computed (every bank
+     * with a Plaid institution id, one row per institution). A rule
+     * matches by `plaid_inst_id`, not a bank row id, so the option value
+     * is the institution id itself.
+     */
+    public function bankOptions(): JsonResponse
+    {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
+        $banks = Bank::withoutGlobalScopes()
+            ->whereNotNull('plaid_ins_id')
+            ->orderBy('name')
+            ->get()
+            ->unique('plaid_ins_id')
+            ->values();
+
+        return response()->json([
+            'data' => $banks->map(fn (Bank $bank) => [
+                'plaid_ins_id' => $bank->plaid_ins_id,
+                'name' => $bank->name,
+            ])->all(),
+        ]);
     }
 }

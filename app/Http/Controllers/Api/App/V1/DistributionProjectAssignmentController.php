@@ -95,7 +95,7 @@ class DistributionProjectAssignmentController extends Controller
     }
 
     /**
-     * @return array{id: int, name: string, address: ?string, client: ?string, profit: float, completed_at: ?string, web_path: string}
+     * @return array{id: int, name: string, address: ?string, client: ?string, profit: float, balance: float, total_project: float, completed_at: ?string, web_path: string}
      */
     private function projectPayload(Project $project): array
     {
@@ -105,6 +105,11 @@ class DistributionProjectAssignmentController extends Controller
             'address' => $project->short_address,
             'client' => $project->client?->name,
             'profit' => (float) data_get($project->finances ?? [], 'profit', 0),
+            // The assign modal's two summary tiles — mirrors
+            // projects-form.blade.php's own $projectProfit/$projectTotal
+            // read off the same $project->finances array.
+            'balance' => (float) data_get($project->finances ?? [], 'balance', 0),
+            'total_project' => (float) data_get($project->finances ?? [], 'total_project', 0),
             'completed_at' => $project->statuses->first()?->start_date?->toDateString(),
             'web_path' => '/projects/'.$project->id,
         ];

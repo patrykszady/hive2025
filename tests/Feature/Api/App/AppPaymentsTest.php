@@ -171,7 +171,54 @@ it('shows a payment\'s detail with its grouped siblings', function () {
 
     expect($response->json('data.id'))->toBe($parent->id)
         ->and(collect($response->json('data.grouped_payments'))->pluck('id')->sort()->values()->all())
-        ->toBe(collect([$parent->id, $child->id])->sort()->values()->all());
+        ->toBe(collect([$parent->id, $child->id])->sort()->values()->all())
+        ->and(collect($response->json('data.grouped_payments'))->pluck('reference')->unique()->all())
+        ->toBe(['GRP']);
+});
+
+it('shows the matched transaction\'s bank and account, like the web\'s Payment Transaction card', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $project = appPaymentsProject($vendor, $client);
+
+    $bank = Bank::create(['name' => 'Citibank', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_'.uniqid()]);
+    $bankAccount = BankAccount::create([
+        'bank_id' => $bank->id, 'vendor_id' => $vendor->id, 'type' => 'Checking',
+        'account_number' => 4903, 'plaid_account_id' => 'acc_'.uniqid(),
+    ]);
+    $transaction = Transaction::create([
+        'amount' => 13000, 'transaction_date' => now()->format('Y-m-d'), 'bank_account_id' => $bankAccount->id,
+    ]);
+    $payment = appPaymentsRow($vendor, $project, ['transaction_id' => $transaction->id]);
+
+    $response = $this->getJson("/api/app/v1/payments/{$payment->id}")->assertOk();
+
+    expect($response->json('data.transaction.bank'))->toBe('Citibank')
+        ->and($response->json('data.transaction.account'))->toBe('4903');
+});
+
+it('prefers the transaction\'s own owner over the bank account number for the Payment Transaction "Account" field', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $project = appPaymentsProject($vendor, $client);
+
+    $bank = Bank::create(['name' => 'Capital One', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_'.uniqid()]);
+    $bankAccount = BankAccount::create([
+        'bank_id' => $bank->id, 'vendor_id' => $vendor->id, 'type' => 'Checking',
+        'account_number' => 1111, 'plaid_account_id' => 'acc_'.uniqid(),
+    ]);
+    $transaction = Transaction::create([
+        'amount' => 50, 'transaction_date' => now()->format('Y-m-d'), 'bank_account_id' => $bankAccount->id, 'owner' => 1820,
+    ]);
+    $payment = appPaymentsRow($vendor, $project, ['transaction_id' => $transaction->id]);
+
+    $response = $this->getJson("/api/app/v1/payments/{$payment->id}")->assertOk();
+
+    expect($response->json('data.transaction.account'))->toBe('1820');
 });
 
 it('lists eligible projects for a client: Active always, Completed only with a balance', function () {

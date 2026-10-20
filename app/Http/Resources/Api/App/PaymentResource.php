@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Api\App;
 
 use App\Models\Payment;
+use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -61,6 +62,7 @@ class PaymentResource extends JsonResource
                 'id' => $payment->id,
                 'amount' => (float) $payment->amount,
                 'date' => $payment->date?->toDateString(),
+                'reference' => $payment->reference,
                 'project' => $payment->project ? ['id' => $payment->project->id, 'name' => $payment->project->project_name] : null,
             ])->values()->all(),
             'transaction' => $this->transactionArray(),
@@ -82,7 +84,7 @@ class PaymentResource extends JsonResource
     }
 
     /**
-     * @return array{amount: float, date: ?string, bank: ?string, description: ?string}|null
+     * @return array{amount: float, date: ?string, bank: ?string, account: ?string, description: ?string}|null
      */
     private function transactionArray(): ?array
     {
@@ -96,7 +98,28 @@ class PaymentResource extends JsonResource
             'amount' => (float) $transaction->amount,
             'date' => $transaction->transaction_date?->toDateString(),
             'bank' => $transaction->bank_account?->bank?->name,
+            // The web's Payment Transaction table shows this as "Account" —
+            // Capital One's card-member owner (Plaid's account_owner) when
+            // set, else the bank account's own number (see
+            // Transaction::cardNumbers()'s docblock for the same owner vs.
+            // account-number precedence).
+            'account' => $this->accountLabel($transaction),
             'description' => $transaction->plaid_merchant_description,
         ];
+    }
+
+    /**
+     * The web's `$payment->transaction->owner ?? $payment->transaction->bank_account->account_number`,
+     * as a string (owner is the numeric Plaid account_owner column; account_number is likewise numeric).
+     */
+    private function accountLabel(Transaction $transaction): ?string
+    {
+        if ($transaction->owner !== null) {
+            return (string) $transaction->owner;
+        }
+
+        return $transaction->bank_account?->account_number !== null
+            ? (string) $transaction->bank_account->account_number
+            : null;
     }
 }
