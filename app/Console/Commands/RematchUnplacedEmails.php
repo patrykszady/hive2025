@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\ExtractProjectActionItems;
 use App\Jobs\SummarizeEmailMessage;
 use App\Models\EmailMessage;
 use App\Services\Emails\StakeholderEmailStore;
@@ -28,6 +29,7 @@ class RematchUnplacedEmails extends Command
         $dryRun = (bool) $this->option('dry-run');
         $placed = 0;
         $reread = 0;
+        $projectsWithNewItems = [];
 
         foreach (EmailMessage::query()->unplaced()->orderBy('id')->get() as $email) {
             $placement = $store->placementFor(
@@ -57,6 +59,10 @@ class RematchUnplacedEmails extends Command
 
                 if (! $dryRun) {
                     $email->forceFill($who + ['project_id' => $placement['project_id']])->save();
+
+                    if ((array) $email->action_items !== []) {
+                        $projectsWithNewItems[$placement['project_id']] = true;
+                    }
                 }
 
                 continue;
@@ -74,6 +80,12 @@ class RematchUnplacedEmails extends Command
                 $email->forceFill($who + ['summarized_at' => null])->save();
                 SummarizeEmailMessage::dispatch($email->id);
             }
+        }
+
+        // Same as sorting by hand (EmailPlacement::place): a placed email's
+        // action items join its project's list.
+        foreach (array_keys($projectsWithNewItems) as $projectId) {
+            ExtractProjectActionItems::dispatch($projectId)->delay(now()->addMinute());
         }
 
         $this->info(sprintf('%s %d, %d queued to read again.', $dryRun ? 'Would place' : 'Placed', $placed, $reread));

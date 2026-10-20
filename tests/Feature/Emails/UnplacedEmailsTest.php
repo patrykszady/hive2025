@@ -107,6 +107,8 @@ it('rematches the unplaced inbox by thread and by a client named in the subject'
         ->and($named->fresh()->candidate_project_ids)->toContain($kitchen->id)
         ->and($nothing->fresh()->summarized_at)->not->toBeNull();
     Queue::assertPushed(\App\Jobs\SummarizeEmailMessage::class, fn ($job) => $job->emailMessageId === $named->id);
+    // The reply carried action items: like a manual sort, its project's list is refreshed.
+    Queue::assertPushed(ExtractProjectActionItems::class, fn ($job) => $job->projectId === $world['project']->id);
     Queue::assertNotPushed(\App\Jobs\SummarizeEmailMessage::class, fn ($job) => $job->emailMessageId === $nothing->id);
 });
 
