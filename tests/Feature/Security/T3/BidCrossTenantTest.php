@@ -21,22 +21,32 @@ it('lets an Admin update and remove a change-order bid on their own project', fu
     $vendor = sec3_makeVendor();
     $client = sec3_makeClient($vendor);
     $project = sec3_makeProject($vendor, $client);
-    $bid = sec3_makeBid($project, $vendor, ['amount' => 100]);
+    $original = sec3_makeBid($project, $vendor, ['amount' => 100]);
+    $bid = sec3_makeBid($project, $vendor, ['amount' => 50, 'type' => 2]);
     $admin = sec3_makeAdmin($vendor);
     test()->actingAs($admin);
 
     Livewire::test(BidCreate::class)
         ->call('addBids', $vendor, $project)
-        ->set('bids.0.amount', 555)
+        ->set('bids.1.amount', 555)
         ->call('save');
 
     expect((float) Bid::withoutGlobalScopes()->findOrFail($bid->id)->amount)->toEqual(555.0);
 
     Livewire::test(BidCreate::class)
         ->call('addBids', $vendor, $project)
-        ->call('removeChangeOrder', 0);
+        ->call('removeChangeOrder', 1);
 
     expect(Bid::withoutGlobalScopes()->find($bid->id))->toBeNull();
+
+    // The form never offers "Remove" on the Original Bid (form.blade.php
+    // hides it on the first card); BidWriter::delete enforces that server-side.
+    Livewire::test(BidCreate::class)
+        ->call('addBids', $vendor, $project)
+        ->call('removeChangeOrder', 0)
+        ->assertHasErrors('id');
+
+    expect(Bid::withoutGlobalScopes()->find($original->id))->not->toBeNull();
 });
 
 it('refuses a same-tenant attacker who swaps a foreign bid id into $bids[i][id]', function () {
