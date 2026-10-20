@@ -22,7 +22,9 @@ Route::get('leads/badge', [AppLeadController::class, 'badge'])->name('leads.badg
 Route::get('leads', [AppLeadController::class, 'index'])->name('leads.index');
 Route::post('leads', [AppLeadController::class, 'store'])->name('leads.store');
 Route::get('leads/{lead}', [AppLeadController::class, 'show'])->whereNumber('lead')->name('leads.show');
-Route::patch('leads/{lead}', [AppLeadController::class, 'update'])->whereNumber('lead')->name('leads.update');
+// PUT, not PATCH — the shared app client (src/api/client.ts) only sends
+// GET/POST/PUT/DELETE.
+Route::put('leads/{lead}', [AppLeadController::class, 'update'])->whereNumber('lead')->name('leads.update');
 Route::delete('leads/{lead}', [AppLeadController::class, 'destroy'])->whereNumber('lead')->name('leads.destroy');
 Route::post('leads/{lead}/status', [AppLeadController::class, 'updateStatus'])->whereNumber('lead')->name('leads.status.update');
 Route::post('leads/{lead}/schedule-link', [AppLeadController::class, 'scheduleLink'])->whereNumber('lead')->name('leads.schedule-link');

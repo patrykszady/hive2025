@@ -256,7 +256,7 @@ it("updates a lead's contact and address fields without touching its status", fu
 
     $lead = appSalesLead($vendor);
 
-    $this->patchJson("/api/app/v1/leads/{$lead->id}", [
+    $this->putJson("/api/app/v1/leads/{$lead->id}", [
         'phone' => '2245551234',
         'city' => 'Northbrook',
     ])->assertOk();
