@@ -30,6 +30,16 @@ Route::get('leads/{lead}', [AppLeadController::class, 'show'])->whereNumber('lea
 // GET/POST/PUT/DELETE.
 Route::put('leads/{lead}', [AppLeadController::class, 'update'])->whereNumber('lead')->name('leads.update');
 Route::delete('leads/{lead}', [AppLeadController::class, 'destroy'])->whereNumber('lead')->name('leads.destroy');
+
+// Completing a lead's contact — mirrors the Details tab's "what's still
+// missing" tools (App\Livewire\Leads\LeadCreate's userChoices/attachUser/
+// addUser/saveContactPhone/selectAddressCandidate via
+// App\Services\Leads\LeadContactCompletion).
+Route::get('leads/{lead}/contact-candidates', [AppLeadController::class, 'contactCandidates'])->whereNumber('lead')->name('leads.contact-candidates');
+Route::post('leads/{lead}/attach-user', [AppLeadController::class, 'attachUser'])->whereNumber('lead')->name('leads.attach-user');
+Route::post('leads/{lead}/add-user', [AppLeadController::class, 'addUser'])->whereNumber('lead')->name('leads.add-user');
+Route::post('leads/{lead}/phone', [AppLeadController::class, 'savePhone'])->whereNumber('lead')->name('leads.phone');
+Route::post('leads/{lead}/address-candidate', [AppLeadController::class, 'selectAddressCandidate'])->whereNumber('lead')->name('leads.address-candidate');
 Route::post('leads/{lead}/status', [AppLeadController::class, 'updateStatus'])->whereNumber('lead')->name('leads.status.update');
 Route::post('leads/{lead}/consult-within-the-hour', [AppLeadController::class, 'updateConsultWithinTheHour'])->whereNumber('lead')->name('leads.consult-within-the-hour');
 Route::post('leads/{lead}/schedule-link', [AppLeadController::class, 'scheduleLink'])->whereNumber('lead')->name('leads.schedule-link');

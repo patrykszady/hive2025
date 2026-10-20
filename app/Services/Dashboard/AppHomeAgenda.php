@@ -87,10 +87,16 @@ class AppHomeAgenda
     }
 
     /**
+     * Public: also used by the Hive Contractors app's ThreadToolsController
+     * to shape App\Livewire\Sms\SendScheduleModal's own grouped-by-date task
+     * collections (groupedUpcomingTasks/laterTasks) the same way the Home
+     * tab shapes its own, so the "Send schedule" task list looks and reads
+     * exactly like the Hub's.
+     *
      * @param  Collection<string, Collection<int, Task>>  $grouped
      * @return list<array{date: string, groups: list<array>}>
      */
-    private function dayGroupsPayload(Collection $grouped, int $vendorId): array
+    public function dayGroupsPayload(Collection $grouped, int $vendorId): array
     {
         return $grouped
             ->map(fn (Collection $tasksForDay, string $date): array => [
@@ -122,10 +128,13 @@ class AppHomeAgenda
     }
 
     /**
+     * Public: also used by ThreadToolsController for SendScheduleModal's
+     * pendingTasks() (tasks with no date yet) — see dayGroupsPayload().
+     *
      * @param  Collection<int, Task>  $tasks
      * @return list<array{project: ?array, tasks: list<array>}>
      */
-    private function unscheduledPayload(Collection $tasks, int $vendorId): array
+    public function unscheduledPayload(Collection $tasks, int $vendorId): array
     {
         return $tasks
             ->groupBy(fn (Task $task): int => $task->project_id ?? 0)

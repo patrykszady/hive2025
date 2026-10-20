@@ -3,10 +3,14 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\AddLeadUserRequest;
+use App\Http\Requests\Api\App\AttachLeadUserRequest;
 use App\Http\Requests\Api\App\BulkLeadIdsRequest;
 use App\Http\Requests\Api\App\BulkUpdateLeadStatusRequest;
 use App\Http\Requests\Api\App\PreviewLeadReplyRequest;
 use App\Http\Requests\Api\App\ProposeLeadConsultDateRequest;
+use App\Http\Requests\Api\App\SaveLeadPhoneRequest;
+use App\Http\Requests\Api\App\SelectLeadAddressCandidateRequest;
 use App\Http\Requests\Api\App\SendConsultInviteRequest;
 use App\Http\Requests\Api\App\SendLeadReplyRequest;
 use App\Http\Requests\Api\App\StoreLeadRequest;
@@ -16,6 +20,7 @@ use App\Http\Resources\Api\App\LeadResource;
 use App\Livewire\Leads\LeadsSidebarBadge;
 use App\Models\Lead;
 use App\Services\LeadContactProvisioner;
+use App\Services\Leads\LeadContactCompletion;
 use App\Services\Leads\LeadDuplicateFinder;
 use App\Services\Leads\LeadReplyComposer;
 use App\Services\Leads\LeadScheduleLinkTexter;
@@ -218,6 +223,123 @@ class LeadController extends Controller
         }
 
         $found->save();
+
+        return response()->json(['data' => (new LeadResource($this->findOrFail($lead)))->withDetail()->toArray($request)]);
+    }
+
+    /**
+     * The "User" dropdown's candidates — mirrors
+     * App\Livewire\Leads\LeadCreate::userChoices(): this company's existing
+     * client contacts and the people its other leads are linked to.
+     */
+    public function contactCandidates(Request $request, int $lead, LeadContactCompletion $completion): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+        $vendorId = (int) $request->user()->vendor->id;
+
+        return response()->json(['data' => $completion->contactChoices($vendorId, $found->user)]);
+    }
+
+    /**
+     * Link an existing user as this lead's contact — mirrors
+     * App\Livewire\Leads\LeadCreate::attachUser()/updatedSelectedUserId()
+     * for a lead that already exists (the app never completes a lead
+     * that's still unsaved).
+     */
+    public function attachUser(AttachLeadUserRequest $request, int $lead, LeadContactCompletion $completion): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+        $vendorId = (int) $request->user()->vendor->id;
+
+        $user = $completion->contactCandidatesQuery($vendorId)->whereKey($request->validated('user_id'))->first();
+
+        if (! $user) {
+            return response()->json(['message' => 'That user is not available to link to this lead.'], 422);
+        }
+
+        // Mirrors attachUser()'s own field merge: the picked user's name
+        // always wins; the lead's current email/phone only fill in when
+        // nothing is on file yet.
+        $data = $found->lead_data;
+        $fullName = trim((string) $user->full_name);
+        $email = filled($data['email'] ?? null) ? $data['email'] : ($user->hasRoutableEmail() ? $user->email : null);
+        $phone = filled($data['phone'] ?? null) ? $data['phone'] : ($user->hasRoutablePhone() ? $user->cell_phone : null);
+
+        $completion->attachExistingUser($found, $user, $fullName, $email, $phone);
+
+        LeadsSidebarBadge::bustBadgeCache((int) $found->belongs_to_vendor_id);
+
+        return response()->json(['data' => (new LeadResource($this->findOrFail($lead)))->withDetail()->toArray($request)]);
+    }
+
+    /**
+     * "Add User" — mirrors App\Livewire\Leads\LeadCreate::addUser(): a user
+     * record from the name/email/phone the office just entered, created
+     * and linked to this lead.
+     */
+    public function addUser(AddLeadUserRequest $request, int $lead, LeadContactCompletion $completion): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+
+        if ($found->user_id) {
+            return response()->json(['message' => 'This lead already has a linked user.'], 422);
+        }
+
+        $user = $completion->addUserFromLead($found, $request->validated('full_name'), $request->validated('email'), $request->validated('phone'));
+
+        if ($user === null) {
+            return response()->json(['message' => 'A name is needed to create a user.'], 422);
+        }
+
+        LeadsSidebarBadge::bustBadgeCache((int) $found->belongs_to_vendor_id);
+
+        return response()->json(['data' => (new LeadResource($this->findOrFail($lead)))->withDetail()->toArray($request)]);
+    }
+
+    /**
+     * A hand-entered phone number — mirrors
+     * App\Livewire\Leads\LeadCreate::saveContactPhone(): the same 10-digit +
+     * uniqueness rule, written onto the lead and its contact, then
+     * provisioned exactly like the web.
+     */
+    public function savePhone(SaveLeadPhoneRequest $request, int $lead, LeadContactCompletion $completion): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+
+        $result = $completion->validatePhoneEntry($request->validated('phone'), $found->user_id);
+
+        if (! $result['ok']) {
+            return response()->json(['message' => $result['error'], 'errors' => ['phone' => [$result['error']]]], 422);
+        }
+
+        $completion->completePhone($found, $result['digits']);
+
+        return response()->json(['data' => (new LeadResource($this->findOrFail($lead)))->withDetail()->toArray($request)]);
+    }
+
+    /**
+     * Pick one of the stored address candidates — mirrors
+     * App\Livewire\Leads\LeadCreate::selectAddressCandidate().
+     */
+    public function selectAddressCandidate(SelectLeadAddressCandidateRequest $request, int $lead, LeadContactCompletion $completion): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+
+        $candidate = $completion->selectAddressCandidate($found, (int) $request->validated('index'));
+
+        if (! $candidate) {
+            return response()->json(['message' => 'That address is no longer available.'], 422);
+        }
 
         return response()->json(['data' => (new LeadResource($this->findOrFail($lead)))->withDetail()->toArray($request)]);
     }

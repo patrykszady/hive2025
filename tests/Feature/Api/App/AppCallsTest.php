@@ -83,6 +83,34 @@ it('shows a call like the web detail panel: playable recording, AI summary and t
     $this->get('/calls/'.$call->id.'/recording/signed')->assertForbidden();
 });
 
+it('links a call to the caller\'s client record, like the web detail panel\'s name link', function () {
+    $contact = User::query()->create([
+        'first_name' => 'Dana', 'last_name' => 'Osei',
+        'email' => 'dana.'.uniqid().'@example.test', 'cell_phone' => '6305551234',
+    ]);
+    $client = \App\Models\Client::factory()->create();
+    $client->vendors()->attach(1);
+    $client->users()->attach($contact->id);
+
+    // A phone number no other test in this file touches — the trait's
+    // resolvePhoneContact() caches per-number for the life of the request,
+    // and Pest runs this file's tests in one process.
+    $call = appCall(['from_number' => '+16305551234']);
+
+    $response = $this->getJson("/api/app/v1/calls/{$call->id}")->assertOk();
+
+    expect($response->json('data.contact.type'))->toBe('client')
+        ->and($response->json('data.contact.id'))->toBe($client->id);
+});
+
+it('reports no contact for an unknown caller', function () {
+    $call = appCall(['from_number' => '+14155559999']);
+
+    $this->getJson("/api/app/v1/calls/{$call->id}")
+        ->assertOk()
+        ->assertJsonPath('data.contact', null);
+});
+
 it('keeps another company\'s call out of reach, and says when a call does not exist', function () {
     $theirs = appCall(['vendor_id' => Vendor::factory()->create()->id]);
 

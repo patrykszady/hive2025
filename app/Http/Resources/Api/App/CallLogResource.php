@@ -69,6 +69,11 @@ class CallLogResource extends JsonResource
                 'name' => $history->nameFor($phone),
                 'phone' => $phone,
             ],
+            // Where this call's contact lives — mirrors the web call detail
+            // panel's name link (call-detail.blade.php's $contactUrl); the
+            // app navigates to its own client/vendor screen instead of a web
+            // route. Null for an unknown caller.
+            'contact' => $history->contactFor($phone),
             'answered_by' => $this->answeredBy[(string) $this->forwarded_to] ?? ($this->detail ? $this->resource->agentUser()?->full_name : null),
             'started_at' => $this->created_at?->toIso8601String(),
             'duration_seconds' => $this->duration_seconds,

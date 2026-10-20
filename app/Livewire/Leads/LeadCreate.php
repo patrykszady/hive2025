@@ -439,56 +439,41 @@ class LeadCreate extends Component
     }
 
     /**
+     * The missing-contact-info tools (phone entry, address candidates,
+     * linking/adding a user) — shared with the Hive Contractors app's
+     * LeadController so both write through LeadContactProvisioner the same
+     * way.
+     */
+    protected function contactCompletion(): \App\Services\Leads\LeadContactCompletion
+    {
+        return app(\App\Services\Leads\LeadContactCompletion::class);
+    }
+
+    /**
      * Save a hand-entered phone onto the lead AND its contact, so the number
      * we just learned is on the record people actually call from, not only in
      * the lead payload.
      */
     public function saveContactPhone(): void
     {
-        $digits = preg_replace('/\D/', '', (string) $this->phoneEntry) ?? '';
+        $result = $this->contactCompletion()->validatePhoneEntry($this->phoneEntry, $this->lead?->user_id);
 
-        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            $digits = substr($digits, 1);
-        }
-
-        if (strlen($digits) !== 10) {
-            $this->addError('phoneEntry', 'Enter a 10-digit phone number.');
-
-            return;
-        }
-
-        $taken = \App\Models\User::query()
-            ->where('cell_phone', $digits)
-            ->when($this->lead?->user_id, fn ($q) => $q->whereKeyNot($this->lead->user_id))
-            ->exists();
-
-        if ($taken) {
-            $this->addError('phoneEntry', 'Another contact already uses this number.');
+        if (! $result['ok']) {
+            $this->addError('phoneEntry', $result['error']);
 
             return;
         }
 
         $this->resetErrorBag('phoneEntry');
+        $digits = $result['digits'];
 
         if ($this->lead?->exists) {
-            $data = $this->lead->lead_data;
-            $data['phone'] = $digits;
-            $this->lead->lead_data = $data;
-            $this->lead->saveQuietly();
-
             // The number is often the missing piece that lets provisioning
             // run at all: a name plus a way to reach them is the bar, so an
             // enquiry with neither phone nor usable email had no contact and
             // no client until now. Runs whether or not a user exists — an
             // existing contact may still be missing its client/address.
-            try {
-                app(\App\Services\LeadContactProvisioner::class)->provision($this->lead->fresh());
-            } catch (\Throwable $e) {
-                Log::warning('Lead contact provisioning after manual phone entry failed', [
-                    'lead_id' => $this->lead->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            $this->contactCompletion()->completePhone($this->lead, $digits);
         }
 
         // Persist the number BEFORE reloading anything for display. The client
@@ -540,26 +525,14 @@ class LeadCreate extends Component
     #[Computed]
     public function addressCandidates(): array
     {
-        if (! $this->lead?->exists || ! in_array('a full address', $this->missingContactInfo, true)) {
+        if (! $this->lead?->exists) {
             return [];
-        }
-
-        $data = $this->lead->lead_data;
-
-        $stored = $data['address_candidates'] ?? null;
-
-        if (is_iterable($stored)) {
-            $stored = collect($stored)->map(fn ($c) => (array) $c)->all();
-
-            if ($stored !== []) {
-                return $stored;
-            }
         }
 
         // Stored candidates ONLY. This is a computed property read during
         // render; geocoding here put a third-party API call in the path of
         // every lead click. CompleteLeadAddress writes them instead.
-        return [];
+        return $this->contactCompletion()->addressCandidates($this->lead);
     }
 
     /**
@@ -596,28 +569,14 @@ class LeadCreate extends Component
      */
     public function selectAddressCandidate(int $index): void
     {
-        $candidate = $this->addressCandidates[$index] ?? null;
-
-        if (! $candidate || ! $this->lead?->exists) {
+        if (! $this->lead?->exists) {
             return;
         }
 
-        $data = $this->lead->lead_data;
-        $data['address'] = $candidate['address'];
-        $data['city'] = $candidate['city'];
-        $data['state'] = $candidate['state'];
-        $data['zip'] = $candidate['zip_code'];
-        unset($data['address_candidates']);
-        $this->lead->lead_data = $data;
-        $this->lead->saveQuietly();
+        $candidate = $this->contactCompletion()->selectAddressCandidate($this->lead, $index);
 
-        try {
-            app(\App\Services\LeadContactProvisioner::class)->provision($this->lead->fresh());
-        } catch (\Throwable $e) {
-            Log::warning('Lead contact provisioning after address selection failed', [
-                'lead_id' => $this->lead->id,
-                'error' => $e->getMessage(),
-            ]);
+        if (! $candidate) {
+            return;
         }
 
         $this->lead = $this->lead->fresh(['user.clients.users', 'last_status']);
@@ -651,44 +610,13 @@ class LeadCreate extends Component
             return [];
         }
 
-        $data = $this->lead->lead_data;
-        $contact = $this->lead->user;
-        $client = $this->client;
-
-        $missing = [];
-
-        $email = trim((string) ($data['email'] ?? ''));
-        if ($email === '' && ! ($contact?->hasRoutableEmail() ?? false)) {
-            $missing[] = 'an email address';
-        }
-
-        if ($this->needsPhone) {
-            $missing[] = 'a phone number';
-        }
-
-        // Judge the address on the LEAD, not on the client: a lead with a
-        // perfectly good address still has no client while some OTHER field is
+        // Judged on the LEAD first, not the client: a lead with a perfectly
+        // good address still has no client while some OTHER field is
         // missing (no phone → no contact → no client), and reporting the
         // address as missing then sent people hunting for a problem that
         // wasn't there. The client is the fallback for older leads whose
         // address only ever lived on the client record.
-        $addressComplete = $this->addressIsComplete([
-            'address' => $data['address'] ?? null,
-            'city' => $data['city'] ?? null,
-            'state' => $data['state'] ?? null,
-            'zip_code' => $data['zip'] ?? null,
-        ]) || ($client && $this->addressIsComplete([
-            'address' => $client->address,
-            'city' => $client->city,
-            'state' => $client->state,
-            'zip_code' => $client->zip_code,
-        ]));
-
-        if (! $addressComplete) {
-            $missing[] = 'a full address';
-        }
-
-        return $missing;
+        return $this->contactCompletion()->missingContactInfo($this->lead, $this->client);
     }
 
     /**
@@ -717,18 +645,10 @@ class LeadCreate extends Component
     #[Computed]
     public function needsPhone(): bool
     {
-        if (! $this->lead?->exists) {
-            return false;
-        }
-
         // Persisted state ONLY. Reading the bound input here is what let a
         // half-typed or invalid number open the Message tab without anything
         // being saved.
-        if (trim((string) ($this->lead->lead_data['phone'] ?? '')) !== '') {
-            return false;
-        }
-
-        return ! ($this->lead->user?->hasRoutablePhone() ?? false);
+        return $this->contactCompletion()->needsPhone($this->lead ?? new Lead);
     }
 
     public function confirmRemove(): void
@@ -865,19 +785,7 @@ class LeadCreate extends Component
     #[Computed]
     public function userChoices(): array
     {
-        $choices = $this->contactCandidates()
-            ->orderBy('first_name')
-            ->orderBy('last_name')
-            ->limit(500)
-            ->get()
-            ->map(fn (\App\Models\User $user) => $this->userOption($user));
-
-        $current = $this->lead?->user;
-        if ($current && ! $choices->contains('id', (int) $current->id)) {
-            $choices->prepend($this->userOption($current));
-        }
-
-        return $choices->values()->all();
+        return $this->contactCompletion()->contactChoices((int) auth()->user()->vendor->id, $this->lead?->user);
     }
 
     /**
@@ -885,20 +793,7 @@ class LeadCreate extends Component
      */
     protected function contactCandidates(): \Illuminate\Database\Eloquent\Builder
     {
-        $vendorId = (int) auth()->user()->vendor->id;
-
-        $leadUserIds = Lead::withoutGlobalScopes()
-            ->where('belongs_to_vendor_id', $vendorId)
-            ->whereNotNull('user_id')
-            ->pluck('user_id');
-
-        return \App\Models\User::query()
-            ->where(function ($query) use ($vendorId, $leadUserIds) {
-                $query->whereHas('clients', fn ($clients) => $clients->withoutGlobalScopes()->whereHas('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->where('vendors.id', $vendorId)))
-                    ->orWhereIn('id', $leadUserIds);
-            })
-            ->where(fn ($query) => $query->whereNull('primary_vendor_id')->orWhere('primary_vendor_id', '!=', $vendorId))
-            ->whereDoesntHave('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->where('vendors.id', $vendorId));
+        return $this->contactCompletion()->contactCandidatesQuery((int) auth()->user()->vendor->id);
     }
 
     /**
@@ -906,17 +801,7 @@ class LeadCreate extends Component
      */
     protected function userOption(\App\Models\User $user): array
     {
-        $name = trim((string) $user->full_name);
-        $contact = $user->hasRoutableEmail()
-            ? (string) $user->email
-            : ($user->cell_phone ? preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', (string) $user->cell_phone) : '');
-
-        return [
-            'id' => (int) $user->id,
-            'name' => $name,
-            'contact' => (string) $contact,
-            'label' => $contact !== '' ? "{$name} — {$contact}" : $name,
-        ];
+        return $this->contactCompletion()->contactOption($user);
     }
 
     /** Choosing a different user in the dropdown links them. */
@@ -955,8 +840,7 @@ class LeadCreate extends Component
             return;
         }
 
-        $this->rememberContactOnLead();
-        app(\App\Services\LeadContactProvisioner::class)->link($this->lead->fresh(), $user);
+        $this->contactCompletion()->attachExistingUser($this->lead, $user, (string) $this->full_name, $this->email, $this->phone);
         $this->reloadLeadContact();
 
         Flux::toast(
@@ -986,8 +870,7 @@ class LeadCreate extends Component
             return;
         }
 
-        $this->rememberContactOnLead();
-        $user = app(\App\Services\LeadContactProvisioner::class)->createContactFor($this->lead->fresh(), (string) $this->full_name, $this->email, $this->phone);
+        $user = $this->contactCompletion()->addUserFromLead($this->lead, (string) $this->full_name, $this->email, $this->phone);
 
         if ($user === null) {
             $this->addError('full_name', 'A name is needed to create a user.');
@@ -1004,22 +887,6 @@ class LeadCreate extends Component
             heading: 'User added',
             text: trim((string) $user->full_name).' was created and linked to this lead.',
         );
-    }
-
-    /** The name, email and phone in the boxes onto the lead itself. */
-    protected function rememberContactOnLead(): void
-    {
-        $lead = $this->lead->fresh();
-        $data = $lead->lead_data;
-        $data['name'] = trim((string) $this->full_name) ?: ($data['name'] ?? null);
-        if (filled($this->email)) {
-            $data['email'] = trim((string) $this->email);
-        }
-        if (filled($this->phone)) {
-            $data['phone'] = preg_replace('/\D/', '', (string) $this->phone);
-        }
-        $lead->lead_data = $data;
-        $lead->saveQuietly();
     }
 
     protected function reloadLeadContact(): void

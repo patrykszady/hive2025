@@ -763,3 +763,216 @@ it('toggles consult-within-the-hour, like LeadCreate::updatedConsultWithinTheHou
 
     expect($lead->fresh()->lead_data['consult_notice_hours'] ?? null)->toBeNull();
 });
+
+// --- Completing a lead's contact — mirrors LeadCreate's missing-contact-info
+// tools, writing through LeadContactProvisioner exactly like the web (see
+// App\Services\Leads\LeadContactCompletion). -------------------------------
+
+it('flags a lead missing a phone and reports it on the detail, like LeadCreate::missingContactInfo()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, [
+        'lead_data' => appSalesLeadData(['phone' => null]),
+    ]);
+
+    $response = $this->getJson("/api/app/v1/leads/{$lead->id}")->assertOk();
+
+    expect($response->json('data.needs_phone'))->toBeTrue()
+        ->and($response->json('data.missing_contact_info'))->toContain('a phone number');
+});
+
+it('saves a hand-entered phone and provisions the contact, like LeadCreate::saveContactPhone()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, [
+        'lead_data' => appSalesLeadData(['phone' => null]),
+    ]);
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/phone", ['phone' => '(224) 555-9876'])
+        ->assertOk();
+
+    expect($lead->fresh()->lead_data['phone'])->toBe('2245559876')
+        ->and($response->json('data.needs_phone'))->toBeFalse()
+        ->and($response->json('data.phone'))->toBe('2245559876')
+        // Provisioning ran: the lead now has a contact with that number.
+        ->and($lead->fresh()->user?->cell_phone)->toBe('2245559876');
+});
+
+it('rejects a phone that is not 10 digits, like saveContactPhone()\'s own validation', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null])]);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/phone", ['phone' => '12345'])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.phone.0', 'Enter a 10-digit phone number.');
+
+    expect($lead->fresh()->lead_data['phone'] ?? null)->toBeNull();
+});
+
+it('rejects a phone another contact already uses, like saveContactPhone()\'s uniqueness check', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    User::query()->create(['first_name' => 'Taken', 'last_name' => 'Number', 'email' => 'taken.'.uniqid().'@example.test', 'cell_phone' => '2245559876']);
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null])]);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/phone", ['phone' => '2245559876'])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.phone.0', 'Another contact already uses this number.');
+});
+
+it('selects a stored address candidate and provisions the client, like LeadCreate::selectAddressCandidate()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, [
+        'lead_data' => appSalesLeadData([
+            'address' => '123 Main St',
+            'city' => null,
+            'state' => null,
+            'zip' => null,
+            'address_candidates' => [
+                ['address' => '123 Main St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067', 'miles' => 1.2],
+                ['address' => '123 Main St', 'city' => 'Arlington Heights', 'state' => 'IL', 'zip_code' => '60004', 'miles' => 3.4],
+            ],
+        ]),
+    ]);
+
+    $detail = $this->getJson("/api/app/v1/leads/{$lead->id}")->assertOk();
+    expect($detail->json('data.address_candidates'))->toHaveCount(2);
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/address-candidate", ['index' => 1])
+        ->assertOk();
+
+    expect($response->json('data.city'))->toBe('Arlington Heights')
+        ->and($lead->fresh()->lead_data['zip'])->toBe('60004')
+        ->and($lead->fresh()->lead_data)->not->toHaveKey('address_candidates')
+        // Provisioning ran now that the address is complete: a client exists.
+        ->and($lead->fresh()->resolveClient())->not->toBeNull();
+});
+
+it('rejects an out-of-range address candidate index', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, [
+        'lead_data' => appSalesLeadData(['address_candidates' => [
+            ['address' => '123 Main St', 'city' => 'Palatine', 'state' => 'IL', 'zip_code' => '60067', 'miles' => 1.2],
+        ]]),
+    ]);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/address-candidate", ['index' => 5])
+        ->assertStatus(422);
+});
+
+it("lists this company's linkable contacts, like LeadCreate::userChoices()", function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $contact = User::query()->create(['first_name' => 'Amy', 'last_name' => 'Dusto', 'email' => 'amy.'.uniqid().'@example.test']);
+    $client->users()->attach($contact->id);
+
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null])]);
+
+    $response = $this->getJson("/api/app/v1/leads/{$lead->id}/contact-candidates")->assertOk();
+
+    expect(collect($response->json('data'))->pluck('id'))->toContain($contact->id);
+});
+
+it('links an existing user as the lead contact, like LeadCreate::attachUser()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $contact = User::query()->create([
+        'first_name' => 'Amy', 'last_name' => 'Dusto',
+        'email' => 'amy.'.uniqid().'@example.test', 'cell_phone' => '2245550001',
+    ]);
+    $client->users()->attach($contact->id);
+
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null])]);
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/attach-user", ['user_id' => $contact->id])
+        ->assertOk();
+
+    expect($lead->fresh()->user_id)->toBe($contact->id)
+        ->and($response->json('data.contact.id'))->toBe($contact->id)
+        ->and($response->json('data.needs_phone'))->toBeFalse();
+});
+
+it('refuses to attach a user who is not a linkable candidate', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $otherVendor = Vendor::factory()->create();
+    $staffer = User::factory()->create(['primary_vendor_id' => $otherVendor->id]);
+    $otherVendor->users()->attach($staffer->id, ['role_id' => 1]);
+
+    $lead = appSalesLead($vendor);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/attach-user", ['user_id' => $staffer->id])
+        ->assertStatus(422);
+
+    expect($lead->fresh()->user_id)->toBeNull();
+});
+
+it('creates and links a new user from the lead\'s own details, like LeadCreate::addUser()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null, 'email' => null])]);
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/add-user", [
+        'full_name' => 'Jordan Casey',
+        'email' => 'jordan.'.uniqid().'@example.test',
+    ])->assertOk();
+
+    $fresh = $lead->fresh();
+    expect($fresh->user_id)->not->toBeNull()
+        ->and($fresh->user->full_name)->toBe('Jordan Casey')
+        ->and($response->json('data.contact.name'))->toBe('Jordan Casey');
+});
+
+it('rejects "Add User" with neither email nor phone, like addUser()\'s own guard', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null, 'email' => null])]);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/add-user", ['full_name' => 'Jordan Casey'])
+        ->assertStatus(422);
+
+    expect($lead->fresh()->user_id)->toBeNull();
+});
+
+it('refuses "Add User" once the lead already has a linked contact', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    ['lead' => $lead] = appSalesLeadWithClient($vendor);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/add-user", [
+        'full_name' => 'Someone Else',
+        'email' => 'someone.'.uniqid().'@example.test',
+    ])->assertStatus(422);
+});
+
+it('refuses a Member completing a lead\'s contact, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appSalesTeamUser(role: 2);
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => null])]);
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson("/api/app/v1/leads/{$lead->id}/contact-candidates")->assertForbidden();
+    $this->postJson("/api/app/v1/leads/{$lead->id}/phone", ['phone' => '2245559876'])->assertForbidden();
+    $this->postJson("/api/app/v1/leads/{$lead->id}/attach-user", ['user_id' => 1])->assertForbidden();
+    $this->postJson("/api/app/v1/leads/{$lead->id}/add-user", ['full_name' => 'X', 'email' => 'x.'.uniqid().'@example.test'])->assertForbidden();
+    $this->postJson("/api/app/v1/leads/{$lead->id}/address-candidate", ['index' => 0])->assertForbidden();
+});

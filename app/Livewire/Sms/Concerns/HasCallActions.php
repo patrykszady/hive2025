@@ -241,13 +241,18 @@ trait HasCallActions
     }
 
     /**
-     * Where this call's contact lives in the app: the client page when the
-     * number belongs to a client member, the vendor page for a vendor's (or
-     * vendor team member's) number. Null for unknown callers — the caller
-     * name then renders as plain text. Same matching as resolvePhoneDisplay,
-     * so the link can never point at someone other than the name shown.
+     * Where this call's contact lives: the client page when the number
+     * belongs to a client member, the vendor page for a vendor's (or vendor
+     * team member's) number. Null for unknown callers. Same matching as
+     * resolvePhoneDisplay, so a link (web route or app screen) can never
+     * point at someone other than the name shown. Shared by
+     * resolvePhoneContactUrl() (the web's href) and the Hive Contractors
+     * app's CallLogResource, which navigates to its own client/vendor
+     * screen instead of a web route.
+     *
+     * @return array{type: 'client'|'vendor', id: int, name: string}|null
      */
-    public function resolvePhoneContactUrl(string $e164): ?string
+    public function resolvePhoneContact(string $e164): ?array
     {
         static $cache = [];
 
@@ -271,11 +276,11 @@ trait HasCallActions
         if ($user) {
             $client = $user->clients()->first();
             if ($client) {
-                return $cache[$e164] = route('clients.show', $client->id);
+                return $cache[$e164] = ['type' => 'client', 'id' => $client->id, 'name' => $client->name];
             }
 
             if ($user->vendor) {
-                return $cache[$e164] = route('vendors.show', $user->vendor->id);
+                return $cache[$e164] = ['type' => 'vendor', 'id' => $user->vendor->id, 'name' => $user->vendor->business_name];
             }
         }
 
@@ -285,10 +290,30 @@ trait HasCallActions
             ->first();
 
         if ($vendor) {
-            return $cache[$e164] = route('vendors.show', $vendor->id);
+            return $cache[$e164] = ['type' => 'vendor', 'id' => $vendor->id, 'name' => $vendor->business_name];
         }
 
         return $cache[$e164] = null;
+    }
+
+    /**
+     * Where this call's contact lives in the app: the client page when the
+     * number belongs to a client member, the vendor page for a vendor's (or
+     * vendor team member's) number. Null for unknown callers — the caller
+     * name then renders as plain text. Same matching as resolvePhoneDisplay,
+     * so the link can never point at someone other than the name shown.
+     */
+    public function resolvePhoneContactUrl(string $e164): ?string
+    {
+        $contact = $this->resolvePhoneContact($e164);
+
+        if (! $contact) {
+            return null;
+        }
+
+        return $contact['type'] === 'client'
+            ? route('clients.show', $contact['id'])
+            : route('vendors.show', $contact['id']);
     }
 
     public function formatPhone(?string $phone): string

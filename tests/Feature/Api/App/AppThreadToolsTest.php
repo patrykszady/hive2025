@@ -78,6 +78,51 @@ it('drafts the consult scheduling text without sending it', function () {
     expect(SmsMessage::query()->where('thread_id', $this->thread->id)->count())->toBe(0);
 });
 
+it('returns the "Confirm Tasks" task list from the schedule preview, shaped like the Home tab\'s own', function () {
+    $this->travelTo(\Carbon\Carbon::parse('2026-10-17 10:00:00', 'America/Chicago'));
+
+    $client = \App\Models\Client::factory()->create();
+    $project = \App\Models\Project::query()->create([
+        'project_name' => 'Tile Repair',
+        'client_id' => $client->id,
+        'address' => '100 Main St',
+        'city' => 'Palatine',
+        'state' => 'IL',
+        'zip_code' => 60067,
+        'belongs_to_vendor_id' => 1,
+    ]);
+
+    \App\Models\Task::query()->create([
+        'title' => 'Demo tile',
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'start_date' => '2026-10-17',
+        'end_date' => '2026-10-17',
+    ]);
+    \App\Models\Task::query()->create([
+        'title' => 'Order grout',
+        'project_id' => $project->id,
+        'type' => 'Task',
+        'start_date' => null,
+        'end_date' => null,
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'from_number' => '+12247354200',
+        'participants' => ['+12245550002'],
+        'vendor_id' => 1,
+        'project_id' => $project->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $response = $this->getJson("/api/app/v1/threads/{$thread->id}/schedule")->assertOk();
+
+    expect($response->json('projects.0.name'))->toBe('Tile Repair')
+        ->and($response->json('tasks.days.0.groups.0.project.name'))->toBe('Tile Repair')
+        ->and(collect($response->json('tasks.days'))->pluck('groups.0.tasks.*.title')->flatten())->toContain('Demo tile')
+        ->and($response->json('tasks.pending.0.tasks.0.title'))->toBe('Order grout');
+});
+
 it('keeps another company\'s thread out of the tools', function () {
     $theirs = SmsGroupThread::query()->create(['from_number' => '+12247354200', 'participants' => ['+12245550009'], 'vendor_id' => Vendor::factory()->create()->id, 'last_activity_at' => now()]);
 
