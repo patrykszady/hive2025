@@ -90,11 +90,23 @@ class ProjectWriter
         $project->update([
             'project_name' => $projectName,
             'client_id' => $clientId,
-            'address' => $address['address'] ?? null,
-            'address_2' => $address['address_2'] ?? null,
-            'city' => $address['city'] ?? null,
-            'state' => $address['state'] ?? null,
-            'zip_code' => $address['zip_code'] ?? null,
+            // address/city/state/zip_code are NOT NULL columns (see the
+            // projects table migration), and HasAddress's own setters null
+            // out a blank value before it ever reaches the database. The
+            // web never hits either edge: ProjectForm::update() always
+            // sends the host component's own string properties, and its
+            // address inputs are plain HTML `required` fields (no Laravel
+            // rule backs that up, which is the actual gap — see
+            // UpdateProjectRequest), so a web submission is never truly
+            // blank in practice. UpdateProjectRequest now allows omitting
+            // these; omitted here means "leave unchanged", same as the
+            // app's position/nickname fallbacks elsewhere, not "blank" —
+            // which would crash on the NOT NULL columns besides.
+            'address' => $address['address'] ?? $project->address,
+            'address_2' => array_key_exists('address_2', $address) ? $address['address_2'] : $project->address_2,
+            'city' => $address['city'] ?? $project->city,
+            'state' => $address['state'] ?? $project->state,
+            'zip_code' => $address['zip_code'] ?? $project->zip_code,
         ]);
 
         if ($oldClientId != $clientId) {

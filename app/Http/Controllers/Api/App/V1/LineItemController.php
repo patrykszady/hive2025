@@ -7,6 +7,7 @@ use App\Http\Requests\Api\App\StoreLineItemRequest;
 use App\Http\Requests\Api\App\UpdateLineItemRequest;
 use App\Http\Resources\Api\App\LineItemResource;
 use App\Models\LineItem;
+use App\Services\Estimates\EstimateAllowanceSuggestions;
 use App\Services\LineItems\InlineAllowanceResolver;
 use App\Services\LineItems\LineItemWriter;
 use Illuminate\Http\JsonResponse;
@@ -73,6 +74,22 @@ class LineItemController extends Controller
         $found->load(['allowances' => fn ($q) => $q->orderBy('id')]);
 
         return response()->json(['data' => (new LineItemResource($found))->toArray($request)]);
+    }
+
+    /**
+     * "Previously used" allowance suggestions for this catalog item —
+     * mirrors App\Livewire\LineItems\EstimateLineItemCreate::
+     * previousAllowances() via App\Services\Estimates\
+     * EstimateAllowanceSuggestions, the service both surfaces share. Used
+     * when adding this line item to an estimate, same as the web's
+     * autocomplete under each allowance row.
+     */
+    public function allowanceSuggestions(Request $request, int $lineItem, EstimateAllowanceSuggestions $suggestions): JsonResponse
+    {
+        $found = $this->visibleLineItem($request, $lineItem);
+        $this->authorize('view', $found);
+
+        return response()->json(['data' => $suggestions->forLineItem($found->id)->values()->all()]);
     }
 
     public function store(StoreLineItemRequest $request): JsonResponse

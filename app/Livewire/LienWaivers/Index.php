@@ -153,7 +153,9 @@ class Index extends Component
 
     /**
      * Default the payer fields to the project client's billing address,
-     * falling back to the project's site address when no client is on file.
+     * falling back to the project's site address when no client is on file
+     * — delegates to App\Services\LienWaivers\LienWaiverPayerDefaults, the
+     * same derivation the Hive Contractors app's create screen fetches.
      */
     protected function prefillPayerFromProject(): void
     {
@@ -161,18 +163,11 @@ class Index extends Component
             return;
         }
 
-        $client = $this->project->client;
+        $defaults = app(\App\Services\LienWaivers\LienWaiverPayerDefaults::class)->forProject($this->project);
 
-        $this->newPayerName = $client?->name ?? '';
-        $this->newPayerAddress = trim((string) ($client?->address ?? $this->project->address ?? ''));
-        $this->newPayerCityStateZip = trim(sprintf(
-            '%s%s %s',
-            $client?->city ?? $this->project->city ?? '',
-            ($client?->state ?? $this->project->state)
-                ? ', ' . ($client?->state ?? $this->project->state)
-                : '',
-            $client?->zip_code ?? $this->project->zip_code ?? '',
-        ));
+        $this->newPayerName = $defaults['name'];
+        $this->newPayerAddress = $defaults['address'];
+        $this->newPayerCityStateZip = $defaults['city_state_zip'];
     }
 
     /**

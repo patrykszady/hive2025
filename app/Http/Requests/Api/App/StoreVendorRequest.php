@@ -39,7 +39,10 @@ class StoreVendorRequest extends FormRequest
             'address_2' => ['nullable', 'string', 'max:255'],
             'city' => ['nullable', 'string', 'max:255'],
             'state' => ['nullable', 'string', 'max:2'],
-            'zip_code' => ['nullable', 'string', 'max:20'],
+            // Mirrors the web's footer submit-button gate (form.blade.php):
+            // "businessType === 'Retail' || (businessType !== 'Retail' && zipCode)" —
+            // every other business type needs a zip before it can be saved.
+            'zip_code' => ['required_unless:business_type,Retail', 'nullable', 'string', 'max:20'],
 
             'owner_cell_phone' => ['required_unless:business_type,Retail', 'digits:10'],
             'owner_first_name' => ['nullable', 'string', 'min:2'],

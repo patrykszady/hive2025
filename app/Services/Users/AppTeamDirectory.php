@@ -150,9 +150,16 @@ class AppTeamDirectory
 
         // Business title lives on the user<->vendor pivot for the ACTING
         // admin's vendor — only written when the edited user actually sits
-        // on that pivot (showPosition on the web).
+        // on that pivot (showPosition on the web) AND the caller actually
+        // sent a `position` key. The web always sends it once showPosition
+        // is true (the field stays rendered, pre-filled from the pivot,
+        // whether or not it's touched); a caller that omits the key
+        // entirely — e.g. a client that hides the field for some other
+        // reason — must never wipe a title that was never shown to clear.
+        // array_key_exists (not `$data['position'] ?? null`) is what makes
+        // "omitted" distinguishable from "sent empty/null" here.
         $authVendorId = $actingUser->vendor?->id;
-        if ($authVendorId && $user->vendors()->where('vendor_id', $authVendorId)->exists()) {
+        if ($authVendorId && array_key_exists('position', $data) && $user->vendors()->where('vendor_id', $authVendorId)->exists()) {
             $user->vendors()->updateExistingPivot($authVendorId, [
                 'position' => trim((string) ($data['position'] ?? '')) ?: null,
             ]);

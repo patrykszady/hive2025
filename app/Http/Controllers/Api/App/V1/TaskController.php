@@ -12,11 +12,13 @@ use App\Jobs\UpdateMeetTaskCalendarEvent;
 use App\Models\Project;
 use App\Models\ProjectActionItem;
 use App\Models\Task;
+use App\Models\Vendor;
 use App\Services\Tasks\MeetingContactsFinder;
 use App\Services\Tasks\TaskDependencyWriter;
 use App\Services\Tasks\TaskPreferredTimes;
 use App\Services\Tasks\TaskVendorAvailability;
 use App\Services\Tasks\TaskWriter;
+use App\Services\TaskTitleSuggestions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -45,13 +47,15 @@ class TaskController extends Controller
     /**
      * Mirrors App\Livewire\Tasks\TaskCreate::save(): the write itself, then
      * (when opened from a planner action item) marking that item converted,
-     * then — for a Meet with a start date — the calendar event. Accepts
+     * flushing any predecessors chosen before the task existed
+     * (TaskCreate::save()'s own $pendingDependencies flush — see
+     * availablePredecessorsForNewTask() for choosing them beforehand), then
+     * — for a Meet with a start date — the calendar event. Accepts
      * `parent_task_id` (TaskForm's own field, used for the sibling-overlap
      * check). The predecessor/lag/type dependency editor
-     * (App\Models\TaskDependency) is a separate add/remove flow once the
-     * task exists — see dependencies()/storeDependency()/destroyDependency()
-     * below — mirroring TaskCreate's own "pending until save" behaviour for
-     * a brand-new task is left to the app's create screen, not this write.
+     * (App\Models\TaskDependency) for an ALREADY-SAVED task is a separate
+     * add/remove flow — see dependencies()/storeDependency()/
+     * destroyDependency() below.
      */
     public function store(StoreTaskRequest $request, TaskWriter $writer): JsonResponse
     {
@@ -65,6 +69,8 @@ class TaskController extends Controller
                 ->where('project_id', $task->project_id)
                 ->update(['status' => ProjectActionItem::STATUS_TASK, 'task_id' => $task->id]);
         }
+
+        $this->flushPendingDependencies($task, (array) $request->validated('pending_dependencies'));
 
         if ($task->type === 'Meet' && $task->start_date) {
             CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
@@ -228,6 +234,54 @@ class TaskController extends Controller
     }
 
     /**
+     * The Title field's autocomplete — mirrors
+     * App\Livewire\Tasks\TaskCreate::titleSuggestions() (really
+     * App\Services\TaskTitleSuggestions::titlesForCurrentUser()): every
+     * title this tenant has used before, most-used first.
+     */
+    public function titleSuggestions(Request $request): JsonResponse
+    {
+        return response()->json(['data' => TaskTitleSuggestions::titlesForCurrentUser()]);
+    }
+
+    /**
+     * The vendor remembered for a title — mirrors TaskCreate::
+     * applyRememberedVendorFromTitle(): picking a title suggestion, or
+     * blurring onto an exact (case-insensitive) match, fills the Vendor
+     * field when one vendor overwhelmingly did that work before, but only
+     * when nothing is selected yet (the caller's job, same as the web —
+     * this never overwrites a choice already made).
+     */
+    public function titleVendorSuggestion(Request $request): JsonResponse
+    {
+        $title = trim((string) $request->query('title', ''));
+
+        if ($title === '') {
+            return response()->json(['data' => null]);
+        }
+
+        // Scoped the same way the web's Vendor select is (VendorScope, the
+        // model's own global scope) — queried directly rather than through
+        // a vendor-list endpoint, so a remembered vendor id never goes
+        // stale just because some other index hasn't caught up.
+        $selectableVendorIds = Vendor::query()->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+        $vendorId = TaskTitleSuggestions::dominantVendorId($title, $selectableVendorIds);
+
+        if ($vendorId === null) {
+            return response()->json(['data' => null]);
+        }
+
+        $vendor = Vendor::query()->find($vendorId);
+
+        if (! $vendor) {
+            return response()->json(['data' => null]);
+        }
+
+        return response()->json(['data' => ['id' => $vendor->id, 'business_name' => $vendor->business_name]]);
+    }
+
+    /**
      * Candidate predecessors for this task — mirrors
      * App\Livewire\Tasks\TaskCreate::availableTasks() via the shared
      * App\Services\Tasks\TaskDependencyWriter::availableTasks().
@@ -238,6 +292,29 @@ class TaskController extends Controller
         Gate::authorize('view', $found);
 
         $tasks = $writer->availableTasks((int) $found->project_id, $found->id);
+
+        return response()->json(['data' => $tasks->map(fn (Task $candidate) => [
+            'id' => $candidate->id,
+            'title' => $candidate->title,
+            'start_date' => $candidate->start_date?->toDateString(),
+        ])->values()->all()]);
+    }
+
+    /**
+     * Candidate predecessors for a task that doesn't exist yet — mirrors
+     * App\Livewire\Tasks\TaskCreate::availableTasks() in its not-yet-saved
+     * branch: scheduled tasks on the chosen project, minus whichever this
+     * screen has already picked this session (`exclude[]`, the app's
+     * equivalent of the web's $pendingDependencies list it's built from).
+     */
+    public function availablePredecessorsForNewTask(Request $request): JsonResponse
+    {
+        $projectId = $request->integer('project_id');
+        abort_unless(Project::query()->whereKey($projectId)->exists(), 404);
+
+        $excludeIds = collect((array) $request->input('exclude', []))->map(fn ($id) => (int) $id)->all();
+
+        $tasks = app(TaskDependencyWriter::class)->availableTasks($projectId, null, $excludeIds);
 
         return response()->json(['data' => $tasks->map(fn (Task $candidate) => [
             'id' => $candidate->id,
@@ -304,5 +381,36 @@ class TaskController extends Controller
         abort_unless($found, 403, 'You do not have access to this task.');
 
         return $found;
+    }
+
+    /**
+     * Writes the predecessors chosen before $task existed — mirrors
+     * TaskCreate::save()'s $pendingDependencies flush. Each goes through
+     * TaskDependencyWriter::add() (self/circular/visibility checks); one
+     * that fails is skipped rather than failing the whole create, same as
+     * the web's own `continue` past a circular one.
+     *
+     * @param  list<array{predecessor_task_id: int, type: string, lag_days?: ?int}>  $pending
+     */
+    private function flushPendingDependencies(Task $task, array $pending): void
+    {
+        if ($pending === []) {
+            return;
+        }
+
+        $writer = app(TaskDependencyWriter::class);
+
+        foreach ($pending as $dependency) {
+            try {
+                $writer->add(
+                    $task,
+                    (int) $dependency['predecessor_task_id'],
+                    (string) $dependency['type'],
+                    (int) ($dependency['lag_days'] ?? 0),
+                );
+            } catch (ValidationException $e) {
+                continue;
+            }
+        }
     }
 }

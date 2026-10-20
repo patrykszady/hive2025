@@ -137,6 +137,91 @@ it('falls back to a historical allowance aggregated from past estimates when the
         ->and((float) $row['inline_allowances'][0]['unit_amount'])->toBe(5.0);
 });
 
+it('suggests previously used allowances from the curated catalog, like EstimateLineItemCreate::previousAllowances()', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $catalogItem = appLineItemsRow(['name' => 'Floor Tile']);
+    \App\Models\LineItemAllowance::create([
+        'line_item_id' => $catalogItem->id,
+        'description' => 'Tile Material Budget',
+        'pricing_mode' => 'per_unit',
+        'unit_amount' => 5,
+        'amount' => 105,
+    ]);
+
+    $response = $this->getJson("/api/app/v1/line-items/{$catalogItem->id}/allowance-suggestions")->assertOk();
+
+    expect($response->json('data'))->toHaveCount(1)
+        ->and($response->json('data.0.description'))->toBe('Tile Material Budget')
+        ->and((float) $response->json('data.0.unit_amount'))->toBe(5.0);
+});
+
+it('falls back to a historical allowance suggestion when the catalog item has no curated ones', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $catalogItem = appLineItemsRow(['name' => 'Wine Cellar Cooler', 'unit_type' => 'pieces']);
+
+    $client = \App\Models\Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Kitchen Remodel',
+        'client_id' => $client->id,
+        'address' => '123 Main St',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+
+    $estimate = \App\Models\Estimate::create(['project_id' => $project->id, 'belongs_to_vendor_id' => $vendor->id]);
+    $section = \App\Models\EstimateSection::create(['estimate_id' => $estimate->id, 'order' => 0, 'name' => 'Kitchen', 'total' => 0]);
+    $estimateLineItem = \App\Models\EstimateLineItem::create([
+        'estimate_id' => $estimate->id,
+        'section_id' => $section->id,
+        'line_item_id' => $catalogItem->id,
+        'name' => $catalogItem->name,
+        'category' => $catalogItem->category,
+        'sub_category' => $catalogItem->sub_category,
+        'unit_type' => $catalogItem->unit_type,
+        'quantity' => 1,
+        'cost' => $catalogItem->cost,
+        'total' => $catalogItem->cost,
+        'desc' => $catalogItem->desc,
+        'order' => 1,
+    ]);
+    \App\Models\EstimateLineItemAllowance::create([
+        'estimate_line_item_id' => $estimateLineItem->id,
+        'description' => 'Tile allowance $5/sqft',
+        'pricing_mode' => 'per_unit',
+        'unit_amount' => 5,
+        'amount' => 0,
+    ]);
+
+    $response = $this->getJson("/api/app/v1/line-items/{$catalogItem->id}/allowance-suggestions")->assertOk();
+
+    expect($response->json('data'))->toHaveCount(1)
+        ->and((float) $response->json('data.0.unit_amount'))->toBe(5.0);
+});
+
+it('refuses a Member fetching allowance suggestions, and never surfaces another vendor\'s catalog', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+    $catalogItem = appLineItemsRow();
+
+    ['user' => $member] = appLineItemsTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+    $this->getJson("/api/app/v1/line-items/{$catalogItem->id}/allowance-suggestions")->assertForbidden();
+
+    $otherVendor = Vendor::factory()->create(['business_name' => 'Someone Else']);
+    $otherUser = User::factory()->create(['primary_vendor_id' => $otherVendor->id]);
+    $otherVendor->users()->attach($otherUser->id, ['role_id' => 1]);
+    Sanctum::actingAs($otherUser, ['app']);
+    $this->getJson("/api/app/v1/line-items/{$catalogItem->id}/allowance-suggestions")->assertForbidden();
+});
+
 it('searches the catalog by name, description and notes', function () {
     ['user' => $admin] = appLineItemsTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

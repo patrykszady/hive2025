@@ -164,6 +164,38 @@ it('adds a new team member with a role and hourly rate, a member is refused', fu
     $response->assertJsonPath('data.role', 'Member');
 });
 
+it('saves nickname and preferred language for a new team member, and rejects an unlisted language', function () {
+    ['user' => $admin] = appPeopleUsersTeam();
+    Sanctum::actingAs($admin, ['app']);
+
+    $email = 'new-hire-'.uniqid().'@example.test';
+    $response = $this->postJson('/api/app/v1/users', [
+        'cell_phone' => '2245551214',
+        'first_name' => 'New',
+        'last_name' => 'Hire',
+        'email' => $email,
+        'nickname' => 'Newb',
+        'preferred_language' => 'Ukrainian',
+        'role' => 2,
+        'hourly_rate' => 25,
+    ])->assertCreated();
+
+    $hire = User::where('email', $email)->firstOrFail();
+    expect($hire->nickname)->toBe('Newb')
+        ->and($hire->preferred_language)->toBe('Ukrainian')
+        ->and($response->json('data.id'))->toBe($hire->id);
+
+    $this->postJson('/api/app/v1/users', [
+        'cell_phone' => '2245551215',
+        'first_name' => 'Nope',
+        'last_name' => 'Hire',
+        'email' => 'nope-hire-'.uniqid().'@example.test',
+        'preferred_language' => 'Klingon',
+        'role' => 2,
+        'hourly_rate' => 25,
+    ])->assertStatus(422)->assertJsonValidationErrors('preferred_language');
+});
+
 it('422s adding a team member whose phone is already employed here', function () {
     ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
     ['user' => $existingMember] = appPeopleUsersTeam(role: 2);
@@ -189,6 +221,80 @@ it('422s an email already used by someone else when editing a user', function ()
         'preferred_language' => 'English',
         'email' => $taken->email,
     ])->assertStatus(422)->assertJsonValidationErrors('email');
+});
+
+it('rejects a preferred_language outside User::PREFERRED_LANGUAGES when editing a user', function () {
+    ['user' => $admin] = appPeopleUsersTeam();
+    ['user' => $member] = appPeopleUsersTeam(role: 2);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->putJson('/api/app/v1/users/'.$member->id, [
+        'first_name' => $member->first_name,
+        'last_name' => $member->last_name,
+        'preferred_language' => 'Klingon',
+        'email' => $member->email,
+    ])->assertStatus(422)->assertJsonValidationErrors('preferred_language');
+});
+
+it('writes a business title onto the pivot when editing a team member', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+    ['user' => $member] = appPeopleUsersTeam(role: 2);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->putJson('/api/app/v1/users/'.$member->id, [
+        'first_name' => $member->first_name,
+        'last_name' => $member->last_name,
+        'preferred_language' => 'English',
+        'email' => $member->email,
+        'position' => 'Foreman',
+    ])->assertOk()->assertJsonPath('data.position', 'Foreman');
+
+    expect($vendor->users()->where('user_id', $member->id)->first()->pivot->position)->toBe('Foreman');
+});
+
+/**
+ * The app hides the Business title field once `show_position` is false and
+ * never sends `position` at all — AppTeamDirectory::updateUser() must leave
+ * the pivot's stored title alone rather than reading the missing key as an
+ * explicit clear (it did, before this fix: `$data['position'] ?? ''`
+ * defaults an ABSENT key to the same empty string an explicit clear sends).
+ */
+it('does not clear an existing business title just because the update omits the position field', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+    ['user' => $member] = appPeopleUsersTeam(role: 2);
+    $vendor->users()->updateExistingPivot($member->id, ['position' => 'Foreman']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->putJson('/api/app/v1/users/'.$member->id, [
+        'first_name' => $member->first_name,
+        'last_name' => $member->last_name,
+        'preferred_language' => 'English',
+        'email' => $member->email,
+        // No 'position' key at all.
+    ])->assertOk();
+
+    expect($vendor->users()->where('user_id', $member->id)->first()->pivot->position)->toBe('Foreman');
+});
+
+/**
+ * UserForm::setUser()'s showPosition only checks whether a pivot row
+ * exists for the acting admin's vendor, not is_employed — a FORMER
+ * employee's pivot row persists (removeTeamMember() only flips
+ * is_employed/end_date), so their title is still shown. TeamUserResource
+ * used to gate the pivot lookup on is_employed, forcing `position: null`
+ * and no `show_position` flag for anyone not currently employed.
+ */
+it('still shows a former employee\'s business title and show_position on their detail', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+    ['user' => $former] = appPeopleUsersTeam(role: 2, employed: false);
+    $vendor->users()->updateExistingPivot($former->id, ['position' => 'Former Foreman']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->getJson('/api/app/v1/users/'.$former->id)
+        ->assertOk()
+        ->assertJsonPath('data.is_employed', false)
+        ->assertJsonPath('data.position', 'Former Foreman')
+        ->assertJsonPath('data.show_position', true);
 });
 
 it('never changes cell_phone when editing a user', function () {
@@ -242,6 +348,25 @@ it('gets and saves my own notification settings, always forcing realtime sms on'
         ->assertJsonPath('data.realtime_start', '08:00');
 
     expect($user->notificationSetting()->first()->realtime_sms)->toBeTrue();
+});
+
+it('accepts a 12-hour realtime time, like UserNotificationSettings::normalizeRealtimeTime()', function () {
+    ['user' => $user] = appPeopleUsersTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $this->putJson('/api/app/v1/users/me/notification-settings', [
+        'realtime_email' => true,
+        'morning_email' => false,
+        'morning_sms' => false,
+        'evening_email' => false,
+        'evening_sms' => false,
+        'realtime_start' => '7:00 AM',
+        'realtime_end' => '6:00pm',
+    ])->assertOk()
+        ->assertJsonPath('data.realtime_start', '07:00')
+        ->assertJsonPath('data.realtime_end', '18:00');
+
+    expect($user->notificationSetting()->first()->realtime_start)->toBe('07:00');
 });
 
 it('shows can_remove only to an admin of the member\'s own vendor', function () {

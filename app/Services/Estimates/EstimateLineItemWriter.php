@@ -39,7 +39,7 @@ class EstimateLineItemWriter
             'order' => $section->estimate_line_items()->count() + 1,
         ]);
 
-        $this->syncAllowances($created, $allowances);
+        $this->syncAllowances($created, $allowances, $this->allowanceQuantity($attributes));
 
         return $created;
     }
@@ -65,27 +65,55 @@ class EstimateLineItemWriter
             'notes' => $attributes['notes'] ?? null,
         ]);
 
-        $this->syncAllowances($lineItem, $allowances);
+        $this->syncAllowances($lineItem, $allowances, $this->allowanceQuantity($attributes));
 
         return $lineItem;
     }
 
     /**
-     * Sync allowance rows for the given estimate line item.
+     * The quantity a per-unit allowance total is derived from — mirrors
+     * EstimateLineItemCreate::calculateAllowanceAmount(): the line item's
+     * own quantity, except a "no_unit" line item always prices allowances
+     * as if quantity were 1.
+     *
+     * @param  array{unit_type: string, quantity: float|string}  $attributes
+     */
+    private function allowanceQuantity(array $attributes): float
+    {
+        if (($attributes['unit_type'] ?? null) === 'no_unit') {
+            return 1.0;
+        }
+
+        $quantity = (float) ($attributes['quantity'] ?? 1);
+
+        return $quantity > 0 ? $quantity : 1.0;
+    }
+
+    /**
+     * Sync allowance rows for the given estimate line item. For a per-unit
+     * allowance, `amount` is always DERIVED as unit_amount × $quantity
+     * rather than trusted from the caller — mirrors EstimateLineItemCreate::
+     * recalculateAllowanceAmounts(), which keeps every per-unit allowance's
+     * total following the line item's quantity on the web. A caller (e.g.
+     * one that only recalculates on unit_amount change, like an older app
+     * build) can no longer persist a stale per-unit total this way.
      *
      * @param  array<int, array{id: ?int, description: string, pricing_mode: string, unit_amount: string, amount: string}>  $allowances
      */
-    public function syncAllowances(EstimateLineItem $lineItem, array $allowances): void
+    public function syncAllowances(EstimateLineItem $lineItem, array $allowances, float $quantity = 1.0): void
     {
         $keepIds = [];
 
         foreach ($allowances as $entry) {
             $description = trim($entry['description'] ?? '');
-            $amount = (float) ($entry['amount'] ?? 0);
             $pricingMode = ($entry['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
             $unitAmount = $pricingMode === 'lump_sum' || ($entry['unit_amount'] ?? '') === ''
                 ? null
                 : (float) $entry['unit_amount'];
+
+            $amount = $pricingMode === 'per_unit' && $unitAmount !== null
+                ? round($unitAmount * $quantity, 2)
+                : (float) ($entry['amount'] ?? 0);
 
             if ($description === '' && $amount <= 0) {
                 continue;

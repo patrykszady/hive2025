@@ -114,6 +114,72 @@ it('creates a Meet task with meeting fields and dispatches the calendar event jo
     Queue::assertPushed(CreateMeetTaskCalendarEvent::class, fn ($job) => $job->taskId === $response->json('data.id'));
 });
 
+it('keeps only the last date and its time settings when a Meet is created with several dates, like TaskCreate::updatedFormDates()', function () {
+    Queue::fake();
+
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+
+    $response = $this->postJson('/api/app/v1/tasks', [
+        'title' => 'Design Consult',
+        'project_id' => $project->id,
+        'type' => 'Meet',
+        'dates' => ['2026-11-05', '2026-11-07'],
+        'time_settings' => [
+            '2026-11-05' => ['use_time' => true, 'start_time' => '09:00', 'end_time' => '09:30'],
+            '2026-11-07' => ['use_time' => true, 'start_time' => '14:00', 'end_time' => '14:30'],
+        ],
+        'meeting_location_type' => 'virtual',
+    ])->assertCreated();
+
+    expect($response->json('data.dates'))->toBe(['2026-11-07'])
+        ->and($response->json('data.time_settings'))->toBe([
+            '2026-11-07' => ['use_time' => true, 'start_time' => '14:00', 'end_time' => '14:30'],
+        ]);
+
+    $task = Task::withoutGlobalScopes()->find($response->json('data.id'));
+    expect($task->start_date->toDateString())->toBe('2026-11-07')
+        ->and($task->end_date->toDateString())->toBe('2026-11-07');
+});
+
+it('keeps only the last date when an existing task is edited into a multi-date Meet', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Install cabinets',
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $user->id,
+        'order' => 1,
+        'type' => 'Task',
+        'start_date' => '2026-11-02',
+        'end_date' => '2026-11-03',
+        'user_ids' => [],
+        'options' => ['dates' => ['2026-11-02', '2026-11-03'], 'time_settings' => []],
+    ]));
+
+    $response = $this->postJson("/api/app/v1/tasks/{$task->id}", [
+        'title' => 'Install cabinets',
+        'project_id' => $project->id,
+        'type' => 'Meet',
+        'dates' => ['2026-11-02', '2026-11-03'],
+        'time_settings' => [
+            '2026-11-02' => ['use_time' => true, 'start_time' => '09:00', 'end_time' => '09:30'],
+            '2026-11-03' => ['use_time' => true, 'start_time' => '10:00', 'end_time' => '10:30'],
+        ],
+    ])->assertOk();
+
+    expect($response->json('data.dates'))->toBe(['2026-11-03'])
+        ->and($response->json('data.time_settings'))->toBe([
+            '2026-11-03' => ['use_time' => true, 'start_time' => '10:00', 'end_time' => '10:30'],
+        ]);
+});
+
 it('converts the planner action item it was opened from, like actionItemToTask()/TaskCreate::save()', function () {
     ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
     Sanctum::actingAs($user, ['app']);
@@ -484,4 +550,64 @@ it("keeps a box ticked elsewhere while this screen was open, instead of revertin
 
     $stored = json_decode(json_encode($task->fresh()->options->checklist), true);
     expect($stored[0]['completed'])->toBeTrue();
+});
+
+it('lists previously used task titles for the autocomplete, like TaskTitleSuggestions::titlesForCurrentUser()', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+
+    foreach (['Plumbing', 'Plumbing', 'Electrical'] as $title) {
+        Task::withoutEvents(fn () => Task::create([
+            'title' => $title,
+            'project_id' => $project->id,
+            'belongs_to_vendor_id' => $vendor->id,
+            'created_by_user_id' => $user->id,
+            'order' => 1,
+            'type' => 'Task',
+            'user_ids' => [],
+            'options' => [],
+        ]));
+    }
+
+    $response = $this->getJson('/api/app/v1/tasks/title-suggestions')->assertOk();
+
+    // Most-used first — "Plumbing" (2 tasks) before "Electrical" (1).
+    expect($response->json('data'))->toBe(['Plumbing', 'Electrical']);
+});
+
+it('suggests the remembered vendor for a title, like TaskCreate::applyRememberedVendorFromTitle()', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsTasksTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsTasksProject($vendor);
+    $plumber = Vendor::factory()->create(['business_name' => 'Accomplished J Plumbing']);
+    // VendorScope only shows vendors this company tracks (vendors_vendor) —
+    // the same scoping TaskCreate's own Vendor select uses.
+    $vendor->vendors()->attach($plumber->id);
+
+    foreach ([1, 2] as $i) {
+        Task::withoutEvents(fn () => Task::create([
+            'title' => 'Plumbing',
+            'project_id' => $project->id,
+            'vendor_id' => $plumber->id,
+            'belongs_to_vendor_id' => $vendor->id,
+            'created_by_user_id' => $user->id,
+            'order' => $i,
+            'type' => 'Task',
+            'user_ids' => [],
+            'options' => [],
+        ]));
+    }
+
+    $response = $this->getJson('/api/app/v1/tasks/title-vendor-suggestion?title=plumbing')->assertOk();
+
+    expect($response->json('data.id'))->toBe($plumber->id)
+        ->and($response->json('data.business_name'))->toBe('Accomplished J Plumbing');
+
+    // A title nothing has used yet suggests nothing.
+    $this->getJson('/api/app/v1/tasks/title-vendor-suggestion?title=Drywall')
+        ->assertOk()
+        ->assertJsonPath('data', null);
 });

@@ -68,6 +68,36 @@ it('creates a template, requiring a subject unless it is a contract', function (
         ->and($response->json('data.placeholders'))->toContain('estimate_total_words');
 });
 
+it('cleans up mojibake in the subject the same way it does in the body, like EmailTemplateForm::save()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEmailTemplatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    // "Project’s Estimate" / "We’re ready" pasted through a mis-decoded
+    // UTF-8 round trip — fixMojibake() repairs the right-single-quote
+    // mangling (â€™ → ’) in both fields identically.
+    $response = $this->postJson('/api/app/v1/email-templates', [
+        'name' => 'Mojibake',
+        'subject' => 'Projectâ€™s Estimate',
+        'body' => 'Weâ€™re ready for you, {{client_name}}',
+        'type' => 'estimate',
+    ])->assertCreated();
+
+    expect($response->json('data.subject'))->toBe('Project’s Estimate')
+        ->and($response->json('data.body'))->toBe('We’re ready for you, {{client_name}}');
+
+    $template = EmailTemplate::query()->findOrFail($response->json('data.id'));
+    expect($template->subject)->toBe('Project’s Estimate');
+
+    $this->putJson("/api/app/v1/email-templates/{$template->id}", [
+        'name' => 'Mojibake',
+        'subject' => 'Itâ€™s updated',
+        'body' => $template->body,
+        'type' => 'estimate',
+    ])->assertOk()->assertJsonPath('data.subject', 'It’s updated');
+
+    expect($template->refresh()->subject)->toBe('It’s updated');
+});
+
 it('refuses a Member creating a template, like the web', function () {
     ['user' => $member] = appEmailTemplatesTeamUser(role: 2);
     Sanctum::actingAs($member, ['app']);

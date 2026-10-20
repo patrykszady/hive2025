@@ -54,9 +54,21 @@ class TeamUserResource extends JsonResource
             ? $this->resource->vendors()->where('vendors.id', $actingUser->vendor->id)->first()?->pivot
             : null;
 
+        // Business title lives on the same user<->vendor pivot row but is
+        // shown regardless of CURRENT employment — mirrors UserForm::
+        // setUser()'s `showPosition = (bool) $pivot`, which only checks
+        // whether a pivot row exists for the acting admin's vendor (it
+        // isn't deleted when someone's employment ends), not is_employed.
+        // Reuses $vendorPivot when already resolved rather than querying
+        // twice.
+        $positionPivot = $isEmployed
+            ? $vendorPivot
+            : $this->resource->vendors()->where('vendors.id', $actingUser->vendor->id)->first()?->pivot;
+
         return $row + [
             'preferred_language' => $this->preferred_language ?: 'English',
-            'position' => $vendorPivot?->position,
+            'position' => $positionPivot?->position,
+            'show_position' => (bool) $positionPivot,
             'start_date' => $canEdit ? $vendorPivot?->start_date?->format('Y-m-d') : null,
             'hourly_rate' => $canEdit ? $vendorPivot?->hourly_rate : null,
             'via_vendor' => $this->resource->via_vendor ? [

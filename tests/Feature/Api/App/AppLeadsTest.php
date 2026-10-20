@@ -327,6 +327,78 @@ it('creates a lead by hand, like a phoned-in enquiry', function () {
         ->and($response->json('data.id'))->toBe($lead->id);
 });
 
+it('lists existing users as contact candidates for a lead that does not exist yet, like userChoices() in create mode', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $contact = User::query()->create(['first_name' => 'Preet', 'last_name' => 'Singh', 'email' => 'preet.'.uniqid().'@example.test']);
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $client->users()->attach($contact->id);
+
+    $response = $this->getJson('/api/app/v1/leads/contact-candidates')->assertOk();
+
+    expect($response->json('data'))->toContain([
+        'id' => $contact->id,
+        'name' => 'Preet Singh',
+        'contact' => $contact->email,
+        'label' => 'Preet Singh — '.$contact->email,
+    ]);
+});
+
+it("links a picked user to a new lead before provisioning runs, so provisioning doesn't also create a duplicate contact", function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $contactEmail = 'preet.'.uniqid().'@example.test';
+    $contact = User::query()->create(['first_name' => 'Preet', 'last_name' => 'Singh', 'email' => $contactEmail]);
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $client->users()->attach($contact->id);
+
+    $usersBefore = User::query()->count();
+
+    // Neither email nor phone is typed — picking the contact (user_id)
+    // alone supplies one (the controller's own fallback, since the
+    // candidate's email/phone aren't split out client-side) and skips the
+    // duplicate warning this same email would otherwise trigger, since
+    // LeadDuplicateFinder would match $contact's own client record.
+    $response = $this->postJson('/api/app/v1/leads', [
+        'full_name' => 'Preet Singh',
+        'user_id' => $contact->id,
+        'address' => '10 Main St',
+    ])->assertCreated();
+
+    $lead = Lead::findOrFail($response->json('data.id'));
+
+    expect($lead->user_id)->toBe($contact->id)
+        ->and($lead->lead_data['email'] ?? null)->toBe($contactEmail)
+        ->and(User::query()->count())->toBe($usersBefore);
+});
+
+it('still requires a way to reach them when the picked user has no routable email or phone', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    // A placeholder email and no cell_phone — neither counts as routable
+    // (User::hasRoutableEmail()/hasRoutablePhone()) — so StoreLeadRequest
+    // defers the check to the controller (user_id is present), which must
+    // still catch this once its own fallback comes up empty too.
+    $contact = User::query()->create([
+        'first_name' => 'Preet',
+        'last_name' => 'Singh',
+        'email' => 'preet.'.uniqid().'@'.\App\Models\User::PLACEHOLDER_EMAIL_DOMAIN,
+    ]);
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $client->users()->attach($contact->id);
+
+    $this->postJson('/api/app/v1/leads', [
+        'full_name' => 'Preet Singh',
+        'user_id' => $contact->id,
+    ])->assertStatus(422)->assertJsonValidationErrors(['email']);
+});
+
 it('rejects a new lead with neither email nor phone, like the web', function () {
     ['user' => $admin] = appSalesTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);
@@ -414,6 +486,39 @@ it("updates a lead's contact and address fields without touching its status", fu
     expect($fresh->lead_data['phone'])->toBe('2245551234')
         ->and($fresh->lead_data['city'])->toBe('Northbrook')
         ->and($fresh->last_status->title)->toBe('New');
+});
+
+it('clears a contact field when the client sends it as null, unlike omitting the key entirely', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor, ['lead_data' => appSalesLeadData(['phone' => '2245550000', 'city' => 'Northbrook'])]);
+
+    // city is omitted entirely (as a client would when sending `undefined`)
+    // and must stay untouched, while phone is explicitly cleared.
+    $this->putJson("/api/app/v1/leads/{$lead->id}", ['phone' => null])->assertOk();
+
+    $fresh = $lead->fresh();
+    expect($fresh->lead_data['phone'])->toBeNull()
+        ->and($fresh->lead_data['city'])->toBe('Northbrook');
+});
+
+it('never lets the client set a lead\'s origin — it stays "Manual", like the web\'s disabled Origin field', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $created = $this->postJson('/api/app/v1/leads', [
+        'full_name' => 'New Caller',
+        'phone' => '2245550123',
+        'origin' => 'Website',
+    ])->assertCreated();
+
+    $lead = Lead::findOrFail($created->json('data.id'));
+    expect($lead->origin)->toBe('Manual');
+
+    $this->putJson("/api/app/v1/leads/{$lead->id}", ['origin' => 'Angi'])->assertOk();
+
+    expect($lead->fresh()->origin)->toBe('Manual');
 });
 
 it('deletes a lead that has not replied', function () {

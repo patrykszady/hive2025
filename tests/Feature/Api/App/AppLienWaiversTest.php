@@ -194,6 +194,62 @@ it('refuses a Member listing sub-vendor candidates', function () {
     $this->getJson("/api/app/v1/lien-waivers/sub-vendors?project_id={$project->id}")->assertForbidden();
 });
 
+it('defaults the GC waiver payer fields from the project client, like prefillPayerFromProject()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesWaiverTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appSalesWaiverClient($vendor, ['business_name' => 'Smith Household', 'address' => '55 Oak Ave', 'city' => 'Deerfield', 'state' => 'IL', 'zip_code' => '60015']);
+    $project = appSalesWaiverProject($vendor, $client);
+
+    $response = $this->getJson("/api/app/v1/lien-waivers/payer-defaults?project_id={$project->id}")->assertOk();
+
+    expect($response->json('data.name'))->toBe($client->name)
+        ->and($response->json('data.address'))->toBe('55 Oak Ave')
+        ->and($response->json('data.city_state_zip'))->toBe('Deerfield, IL 60015')
+        ->and($response->json('data.has_client'))->toBeTrue();
+});
+
+it('falls back to the project\'s own address when it has no client, in the payer defaults', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesWaiverTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    // Project::client() resolves the project_vendor row's client THROUGH
+    // Client's own tenant scope (ClientScope: only clients linked to this
+    // vendor via client_vendor) — a client referenced on project_vendor but
+    // never linked to THIS vendor's client_vendor is exactly "no client",
+    // even though every column involved is NOT NULL. ProjectScope itself
+    // requires a project_vendor row to see the project at all, so it can't
+    // simply be omitted the way AppLienWaiversTest's own fixtures do for a
+    // normal (has-a-client) project.
+    $unrelatedClient = Client::factory()->create();
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'No Client Yet',
+        'client_id' => $unrelatedClient->id,
+        'address' => '10 Elm St',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => '60601',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+    $project->vendors()->attach($vendor->id, ['client_id' => $unrelatedClient->id]);
+
+    $response = $this->getJson("/api/app/v1/lien-waivers/payer-defaults?project_id={$project->id}")->assertOk();
+
+    expect($response->json('data.name'))->toBe('')
+        ->and($response->json('data.address'))->toBe('10 Elm St')
+        ->and($response->json('data.city_state_zip'))->toBe('Chicago, IL 60601')
+        ->and($response->json('data.has_client'))->toBeFalse();
+});
+
+it('refuses a Member fetching payer defaults', function () {
+    ['vendor' => $vendor, 'user' => $member] = appSalesWaiverTeamUser(role: 2);
+    $client = appSalesWaiverClient($vendor);
+    $project = appSalesWaiverProject($vendor, $client);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson("/api/app/v1/lien-waivers/payer-defaults?project_id={$project->id}")->assertForbidden();
+});
+
 it("creates the contractor's own waiver, requiring the payer fields", function () {
     ['vendor' => $vendor, 'user' => $admin] = appSalesWaiverTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

@@ -384,7 +384,7 @@ it('needs the Admin ability to create a vendor', function () {
     Sanctum::actingAs($member, ['app']);
 
     $this->postJson('/api/app/v1/vendors', [
-        'business_name' => 'Acme Drywall', 'business_type' => 'Sub',
+        'business_name' => 'Acme Drywall', 'business_type' => 'Sub', 'zip_code' => '60601',
         'owner_cell_phone' => '3125551234', 'owner_first_name' => 'Jane', 'owner_last_name' => 'Owner', 'owner_email' => 'jane@example.com',
     ])->assertForbidden();
 });
@@ -438,7 +438,7 @@ it('reuses an existing person by phone as the new vendor\'s owner, instead of cr
     Sanctum::actingAs($admin, ['app']);
 
     $this->postJson('/api/app/v1/vendors', [
-        'business_name' => 'Acme Drywall', 'business_type' => 'Sub',
+        'business_name' => 'Acme Drywall', 'business_type' => 'Sub', 'zip_code' => '60601',
         'owner_cell_phone' => '3125551234', 'owner_first_name' => 'Ignored', 'owner_last_name' => 'Ignored', 'owner_email' => 'ignored@example.com',
     ])->assertCreated();
 
@@ -450,31 +450,59 @@ it('requires an owner phone for a non-Retail vendor', function () {
     ['user' => $admin] = appFieldAdmin();
     Sanctum::actingAs($admin, ['app']);
 
-    $this->postJson('/api/app/v1/vendors', ['business_name' => 'Acme Drywall', 'business_type' => 'Sub'])
+    $this->postJson('/api/app/v1/vendors', ['business_name' => 'Acme Drywall', 'business_type' => 'Sub', 'zip_code' => '60601'])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('owner_cell_phone');
 });
 
-it('updates a vendor\'s details but never its business_type, like the web\'s disabled radio on edit', function () {
+it('requires a zip code for every business type but Retail, on both create and edit, like the footer submit-button gate', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/vendors', [
+        'business_name' => 'Acme Drywall', 'business_type' => 'Sub',
+        'owner_cell_phone' => '3125551234', 'owner_first_name' => 'Jane', 'owner_last_name' => 'Owner', 'owner_email' => 'jane@example.com',
+    ])->assertUnprocessable()->assertJsonValidationErrors('zip_code');
+
+    // Retail never needs one — it doesn't even show the address card.
+    $this->postJson('/api/app/v1/vendors', ['business_name' => 'Home Depot', 'business_type' => 'Retail'])
+        ->assertCreated();
+
+    $sub = Vendor::factory()->create(['business_name' => 'Acme Drywall', 'business_type' => 'Sub', 'zip_code' => '60601']);
+    appFieldAttach($company, $sub);
+
+    $this->putJson('/api/app/v1/vendors/'.$sub->id, ['zip_code' => ''])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('zip_code');
+});
+
+it('updates a vendor\'s details but never its business_type or business_name, like the web\'s disabled fields on edit', function () {
     ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
     Sanctum::actingAs($admin, ['app']);
 
     $sub = Vendor::factory()->create(['business_name' => 'Acme Drywall', 'business_type' => 'Sub']);
     appFieldAttach($company, $sub);
 
+    // business_name is submitted here only to prove it's ignored —
+    // UpdateVendorRequest doesn't even accept the field.
     $this->putJson('/api/app/v1/vendors/'.$sub->id, [
         'business_name' => 'Acme Drywall LLC',
         'address' => '2 Oak St', 'city' => 'Evanston', 'state' => 'IL', 'zip_code' => '60201',
         'business_phone' => '3125550000', 'business_email' => 'new@acme.test', 'business_website' => 'https://acme.test',
     ])->assertOk()
-        // Vendor::businessName()'s own mutator title-cases every save, web
-        // or app alike — "LLC" becomes "Llc", same as it always has.
-        ->assertJsonPath('data.business_name', 'Acme Drywall Llc')
+        // form.blade.php's Business Name input is `x-bind:disabled="$wire.
+        // form.business_name"` — disabled the moment it has a value, which
+        // every existing vendor's does, so editing one can never change it.
+        ->assertJsonPath('data.business_name', 'Acme Drywall')
         ->assertJsonPath('data.business_type', 'Sub');
 
-    expect($sub->refresh()->business_type)->toBe('Sub')
+    expect($sub->refresh()->business_name)->toBe('Acme Drywall')
+        ->and($sub->business_type)->toBe('Sub')
         ->and($sub->address)->toBe('2 Oak St')
-        ->and($sub->timezone)->toBe('America/Chicago');
+        ->and($sub->timezone)->toBe('America/Chicago')
+        // (999) 999-9999 — mirrors the web's `x-mask="(999) 999-9999"` on
+        // the Business Phone input; the web never stores raw digits.
+        ->and($sub->business_phone)->toBe('(312) 555-0000');
 });
 
 it('403s editing a Retail vendor, an unconnected vendor, and refuses a Member outright', function () {
@@ -489,18 +517,19 @@ it('403s editing a Retail vendor, an unconnected vendor, and refuses a Member ou
     Sanctum::actingAs($admin, ['app']);
     // isEditableBy() returns false outright for Retail — VendorPolicy::update's
     // own business rule, same gate the web's YTD-paid figure and the
-    // vendor-docs card use.
+    // vendor-docs card use. Retail needs no zip_code either way.
     $this->putJson('/api/app/v1/vendors/'.$retail->id, ['business_name' => 'Nope'])->assertForbidden();
     // Not even in VendorScope's visible tree — 403 at the view step, same
-    // as the read tests above.
-    $this->putJson('/api/app/v1/vendors/'.$unconnected->id, ['business_name' => 'Nope'])->assertForbidden();
+    // as the read tests above. zip_code is supplied so the 403 is reached
+    // past validation — a Sub needs one — rather than masked by a 422.
+    $this->putJson('/api/app/v1/vendors/'.$unconnected->id, ['business_name' => 'Nope', 'zip_code' => '60601'])->assertForbidden();
 
     auth()->forgetGuards();
     Sanctum::actingAs($member, ['app']);
     $privateSub = Vendor::factory()->create(['business_type' => 'Sub']);
     appFieldAttach($company, $privateSub);
     // A Member never has VendorPolicy::update, regardless of the vendor.
-    $this->putJson('/api/app/v1/vendors/'.$privateSub->id, ['business_name' => 'Nope'])->assertForbidden();
+    $this->putJson('/api/app/v1/vendors/'.$privateSub->id, ['business_name' => 'Nope', 'zip_code' => '60601'])->assertForbidden();
 });
 
 it('finds existing-and-linkable vendors by business name, like VendorCreate::updatedBusinessNameText()', function () {

@@ -6,10 +6,7 @@ use App\Livewire\Forms\EstimateLineItemForm;
 use App\Livewire\Projects\ProjectFinances;
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
-use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
-use App\Models\LineItemAllowance;
-use App\Services\AllowanceAggregator;
 use App\Services\Estimates\EstimateLineItemWriter;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -106,38 +103,11 @@ class EstimateLineItemCreate extends Component
             return collect();
         }
 
-        $globalAllowances = LineItemAllowance::query()
-            ->where('line_item_id', $this->line_item_id)
-            ->orderBy('id')
-            ->get();
-
-        if ($globalAllowances->isNotEmpty()) {
-            return $globalAllowances
-                ->map(fn (LineItemAllowance $allowance) => [
-                    'description' => $allowance->description,
-                    'pricing_mode' => $allowance->pricing_mode ?? ($allowance->unit_amount !== null ? 'per_unit' : 'lump_sum'),
-                    'unit_amount' => $allowance->unit_amount !== null ? (float) $allowance->unit_amount : null,
-                    'amount' => $allowance->amount !== null ? (float) $allowance->amount : null,
-                ])
-                ->filter(fn (array $allowance) => $allowance['description'] !== '')
-                ->values();
-        }
-
-        $allowances = EstimateLineItemAllowance::query()
-            ->whereHas('estimateLineItem', fn ($query) => $query->where('line_item_id', $this->line_item_id))
-            ->with('estimateLineItem:id,line_item_id,name,unit_type,quantity')
-            ->orderByDesc('id')
-            ->get();
-
-        return app(AllowanceAggregator::class)->aggregate($allowances)
-            ->map(fn (array $allowance) => [
-                'description' => $allowance['description'],
-                'pricing_mode' => $allowance['unit_amount'] !== null ? 'per_unit' : 'lump_sum',
-                'unit_amount' => $allowance['unit_amount'],
-                'amount' => null,
-            ])
-            ->filter(fn (array $allowance) => $allowance['description'] !== '')
-            ->values();
+        // Delegates to App\Services\Estimates\EstimateAllowanceSuggestions,
+        // the service shared with the Hive Contractors app's "Add Line
+        // Item" screen.
+        return app(\App\Services\Estimates\EstimateAllowanceSuggestions::class)
+            ->forLineItem((int) $this->line_item_id);
     }
 
     /**

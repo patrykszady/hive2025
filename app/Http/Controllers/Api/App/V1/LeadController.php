@@ -131,23 +131,78 @@ class LeadController extends Controller
     }
 
     /**
+     * The "User" dropdown's candidates for a lead that doesn't exist yet —
+     * mirrors App\Livewire\Leads\LeadCreate::userChoices() in create mode
+     * (no current contact to always include, unlike contactCandidates()
+     * above for an existing lead).
+     */
+    public function createContactCandidates(Request $request, LeadContactCompletion $completion): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $vendorId = (int) $request->user()->vendor->id;
+
+        return response()->json(['data' => $completion->contactChoices($vendorId)]);
+    }
+
+    /**
      * Create a lead by hand — the person who called instead of emailing or
      * filling the website form. Mirrors LeadCreate::save(): a duplicate
      * contact/lead on file is reported back (409) instead of silently
      * creating a twin; resubmitting with `force: true` goes through anyway,
-     * matching the web's "Create anyway" button.
+     * matching the web's "Create anyway" button. Picking an existing user
+     * first (same as the web's userChoices() dropdown via attachUser())
+     * skips that warning entirely — someone who already picked a contact
+     * from the list knows it's the same person.
      */
-    public function store(StoreLeadRequest $request, LeadDuplicateFinder $finder): JsonResponse
+    public function store(StoreLeadRequest $request, LeadDuplicateFinder $finder, LeadContactCompletion $completion): JsonResponse
     {
         $this->authorize('viewAny', Lead::class);
 
         $user = $request->user();
         $vendorId = (int) $user->vendor->id;
 
+        $fullName = trim((string) $request->validated('full_name'));
         $email = (string) $request->validated('email');
         $phone = (string) $request->validated('phone');
 
-        if (! $request->boolean('force')) {
+        // Mirrors LeadCreate::attachUser(): the app fills name/email/phone
+        // from the picked candidate the moment it's picked (same as the
+        // web's reactive dropdown), so this only backfills whichever of
+        // those the submitted form still left blank — resolved through the
+        // same vendor-scoped candidate query the contact-candidates list is
+        // built from, so a client-controlled id can't be pointed at another
+        // tenant's (or GS's own staff) user.
+        $pickedUser = $request->filled('user_id')
+            ? $completion->contactCandidatesQuery($vendorId)->whereKey($request->validated('user_id'))->first()
+            : null;
+
+        if ($pickedUser) {
+            $fullName = $fullName !== '' ? $fullName : trim((string) $pickedUser->full_name);
+
+            if ($email === '' && $pickedUser->hasRoutableEmail()) {
+                $email = (string) $pickedUser->email;
+            }
+
+            if ($phone === '' && $pickedUser->hasRoutablePhone()) {
+                $phone = (string) $pickedUser->cell_phone;
+            }
+        }
+
+        // StoreLeadRequest skips this check up front when `user_id` is
+        // present, deferring to the fallback above — re-check here now that
+        // it's run (a picked candidate with neither a routable email nor
+        // phone, or an id that didn't resolve to one, still needs one typed).
+        if (trim($email) === '' && trim($phone) === '') {
+            return response()->json([
+                'message' => 'An email or phone number is needed to reach them.',
+                'errors' => ['email' => ['An email or phone number is needed to reach them.']],
+            ], 422);
+        }
+
+        // Someone who already picked a contact from the list knows it's the
+        // same person — the duplicate warning is for the unassisted case.
+        if ($pickedUser === null && ! $request->boolean('force')) {
             $match = $finder->find($email, $phone, $vendorId);
 
             if ($match !== null) {
@@ -163,9 +218,12 @@ class LeadController extends Controller
 
         $lead = Lead::create([
             'date' => now(),
-            'origin' => $request->validated('origin') ?: 'Manual',
+            // Mirrors LeadCreate::save(): the Origin field is disabled on
+            // the web, so a hand-entered lead is always "Manual" —
+            // never client-chosen (StoreLeadRequest no longer accepts it).
+            'origin' => 'Manual',
             'lead_data' => array_filter([
-                'name' => trim((string) $request->validated('full_name')),
+                'name' => $fullName,
                 'email' => trim($email) ?: null,
                 'phone' => preg_replace('/\D/', '', $phone) ?: null,
                 'address' => $request->validated('address'),
@@ -182,6 +240,13 @@ class LeadController extends Controller
             'title' => 'New',
             'belongs_to_vendor_id' => $vendorId,
         ]);
+
+        // The user picked from the list is the contact; provisioning then
+        // only fills in the client at the lead's address, instead of also
+        // creating a brand-new contact record for the same person.
+        if ($pickedUser) {
+            app(LeadContactProvisioner::class)->link($lead, $pickedUser);
+        }
 
         try {
             app(LeadContactProvisioner::class)->provision($lead->fresh());
@@ -200,11 +265,17 @@ class LeadController extends Controller
     }
 
     /**
-     * The lead's contact/address fields and origin — mirrors
+     * The lead's contact/address fields — mirrors
      * App\Livewire\Leads\LeadCreate::edit() apart from the status write
      * (see updateStatus() below for that, kept as its own call so the app
      * never writes a duplicate status row the way edit()'s combined save
-     * can).
+     * can) and origin, which the web never lets edit() change (its Origin
+     * field is disabled) — UpdateLeadRequest doesn't accept it either.
+     *
+     * A field the caller sends as `null` genuinely clears it: `has()` is
+     * true for a present key regardless of its value, so this writes null
+     * into lead_data rather than skipping the field the way a caller that
+     * drops the key entirely (sending `undefined`) would.
      */
     public function update(UpdateLeadRequest $request, int $lead): JsonResponse
     {
@@ -216,10 +287,6 @@ class LeadController extends Controller
             if ($request->has($field)) {
                 $found->lead_data[$field] = $request->validated($field);
             }
-        }
-
-        if ($request->has('origin')) {
-            $found->origin = $request->validated('origin');
         }
 
         $found->save();

@@ -11,11 +11,15 @@ use Illuminate\Foundation\Http\FormRequest;
  * App\Livewire\Forms\ProjectForm::update()): client_id and project_name
  * required exactly like create, but the address is always given directly
  * here (no project_existing_address selector — that's a create-only
- * concept for copying a client's past address). Validation only — same as
- * UpdateProjectStatusRequest, the {project} route param here is a plain
- * int (not a bound model), so the Admin-only check
- * (App\Policies\ProjectPolicy::update) happens in the controller once the
- * project is resolved (visibleProject() + $this->authorize()).
+ * concept for copying a client's past address). address/city are NOT
+ * required: ProjectForm::update() validates only client_id/project_name/
+ * project_existing_address (the address fields live on the host
+ * component, outside the Form's own validate() call), and ProjectWriter::
+ * update() already writes whatever address fields it's given, nullable.
+ * Validation only — same as UpdateProjectStatusRequest, the {project}
+ * route param here is a plain int (not a bound model), so the Admin-only
+ * check (App\Policies\ProjectPolicy::update) happens in the controller
+ * once the project is resolved (visibleProject() + $this->authorize()).
  */
 class UpdateProjectRequest extends FormRequest
 {
@@ -32,9 +36,9 @@ class UpdateProjectRequest extends FormRequest
         return [
             'client_id' => ['required', 'integer'],
             'project_name' => ['required', 'string', 'min:3'],
-            'address' => ['required', 'string', 'max:255'],
+            'address' => ['nullable', 'string', 'max:255'],
             'address_2' => ['nullable', 'string', 'max:255'],
-            'city' => ['required', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'max:255'],
             'state' => ['nullable', 'string', 'max:2'],
             'zip_code' => ['nullable', 'string', 'max:10'],
         ];
