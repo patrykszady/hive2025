@@ -103,6 +103,42 @@ class ExpenseAccessGuard
     }
 
     /**
+     * Resolves a project/distribution selector into [projectId, distributionId]
+     * — exactly one of the two ever comes back non-null. Accepts either the
+     * web's own single-field "D:{id}" encoding (ExpenseForm.php:144-150) via
+     * $projectIdRaw, or two already-split fields (the app's own project_id/
+     * distribution_id JSON fields) via $distributionIdRaw: an explicit
+     * $distributionIdRaw always wins, so callers that already know which
+     * field was sent don't need to invent a "D:" string first.
+     *
+     * @return array{0: ?int, 1: ?int}
+     */
+    public function resolveProjectSelector(mixed $projectIdRaw, mixed $distributionIdRaw = null): array
+    {
+        if ($distributionIdRaw !== null && $distributionIdRaw !== '') {
+            return [null, (int) $distributionIdRaw];
+        }
+
+        if ($projectIdRaw === null || $projectIdRaw === '') {
+            return [null, null];
+        }
+
+        if (is_string($projectIdRaw) && str_starts_with($projectIdRaw, 'D:')) {
+            $distributionId = substr($projectIdRaw, 2);
+
+            return $distributionId === '' ? [null, null] : [null, (int) $distributionId];
+        }
+
+        if (is_numeric($projectIdRaw)) {
+            $projectId = (int) $projectIdRaw;
+
+            return $projectId > 0 ? [$projectId, null] : [null, null];
+        }
+
+        return [null, null];
+    }
+
+    /**
      * project_id/distribution_id come from a client-chosen selector — check
      * them against what this tenant can actually see (ProjectScope allows
      * projects shared with an invited sub, so this stays permissive for

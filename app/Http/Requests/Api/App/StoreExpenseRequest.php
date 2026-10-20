@@ -4,6 +4,8 @@ namespace App\Http\Requests\Api\App;
 
 use App\Models\BankAccount;
 use App\Models\Expense;
+use App\Models\ExpenseSplits;
+use App\Models\Vendor;
 use App\Services\Checks\CheckNumberSuggester;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -50,6 +52,19 @@ class StoreExpenseRequest extends FormRequest
     }
 
     /**
+     * The expense a submitted split 'id' must already belong to — null on
+     * create (where no split can legitimately carry an id yet). See
+     * UpdateExpenseRequest's override and the 'splits.*.id' check in
+     * withValidator() below: this is what lets AppExpenseDirectory's
+     * ExpenseSplitsWriter trust a submitted split id is really one of
+     * THIS expense's own rows, not another tenant's.
+     */
+    protected function expenseIdForSplitOwnership(): ?int
+    {
+        return null;
+    }
+
+    /**
      * A receipt photo attached alongside JSON fields means the request is
      * multipart/form-data, which can't carry a nested `splits` array
      * natively — the app JSON-encodes it into a single field in that case.
@@ -82,10 +97,24 @@ class StoreExpenseRequest extends FormRequest
             'date' => ['required', 'date', 'before_or_equal:today', 'after:2017-01-01'],
             'vendor_id' => ['required', 'integer', 'exists:vendors,id'],
             'project_id' => ['nullable', 'integer'],
+            // The web's own distribution selector (ExpenseForm.php:144-150)
+            // exposed as its own field instead of the web's single-select
+            // "D:{id}" encoding — ExpenseAccessGuard::resolveProjectSelector()
+            // accepts either shape. Scoped against this tenant's own
+            // distributions (DistributionScope) by
+            // ExpenseAccessGuard::assertProjectAccessible(), not an `exists:`
+            // rule, for the same reason as belongs_to_vendor_id below.
+            'distribution_id' => ['nullable', 'integer'],
             'note' => ['nullable', 'string', 'max:2000'],
             'invoice' => ['nullable', 'string', 'max:255'],
-            'paid_by' => ['nullable', 'integer', 'exists:users,id'],
-            'reimbursement' => ['nullable', 'string', 'max:255'],
+            // Limited to the hub's own employed team — mirrors the web's
+            // "Paid By" select (ExpenseCreate::employees()), not just any
+            // user id.
+            'paid_by' => ['nullable', 'integer', $this->paidByRule()],
+            // 'Client', an employed teammate's user id, or 'V:{vendor_id}'
+            // for a Sub/1099 vendor — mirrors the web's "Reimbursment"
+            // select exactly (expenses/form.blade.php:294-312).
+            'reimbursement' => ['nullable', 'string', 'max:255', $this->reimbursementRule()],
             'is_material_order' => ['nullable', 'boolean'],
             // Whitelisted against the hub vendor (or one already linked to
             // it) by ExpenseAccessGuard::resolveOwnerVendorId() — not an
@@ -115,12 +144,79 @@ class StoreExpenseRequest extends FormRequest
                 $this->checkNumberUniqueRule(),
             ],
             'splits' => ['nullable', 'array'],
+            // Present only when editing an already-saved split (sent back by
+            // the app so AppExpenseDirectory's ExpenseSplitsWriter updates
+            // that exact row in place — receipt_items, id and distribution
+            // links included — instead of deleting and recreating it).
+            // Ownership (must belong to the expense being edited) is
+            // enforced in withValidator() below, not an `exists:` rule.
+            'splits.*.id' => ['nullable', 'integer'],
             'splits.*.amount' => ['required', 'numeric', 'regex:/^-?\d+(\.\d{1,2})?$/', 'not_in:0'],
-            'splits.*.project_id' => ['required', 'integer'],
+            // Exactly one of project_id/distribution_id per split — same
+            // "D:{id}" idea as the top-level selector above, as two plain
+            // fields; enforced together in withValidator() below (neither
+            // `required` alone would allow "either, not both, not neither").
+            'splits.*.project_id' => ['nullable', 'integer'],
+            'splits.*.distribution_id' => ['nullable', 'integer'],
             'splits.*.note' => ['nullable', 'string', 'max:2000'],
-            'splits.*.reimbursement' => ['nullable', 'string', 'max:255'],
+            // Mirrors the web split editor's own flux:radio.group exactly
+            // (splits-form.blade.php:80-91) — narrower than the top-level
+            // expense's own Reimbursement field above.
+            'splits.*.reimbursement' => ['nullable', Rule::in(['None', 'Client'])],
             'receipt' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:20480'],
         ];
+    }
+
+    /**
+     * Mirrors the web's "Paid By" select (ExpenseCreate::employees(), via
+     * App\Services\Users\AppTeamDirectory::teamMembers()) — limited to the
+     * hub vendor's own currently-employed team, not any arbitrary user id.
+     */
+    private function paidByRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            $vendor = $this->user()?->vendor;
+
+            if (! $vendor || ! $vendor->users()->employed()->whereKey((int) $value)->exists()) {
+                $fail('Invalid Paid By selection.');
+            }
+        };
+    }
+
+    /**
+     * Mirrors the web's "Reimbursment" select exactly
+     * (expenses/form.blade.php:294-312): 'Client', an employed teammate's
+     * user id (as a numeric string), or 'V:{vendor_id}' for a vendor
+     * ExpenseCreate::reimbursment_vendors() would actually offer (Sub/1099,
+     * and — via Vendor's own global VendorScope — one this tenant can see).
+     */
+    private function reimbursementRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            if ($value === null || $value === '' || $value === 'Client') {
+                return;
+            }
+
+            if (is_numeric($value)) {
+                $vendor = $this->user()?->vendor;
+                if (! $vendor || ! $vendor->users()->employed()->whereKey((int) $value)->exists()) {
+                    $fail('Invalid reimbursement selection.');
+                }
+
+                return;
+            }
+
+            if (is_string($value) && str_starts_with($value, 'V:')) {
+                $reimbursementVendorId = substr($value, 2);
+                if (! ctype_digit($reimbursementVendorId) || ! Vendor::whereKey((int) $reimbursementVendorId)->whereIn('business_type', ['Sub', '1099'])->exists()) {
+                    $fail('Invalid reimbursement selection.');
+                }
+
+                return;
+            }
+
+            $fail('Invalid reimbursement selection.');
+        };
     }
 
     /**
@@ -192,12 +288,52 @@ class StoreExpenseRequest extends FormRequest
                     $validator->errors()->add('splits', 'Split amounts must add up to the expense amount.');
                 }
 
+                $this->validateSplitSelectors($validator, $splits);
+
                 return;
             }
 
-            if (! $this->filled('project_id')) {
+            if ($this->filled('project_id') && $this->filled('distribution_id')) {
+                $validator->errors()->add('project_id', 'Choose a project or a distribution, not both.');
+
+                return;
+            }
+
+            if (! $this->filled('project_id') && ! $this->filled('distribution_id')) {
                 $validator->errors()->add('project_id', 'Project is required unless the expense is split.');
             }
         });
+    }
+
+    /**
+     * Each split needs exactly one of project_id/distribution_id, and any
+     * split 'id' the request sends back must already belong to the expense
+     * being edited — AppExpenseDirectory's ExpenseSplitsWriter trusts a
+     * submitted id enough to update that exact row in place, so this is
+     * what keeps a tampered id from overwriting a DIFFERENT expense's split.
+     *
+     * @param  array<int, array<string, mixed>>  $splits
+     */
+    private function validateSplitSelectors(Validator $validator, array $splits): void
+    {
+        $expenseId = $this->expenseIdForSplitOwnership();
+
+        foreach ($splits as $index => $split) {
+            $hasProject = ! empty($split['project_id']);
+            $hasDistribution = ! empty($split['distribution_id']);
+
+            if ($hasProject === $hasDistribution) {
+                $validator->errors()->add("splits.{$index}.project_id", 'Choose a project or a distribution for this split.');
+            }
+
+            if (! empty($split['id'])) {
+                $belongsToExpense = $expenseId !== null
+                    && ExpenseSplits::withoutGlobalScopes()->whereKey($split['id'])->where('expense_id', $expenseId)->exists();
+
+                if (! $belongsToExpense) {
+                    $validator->errors()->add("splits.{$index}.id", 'Invalid split selected.');
+                }
+            }
+        }
     }
 }

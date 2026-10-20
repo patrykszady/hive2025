@@ -75,10 +75,17 @@ class ExpenseController extends Controller
         // StoreExpenseRequest::authorize() already refused a non-admin
         // (mirroring ExpenseForm::store()'s authorize('create', ...) before
         // validate()) — see ExpensePolicy::create().
-        $expense = $this->directory->create($user, $request->validated(), $request->file('receipt'));
+        $result = $this->directory->create($user, $request->validated(), $request->file('receipt'));
+        $expense = $result->expense;
         $expense->load(['vendor', 'project', 'distribution', 'splits.project:id,project_name', 'splits.distribution:id,name', 'receipts', 'checks.bank_account.bank', 'check.bank_account.bank', 'payments']);
 
-        return response()->json(['data' => (new ExpenseResource($expense))->withDetail()->toArray($request)], 201);
+        return response()->json([
+            'data' => (new ExpenseResource($expense))->withDetail()->toArray($request),
+            // Mirrors ExpenseForm::store()'s session-flashed warning
+            // (ExpenseForm.php:604-611) when a receipt was attached but OCR
+            // couldn't process it — the expense itself still saved fine.
+            'receipt_warning' => $result->receiptWarning,
+        ], 201);
     }
 
     /**
@@ -95,10 +102,15 @@ class ExpenseController extends Controller
         // ExpenseForm::update(), which (like store()) authorizes against
         // 'create', not 'update' — see ExpensePolicy::create().
         $found = $this->visibleExpense($request, $expense);
-        $updated = $this->directory->update($user, $found, $request->validated(), $request->file('receipt'));
+        $result = $this->directory->update($user, $found, $request->validated(), $request->file('receipt'));
+        $updated = $result->expense;
         $updated->load(['vendor', 'project', 'distribution', 'splits.project:id,project_name', 'splits.distribution:id,name', 'receipts', 'checks.bank_account.bank', 'check.bank_account.bank', 'payments']);
 
-        return response()->json(['data' => (new ExpenseResource($updated))->withDetail()->toArray($request)]);
+        return response()->json([
+            'data' => (new ExpenseResource($updated))->withDetail()->toArray($request),
+            // See store()'s matching comment.
+            'receipt_warning' => $result->receiptWarning,
+        ]);
     }
 
     public function destroy(Request $request, int $expense): JsonResponse

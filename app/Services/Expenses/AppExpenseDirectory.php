@@ -8,8 +8,8 @@ use App\Jobs\FetchAmazonReceiptForExpense;
 use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\CheckImage;
+use App\Models\Distribution;
 use App\Models\Expense;
-use App\Models\ExpenseSplits;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
@@ -43,6 +43,7 @@ class AppExpenseDirectory
         private ExpenseAccessGuard $guard,
         private AppTeamDirectory $teamDirectory,
         private UnmatchedTransactionFinder $unmatchedTransactions,
+        private ExpenseSplitsWriter $splitsWriter,
     ) {
     }
 
@@ -488,19 +489,21 @@ class AppExpenseDirectory
      * (ExpenseAccessGuard), same cross-vendor attach, same optional receipt
      * OCR.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, transaction_id?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, distribution_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, transaction_id?: ?int, splits?: list<array{amount: float|string, project_id?: ?int, distribution_id?: ?int, note?: ?string, reimbursement?: ?string}>}  $data
      */
-    public function create(User $user, array $data, ?UploadedFile $receipt): Expense
+    public function create(User $user, array $data, ?UploadedFile $receipt): ExpenseSaveResult
     {
         $hubVendorId = (int) $user->vendor->id;
         $isSplit = ! empty($data['splits']);
-        $projectId = $isSplit ? null : (isset($data['project_id']) ? (int) $data['project_id'] : null);
+        [$projectId, $distributionId] = $isSplit
+            ? [null, null]
+            : $this->guard->resolveProjectSelector($data['project_id'] ?? null, $data['distribution_id'] ?? null);
         $isMaterialOrder = (bool) ($data['is_material_order'] ?? false);
         $belongsToVendorId = isset($data['belongs_to_vendor_id']) && $data['belongs_to_vendor_id'] !== null
             ? (int) $data['belongs_to_vendor_id']
             : null;
 
-        $this->guard->assertProjectAccessible($projectId, null);
+        $this->guard->assertProjectAccessible($projectId, $distributionId);
         $ownerVendorId = $this->guard->resolveOwnerVendorId($hubVendorId, $isMaterialOrder, $belongsToVendorId);
 
         // "Create an expense from the transaction" (the Transactions card)
@@ -526,7 +529,7 @@ class AppExpenseDirectory
         // $shouldCreateCheck branch: only when neither an existing check nor
         // "paid by an employee" already settled it.
         if (! $check && empty($data['paid_by'])) {
-            $check = $this->createCheckForNewExpense($data, (int) $data['vendor_id'], $hubVendorId, (int) $user->id);
+            $check = $this->createCheckForNewExpense($data, (int) $data['vendor_id'], $hubVendorId, (int) $user->id, $distributionId);
         }
 
         $expense = Expense::create([
@@ -535,7 +538,7 @@ class AppExpenseDirectory
             'invoice' => $data['invoice'] ?? null,
             'note' => $data['note'] ?? null,
             'project_id' => $projectId,
-            'distribution_id' => null,
+            'distribution_id' => $distributionId,
             'vendor_id' => $data['vendor_id'],
             'check_id' => $check?->id,
             'paid_by' => $data['paid_by'] ?? null,
@@ -549,7 +552,7 @@ class AppExpenseDirectory
         }
 
         if ($isSplit) {
-            $this->replaceSplits($expense, $data['splits']);
+            $this->splitsWriter->sync($expense, $this->canonicalSplits($data['splits']), $hubVendorId, (int) $user->id);
         }
 
         $this->guard->attachCrossVendorRelationships($expense);
@@ -558,11 +561,34 @@ class AppExpenseDirectory
             $this->linkTransactionToExpense($transaction, $expense, $check, (int) $data['vendor_id'], $hubVendorId);
         }
 
-        if ($receipt) {
-            $this->attachReceiptFromUpload($expense, $receipt, $isMaterialOrder);
-        }
+        $receiptWarning = $receipt && ! $this->attachReceiptFromUpload($expense, $receipt, $isMaterialOrder)
+            ? 'Expense saved but the receipt could not be processed. Please try uploading the receipt again.'
+            : null;
 
-        return $expense;
+        return new ExpenseSaveResult($expense, $receiptWarning);
+    }
+
+    /**
+     * Maps the app's own split shape (project_id XOR distribution_id, no
+     * per-split receipt line items) into ExpenseSplitsWriter::sync()'s
+     * canonical shape — see that class's docblock.
+     *
+     * @param  list<array{id?: ?int, amount: float|string, project_id?: ?int, distribution_id?: ?int, note?: ?string, reimbursement?: ?string}>  $splits
+     * @return list<array{id: ?int, amount: float|string, project_id: ?int, distribution_id: ?int, reimbursement: ?string, note: ?string}>
+     */
+    private function canonicalSplits(array $splits): array
+    {
+        return array_map(fn (array $split) => [
+            'id' => isset($split['id']) ? (int) $split['id'] : null,
+            'amount' => $split['amount'],
+            'project_id' => isset($split['project_id']) ? (int) $split['project_id'] : null,
+            'distribution_id' => isset($split['distribution_id']) ? (int) $split['distribution_id'] : null,
+            'reimbursement' => $split['reimbursement'] ?? null,
+            'note' => $split['note'] ?? null,
+            // No 'items' key at all — the app never sends per-split receipt
+            // line items, so ExpenseSplitsWriter preserves whatever an
+            // existing split already has instead of clearing it.
+        ], $splits);
     }
 
     /**
@@ -639,19 +665,21 @@ class AppExpenseDirectory
      * that looks surprising: created_by_user_id is overwritten to the
      * editing user on every save, not preserved from the original creator.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, distribution_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, splits?: list<array{amount: float|string, project_id?: ?int, distribution_id?: ?int, note?: ?string, reimbursement?: ?string}>}  $data
      */
-    public function update(User $user, Expense $expense, array $data, ?UploadedFile $receipt): Expense
+    public function update(User $user, Expense $expense, array $data, ?UploadedFile $receipt): ExpenseSaveResult
     {
         $hubVendorId = (int) $user->vendor->id;
         $isSplit = ! empty($data['splits']);
-        $projectId = $isSplit ? null : (isset($data['project_id']) ? (int) $data['project_id'] : null);
+        [$projectId, $distributionId] = $isSplit
+            ? [null, null]
+            : $this->guard->resolveProjectSelector($data['project_id'] ?? null, $data['distribution_id'] ?? null);
         $isMaterialOrder = (bool) ($data['is_material_order'] ?? false);
         $belongsToVendorId = isset($data['belongs_to_vendor_id']) && $data['belongs_to_vendor_id'] !== null
             ? (int) $data['belongs_to_vendor_id']
             : null;
 
-        $this->guard->assertProjectAccessible($projectId, null);
+        $this->guard->assertProjectAccessible($projectId, $distributionId);
         $ownerVendorId = $this->guard->resolveOwnerVendorId($hubVendorId, $isMaterialOrder, $belongsToVendorId);
 
         $expense->update([
@@ -660,7 +688,7 @@ class AppExpenseDirectory
             'invoice' => $data['invoice'] ?? null,
             'note' => $data['note'] ?? null,
             'project_id' => $projectId,
-            'distribution_id' => null,
+            'distribution_id' => $distributionId,
             'vendor_id' => $data['vendor_id'],
             'paid_by' => $data['paid_by'] ?? null,
             'reimbursment' => $data['reimbursement'] ?? null,
@@ -670,17 +698,17 @@ class AppExpenseDirectory
 
         // Recording/updating/detaching the linked check — mirrors
         // ExpenseForm::update()'s "Handle existing check" block exactly.
-        $this->resolveCheckOnUpdate($expense, $data, (int) $data['vendor_id'], $hubVendorId, (int) $user->id);
+        $this->resolveCheckOnUpdate($expense, $data, (int) $data['vendor_id'], $hubVendorId, (int) $user->id, $distributionId);
 
-        $this->replaceSplits($expense, $isSplit ? $data['splits'] : []);
+        $this->splitsWriter->sync($expense, $isSplit ? $this->canonicalSplits($data['splits']) : [], $hubVendorId, (int) $user->id);
 
         $this->guard->attachCrossVendorRelationships($expense);
 
-        if ($receipt) {
-            $this->attachReceiptFromUpload($expense, $receipt, $isMaterialOrder);
-        }
+        $receiptWarning = $receipt && ! $this->attachReceiptFromUpload($expense, $receipt, $isMaterialOrder)
+            ? 'Expense updated but the receipt could not be processed. Please try uploading the receipt again.'
+            : null;
 
-        return $expense;
+        return new ExpenseSaveResult($expense, $receiptWarning);
     }
 
     /**
@@ -691,7 +719,7 @@ class AppExpenseDirectory
      *
      * @param  array{date: string, amount: float|string, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int}  $data
      */
-    private function createCheckForNewExpense(array $data, int $vendorId, int $actingVendorId, int $actingUserId): ?Check
+    private function createCheckForNewExpense(array $data, int $vendorId, int $actingVendorId, int $actingUserId, ?int $distributionId = null): ?Check
     {
         $bankAccountId = isset($data['bank_account_id']) && $data['bank_account_id'] !== null ? (int) $data['bank_account_id'] : null;
         $checkType = $data['check_type'] ?? null;
@@ -720,10 +748,30 @@ class AppExpenseDirectory
             'date' => $data['date'],
             'bank_account_id' => $bankAccountId,
             'amount' => $data['amount'],
+            // A distribution's own user — mirrors ExpenseForm::store()'s
+            // $dist_user (ExpenseForm.php:508-514): only a brand-new check
+            // ever gets this; an existing/reused one (above) is untouched.
+            'user_id' => $this->distributionUserId($distributionId),
             'vendor_id' => $vendorId,
             'belongs_to_vendor_id' => $actingVendorId,
             'created_by_user_id' => $actingUserId,
         ]);
+    }
+
+    /**
+     * Mirrors ExpenseForm::store()/update()'s $dist_user calculation exactly
+     * (ExpenseForm.php:381-387,508-514): a distribution's own user_id of 0
+     * is treated the same as having none.
+     */
+    private function distributionUserId(?int $distributionId): ?int
+    {
+        if (! $distributionId) {
+            return null;
+        }
+
+        $userId = Distribution::findOrFail($distributionId)->user_id;
+
+        return $userId != 0 ? $userId : null;
     }
 
     /**
@@ -736,7 +784,7 @@ class AppExpenseDirectory
      *
      * @param  array{date: string, amount: float|string, paid_by?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int}  $data
      */
-    private function resolveCheckOnUpdate(Expense $expense, array $data, int $vendorId, int $actingVendorId, int $actingUserId): void
+    private function resolveCheckOnUpdate(Expense $expense, array $data, int $vendorId, int $actingVendorId, int $actingUserId, ?int $distributionId = null): void
     {
         $check = $expense->check;
         $bankAccountId = isset($data['bank_account_id']) && $data['bank_account_id'] !== null ? (int) $data['bank_account_id'] : null;
@@ -766,6 +814,8 @@ class AppExpenseDirectory
                     'date' => $data['date'],
                     'bank_account_id' => $bankAccountId,
                     'amount' => $data['amount'],
+                    // See createCheckForNewExpense()'s matching comment.
+                    'user_id' => $this->distributionUserId($distributionId),
                     'vendor_id' => $vendorId,
                     'belongs_to_vendor_id' => $actingVendorId,
                     'created_by_user_id' => $actingUserId,
@@ -853,38 +903,6 @@ class AppExpenseDirectory
         }
 
         return $expense->refresh();
-    }
-
-    /**
-     * Replaces an expense's splits wholesale. The app's split editor has no
-     * per-row ids to reconcile against (unlike the web's line-item-aware
-     * ExpenseSplitsCreate), so every save simply deletes the old rows and
-     * recreates them — simpler, and the end state (rows summing to the
-     * expense amount, each on a tenant-visible project) is identical.
-     *
-     * @param  list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>  $splits
-     */
-    private function replaceSplits(Expense $expense, array $splits): void
-    {
-        foreach ($expense->splits as $existing) {
-            $existing->delete();
-        }
-
-        foreach ($splits as $split) {
-            $projectId = (int) $split['project_id'];
-            $this->guard->assertProjectAccessible($projectId, null);
-
-            ExpenseSplits::create([
-                'amount' => $split['amount'],
-                'expense_id' => $expense->id,
-                'project_id' => $projectId,
-                'distribution_id' => null,
-                'reimbursment' => $split['reimbursement'] ?? null,
-                'note' => $split['note'] ?? null,
-                'belongs_to_vendor_id' => $expense->belongs_to_vendor_id,
-                'created_by_user_id' => auth()->id(),
-            ]);
-        }
     }
 
     /**
