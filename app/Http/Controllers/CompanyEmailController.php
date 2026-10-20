@@ -22,6 +22,7 @@ use App\Models\Vendor;
 use App\Services\NylasService;
 use App\Services\ReceiptItemEnricher;
 
+use App\Http\Requests\NylasLoginRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
@@ -35,6 +36,7 @@ use setasign\Fpdi\Fpdi;
 
 use Exception;
 use App\Support\ApiErrorFormatter;
+use App\Support\AppReturnTo;
 use App\Support\MaterialOrderStatus;
  
 class CompanyEmailController extends Controller
@@ -51,10 +53,10 @@ class CompanyEmailController extends Controller
      *
      * @return \Illuminate\Http\RedirectResponse
      */
-    public function nylasLogin()
+    public function nylasLogin(NylasLoginRequest $request)
     {
         try {
-            $authUrl = $this->nylasService->getAuthUrl();
+            $authUrl = $this->nylasService->getAuthUrl($request->validated('return_to'));
             return redirect($authUrl['authentication_url']);
         } catch (Exception $e) {
             Log::channel('nylas')->error('Failed to retrieve Nylas authentication URL', ApiErrorFormatter::format($e));
@@ -73,11 +75,16 @@ class CompanyEmailController extends Controller
         // Decode state to check if popup mode
         $isPopup = false;
         $stateCsrf = null;
+        $returnTo = null;
         if ($request->has('state')) {
             $stateJson = base64_decode($request->query('state'));
             $state = json_decode($stateJson, true);
             $isPopup = $state['popup'] ?? false;
             $stateCsrf = $state['csrf'] ?? null;
+            // Re-validated here too (not just at nylasLogin): this round-tripped
+            // through Nylas and back, so treat it the same as any other
+            // untrusted input arriving at this endpoint.
+            $returnTo = AppReturnTo::isValid($state['return_to'] ?? null) ? $state['return_to'] : null;
         }
 
         // NylasService::getAuthUrl() embeds the session's CSRF token in
@@ -102,14 +109,20 @@ class CompanyEmailController extends Controller
 
         if ($request->has('error')) {
             Log::channel('nylas')->error(["Failed to nylasAuthResponse: ", $request->all()]);
-            
+
+            // The app's in-app browser: hand control straight back to it
+            // rather than showing a page it has no way to dismiss itself.
+            if ($returnTo) {
+                return redirect()->away($this->appendReturnToQuery($returnTo, ['connected' => '0']));
+            }
+
             // If opened in popup, show error and allow manual close
             if ($isPopup) {
                 return view('nylas.auth-error', [
                     'error' => $request->query('error'),
                 ]);
             }
-            
+
             return redirect()->back()->withErrors(['error' => $request->query('error')]);
         }
 
@@ -126,38 +139,62 @@ class CompanyEmailController extends Controller
                 // Single HIVE RECEIPTS folder is created during company email setup
                 // Folder ID is stored in api_json['HIVE_RECEIPTS_FOLDER'] for reference
 
+                if ($returnTo) {
+                    return redirect()->away($this->appendReturnToQuery($returnTo, ['connected' => '1']));
+                }
+
                 // If opened in popup, notify parent and auto-close
                 if ($isPopup) {
                     return view('nylas.auth-success', [
                         'email' => $nylasAccount['email'],
                     ]);
                 }
-                
+
                 return redirect(route('company_emails.index'))->with('success', 'Nylas account connected successfully.');
             } else {
+                if ($returnTo) {
+                    return redirect()->away($this->appendReturnToQuery($returnTo, ['connected' => '0']));
+                }
+
                 // If opened in popup, show error
                 if ($isPopup) {
                     return view('nylas.auth-error', [
                         'error' => 'Failed to retrieve account details from Nylas.',
                     ]);
                 }
-                
+
                 return redirect()->back()->withErrors(['error' => 'Failed to retrieve account details from Nylas.']);
             }
         } catch (\Exception $e) {
             Log::channel('nylas')->error('Failed to handle Nylas authentication response', ApiErrorFormatter::format($e, [
                 'code' => $code,
             ]));
-            
+
+            if ($returnTo) {
+                return redirect()->away($this->appendReturnToQuery($returnTo, ['connected' => '0']));
+            }
+
             // If opened in popup, show error
             if ($isPopup) {
                 return view('nylas.auth-error', [
                     'error' => 'An error occurred during Nylas authentication.',
                 ]);
             }
-            
+
             return redirect()->back()->withErrors(['error' => 'An error occurred during Nylas authentication.']);
         }
+    }
+
+    /**
+     * Append query params to an already-validated `hivecontractors://…`
+     * return_to link, e.g. "hivecontractors://manage/emails" + connected=1
+     * -> "hivecontractors://manage/emails?connected=1".
+     *
+     * @param  array<string, string>  $query
+     */
+    private function appendReturnToQuery(string $returnTo, array $query): string
+    {
+        return $returnTo.(str_contains($returnTo, '?') ? '&' : '?').http_build_query($query);
     }
 
     /**
