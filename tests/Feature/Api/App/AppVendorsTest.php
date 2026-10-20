@@ -213,6 +213,10 @@ it('shows YTD paid and documents to an Admin, never to a Member', function () {
         ->assertJsonPath('data.documents.0.number', 'WC-12345')
         ->assertJsonPath('data.documents.0.type_label', 'Workers');
 
+    // The per-row "View" link (vendor-docs/_doc-row.blade.php:5-12) — a
+    // signed link to the same file the Manage hub's Vendor Documents screen uses.
+    expect($asAdmin->json('data.documents.0.file_url'))->toContain('vendor-docs/');
+
     expect((float) $asAdmin->json('data.ytd_paid'))->toBe(0.0);
 
     auth()->forgetGuards();

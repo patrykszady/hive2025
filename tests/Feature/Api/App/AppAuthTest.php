@@ -90,7 +90,10 @@ it('mails a code to an allowed team member and signs them in', function () {
     $this->withToken($token)
         ->getJson('/api/app/v1/me')
         ->assertOk()
-        ->assertJsonPath('user.id', $user->id);
+        ->assertJsonPath('user.id', $user->id)
+        // The Manage hub's "Edit Company" row pushes straight to
+        // /vendors/{vendor_id}/edit — needs this on every /me response.
+        ->assertJsonPath('user.vendor_id', $user->primary_vendor_id);
 
     expect($user->tokens()->count())->toBe(1);
     expect($user->tokens()->first()->abilities)->toBe(['app']);

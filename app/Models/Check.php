@@ -237,6 +237,27 @@ class Check extends Model
 
     protected function resolvePayeeUrl(): ?string
     {
+        $route = $this->payeeRoute();
+
+        if ($route === null) {
+            return null;
+        }
+
+        return $route['type'] === 'vendor'
+            ? route('vendors.show', $route['id'])
+            : route('users.show', $route['id']);
+    }
+
+    /**
+     * The payee's id and type (vendor vs. user) — the same precedence
+     * resolvePayeeUrl() builds its web route from (a via-vendor before the
+     * user, then the vendor), exposed so API clients (the app) can link
+     * there themselves instead of following a web URL.
+     *
+     * @return array{type: 'vendor'|'user', id: int}|null
+     */
+    public function payeeRoute(): ?array
+    {
         if ($this->user_id && $this->user) {
             $userVendorPivot = $this->user->relationLoaded('vendors')
                 ? $this->user->vendors->firstWhere('id', auth()->user()?->vendor?->id)
@@ -248,14 +269,14 @@ class Check extends Model
 
             // owner() shows the via-vendor's business name here, so link there.
             if ($viaVendorId) {
-                return route('vendors.show', $viaVendorId);
+                return ['type' => 'vendor', 'id' => (int) $viaVendorId];
             }
 
-            return route('users.show', $this->user_id);
+            return ['type' => 'user', 'id' => (int) $this->user_id];
         }
 
         if ($this->vendor) {
-            return route('vendors.show', $this->vendor->id);
+            return ['type' => 'vendor', 'id' => (int) $this->vendor->id];
         }
 
         return null;

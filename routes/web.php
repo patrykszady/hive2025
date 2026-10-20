@@ -144,6 +144,15 @@ Route::get('checks/images/{image}/signed', function (\App\Models\CheckImage $ima
     return app(\App\Http\Controllers\ReceiptController::class)->original_receipt('checks', $image->image_filename);
 })->middleware('signed')->name('checks.image.signed');
 
+// A check's bank-statement PDF for the Hive Contractors app: a time-limited
+// signed link handed out by GET /api/app/v1/checks/{id} (see CheckResource),
+// so the app's check detail screen can show the same "View Full Statement"
+// file the web's checks.statement_pdf route serves from files/checks/files/
+// — see ReceiptController::original_receipt().
+Route::get('checks/statements/{filename}/signed', function (string $filename) {
+    return app(\App\Http\Controllers\ReceiptController::class)->original_receipt('checks/files', $filename);
+})->middleware('signed')->name('checks.statement.signed');
+
 // An expense receipt scan for the Hive Contractors app: a time-limited
 // signed link handed out by GET/POST /api/app/v1/expenses/{id} (see
 // ExpenseResource), so the app's expense detail screen can show the

@@ -259,6 +259,10 @@ class AppTimesheetDirectory
                     'hours' => (float) $row->hours,
                     'project' => $row->project ? ['id' => $row->project->id, 'name' => $row->project->name] : null,
                     'payment' => $this->paymentLabel($row),
+                    // The web's Amount/Payment cells both link straight to the
+                    // paying check (timesheets/show.blade.php:40-71) — null
+                    // once this week has no check yet.
+                    'check_id' => $row->check_id,
                     'status' => $status,
                 ];
             })->values()->all(),

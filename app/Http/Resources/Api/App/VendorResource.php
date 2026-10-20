@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\URL;
 
 /**
  * A vendor as the app's Vendors tab shows it. With withDetail() it adds
@@ -353,7 +354,7 @@ class VendorResource extends JsonResource
      * verification summary the card's "Verified" column reads
      * (VendorDoc::getVerificationSummaryAttribute()).
      *
-     * @return list<array{id: int, type: string, type_label: string, expiration_date: ?string, number: ?string, verified: bool, verified_at: ?string, alert: bool, tip: string}>
+     * @return list<array{id: int, type: string, type_label: string, expiration_date: ?string, number: ?string, verified: bool, verified_at: ?string, alert: bool, tip: string, file_url: ?string}>
      */
     private function documents(Vendor $vendor): array
     {
@@ -378,6 +379,12 @@ class VendorResource extends JsonResource
                 'verified_at' => $verification['verified_at'] ?? null,
                 'alert' => (bool) ($verification['alert'] ?? false),
                 'tip' => (string) ($verification['tip'] ?? ''),
+                // The web's per-row "View" link (vendor-docs/_doc-row.blade.php:5-12) —
+                // same signed file route VendorDocResource gives the Manage
+                // hub's own Vendor Documents screen.
+                'file_url' => $doc->doc_filename
+                    ? URL::temporarySignedRoute('vendor-docs.file.signed', now()->addHours(24), ['vendorDoc' => $doc->id])
+                    : null,
             ];
         })->values()->all();
     }
