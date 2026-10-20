@@ -7,24 +7,61 @@ use App\Http\Controllers\ReceiptController;
 use App\Models\Expense;
 use App\Models\Vendor;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Captures a receipt photo straight into a brand-new Expense via OCR —
- * exactly App\Livewire\Expenses\ExpenseCreate::uploadReceipt()'s "Upload
- * Receipt" quick-capture flow (amount/date/vendor/invoice read off the
- * receipt, no project chosen yet; the user fills in the rest on the edit
- * form that opens next). ExpenseCreate now delegates to this, same as
- * App\Services\Projects\ProjectMaterialsUploader does for
- * App\Livewire\Projects\ProjectMaterials — shared with the Hive Contractors
- * app's own quick-capture endpoint (Api\App\V1\QuickReceiptController) so
- * both produce the same Expense + OCR'd ExpenseReceipts row.
+ * Reads a receipt photo via OCR for "Upload Receipt" (amount/date/vendor/
+ * invoice off the receipt, no project chosen yet). The web's
+ * App\Livewire\Expenses\ExpenseCreate::uploadReceipt() read()s it, parks it
+ * with hold() and opens the new-expense form filled in — nothing is saved
+ * until the user presses Create, which attach()es the receipt. The app's
+ * quick capture (Api\App\V1\QuickReceiptController) still capture()s
+ * straight into an Expense. Both produce the same Expense + OCR'd
+ * ExpenseReceipts row, the way App\Services\Projects\ProjectMaterialsUploader
+ * is shared by App\Livewire\Projects\ProjectMaterials and the app.
  */
 class QuickReceiptCapture
 {
-    /** @throws ValidationException on an invalid "belongs to vendor" id or a failed OCR read */
+    /** How long a receipt read by the web's "Upload Receipt" waits for its Create. */
+    public const PENDING_TTL_HOURS = 24;
+
+    /**
+     * Reads the receipt into a brand-new Expense in one go — the app's
+     * quick-capture endpoint, which then opens the expense for editing.
+     *
+     * @throws ValidationException on an invalid "belongs to vendor" id or a failed OCR read
+     */
     public function capture(UploadedFile $file, bool $isMaterialOrder, ?int $belongsToVendorId, int $hubVendorId, int $actingUserId): Expense
+    {
+        $draft = $this->read($file, $isMaterialOrder, $belongsToVendorId, $hubVendorId);
+
+        $expense = Expense::create([
+            'amount' => $draft['fields']['amount'],
+            'date' => $draft['fields']['date'],
+            'invoice' => $draft['fields']['invoice'],
+            'vendor_id' => $draft['fields']['vendor_id'],
+            'belongs_to_vendor_id' => $draft['fields']['belongs_to_vendor_id'],
+            'created_by_user_id' => $actingUserId,
+        ]);
+
+        $this->attach($expense, $draft);
+
+        return $expense;
+    }
+
+    /**
+     * Reads a receipt without creating anything: the expense fields it fills
+     * (amount/date/vendor/invoice off the receipt) and the OCR result, with
+     * the file kept in _temp_ocr until attach() files it under an expense.
+     *
+     * @return array{fields: array{amount: mixed, date: string, invoice: ?string, vendor_id: ?int, belongs_to_vendor_id: int, merchant_name: ?string}, ocr: array<string, mixed>, ocr_filename: string, is_material_order: bool}
+     *
+     * @throws ValidationException on an invalid "belongs to vendor" id or a failed OCR read
+     */
+    public function read(UploadedFile $file, bool $isMaterialOrder, ?int $belongsToVendorId, int $hubVendorId): array
     {
         // belongs_to_vendor_id is client-chosen — whitelist it to the hub
         // vendor or a vendor already linked to it (same set the "Belongs To
@@ -69,24 +106,77 @@ class QuickReceiptCapture
             }
         }
 
-        $ownerVendorId = ($isMaterialOrder && $belongsToVendorId) ? $belongsToVendorId : $hubVendorId;
+        return [
+            'fields' => [
+                'amount' => $fields['total'] ?? 0,
+                'date' => $fields['transaction_date'] ?? now()->format('Y-m-d'),
+                'invoice' => $fields['invoice_number'] ?? null,
+                'vendor_id' => $vendorId,
+                'belongs_to_vendor_id' => ($isMaterialOrder && $belongsToVendorId) ? $belongsToVendorId : $hubVendorId,
+                'merchant_name' => is_string($merchantName) ? $merchantName : null,
+            ],
+            'ocr' => $ocrData,
+            'ocr_filename' => $ocrFilename,
+            'is_material_order' => $isMaterialOrder,
+        ];
+    }
 
-        $expense = Expense::create([
-            'amount' => $fields['total'] ?? 0,
-            'date' => $fields['transaction_date'] ?? now()->format('Y-m-d'),
-            'invoice' => $fields['invoice_number'] ?? null,
-            'vendor_id' => $vendorId,
-            'belongs_to_vendor_id' => $ownerVendorId,
-            'created_by_user_id' => $actingUserId,
-        ]);
-
-        // Save the receipt data.
+    /**
+     * Files a read receipt under its expense (the OCR'd ExpenseReceipts row)
+     * and drops the temp file.
+     *
+     * @param  array{ocr: array<string, mixed>, ocr_filename: string, is_material_order: bool}  $draft
+     */
+    public function attach(Expense $expense, array $draft): void
+    {
         app(CompanyEmailController::class)
-            ->saveExpenseReceipt($expense->id, $ocrData, $ocrFilename, null, false, $isMaterialOrder);
+            ->saveExpenseReceipt($expense->id, $draft['ocr'], $draft['ocr_filename'], null, false, $draft['is_material_order']);
 
-        // Clean up temp file.
-        Storage::disk('files')->delete($ocrPath);
+        $this->discard($draft);
+    }
 
-        return $expense;
+    /** @param  array{ocr_filename: string}  $draft */
+    public function discard(array $draft): void
+    {
+        Storage::disk('files')->delete('_temp_ocr/'.$draft['ocr_filename']);
+    }
+
+    /**
+     * Parks a read receipt until the user presses Create on the new-expense
+     * form. The token lives in that form, so it is scoped to the user who
+     * uploaded the receipt: another user's token reads nothing.
+     *
+     * @param  array<string, mixed>  $draft
+     */
+    public function hold(array $draft, int $userId): string
+    {
+        $token = Str::random(40);
+
+        Cache::put($this->pendingKey($token, $userId), $draft, now()->addHours(self::PENDING_TTL_HOURS));
+
+        return $token;
+    }
+
+    /** @return array<string, mixed>|null the parked receipt, removed from the cache */
+    public function release(string $token, int $userId): ?array
+    {
+        $draft = Cache::pull($this->pendingKey($token, $userId));
+
+        return is_array($draft) ? $draft : null;
+    }
+
+    /** Drops a parked receipt the user walked away from, temp file and all. */
+    public function forget(string $token, int $userId): void
+    {
+        $draft = $this->release($token, $userId);
+
+        if ($draft) {
+            $this->discard($draft);
+        }
+    }
+
+    private function pendingKey(string $token, int $userId): string
+    {
+        return "expense-receipt-pending:{$userId}:{$token}";
     }
 }

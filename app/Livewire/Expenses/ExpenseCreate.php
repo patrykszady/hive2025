@@ -235,6 +235,7 @@ class ExpenseCreate extends Component
     public function newExpense($amount)
     {
         $this->hydrated = true;
+        $this->forgetPendingReceipt();
         $this->clearCheckFields();
         $this->expense = Expense::make();
        
@@ -283,6 +284,7 @@ class ExpenseCreate extends Component
 
     public function resetModal()
     {
+        $this->forgetPendingReceipt();
         $this->expense = Expense::make();
         $this->form->reset();
         $this->clearCheckFields();
@@ -591,6 +593,13 @@ class ExpenseCreate extends Component
         }
     }
 
+    /**
+     * "Upload Receipt": reads the receipt and opens the new-expense form
+     * filled in from it. Nothing is saved until Create is pressed — the read
+     * receipt waits in the form (form.pending_receipt) and is filed under the
+     * expense by ExpenseForm::store(). It used to create the expense right
+     * here, so a receipt became an expense before anyone looked at it.
+     */
     public function uploadReceipt(): void
     {
         $this->validate([
@@ -601,15 +610,14 @@ class ExpenseCreate extends Component
             'upload_file.max' => 'File must be less than 20MB.',
         ]);
 
-        $hubVendorId = auth()->user()->vendor->id;
+        $receiptCapture = app(\App\Services\Expenses\QuickReceiptCapture::class);
 
         try {
-            $expense = app(\App\Services\Expenses\QuickReceiptCapture::class)->capture(
+            $draft = $receiptCapture->read(
                 $this->upload_file,
                 $this->upload_is_material_order,
                 $this->upload_belongs_to_vendor_id ? (int) $this->upload_belongs_to_vendor_id : null,
-                $hubVendorId,
-                auth()->id(),
+                auth()->user()->vendor->id,
             );
         } catch (\Illuminate\Validation\ValidationException $exception) {
             // Same error-bag keys the inline checks used to add directly:
@@ -623,25 +631,52 @@ class ExpenseCreate extends Component
             return;
         }
 
+        $isMaterialOrder = $this->upload_is_material_order;
+
         // Reset upload fields
         $this->upload_file = null;
         $this->upload_is_material_order = false;
         $this->upload_belongs_to_vendor_id = null;
         $this->modal('upload_receipt_modal')->close();
 
-        // Set up edit state directly (avoid resetModal which close+show same-request conflict)
-        $this->expense = $expense;
-        $this->form->setExpense($expense);
+        // A fresh new-expense form, set up directly (resetModal would close
+        // the modal this same request shows).
+        $this->forgetPendingReceipt();
+        $this->expense = Expense::make();
+        $this->form->reset();
+        $this->clearCheckFields();
+        $this->existing_check_id = null;
+        $this->split = false;
+        $this->splits = false;
+        $this->expense_splits = [];
+        $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
+
+        $this->form->amount = $draft['fields']['amount'];
+        $this->form->date = $draft['fields']['date'];
+        $this->form->invoice = $draft['fields']['invoice'];
+        $this->form->vendor_id = $draft['fields']['vendor_id'];
+        $this->form->merchant_name = $draft['fields']['merchant_name'];
+        $this->form->is_material_order = $isMaterialOrder;
+        $this->form->belongs_to_vendor_id = $isMaterialOrder ? $draft['fields']['belongs_to_vendor_id'] : null;
+        $this->form->pending_receipt = $receiptCapture->hold($draft, auth()->id());
+
         $this->view_text = [
-            'card_title' => 'Update Expense',
-            'button_text' => 'Update',
-            'form_submit' => 'edit',
+            'card_title' => 'Create Expense',
+            'button_text' => 'Create',
+            'form_submit' => 'save',
         ];
         if (! $this->embedded) {
             $this->modal('expenses_form_modal')->show();
         }
+    }
 
-        $this->dispatch('refreshComponent')->to(ExpenseIndex::class);
+    /** Drops a receipt read by "Upload Receipt" that never got its Create. */
+    protected function forgetPendingReceipt(): void
+    {
+        if ($this->form->pending_receipt) {
+            app(\App\Services\Expenses\QuickReceiptCapture::class)->forget($this->form->pending_receipt, (int) auth()->id());
+            $this->form->pending_receipt = null;
+        }
     }
 
     public function render()

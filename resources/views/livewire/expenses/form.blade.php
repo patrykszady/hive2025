@@ -269,6 +269,9 @@
                 <div x-data="{ receipts: @entangle('form.receipts')}" x-show="receipts">
                     <flux:description><i>Receipt Existing</i></flux:description>
                 </div>
+                @if($form->pending_receipt)
+                    <flux:description><i>Receipt read from Upload Receipt — saved with the expense on Create</i></flux:description>
+                @endif
                 <div x-data="{ receipt: @entangle('form.receipt_file')}" x-show="receipt" wire:loading.remove wire:target="form.receipt_file">
                     <flux:description wire:loaded wire:target="form.receipt_file"><i>Receipt Uploaded</i></flux:description>
                 </div>

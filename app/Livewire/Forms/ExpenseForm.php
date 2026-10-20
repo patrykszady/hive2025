@@ -78,6 +78,13 @@ class ExpenseForm extends Form
     // #[Validate]
     public $receipt_file = null;
 
+    /**
+     * Token of the receipt "Upload Receipt" already read (parked by
+     * App\Services\Expenses\QuickReceiptCapture::hold()); store() files it
+     * under the new expense, so nothing exists until Create is pressed.
+     */
+    public ?string $pending_receipt = null;
+
     public function rules()
     {
         return [];
@@ -575,6 +582,19 @@ class ExpenseForm extends Form
             }
 
             $this->transaction->save();
+        }
+
+        if ($this->pending_receipt) {
+            $receiptCapture = app(\App\Services\Expenses\QuickReceiptCapture::class);
+
+            // A file picked on the form itself replaces the uploaded one.
+            if ($this->receipt_file) {
+                $receiptCapture->forget($this->pending_receipt, auth()->id());
+            } elseif ($draft = $receiptCapture->release($this->pending_receipt, auth()->id())) {
+                $receiptCapture->attach($expense, $draft);
+            }
+
+            $this->pending_receipt = null;
         }
 
         if ($this->receipt_file) {
