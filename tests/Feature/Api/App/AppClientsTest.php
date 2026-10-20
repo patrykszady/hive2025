@@ -92,6 +92,31 @@ it('lists this vendor\'s clients newest first, with their people and project cou
         ->and($newerRow['web_path'])->toBe('/clients/'.$newer->id);
 });
 
+it('sorts the clients list by Created asc/desc via sort/direction, like ClientsTable::sort()', function () {
+    ['vendor' => $vendor, 'user' => $user] = appClientsTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    // Narrow to just these two with a search term (a plain vendor-1 listing
+    // also carries the seeded Pest clients — see test-db-has-seeded-users —
+    // which would otherwise crowd both backdated fixtures off page one);
+    // same reasoning as the Meilisearch-unavailable test above — force the
+    // plain LIKE fallback so the search is deterministic under test.
+    $older = appClientFixture($vendor, ['business_name' => 'ZzSortProbe Older Co', 'created_at' => now()->subDays(5)]);
+    $newer = appClientFixture($vendor, ['business_name' => 'ZzSortProbe Newer Co', 'created_at' => now()->subDay()]);
+
+    $this->mock(EngineManager::class, function ($mock) {
+        $mock->shouldReceive('engine')->andThrow(new RuntimeException('no search engine in tests'));
+    });
+
+    $desc = $this->getJson('/api/app/v1/clients?'.http_build_query(['search' => 'ZzSortProbe', 'sort' => 'created_at', 'direction' => 'desc']))->assertOk();
+    expect(collect($desc->json('data'))->pluck('id')->all())->toBe([$newer->id, $older->id])
+        ->and($desc->json('direction'))->toBe('desc');
+
+    $asc = $this->getJson('/api/app/v1/clients?'.http_build_query(['search' => 'ZzSortProbe', 'sort' => 'created_at', 'direction' => 'asc']))->assertOk();
+    expect(collect($asc->json('data'))->pluck('id')->all())->toBe([$older->id, $newer->id])
+        ->and($asc->json('direction'))->toBe('asc');
+});
+
 it('searches by business name, address, phone, or a person\'s name when Meilisearch is unavailable', function () {
     ['vendor' => $vendor, 'user' => $user] = appClientsTeam();
     Sanctum::actingAs($user, ['app']);

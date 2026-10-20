@@ -27,6 +27,7 @@ Route::get('estimates', [EstimateController::class, 'index'])->name('estimates.i
 Route::post('estimates', [EstimateController::class, 'store'])->name('estimates.store');
 Route::get('estimates/{estimate}', [EstimateController::class, 'show'])->whereNumber('estimate')->name('estimates.show');
 Route::delete('estimates/{estimate}', [EstimateController::class, 'destroy'])->whereNumber('estimate')->name('estimates.destroy');
+Route::delete('estimates/{estimate}/permanent', [EstimateController::class, 'forceDelete'])->whereNumber('estimate')->name('estimates.force-delete');
 Route::post('estimates/{estimate}/restore', [EstimateController::class, 'restore'])->whereNumber('estimate')->name('estimates.restore');
 Route::post('estimates/{estimate}/duplicate', [EstimateController::class, 'duplicate'])->whereNumber('estimate')->name('estimates.duplicate');
 Route::get('estimates/{estimate}/pdf-url', [EstimateController::class, 'pdfUrl'])->whereNumber('estimate')->name('estimates.pdf-url');

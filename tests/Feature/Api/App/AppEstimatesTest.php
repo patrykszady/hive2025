@@ -297,6 +297,58 @@ it('disables (soft-deletes) and restores an estimate', function () {
     expect($estimate->fresh()->trashed())->toBeFalse();
 });
 
+it('refuses to permanently delete an estimate that is still active', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    $this->deleteJson("/api/app/v1/estimates/{$estimate->id}/permanent")->assertStatus(422);
+
+    expect(Estimate::withTrashed()->find($estimate->id))->not->toBeNull();
+});
+
+it('permanently deletes a disabled estimate and its sections/line items/allowances, like the trashed branch of removeEstimate()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalogItem = appEstimatesCatalogItem();
+    $lineItem = appEstimatesLineItemRow($estimate, $section, $catalogItem);
+    $allowance = $lineItem->allowances()->create(['description' => 'Allowance', 'amount' => 20]);
+
+    $this->deleteJson("/api/app/v1/estimates/{$estimate->id}")->assertOk();
+    expect($estimate->fresh()->trashed())->toBeTrue();
+
+    $this->deleteJson("/api/app/v1/estimates/{$estimate->id}/permanent")
+        ->assertOk()
+        ->assertJsonPath('data.deleted', true);
+
+    expect(Estimate::withTrashed()->find($estimate->id))->toBeNull()
+        ->and(EstimateSection::withTrashed()->find($section->id))->toBeNull()
+        ->and(EstimateLineItem::withTrashed()->find($lineItem->id))->toBeNull()
+        ->and(\App\Models\EstimateLineItemAllowance::withTrashed()->find($allowance->id))->toBeNull();
+});
+
+it('refuses a Member permanently deleting an estimate, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appEstimatesTeamUser(role: 2);
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $estimate->delete();
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->deleteJson("/api/app/v1/estimates/{$estimate->id}/permanent")->assertForbidden();
+
+    expect(Estimate::withTrashed()->find($estimate->id))->not->toBeNull();
+});
+
 // --- Duplicate -----------------------------------------------------------
 
 it('duplicates a whole estimate with its sections, line items and allowances', function () {

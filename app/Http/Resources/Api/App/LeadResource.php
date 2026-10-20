@@ -56,7 +56,21 @@ class LeadResource extends JsonResource
             ],
             'client' => $client ? ['id' => $client->id, 'name' => $client->name] : null,
             'feedback_count' => $this->whenCounted('feedback', fn () => $this->feedback_count, null),
-            'has_feedback' => $lead->relationLoaded('feedback') ? $lead->feedback->isNotEmpty() : null,
+            // The list query withCount()s feedback but never loads the
+            // relation itself (too expensive per row); the detail query
+            // loads the relation but never counts it. Prefer whichever one
+            // this lead actually has, so the list's "Left feedback" icon
+            // (leads/index.blade.php's `@if ($lead->feedback_count > 0)`)
+            // shows under the same condition here as it does on the web.
+            'has_feedback' => $lead->relationLoaded('feedback')
+                ? $lead->feedback->isNotEmpty()
+                : $this->whenCounted('feedback', fn () => $this->feedback_count > 0, null),
+            // The "Last" column — the latest status's date, but only for a
+            // status that isn't one of the lifecycle bookends (mirrors
+            // leads/index.blade.php's `@if($lead->last_status && !in_array(...))`).
+            'last_status_at' => ($lead->last_status !== null && ! in_array($status, ['New', 'Won', 'Lost', 'Not a Fit'], true))
+                ? $lead->last_status->created_at?->toIso8601String()
+                : null,
             'created_at' => $lead->created_at?->toIso8601String(),
             'web_path' => '/leads?lead='.$lead->id,
         ];
