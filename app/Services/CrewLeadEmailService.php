@@ -266,6 +266,14 @@ class CrewLeadEmailService
             'mailbox' => $mailbox,
         ]);
 
+        // A client writing about a problem on finished work is a service
+        // call, not a lead reply: open it (once per email, whichever path
+        // sees it first) and stop here so no old lead is put back in front
+        // of the team.
+        if ($this->openServiceCallFrom($message, $mailbox)) {
+            return 'service_call';
+        }
+
         // Same dedupe ledger the crew@ ingest uses — a reply CC'd to crew@ is
         // captured once, whichever sweep or webhook sees it first.
         if (CrewEmailIngest::where('nylas_message_id', $nylasId)->exists()) {
@@ -320,6 +328,39 @@ class CrewLeadEmailService
         ]);
 
         return 'filed';
+    }
+
+    /**
+     * Hand one inbound message to the service-call intake. True when it is
+     * (or already was) a client's service request that opened a call.
+     */
+    protected function openServiceCallFrom(array $message, string $mailbox): bool
+    {
+        $from = $message['from'][0] ?? [];
+        $headers = $this->headerMap($message);
+
+        try {
+            $decision = app(\App\Services\ServiceCalls\ServiceCallEmailIntake::class)->consider([
+                'message_key' => $this->externalId($message, ['nylas_message_id' => (string) ($message['id'] ?? '')]),
+                'nylas_message_id' => $message['id'] ?? null,
+                'thread_id' => $message['thread_id'] ?? null,
+                'mailbox' => $mailbox,
+                'from_email' => (string) ($from['email'] ?? ''),
+                'from_name' => $from['name'] ?? null,
+                'to' => array_column($message['to'] ?? [], 'email'),
+                'cc' => array_column($message['cc'] ?? [], 'email'),
+                'subject' => (string) ($message['subject'] ?? ''),
+                'body' => $this->plainBody($message),
+                'rfc_message_id' => $headers['message-id'] ?? null,
+                'received_at' => isset($message['date']) ? now()->setTimestamp((int) $message['date']) : null,
+            ]);
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Service call intake failed on an inbound message', ['error' => $e->getMessage()]);
+
+            return false;
+        }
+
+        return (bool) $decision?->isOpened();
     }
 
     /** The grant's mailbox address, cached a day (it never changes in practice). */
@@ -400,6 +441,16 @@ class CrewLeadEmailService
         // Already handled on an earlier run.
         if (! $dryRun && $nylasId !== '' && CrewEmailIngest::where('nylas_message_id', $nylasId)->exists()) {
             return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => 'already_ingested'];
+        }
+
+        if (! $dryRun && $this->openServiceCallFrom($message, $mailbox)) {
+            CrewEmailIngest::updateOrCreate(['nylas_message_id' => $nylasId], $base + [
+                'status' => CrewEmailIngest::STATUS_SKIPPED,
+                'skip_reason' => 'service_call',
+                'is_lead' => false,
+            ]);
+
+            return $summary + ['status' => CrewEmailIngest::STATUS_SKIPPED, 'reason' => 'service_call'];
         }
 
         if ($reason = $this->triage($fromEmail, $subject, $body, $message)) {
@@ -993,7 +1044,7 @@ TXT;
     }
 
     /** Our own mailboxes and domains — never a lead's address. */
-    protected function isOurAddress(string $email): bool
+    public function isOurAddress(string $email): bool
     {
         $domain = Str::after($email, '@');
 

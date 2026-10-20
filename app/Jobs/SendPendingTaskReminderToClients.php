@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\PendingTasksReminderEmail;
 use App\Models\Project;
+use App\Models\ServiceCallEmail;
 use App\Models\Task;
 use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -80,6 +81,17 @@ class SendPendingTaskReminderToClients implements ShouldQueue, ShouldBeUnique
             ->where('created_at', '>=', now()->subMinutes(20))
             ->orderBy('created_at')
             ->get();
+
+        // A service call opened from the client's own email already answered
+        // them with the schedule link; "we'll let you know when it's
+        // scheduled" on top of it would contradict that.
+        $announced = ServiceCallEmail::query()
+            ->whereIn('task_id', $pendingTasks->pluck('id'))
+            ->where('outcome', ServiceCallEmail::OUTCOME_OPENED)
+            ->pluck('task_id')
+            ->all();
+
+        $pendingTasks = $pendingTasks->reject(fn (Task $task) => in_array($task->id, $announced))->values();
 
         if ($pendingTasks->isEmpty()) {
             Log::info('SendPendingTaskReminderToClients: No recent pending tasks', [

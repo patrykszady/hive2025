@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Lead;
+use App\Models\ServiceCallEmail;
 use Illuminate\Support\Facades\Log;
 use App\Services\CrewLeadEmailService;
 use App\Services\LeadAddressCompleter;
+use App\Services\ServiceCalls\ServiceCallEmailIntake;
 use App\Services\LeadContactProvisioner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -148,6 +150,12 @@ class LeadsController extends Controller
         $date = ! empty($data['submitted_at'])
             ? Carbon::parse($data['submitted_at'])
             : now();
+
+        // A client writing about a problem on finished work is a service
+        // call, not a lead — whichever reader saw the email first.
+        if ($isEmail && ($serviceCall = $this->openServiceCall($data, $externalId, $date, $vendorId))) {
+            return $this->serviceCallResponse($serviceCall, $data, $externalSource, $externalId, $date, $vendorId, $user->id);
+        }
 
         $message = (string) ($data['message'] ?? '');
         $subject = trim((string) ($data['subject'] ?? ''));
@@ -299,6 +307,85 @@ class LeadsController extends Controller
             'data' => ['id' => $lead->id],
             'created' => true,
         ], 201);
+    }
+
+    /**
+     * Run the service-call intake on an email lead the site pushed. Returns
+     * the decision when the email opened (now, or earlier from Hive's own
+     * inbox reader) a service call.
+     */
+    protected function openServiceCall(array $data, string $externalId, Carbon $date, int $vendorId): ?ServiceCallEmail
+    {
+        $intake = app(ServiceCallEmailIntake::class);
+
+        if ($opened = $intake->openedFor($externalId)) {
+            return $opened;
+        }
+
+        $decision = $intake->consider([
+            'message_key' => $externalId,
+            'mailbox' => $data['extracted']['mailbox'] ?? null,
+            'from_email' => (string) ($data['email'] ?? ''),
+            'from_name' => $data['name'] ?? null,
+            'cc' => (array) ($data['extracted']['cc_emails'] ?? []),
+            'subject' => (string) ($data['subject'] ?? ''),
+            'body' => (string) ($data['message'] ?? ''),
+            'rfc_message_id' => $data['in_reply_to'] ?? null,
+            'received_at' => $date,
+            'vendor_id' => $vendorId,
+        ]);
+
+        return $decision?->isOpened() ? $decision : null;
+    }
+
+    /**
+     * The site needs a lead id for every email it pushes (it stores it, and
+     * may withdraw it later). A service-call email gets one that is archived
+     * at birth: on record, never in the Leads list, never provisioned or
+     * asked for missing details.
+     */
+    protected function serviceCallResponse(ServiceCallEmail $serviceCall, array $data, string $externalSource, string $externalId, Carbon $date, int $vendorId, int $userId): JsonResponse
+    {
+        $lead = Lead::onlyTrashed()
+            ->where('external_source', $externalSource)
+            ->where('external_id', $externalId)
+            ->first();
+
+        if (! $lead) {
+            // Without model events: LeadObserver would announce a "New Lead"
+            // to every admin and mirror it back to the site.
+            $lead = Lead::withoutEvents(fn () => Lead::create([
+                'date' => $date,
+                'origin' => 'Email',
+                'external_source' => $externalSource,
+                'external_id' => $externalId,
+                'notes' => Str::limit('Service call (project '.$serviceCall->project_id.') — '.trim((string) ($data['subject'] ?? '')), 250),
+                'lead_data' => array_filter([
+                    'name' => $data['name'] ?? null,
+                    'email' => $data['email'] ?? null,
+                    'subject' => $data['subject'] ?? null,
+                    'message' => $data['message'] ?? null,
+                    'service_call_project_id' => $serviceCall->project_id,
+                    'service_call_task_id' => $serviceCall->task_id,
+                    'submitted_at' => $date->toIso8601String(),
+                ], fn ($value) => $value !== null && $value !== ''),
+                'user_id' => $serviceCall->user_id,
+                'belongs_to_vendor_id' => $vendorId,
+                'created_by_user_id' => $userId,
+            ]));
+            $lead->delete();
+        }
+
+        Log::info('Email lead was a client service request — opened a service call instead', [
+            'lead_id' => $lead->id,
+            'project_id' => $serviceCall->project_id,
+        ]);
+
+        return response()->json([
+            'data' => ['id' => $lead->id],
+            'created' => false,
+            'service_call' => ['project_id' => $serviceCall->project_id, 'task_id' => $serviceCall->task_id],
+        ], 200);
     }
 
     /**

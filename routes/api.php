@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\App\V1\WebSessionController as AppWebSessionControl
 use App\Http\Controllers\Api\LeadsController;
 use App\Http\Controllers\Api\MailboxesController;
 use App\Http\Controllers\Api\ProjectZipCountsController;
+use App\Http\Controllers\Api\ServiceCallEmailController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', 'throttle:api'])
@@ -37,6 +38,11 @@ Route::middleware(['auth:sanctum', 'throttle:api'])
         // email enquiries (see MailboxesController).
         Route::get('mailboxes', MailboxesController::class)
             ->name('api.v1.mailboxes');
+
+        // Asked by the site's mail reader before it files an email as a lead:
+        // a client's service request opens a service call here instead.
+        Route::post('service-calls/from-email', ServiceCallEmailController::class)
+            ->name('api.v1.service-calls.from-email');
     });
 
 /*
