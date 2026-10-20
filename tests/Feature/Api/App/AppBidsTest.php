@@ -95,6 +95,27 @@ it('lets an Admin add an original bid and a change order', function () {
         ->and(Bid::withoutGlobalScopes()->where('project_id', $project->id)->count())->toBe(2);
 });
 
+it('lists existing bids as Original Bid then Change Order 1, like BidCreate::addBids()', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsBidsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsBidsProject($vendor);
+
+    $this->postJson("/api/app/v1/projects/{$project->id}/vendors/{$vendor->id}/bids", [
+        'bids' => [['amount' => 15000, 'type' => 1], ['amount' => 2000, 'type' => 2]],
+    ])->assertCreated();
+
+    $this->getJson("/api/app/v1/projects/{$project->id}/vendors/{$vendor->id}/bids")
+        ->assertOk()
+        ->assertJsonCount(2, 'data')
+        ->assertJsonPath('data.0.name', 'Original Bid')
+        ->assertJsonPath('data.0.amount', 15000)
+        ->assertJsonPath('data.0.project_id', $project->id)
+        ->assertJsonPath('data.0.vendor_id', $vendor->id)
+        ->assertJsonPath('data.1.name', 'Change Order 1')
+        ->assertJsonPath('data.1.amount', 2000);
+});
+
 it('blocks a Member and a 1099 vendor from writing bids, like BidPolicy::create', function () {
     ['vendor' => $vendor, 'user' => $member] = appJobsBidsTeamUser(2);
     Sanctum::actingAs($member, ['app']);

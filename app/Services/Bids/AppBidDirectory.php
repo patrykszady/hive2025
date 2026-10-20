@@ -25,7 +25,7 @@ class AppBidDirectory
             ->orderBy('type')
             ->get()
             ->values()
-            ->map(function ($bid, int $key) use ($viewingVendorId) {
+            ->map(function ($bid, int $key) use ($project, $vendor, $viewingVendorId) {
                 $belongsToViewingVendor = (int) $bid->vendor_id === $viewingVendorId;
                 $hasEstimateSections = $bid->estimate_sections->where('bid_id', $bid->id)->isNotEmpty();
 
