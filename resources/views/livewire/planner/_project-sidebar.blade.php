@@ -13,10 +13,11 @@
         $showStatus       – hide the status badge (narrow weekend columns)
         $showPending      – hide the chip (cards view shows the shared
                             pending-tasks CARD inside the column instead)
-        $showActions      – same for the "from calls & texts" chip (the cards
-                            view shows the shared action-items CARD instead)
-        $actionCount      – open action items from calls & texts (defaults to
-                            the component's per-project count)
+        $showActions      – same for the "from calls, texts & email" chip
+                            (the cards view shows the shared action-items
+                            CARD instead)
+        $actionCount      – open action items from calls, texts & email
+                            (defaults to the component's per-project count)
 --}}
 @php
     $latestStatus = $project->latestStatus;
@@ -60,7 +61,9 @@
 
 {{-- Two lines, never three: the client on the left, the two counts as
      icon chips on the right (their meaning in the tooltip). The third line of
-     "1 pending · 93 from calls & texts" overflowed the timeline's rows. --}}
+     "1 pending · 93 from calls & texts" overflowed the timeline's rows, so
+     the chip itself stays a bare count — only the tooltip spells out
+     "calls, texts & email". --}}
 <div class="flex items-center gap-1.5 min-w-0">
     <div class="flex-1 min-w-0 text-xs text-zinc-500 dark:text-zinc-400 truncate">
         {{ $project->client->last_names ?? '' }}{{ $project->project_name ? ' | ' . $project->project_name : '' }}
@@ -78,13 +81,13 @@
         </flux:tooltip>
     @endif
     @if ($showActions && $actionCount > 0)
-        {{-- What the client's calls and texts asked for (ProjectActionItem). --}}
-        <flux:tooltip :content="$actionCount . ' ' . \Illuminate\Support\Str::plural('to-do', $actionCount) . ' from calls & texts'" position="top">
+        {{-- What the client's calls, texts and email asked for (ProjectActionItem). --}}
+        <flux:tooltip :content="$actionCount . ' ' . \Illuminate\Support\Str::plural('to-do', $actionCount) . ' from calls, texts & email'" position="top">
             <button
                 type="button"
                 x-on:click="window.dispatchEvent(new CustomEvent('open-action-items', { detail: { projectId: {{ (int) $projectId }} } }))"
                 class="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium tabular-nums rounded-md bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:hover:bg-sky-900/50 transition-colors"
-                aria-label="{{ $actionCount }} {{ \Illuminate\Support\Str::plural('to-do', $actionCount) }} from calls and texts"
+                aria-label="{{ $actionCount }} {{ \Illuminate\Support\Str::plural('to-do', $actionCount) }} from calls, texts and email"
             >
                 <flux:icon.chat-bubble-left-right variant="micro" class="size-3" />{{ $actionCount }}
             </button>

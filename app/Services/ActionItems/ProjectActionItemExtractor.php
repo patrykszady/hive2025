@@ -3,6 +3,7 @@
 namespace App\Services\ActionItems;
 
 use App\Models\CallLog;
+use App\Models\EmailMessage;
 use App\Models\Project;
 use App\Models\ProjectActionItem;
 use App\Models\ProjectActionItemScan;
@@ -17,14 +18,18 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * The action tasks a project's phone calls and text messages add up to.
+ * The action tasks a project's phone calls, text messages and stakeholder
+ * email add up to.
  *
- * Calls already carry action items (CallTranscript::action_items, written
- * by SummarizeCallTranscript); texts get one model pass per batch of
- * messages. Neither calls nor threads are tied to a project, only to its
- * client, so a project's conversations are its client's: the threads on the
- * client and the calls with the client's people (their user ids and phone
- * numbers).
+ * Calls and emails already carry action items (CallTranscript::action_items
+ * / EmailMessage::action_items, written by SummarizeCallTranscript and
+ * SummarizeEmailMessage); texts get one model pass per batch of messages.
+ * Neither calls nor threads are tied to a project, only to its client, so a
+ * project's conversations are its client's: the threads on the client and
+ * the calls with the client's people (their user ids and phone numbers).
+ * Email, unlike calls and texts, is only read once it is placed on this
+ * exact project (EmailMessage::project_id) — an email the AI could not
+ * confidently place on one of the client's projects is never guessed at.
  *
  * The same task tends to come up more than once ("send Mark the window
  * invoice" on a call, "did you send the invoice?" by text two days later),
@@ -33,8 +38,9 @@ use Illuminate\Support\Str;
  * that reports a task done closes it. Matching is by embedding similarity
  * when OpenAI is configured and by word overlap otherwise.
  *
- * Runs are incremental: each run starts after the last call and the last
- * message per thread an earlier run read (ProjectActionItemScan).
+ * Runs are incremental: each run starts after the last call, the last
+ * message per thread, and the last email an earlier run read
+ * (ProjectActionItemScan).
  */
 class ProjectActionItemExtractor
 {
@@ -60,7 +66,7 @@ class ProjectActionItemExtractor
     public function __construct(protected EmbeddingService $embeddings, protected ProjectActionItemConsolidator $consolidator) {}
 
     /**
-     * @return array{calls: int, messages: int, created: int, merged: int, done: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}
+     * @return array{calls: int, messages: int, emails: int, created: int, merged: int, done: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}
      */
     public function run(Project $project, ?CarbonInterface $since = null, bool $fresh = false, bool $review = false): array
     {
@@ -81,8 +87,9 @@ class ProjectActionItemExtractor
 
         [$callCandidates, $callCount, $lastCallId] = $this->callCandidates($project, $userIds, $phones, $since);
         [$textCandidates, $messageCount, $threadBookmarks] = $this->textCandidates($project, $client?->id, $since, $names);
+        [$emailCandidates, $emailCount, $lastEmailId] = $this->emailCandidates($project, $since);
 
-        $candidates = collect([...$callCandidates, ...$textCandidates])
+        $candidates = collect([...$callCandidates, ...$textCandidates, ...$emailCandidates])
             ->sortBy(fn (array $candidate) => $candidate['at']->getTimestamp())
             ->values()
             ->all();
@@ -102,8 +109,11 @@ class ProjectActionItemExtractor
         foreach ($threadBookmarks as $threadId => $lastMessageId) {
             ProjectActionItemScan::record($project->id, ProjectActionItemScan::KIND_SMS_THREAD, $threadId, $lastMessageId);
         }
+        if ($lastEmailId > 0) {
+            ProjectActionItemScan::record($project->id, ProjectActionItemScan::KIND_EMAILS, 0, $lastEmailId);
+        }
 
-        return ['calls' => $callCount, 'messages' => $messageCount] + $stats;
+        return ['calls' => $callCount, 'messages' => $messageCount, 'emails' => $emailCount] + $stats;
     }
 
     // ── Calls ────────────────────────────────────────────────────────────
@@ -275,6 +285,87 @@ class ProjectActionItemExtractor
                     ->orWhere('last_mentioned_at', '<', Carbon::now()->subDays($staleDays));
             })
             ->update(['status' => ProjectActionItem::STATUS_LAPSED]);
+    }
+
+    // ── Emails ───────────────────────────────────────────────────────────
+
+    /**
+     * Stakeholder email already carries action items from its own AI read
+     * (EmailMessage::action_items, written by SummarizeEmailMessage) — same
+     * format as a call's ("Patryk: Send the tile quote"), so the same
+     * splitOwner/isTransient/dueDateIn apply.
+     *
+     * Unlike calls and texts, email is read by project id directly, not by
+     * the client: an email the AI could not confidently place on one of the
+     * client's projects (project_id still null after it was read) is never
+     * guessed onto any of them.
+     *
+     * The bookmark can only advance past a contiguous run of already
+     * summarized emails. SummarizeEmailMessage runs on a queue and can
+     * finish out of order, so an earlier email that was still waiting on
+     * its AI read the last time this ran must still be read once it is —
+     * however many later emails have already been read past it.
+     *
+     * @return array{0: list<array<string, mixed>>, 1: int, 2: int} candidates, emails read, bookmark id
+     */
+    protected function emailCandidates(Project $project, ?CarbonInterface $since): array
+    {
+        $afterId = ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS);
+
+        $emails = EmailMessage::query()
+            ->where('project_id', $project->id)
+            ->where('id', '>', $afterId)
+            ->when($since, fn ($query) => $query->where('sent_at', '>=', $since))
+            ->orderBy('id')
+            ->get(['id', 'subject', 'sent_at', 'summarized_at', 'action_items']);
+
+        $candidates = [];
+        $count = 0;
+        $lastId = $afterId;
+        $blocked = false;
+
+        foreach ($emails as $email) {
+            if (! $email->summarized_at) {
+                // Still waiting on its AI read: freeze the bookmark here so a
+                // later run comes back for it once it is summarized.
+                $blocked = true;
+
+                continue;
+            }
+
+            if (! $blocked) {
+                $lastId = $email->id;
+            }
+            $count++;
+
+            foreach ((array) ($email->action_items ?? []) as $item) {
+                if (! is_string($item) || trim($item) === '') {
+                    continue;
+                }
+                [$owner, $title] = $this->splitOwner($item);
+                if (self::isTransient($title)) {
+                    continue;
+                }
+                $at = Carbon::parse($email->sent_at);
+                $candidates[] = [
+                    'title' => $title,
+                    'owner' => $owner,
+                    'due_on' => self::dueDateIn($title, $at),
+                    'kind' => 'todo',
+                    'at' => $at,
+                    'source' => [
+                        'kind' => 'email',
+                        'id' => $email->id,
+                        'thread_id' => null,
+                        'at' => $at->toIso8601String(),
+                        'excerpt' => Str::limit(trim($item), 180, ''),
+                        'subject' => $email->subject,
+                    ],
+                ];
+            }
+        }
+
+        return [$candidates, $count, $lastId];
     }
 
     // ── Texts ────────────────────────────────────────────────────────────

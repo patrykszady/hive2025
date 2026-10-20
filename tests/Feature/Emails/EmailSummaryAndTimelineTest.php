@@ -15,6 +15,7 @@ use App\Services\Communications\ProjectCommunicationsTimeline;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -23,6 +24,12 @@ require_once __DIR__.'/../../Support/service-call-fixtures.php';
 
 beforeEach(function () {
     config(['services.openai.api_key' => 'test-key', 'scout.driver' => null]);
+    // SummarizeEmailMessage queues ExtractProjectActionItems when it saves
+    // action items on a placed email — fake the queue so these tests, which
+    // call handle() directly, don't also run that extraction synchronously
+    // (QUEUE_CONNECTION=sync in testing) and send it through this file's
+    // single-purpose OpenAI fake.
+    Queue::fake();
 });
 
 it('summarizes an email like a call and places it on the project it is about', function () {

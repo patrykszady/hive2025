@@ -922,7 +922,7 @@ class CardsIndex extends Component
 
     /**
      * The Board's first column: projects with tasks still to schedule or open
-     * to-dos from their calls and texts, in planner order.
+     * to-dos from their calls, texts and email, in planner order.
      *
      * @return Collection<int, object{project: Project, undated: int, actions: int}>
      */
@@ -2497,10 +2497,11 @@ class CardsIndex extends Component
         return $map;
     }
 
-    // ── Action items from calls & texts ──────────────────────────────────
-    // What the client's calls and texts asked for and nobody has booked,
-    // done or dismissed yet (ProjectActionItemExtractor), per active project:
-    // a chip on the project column in every view, and a modal to act on them.
+    // ── Action items from calls, texts & email ───────────────────────────
+    // What the client's calls, texts and email asked for and nobody has
+    // booked, done or dismissed yet (ProjectActionItemExtractor), per active
+    // project: a chip on the project column in every view, and a modal to
+    // act on them.
 
     /**
      * Open item count per active project id.
@@ -2526,7 +2527,7 @@ class CardsIndex extends Component
     }
 
     /**
-     * The open items themselves for the "From calls & texts" modal, keyed
+     * The open items themselves for the "From calls, texts & email" modal, keyed
      * by project id: grouped by who is responsible (the signed-in person's
      * own first, then the company's, then the client's people), newest
      * mention first within a group; items older than config
@@ -2602,7 +2603,7 @@ class CardsIndex extends Component
         }
 
         $notes = collect($item->sources ?? [])
-            ->map(fn (array $source) => 'From a '.ProjectActionItem::sourceLabel($source).': '.($source['excerpt'] ?? ''))
+            ->map(fn (array $source) => 'From '.ProjectActionItem::sourceArticle($source).' '.ProjectActionItem::sourceLabel($source).': '.($source['excerpt'] ?? ''))
             ->implode("
 ");
 

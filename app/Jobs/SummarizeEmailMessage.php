@@ -91,10 +91,12 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
             $projectId = $picked;
         }
 
+        $actionItems = $this->list($parsed['action_items'] ?? []);
+
         $email->forceFill([
             'summary_model' => $model,
             'summary' => $this->text($parsed['summary'] ?? null, 2000),
-            'action_items' => $this->list($parsed['action_items'] ?? []),
+            'action_items' => $actionItems,
             'topics' => $this->list($parsed['topics'] ?? []),
             'next_steps' => $this->list($parsed['next_steps'] ?? []),
             'sentiment' => $this->text($parsed['sentiment'] ?? null, 16),
@@ -102,6 +104,13 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
             'project_id' => $projectId,
             'summarized_at' => now(),
         ])->save();
+
+        // New action items on a placed email: re-read the project's action
+        // list soon (ProjectActionItemExtractor), batching several emails
+        // that land close together into one pass.
+        if ($projectId && $actionItems !== []) {
+            ExtractProjectActionItems::dispatch($projectId)->delay(now()->addMinutes(10));
+        }
     }
 
     /**
