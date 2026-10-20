@@ -601,73 +601,27 @@ class ExpenseCreate extends Component
             'upload_file.max' => 'File must be less than 20MB.',
         ]);
 
-        // upload_belongs_to_vendor_id is client-chosen — whitelist it to the
-        // hub vendor or a vendor already linked to it (same set the "Belongs
-        // To Vendor" dropdown offers), never an arbitrary vendor id. Checked
-        // up front, before the OCR spend, so a tampered id fails fast.
-        if ($this->upload_is_material_order && $this->upload_belongs_to_vendor_id
-            && ! Vendor::whereKey($this->upload_belongs_to_vendor_id)->exists()) {
-            $this->addError('upload_belongs_to_vendor_id', 'Invalid vendor selected for material order.');
-
-            return;
-        }
-
-        $docType = $this->upload_file->getClientOriginalExtension();
-        $ocrFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.' . $docType;
-        $ocrPath = '_temp_ocr/' . $ocrFilename;
-
-        Storage::disk('files')->put($ocrPath, file_get_contents($this->upload_file->getRealPath()));
-
-        $analyzerId = $this->upload_is_material_order
-            ? config('services.azure_cu.analyzer_id_material_order')
-            : null;
-
-        $effectiveDocType = $this->upload_is_material_order ? 'material_order' : $docType;
-
-        $ocrData = app(\App\Http\Controllers\ReceiptController::class)
-            ->extractReceipt($ocrPath, $effectiveDocType, null, null, null, $analyzerId);
-
-        if (isset($ocrData['error']) && $ocrData['error'] === true) {
-            Storage::disk('files')->delete($ocrPath);
-            $this->addError('upload_file', 'Unable to process receipt. Please check the file and try again.');
-            return;
-        }
-
-        $fields = $ocrData['fields'] ?? [];
-
-        // Match vendor from OCR merchant name
-        $vendorId = null;
-        $merchantName = $fields['merchant_name'] ?? null;
-        if ($merchantName) {
-            $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
-            $matched = app(\App\Http\Controllers\CompanyEmailController::class)
-                ->fuzzyMatchVendor($merchantName, $vendors, 70.0);
-            if ($matched) {
-                $vendorId = $matched->id;
-            }
-        }
-
         $hubVendorId = auth()->user()->vendor->id;
 
-        $ownerVendorId = ($this->upload_is_material_order && $this->upload_belongs_to_vendor_id)
-            ? (int) $this->upload_belongs_to_vendor_id
-            : $hubVendorId;
+        try {
+            $expense = app(\App\Services\Expenses\QuickReceiptCapture::class)->capture(
+                $this->upload_file,
+                $this->upload_is_material_order,
+                $this->upload_belongs_to_vendor_id ? (int) $this->upload_belongs_to_vendor_id : null,
+                $hubVendorId,
+                auth()->id(),
+            );
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            // Same error-bag keys the inline checks used to add directly:
+            // 'file' -> upload_file (OCR failure), 'belongs_to_vendor_id' ->
+            // upload_belongs_to_vendor_id (bad "Belongs To Vendor" pick).
+            $fieldMap = ['file' => 'upload_file', 'belongs_to_vendor_id' => 'upload_belongs_to_vendor_id'];
+            foreach ($exception->errors() as $field => $messages) {
+                $this->addError($fieldMap[$field] ?? $field, $messages[0] ?? 'Invalid.');
+            }
 
-        $expense = Expense::create([
-            'amount' => $fields['total'] ?? 0,
-            'date' => $fields['transaction_date'] ?? now()->format('Y-m-d'),
-            'invoice' => $fields['invoice_number'] ?? null,
-            'vendor_id' => $vendorId,
-            'belongs_to_vendor_id' => $ownerVendorId,
-            'created_by_user_id' => auth()->user()->id,
-        ]);
-
-        // Save the receipt data
-        app(\App\Http\Controllers\CompanyEmailController::class)
-            ->saveExpenseReceipt($expense->id, $ocrData, $ocrFilename, null, false, $this->upload_is_material_order);
-
-        // Clean up temp file
-        Storage::disk('files')->delete($ocrPath);
+            return;
+        }
 
         // Reset upload fields
         $this->upload_file = null;

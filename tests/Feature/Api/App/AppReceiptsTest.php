@@ -124,7 +124,8 @@ it('shows a single receipt\'s detail with its OCR summary and linked expense', f
         'merchant_name' => 'Home Depot',
         'purchase_order' => 'PO-1',
         'invoice_number' => 'INV-1',
-        'items' => [['Description' => '2x4 Lumber', 'ProductCode' => 'SKU-1']],
+        'total' => 24.99,
+        'items' => [['Description' => '2x4 Lumber', 'ProductCode' => 'SKU-1', 'Price' => 24.99, 'Quantity' => 1, 'TotalPrice' => 24.99]],
     ]);
 
     Sanctum::actingAs($admin, ['app']);
@@ -133,8 +134,31 @@ it('shows a single receipt\'s detail with its OCR summary and linked expense', f
     expect($response->json('data.merchant_name'))->toBe('Home Depot')
         ->and($response->json('data.purchase_order'))->toBe('PO-1')
         ->and($response->json('data.invoice_number'))->toBe('INV-1')
-        ->and($response->json('data.line_items.0.description'))->toBe('2x4 Lumber')
+        ->and((float) $response->json('data.total'))->toBe(24.99)
+        ->and($response->json('data.items.0.Description'))->toBe('2x4 Lumber')
+        ->and($response->json('data.siblings'))->toBe([])
         ->and($response->json('data.expense.web_path'))->toStartWith('/expenses/');
+});
+
+it('lists sibling receipts of the same expense, newest first, excluding the current one', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appReceiptsAdmin();
+    ['receipt' => $receipt, 'expense' => $expense] = appReceiptsBatchWithOneReceipt($vendor, $admin, [
+        'merchant_name' => 'Home Depot',
+    ]);
+
+    $sibling = ExpenseReceipts::forceCreate([
+        'expense_id' => $expense->id,
+        'receipt_filename' => 'receipt-2.jpg',
+        'receipt_items' => ['merchant_name' => 'Home Depot'],
+        'is_material_order' => true,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson("/api/app/v1/receipts/auto/{$receipt->id}")->assertOk();
+
+    expect($response->json('data.siblings'))->toHaveCount(1)
+        ->and($response->json('data.siblings.0.id'))->toBe($sibling->id)
+        ->and($response->json('data.siblings.0.is_material_order'))->toBeTrue();
 });
 
 it('404s a receipt that does not exist, or belongs to another tenant\'s expense', function () {

@@ -62,14 +62,21 @@ class AppAutoReceiptsQueue
     }
 
     /**
-     * A single receipt's full detail — mirrors AutoReceipts::currentReceipt()
-     * plus the OCR summary the web's receipt/OCR tab shows.
+     * A single receipt's full detail, for the app's step-through reviewer —
+     * mirrors AutoReceipts::currentReceipt() (the receipt/OCR tab) PLUS the
+     * sibling receipts the web renders as "Receipt 1, Receipt 2…" sub-tabs
+     * when the same Expense carries more than one (auto-receipts.blade.php's
+     * `$expenseReceipts` collection), so the app can switch between them
+     * without leaving this position. The matched Expense's full editable
+     * detail is fetched separately, the same way the app's existing Expense
+     * edit screen does (GET expenses/{expense}) — this stays a read of the
+     * receipt scan/OCR only.
      *
-     * @return array{id: int, image_url: ?string, merchant_name: ?string, purchase_order: ?string, invoice_number: ?string, line_items: list<array{description: ?string, product_code: ?string}>, expense: array{id: int, amount: float, date: ?string, note: ?string, vendor_name: ?string, project_name: ?string, web_path: string}}|null
+     * @return array{id: int, image_url: ?string, is_material_order: bool, notes: ?string, merchant_name: ?string, purchase_order: ?string, invoice_number: ?string, total: ?float, items: list<mixed>, siblings: list<array{id: int, image_url: ?string, merchant_name: ?string, is_material_order: bool}>, expense: array{id: int, amount: float, date: ?string, note: ?string, vendor_name: ?string, project_name: ?string, web_path: string}}|null
      */
     public function detail(int $receiptId, ?int $vendorId): ?array
     {
-        $receipt = ExpenseReceipts::with(['expense.vendor', 'expense.project'])->find($receiptId);
+        $receipt = ExpenseReceipts::with(['expense.vendor', 'expense.project', 'expense.receipts'])->find($receiptId);
 
         if (! $receipt || ! $receipt->expense) {
             return null;
@@ -79,16 +86,32 @@ class AppAutoReceiptsQueue
             return null;
         }
 
-        $summary = $this->ocrSummary($receipt);
         $expense = $receipt->expense;
+        $items = $receipt->receipt_items ?? [];
+
+        $siblings = $expense->receipts
+            ->reject(fn (ExpenseReceipts $sibling) => (int) $sibling->id === (int) $receipt->id)
+            ->sortByDesc('id')
+            ->map(fn (ExpenseReceipts $sibling) => [
+                'id' => $sibling->id,
+                'image_url' => $this->imageUrl($sibling),
+                'merchant_name' => $this->ocrSummary($sibling)['merchant_name'],
+                'is_material_order' => (bool) $sibling->is_material_order,
+            ])
+            ->values()
+            ->all();
 
         return [
             'id' => $receipt->id,
             'image_url' => $this->imageUrl($receipt),
-            'merchant_name' => $summary['merchant_name'],
-            'purchase_order' => $summary['purchase_order'],
-            'invoice_number' => $summary['invoice_number'],
-            'line_items' => $summary['line_items'],
+            'is_material_order' => (bool) $receipt->is_material_order,
+            'notes' => $receipt->notes,
+            'merchant_name' => $items['merchant_name'] ?? null,
+            'purchase_order' => $items['purchase_order'] ?? null,
+            'invoice_number' => $items['invoice_number'] ?? null,
+            'total' => isset($items['total']) ? (float) $items['total'] : null,
+            'items' => $items['items'] ?? [],
+            'siblings' => $siblings,
             'expense' => [
                 'id' => $expense->id,
                 'amount' => (float) $expense->amount,

@@ -3,10 +3,12 @@
 namespace App\Http\Resources\Api\App;
 
 use App\Models\Check;
+use App\Models\Client;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\ExpenseSplits;
 use App\Models\User;
+use App\Models\Vendor;
 use App\Services\Expenses\ExpenseAssociationService;
 use App\Services\Expenses\TransactionLinkService;
 use Illuminate\Http\Request;
@@ -65,9 +67,28 @@ class ExpenseResource extends JsonResource
             return $row;
         }
 
+        $hubVendorId = (int) ($request->user()->vendor?->id ?? 0);
+        $latestReceipt = $expense->relationLoaded('receipts')
+            ? $expense->receipts->sortByDesc('created_at')->first()
+            : $expense->receipts()->latest()->first();
+
         return $row + [
             'paid_by' => $this->userPayload($expense->paid_by),
             'created_by' => $this->userPayload($expense->created_by_user_id),
+            // Raw select value ('Client', a user id, or 'V:{vendor_id}') so
+            // the app's edit form can preselect the right option — `reimbursement`
+            // above is the human-readable display string instead (Expense::reimbursment()'s accessor).
+            'reimbursement_raw' => $expense->getRawOriginal('reimbursment'),
+            // Mirrors ExpenseForm::setExpense(): is_material_order is read
+            // off the latest receipt, not the expense row itself.
+            'is_material_order' => (bool) ($latestReceipt?->is_material_order ?? false),
+            // Only surfaced when it differs from the hub vendor — same `@elseif` the web's show page uses.
+            'belongs_to_vendor' => ($expense->belongs_to_vendor_id && (int) $expense->belongs_to_vendor_id !== $hubVendorId)
+                ? $this->vendorSummary($expense->belongs_to_vendor_id)
+                : null,
+            'belongs_to_client' => $expense->belongs_to_client_id
+                ? $this->clientSummary($expense->belongs_to_client_id)
+                : null,
             'splits' => $hasSplits ? $expense->splits->map(fn (ExpenseSplits $split) => [
                 'id' => $split->id,
                 'amount' => (float) $split->amount,
@@ -146,6 +167,28 @@ class ExpenseResource extends JsonResource
         $project = $expense->project;
 
         return $project && $project->exists ? ['id' => $project->id, 'name' => $project->project_name] : null;
+    }
+
+    /**
+     * @return array{id: int, name: string}|null
+     */
+    private function vendorSummary(int $vendorId): ?array
+    {
+        $vendor = Vendor::withoutGlobalScopes()->select(['id', 'business_name'])->find($vendorId);
+
+        return $vendor ? ['id' => $vendor->id, 'name' => $vendor->business_name] : null;
+    }
+
+    /**
+     * @return array{id: int, name: string}|null
+     */
+    private function clientSummary(int $clientId): ?array
+    {
+        // Client::name is a computed accessor (business_name, or built from
+        // the users relation) — load it whole rather than a column list.
+        $client = Client::query()->find($clientId);
+
+        return $client ? ['id' => $client->id, 'name' => $client->name] : null;
     }
 
     /**
