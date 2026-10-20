@@ -232,6 +232,32 @@ it('shows the full detail shape, including splits', function () {
         ]);
 });
 
+it('shows the matched bank transaction, like the web\'s Transaction card', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor, ['amount' => 20.00]);
+    $transaction = appExpensesMatchedTransaction($vendor, $expense);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+
+    $response->assertJsonCount(1, 'data.transactions')
+        ->assertJsonPath('data.transactions.0.id', $transaction->id)
+        ->assertJsonPath('data.transactions.0.bank', 'Citibank');
+
+    expect((string) $response->json('data.transactions.0.account'))->toBe('4903')
+        ->and((float) $response->json('data.transactions.0.amount'))->toBe(20.0);
+});
+
+it('lists no transactions when nothing has matched yet', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk()->assertJsonCount(0, 'data.transactions');
+});
+
 // --- store -----------------------------------------------------------------
 
 it('only an admin can create an expense', function () {

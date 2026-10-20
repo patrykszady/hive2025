@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\ExpenseSplits;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\Expenses\ExpenseAssociationService;
@@ -98,6 +99,9 @@ class ExpenseResource extends JsonResource
                 'note' => $split->note,
             ])->values()->all() : [],
             'receipts' => $expense->receipts->map(fn (ExpenseReceipts $receipt) => $this->receiptPayload($receipt))->values()->all(),
+            // The matched bank charge(s) — mirrors the web's x-transactions.list_card,
+            // fed by Expense::allTransactions() (own -> shared -> check).
+            'transactions' => $expense->allTransactions()->map(fn (Transaction $transaction) => $this->transactionPayload($transaction))->values()->all(),
             'checks' => app(ExpenseAssociationService::class)->linkedChecks($expense)->map(fn (Check $check) => $this->checkPayload($check))->values()->all(),
             'check_associated_expenses' => app(ExpenseAssociationService::class)->checkAssociatedExpenses($expense)->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
             'associated_expenses' => $expense->associated_expenses->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
@@ -120,6 +124,21 @@ class ExpenseResource extends JsonResource
             'date' => $check->date?->format('Y-m-d'),
             'amount' => (float) $check->amount,
             'bank' => $check->bank_account?->bank?->name,
+        ];
+    }
+
+    /**
+     * @return array{id: int, amount: float, date: ?string, bank: ?string, account: ?string, description: ?string}
+     */
+    private function transactionPayload(Transaction $transaction): array
+    {
+        return [
+            'id' => $transaction->id,
+            'amount' => (float) $transaction->amount,
+            'date' => $transaction->transaction_date?->format('Y-m-d'),
+            'bank' => $transaction->bank_account?->bank?->name,
+            'account' => $transaction->bank_account?->account_number,
+            'description' => $transaction->plaid_merchant_name ?: $transaction->plaid_merchant_description,
         ];
     }
 
