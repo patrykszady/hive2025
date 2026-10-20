@@ -94,24 +94,29 @@ it('filters the Communications card by kind', function () {
     $component->set('kind', 'all')->assertCount('items', 3);
 });
 
-it('loads more communications past the first page with Load more', function () {
+it('opens on the latest five communications and loads ten more at a time', function () {
     $world = serviceCallWorld();
     $digits = substr(preg_replace('/\D/', '', $world['katie']->cell_phone), -10);
 
-    foreach (range(1, 32) as $i) {
+    foreach (range(1, 17) as $i) {
         $call = CallLog::withoutEvents(fn () => CallLog::create([
             'direction' => 'incoming', 'from_number' => '+1'.$digits, 'to_number' => '+12247354200', 'status' => 'completed', 'duration_seconds' => 10,
         ]));
         $call->forceFill(['created_at' => now()->subMinutes($i)])->saveQuietly();
     }
 
+    // A short card: the latest five, so Communications doesn't take over the project page.
     $component = Livewire::actingAs($world['admin'])
         ->test(ProjectCommunications::class, ['project' => $world['project']])
-        ->assertCount('items', 30);
+        ->assertCount('items', 5)
+        ->assertSee('Load more');
 
     expect($component->get('nextBefore'))->not->toBeNull();
 
-    $component->call('loadMore')->assertCount('items', 32);
+    $component->call('loadMore')->assertCount('items', 15);
+    expect($component->get('nextBefore'))->not->toBeNull();
+
+    $component->call('loadMore')->assertCount('items', 17);
     expect($component->get('nextBefore'))->toBeNull();
 });
 

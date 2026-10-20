@@ -26,7 +26,11 @@ class ProjectCommunications extends Component
 {
     use AuthorizesRequests;
 
-    public const PER_PAGE = 30;
+    /** The card opens on the latest few, so it doesn't take over the project page. */
+    public const FIRST_PAGE = 5;
+
+    /** Each "Load more" adds this many. */
+    public const PER_PAGE = 10;
 
     public Project $project;
 
@@ -145,7 +149,7 @@ class ProjectCommunications extends Component
 
     protected function loadFirstPage(): void
     {
-        $page = app(ProjectCommunicationsTimeline::class)->forProject($this->project, null, self::PER_PAGE, $this->kinds());
+        $page = app(ProjectCommunicationsTimeline::class)->forProject($this->project, null, self::FIRST_PAGE, $this->kinds());
 
         $this->items = $page['items'];
         $this->nextBefore = $page['next_before'];
