@@ -51,21 +51,30 @@ class EmailStakeholders
 
         foreach ($addresses as $address) {
             if ($user = $users->get($address)) {
+                // A designer can be a client (her own house) and a vendor on
+                // other jobs at once (Jenn Peterson): both sets are candidates.
                 $clientIds = $user->clients()->withoutGlobalScopes()->pluck('clients.id')->map(fn ($id) => (int) $id);
-                $projects = $this->clientProjects($clientIds, $companyVendorId);
-
-                if ($projects->isNotEmpty()) {
-                    return ['user' => $user, 'client_id' => (int) $projects->first()->client_id, 'vendor_id' => null, 'projects' => $projects];
-                }
+                $clientProjects = $this->clientProjects($clientIds, $companyVendorId);
 
                 $vendorIds = $user->vendors()->withoutGlobalScopes()
                     ->where('vendors.id', '!=', $companyVendorId)
                     ->pluck('vendors.id')
                     ->map(fn ($id) => (int) $id);
-                $projects = $this->vendorProjects($vendorIds, $companyVendorId);
+                $vendorProjects = $this->vendorProjects($vendorIds, $companyVendorId);
+
+                $projects = $clientProjects->concat($vendorProjects)
+                    ->unique('id')
+                    ->sortByDesc('id')
+                    ->take(self::MAX_CANDIDATES)
+                    ->values();
 
                 if ($projects->isNotEmpty()) {
-                    return ['user' => $user, 'client_id' => null, 'vendor_id' => $this->vendorOn($projects, $vendorIds), 'projects' => $projects];
+                    return [
+                        'user' => $user,
+                        'client_id' => $clientProjects->isNotEmpty() ? (int) $clientProjects->first()->client_id : null,
+                        'vendor_id' => $vendorProjects->isNotEmpty() ? $this->vendorOn($vendorProjects, $vendorIds) : null,
+                        'projects' => $projects,
+                    ];
                 }
             }
 

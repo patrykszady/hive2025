@@ -223,3 +223,30 @@ it('resumes a window too big for one run before moving the watermark', function 
         ->and(Cache::get("{$key}:resume"))->toBeNull()
         ->and(Cache::get($key))->toBe($newer['date'] - 1);
 });
+
+it('offers a person\'s client projects and the jobs they work on as a vendor', function () {
+    $world = serviceCallWorld();
+    $studio = Vendor::factory()->create(['business_name' => 'Design Studio '.uniqid()]);
+    $studio->users()->attach($world['katie']->id, ['role_id' => 1]);
+    $otherClient = sec3_makeClient($world['vendor']);
+    $designJob = sec3_makeProject($world['vendor'], $otherClient, ['project_name' => 'Garvey']);
+    ProjectStatus::create(['project_id' => $designJob->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+    $designJob->vendors()->attach($studio->id, ['client_id' => $otherClient->id]);
+
+    $row = app(StakeholderEmailStore::class)->store(nylasMessage($world, ['cc' => []]), 'grant-1', $world['mailbox']);
+
+    expect($row->client_id)->toBe($world['client']->id)
+        ->and($row->vendor_id)->toBe($studio->id)
+        ->and($row->project_id)->toBeNull()
+        ->and($row->candidate_project_ids)->toEqualCanonicalizing([$designJob->id, $world['project']->id]);
+});
+
+it('keeps an email the AI could not place off the client\'s projects', function () {
+    $world = serviceCallWorld();
+    $pending = EmailMessage::factory()->create(['belongs_to_vendor_id' => $world['vendor']->id, 'client_id' => $world['client']->id]);
+    $unplaced = EmailMessage::factory()->create(['belongs_to_vendor_id' => $world['vendor']->id, 'client_id' => $world['client']->id, 'summarized_at' => now()]);
+    $placed = EmailMessage::factory()->create(['belongs_to_vendor_id' => $world['vendor']->id, 'client_id' => $world['client']->id, 'project_id' => $world['project']->id, 'summarized_at' => now()]);
+
+    expect(EmailMessage::forProject($world['project'])->pluck('id')->sort()->values()->all())->toBe(collect([$pending->id, $placed->id])->sort()->values()->all())
+        ->and(EmailMessage::forProject($world['project'])->pluck('id'))->not->toContain($unplaced->id);
+});

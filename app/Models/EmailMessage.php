@@ -44,8 +44,9 @@ class EmailMessage extends Model
     }
 
     /**
-     * Email about a project: linked to it, or from its client and not yet
-     * placed on any other project.
+     * Email about a project: placed on it, or from its client while the AI
+     * read that places it is still pending. Once read, an email none of the
+     * client's projects fits stays off all of them.
      */
     public function scopeForProject(Builder $query, Project $project): Builder
     {
@@ -55,6 +56,7 @@ class EmailMessage extends Model
             if ($project->client_id) {
                 $about->orWhere(fn (Builder $client) => $client
                     ->whereNull('project_id')
+                    ->whereNull('summarized_at')
                     ->where('client_id', $project->client_id));
             }
         });
