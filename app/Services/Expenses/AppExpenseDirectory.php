@@ -4,9 +4,12 @@ namespace App\Services\Expenses;
 
 use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\ReceiptController;
+use App\Models\Check;
 use App\Models\Expense;
 use App\Models\ExpenseSplits;
 use App\Models\User;
+use App\Models\Vendor;
+use App\Services\Users\AppTeamDirectory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -30,8 +33,65 @@ class AppExpenseDirectory
     /** Non-trashed statuses selectable from the app — mirrors ExpenseIndex::VALID_EXPENSE_STATUSES minus 'Deleted' (trash isn't exposed to the app). */
     private const VALID_STATUSES = ['Complete', 'No Transaction', 'No Project', 'Missing Info'];
 
-    public function __construct(private ExpenseAccessGuard $guard)
+    public function __construct(private ExpenseAccessGuard $guard, private AppTeamDirectory $teamDirectory)
     {
+    }
+
+    /**
+     * The "Paid By" / "Reimbursement" pickers' employee options — the same
+     * employed() members of the hub vendor ExpenseCreate::employees() lists.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, User>
+     */
+    public function employees(User $user): \Illuminate\Database\Eloquent\Collection
+    {
+        return $this->teamDirectory->teamMembers($user->vendor);
+    }
+
+    /**
+     * The "Reimbursement" picker's vendor options — mirrors
+     * ExpenseCreate::reimbursment_vendors() exactly: Sub/1099 vendors that
+     * can owe the company back for expenses paid on their behalf.
+     *
+     * @return \Illuminate\Support\Collection<int, Vendor>
+     */
+    public function reimbursementVendors(): \Illuminate\Support\Collection
+    {
+        return Vendor::whereIn('business_type', ['Sub', '1099'])
+            ->orderBy('business_name')
+            ->get(['id', 'business_name']);
+    }
+
+    /**
+     * The "Attach to Existing Check" picker's options — mirrors
+     * ExpenseCreate::available_checks() exactly: recent (60-day) checks,
+     * newest first, capped at 50.
+     *
+     * @return list<array{id: int, label: string}>
+     */
+    public function checkOptions(): array
+    {
+        return Check::with('vendor', 'bank_account.bank')
+            ->whereNull('deleted_at')
+            ->where('date', '>=', now()->subDays(60))
+            ->orderBy('date', 'DESC')
+            ->limit(50)
+            ->get()
+            ->map(function (Check $check) {
+                $label = "#{$check->id} - ".$check->check_type;
+                if ($check->check_type === 'Check') {
+                    $label .= " #{$check->check_number}";
+                }
+                $label .= ' - $'.number_format((float) $check->amount, 2);
+                $label .= ' - '.$check->date->format('m/d/Y');
+                if ($check->vendor) {
+                    $label .= ' - '.$check->vendor->business_name;
+                }
+
+                return ['id' => $check->id, 'label' => $label];
+            })
+            ->values()
+            ->all();
     }
 
     /**
@@ -212,21 +272,35 @@ class AppExpenseDirectory
 
     /**
      * Create an expense the way ExpenseForm::store() does for the fields
-     * the app's own form offers (no check/bank-account recording — a
-     * desktop accounting feature the app doesn't surface): same ownership
-     * whitelisting (ExpenseAccessGuard), same cross-vendor attach, same
-     * optional receipt OCR.
+     * the app's own form offers (the app can attach an already-existing
+     * check via existing_check_id, but never creates one — recording a new
+     * bank account/check number stays a desktop accounting feature): same
+     * ownership whitelisting (ExpenseAccessGuard), same cross-vendor
+     * attach, same optional receipt OCR.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
      */
     public function create(User $user, array $data, ?UploadedFile $receipt): Expense
     {
         $hubVendorId = (int) $user->vendor->id;
         $isSplit = ! empty($data['splits']);
         $projectId = $isSplit ? null : (isset($data['project_id']) ? (int) $data['project_id'] : null);
+        $isMaterialOrder = (bool) ($data['is_material_order'] ?? false);
+        $belongsToVendorId = isset($data['belongs_to_vendor_id']) && $data['belongs_to_vendor_id'] !== null
+            ? (int) $data['belongs_to_vendor_id']
+            : null;
 
         $this->guard->assertProjectAccessible($projectId, null);
-        $ownerVendorId = $this->guard->resolveOwnerVendorId($hubVendorId, false, null);
+        $ownerVendorId = $this->guard->resolveOwnerVendorId($hubVendorId, $isMaterialOrder, $belongsToVendorId);
+
+        // "Attach to Existing Check" — mirrors ExpenseForm::store()'s
+        // existing_check_id handling: the expense simply points at an
+        // already-existing check (never creates one; the app's own form
+        // never collects a bank account/check number).
+        $existingCheckId = isset($data['existing_check_id']) && $data['existing_check_id'] !== null
+            ? (int) $data['existing_check_id']
+            : null;
+        $check = $this->guard->assertCheckAccessible($existingCheckId);
 
         $expense = Expense::create([
             'amount' => $data['amount'],
@@ -236,11 +310,16 @@ class AppExpenseDirectory
             'project_id' => $projectId,
             'distribution_id' => null,
             'vendor_id' => $data['vendor_id'],
+            'check_id' => $check?->id,
             'paid_by' => $data['paid_by'] ?? null,
             'reimbursment' => $data['reimbursement'] ?? null,
             'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => $user->id,
         ]);
+
+        if ($check) {
+            $check->recalculateAmount();
+        }
 
         if ($isSplit) {
             $this->replaceSplits($expense, $data['splits']);
@@ -249,7 +328,7 @@ class AppExpenseDirectory
         $this->guard->attachCrossVendorRelationships($expense);
 
         if ($receipt) {
-            $this->attachReceiptFromUpload($expense, $receipt, false);
+            $this->attachReceiptFromUpload($expense, $receipt, $isMaterialOrder);
         }
 
         return $expense;
@@ -261,16 +340,20 @@ class AppExpenseDirectory
      * that looks surprising: created_by_user_id is overwritten to the
      * editing user on every save, not preserved from the original creator.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
      */
     public function update(User $user, Expense $expense, array $data, ?UploadedFile $receipt): Expense
     {
         $hubVendorId = (int) $user->vendor->id;
         $isSplit = ! empty($data['splits']);
         $projectId = $isSplit ? null : (isset($data['project_id']) ? (int) $data['project_id'] : null);
+        $isMaterialOrder = (bool) ($data['is_material_order'] ?? false);
+        $belongsToVendorId = isset($data['belongs_to_vendor_id']) && $data['belongs_to_vendor_id'] !== null
+            ? (int) $data['belongs_to_vendor_id']
+            : null;
 
         $this->guard->assertProjectAccessible($projectId, null);
-        $ownerVendorId = $this->guard->resolveOwnerVendorId($hubVendorId, false, null);
+        $ownerVendorId = $this->guard->resolveOwnerVendorId($hubVendorId, $isMaterialOrder, $belongsToVendorId);
 
         $expense->update([
             'amount' => $data['amount'],
@@ -291,7 +374,7 @@ class AppExpenseDirectory
         $this->guard->attachCrossVendorRelationships($expense);
 
         if ($receipt) {
-            $this->attachReceiptFromUpload($expense, $receipt, false);
+            $this->attachReceiptFromUpload($expense, $receipt, $isMaterialOrder);
         }
 
         return $expense;

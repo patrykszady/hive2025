@@ -2,6 +2,7 @@
 
 namespace App\Services\Expenses;
 
+use App\Models\Check;
 use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\Project;
@@ -45,6 +46,30 @@ class ExpenseAccessGuard
         }
 
         return $belongsToVendorId;
+    }
+
+    /**
+     * "Attach to Existing Check" (the app's own create form, mirroring
+     * ExpenseCreate's existing_check_id) comes from a client-chosen
+     * selector — check it against what this tenant can see (CheckScope,
+     * which already covers an Admin's whole team or a Member's own checks)
+     * rather than trusting the id outright.
+     */
+    public function assertCheckAccessible(?int $checkId): ?Check
+    {
+        if (! $checkId) {
+            return null;
+        }
+
+        $check = Check::query()->whereKey($checkId)->first();
+
+        if (! $check) {
+            throw ValidationException::withMessages([
+                'existing_check_id' => 'Invalid check selected.',
+            ]);
+        }
+
+        return $check;
     }
 
     /**

@@ -38,6 +38,13 @@ class StoreExpenseRequest extends FormRequest
             $decoded = json_decode((string) $this->input('splits'), true);
             $this->merge(['splits' => is_array($decoded) ? $decoded : []]);
         }
+
+        // A receipt photo makes this multipart/form-data, which only ever
+        // carries strings — normalize "true"/"false"/"1"/"0" the same way
+        // whether the body is JSON (a real bool already) or multipart.
+        if ($this->has('is_material_order')) {
+            $this->merge(['is_material_order' => $this->boolean('is_material_order')]);
+        }
     }
 
     /**
@@ -54,6 +61,17 @@ class StoreExpenseRequest extends FormRequest
             'invoice' => ['nullable', 'string', 'max:255'],
             'paid_by' => ['nullable', 'integer', 'exists:users,id'],
             'reimbursement' => ['nullable', 'string', 'max:255'],
+            'is_material_order' => ['nullable', 'boolean'],
+            // Whitelisted against the hub vendor (or one already linked to
+            // it) by ExpenseAccessGuard::resolveOwnerVendorId() — not an
+            // `exists:` rule here, since that alone wouldn't enforce the
+            // tenant boundary.
+            'belongs_to_vendor_id' => ['nullable', 'integer'],
+            // Attach to an already-existing check (create only) — scoped
+            // against this tenant's own checks by
+            // ExpenseAccessGuard::assertCheckAccessible(), not an `exists:`
+            // rule, for the same reason as belongs_to_vendor_id above.
+            'existing_check_id' => ['nullable', 'integer'],
             'splits' => ['nullable', 'array'],
             'splits.*.amount' => ['required', 'numeric', 'regex:/^-?\d+(\.\d{1,2})?$/', 'not_in:0'],
             'splits.*.project_id' => ['required', 'integer'],

@@ -232,6 +232,32 @@ it('shows the full detail shape, including splits', function () {
         ]);
 });
 
+it('shows the matched bank transaction, like the web\'s Transaction card', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor, ['amount' => 20.00]);
+    $transaction = appExpensesMatchedTransaction($vendor, $expense);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+
+    $response->assertJsonCount(1, 'data.transactions')
+        ->assertJsonPath('data.transactions.0.id', $transaction->id)
+        ->assertJsonPath('data.transactions.0.bank', 'Citibank');
+
+    expect((string) $response->json('data.transactions.0.account'))->toBe('4903')
+        ->and((float) $response->json('data.transactions.0.amount'))->toBe(20.0);
+});
+
+it('lists no transactions when nothing has matched yet', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk()->assertJsonCount(0, 'data.transactions');
+});
+
 // --- store -----------------------------------------------------------------
 
 it('only an admin can create an expense', function () {
@@ -349,6 +375,198 @@ it('attaches a receipt via the shared OCR/save path (AppExpenseDirectory::attach
 
     expect($saved)->toBeTrue()
         ->and(ExpenseReceipts::where('expense_id', $expense->id)->count())->toBe(1);
+});
+
+it('creates a material-order expense attributed to another vendor, like ExpenseForm::store()', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    $ownerVendor = Vendor::factory()->create();
+    $vendor->vendors()->attach($ownerVendor->id);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/expenses', [
+        'amount' => '50.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id, 'is_material_order' => true, 'belongs_to_vendor_id' => $ownerVendor->id,
+    ])->assertCreated();
+
+    // belongs_to_vendor_id is now the OTHER vendor, not the hub — Expense::findOrFail()
+    // is scoped by ExpenseScope (Admin sees belongs_to_vendor_id === their own vendor
+    // only), so this expense is correctly invisible to the hub admin from here on.
+    $expense = Expense::withoutGlobalScopes()->findOrFail($response->json('data.id'));
+    expect((int) $expense->belongs_to_vendor_id)->toBe($ownerVendor->id);
+});
+
+it('refuses a material order attributed to an unrelated vendor', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    $unrelatedVendor = Vendor::factory()->create();
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses', [
+        'amount' => '50.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id, 'is_material_order' => true, 'belongs_to_vendor_id' => $unrelatedVendor->id,
+    ])->assertStatus(422)->assertJsonValidationErrors(['belongs_to_vendor_id']);
+
+    expect(Expense::withoutGlobalScopes()->where('belongs_to_vendor_id', $unrelatedVendor->id)->count())->toBe(0);
+});
+
+it('attaches a new expense to an existing check and recalculates its amount', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    $bank = Bank::create(['name' => 'Citibank', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_'.uniqid()]);
+    $account = BankAccount::create(['vendor_id' => $vendor->id, 'bank_id' => $bank->id, 'account_number' => '1234', 'plaid_account_id' => 'acc_'.uniqid(), 'type' => 'checking']);
+    $check = \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '101', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $account->id, 'amount' => 20, 'vendor_id' => $merchant->id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/expenses', [
+        'amount' => '35.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id, 'existing_check_id' => $check->id,
+    ])->assertCreated();
+
+    $expense = Expense::findOrFail($response->json('data.id'));
+    $check->refresh();
+    expect((int) $expense->check_id)->toBe($check->id)
+        ->and((float) $check->amount)->toBe(35.0);
+});
+
+it('refuses an existing_check_id outside the tenant\'s own checks', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    $otherVendor = Vendor::factory()->create();
+    $otherBank = Bank::create(['name' => 'Other Bank', 'vendor_id' => $otherVendor->id, 'plaid_ins_id' => 'ins_'.uniqid()]);
+    $otherAccount = BankAccount::create(['vendor_id' => $otherVendor->id, 'bank_id' => $otherBank->id, 'account_number' => '999', 'plaid_account_id' => 'acc_'.uniqid(), 'type' => 'checking']);
+    $foreignCheck = \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '555', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $otherAccount->id, 'amount' => 20, 'vendor_id' => $merchant->id,
+        'belongs_to_vendor_id' => $otherVendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses', [
+        'amount' => '35.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id, 'existing_check_id' => $foreignCheck->id,
+    ])->assertStatus(422)->assertJsonValidationErrors(['existing_check_id']);
+});
+
+it('lists the form-options for Paid By, Reimbursement and Attach to Existing Check', function () {
+    ['vendor' => $vendor, 'admin' => $admin, 'member' => $member] = appExpensesTeam();
+    // Vendor::business_name is title-cased by a setter on the model.
+    $subVendor = Vendor::factory()->create(['business_type' => 'Sub', 'business_name' => 'ABC Drywall']);
+    // Reimbursement vendors go through the plain, VendorScope-scoped Vendor
+    // query (same as ExpenseCreate::reimbursment_vendors()) — only a vendor
+    // already linked to the hub is a candidate, same set "Belongs To
+    // Vendor" offers.
+    $vendor->vendors()->attach($subVendor->id);
+    $unreimbursable = Vendor::factory()->create(['business_type' => 'Retail', 'business_name' => 'Not Reimbursable Inc']);
+    $vendor->vendors()->attach($unreimbursable->id);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/form-options')->assertOk();
+
+    expect(collect($response->json('data.employees'))->pluck('id'))->toContain($admin->id, $member->id)
+        ->and(collect($response->json('data.reimbursement_vendors'))->pluck('name'))->toContain($subVendor->business_name)
+        ->and(collect($response->json('data.reimbursement_vendors'))->pluck('name'))->not->toContain($unreimbursable->business_name);
+});
+
+it('exposes is_material_order and the raw reimbursement value on the detail payload', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor, ['reimbursment' => 'Client']);
+    ExpenseReceipts::forceCreate(['expense_id' => $expense->id, 'receipt_filename' => 'r.jpg', 'receipt_items' => [], 'is_material_order' => true]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+
+    expect($response->json('data.is_material_order'))->toBeTrue()
+        // belongs_to_vendor is only ever surfaced when it differs from the
+        // viewer's own vendor — which, thanks to ExpenseScope, is never true
+        // for an expense the viewer can actually see (same reasoning as the
+        // web's own dead-looking @elseif branch on expenses/show.blade.php).
+        ->and($response->json('data.belongs_to_vendor'))->toBeNull()
+        ->and($response->json('data.reimbursement_raw'))->toBe('Client');
+});
+
+// --- quick-receipt -----------------------------------------------------------
+
+it('needs a token for the quick-receipt capture endpoint', function () {
+    $this->postJson('/api/app/v1/expenses/quick-receipt', [])->assertUnauthorized();
+});
+
+it('only an admin can use the quick-receipt capture', function () {
+    ['member' => $member] = appExpensesTeam();
+    Sanctum::actingAs($member, ['app']);
+
+    $this->post('/api/app/v1/expenses/quick-receipt', [
+        'file' => UploadedFile::fake()->create('receipt.pdf', 10),
+    ])->assertForbidden();
+});
+
+it('OCRs a receipt photo into a brand-new expense, like ExpenseCreate::uploadReceipt()', function () {
+    Storage::fake('files');
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->partialMock(\App\Http\Controllers\ReceiptController::class, function ($mock) {
+        $mock->shouldReceive('extractReceipt')->andReturn([
+            'fields' => ['total' => 19.99, 'transaction_date' => '2026-09-01', 'invoice_number' => 'INV-9'],
+        ]);
+    });
+    $this->partialMock(\App\Http\Controllers\CompanyEmailController::class, function ($mock) {
+        $mock->shouldReceive('saveExpenseReceipt')->andReturnNull();
+    });
+
+    $response = $this->post('/api/app/v1/expenses/quick-receipt', [
+        'file' => UploadedFile::fake()->create('receipt.jpg', 10, 'image/jpeg'),
+    ])->assertCreated();
+
+    $expense = Expense::findOrFail($response->json('data.id'));
+    expect((float) $expense->amount)->toBe(19.99)
+        ->and((string) $expense->invoice)->toBe('INV-9')
+        ->and((int) $expense->belongs_to_vendor_id)->toBe($vendor->id)
+        ->and((int) $expense->created_by_user_id)->toBe($admin->id)
+        ->and($response->json('data.project'))->toBeNull();
+});
+
+it('refuses a quick-receipt capture attributed to an unrelated vendor', function () {
+    Storage::fake('files');
+    ['admin' => $admin] = appExpensesTeam();
+    $unrelatedVendor = Vendor::factory()->create();
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses/quick-receipt', [
+        'file' => UploadedFile::fake()->create('receipt.jpg', 10, 'image/jpeg'),
+        'is_material_order' => true,
+        'belongs_to_vendor_id' => $unrelatedVendor->id,
+    ])->assertStatus(422)->assertJsonValidationErrors(['belongs_to_vendor_id']);
+
+    expect(Expense::withoutGlobalScopes()->where('belongs_to_vendor_id', $unrelatedVendor->id)->count())->toBe(0);
+});
+
+it('surfaces an OCR failure as a 422 on the file field', function () {
+    Storage::fake('files');
+    ['admin' => $admin] = appExpensesTeam();
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->partialMock(\App\Http\Controllers\ReceiptController::class, function ($mock) {
+        $mock->shouldReceive('extractReceipt')->andReturn(['error' => true]);
+    });
+
+    $this->postJson('/api/app/v1/expenses/quick-receipt', [
+        'file' => UploadedFile::fake()->create('receipt.jpg', 10, 'image/jpeg'),
+    ])->assertStatus(422)->assertJsonValidationErrors(['file']);
 });
 
 // --- update ----------------------------------------------------------------
