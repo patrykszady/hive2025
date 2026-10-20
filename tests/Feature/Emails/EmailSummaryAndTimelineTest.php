@@ -74,6 +74,16 @@ it('summarizes an email like a call and places it on the project it is about', f
     });
 });
 
+it('marks an email read when the model answers junk, so the schedule does not pay for it again', function () {
+    $email = EmailMessage::factory()->create();
+    Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'not json']]]])]);
+
+    (new SummarizeEmailMessage($email->id))->handle();
+
+    expect($email->fresh()->summarized_at)->not->toBeNull()
+        ->and($email->fresh()->summary)->toBeNull();
+});
+
 it('cuts the quoted history off an email', function () {
     expect(SummarizeEmailMessage::latestPart("Sounds good, Thursday works.\n\nOn Tue, Oct 13, 2026, Greg wrote:\n> Can we come Thursday?"))->toBe('Sounds good, Thursday works.')
         ->and(SummarizeEmailMessage::latestPart("Approved.\n\n-----Original Message-----\nFrom: Patryk"))->toBe('Approved.');

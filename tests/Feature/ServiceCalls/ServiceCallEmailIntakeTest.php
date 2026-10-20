@@ -59,10 +59,12 @@ it('opens a service call from a client\'s email about finished work', function (
         ->and($task->created_by_user_id)->toBe($world['admin']->id)
         ->and($task->notes)->toContain('grout cracking in both bathrooms');
 
-    Queue::assertPushed(SendServiceCallScheduleEmail::class, fn ($job) => $job->serviceCallEmailId === $row->id);
-    Queue::assertPushed(TextServiceCallScheduleLink::class, fn ($job) => $job->serviceCallEmailId === $row->id);
+    // Nobody is contacted until client contact is switched on.
+    Queue::assertNotPushed(SendServiceCallScheduleEmail::class);
+    Queue::assertNotPushed(TextServiceCallScheduleLink::class);
 
-    expect(AppNotification::where('user_id', $world['admin']->id)->where('type', 'service_call_opened')->exists())->toBeTrue();
+    $alert = AppNotification::where('user_id', $world['admin']->id)->where('type', 'service_call_opened')->sole();
+    expect($alert->body)->toContain('have not been contacted');
 
     // The model only ever sees this client's finished projects.
     Http::assertSent(function (HttpRequest $request) use ($world) {
@@ -109,7 +111,20 @@ it('ignores strangers and clients without a finished project, without asking the
     Http::assertNothingSent();
 });
 
+it('emails and texts the client the schedule link only once client contact is on', function () {
+    config(['service_calls.email_intake.contact_client' => true]);
+    $world = serviceCallWorld();
+    fakeServiceCallVerdict(['project_id' => $world['project']->id]);
+
+    $row = app(ServiceCallEmailIntake::class)->consider(katieEmail($world));
+
+    Queue::assertPushed(SendServiceCallScheduleEmail::class, fn ($job) => $job->serviceCallEmailId === $row->id);
+    Queue::assertPushed(TextServiceCallScheduleLink::class, fn ($job) => $job->serviceCallEmailId === $row->id);
+    expect(AppNotification::where('type', 'service_call_opened')->sole()->body)->toContain('sent the schedule link');
+});
+
 it('judges and answers each email once, whichever path reads it again', function () {
+    config(['service_calls.email_intake.contact_client' => true]);
     $world = serviceCallWorld();
     fakeServiceCallVerdict(['project_id' => $world['project']->id]);
     $email = katieEmail($world);

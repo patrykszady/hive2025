@@ -9,8 +9,8 @@ return [
     |
     | A known client writing about a problem on finished work ("the grout is
     | cracking in both bathrooms") opens a service call: the project moves to
-    | Service Call, a pending task is created, and the client is emailed and
-    | texted the schedule page to pick times. See
+    | Service Call, a pending task is created, and (when contact_client is
+    | on) the client is emailed and texted the schedule page. See
     | App\Services\ServiceCalls\ServiceCallEmailIntake.
     |
     | Off outside production by default: the dev database is a copy of prod
@@ -21,6 +21,12 @@ return [
 
     'email_intake' => [
         'enabled' => (bool) env('SERVICE_CALL_EMAIL_INTAKE', env('APP_ENV') === 'production'),
+
+        // Email and text the client the schedule link when a call opens.
+        // Off until Patryk says otherwise (2026-10-20: "don't send anyone any
+        // emails, just create those tasks for now") — the project still moves
+        // to Service Call, the task is created and the office is alerted.
+        'contact_client' => (bool) env('SERVICE_CALL_CONTACT_CLIENT', false),
 
         // How sure the model must be before anything is written or sent.
         'min_confidence' => 0.8,

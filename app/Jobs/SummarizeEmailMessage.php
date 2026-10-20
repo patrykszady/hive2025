@@ -80,7 +80,10 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
         $parsed = json_decode((string) data_get($response->json(), 'choices.0.message.content'), true);
 
         if (! is_array($parsed)) {
+            // Marked read anyway: `emails:summarize --missing` runs on a
+            // schedule and must not pay for the same bad answer forever.
             Log::channel('call_ai')->warning('SummarizeEmailMessage: unreadable answer', ['email_message_id' => $email->id]);
+            $email->forceFill(['summary_model' => $model, 'summarized_at' => now()])->save();
 
             return;
         }

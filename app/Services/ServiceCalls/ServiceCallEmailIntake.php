@@ -29,9 +29,10 @@ use Illuminate\Support\Str;
 /**
  * Turns a client's email about a problem on finished work into a service
  * call: the project moves to Service Call, a pending task is created for the
- * request, the client is emailed and texted the schedule page (the same
- * /s/{token} page whose service-window picker they already use), and the
- * office gets an in-app alert. When the client then shares times, the
+ * request, the office gets an in-app alert, and — only when
+ * service_calls.email_intake.contact_client is on — the client is emailed
+ * and texted the schedule page (the same /s/{token} page whose
+ * service-window picker they already use). When the client then shares times, the
  * existing ScheduleIndex flow tells the team to book the visit.
  *
  * Every mail path calls consider(): Hive's personal-inbox sweep and Nylas
@@ -229,14 +230,18 @@ class ServiceCallEmailIntake
             ]);
         });
 
-        SendServiceCallScheduleEmail::dispatch($row->id)->afterCommit();
+        $contactClient = (bool) config('service_calls.email_intake.contact_client', false);
 
-        $sms = app(SmsScheduleService::class);
-        TextServiceCallScheduleLink::dispatch($row->id)
-            ->delay($sms->isWithinBusinessHours() ? now() : $sms->getNextBusinessHoursStart())
-            ->afterCommit();
+        if ($contactClient) {
+            SendServiceCallScheduleEmail::dispatch($row->id)->afterCommit();
 
-        $this->notifyTeam($row, $project, $verdict['task_title']);
+            $sms = app(SmsScheduleService::class);
+            TextServiceCallScheduleLink::dispatch($row->id)
+                ->delay($sms->isWithinBusinessHours() ? now() : $sms->getNextBusinessHoursStart())
+                ->afterCommit();
+        }
+
+        $this->notifyTeam($row, $project, $verdict['task_title'], $contactClient);
 
         Log::channel('nylas')->info('Service call intake: opened a service call from an email', [
             'project_id' => $project->id,
@@ -384,7 +389,7 @@ class ServiceCallEmailIntake
         return "Service request emailed by {$name} on {$receivedAt->copy()->setTimezone('America/Chicago')->format('M j, Y g:i A')}:\n\n\"{$body}\"";
     }
 
-    protected function notifyTeam(ServiceCallEmail $row, Project $project, string $taskTitle): void
+    protected function notifyTeam(ServiceCallEmail $row, Project $project, string $taskTitle, bool $clientContacted): void
     {
         $admins = User::withoutGlobalScopes()
             ->whereHas('vendors', fn ($query) => $query->withoutGlobalScopes()
@@ -399,7 +404,9 @@ class ServiceCallEmailIntake
         $client = Client::withoutGlobalScopes()->find($project->client_id);
         $who = trim((string) ($client?->name ?: $client?->last_names ?: 'A client'));
         $title = "Service call opened: {$who}";
-        $body = "{$taskTitle} — from their email. They were sent the schedule link to pick times.";
+        $body = $clientContacted
+            ? "{$taskTitle} — from their email. They were sent the schedule link to pick times."
+            : "{$taskTitle} — from their email. They have not been contacted; send the schedule link when ready.";
         $path = '/projects/'.$project->id;
 
         foreach ($admins as $userId) {

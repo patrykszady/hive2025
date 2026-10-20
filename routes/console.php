@@ -45,6 +45,16 @@ Schedule::command('emails:sync')
     ->withoutOverlapping()
     ->onOneServer();
 
+// The AI read for any stored email still without one: the first sync's
+// backfill, and anything a queue outage dropped. SummarizeEmailMessage is
+// unique per email, so an email already queued is not queued twice.
+Schedule::command('emails:summarize --missing')
+    ->everyFifteenMinutes()
+    ->name('summarize-stakeholder-emails')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // Keeps the Nylas message.created webhook converged without any deploy step:
 // registers it if missing (the challenge handshake needs the LIVE endpoint,
 // so deploy-time registration would race opcache), and rotates a lost signing
