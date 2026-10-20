@@ -89,6 +89,10 @@ class ProjectStatus extends Model
     {
         static::addGlobalScope(new ProjectStatusScope);
         
+        static::created(function (ProjectStatus $projectStatus) {
+            $projectStatus->supersedeLaterDatedStatuses();
+        });
+
         // When a project status is saved or deleted, re-index the parent project
         static::saved(function ($projectStatus) {
             if ($projectStatus->project) {
@@ -106,6 +110,28 @@ class ProjectStatus extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    /**
+     * A status set today is the project's status now. Rows of the same
+     * vendor's history dated after today (a Scheduled row carrying the job's
+     * start date, or the Active row projects:activate-scheduled dates on it)
+     * would otherwise outrank it in latestStatus (latestOfMany by start_date)
+     * until that date passes. Pulling them back to today lets the new row win
+     * the tie by id. Backdated and future-dated rows leave history alone.
+     */
+    public function supersedeLaterDatedStatuses(): void
+    {
+        if (! $this->start_date?->isToday()) {
+            return;
+        }
+
+        static::withoutGlobalScopes()
+            ->where('project_id', $this->project_id)
+            ->where('belongs_to_vendor_id', $this->belongs_to_vendor_id)
+            ->whereKeyNot($this->getKey())
+            ->whereDate('start_date', '>', $this->start_date->toDateString())
+            ->update(['start_date' => $this->start_date->toDateString()]);
     }
 
     /**

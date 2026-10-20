@@ -36,7 +36,7 @@ class StatusCreate extends Component
     {
         $this->project = $project;
         $this->project_status_date = today()->format('Y-m-d');
-        $this->statuses = $this->project->statuses()->orderBy('start_date', 'ASC')->get();
+        $this->statuses = $this->project->statuses()->orderBy('start_date', 'ASC')->orderBy('id', 'ASC')->get();
     }
 
     public function update_project()
