@@ -137,6 +137,7 @@ class VendorResource extends JsonResource
             'task_count' => $tasks['task_count'] ?? 0,
             'pending_tasks' => $tasks['pending_tasks'] ?? [],
             'upcoming_tasks' => $tasks['upcoming_tasks'] ?? [],
+            'later_tasks' => $tasks['later_tasks'] ?? [],
             // Insurance/vendor-document status: only Sub/DBA vendors carry
             // documents at all, and only an admin (VendorDocPolicy) sees them
             // — matches show.blade's @can('update', $vendor) wrapping the
@@ -183,12 +184,11 @@ class VendorResource extends JsonResource
      * pending_tasks is the "Pending Tasks" accordion (unscheduled tasks),
      * and upcoming_tasks is the scheduled tasks grouped by day across the
      * 8-day window (yesterday..+6) with the same Today/Tomorrow/Yesterday
-     * flags the web's upcoming-tasks-list-day.blade.php badges. Tasks
-     * beyond that window ("Later", on the web) are deliberately left out —
-     * a vendor profile's own secondary accordion, lower priority than the
-     * pending/day split this mirrors.
+     * flags the web's upcoming-tasks-list-day.blade.php badges, and
+     * later_tasks is the "Later" accordion — tasks beyond that window,
+     * grouped by date (App\Livewire\Concerns\HasLaterTasks).
      *
-     * @return array{task_count: int, pending_tasks: list<array<string, mixed>>, upcoming_tasks: list<array{date: string, is_today: bool, is_yesterday: bool, is_tomorrow: bool, tasks: list<array<string, mixed>>}>}
+     * @return array{task_count: int, pending_tasks: list<array<string, mixed>>, upcoming_tasks: list<array{date: string, is_today: bool, is_yesterday: bool, is_tomorrow: bool, tasks: list<array<string, mixed>>}>, later_tasks: list<array{date: string, tasks: list<array<string, mixed>>}>}
      */
     private function tasksCard(Vendor $vendor, int $viewerVendorId): array
     {
@@ -265,10 +265,41 @@ class VendorResource extends JsonResource
 
         $this->primeTaskUsers($pending);
 
+        // The "Later" accordion — tasks starting after the window, grouped by
+        // their selected dates beyond it (App\Livewire\Concerns\HasLaterTasks).
+        $laterScheduled = $baseQuery()
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('start_date', '>', $windowEndStr)
+            ->with('project:id,project_name,address,address_2,city,state,zip_code')
+            ->orderBy('start_date')
+            ->orderBy('end_date')
+            ->get()
+            ->filter(fn (Task $task) => $task->project !== null);
+
+        $this->primeTaskUsers($laterScheduled);
+
+        $laterGrouped = collect();
+        foreach ($laterScheduled as $task) {
+            $selectedDates = (array) data_get($task->options, 'dates', []);
+            $dates = $selectedDates !== [] ? $selectedDates : [$task->start_date->format('Y-m-d')];
+
+            foreach ($dates as $dateStr) {
+                if ($dateStr > $windowEndStr) {
+                    $laterGrouped[$dateStr] ??= collect();
+                    $laterGrouped[$dateStr]->push($task);
+                }
+            }
+        }
+
         return [
             'task_count' => $taskCount,
             'pending_tasks' => $pending->map(fn (Task $task) => $this->taskRow($task, null))->values()->all(),
             'upcoming_tasks' => $upcomingTasks,
+            'later_tasks' => $laterGrouped->sortKeys()->map(fn (Collection $dayTasks, string $dateStr): array => [
+                'date' => $dateStr,
+                'tasks' => $dayTasks->map(fn (Task $task) => $this->taskRow($task, $dateStr))->values()->all(),
+            ])->values()->all(),
         ];
     }
 

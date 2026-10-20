@@ -282,6 +282,16 @@ it('groups a vendor\'s upcoming tasks by day, with a Pending Tasks split, like V
         'start_date' => null,
         'end_date' => null,
     ]);
+    $tenDays = now()->addDays(10)->format('Y-m-d');
+    $twelveDays = now()->addDays(12)->format('Y-m-d');
+    Task::factory()->create([
+        'project_id' => $project->id,
+        'vendor_id' => $sub->id,
+        'belongs_to_vendor_id' => $company->id,
+        'start_date' => $tenDays,
+        'end_date' => $twelveDays,
+        'options' => ['dates' => [$tenDays, $twelveDays]],
+    ]);
 
     $response = $this->getJson('/api/app/v1/vendors/'.$sub->id)->assertOk();
 
@@ -293,7 +303,11 @@ it('groups a vendor\'s upcoming tasks by day, with a Pending Tasks split, like V
         ->assertJsonPath('data.upcoming_tasks.0.is_tomorrow', true)
         ->assertJsonPath('data.upcoming_tasks.0.is_today', false)
         ->assertJsonCount(1, 'data.upcoming_tasks.0.tasks')
-        ->assertJsonPath('data.upcoming_tasks.0.tasks.0.project.id', $project->id);
+        ->assertJsonPath('data.upcoming_tasks.0.tasks.0.project.id', $project->id)
+        ->assertJsonCount(2, 'data.later_tasks')
+        ->assertJsonPath('data.later_tasks.0.date', $tenDays)
+        ->assertJsonPath('data.later_tasks.1.date', $twelveDays)
+        ->assertJsonPath('data.later_tasks.1.tasks.0.date', $twelveDays);
 });
 
 it('has no tasks card for a Retail vendor', function () {
@@ -307,7 +321,8 @@ it('has no tasks card for a Retail vendor', function () {
         ->assertOk()
         ->assertJsonPath('data.task_count', 0)
         ->assertJsonPath('data.pending_tasks', [])
-        ->assertJsonPath('data.upcoming_tasks', []);
+        ->assertJsonPath('data.upcoming_tasks', [])
+        ->assertJsonPath('data.later_tasks', []);
 });
 
 it('shows a non-Retail vendor\'s payment history, scoped to the company\'s own checks', function () {
