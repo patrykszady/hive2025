@@ -139,6 +139,24 @@ class CallHistory
     }
 
     /**
+     * Where this number's contact record lives — the client or vendor the
+     * web call detail panel links the caller's name to
+     * (resolvePhoneContactUrl), structured for the Hive Contractors app to
+     * navigate to its own client/vendor screen instead of a web route. Null
+     * for an unknown caller.
+     *
+     * @return array{type: 'client'|'vendor', id: int, name: string}|null
+     */
+    public function contactFor(?string $phone): ?array
+    {
+        if (! $phone) {
+            return null;
+        }
+
+        return $this->resolvePhoneContact($phone);
+    }
+
+    /**
      * Phantom-leg origins and phone names for these calls, in a few queries.
      *
      * @param  iterable<CallLog>  $calls

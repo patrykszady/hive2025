@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Api\App;
 
 use App\Models\Lead;
+use App\Services\Leads\LeadContactCompletion;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\URL;
@@ -80,11 +81,28 @@ class LeadResource extends JsonResource
         }
 
         $hasReplied = $status === 'Replied' && ! $this->lastEmailBounced($lead);
+        $completion = app(LeadContactCompletion::class);
 
         return $row + [
             'message' => $lead->lead_data['message'] ?? null,
             'notes' => $lead->notes,
             'reply_to_email' => $lead->lead_data['reply_to_email'] ?? null,
+            // The linked contact — distinct from `client` above, which is
+            // null until the contact also has an address on file. Mirrors
+            // details-panel.blade.php's "User" card (the contact with no
+            // client yet).
+            'contact' => $lead->user ? [
+                'id' => $lead->user->id,
+                'name' => $lead->user->full_name,
+                'email' => $lead->user->email,
+                'phone' => $lead->user->cell_phone,
+            ] : null,
+            // What's still missing before this lead can be replied to, and
+            // the tools the Details tab offers to fill each one in — mirrors
+            // LeadCreate::missingContactInfo()/needsPhone()/addressCandidates().
+            'missing_contact_info' => $completion->missingContactInfo($lead, $client),
+            'needs_phone' => $completion->needsPhone($lead),
+            'address_candidates' => $completion->addressCandidates($lead),
             // Raw address parts — mirrors LeadCreate's edit() fields exactly,
             // so an "Edit" form can prefill city/state/zip without re-parsing
             // the combined 'address' string.

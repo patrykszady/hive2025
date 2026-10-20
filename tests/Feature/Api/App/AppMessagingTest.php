@@ -238,6 +238,31 @@ it('uploads image attachments through the same public-disk convention as the web
         ->and($mediaUrls[0])->toContain('/m/sms/sms-attachments/');
 });
 
+it('uploads a video attachment, like the composer\'s image+video media picker', function () {
+    Storage::fake('public');
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+    $thread = appMessagingThread($vendor, ['participants' => ['+12245550010']]);
+
+    Http::fake(['https://api.telnyx.com/*' => Http::response(['data' => ['id' => 'telnyx-mms']], 200)]);
+
+    // SmsConversation::attachmentValidationRule() accepts mp4/mov/webm/m4v/
+    // 3gp/avi alongside images — same rule the web composer's single
+    // attachment is validated against.
+    $file = UploadedFile::fake()->create('clip.mp4', 500, 'video/mp4');
+
+    $response = $this->postJson("/api/app/v1/threads/{$thread->id}/messages", [
+        'body' => 'Here is a video',
+        'media' => [$file],
+    ])->assertStatus(201);
+
+    $message = SmsMessage::findOrFail($response->json('data.id'));
+    expect($message->media_urls)->toHaveCount(1)
+        ->and($message->media_urls[0])->toStartWith('/storage/sms-attachments/');
+
+    Storage::disk('public')->assertExists(str_replace('/storage/', '', $message->media_urls[0]));
+});
+
 it('refuses to send project messages while opt-in is pending', function () {
     ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
     Sanctum::actingAs($user, ['app']);
