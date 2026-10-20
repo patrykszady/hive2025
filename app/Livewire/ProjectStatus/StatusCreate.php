@@ -5,8 +5,11 @@ namespace App\Livewire\ProjectStatus;
 use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use App\Services\Projects\ProjectStatusHistoryWriter;
 use Flux;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 
 class StatusCreate extends Component
@@ -108,9 +111,11 @@ class StatusCreate extends Component
         }
 
         $status = ProjectStatus::findOrFail($statusId);
-        
-        // Authorize - only owner or admin can edit
-        if ($status->belongs_to_vendor_id !== auth()->user()->vendor->id && !auth()->user()->hasRole('Super Admin')) {
+
+        // Authorize - only the owning vendor may edit (see ProjectStatusHistoryWriter).
+        try {
+            app(ProjectStatusHistoryWriter::class)->assertOwnedBy($status, auth()->user());
+        } catch (AuthorizationException) {
             Flux::toast(
                 duration: 5000,
                 position: 'top right',
@@ -120,7 +125,7 @@ class StatusCreate extends Component
             );
             return;
         }
-        
+
         $this->editingStatusId = $statusId;
         $this->editingStatusCode = $status->status_code;
         $this->editingStatusDate = $status->start_date->format('Y-m-d');
@@ -140,20 +145,33 @@ class StatusCreate extends Component
         ]);
         
         $status = ProjectStatus::findOrFail($this->editingStatusId);
-        
-        $status->update([
-            'status_code' => (int) $this->editingStatusCode,
-            'start_date' => $this->editingStatusDate,
-        ]);
-        
+
+        try {
+            app(ProjectStatusHistoryWriter::class)->update(
+                $status,
+                auth()->user(),
+                (int) $this->editingStatusCode,
+                $this->editingStatusDate,
+            );
+        } catch (AuthorizationException) {
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Unauthorized',
+                text: 'You cannot edit this status.',
+            );
+            return;
+        }
+
         $this->editingStatusId = null;
         $this->editingStatusCode = null;
         $this->editingStatusDate = null;
-        
+
         $this->mount($this->project);
         Flux::modal('edit_status_modal')->close();
         $this->dispatch('refreshComponent')->to('projects.project-show');
-        
+
         Flux::toast(
             duration: 5000,
             position: 'top right',
@@ -174,9 +192,10 @@ class StatusCreate extends Component
         }
         
         $status = ProjectStatus::findOrFail($this->editingStatusId);
-        
-        // Prevent deleting if it's the only status
-        if ($this->statuses->count() <= 1) {
+
+        try {
+            app(ProjectStatusHistoryWriter::class)->delete($this->project, $status, auth()->user());
+        } catch (ValidationException) {
             Flux::toast(
                 duration: 5000,
                 position: 'top right',
@@ -185,10 +204,7 @@ class StatusCreate extends Component
                 text: 'Project must have at least one status.',
             );
             return;
-        }
-        
-        // Authorize - only owner or admin can delete
-        if ($status->belongs_to_vendor_id !== auth()->user()->vendor->id && !auth()->user()->hasRole('Super Admin')) {
+        } catch (AuthorizationException) {
             Flux::toast(
                 duration: 5000,
                 position: 'top right',
@@ -198,9 +214,7 @@ class StatusCreate extends Component
             );
             return;
         }
-        
-        $status->delete();
-        
+
         $this->editingStatusId = null;
         $this->editingStatusCode = null;
         $this->editingStatusDate = null;

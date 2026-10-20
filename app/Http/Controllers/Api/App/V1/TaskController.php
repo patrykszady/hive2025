@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\StoreTaskDependencyRequest;
 use App\Http\Requests\Api\App\StoreTaskRequest;
 use App\Http\Requests\Api\App\UpdateTaskRequest;
 use App\Http\Resources\Api\App\TaskResource;
@@ -10,10 +11,12 @@ use App\Jobs\CreateMeetTaskCalendarEvent;
 use App\Jobs\UpdateMeetTaskCalendarEvent;
 use App\Models\ProjectActionItem;
 use App\Models\Task;
+use App\Services\Tasks\TaskDependencyWriter;
 use App\Services\Tasks\TaskWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The app's task screens: create, edit, delete and schedule a task exactly
@@ -30,18 +33,21 @@ class TaskController extends Controller
         $found = $this->visibleTask($task);
         Gate::authorize('view', $found);
 
+        $found->load(['predecessorDependencies.predecessor', 'successorDependencies.successor']);
+
         return response()->json(['data' => (new TaskResource($found))->toArray($request)]);
     }
 
     /**
      * Mirrors App\Livewire\Tasks\TaskCreate::save(): the write itself, then
      * (when opened from a planner action item) marking that item converted,
-     * then — for a Meet with a start date — the calendar event. Simple
-     * dependencies only: this accepts `parent_task_id` (TaskForm's own
-     * field, used for the sibling-overlap check); the separate
-     * predecessor/lag/type Gantt-dependency editor
-     * (TaskCreate::$pendingDependencies / App\Models\TaskDependency) is
-     * web-only.
+     * then — for a Meet with a start date — the calendar event. Accepts
+     * `parent_task_id` (TaskForm's own field, used for the sibling-overlap
+     * check). The predecessor/lag/type dependency editor
+     * (App\Models\TaskDependency) is a separate add/remove flow once the
+     * task exists — see dependencies()/storeDependency()/destroyDependency()
+     * below — mirroring TaskCreate's own "pending until save" behaviour for
+     * a brand-new task is left to the app's create screen, not this write.
      */
     public function store(StoreTaskRequest $request, TaskWriter $writer): JsonResponse
     {
@@ -93,6 +99,68 @@ class TaskController extends Controller
         $found->delete();
 
         return response()->json(['data' => ['id' => $found->id, 'deleted' => true]]);
+    }
+
+    /**
+     * Candidate predecessors for this task — mirrors
+     * App\Livewire\Tasks\TaskCreate::availableTasks() via the shared
+     * App\Services\Tasks\TaskDependencyWriter::availableTasks().
+     */
+    public function availablePredecessors(Request $request, int $task, TaskDependencyWriter $writer): JsonResponse
+    {
+        $found = $this->visibleTask($task);
+        Gate::authorize('view', $found);
+
+        $tasks = $writer->availableTasks((int) $found->project_id, $found->id);
+
+        return response()->json(['data' => $tasks->map(fn (Task $candidate) => [
+            'id' => $candidate->id,
+            'title' => $candidate->title,
+            'start_date' => $candidate->start_date?->toDateString(),
+        ])->values()->all()]);
+    }
+
+    /**
+     * Add a predecessor — mirrors
+     * App\Livewire\Tasks\TaskCreate::addDependency()'s "already saved"
+     * branch, via the shared App\Services\Tasks\TaskDependencyWriter::add().
+     */
+    public function storeDependency(StoreTaskDependencyRequest $request, int $task, TaskDependencyWriter $writer): JsonResponse
+    {
+        $found = $this->visibleTask($task);
+        Gate::authorize('update', $found);
+
+        try {
+            $writer->add(
+                $found,
+                (int) $request->validated('predecessor_task_id'),
+                (string) $request->validated('type'),
+                (int) $request->validated('lag_days', 0),
+            );
+        } catch (ValidationException $exception) {
+            return response()->json(['message' => $exception->getMessage(), 'errors' => $exception->errors()], 422);
+        }
+
+        $found->load(['predecessorDependencies.predecessor', 'successorDependencies.successor']);
+
+        return response()->json(['data' => (new TaskResource($found))->toArray($request)], 201);
+    }
+
+    /**
+     * Remove a dependency — mirrors
+     * App\Livewire\Tasks\TaskCreate::removeDependency(), via the shared
+     * App\Services\Tasks\TaskDependencyWriter::remove().
+     */
+    public function destroyDependency(Request $request, int $task, int $dependency, TaskDependencyWriter $writer): JsonResponse
+    {
+        $found = $this->visibleTask($task);
+        Gate::authorize('update', $found);
+
+        $writer->remove($found, $dependency);
+
+        $found->load(['predecessorDependencies.predecessor', 'successorDependencies.successor']);
+
+        return response()->json(['data' => (new TaskResource($found))->toArray($request)]);
     }
 
     /**

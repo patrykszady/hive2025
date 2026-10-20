@@ -127,4 +127,30 @@ class AppClientDirectory
 
         return $person;
     }
+
+    /**
+     * App\Livewire\Clients\ClientCreate::deleteClient() — the caller is
+     * responsible for the 'delete' policy check first
+     * (App\Policies\ClientPolicy::delete already blocks a non-Admin or a
+     * client with projects). Detaches the client's people and vendors, then
+     * deletes any person left with no other client or vendor relationship
+     * — a contact shared with another client or a vendor keeps their
+     * account — before unindexing and deleting the client itself.
+     */
+    public function deleteClient(Client $client): void
+    {
+        $users = $client->users()->get();
+
+        $client->users()->detach();
+        $client->vendors()->detach();
+
+        foreach ($users as $user) {
+            if (! $user->clients()->exists() && ! $user->vendors()->exists()) {
+                $user->delete();
+            }
+        }
+
+        $client->unsearchable();
+        $client->delete();
+    }
 }

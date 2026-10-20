@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Api\App;
 
 use App\Models\Task;
+use App\Models\TaskDependency;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -10,7 +11,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /**
  * A task exactly as the Hive Contractors app's task screens need it: every
  * field App\Livewire\Forms\TaskForm::setTask() loads for editing, plus a few
- * display-only extras (`is_meet`, `progress`) the planner cards also show.
+ * display-only extras (`is_meet`, `progress`) the planner cards also show,
+ * and the predecessor/successor dependency list
+ * App\Livewire\Tasks\TaskCreate's Dependencies panel shows (see
+ * App\Services\Tasks\TaskDependencyWriter for the add/remove writes).
  *
  * @mixin \App\Models\Task
  */
@@ -62,8 +66,40 @@ class TaskResource extends JsonResource
             'parent_task_id' => $this->parent_task_id,
             'meeting_location_type' => $this->options->meeting_location_type ?? null,
             'meeting_participants' => (array) ($this->options->meeting_participants ?? []),
+            'predecessor_dependencies' => $this->dependencyList($this->resource->predecessorDependencies ?? collect(), 'predecessor'),
+            'successor_dependencies' => $this->dependencyList($this->resource->successorDependencies ?? collect(), 'successor'),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, TaskDependency>  $dependencies
+     * @param  'predecessor'|'successor'  $side  which side of the row is the OTHER task
+     * @return list<array{id: int, task: array{id: int, title: string}, type: string, type_display: string, lag_days: int, lag_display: string, is_blocking: bool}>
+     */
+    private function dependencyList($dependencies, string $side): array
+    {
+        return collect($dependencies)
+            ->map(function (TaskDependency $dependency) use ($side) {
+                $other = $side === 'predecessor' ? $dependency->predecessor : $dependency->successor;
+
+                if (! $other) {
+                    return null;
+                }
+
+                return [
+                    'id' => $dependency->id,
+                    'task' => ['id' => $other->id, 'title' => $other->title],
+                    'type' => $dependency->type,
+                    'type_display' => $dependency->type_display,
+                    'lag_days' => (int) $dependency->lag_days,
+                    'lag_display' => $dependency->lag_display,
+                    'is_blocking' => $side === 'predecessor' && $dependency->isBlocking(),
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
     }
 }

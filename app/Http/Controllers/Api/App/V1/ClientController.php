@@ -134,6 +134,21 @@ class ClientController extends Controller
     }
 
     /**
+     * "Delete Client" — App\Livewire\Clients\ClientCreate::deleteClient(),
+     * same gate (App\Policies\ClientPolicy::delete: an Admin, and only a
+     * client with no projects).
+     */
+    public function destroy(Request $request, int $client, AppClientDirectory $directory): JsonResponse
+    {
+        $found = $this->visibleClient($client);
+        $this->authorize('delete', $found);
+
+        $directory->deleteClient($found);
+
+        return response()->json(['data' => ['deleted' => true]]);
+    }
+
+    /**
      * "Add Member" on a client — the client branch of
      * App\Livewire\Users\UserCreate::save() for an existing client id.
      */

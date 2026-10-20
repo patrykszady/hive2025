@@ -2391,30 +2391,20 @@ class TaskCreate extends Component
             return;
         }
 
-        // Check for circular dependencies
-        if (TaskDependency::wouldCreateCircularDependency((int) $this->selectedPredecessorId, (int) $this->form->task->id)) {
-            $this->addError('selectedPredecessorId', 'This would create a circular dependency.');
+        // Circular/self/already-exists checks, then the write itself — shared
+        // with the app's task screen (see TaskDependencyWriter).
+        try {
+            app(\App\Services\Tasks\TaskDependencyWriter::class)->add(
+                $this->form->task,
+                (int) $this->selectedPredecessorId,
+                $this->dependencyType,
+                (int) $this->lagDays,
+            );
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $this->addError('selectedPredecessorId', $exception->validator->errors()->first());
             return;
         }
 
-        // Check if dependency already exists
-        $existingDependency = TaskDependency::where('predecessor_task_id', $this->selectedPredecessorId)
-            ->where('successor_task_id', $this->form->task->id)
-            ->first();
-
-        if ($existingDependency) {
-            $this->addError('selectedPredecessorId', 'This dependency already exists.');
-            return;
-        }
-
-        // Create the dependency
-        TaskDependency::create([
-            'predecessor_task_id' => $this->selectedPredecessorId,
-            'successor_task_id' => $this->form->task->id,
-            'type' => $this->dependencyType,
-            'lag_days' => $this->lagDays,
-        ]);
-        
         // Reset form fields
         $this->selectedPredecessorId = null;
         $this->lagDays = 0;
@@ -2446,20 +2436,9 @@ class TaskCreate extends Component
 
         $this->authorize('update', $task);
 
-        // Must actually belong to this task — dependencyId is otherwise a
-        // bare id the browser can pass for any dependency row.
-        $dependency = TaskDependency::where('id', $dependencyId)
-            ->where(function ($query) use ($task) {
-                $query->where('predecessor_task_id', $task->id)
-                    ->orWhere('successor_task_id', $task->id);
-            })
-            ->first();
-
-        if (! $dependency) {
+        if (! app(\App\Services\Tasks\TaskDependencyWriter::class)->remove($task, (int) $dependencyId)) {
             return;
         }
-
-        $dependency->delete();
 
         // Refresh task data with eager loading
         $this->form->refreshTaskWithDependencies($this->form->task->id);
@@ -2486,25 +2465,14 @@ class TaskCreate extends Component
             return collect();
         }
 
-        $excludeIds = array_filter([$this->form->task?->id]);
-
-        // Exclude tasks that are already predecessors — saved ones, and the
-        // ones chosen in this session that have not been written yet.
-        if ($this->form->task) {
-            $excludeIds = array_merge($excludeIds, $this->form->task->predecessorTasks->pluck('id')->toArray());
-        }
-
-        $excludeIds = array_merge(
-            $excludeIds,
+        // Shared with the app's task screen (TaskDependencyWriter::availableTasks());
+        // the extra exclusion here is this session's own not-yet-written
+        // predecessors, which only this component's pending-dependency UI has.
+        return app(\App\Services\Tasks\TaskDependencyWriter::class)->availableTasks(
+            (int) $projectId,
+            $this->form->task?->id,
             collect($this->pendingDependencies)->pluck('predecessor_task_id')->all(),
         );
-
-        return Task::where('project_id', $projectId)
-                ->whereNotIn('id', $excludeIds)
-                ->whereNotNull('start_date')
-                ->whereNotNull('end_date')
-                ->orderBy('start_date')
-                ->get();
     }
 
     /**
