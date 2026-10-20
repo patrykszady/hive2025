@@ -45,7 +45,7 @@ class EmailController extends Controller
 
             return $project
                 && Project::query()->whereKey($project->id)->exists()
-                && Gate::allows('view', $project);
+                && Gate::allows('update', $project);
         }
 
         if (! $email->client_id) {
@@ -55,6 +55,6 @@ class EmailController extends Controller
         return Project::query()
             ->where('client_id', $email->client_id)
             ->get()
-            ->contains(fn (Project $candidate) => Gate::allows('view', $candidate));
+            ->contains(fn (Project $candidate) => Gate::allows('update', $candidate));
     }
 }

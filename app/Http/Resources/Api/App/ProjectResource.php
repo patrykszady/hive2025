@@ -104,6 +104,9 @@ class ProjectResource extends JsonResource
                 'view_materials' => (bool) $user?->can('viewMaterials', $this->resource),
                 'manage_vendors' => (bool) $user?->can('update', $this->resource),
                 'manage_images' => (bool) $user?->can('manageImages', $this->resource),
+                // Calls, texts and emails with the project's stakeholders —
+                // Admin-only, like the web page's Communications card.
+                'view_communications' => (bool) $user?->can('update', $this->resource),
             ],
             // Project has no areas relation or table at all (checked the
             // model and the schema), so this is always empty rather than

@@ -37,10 +37,12 @@ beforeEach(function () {
  *
  * @return array{vendor: Vendor, user: User, client: Client, katie: User, project: Project}
  */
-function appCommWorld(): array
+function appCommWorld(int $role = 1): array
 {
     $vendor = Vendor::query()->find(1) ?? Vendor::factory()->create(['id' => 1, 'business_name' => 'GS Construction']);
     $user = User::factory()->create(['first_name' => 'Patryk', 'last_name' => 'Crew', 'primary_vendor_id' => $vendor->id]);
+    // Communications are Admin-only, like the web project page's card.
+    $vendor->users()->attach($user->id, ['role_id' => $role, 'is_employed' => 1]);
 
     $client = Client::factory()->create();
 
@@ -266,4 +268,20 @@ it('shows an email\'s full detail: AI read, latest-part body, and a downloadable
     auth()->forgetGuards();
     $this->get($response->json('data.attachments.0.url'))->assertOk();
     $this->get($response->json('data.attachments.1.url'))->assertOk();
+});
+
+it('keeps communications to Admins, like the web project page, and says so on the project', function () {
+    ['user' => $member, 'project' => $project, 'client' => $client, 'vendor' => $vendor] = appCommWorld(role: 2);
+    $email = EmailMessage::factory()->create(['belongs_to_vendor_id' => $vendor->id, 'client_id' => $client->id, 'project_id' => $project->id]);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson("/api/app/v1/projects/{$project->id}/communications")->assertForbidden();
+    $this->getJson("/api/app/v1/emails/{$email->id}")->assertForbidden();
+    $this->getJson("/api/app/v1/projects/{$project->id}")->assertOk()->assertJsonPath('data.permissions.view_communications', false);
+
+    $admin = User::factory()->create(['primary_vendor_id' => $vendor->id]);
+    $vendor->users()->attach($admin->id, ['role_id' => 1, 'is_employed' => 1]);
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->getJson("/api/app/v1/projects/{$project->id}")->assertOk()->assertJsonPath('data.permissions.view_communications', true);
 });

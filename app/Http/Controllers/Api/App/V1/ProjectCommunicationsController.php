@@ -13,11 +13,9 @@ use Illuminate\Support\Facades\Gate;
 /**
  * The app's Communications tab on a project: the same merged call/text/
  * email timeline ProjectCommunicationsTimeline hands the web project page,
- * paged newest-first with `before`. Open to anyone who can view the
- * project at all (ProjectPolicy::view) — the web has no narrower,
- * Member-only restriction on this data to mirror (Finances/Materials/
- * Vendors/Email-Tracking are the only project-page cards gated past plain
- * view(), and none of them covers calls/texts/emails).
+ * paged newest-first with `before`. Admins only, like the web project
+ * page's Communications card (@can('update', $project)): client email can
+ * carry prices and negotiations.
  */
 class ProjectCommunicationsController extends Controller
 {
@@ -45,7 +43,7 @@ class ProjectCommunicationsController extends Controller
         $project = Project::query()->whereKey($id)->first();
         abort_unless($project, 403, 'You do not have access to this project.');
 
-        Gate::authorize('view', $project);
+        Gate::authorize('update', $project);
 
         return $project;
     }
