@@ -71,6 +71,12 @@ class LeadResource extends JsonResource
             'message' => $lead->lead_data['message'] ?? null,
             'notes' => $lead->notes,
             'reply_to_email' => $lead->lead_data['reply_to_email'] ?? null,
+            // Raw address parts — mirrors LeadCreate's edit() fields exactly,
+            // so an "Edit" form can prefill city/state/zip without re-parsing
+            // the combined 'address' string.
+            'city' => $lead->lead_data['city'] ?? null,
+            'state' => $lead->lead_data['state'] ?? null,
+            'zip' => $lead->lead_data['zip'] ?? null,
             'attachments' => $this->attachments($lead),
             'availability' => $lead->usableAvailability(),
             'has_rescheduled' => $lead->hasRescheduled(),

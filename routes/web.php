@@ -235,6 +235,20 @@ Route::get('estimates/{estimate}/pdf/signed', [\App\Http\Controllers\EstimatePdf
     ->whereNumber('estimate')
     ->name('estimates.pdf.signed');
 
+// Same pattern as estimates.pdf.signed, for the Export > Excel menu item
+// (EstimateShow::export_csv()) and the Export > Download Signed Contract
+// item (EstimateShow::downloadSignedContract()) — minted by GET
+// /api/app/v1/estimates/{id}/xlsx-url and signed-contract-url.
+Route::get('estimates/{estimate}/xlsx/signed', [\App\Http\Controllers\EstimatePdfController::class, 'xlsxSigned'])
+    ->middleware('signed')
+    ->whereNumber('estimate')
+    ->name('estimates.xlsx.signed');
+
+Route::get('estimates/{estimate}/signed-contract/signed', [\App\Http\Controllers\EstimatePdfController::class, 'signedContract'])
+    ->middleware('signed')
+    ->whereNumber('estimate')
+    ->name('estimates.signed-contract.signed');
+
 // A vendor document/certificate scan for the Hive Contractors app: a
 // time-limited signed link handed out by GET /api/app/v1/vendor-docs/{vendor}
 // (see VendorDocResource), so the app's Vendor Documents screen can show it

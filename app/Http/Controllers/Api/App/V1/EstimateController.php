@@ -125,11 +125,39 @@ class EstimateController extends Controller
     /**
      * A fresh, time-limited signed link to this estimate's PDF — same
      * App\Support\EstimateDocumentGenerator output App\Livewire\Estimates\
-     * EstimateShow::create_pdf() streams on the web, but reachable without a
-     * web session (the `signed` middleware alone is the gate — see
-     * routes/web.php's estimates.pdf.signed and EstimateController::pdf()).
+     * EstimateShow::create_pdf($type) streams on the web (Export > Export
+     * Estimate/Invoice/Work Order), but reachable without a web session (the
+     * `signed` middleware alone is the gate — see routes/web.php's
+     * estimates.pdf.signed and EstimatePdfController::signed()). `type`
+     * defaults to 'estimate'; anything else unrecognized falls back to it too
+     * (same as the controller's own guard), so a bad value never 404s.
      */
     public function pdfUrl(Request $request, int $estimate): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('view', $found);
+
+        $type = (string) $request->query('type', 'estimate');
+        if (! in_array($type, ['estimate', 'invoice', 'work order'], true)) {
+            $type = 'estimate';
+        }
+
+        $expiresAt = now()->addMinutes(10);
+
+        return response()->json([
+            'data' => [
+                'url' => URL::temporarySignedRoute('estimates.pdf.signed', $expiresAt, ['estimate' => $found->id, 'type' => $type]),
+                'expires_at' => $expiresAt->toIso8601String(),
+            ],
+        ]);
+    }
+
+    /**
+     * A fresh, time-limited signed link to this estimate's XLSX — mirrors
+     * App\Livewire\Estimates\EstimateShow::export_csv() (Export > Export
+     * Excel Estimate).
+     */
+    public function xlsxUrl(Request $request, int $estimate): JsonResponse
     {
         $found = $this->visibleEstimate($estimate);
         $this->authorize('view', $found);
@@ -138,10 +166,51 @@ class EstimateController extends Controller
 
         return response()->json([
             'data' => [
-                'url' => URL::temporarySignedRoute('estimates.pdf.signed', $expiresAt, ['estimate' => $found->id]),
+                'url' => URL::temporarySignedRoute('estimates.xlsx.signed', $expiresAt, ['estimate' => $found->id]),
                 'expires_at' => $expiresAt->toIso8601String(),
             ],
         ]);
+    }
+
+    /**
+     * A fresh, time-limited signed link to the already-signed contract PDF —
+     * mirrors App\Livewire\Estimates\EstimateShow::downloadSignedContract()
+     * (Export > Download Signed Contract), only offered once one exists.
+     */
+    public function signedContractUrl(Request $request, int $estimate): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('view', $found);
+
+        abort_unless($found->signed_contract_path, 404, 'No signed contract on file for this estimate.');
+
+        $expiresAt = now()->addMinutes(10);
+
+        return response()->json([
+            'data' => [
+                'url' => URL::temporarySignedRoute('estimates.signed-contract.signed', $expiresAt, ['estimate' => $found->id]),
+                'expires_at' => $expiresAt->toIso8601String(),
+            ],
+        ]);
+    }
+
+    /**
+     * Sends the "Send Invite" emails — mirrors App\Livewire\Estimates\
+     * EstimateShow::sendInvite() via App\Services\Estimates\
+     * EstimateInviteSender, the service both surfaces share.
+     */
+    public function sendInvite(Request $request, int $estimate, \App\Services\Estimates\EstimateInviteSender $sender): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('update', $found);
+
+        $result = $sender->send($found);
+
+        if ($result['reason'] !== null) {
+            return response()->json(['message' => $result['reason']], 422);
+        }
+
+        return response()->json(['data' => ['kind' => $result['kind'], 'sent' => $result['sent']]]);
     }
 
     private function visibleEstimate(int $id, bool $withTrashed = false): Estimate

@@ -42,11 +42,29 @@ class EstimateResource extends JsonResource
             return $row;
         }
 
+        $trashedSections = $this->resource->estimate_sections()->onlyTrashed()->get();
+        $trashedLineItems = EstimateLineItem::onlyTrashed()
+            ->where('estimate_id', $this->resource->id)
+            ->whereHas('section', fn ($query) => $query->whereNull('deleted_at'))
+            ->get()
+            ->groupBy('section_id');
+
         return $row + [
             'sections' => $this->resource->estimate_sections
                 ->sortBy('order')
                 ->values()
-                ->map(fn (EstimateSection $section) => $this->sectionArray($section))
+                ->map(fn (EstimateSection $section) => $this->sectionArray($section) + [
+                    'trashed_line_items' => ($trashedLineItems->get($section->id) ?? collect())
+                        ->map(fn (EstimateLineItem $lineItem) => ['id' => $lineItem->id, 'name' => $lineItem->name, 'total' => round((float) $lineItem->total, 2)])
+                        ->values()
+                        ->all(),
+                ])
+                ->all(),
+            // Disabled sections, restorable from the "Restore Deleted Section"
+            // menu — mirrors EstimateShow's $trashedSections exactly.
+            'trashed_sections' => $trashedSections
+                ->map(fn (EstimateSection $section) => ['id' => $section->id, 'name' => $section->name, 'total' => round((float) $section->total, 2)])
+                ->values()
                 ->all(),
             'dates' => [
                 'start_date' => $this->start_date?->toDateString(),

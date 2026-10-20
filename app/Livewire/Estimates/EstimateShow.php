@@ -217,49 +217,7 @@ class EstimateShow extends Component
         $this->authorize('update', $this->estimate);
 
         $lineItem = $this->estimate->estimate_line_items()->onlyTrashed()->findOrFail($lineItemId);
-        $section = $this->estimate->estimate_sections()->findOrFail($lineItem->section_id);
-
-        // Look up the original order from the activity log recorded on deletion.
-        // displace() logs this FIRST (before LogsActivity fires its own 'deleted' entry),
-        // so we use orderBy('id') ASC to get the displace log which carries the order.
-        $deletedActivity = \Spatie\Activitylog\Models\Activity::query()
-            ->where('subject_type', EstimateLineItem::class)
-            ->where('subject_id', $lineItemId)
-            ->where('event', 'deleted')
-            ->orderBy('id')
-            ->first();
-
-        $originalOrder = isset($deletedActivity->properties['old']['order'])
-            ? (int) $deletedActivity->properties['old']['order']
-            : null;
-
-        // Restore the line item (order remains 999999 until moved below)
-        $lineItem->restore();
-
-        // Re-insert at the original position so numbering is preserved.
-        // Falls back to end-of-list when no activity record exists.
-        if ($originalOrder !== null) {
-            $lineItem->move($originalOrder);
-        } else {
-            $currentMaxOrder = EstimateLineItem::where('section_id', $section->id)
-                ->where('order', '<', 999999)
-                ->max('order');
-            $lineItem->order = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
-            $lineItem->save();
-        }
-
-        // Update section total
-        $section->total = $section->estimate_line_items()->sum('total');
-        $section->save();
-
-        // Update bid if applicable
-        if ($section->bid_id) {
-            $bid = Bid::find($section->bid_id);
-            if ($bid) {
-                $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
-                $bid->save();
-            }
-        }
+        $section = app(EstimateSectionWriter::class)->restoreLineItem($lineItem);
 
         $this->estimate_refresh();
         $this->refreshFinancialIslands();
@@ -370,98 +328,28 @@ class EstimateShow extends Component
     {
         $this->authorize('update', $this->estimate);
 
-        $estimate = Estimate::withoutGlobalScopes()
-            ->with(['signatures', 'project.client.users'])
-            ->find($this->estimate->id);
+        $result = app(\App\Services\Estimates\EstimateInviteSender::class)->send($this->estimate);
 
-        if (! $estimate) {
+        if ($result['reason'] !== null) {
             Flux::toast(
                 duration: 5000,
                 position: 'top right',
                 variant: 'warning',
-                heading: 'Estimate Not Found',
-                text: 'Unable to send invites for this estimate.',
+                heading: $result['kind'] === \App\Services\Estimates\EstimateInviteSender::KIND_SIGNING ? 'No Pending Signers' : ($result['kind'] === '' ? 'Estimate Not Found' : 'No Recipients'),
+                text: $result['reason'],
             );
 
             return;
         }
 
-        if ($estimate->isVendorSigned() && ! $estimate->isFullySigned()) {
-            $clientUsers = $estimate->project?->client?->users ?? collect();
-            $signedUserIds = $estimate->signatures->pluck('user_id')->all();
-            $pendingRecipients = $clientUsers
-                ->filter(fn ($user) => filled($user->email) && ! in_array($user->id, $signedUserIds));
-
-            if ($pendingRecipients->isEmpty()) {
-                Flux::toast(
-                    duration: 5000,
-                    position: 'top right',
-                    variant: 'warning',
-                    heading: 'No Pending Signers',
-                    text: 'All client users have signed or are missing an email address.',
-                );
-
-                return;
-            }
-
-            $sent = 0;
-            foreach ($pendingRecipients as $user) {
-                Mail::mailer('mailtrap-sdk')->to($user->email)->send(
-                    new EstimateSigningInvite($estimate, $user->first_name ?? '')
-                );
-                $sent++;
-            }
-
-            Flux::toast(
-                duration: 5000,
-                position: 'top right',
-                variant: 'success',
-                heading: 'Signing Invites Sent',
-                text: "Sent {$sent} contract signing invite" . ($sent !== 1 ? 's' : '') . '.',
-            );
-
-            return;
-        }
-
-        $client = $this->estimate->client;
-        $vendorId = $this->estimate->belongs_to_vendor_id;
-        $allUsers = $client?->users ?? collect();
-
-        // The registration.registered flag is unreliable on legacy/imported users,
-        // so send to every client user with an email and let recipients ignore it
-        // if they're already signed up.
-        $users = $allUsers->filter(fn ($u) => filled($u->email));
-
-        if ($users->isEmpty()) {
-            Flux::toast(
-                duration: 5000,
-                position: 'top right',
-                variant: 'warning',
-                heading: 'No Recipients',
-                text: 'No client users with an email address.',
-            );
-
-            return;
-        }
-
-        $sent = 0;
-        foreach ($users as $user) {
-            if (! $user->email) {
-                continue;
-            }
-
-            Mail::mailer('mailtrap-sdk')->to($user->email)->send(
-                new WelcomeClient($vendorId, $user->first_name ?? '')
-            );
-            $sent++;
-        }
+        $isSigning = $result['kind'] === \App\Services\Estimates\EstimateInviteSender::KIND_SIGNING;
 
         Flux::toast(
             duration: 5000,
             position: 'top right',
             variant: 'success',
-            heading: 'Invites Sent',
-            text: "Sent {$sent} invite" . ($sent !== 1 ? 's' : '') . '.',
+            heading: $isSigning ? 'Signing Invites Sent' : 'Invites Sent',
+            text: 'Sent '.$result['sent'].' '.($isSigning ? 'contract signing invite' : 'invite').($result['sent'] !== 1 ? 's' : '').'.',
         );
     }
 
@@ -522,36 +410,8 @@ class EstimateShow extends Component
 
         $section_data = $this->sections[$section_index];
         $section = $this->estimate->estimate_sections()->findOrFail($section_data['id']);
-        $line_items = $this->estimate->estimate_line_items()->where('section_id', $section->id)->get();
 
-        $new_section = $this->create_new_section($section->name.' -Copy');
-
-        //create new estimate section
-        foreach ($line_items as $duplicate_section_line) {
-            $newLineItem = EstimateLineItem::create([
-                'estimate_id' => $this->estimate->id,
-                'line_item_id' => $duplicate_section_line->line_item_id,
-                'section_id' => $new_section->id,
-                'order' => $duplicate_section_line->order,
-                'name' => $duplicate_section_line->name,
-                'category' => $duplicate_section_line->category,
-                'sub_category' => $duplicate_section_line->sub_category,
-                'unit_type' => $duplicate_section_line->unit_type,
-                'quantity' => $duplicate_section_line->quantity,
-                'cost' => $duplicate_section_line->cost,
-                'total' => $duplicate_section_line->total,
-                'desc' => $duplicate_section_line->desc,
-                'notes' => $duplicate_section_line->notes,
-            ]);
-
-            // Duplicate allowances
-            foreach ($duplicate_section_line->allowances as $allowance) {
-                $newLineItem->allowances()->create([
-                    'description' => $allowance->description,
-                    'amount' => $allowance->amount,
-                ]);
-            }
-        }
+        $new_section = app(EstimateSectionWriter::class)->duplicateSection($section);
 
         $this->estimate_refresh();
         $this->refreshFinancialIslands();
