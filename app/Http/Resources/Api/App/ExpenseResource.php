@@ -55,6 +55,15 @@ class ExpenseResource extends JsonResource
             'date' => $expense->date?->format('Y-m-d'),
             'vendor' => $this->vendorPayload($expense),
             'project' => $this->projectPayload($expense),
+            // The distribution this expense is on (if any) — id/name, same
+            // shape as a split's own `distribution` field below. 'project'
+            // above keeps carrying the distribution's NAME for backward
+            // compatibility with the list row's display, but its `id` stays
+            // null; this is what lets the edit form actually tell which
+            // distribution it was and round-trip it (see AppExpenseDirectory
+            // /StoreExpenseRequest's distribution_id field) instead of
+            // forcing a reclassification to a plain project.
+            'distribution' => $this->distributionPayload($expense),
             'is_split' => $hasSplits,
             'status' => $expense->status,
             'status_color' => $expense->statusColor,
@@ -264,6 +273,18 @@ class ExpenseResource extends JsonResource
         $project = $expense->project;
 
         return $project && $project->exists ? ['id' => $project->id, 'name' => $project->project_name] : null;
+    }
+
+    /**
+     * @return array{id: int, name: string}|null
+     */
+    private function distributionPayload(Expense $expense): ?array
+    {
+        if (! $expense->distribution_id || ! $expense->distribution) {
+            return null;
+        }
+
+        return ['id' => $expense->distribution->id, 'name' => $expense->distribution->name];
     }
 
     /**

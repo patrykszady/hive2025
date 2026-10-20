@@ -6,10 +6,10 @@ use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Distribution;
 use App\Models\Expense;
-use App\Models\ExpenseSplits;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Models\Vendor;
+use App\Services\Expenses\ExpenseSplitsWriter;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -228,59 +228,35 @@ class ExpenseForm extends Form
     public function save_splits(Expense $expense)
     {
         $expense_details = $this->expenseDetails();
-        //if no splits / splits removed and project/distrubtuion entered...
+        $hubVendorId = auth()->user()->vendor->id;
+
+        // Switched from Split to a direct project/distribution — no splits
+        // remain. Delegating an empty array to the writer below already
+        // deletes every existing one (nothing in the empty set "keeps" it),
+        // so this branch only short-circuits reading $this->component's
+        // (possibly stale) expense_splits in that case.
         if (! $expense->splits->isEmpty() && (! is_null($expense_details['project_id']) || ! is_null($expense_details['distribution_id']))) {
-            foreach ($expense->splits as $split_to_remove) {
-                $split_to_remove = ExpenseSplits::findOrFail($split_to_remove->id);
-                $split_to_remove->delete();
-            }
-        } else {
-            foreach (collect($this->component->expense_splits) as $split) {
-                if (is_numeric($split['project_id'])) {
-                    $project_id = $split['project_id'];
-                    $distribution_id = null;
-                } else {
-                    $project_id = null;
-                    $distribution_id = substr($split['project_id'], 2);
-                }
+            app(ExpenseSplitsWriter::class)->sync($expense, [], $hubVendorId, auth()->user()->id);
 
-                // Each split row's project/distribution id is client-supplied —
-                // check it against what this tenant can see before writing it.
-                $this->assertProjectAccessible(
-                    $project_id ? (int) $project_id : null,
-                    $distribution_id ? (int) $distribution_id : null,
-                );
-
-                if (isset($split['id'])) {
-                    $update_split = ExpenseSplits::findOrFail($split['id']);
-                    $update_split->update([
-                        'amount' => $split['amount'],
-                        'expense_id' => $expense->id,
-                        'project_id' => $project_id,
-                        'distribution_id' => $distribution_id,
-                        'reimbursment' => isset($split['reimbursment']) ? $split['reimbursment'] : null,
-                        'note' => isset($split['note']) ? $split['note'] : null,
-                        'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                        'created_by_user_id' => auth()->user()->id,
-                        'receipt_items' => (object) $split['items'],
-                    ]);
-                } else {
-                    $split = ExpenseSplits::create([
-                        'amount' => $split['amount'],
-                        'expense_id' => $expense->id,
-                        'project_id' => $project_id,
-                        'distribution_id' => $distribution_id,
-                        'reimbursment' => isset($split['reimbursment']) ? $split['reimbursment'] : null,
-                        'note' => isset($split['note']) ? $split['note'] : null,
-                        'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                        'created_by_user_id' => auth()->user()->id,
-                        'receipt_items' => (object) $split['items'],
-                    ]);
-                }
-            }
+            return;
         }
 
-        return;
+        $splits = collect($this->component->expense_splits)->map(fn ($split) => [
+            'id' => $split['id'] ?? null,
+            'amount' => $split['amount'],
+            // The web's own single-field "D:{id}" encoding — see
+            // ExpenseAccessGuard::resolveProjectSelector().
+            'project_id' => $split['project_id'],
+            'reimbursment' => $split['reimbursment'] ?? null,
+            'note' => $split['note'] ?? null,
+            // Always present (even as null) — matches the web split
+            // editor's own state shape exactly, so receipt_items is
+            // written through on every save, same as before this was
+            // extracted.
+            'items' => $split['items'] ?? null,
+        ])->all();
+
+        app(ExpenseSplitsWriter::class)->sync($expense, $splits, $hubVendorId, auth()->user()->id);
     }
 
     public function delete()

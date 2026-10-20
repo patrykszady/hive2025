@@ -22,4 +22,13 @@ class UpdateExpenseRequest extends StoreExpenseRequest
 
         return Expense::withoutGlobalScopes()->whereKey($expenseId)->first()?->check_id;
     }
+
+    /**
+     * See StoreExpenseRequest::expenseIdForSplitOwnership()'s docblock — on
+     * update, a submitted split id must belong to THIS route's expense.
+     */
+    protected function expenseIdForSplitOwnership(): ?int
+    {
+        return (int) $this->route('expense');
+    }
 }
