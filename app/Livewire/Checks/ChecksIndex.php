@@ -78,9 +78,30 @@ class ChecksIndex extends Component
 
     public $sortDirection = 'desc';
 
+    /** Only the Date header is sortable (the Amount one is commented out in the view). */
+    public const SORTABLE_COLUMNS = ['date'];
+
     public function updating($field)
     {
         $this->resetPage();
+    }
+
+    /**
+     * The Date header's sort toggle (the view has always called sort('date'),
+     * which used to throw because the method didn't exist).
+     */
+    public function sort(string $column): void
+    {
+        if (! in_array($column, self::SORTABLE_COLUMNS, true)) {
+            return;
+        }
+
+        if ($this->sortBy === $column) {
+            $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            $this->sortBy = $column;
+            $this->sortDirection = 'asc';
+        }
     }
 
     public function mount()
@@ -124,7 +145,7 @@ class ChecksIndex extends Component
         $check_number = $this->check_number;
         $amount = $this->amount;
         $checks =
-            Check::orderBy('date', 'DESC')
+            Check::orderBy('date', $this->sortDirection === 'asc' ? 'asc' : 'desc')
                 //distributions
                 ->with(['expenses', 'bank_account.bank', 'transactions', 'user.vendors', 'vendor'])
                 ->where(function ($query) use ($bank_accounts) {
