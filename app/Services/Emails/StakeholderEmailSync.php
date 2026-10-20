@@ -67,13 +67,20 @@ class StakeholderEmailSync
     protected function readFolder(string $grantId, string $mailbox, string $folder, string $folderId, ?string $sharedFrom, ?int $days): array
     {
         $watermarkKey = "emails:sync:{$grantId}:{$mailbox}:{$folder}";
-        $since = $days !== null
+        $resumeKey = "{$watermarkKey}:resume";
+
+        // Nylas pages newest first. A sweep larger than one run's page budget
+        // resumes from its cursor on the next run (same window), and only a
+        // sweep that reached the end moves the watermark — otherwise the
+        // older part of a busy first window would never be read.
+        $resume = $days === null ? Cache::get($resumeKey) : null;
+        $since = $resume['since'] ?? ($days !== null
             ? now()->subDays($days)->getTimestamp()
-            : (int) Cache::get($watermarkKey, now()->subDays((int) config('emails.stakeholder_sync.initial_days', 30))->getTimestamp());
+            : (int) Cache::get($watermarkKey, now()->subDays((int) config('emails.stakeholder_sync.initial_days', 30))->getTimestamp()));
+        $newest = (int) ($resume['newest'] ?? $since);
+        $cursor = $resume['cursor'] ?? null;
 
         $out = ['mailbox' => $mailbox, 'folder' => $folder, 'fetched' => 0, 'stored' => 0, 'error' => null];
-        $newest = $since;
-        $cursor = null;
 
         for ($page = 0; $page < (int) config('emails.stakeholder_sync.max_pages', 10); $page++) {
             try {
@@ -92,6 +99,11 @@ class StakeholderEmailSync
             }
 
             if (! $response->successful()) {
+                // A stale resume cursor: start the window over next run.
+                if ($cursor !== null && $response->status() === 400) {
+                    Cache::forget($resumeKey);
+                }
+
                 $out['error'] = 'HTTP '.$response->status();
                 Log::channel('nylas')->warning('Stakeholder email sync: folder unreadable', ['mailbox' => $mailbox, 'folder' => $folder, 'status' => $response->status()]);
 
@@ -115,16 +127,28 @@ class StakeholderEmailSync
                 }
             }
 
-            $cursor = $response->json('next_cursor');
+            $cursor = $response->json('next_cursor') ?: null;
 
-            if (! $cursor) {
+            if ($cursor === null) {
                 break;
             }
         }
 
+        if ($out['error'] !== null || $days !== null) {
+            return $out;
+        }
+
+        if ($cursor !== null) {
+            Cache::put($resumeKey, ['since' => $since, 'newest' => $newest, 'cursor' => $cursor], now()->addDay());
+
+            return $out;
+        }
+
+        Cache::forget($resumeKey);
+
         // A message dated in the same second as the newest one read must not
         // fall between runs; the store dedupes the overlap.
-        if ($out['error'] === null && $newest > $since) {
+        if ($newest > $since) {
             Cache::forever($watermarkKey, $newest - 1);
         }
 

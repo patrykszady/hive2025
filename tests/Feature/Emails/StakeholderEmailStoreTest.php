@@ -194,3 +194,32 @@ it('serves an attachment only through its signed link', function () {
     $this->get("/emails/{$email->id}/attachments/0/signed")->assertForbidden();
     $this->get(str_replace('/attachments/0/', '/attachments/1/', $email->attachmentUrl(0)))->assertForbidden();
 });
+
+it('resumes a window too big for one run before moving the watermark', function () {
+    config(['emails.stakeholder_sync.max_pages' => 1]);
+    $world = serviceCallWorld();
+    $newer = nylasMessage($world, ['date' => now()->subHour()->getTimestamp()]);
+    $older = nylasMessage($world, ['date' => now()->subDays(20)->getTimestamp()]);
+    $key = "emails:sync:grant-1:{$world['mailbox']}:inbox";
+
+    Http::fake([
+        NYLAS_TEST.'/v3/grants/grant-1/folders*' => Http::response(['data' => [['id' => 'f-inbox', 'name' => 'Inbox']]]),
+        NYLAS_TEST.'/v3/grants/grant-1/messages*' => function (HttpRequest $request) use ($newer, $older) {
+            return ($request['page_token'] ?? null) === 'page-2'
+                ? Http::response(['data' => [$older]])
+                : Http::response(['data' => [$newer], 'next_cursor' => 'page-2']);
+        },
+    ]);
+
+    $sync = app(StakeholderEmailSync::class);
+
+    $sync->run();
+    expect(Cache::get($key))->toBeNull()
+        ->and(Cache::get("{$key}:resume")['cursor'])->toBe('page-2')
+        ->and(EmailMessage::count())->toBe(1);
+
+    $sync->run();
+    expect(EmailMessage::count())->toBe(2)
+        ->and(Cache::get("{$key}:resume"))->toBeNull()
+        ->and(Cache::get($key))->toBe($newer['date'] - 1);
+});

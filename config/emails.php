@@ -24,9 +24,10 @@ return [
         // First run (and a run with no watermark) looks back this far.
         'initial_days' => (int) env('STAKEHOLDER_EMAIL_INITIAL_DAYS', 30),
 
-        // Messages per Nylas page; a run reads at most `max_pages` pages per folder.
-        'page_size' => 50,
-        'max_pages' => 10,
+        // Messages per Nylas page; a run reads at most `max_pages` pages per
+        // folder and resumes from there on the next run.
+        'page_size' => 100,
+        'max_pages' => 20,
 
         // The AI read every stored email gets (summary, action items, project).
         'summary_model' => env('OPENAI_EMAIL_SUMMARY_MODEL', 'gpt-4.1'),
