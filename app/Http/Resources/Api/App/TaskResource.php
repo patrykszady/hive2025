@@ -27,10 +27,12 @@ class TaskResource extends JsonResource
             'title' => $this->title,
             'type' => $this->type,
             'is_meet' => $this->type === 'Meet',
-            'project' => $this->whenLoaded('project', fn () => [
-                'id' => $this->project->id,
-                'name' => $this->project->project_name,
-            ], ['id' => $this->project_id]),
+            // Always named: the app's task screen shows the project in its
+            // Project field, and show/update never eager-load it.
+            'project' => [
+                'id' => $this->project_id,
+                'name' => $this->resource->project?->project_name,
+            ],
             'vendor' => $this->resource->vendor ? [
                 'id' => $this->resource->vendor->id,
                 'business_name' => $this->resource->vendor->business_name,

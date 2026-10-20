@@ -182,12 +182,18 @@ it('lets the owning company update and delete a task, and 403s another company',
         'created_by_user_id' => $user->id,
     ]));
 
+    // The task screen's Project field shows the project's name.
+    $this->getJson("/api/app/v1/tasks/{$task->id}")
+        ->assertOk()
+        ->assertJsonPath('data.project.id', $project->id)
+        ->assertJsonPath('data.project.name', $project->project_name);
+
     $this->postJson("/api/app/v1/tasks/{$task->id}", [
         'title' => 'Updated title',
         'project_id' => $project->id,
         'type' => 'Task',
         'dates' => ['2026-11-10'],
-    ])->assertOk()->assertJsonPath('data.title', 'Updated title');
+    ])->assertOk()->assertJsonPath('data.title', 'Updated title')->assertJsonPath('data.project.name', $project->project_name);
 
     expect($task->fresh()->title)->toBe('Updated title');
 
