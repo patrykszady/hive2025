@@ -212,6 +212,32 @@ it('shows a payment\'s detail with its grouped siblings', function () {
         ->toBe(collect([$parent->id, $child->id])->sort()->values()->all())
         ->and(collect($response->json('data.grouped_payments'))->pluck('reference')->unique()->all())
         ->toBe(['GRP']);
+
+    // Each grouped row carries its own client/project — the web groups them
+    // by client (payments/show.blade.php:66-76); both link to the same
+    // client here since both projects share it.
+    $parentRow = collect($response->json('data.grouped_payments'))->firstWhere('id', $parent->id);
+    expect($parentRow['client'])->toBe(['id' => $client->id, 'name' => $client->name])
+        ->and($parentRow['project'])->toBe(['id' => $hallBath->id, 'name' => $hallBath->project_name]);
+});
+
+it('carries each grouped row\'s own client when a deposit covers more than one', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $clientA = appPaymentsClient($vendor, ['business_name' => 'Smith Household']);
+    $clientB = appPaymentsClient($vendor, ['business_name' => 'Jones Household']);
+    $projectA = appPaymentsProject($vendor, $clientA);
+    $projectB = appPaymentsProject($vendor, $clientB);
+
+    $parent = appPaymentsRow($vendor, $projectA, ['amount' => 100, 'reference' => 'DEP']);
+    $sibling = appPaymentsRow($vendor, $projectB, ['amount' => 200, 'reference' => 'DEP', 'parent_client_payment_id' => $parent->id]);
+
+    $response = $this->getJson("/api/app/v1/payments/{$parent->id}")->assertOk();
+
+    $rows = collect($response->json('data.grouped_payments'));
+    expect($rows->firstWhere('id', $parent->id)['client']['name'])->toBe('Smith Household')
+        ->and($rows->firstWhere('id', $sibling->id)['client']['name'])->toBe('Jones Household');
 });
 
 it('shows the matched transaction\'s bank and account, like the web\'s Payment Transaction card', function () {

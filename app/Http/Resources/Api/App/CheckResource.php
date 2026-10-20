@@ -45,10 +45,7 @@ class CheckResource extends JsonResource
             'check_type' => $this->check_type,
             'payment_label' => $this->payment_label,
             'bank' => $this->resource->bank_account?->getNameAndType(),
-            'payee' => [
-                'label' => $this->owner,
-                'web_path' => $this->webPathFor($this->payeeUrl()),
-            ],
+            'payee' => $this->payeePayload(),
             'status' => [
                 'label' => $this->status,
                 'color' => $this->statusColor,
@@ -102,9 +99,28 @@ class CheckResource extends JsonResource
     }
 
     /**
-     * The web's payeeUrl()/owner() point at vendors.show or users.show — the
-     * app has no native screen for either yet, so this is only used for the
-     * "Open in Hive" link, never a route the app itself can push to.
+     * The payee's label plus where the app can push to natively (a vendor or
+     * a user screen) — same precedence Check::payeeRoute() builds the web's
+     * payeeUrl() from.
+     *
+     * @return array{label: ?string, web_path: ?string, id: ?int, type: ?string}
+     */
+    private function payeePayload(): array
+    {
+        $route = $this->resource->payeeRoute();
+
+        return [
+            'label' => $this->owner,
+            'web_path' => $this->webPathFor($this->payeeUrl()),
+            'id' => $route['id'] ?? null,
+            'type' => $route['type'] ?? null,
+        ];
+    }
+
+    /**
+     * The web's payeeUrl()/owner() point at vendors.show or users.show —
+     * kept for the "Open in Hive" link (payeePayload() above now also gives
+     * the app its own id/type to push to natively).
      */
     private function webPathFor(?string $absoluteOrRelativeRoute): ?string
     {
@@ -144,7 +160,7 @@ class CheckResource extends JsonResource
      * projects.timelapse.frame.signed) so the app can show them without a
      * web session or cookie.
      *
-     * @return list<array{id: int, url: string, check_date: ?string}>
+     * @return list<array{id: int, url: string, check_date: ?string, statement_url: ?string}>
      */
     private function imagesArray(): array
     {
@@ -160,6 +176,16 @@ class CheckResource extends JsonResource
                     ['image' => $image->id]
                 ),
                 'check_date' => $image->check_date?->toDateString(),
+                // The web's "View Full Statement" icon button
+                // (checks/show.blade.php:251-252) — only the FIRST image's
+                // statement, same as the web reading $check_images->first().
+                'statement_url' => $image->statement_filename
+                    ? URL::temporarySignedRoute(
+                        'checks.statement.signed',
+                        now()->addHours(24),
+                        ['filename' => $image->statement_filename]
+                    )
+                    : null,
             ])
             ->values()
             ->all();

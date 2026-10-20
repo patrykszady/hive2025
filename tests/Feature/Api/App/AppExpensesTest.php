@@ -784,6 +784,30 @@ it('exposes is_material_order and the raw reimbursement value on the detail payl
         ->and($response->json('data.reimbursement_raw'))->toBe('Client');
 });
 
+it('points a vendor reimbursement at that vendor, like the web\'s Reimbursment row', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $reimbursementVendor = Vendor::factory()->create(['business_type' => 'Sub', 'business_name' => 'Owes Us LLC']);
+    $expense = appExpensesExpense($vendor, ['reimbursment' => 'V:'.$reimbursementVendor->id]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+
+    expect($response->json('data.reimbursement_raw'))->toBe('V:'.$reimbursementVendor->id)
+        ->and($response->json('data.reimbursement_vendor_id'))->toBe($reimbursementVendor->id);
+});
+
+it('leaves reimbursement_vendor_id null for a non-vendor reimbursement', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor, ['reimbursment' => 'Client']);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+
+    expect($response->json('data.reimbursement_vendor_id'))->toBeNull();
+});
+
 // --- quick-receipt -----------------------------------------------------------
 
 it('needs a token for the quick-receipt capture endpoint', function () {

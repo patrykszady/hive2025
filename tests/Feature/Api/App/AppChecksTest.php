@@ -4,6 +4,7 @@ use App\Models\Bank;
 use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\CheckImage;
+use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\Transaction;
@@ -140,6 +141,15 @@ it('shows a check\'s detail with its expenses, timesheets and images', function 
         'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
     ]);
 
+    // A distribution expense settled by the same check — CheckShow's own
+    // "Paid Distributions" card (checks/show.blade.php:152-175).
+    $distribution = Distribution::create(['name' => 'Profit Share', 'user_id' => $admin->id, 'vendor_id' => $vendor->id]);
+    $distributionExpense = Expense::create([
+        'amount' => 50, 'date' => now()->format('Y-m-d'), 'check_id' => $check->id,
+        'distribution_id' => $distribution->id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+
     $timesheet = Timesheet::create([
         'date' => now()->format('Y-m-d'), 'user_id' => $payee->id, 'vendor_id' => $vendor->id, 'check_id' => $check->id,
         'hours' => 40, 'amount' => 500, 'hourly' => 12.5, 'created_by_user_id' => $admin->id,
@@ -158,6 +168,7 @@ it('shows a check\'s detail with its expenses, timesheets and images', function 
 
     $image = CheckImage::create([
         'image_filename' => 'check-'.$check->id.'.jpg',
+        'statement_filename' => 'statement-'.$check->id.'.pdf',
         'check_id' => $check->id,
         'belongs_to_vendor_id' => $vendor->id,
         'check_date' => now()->format('Y-m-d'),
@@ -175,9 +186,13 @@ it('shows a check\'s detail with its expenses, timesheets and images', function 
     $response = $this->getJson("/api/app/v1/checks/{$check->id}")->assertOk();
 
     expect($response->json('data.id'))->toBe($check->id)
-        ->and(collect($response->json('data.expenses'))->pluck('id')->all())->toBe([$expense->id])
+        ->and(collect($response->json('data.expenses'))->pluck('id')->all())->toContain($expense->id, $distributionExpense->id)
         ->and($response->json('data.expenses.0.is_deduction'))->toBeFalse()
         ->and($response->json('data.payee_first_name'))->toBe('Czarek')
+        // The payee is a user (no via-vendor) — Check::payeeRoute() points
+        // the app straight at /users/{id} (checks/show.blade.php:24).
+        ->and($response->json('data.payee.id'))->toBe($payee->id)
+        ->and($response->json('data.payee.type'))->toBe('user')
         ->and(collect($response->json('data.timesheets'))->pluck('id')->all())->toBe([$timesheet->id])
         ->and(collect($response->json('data.employee_paid_timesheets'))->pluck('id')->all())->toBe([$employeePaidTimesheet->id])
         ->and($response->json('data.employee_paid_timesheets.0.team_member'))->toBe('Robert Smith')
@@ -185,7 +200,27 @@ it('shows a check\'s detail with its expenses, timesheets and images', function 
         ->and($response->json('data.transactions.0.bank'))->toBe('PSFCU')
         ->and($response->json('data.transactions.0.account'))->toBe('1234')
         ->and($response->json('data.images.0.id'))->toBe($image->id)
-        ->and($response->json('data.images.0.url'))->toContain("checks/images/{$image->id}/signed");
+        ->and($response->json('data.images.0.url'))->toContain("checks/images/{$image->id}/signed")
+        // "View Full Statement" (checks/show.blade.php:251-262) — a signed
+        // link to the same files/checks/files/ folder the web serves from.
+        ->and($response->json('data.images.0.statement_url'))->toContain('checks/statements/statement-'.$check->id.'.pdf/signed');
+
+    $distributionRow = collect($response->json('data.expenses'))->firstWhere('id', $distributionExpense->id);
+    expect($distributionRow['distribution'])->toBe(['id' => $distribution->id, 'name' => 'Profit Share']);
+});
+
+it('points a vendor-paid check\'s payee at the vendor, not a user', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appChecksTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $payeeVendor = Vendor::factory()->create(['business_type' => 'Sub', 'business_name' => 'ABC Plumbing']);
+    $vendor->vendors()->attach($payeeVendor->id);
+    $check = appChecksCheck($vendor, ['vendor_id' => $payeeVendor->id]);
+
+    $response = $this->getJson("/api/app/v1/checks/{$check->id}")->assertOk();
+
+    expect($response->json('data.payee.id'))->toBe($payeeVendor->id)
+        ->and($response->json('data.payee.type'))->toBe('vendor');
 });
 
 it('falls back to the payee\'s first name when they have no nickname', function () {

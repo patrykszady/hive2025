@@ -57,13 +57,17 @@ class PaymentResource extends JsonResource
             'check_id' => $this->check_id,
             // Every payment in this group (parent + children, or the
             // transaction-matched set) — Payment::payments always returns
-            // an Eloquent collection, even for a standalone payment.
+            // an Eloquent collection, even for a standalone payment. A single
+            // bank deposit can cover more than one client's checks, so each
+            // row carries its OWN client — the web groups these rows by
+            // client (payments/show.blade.php:66-76, "$group['client']").
             'grouped_payments' => $this->resource->payments->map(fn (Payment $payment) => [
                 'id' => $payment->id,
                 'amount' => (float) $payment->amount,
                 'date' => $payment->date?->toDateString(),
                 'reference' => $payment->reference,
                 'project' => $payment->project ? ['id' => $payment->project->id, 'name' => $payment->project->project_name] : null,
+                'client' => $payment->project?->client ? ['id' => $payment->project->client->id, 'name' => $payment->project->client->name] : null,
             ])->values()->all(),
             'transaction' => $this->transactionArray(),
         ];

@@ -89,6 +89,11 @@ class ExpenseResource extends JsonResource
             // the app's edit form can preselect the right option — `reimbursement`
             // above is the human-readable display string instead (Expense::reimbursment()'s accessor).
             'reimbursement_raw' => $expense->getRawOriginal('reimbursment'),
+            // The web's "Reimbursment" row links to the vendor when the raw
+            // value is 'V:{vendor_id}' (expenses/show.blade.php:89-103) —
+            // parsed the same way that blade does, so the app can push
+            // straight there instead of re-deriving it from reimbursement_raw.
+            'reimbursement_vendor_id' => $this->reimbursementVendorId($expense),
             // Mirrors ExpenseForm::setExpense(): is_material_order is read
             // off the latest receipt, not the expense row itself.
             'is_material_order' => (bool) ($latestReceipt?->is_material_order ?? false),
@@ -219,6 +224,18 @@ class ExpenseResource extends JsonResource
             'project' => $expense->project?->project_name,
             'web_path' => '/expenses/'.$expense->id,
         ];
+    }
+
+    /**
+     * 'V:{vendor_id}' — a vendor reimbursement links to that vendor, exactly
+     * like expenses/show.blade.php's own inline parse of
+     * getRawOriginal('reimbursment').
+     */
+    private function reimbursementVendorId(Expense $expense): ?int
+    {
+        $raw = $expense->getRawOriginal('reimbursment');
+
+        return is_string($raw) && str_starts_with($raw, 'V:') ? (int) substr($raw, 2) : null;
     }
 
     /**

@@ -182,8 +182,20 @@ it('shows a week\'s detail with its per-project rows and daily breakdown', funct
     $response->assertJsonPath('data.week.date', '2026-05-11')
         ->assertJsonCount(1, 'data.rows')
         ->assertJsonPath('data.rows.0.status.label', 'Pay')
+        ->assertJsonPath('data.rows.0.check_id', null)
         ->assertJsonCount(1, 'data.days')
         ->assertJsonPath('data.days.0.date', '2026-05-11');
+});
+
+it('carries the paying check\'s id on a paid row, like the web\'s Amount/Payment links', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $timesheet = appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'check_id' => 9999]);
+
+    $this->getJson('/api/app/v1/timesheets/'.$timesheet->id)
+        ->assertOk()
+        ->assertJsonPath('data.rows.0.check_id', 9999);
 });
 
 it('shows "Not Paid" instead of "Pay" to a Member viewing their own unpaid week', function () {

@@ -24,6 +24,10 @@ class UserResource extends JsonResource
             'last_name' => $this->last_name,
             'email' => $this->email,
             'cell_phone' => $this->cell_phone,
+            // The Manage hub's "Edit Company" row (vendor-details.blade.php's
+            // own-company "Edit" button) needs this to push straight to
+            // /vendors/{id}/edit — null for a person with no primary vendor.
+            'vendor_id' => $this->resource->vendor?->id,
             'permissions' => AppSectionPermissions::for($this->resource),
         ];
     }

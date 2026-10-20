@@ -23,7 +23,7 @@ class AppCheckBreakdown
      * (is_deduction false) or was deducted from it because the payee owed
      * the company (is_deduction true — see Check::isSettlementDeduction()).
      *
-     * @return list<array{id: int, amount: float, is_deduction: bool, date: ?string, vendor: ?array{id: int, name: string}, project: ?array{id: int, name: string}, note: ?string}>
+     * @return list<array{id: int, amount: float, is_deduction: bool, date: ?string, vendor: ?array{id: int, name: string}, project: ?array{id: int, name: string}, distribution: ?array{id: int, name: string}, note: ?string}>
      */
     public function expenses(Check $check): array
     {
@@ -35,7 +35,7 @@ class AppCheckBreakdown
 
         return Expense::query()
             ->whereIn('id', $ids)
-            ->with(['vendor:id,business_name,business_type', 'project:id,project_name'])
+            ->with(['vendor:id,business_name,business_type', 'project:id,project_name', 'distribution:id,name'])
             ->orderByDesc('date')
             ->orderByDesc('id')
             ->get()
@@ -46,6 +46,9 @@ class AppCheckBreakdown
                 'date' => $expense->date?->toDateString(),
                 'vendor' => $expense->vendor ? ['id' => $expense->vendor->id, 'name' => $expense->vendor->name] : null,
                 'project' => $expense->project ? ['id' => $expense->project->id, 'name' => $expense->project->project_name] : null,
+                // CheckShow's own "Paid Distributions" card (checks/show.blade.php:152-175) — an
+                // expense settled straight against a distribution instead of a project.
+                'distribution' => $expense->distribution ? ['id' => $expense->distribution->id, 'name' => $expense->distribution->name] : null,
                 'note' => $expense->note,
             ])
             ->values()
