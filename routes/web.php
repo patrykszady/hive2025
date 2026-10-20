@@ -207,6 +207,28 @@ Route::get('estimates/{estimate}/pdf/signed', [\App\Http\Controllers\EstimatePdf
     ->whereNumber('estimate')
     ->name('estimates.pdf.signed');
 
+// A vendor document/certificate scan for the Hive Contractors app: a
+// time-limited signed link handed out by GET /api/app/v1/vendor-docs/{vendor}
+// (see VendorDocResource), so the app's Vendor Documents screen can show it
+// without a web session. Deliberately NOT implicit route binding on
+// {vendorDoc} — VendorDoc's global VendorDocScope reads
+// auth()->user()->vendor->id unconditionally, which would throw on this
+// unauthenticated, `signed`-only route (same reasoning checks.image.signed
+// and expenses.receipts.signed already follow for their own models).
+Route::get('vendor-docs/{vendorDoc}/signed', function (int $vendorDoc) {
+    $doc = \App\Models\VendorDoc::withoutGlobalScopes()->find($vendorDoc);
+    abort_unless($doc && $doc->doc_filename, 404);
+
+    $resolvedPath = \App\Support\StoredFile::resolve(storage_path('files/vendor_docs'), $doc->doc_filename);
+    abort_unless($resolvedPath, 404);
+
+    if (strtolower(pathinfo($resolvedPath, PATHINFO_EXTENSION)) === 'pdf') {
+        return response()->make(file_get_contents($resolvedPath), 200, ['Content-Type' => 'application/pdf']);
+    }
+
+    return \Intervention\Image\Facades\Image::make($resolvedPath)->response();
+})->middleware('signed')->whereNumber('vendorDoc')->name('vendor-docs.file.signed');
+
 // The Hive Contractors app's "open full page" hand-off: a one-time signed
 // link from POST /api/app/v1/web-session that logs its user into THIS web
 // session (no session yet, so this must sit outside the 'auth' group) and
