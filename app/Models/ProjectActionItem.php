@@ -104,6 +104,22 @@ class ProjectActionItem extends Model
         return trim($noun.' '.$when);
     }
 
+    /**
+     * The line a task's notes cite its source with: "From a call Oct 19",
+     * "From a text Oct 19", "From an email Oct 19" — or, for an email with a
+     * subject (whose label is the subject), "From an email (Grout Oct 19)".
+     *
+     * @param  array{kind: string, at?: string, subject?: ?string}  $source
+     */
+    public static function sourcePhrase(array $source): string
+    {
+        if (($source['kind'] ?? null) === 'email' && ! empty($source['subject'])) {
+            return 'From an email ('.self::sourceLabel($source).')';
+        }
+
+        return 'From '.self::sourceArticle($source).' '.self::sourceLabel($source);
+    }
+
     /** The article "sourceLabel" wants in front of it: "a call", "an email". */
     public static function sourceArticle(array $source): string
     {

@@ -2603,7 +2603,7 @@ class CardsIndex extends Component
         }
 
         $notes = collect($item->sources ?? [])
-            ->map(fn (array $source) => 'From '.ProjectActionItem::sourceArticle($source).' '.ProjectActionItem::sourceLabel($source).': '.($source['excerpt'] ?? ''))
+            ->map(fn (array $source) => ProjectActionItem::sourcePhrase($source).': '.($source['excerpt'] ?? ''))
             ->implode("
 ");
 

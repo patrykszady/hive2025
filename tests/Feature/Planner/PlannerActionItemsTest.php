@@ -194,5 +194,8 @@ it('links an email source to the project page and labels it with its subject', f
         ->and(ProjectActionItem::sourceLabel($source))->toBe('Cabinet hardware Oct 15')
         ->and(ProjectActionItem::sourceLabel(['kind' => 'email', 'at' => '2026-10-15T09:00:00+00:00']))->toBe('email Oct 15')
         ->and(ProjectActionItem::sourceArticle($source))->toBe('an')
-        ->and(ProjectActionItem::sourceArticle(['kind' => 'call']))->toBe('a');
+        ->and(ProjectActionItem::sourceArticle(['kind' => 'call']))->toBe('a')
+        ->and(ProjectActionItem::sourcePhrase($source))->toBe('From an email (Cabinet hardware Oct 15)')
+        ->and(ProjectActionItem::sourcePhrase(['kind' => 'email', 'at' => '2026-10-15T09:00:00+00:00']))->toBe('From an email Oct 15')
+        ->and(ProjectActionItem::sourcePhrase(['kind' => 'call', 'at' => '2026-10-10T19:37:00+00:00']))->toBe('From a call Oct 10');
 });
