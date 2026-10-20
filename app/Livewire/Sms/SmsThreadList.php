@@ -6,10 +6,10 @@ use App\Livewire\Sms\Concerns\ResolvesClientDisplayName;
 use App\Models\BlockedCaller;
 use App\Models\CallLog;
 use App\Models\SmsGroupThread;
-use App\Models\SmsMessage;
 use App\Models\SmsThreadRead;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Services\Sms\ThreadSearch;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Isolate;
 use Livewire\Attributes\Reactive;
@@ -74,51 +74,17 @@ class SmsThreadList extends Component
         $user = auth()->user();
         $search = trim($this->search);
 
-        // Fast path: Meilisearch when there's a query.
+        // Fast path: Meilisearch when there's a query (App\Services\Sms\
+        // ThreadSearch, shared with the app's ThreadController so both find
+        // the same threads for the same query).
         if ($search !== '') {
             try {
-                $meili = SmsGroupThread::search($search);
-
-                if (! $user->is_browsing_as_client && $user->vendor?->id) {
-                    $meili->where('vendor_visibility_ids', (int) $user->vendor->id);
-                }
-                // Scout's builder has no whereNotNull() — filter on indexed 0/1 flags.
-                // ('unread' is per-user state, not indexed — applied on the DB query below.)
-                if ($this->subjectFilter === 'client') {
-                    $meili->where('has_client', 1);
-                } elseif ($this->subjectFilter === 'vendor') {
-                    $meili->where('has_subject_vendor', 1);
-                }
-
-                $ids = $meili->take(max($this->limit, 50))->keys()->all();
-
-                // Also match on the dedicated message index so searches hit
-                // body text anywhere in a thread's history (the thread index
-                // only embeds its most recent messages).
-                try {
-                    $messageIds = SmsMessage::search($search)->take(max($this->limit, 50))->keys()->all();
-                    if (! empty($messageIds)) {
-                        $messageThreadIds = SmsMessage::query()
-                            ->whereIn('id', $messageIds)
-                            ->whereNotNull('thread_id')
-                            ->orderByDesc('created_at')
-                            ->pluck('thread_id')
-                            ->map(fn ($id) => (int) $id)
-                            ->all();
-
-                        $ids = array_merge(array_map('intval', $ids), $messageThreadIds);
-                    }
-                } catch (\Throwable $e) {
-                    report($e);
-                }
-
-                $ids = array_values(array_unique($ids));
+                $vendorId = (! $user->is_browsing_as_client && $user->vendor?->id) ? (int) $user->vendor->id : null;
+                $ids = app(ThreadSearch::class)->matchingThreadIds($search, $vendorId, $this->subjectFilter, $this->limit);
 
                 if (empty($ids)) {
                     return collect();
                 }
-
-                $orderedIds = implode(',', array_map('intval', $ids));
 
                 $threads = SmsGroupThread::query()
                     ->with([
@@ -185,21 +151,7 @@ class SmsThreadList extends Component
                     $query->visibleToVendor($vendorId);
                 }
             })
-            ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($q) use ($search) {
-                    $q->whereJsonContains('participants', $search)
-                        ->orWhereHas('project', fn ($pq) => $pq->where('address', 'like', "%{$search}%"))
-                        ->orWhereHas('messages', fn ($mq) => $mq->where('text', 'like', "%{$search}%"));
-
-                    // Phone digit search — match participants by trailing digits
-                    // (e.g. "6349" matches +18473376349).
-                    $digits = preg_replace('/\D/', '', $search);
-                    if (is_string($digits) && strlen($digits) >= 4) {
-                        $q->orWhereHas('threadParticipants', fn ($pq) => $pq
-                            ->where('phone_number', 'like', "%{$digits}%"));
-                    }
-                });
-            })
+            ->when($search !== '', fn ($query) => app(ThreadSearch::class)->applyLikeFallback($query, $search))
             ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
             ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'))
             ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) $user->id))

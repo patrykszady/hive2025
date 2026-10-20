@@ -506,3 +506,101 @@ it('flags a thread as spam in the list and detail once its participant number is
     expect($entry()['is_spam'])->toBeTrue();
     expect($this->getJson("/api/app/v1/threads/{$thread->id}")->assertOk()->json('data.is_spam'))->toBeTrue();
 });
+
+/**
+ * ThreadController::index()'s search now goes through the same
+ * App\Services\Sms\ThreadSearch Meilisearch path as SmsThreadList (see
+ * tests/Feature/SmsThreadListTest.php's own "orders search results newest
+ * first" test, which this mirrors through the app endpoint instead of
+ * Livewire), rather than its own separate LIKE-only query.
+ *
+ * Every app user has a vendor (EnsureAppUserAllowed requires primary_vendor_id
+ * 1), so — unlike SmsThreadListTest's own version of this test — this can't
+ * dodge the thread index's `vendor_visibility_ids` filter by using a
+ * vendorless user; the collection driver can't evaluate that Meilisearch-only
+ * field against a real table column, so the thread index itself matches
+ * nothing here, same as SmsThreadListTest's comment explains. What this
+ * still proves end to end: a match coming ONLY from the dedicated message
+ * index (ThreadSearch::matchingThreadIds()'s inner merge) reaches the list,
+ * and the caller re-sorts the merged ids by thread activity rather than
+ * leaving them in message-search order.
+ */
+it('finds threads via the message-index merge, newest activity first, not relevance order', function () {
+    config(['scout.driver' => 'collection']);
+
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    // Activity order is deliberately unrelated to message age, so a list
+    // sorted by search relevance (or insertion order) can't pass by luck.
+    $threads = [
+        ['Scott Weyman', 2, 1200],
+        ['Scott Swenson', 20, 7],
+        ['Scott Lunardini', 200, 300],
+    ];
+
+    $created = [];
+    foreach ($threads as [$name, $messageAge, $activityAge]) {
+        $thread = appMessagingThread($vendor, [
+            'name' => $name,
+            'participants' => ['+1224555'.random_int(1000, 9999)],
+            'last_activity_at' => now()->subDays($activityAge),
+        ]);
+        SmsMessage::create([
+            'thread_id' => $thread->id, 'direction' => 'outbound', 'from_number' => '+12247354200',
+            'text' => "Hi {$name}, checking in.", 'status' => 'sent', 'created_at' => now()->subDays($messageAge),
+        ]);
+        $created[$name] = $thread;
+    }
+
+    $response = $this->getJson('/api/app/v1/threads?search=Scott')->assertOk();
+    $ids = collect($response->json('data'))->pluck('id')->all();
+
+    expect($ids)->toBe([
+        $created['Scott Swenson']->id,
+        $created['Scott Lunardini']->id,
+        $created['Scott Weyman']->id,
+    ]);
+});
+
+/**
+ * Pest's ambient scout.driver is null (see tests/TestCase.php), which Scout
+ * resolves to its own built-in NullEngine — it returns an empty result
+ * without throwing, so (same as SmsThreadList already does — this isn't a
+ * behavior change) a search under the plain default driver finds nothing
+ * at all rather than reaching the LIKE fallback. Reaching that fallback
+ * for real needs Meilisearch to actually fail, so this switches to an
+ * unsupported driver name (which does throw) only AFTER the fixture rows
+ * are created — creating them under NullEngine first avoids also breaking
+ * the Searchable observers that index a model on save.
+ */
+it('falls back to a LIKE search when Meilisearch itself fails, same as the web', function () {
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = \App\Models\Client::factory()->create();
+    $project = \App\Models\Project::factory()->create(['address' => '742 Evergreen Terrace', 'belongs_to_vendor_id' => $vendor->id, 'client_id' => $client->id]);
+    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+    $byAddress = appMessagingThread($vendor, ['participants' => ['+12245559001'], 'project_id' => $project->id]);
+
+    $byMessage = appMessagingThread($vendor, ['participants' => ['+12245559002']]);
+    SmsMessage::create([
+        'thread_id' => $byMessage->id, 'direction' => 'outbound', 'from_number' => '+12247354200',
+        'text' => 'The quartz countertop ships Monday.', 'status' => 'sent',
+    ]);
+
+    $byPhone = appMessagingThread($vendor, ['participants' => ['+13125556349']]);
+
+    $unrelated = appMessagingThread($vendor, ['participants' => ['+12245559999']]);
+
+    config(['scout.driver' => 'totally-unsupported-driver']);
+
+    $addressIds = collect($this->getJson('/api/app/v1/threads?search=Evergreen')->assertOk()->json('data'))->pluck('id');
+    expect($addressIds)->toContain($byAddress->id)->not->toContain($unrelated->id);
+
+    $messageIds = collect($this->getJson('/api/app/v1/threads?search=quartz')->assertOk()->json('data'))->pluck('id');
+    expect($messageIds)->toContain($byMessage->id)->not->toContain($unrelated->id);
+
+    $phoneIds = collect($this->getJson('/api/app/v1/threads?search=6349')->assertOk()->json('data'))->pluck('id');
+    expect($phoneIds)->toContain($byPhone->id)->not->toContain($unrelated->id);
+});

@@ -111,6 +111,56 @@ it('orders search results newest first, not by relevance', function (): void {
         ->toEqual($results->pluck('last_activity_at')->sortDesc()->values()->all());
 });
 
+/**
+ * Shared with the app's ThreadController via App\Services\Sms\ThreadSearch
+ * since this round — this pins that the extraction didn't change what
+ * happens when Meilisearch genuinely fails (not merely unconfigured: the
+ * ambient scout.driver null in tests resolves to Scout's own NullEngine,
+ * which returns empty without throwing, so it never reaches this fallback
+ * at all — see AppMessagingTest's own version of this test for why an
+ * actually-unsupported driver name is used here instead).
+ */
+it('falls back to a LIKE search when Meilisearch itself fails', function (): void {
+    $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
+
+    $user = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Tester',
+        'email' => 'patryk.thread-list-like-fallback@example.com',
+        'cell_phone' => '2245551122',
+        'primary_vendor_id' => $vendor->id,
+    ]);
+
+    $thread = SmsGroupThread::query()->create([
+        'name' => 'Fallback Thread',
+        'from_number' => '+12245554444',
+        'participants' => ['+12245550099'],
+        'vendor_id' => $vendor->id,
+        'last_activity_at' => now(),
+    ]);
+    SmsMessage::query()->create([
+        'thread_id' => $thread->id,
+        'direction' => SmsMessage::DIRECTION_OUTBOUND,
+        'from_number' => '+12245554444',
+        'to_number' => '+12245550099',
+        'text' => 'The quartz countertop ships Monday.',
+        'status' => 'sent',
+    ]);
+
+    $this->actingAs($user);
+
+    // Created under the default (NullEngine) driver above so the
+    // Searchable observer's own indexing call doesn't throw; only the
+    // search itself needs to fail.
+    config(['scout.driver' => 'totally-unsupported-driver']);
+
+    $results = Livewire::test(SmsThreadList::class, ['isClientUser' => false, 'search' => 'quartz'])
+        ->instance()
+        ->threads;
+
+    expect($results->pluck('id')->all())->toBe([$thread->id]);
+});
+
 it('shows participant names for client users in the list', function (): void {
     $ownerVendor = Vendor::factory()->create([
         'business_name' => 'Acme Vendor LLC',
