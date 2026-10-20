@@ -21,6 +21,9 @@ use Illuminate\Support\Facades\Gate;
  */
 class EmailController extends Controller
 {
+    /** Mirrors UnplacedEmails' own 25/page (WithPagination). */
+    private const PER_PAGE = 25;
+
     public function show(Request $request, int $email): JsonResponse
     {
         $found = EmailMessage::withoutGlobalScopes()->whereKey($email)->first();
@@ -39,7 +42,10 @@ class EmailController extends Controller
 
     /**
      * The unplaced inbox: emails the AI read but could not put on a project,
-     * for an Admin to sort. Newest first, at most 100.
+     * for an Admin to sort. Newest first, 25/page — same page size as the
+     * web's UnplacedEmails (WithPagination), cursor-paginated like the
+     * Notifications tab so a company with more than one page can page
+     * through every one of them instead of only ever seeing the newest 100.
      */
     public function unplaced(Request $request, EmailPlacement $placement): JsonResponse
     {
@@ -47,15 +53,15 @@ class EmailController extends Controller
         $vendorId = (int) $user->vendor?->id;
         abort_unless($vendorId && EmailPlacement::canSort($user, $vendorId), 403);
 
-        $emails = EmailMessage::query()
+        $page = EmailMessage::query()
             ->where('belongs_to_vendor_id', $vendorId)
             ->unplaced()
             ->orderByDesc('sent_at')
-            ->limit(100)
-            ->get();
+            ->orderByDesc('id')
+            ->cursorPaginate(self::PER_PAGE);
 
         return response()->json([
-            'data' => $emails->map(fn (EmailMessage $email) => [
+            'data' => $page->getCollection()->map(fn (EmailMessage $email) => [
                 'id' => $email->id,
                 'direction' => $email->direction,
                 'subject' => $email->subject,
@@ -66,6 +72,7 @@ class EmailController extends Controller
                 'attachment_count' => count((array) $email->attachments),
                 'candidates' => EmailResource::candidatesFor($email, $placement),
             ])->values(),
+            'next_cursor' => $page->nextCursor()?->encode(),
         ]);
     }
 

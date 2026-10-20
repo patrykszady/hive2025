@@ -2,13 +2,17 @@
 
 namespace App\Livewire\Concerns;
 
-use App\Models\Task;
+use App\Services\Tasks\TaskChecklistToggle;
 
 /**
  * Tick a task checklist item from any card that renders the shared
  * checklist sub-card. Same rules everywhere: team members only, own
  * vendor's tasks only, and only from the task's scheduled day onward —
- * work gets checked off on site, not in advance.
+ * work gets checked off on site, not in advance. The rule itself now lives
+ * in App\Services\Tasks\TaskChecklistToggle, shared with the Hive
+ * Contractors app's Home tab (App\Http\Controllers\Api\App\V1\
+ * HomeController::toggleChecklistItem()), so a card ticked from the app and
+ * one ticked from the web obey exactly the same checks.
  */
 trait TogglesTaskChecklist
 {
@@ -16,33 +20,10 @@ trait TogglesTaskChecklist
     {
         $user = auth()->user();
 
-        if (! $user || $user->is_browsing_as_client || ! $user->vendor) {
+        if (! $user) {
             return;
         }
 
-        $task = Task::withoutGlobalScopes()
-            ->where('belongs_to_vendor_id', $user->vendor->id)
-            ->find($taskId);
-
-        if (! $task) {
-            return;
-        }
-
-        if (! $task->start_date || $task->start_date->copy()->startOfDay()->gt(today(browser_timezone()))) {
-            return;
-        }
-
-        $options = json_decode(json_encode($task->options ?? []), true) ?: [];
-
-        if (! isset($options['checklist'][$index])) {
-            return;
-        }
-
-        $item = (array) $options['checklist'][$index];
-        $item['completed'] = ! (bool) ($item['completed'] ?? false);
-        $options['checklist'][$index] = $item;
-
-        $task->options = $options;
-        $task->saveQuietly();
+        app(TaskChecklistToggle::class)->toggle($user, $taskId, $index, today(browser_timezone()));
     }
 }

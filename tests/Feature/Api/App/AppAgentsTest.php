@@ -77,5 +77,11 @@ it('lists vendor docs for the chosen agent ids', function () {
 
     $response = $this->getJson("/api/app/v1/agents/vendor-docs?agent_ids[]={$agent->id}")->assertOk();
 
-    expect(collect($response->json('data'))->pluck('number')->all())->toBe([$doc->number]);
+    expect(collect($response->json('data'))->pluck('number')->all())->toBe([$doc->number])
+        // Same shape as the Vendor Documents screen's own VendorDocResource
+        // — effective date and an openable file link, like the web's modal.
+        ->and($response->json('data.0.effective_date'))->toBe($doc->effective_date->toDateString())
+        ->and($response->json('data.0.expiration_date'))->toBe($doc->expiration_date->toDateString())
+        ->and($response->json('data.0.file_url'))->toContain("/vendor-docs/{$doc->id}/signed")
+        ->and($response->json('data.0.vendor.id'))->toBe($vendor->id);
 });

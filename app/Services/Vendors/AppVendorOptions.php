@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Storage;
 class AppVendorOptions
 {
     /**
-     * @return array{short_name: ?string, logo_url: ?string, sms_team_enabled: bool, sms_client_enabled: bool, sms_vendor_enabled: bool, default_contract_signers: list<int>, business_hours_start: string, business_hours_end: string, business_hours_days: list<int>, admin_users: list<array{id: int, name: string, cell_phone: ?string}>}
+     * @return array{short_name: ?string, logo_url: ?string, timezone: string, sms_team_enabled: bool, sms_client_enabled: bool, sms_vendor_enabled: bool, default_contract_signers: list<int>, business_hours_start: string, business_hours_end: string, business_hours_days: list<int>, admin_users: list<array{id: int, name: string, cell_phone: ?string}>}
      */
     public function present(Vendor $vendor): array
     {
@@ -28,6 +28,9 @@ class AppVendorOptions
         return [
             'short_name' => $vendor->options?->short_name ?? '',
             'logo_url' => $logo && Storage::disk('public')->exists($logo) ? Storage::disk('public')->url($logo) : null,
+            // Read-only, set from the vendor's business address — mirrors
+            // VendorOptions' disabled "Set by your business address" field.
+            'timezone' => $vendor->timezone ?: 'America/Chicago',
             'sms_team_enabled' => (bool) data_get($vendor->options, 'sms_team_enabled', $baseSmsEnabled),
             'sms_client_enabled' => (bool) data_get($vendor->options, 'sms_client_enabled', $baseSmsEnabled),
             'sms_vendor_enabled' => (bool) data_get($vendor->options, 'sms_vendor_enabled', $baseSmsEnabled),

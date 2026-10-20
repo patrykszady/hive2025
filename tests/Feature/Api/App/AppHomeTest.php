@@ -186,6 +186,49 @@ it('puts an undated task in "unscheduled", grouped by project', function () {
     expect($row['title'])->toBe('Pending Punch List');
 });
 
+it('flags an undated Service Call task as awaiting the homeowner, like the web\'s indicator', function () {
+    ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appHomeProject($vendor, $client);
+    appHomeStatus($project, $vendor, 8); // Service Call, no homeowner preferred times yet.
+
+    $undated = appHomeTask($project, $user, ['title' => 'Diagnose Leak']);
+
+    $response = $this->getJson('/api/app/v1/home')->assertOk();
+    $group = collect($response->json('data.unscheduled'))->firstWhere('project.id', $project->id);
+    $row = collect($group['tasks'])->firstWhere('id', $undated->id);
+
+    expect($row['preferred_time_indicator'])->toBe('pending');
+});
+
+it('shows a scheduled task\'s previous arrival time, struck through, after it changes', function () {
+    ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appHomeProject($vendor, $client);
+    $task = appHomeTask($project, $user, [
+        'start_date' => '2026-10-16',
+        'end_date' => '2026-10-16',
+        'options' => ['time_settings' => ['2026-10-16' => ['use_time' => true, 'start_time' => '08:00', 'end_time' => '09:00']]],
+    ]);
+
+    // A later edit moves the arrival time — the activity log (spatie/laravel-activitylog, via Task's LogsActivity) records old vs. new options.
+    $task->update([
+        'options' => ['time_settings' => ['2026-10-16' => ['use_time' => true, 'start_time' => '10:00', 'end_time' => '11:00']]],
+    ]);
+
+    $response = $this->getJson('/api/app/v1/home')->assertOk();
+    $days = collect($response->json('data.days'))->keyBy('date');
+    $row = collect($days['2026-10-16']['groups'][0]['tasks'])->firstWhere('id', $task->id);
+
+    expect($row['arrival'])->toBe($task->refresh()->getArrivalTimeLabel('2026-10-16'))
+        ->and($row['previous_arrival'])->not->toBeNull()
+        ->and($row['previous_arrival'])->not->toBe($row['arrival']);
+});
+
 it('puts a task more than 6 days out in "later", grouped by day and project', function () {
     ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
     Sanctum::actingAs($user, ['app']);
@@ -292,6 +335,131 @@ it('hides the monthly summary from a Member, like the web', function () {
     $response = $this->getJson('/api/app/v1/home')->assertOk();
 
     expect($response->json('data.monthly'))->toBeNull();
+});
+
+it('shows a task\'s checklist, filtering blank rows and keeping original indexes', function () {
+    ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appHomeProject($vendor, $client);
+    $task = appHomeTask($project, $user, [
+        'start_date' => '2026-10-15', // "Today" — on-site, so interactive.
+        'end_date' => '2026-10-15',
+        'options' => [
+            'checklist' => [
+                ['text' => 'Shut off water', 'completed' => true],
+                ['text' => ''],
+                ['text' => 'Check the meter', 'completed' => false],
+            ],
+        ],
+    ]);
+
+    $response = $this->getJson('/api/app/v1/home')->assertOk();
+    $days = collect($response->json('data.days'))->keyBy('date');
+    $row = collect($days['2026-10-15']['groups'][0]['tasks'])->firstWhere('id', $task->id);
+
+    expect($row['checklist'])->toBe([
+        ['index' => 0, 'text' => 'Shut off water', 'completed' => true],
+        ['index' => 2, 'text' => 'Check the meter', 'completed' => false],
+    ])->and($row['checklist_interactive'])->toBeTrue();
+});
+
+it('marks a checklist read-only before the task\'s scheduled day', function () {
+    ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appHomeProject($vendor, $client);
+    // Spans "today" through next week via its options.dates — the later
+    // date (10/21) is still before "today" (10/15)? No: use a start_date
+    // strictly after today so checklist_interactive is false.
+    appHomeTask($project, $user, [
+        'start_date' => '2026-10-20',
+        'end_date' => '2026-10-20',
+        'options' => ['checklist' => [['text' => 'Too early', 'completed' => false]]],
+    ]);
+
+    $response = $this->getJson('/api/app/v1/home')->assertOk();
+    $days = collect($response->json('data.days'))->keyBy('date');
+    $row = $days['2026-10-20']['groups'][0]['tasks'][0];
+
+    expect($row['checklist_interactive'])->toBeFalse();
+});
+
+it('toggles a checklist item from the app, like the web\'s cards', function () {
+    ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appHomeProject($vendor, $client);
+    $task = appHomeTask($project, $user, [
+        'start_date' => '2026-10-15', // Today — on-site, so interactive.
+        'end_date' => '2026-10-15',
+        'options' => ['checklist' => [['text' => 'Shut off water', 'completed' => false]]],
+    ]);
+
+    $response = $this->postJson("/api/app/v1/home/tasks/{$task->id}/checklist/0/toggle")->assertOk();
+
+    expect($response->json('data.checklist.0.completed'))->toBeTrue();
+    expect(data_get($task->refresh()->options, 'checklist.0.completed'))->toBeTrue();
+
+    // Toggling again flips it back off.
+    $this->postJson("/api/app/v1/home/tasks/{$task->id}/checklist/0/toggle")
+        ->assertOk()
+        ->assertJsonPath('data.checklist.0.completed', false);
+});
+
+it('refuses to toggle a checklist item before the task\'s scheduled day', function () {
+    ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appHomeProject($vendor, $client);
+    $task = appHomeTask($project, $user, [
+        'start_date' => '2026-10-20', // After "today" (10/15) — not on-site yet.
+        'end_date' => '2026-10-20',
+        'options' => ['checklist' => [['text' => 'Too early', 'completed' => false]]],
+    ]);
+
+    $this->postJson("/api/app/v1/home/tasks/{$task->id}/checklist/0/toggle")->assertNotFound();
+
+    expect(data_get($task->refresh()->options, 'checklist.0.completed'))->toBeFalse();
+});
+
+it('refuses to toggle a checklist item on another vendor\'s task', function () {
+    ['user' => $user] = appHomeTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $otherVendor = Vendor::factory()->create();
+    $client = Client::factory()->create();
+    $project = appHomeProject($otherVendor, $client);
+    $task = appHomeTask($project, $user, [
+        'start_date' => '2026-10-15',
+        'end_date' => '2026-10-15',
+        'options' => ['checklist' => [['text' => 'Not yours', 'completed' => false]]],
+        'belongs_to_vendor_id' => $otherVendor->id,
+    ]);
+
+    $this->postJson("/api/app/v1/home/tasks/{$task->id}/checklist/0/toggle")->assertNotFound();
+});
+
+it('keeps the web\'s TogglesTaskChecklist trait writing through the same shared service', function () {
+    ['vendor' => $vendor, 'user' => $user] = appHomeTeamUser();
+
+    $client = Client::factory()->create();
+    $project = appHomeProject($vendor, $client);
+    $task = appHomeTask($project, $user, [
+        'start_date' => '2026-10-15',
+        'end_date' => '2026-10-15',
+        'options' => ['checklist' => [['text' => 'Shared logic', 'completed' => false]]],
+    ]);
+
+    $this->actingAs($user);
+    Livewire::test(\App\Livewire\Dashboard\VendorTasks::class, ['vendor' => $vendor])
+        ->call('toggleChecklistItem', $task->id, 0);
+
+    expect(data_get($task->refresh()->options, 'checklist.0.completed'))->toBeTrue();
 });
 
 it('keeps the web Hub\'s own VendorTasks Livewire component in sync with the API', function () {
