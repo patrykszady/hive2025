@@ -20,6 +20,24 @@ class LienWaiverController extends Controller
         $tenantId = (int) (auth()->user()?->vendor?->id ?? 0);
         abort_unless($tenantId && (int) $swornStatement->belongs_to_vendor_id === $tenantId, 403);
 
+        return $this->buildDrawPackageResponse($swornStatement);
+    }
+
+    /**
+     * Signed-link variant for the Hive Contractors app: the signature itself
+     * is the gate — it's handed out only by GET /api/app/v1/lien-waivers/
+     * draws/{id} (SwornStatementResource) after that controller has already
+     * checked the statement belongs to the requesting vendor, same reasoning
+     * as LienWaiverController::download()'s `lien-waivers.download.signed`.
+     */
+    public function downloadDrawPackageSigned(\App\Models\SwornStatement $swornStatement): BinaryFileResponse
+    {
+        return $this->buildDrawPackageResponse($swornStatement);
+    }
+
+    protected function buildDrawPackageResponse(\App\Models\SwornStatement $swornStatement): BinaryFileResponse
+    {
+        $tenantId = (int) $swornStatement->belongs_to_vendor_id;
         $project = \App\Models\Project::withoutGlobalScopes()->findOrFail($swornStatement->project_id);
 
         $tmpDir = storage_path('app/tmp/draw-packages');
@@ -140,6 +158,20 @@ class LienWaiverController extends Controller
             403,
         );
 
+        return $this->streamSwornStatement($swornStatement);
+    }
+
+    /**
+     * Signed-link variant for the Hive Contractors app — the signature
+     * itself is the gate, same reasoning as downloadDrawPackageSigned().
+     */
+    public function downloadSwornStatementSigned(\App\Models\SwornStatement $swornStatement): BinaryFileResponse
+    {
+        return $this->streamSwornStatement($swornStatement);
+    }
+
+    protected function streamSwornStatement(\App\Models\SwornStatement $swornStatement): BinaryFileResponse
+    {
         $absolute = $swornStatement->path
             ? \Storage::disk('files')->path($swornStatement->path)
             : null;
