@@ -37,11 +37,15 @@ class AppTeamDirectory
      * App\Livewire\Users\UserCreate::save() for an existing vendor id (not
      * NEW; the app never creates a brand-new company this way). A phone
      * already employed here is refused exactly like user_cell_find's
-     * inline error. The "via vendor" (1099/Sub payroll routing) and
-     * "create a new vendor for this person" branches stay web-only — see
-     * AppUsersTest and the task report.
+     * inline error. "Create a new vendor for this person" (the web's
+     * VendorCreate::viaVendor() step) is the app's own
+     * POST /vendors (business_type 1099, owner_cell_phone = this same
+     * phone) called BEFORE this one — see lookupForTeamMember() and
+     * UserController::store()'s docblock; its id is simply passed here as
+     * via_vendor_id, exactly as UserCreate::ViaVendorId() hands it back to
+     * the form before save().
      *
-     * @param  array{cell_phone: string, first_name?: ?string, last_name?: ?string, email?: ?string, nickname?: ?string, preferred_language?: ?string, role: int, hourly_rate?: ?float}  $data
+     * @param  array{cell_phone: string, first_name?: ?string, last_name?: ?string, email?: ?string, nickname?: ?string, preferred_language?: ?string, role: int, hourly_rate?: ?float, via_vendor_id?: ?int}  $data
      */
     public function addTeamMember(Vendor $vendor, array $data): User
     {
@@ -55,16 +59,75 @@ class AppTeamDirectory
 
         $person = $this->people->resolveOrCreate($data);
 
+        // Routing pay through a vendor (role 2 only — the web hides the
+        // picker once role is 1/Admin) is only ever onto a vendor this
+        // PERSON already has a pivot on (an existing 1099/DBA of theirs, or
+        // the one just created for them with them attached as its owner —
+        // VendorCreate::viaVendor()'s hardcoded role_id 1/$0 attach, which
+        // AppVendorDirectory::createVendor reuses) and never a Sub, exactly
+        // the candidates the web's $via_vendors list offers
+        // (UserCreate::user_cell_find()/ViaVendorId()).
+        $viaVendorId = (int) $data['role'] === 1 ? null : ($data['via_vendor_id'] ?? null);
+
+        if ($viaVendorId !== null) {
+            // withoutGlobalScopes(): VendorScope limits a plain vendors()
+            // query to companies already linked to the ACTING admin's own
+            // vendor, but a 1099/DBA this person owns is typically its own
+            // unrelated tenant — the pivot on $person is what matters here,
+            // not whether the acting admin's company can otherwise see it.
+            $eligible = $person->vendors()
+                ->withoutGlobalScopes()
+                ->where('vendors.id', $viaVendorId)
+                ->where('vendors.business_type', '!=', 'Sub')
+                ->exists();
+
+            if (! $eligible) {
+                throw ValidationException::withMessages([
+                    'via_vendor_id' => 'Choose a vendor already linked to this person.',
+                ]);
+            }
+        }
+
         if (! $person->vendors()->where('vendor_id', $vendor->id)->exists()) {
             $person->vendors()->attach($vendor->id, [
                 'role_id' => $data['role'],
                 'hourly_rate' => $data['hourly_rate'] ?? null,
                 'start_date' => today()->format('Y-m-d'),
-                'via_vendor_id' => null,
+                'via_vendor_id' => $viaVendorId,
             ]);
         }
 
         return $person;
+    }
+
+    /**
+     * "Add Member"'s phone lookup, before the role/pay-routing step —
+     * UserCreate::user_cell_find() for the vendor branch, plus the
+     * $via_vendors list it (and ViaVendorId()) populate: vendors this
+     * person already has a pivot on, excluding Subs, the same candidates
+     * the web's "Member Type" cards offer.
+     *
+     * @return array{user: ?array{id: int, first_name: string, last_name: string, email: ?string}, already_employed: bool, via_vendor_options: list<array{id: int, name: string, business_type: string}>}
+     */
+    public function lookupForTeamMember(Vendor $vendor, string $cellPhone): array
+    {
+        $person = $this->people->findByPhone($cellPhone);
+
+        if (! $person) {
+            return ['user' => null, 'already_employed' => false, 'via_vendor_options' => []];
+        }
+
+        return [
+            'user' => ['id' => $person->id, 'first_name' => $person->first_name, 'last_name' => $person->last_name, 'email' => $person->email],
+            'already_employed' => $vendor->users()->where('user_id', $person->id)->employed()->exists(),
+            'via_vendor_options' => $person->vendors()
+                ->withoutGlobalScopes()
+                ->where('vendors.business_type', '!=', 'Sub')
+                ->get()
+                ->map(fn (Vendor $v) => ['id' => $v->id, 'name' => $v->business_name, 'business_type' => $v->business_type])
+                ->values()
+                ->all(),
+        ];
     }
 
     /**

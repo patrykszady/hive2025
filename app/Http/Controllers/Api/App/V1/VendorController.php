@@ -10,6 +10,7 @@ use App\Models\Check;
 use App\Models\Vendor;
 use App\Services\People\AppPersonResolver;
 use App\Services\Vendors\AppVendorDirectory;
+use App\Services\Vendors\AppVendorPaymentEmailTracking;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -170,6 +171,38 @@ class VendorController extends Controller
 
         return response()->json([
             'data' => (new VendorResource($found))->canManage($request->user()->can('update', $found))->canPay($request->user()->can('create', Check::class))->withDetail()->toArray($request),
+        ]);
+    }
+
+    /**
+     * "Vendor Payment" email tracking on the Vendors index —
+     * App\Livewire\Vendors\VendorPaymentEmailTrackingTable with its default
+     * `templates` — see App\Services\Vendors\AppVendorPaymentEmailTracking
+     * for what is simplified versus the web's fuller table. Admin-only,
+     * same as the web card: it shows vendors' correspondence, not just
+     * their own.
+     */
+    public function paymentEmailTracking(Request $request, AppVendorPaymentEmailTracking $tracking): JsonResponse
+    {
+        Gate::authorize('create', Vendor::class);
+
+        return response()->json([
+            'data' => $tracking->recentEvents($request->user()->vendor, ['Vendor Payment']),
+        ]);
+    }
+
+    /**
+     * "Lien Waiver Signing Request" email tracking, scoped to one vendor —
+     * the same VendorPaymentEmailTrackingTable reused on the vendor show
+     * page with `templates => ['Lien Waiver Signing Request']` and
+     * `vendorId`. Gated like viewing the vendor itself.
+     */
+    public function lienWaiverEmailTracking(Request $request, int $vendor, AppVendorPaymentEmailTracking $tracking): JsonResponse
+    {
+        $found = $this->visibleVendor($request, $vendor);
+
+        return response()->json([
+            'data' => $tracking->recentEvents($request->user()->vendor, ['Lien Waiver Signing Request'], $found->id),
         ]);
     }
 

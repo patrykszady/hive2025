@@ -28,8 +28,12 @@ class TimesheetController extends Controller
         $search = trim((string) $request->query('search', ''));
         $sortBy = in_array($request->query('sort'), ['date', 'hours', 'amount'], true) ? $request->query('sort') : 'date';
         $sortDirection = $request->query('direction') === 'asc' ? 'asc' : 'desc';
+        // TimesheetsIndex::$date_range — both ends required, same as the web
+        // (a lone start or end is simply ignored rather than half-applied).
+        $startDate = $request->filled('start_date') && $request->filled('end_date') ? (string) $request->query('start_date') : null;
+        $endDate = $request->filled('start_date') && $request->filled('end_date') ? (string) $request->query('end_date') : null;
 
-        $page = $directory->groups($userId, $paid, $search, $sortBy, $sortDirection);
+        $page = $directory->groups($userId, $paid, $search, $sortBy, $sortDirection, $startDate, $endDate);
         $groups = $page->getCollection();
         $hydrated = $directory->hydrateGroups($groups);
 

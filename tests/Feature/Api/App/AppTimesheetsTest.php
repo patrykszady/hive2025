@@ -224,6 +224,22 @@ it('searches the list by member name when Meilisearch is unavailable', function 
     expect(collect($response->json('data'))->pluck('date')->all())->toBe(['2026-05-11']);
 });
 
+it('filters the list by date range, like the web\'s date_range filter, needing both ends', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11']);
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-06-15']);
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-07-20']);
+
+    $response = $this->getJson('/api/app/v1/timesheets?start_date=2026-05-01&end_date=2026-06-30')->assertOk();
+    expect(collect($response->json('data'))->pluck('date')->all())->toBe(['2026-06-15', '2026-05-11']);
+
+    // A lone end without a start is ignored rather than half-applied.
+    $unfiltered = $this->getJson('/api/app/v1/timesheets?end_date=2026-06-30')->assertOk();
+    expect(collect($unfiltered->json('data')))->toHaveCount(3);
+});
+
 it('includes the week\'s not_paid flag on the detail screen', function () {
     ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
     Sanctum::actingAs($admin, ['app']);

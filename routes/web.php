@@ -285,6 +285,17 @@ Route::get('vendor-docs/{vendorDoc}/signed', function (int $vendorDoc) {
     return \Intervention\Image\Facades\Image::make($resolvedPath)->response();
 })->middleware('signed')->whereNumber('vendorDoc')->name('vendor-docs.file.signed');
 
+// The audit page's Excel export for the Hive Contractors app: a
+// time-limited signed link handed out by GET /api/app/v1/vendor-docs/
+// audit/export-xlsx-url (see
+// Api\App\V1\VendorDocAuditController::exportXlsxUrl), so the app's audit
+// screen can download the same App\Services\Audits\AuditReport::xlsx()
+// AuditShow::export_xlsx() streams on the web, without a web session.
+Route::get('vendor-docs/audit/{vendor}/export.xlsx', [\App\Http\Controllers\VendorDocsAuditXlsxController::class, 'signed'])
+    ->middleware('signed')
+    ->whereNumber('vendor')
+    ->name('vendor-docs.audit.xlsx.signed');
+
 // The Hive Contractors app's "open full page" hand-off: a one-time signed
 // link from POST /api/app/v1/web-session that logs its user into THIS web
 // session (no session yet, so this must sit outside the 'auth' group) and

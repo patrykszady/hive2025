@@ -474,3 +474,85 @@ it('summarizes a Retail vendor\'s YTD expenses, scoped to the company\'s own spe
     expect((float) $response->json('data.expense_summary.ytd_total'))->toBe(60.0)
         ->and($recentAmounts)->toBe([60.0, 40.0]);
 });
+
+it('tracks Vendor Payment emails on the index, Admin-only, attributed by the sent event\'s vendor_id', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    $member = appFieldMember($company);
+    $paidVendor = Vendor::factory()->create(['business_name' => 'Acme Supply']);
+
+    \App\Models\EmailTracking::create([
+        'belongs_to_vendor_id' => $company->id,
+        'message_id' => 'msg-1',
+        'thread_id' => 'thread-1',
+        'email_template_name' => 'Vendor Payment',
+        'event_type' => 'sent',
+        'recipient_emails' => ['acme@example.test'],
+        'metadata' => ['vendor_id' => $paidVendor->id],
+        'event_at' => now()->subHours(3),
+    ]);
+    \App\Models\EmailTracking::create([
+        'belongs_to_vendor_id' => $company->id,
+        'message_id' => 'msg-1-open',
+        'thread_id' => 'thread-1',
+        'email_template_name' => 'Vendor Payment',
+        'event_type' => 'opened',
+        'recipient_emails' => ['acme@example.test'],
+        'event_at' => now()->subHours(1),
+    ]);
+    // A different template never shows on this card.
+    \App\Models\EmailTracking::create([
+        'belongs_to_vendor_id' => $company->id,
+        'message_id' => 'msg-2',
+        'email_template_name' => 'Lien Waiver Signing Request',
+        'event_type' => 'sent',
+        'recipient_emails' => ['acme@example.test'],
+        'event_at' => now(),
+    ]);
+
+    Sanctum::actingAs($member, ['app']);
+    $this->getJson('/api/app/v1/vendors/payment-email-tracking')->assertForbidden();
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson('/api/app/v1/vendors/payment-email-tracking')->assertOk();
+
+    $rows = $response->json('data');
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['event_type'])->toBe('opened')
+        ->and($rows[0]['vendor_id'])->toBe($paidVendor->id)
+        ->and($rows[0]['vendor_name'])->toBe('Acme Supply')
+        ->and($rows[0]['event_count'])->toBe(2);
+});
+
+it('scopes Lien Waiver Signing Request email tracking to one vendor', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    $vendorA = Vendor::factory()->create(['business_name' => 'Vendor A']);
+    $vendorB = Vendor::factory()->create(['business_name' => 'Vendor B']);
+    appFieldAttach($company, $vendorA);
+    appFieldAttach($company, $vendorB);
+
+    \App\Models\EmailTracking::create([
+        'belongs_to_vendor_id' => $company->id,
+        'message_id' => 'lw-a',
+        'email_template_name' => 'Lien Waiver Signing Request',
+        'event_type' => 'sent',
+        'recipient_emails' => ['a@example.test'],
+        'metadata' => ['vendor_id' => $vendorA->id],
+        'event_at' => now(),
+    ]);
+    \App\Models\EmailTracking::create([
+        'belongs_to_vendor_id' => $company->id,
+        'message_id' => 'lw-b',
+        'email_template_name' => 'Lien Waiver Signing Request',
+        'event_type' => 'sent',
+        'recipient_emails' => ['b@example.test'],
+        'metadata' => ['vendor_id' => $vendorB->id],
+        'event_at' => now(),
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson('/api/app/v1/vendors/'.$vendorA->id.'/lien-waiver-email-tracking')->assertOk();
+
+    $rows = $response->json('data');
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['vendor_id'])->toBe($vendorA->id);
+});

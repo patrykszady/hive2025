@@ -24,11 +24,13 @@ use Illuminate\Support\Facades\Route;
 Route::get('vendors/types', [AppVendorController::class, 'types'])->name('vendors.types');
 Route::get('vendors/search', [AppVendorController::class, 'search'])->name('vendors.search');
 Route::get('vendors/owner-lookup', [AppVendorController::class, 'ownerLookup'])->name('vendors.owner-lookup');
+Route::get('vendors/payment-email-tracking', [AppVendorController::class, 'paymentEmailTracking'])->name('vendors.payment-email-tracking');
 Route::get('vendors', [AppVendorController::class, 'index'])->name('vendors.index');
 Route::post('vendors', [AppVendorController::class, 'store'])->name('vendors.store');
 Route::get('vendors/{vendor}', [AppVendorController::class, 'show'])->whereNumber('vendor')->name('vendors.show');
 Route::put('vendors/{vendor}', [AppVendorController::class, 'update'])->whereNumber('vendor')->name('vendors.update');
 Route::post('vendors/{vendor}/link', [AppVendorController::class, 'link'])->whereNumber('vendor')->name('vendors.link');
+Route::get('vendors/{vendor}/lien-waiver-email-tracking', [AppVendorController::class, 'lienWaiverEmailTracking'])->whereNumber('vendor')->name('vendors.lien-waiver-email-tracking');
 
 // HOURS — the day the member taps, its offered projects, and saving the
 // whole day at once. 'other-projects' is registered ahead of the bare

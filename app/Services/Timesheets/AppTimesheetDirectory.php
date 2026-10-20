@@ -27,11 +27,12 @@ class AppTimesheetDirectory
     /**
      * One row per person-week (the per-project rows summed) — mirrors
      * TimesheetsIndex::timesheets()'s grouping, including its text search
-     * (Meilisearch — user name/note/invoice/amount, same as $search there)
-     * and sortable columns (date/hours/amount, same mapping as
-     * TimesheetsIndex::$sortBy).
+     * (Meilisearch — user name/note/invoice/amount, same as $search there),
+     * sortable columns (date/hours/amount, same mapping as
+     * TimesheetsIndex::$sortBy) and its date range filter
+     * (TimesheetsIndex::$date_range — inclusive, whole days).
      */
-    public function groups(?int $userId, ?string $paid, string $search = '', string $sortBy = 'date', string $sortDirection = 'desc'): CursorPaginator
+    public function groups(?int $userId, ?string $paid, string $search = '', string $sortBy = 'date', string $sortDirection = 'desc', ?string $startDate = null, ?string $endDate = null): CursorPaginator
     {
         $query = Timesheet::query();
 
@@ -43,6 +44,13 @@ class AppTimesheetDirectory
             $query->whereNotNull('check_id');
         } elseif ($paid === 'unpaid') {
             $query->whereNull('check_id');
+        }
+
+        if ($startDate !== null && $endDate !== null) {
+            $query->whereBetween('date', [
+                \Illuminate\Support\Carbon::parse($startDate)->startOfDay(),
+                \Illuminate\Support\Carbon::parse($endDate)->endOfDay(),
+            ]);
         }
 
         if ($search !== '') {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\LookupTeamMemberRequest;
 use App\Http\Requests\Api\App\StoreTeamMemberRequest;
 use App\Http\Requests\Api\App\UpdateNotificationSettingsRequest;
 use App\Http\Requests\Api\App\UpdateUserRequest;
@@ -47,6 +48,18 @@ class UserController extends Controller
 
         return response()->json([
             'data' => (new TeamUserResource($found))->withDetail()->toArray($request),
+        ]);
+    }
+
+    /**
+     * "Add Member"'s phone lookup, before role/pay-routing is chosen —
+     * UserCreate::user_cell_find() for the vendor branch, see
+     * AppTeamDirectory::lookupForTeamMember().
+     */
+    public function lookup(LookupTeamMemberRequest $request, AppTeamDirectory $directory): JsonResponse
+    {
+        return response()->json([
+            'data' => $directory->lookupForTeamMember($request->user()->vendor, $request->string('cell_phone')->value()),
         ]);
     }
 
