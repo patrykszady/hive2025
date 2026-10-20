@@ -3,7 +3,7 @@
 namespace App\Livewire\Expenses;
 
 use App\Models\Expense;
-use App\Scopes\VendorScope;
+use App\Services\Expenses\ExpenseAssociationService;
 use Flux;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -47,35 +47,9 @@ class ExpensesAssociated extends Component
         $this->search = '';
         $this->associate_expense = '';
 
-        $excludedIds = $expense->associated()->pluck('id')->toArray();
-        $excludedIds[] = $expense->id;
-
-        $this->expenses = Expense::query()
-            // No eager loading of vendor here since we compare the ID directly.
-            ->whereNotIn('id', $excludedIds)
-            ->where(function ($query) use ($expense) {
-                $query->where(function ($q) use ($expense) {
-                        // Condition A: amount matches and date is within ±3 months.
-                        $q->where(function ($amountQuery) use ($expense) {
-                                $amountQuery->where('amount', $expense->amount)
-                                            ->orWhere('amount', -1 * $expense->amount);
-                            })
-                          ->whereBetween('date', [
-                              $expense->date->copy()->subMonths(3),
-                              $expense->date->copy()->addMonths(3),
-                          ]);
-                    })
-                    ->orWhere(function ($q) use ($expense) {
-                        // Condition B: the same vendor, whenever — "the vendor
-                        // should always match" (Patryk, 2026-10-11); this used
-                        // to need the same calendar day as well.
-                        $q->where('vendor_id', $expense->vendor_id);
-                    });
-            })
-            ->orderBy('date', 'desc')
-            ->orderBy('id', 'desc')
-            ->limit(self::SUGGESTION_LIMIT)
-            ->get();
+        // The suggestion query lives in ExpenseAssociationService, shared
+        // with the Hive Contractors app's ExpenseAssociationController.
+        $this->expenses = app(ExpenseAssociationService::class)->suggestions($expense);
 
         $this->modal('associated_expenses_form_modal')->show();
     }
@@ -96,56 +70,14 @@ class ExpensesAssociated extends Component
             return collect($this->expenses);
         }
 
-        $excludedIds = $this->expense->associated()->pluck('id')->all();
-        $excludedIds[] = $this->expense->id;
-
-        $number = is_numeric(str_replace([',', '$'], '', $term)) ? (float) str_replace([',', '$'], '', $term) : null;
-
-        return Expense::query()
-            ->with('vendor')
-            ->whereNotIn('id', $excludedIds)
-            ->where(function ($query) use ($term, $number) {
-                if ($number !== null) {
-                    $query->where('id', (int) $number)
-                        ->orWhere('amount', $number)
-                        ->orWhere('amount', -1 * $number);
-                }
-
-                $query->orWhereHas('vendor', fn ($vendor) => $vendor->withoutGlobalScope(VendorScope::class)->where('business_name', 'like', "%{$term}%"))
-                    ->orWhere('invoice', 'like', "%{$term}%");
-            })
-            ->orderByDesc('date')
-            ->orderByDesc('id')
-            ->limit(self::SEARCH_LIMIT)
-            ->get();
+        return app(ExpenseAssociationService::class)->search($this->expense, $term);
     }
 
     public function save()
     {
         $associate = Expense::findOrFail($this->associate_expense);
-        $current = $this->expense->fresh();
 
-        $associateRootId = $associate->parent_expense_id ?: $associate->id;
-        $currentRootId = $current->parent_expense_id ?: $current->id;
-
-        if ($associateRootId !== $currentRootId) {
-            $currentGroupIds = Expense::query()
-                ->where(function ($query) use ($currentRootId) {
-                    $query->where('id', $currentRootId)
-                        ->orWhere('parent_expense_id', $currentRootId);
-                })
-                ->pluck('id');
-
-            if ($currentGroupIds->isNotEmpty()) {
-                Expense::query()
-                    ->whereIn('id', $currentGroupIds)
-                    ->where('id', '!=', $associateRootId)
-                    ->update(['parent_expense_id' => $associateRootId]);
-            }
-        } elseif ($current->id !== $associateRootId) {
-            $current->parent_expense_id = $associateRootId;
-            $current->save();
-        }
+        app(ExpenseAssociationService::class)->associate($this->expense, $associate);
 
         $this->dispatch('refreshComponent')->to('expenses.expense-show');
         $this->modal('associated_expenses_form_modal')->close();
