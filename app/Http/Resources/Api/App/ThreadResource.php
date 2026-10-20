@@ -15,6 +15,23 @@ class ThreadResource extends JsonResource
     use ResolvesClientDisplayName;
 
     /**
+     * Compute callable_contacts (ConversationPresenter::callableContacts(),
+     * the conversation's quick-call row) — off by default. It isn't needed
+     * by a list row, and threads a list row's underlying query didn't eager
+     * load client.users/threadParticipants for (e.g. ThreadForwardController's
+     * candidateThreads()) would otherwise lazy-load it once per thread.
+     * ThreadController::show() is the only caller that needs it and opts in.
+     */
+    protected bool $withCallableContacts = false;
+
+    public function withCallableContacts(): static
+    {
+        $this->withCallableContacts = true;
+
+        return $this;
+    }
+
+    /**
      * Transform the resource into an array.
      *
      * @return array<string, mixed>
@@ -71,8 +88,11 @@ class ThreadResource extends JsonResource
             'is_spam' => (bool) ($this->is_spam ?? false),
             // The quick-call row under the web conversation's title
             // (conversation.blade.php's $callableContacts) — who this thread
-            // can click-to-call, excluding the business number itself.
-            'callable_contacts' => (new ConversationPresenter($this->resource, null))->callableContacts(),
+            // can click-to-call, excluding the business number itself. Only
+            // computed when withCallableContacts() was called (see above).
+            'callable_contacts' => $this->withCallableContacts
+                ? (new ConversationPresenter($this->resource, null))->callableContacts()
+                : [],
         ];
     }
 

@@ -109,7 +109,7 @@ class ThreadController extends Controller
         $this->attachThreadUnreadCounts(collect([$found]), $user);
         $this->attachThreadSpamFlags(collect([$found]));
 
-        return response()->json(['data' => new ThreadResource($found)]);
+        return response()->json(['data' => (new ThreadResource($found))->withCallableContacts()]);
     }
 
     /**
