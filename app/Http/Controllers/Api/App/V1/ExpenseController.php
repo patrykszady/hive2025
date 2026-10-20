@@ -60,6 +60,7 @@ class ExpenseController extends Controller
             'splits.project:id,project_name', 'splits.distribution:id,name',
             'receipts' => fn ($q) => $q->orderByDesc('id'),
             'checks.bank_account.bank', 'check.bank_account.bank',
+            'payments',
         ]);
 
         return response()->json(['data' => (new ExpenseResource($found))->withDetail()->toArray($request)]);
@@ -73,7 +74,7 @@ class ExpenseController extends Controller
         // (mirroring ExpenseForm::store()'s authorize('create', ...) before
         // validate()) — see ExpensePolicy::create().
         $expense = $this->directory->create($user, $request->validated(), $request->file('receipt'));
-        $expense->load(['vendor', 'project', 'distribution', 'splits.project:id,project_name', 'splits.distribution:id,name', 'receipts', 'checks.bank_account.bank', 'check.bank_account.bank']);
+        $expense->load(['vendor', 'project', 'distribution', 'splits.project:id,project_name', 'splits.distribution:id,name', 'receipts', 'checks.bank_account.bank', 'check.bank_account.bank', 'payments']);
 
         return response()->json(['data' => (new ExpenseResource($expense))->withDetail()->toArray($request)], 201);
     }
@@ -93,7 +94,7 @@ class ExpenseController extends Controller
         // 'create', not 'update' — see ExpensePolicy::create().
         $found = $this->visibleExpense($request, $expense);
         $updated = $this->directory->update($user, $found, $request->validated(), $request->file('receipt'));
-        $updated->load(['vendor', 'project', 'distribution', 'splits.project:id,project_name', 'splits.distribution:id,name', 'receipts', 'checks.bank_account.bank', 'check.bank_account.bank']);
+        $updated->load(['vendor', 'project', 'distribution', 'splits.project:id,project_name', 'splits.distribution:id,name', 'receipts', 'checks.bank_account.bank', 'check.bank_account.bank', 'payments']);
 
         return response()->json(['data' => (new ExpenseResource($updated))->withDetail()->toArray($request)]);
     }

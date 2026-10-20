@@ -2,9 +2,12 @@
 
 namespace App\Http\Requests\Api\App;
 
+use App\Models\BankAccount;
 use App\Models\Expense;
+use App\Services\Checks\CheckNumberSuggester;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
@@ -12,6 +15,15 @@ use Illuminate\Validation\Validator;
  * ExpenseForm's #[Validate] attributes and rules() enforce (amount format,
  * date window, project-required-unless-split), plus the splits array the
  * app's own simplified split editor sends.
+ *
+ * bank_account_id/check_type/check_number let the app record a brand-new
+ * check the same way App\Traits\HandlesChecks' rules do for the web's own
+ * expense form (ExpenseCreate uses that trait for its bank_account_id/
+ * check_type/check_number properties and autoCheckNumber(), though the web
+ * component never actually wires handlesChecksRules() into its own live
+ * validation — this applies that same rule set explicitly, which is the
+ * stricter, correct behaviour and the one CheckNumberSuggester/
+ * StoreVendorPaymentRequest already enforce elsewhere).
  *
  * authorize() mirrors ExpenseForm::store()'s ordering exactly: it calls
  * `$this->authorize('create', Expense::class)` BEFORE `$this->validate()`,
@@ -24,6 +36,17 @@ class StoreExpenseRequest extends FormRequest
     public function authorize(): bool
     {
         return (bool) $this->user()?->can('create', Expense::class);
+    }
+
+    /**
+     * On update, the expense's own already-recorded check must be excluded
+     * from the check_number uniqueness check (re-submitting its unchanged
+     * bank/number would otherwise collide with itself) — see
+     * UpdateExpenseRequest's override.
+     */
+    protected function excludedCheckId(): ?int
+    {
+        return null;
     }
 
     /**
@@ -52,6 +75,8 @@ class StoreExpenseRequest extends FormRequest
      */
     public function rules(): array
     {
+        $vendorId = $this->user()?->vendor?->id;
+
         return [
             'amount' => ['required', 'numeric', 'regex:/^-?\d+(\.\d{1,2})?$/'],
             'date' => ['required', 'date', 'before_or_equal:today', 'after:2017-01-01'],
@@ -72,6 +97,17 @@ class StoreExpenseRequest extends FormRequest
             // ExpenseAccessGuard::assertCheckAccessible(), not an `exists:`
             // rule, for the same reason as belongs_to_vendor_id above.
             'existing_check_id' => ['nullable', 'integer'],
+            // Recording a brand-new check — mirrors App\Traits\HandlesChecks'
+            // handlesChecksRules() exactly (same scoping, same messages).
+            'bank_account_id' => [
+                'nullable', 'integer',
+                Rule::exists('bank_accounts', 'id')->where('vendor_id', $vendorId),
+            ],
+            'check_type' => ['nullable', 'required_with:bank_account_id', 'in:Check,Transfer,Cash'],
+            'check_number' => [
+                'nullable', 'required_if:check_type,Check', 'integer',
+                $this->checkNumberUniqueRule(),
+            ],
             'splits' => ['nullable', 'array'],
             'splits.*.amount' => ['required', 'numeric', 'regex:/^-?\d+(\.\d{1,2})?$/', 'not_in:0'],
             'splits.*.project_id' => ['required', 'integer'],
@@ -79,6 +115,46 @@ class StoreExpenseRequest extends FormRequest
             'splits.*.reimbursement' => ['nullable', 'string', 'max:255'],
             'receipt' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:20480'],
         ];
+    }
+
+    /**
+     * Unique across every account under the submitted bank_account_id's own
+     * bank (CheckNumberSuggester::siblingAccountIds()) — paper checks only,
+     * excluding soft-deleted rows, the expense's own already-recorded check
+     * (on update), AND an exact (bank_account_id, vendor_id) match: that's
+     * not a collision, it's a SECOND expense against the same already-
+     * recorded check, which AppExpenseDirectory's own find-or-create simply
+     * reuses — mirrors ExpenseForm::store()/update()'s $existing_check
+     * lookup, which is keyed the same way.
+     */
+    private function checkNumberUniqueRule(): \Illuminate\Validation\Rules\Unique
+    {
+        $bankAccountId = $this->input('bank_account_id');
+        $vendorId = $this->input('vendor_id');
+        $excludedCheckId = $this->excludedCheckId();
+
+        $rule = Rule::unique('checks', 'check_number')->where(function ($query) use ($bankAccountId, $vendorId) {
+            $query->where('check_type', 'Check')->whereNull('deleted_at');
+
+            $account = $bankAccountId ? BankAccount::withoutGlobalScopes()->find($bankAccountId) : null;
+            if ($account) {
+                $siblingIds = app(CheckNumberSuggester::class)->siblingAccountIds($account);
+                $query->whereIn('bank_account_id', $siblingIds);
+            } else {
+                // No bank account submitted (or an invalid one, already
+                // caught by the bank_account_id rule) — fall back to this
+                // one id so the uniqueness check still scopes narrowly
+                // rather than matching every bank's check numbers.
+                $query->where('bank_account_id', $bankAccountId);
+            }
+
+            $query->where(function ($inner) use ($bankAccountId, $vendorId) {
+                $inner->where('bank_account_id', '!=', $bankAccountId)
+                    ->orWhere('vendor_id', '!=', $vendorId);
+            });
+        });
+
+        return $excludedCheckId ? $rule->ignore($excludedCheckId) : $rule;
     }
 
     /**
@@ -92,6 +168,7 @@ class StoreExpenseRequest extends FormRequest
             'date.after' => 'Date cannot be before 2017-01-01.',
             'receipt.mimes' => 'Receipt must be a PDF, JPG, or PNG.',
             'receipt.max' => 'Receipt must be less than 20MB.',
+            'check_number.unique' => 'Check already recorded.',
         ];
     }
 

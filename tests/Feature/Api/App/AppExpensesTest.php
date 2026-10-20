@@ -460,6 +460,291 @@ it('refuses an existing_check_id outside the tenant\'s own checks', function () 
     ])->assertStatus(422)->assertJsonValidationErrors(['existing_check_id']);
 });
 
+// --- recording a NEW check (bank_account_id/check_type/check_number) -------
+
+/** @return array{vendor: Vendor, bank: Bank, account: BankAccount} */
+function appExpensesBankAccount(Vendor $vendor, array $overrides = []): array
+{
+    $bank = Bank::create(['name' => 'Citibank', 'vendor_id' => $vendor->id, 'plaid_access_token' => 'access-'.uniqid(), 'plaid_ins_id' => 'ins_'.uniqid()]);
+    $account = BankAccount::create(array_merge([
+        'vendor_id' => $vendor->id, 'bank_id' => $bank->id, 'account_number' => '1234',
+        'plaid_account_id' => 'acc_'.uniqid(), 'type' => 'Checking',
+    ], $overrides));
+
+    return ['vendor' => $vendor, 'bank' => $bank, 'account' => $account];
+}
+
+it('records a brand-new check from the create form, like ExpenseForm::store()', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    ['account' => $account] = appExpensesBankAccount($vendor);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/expenses', [
+        'amount' => '42.50', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id,
+        'bank_account_id' => $account->id, 'check_type' => 'Check', 'check_number' => '301',
+    ])->assertCreated();
+
+    $expense = Expense::findOrFail($response->json('data.id'));
+    expect($expense->check_id)->not->toBeNull();
+
+    $check = \App\Models\Check::findOrFail($expense->check_id);
+    expect((string) $check->check_number)->toBe('301')
+        ->and((int) $check->bank_account_id)->toBe($account->id)
+        ->and((float) $check->amount)->toBe(42.5)
+        ->and((int) $check->vendor_id)->toBe($merchant->id)
+        ->and((int) $check->belongs_to_vendor_id)->toBe($vendor->id);
+});
+
+it('reuses an already-recorded check with the same bank/number/vendor instead of creating a duplicate', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    ['account' => $account] = appExpensesBankAccount($vendor);
+    $existingCheck = \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '400', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $account->id, 'amount' => 10, 'vendor_id' => $merchant->id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/expenses', [
+        'amount' => '15.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id,
+        'bank_account_id' => $account->id, 'check_type' => 'Check', 'check_number' => '400',
+    ])->assertCreated();
+
+    $expense = Expense::findOrFail($response->json('data.id'));
+    $existingCheck->refresh();
+    // recalculateAmount() sums the REAL expenses now pointing at the check
+    // (just the new $15 one — the check's original $10 was never backed by
+    // an actual expense row), proving the new expense really reused it
+    // rather than creating a second check for the same number.
+    expect((int) $expense->check_id)->toBe($existingCheck->id)
+        ->and((float) $existingCheck->amount)->toBe(15.0)
+        ->and(\App\Models\Check::where('check_number', '400')->count())->toBe(1);
+});
+
+it('refuses a check number already recorded on a sibling account of the same bank', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    $bank = Bank::create(['name' => 'Chase', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_'.uniqid()]);
+    $accountOne = BankAccount::create(['vendor_id' => $vendor->id, 'bank_id' => $bank->id, 'account_number' => '111', 'plaid_account_id' => 'acc_'.uniqid(), 'type' => 'Checking']);
+    $accountTwo = BankAccount::create(['vendor_id' => $vendor->id, 'bank_id' => $bank->id, 'account_number' => '222', 'plaid_account_id' => 'acc_'.uniqid(), 'type' => 'Checking']);
+    \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '900', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $accountOne->id, 'amount' => 10, 'vendor_id' => $merchant->id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses', [
+        'amount' => '15.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id,
+        // Different bank_account row, but the SAME bank — must still collide.
+        'bank_account_id' => $accountTwo->id, 'check_type' => 'Check', 'check_number' => '900',
+    ])->assertStatus(422)->assertJsonValidationErrors(['check_number']);
+});
+
+it('refuses bank_account_id outside the tenant\'s own accounts', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    $otherVendor = Vendor::factory()->create();
+    ['account' => $foreignAccount] = appExpensesBankAccount($otherVendor);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses', [
+        'amount' => '15.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'project_id' => $project->id,
+        'bank_account_id' => $foreignAccount->id, 'check_type' => 'Check', 'check_number' => '1',
+    ])->assertStatus(422)->assertJsonValidationErrors(['bank_account_id']);
+});
+
+it('records a brand-new check when editing an expense, like ExpenseForm::update()', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $expense = appExpensesExpense($vendor, ['project_id' => $project->id, 'amount' => 60]);
+    ['account' => $account] = appExpensesBankAccount($vendor);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses/'.$expense->id, [
+        'amount' => '60.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $expense->vendor_id,
+        'project_id' => $project->id,
+        'bank_account_id' => $account->id, 'check_type' => 'Transfer',
+    ])->assertOk();
+
+    $expense->refresh();
+    expect($expense->check_id)->not->toBeNull();
+    $check = \App\Models\Check::findOrFail($expense->check_id);
+    expect($check->check_type)->toBe('Transfer')
+        ->and((float) $check->amount)->toBe(60.0);
+});
+
+it('re-submitting the same check unchanged on edit does not collide with itself', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    ['account' => $account] = appExpensesBankAccount($vendor);
+    $expense = appExpensesExpense($vendor, ['project_id' => $project->id, 'amount' => 60]);
+    $check = \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '777', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $account->id, 'amount' => 60, 'vendor_id' => $expense->vendor_id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+    $expense->update(['check_id' => $check->id]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses/'.$expense->id, [
+        'amount' => '60.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $expense->vendor_id,
+        'project_id' => $project->id,
+        'bank_account_id' => $account->id, 'check_type' => 'Check', 'check_number' => '777',
+    ])->assertOk();
+
+    $expense->refresh();
+    expect((int) $expense->check_id)->toBe($check->id)
+        ->and(\App\Models\Check::where('check_number', '777')->count())->toBe(1);
+});
+
+it('detaches the check on edit when the bank/check fields are cleared', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    ['account' => $account] = appExpensesBankAccount($vendor);
+    $expense = appExpensesExpense($vendor, ['project_id' => $project->id, 'amount' => 30]);
+    $check = \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '888', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $account->id, 'amount' => 30, 'vendor_id' => $expense->vendor_id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+    $expense->update(['check_id' => $check->id]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses/'.$expense->id, [
+        'amount' => '30.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $expense->vendor_id,
+        'project_id' => $project->id,
+    ])->assertOk();
+
+    $expense->refresh();
+    $check->refresh();
+    expect($expense->check_id)->toBeNull()
+        ->and((float) $check->amount)->toBe(0.0);
+});
+
+it('exposes the expense\'s own check as linked_check, for the edit form to pre-fill', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    ['account' => $account] = appExpensesBankAccount($vendor);
+    $expense = appExpensesExpense($vendor, ['amount' => 22]);
+    $check = \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '650', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $account->id, 'amount' => 22, 'vendor_id' => $expense->vendor_id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+    $expense->update(['check_id' => $check->id]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+
+    $response->assertJsonPath('data.linked_check.bank_account_id', $account->id)
+        ->assertJsonPath('data.linked_check.check_type', 'Check')
+        ->assertJsonPath('data.linked_check.check_number', '650');
+});
+
+it('null linked_check when the expense has no check', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk()->assertJsonPath('data.linked_check', null);
+});
+
+it('includes bank_accounts with a suggested next check number on the form-options endpoint', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    ['account' => $account] = appExpensesBankAccount($vendor);
+    \App\Models\Check::create([
+        'check_type' => 'Check', 'check_number' => '500', 'date' => now()->format('Y-m-d'),
+        'bank_account_id' => $account->id, 'amount' => 5, 'vendor_id' => $vendor->id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/form-options')->assertOk();
+
+    $bankAccounts = collect($response->json('data.bank_accounts'));
+    $row = $bankAccounts->firstWhere('id', $account->id);
+    expect($row)->not->toBeNull()
+        ->and($row['next_check_number'])->toBe(501);
+});
+
+// --- off-bank payments (ExpensePayment::isOffBank()) ------------------------
+
+it('shows off-bank payments on the detail payload, like the web\'s Transaction card', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor, ['amount' => 50]);
+    \App\Models\ExpensePayment::factory()->offBank(\App\Models\ExpensePayment::STORE_CREDIT)->create([
+        'expense_id' => $expense->id, 'amount' => 50, 'source' => \App\Models\ExpensePayment::SOURCE_RECEIPT_TEXT,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+
+    $response->assertJsonCount(1, 'data.payments')
+        ->assertJsonPath('data.payments.0.method', 'Store credit')
+        ->assertJsonCount(0, 'data.transactions');
+
+    expect((float) $response->json('data.payments.0.amount'))->toBe(50.0)
+        ->and($response->json('data.can_link_transaction'))->toBeFalse();
+});
+
+it('excludes on-bank (card) payment rows from the off-bank payments list', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $expense = appExpensesExpense($vendor, ['amount' => 50]);
+    \App\Models\ExpensePayment::factory()->create(['expense_id' => $expense->id, 'amount' => 50]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk()->assertJsonCount(0, 'data.payments');
+});
+
+// --- per-split reimbursement/note -------------------------------------------
+
+it('saves and returns a reimbursement and note on each split', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $projectA = appExpensesProject($vendor, ['project_name' => 'Job A']);
+    $projectB = appExpensesProject($vendor, ['project_name' => 'Job B']);
+    $merchant = Vendor::factory()->create();
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/expenses', [
+        'amount' => '100.00', 'date' => now()->format('Y-m-d'), 'vendor_id' => $merchant->id,
+        'splits' => [
+            ['amount' => 60, 'project_id' => $projectA->id, 'reimbursement' => 'Client', 'note' => 'Deck materials'],
+            ['amount' => 40, 'project_id' => $projectB->id, 'note' => 'Overflow'],
+        ],
+    ])->assertCreated();
+
+    $response->assertJsonPath('data.splits.0.reimbursement', 'Client')
+        ->assertJsonPath('data.splits.0.note', 'Deck materials')
+        ->assertJsonPath('data.splits.1.note', 'Overflow');
+
+    $expense = Expense::findOrFail($response->json('data.id'));
+    expect($expense->splits->firstWhere('project_id', $projectA->id)->reimbursment)->toBe('Client')
+        ->and($expense->splits->firstWhere('project_id', $projectB->id)->note)->toBe('Overflow');
+});
+
 it('lists the form-options for Paid By, Reimbursement and Attach to Existing Check', function () {
     ['vendor' => $vendor, 'admin' => $admin, 'member' => $member] = appExpensesTeam();
     // Vendor::business_name is title-cased by a setter on the model.

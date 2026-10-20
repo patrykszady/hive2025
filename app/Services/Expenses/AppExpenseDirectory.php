@@ -4,11 +4,13 @@ namespace App\Services\Expenses;
 
 use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\ReceiptController;
+use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Expense;
 use App\Models\ExpenseSplits;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Services\Checks\CheckNumberSuggester;
 use App\Services\Users\AppTeamDirectory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
@@ -92,6 +94,17 @@ class AppExpenseDirectory
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * The "Record a New Check" bank picker's options — mirrors
+     * HandlesChecks::getBankAccountsProperty() exactly.
+     *
+     * @return \Illuminate\Support\Collection<int, BankAccount>
+     */
+    public function bankAccounts(): \Illuminate\Support\Collection
+    {
+        return BankAccount::latestCheckingAccounts()->get();
     }
 
     /**
@@ -272,13 +285,14 @@ class AppExpenseDirectory
 
     /**
      * Create an expense the way ExpenseForm::store() does for the fields
-     * the app's own form offers (the app can attach an already-existing
-     * check via existing_check_id, but never creates one — recording a new
-     * bank account/check number stays a desktop accounting feature): same
-     * ownership whitelisting (ExpenseAccessGuard), same cross-vendor
-     * attach, same optional receipt OCR.
+     * the app's own form offers: attach an already-existing check via
+     * existing_check_id, OR record a brand-new one via bank_account_id/
+     * check_type/check_number (mirrors ExpenseForm::store()'s own
+     * find-or-create/dedupe), OR neither — same ownership whitelisting
+     * (ExpenseAccessGuard), same cross-vendor attach, same optional receipt
+     * OCR.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
      */
     public function create(User $user, array $data, ?UploadedFile $receipt): Expense
     {
@@ -295,12 +309,18 @@ class AppExpenseDirectory
 
         // "Attach to Existing Check" — mirrors ExpenseForm::store()'s
         // existing_check_id handling: the expense simply points at an
-        // already-existing check (never creates one; the app's own form
-        // never collects a bank account/check number).
+        // already-existing check.
         $existingCheckId = isset($data['existing_check_id']) && $data['existing_check_id'] !== null
             ? (int) $data['existing_check_id']
             : null;
         $check = $this->guard->assertCheckAccessible($existingCheckId);
+
+        // Recording a brand-new check — mirrors ExpenseForm::store()'s
+        // $shouldCreateCheck branch: only when neither an existing check nor
+        // "paid by an employee" already settled it.
+        if (! $check && empty($data['paid_by'])) {
+            $check = $this->createCheckForNewExpense($data, (int) $data['vendor_id'], $hubVendorId, (int) $user->id);
+        }
 
         $expense = Expense::create([
             'amount' => $data['amount'],
@@ -340,7 +360,7 @@ class AppExpenseDirectory
      * that looks surprising: created_by_user_id is overwritten to the
      * editing user on every save, not preserved from the original creator.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
      */
     public function update(User $user, Expense $expense, array $data, ?UploadedFile $receipt): Expense
     {
@@ -369,6 +389,10 @@ class AppExpenseDirectory
             'created_by_user_id' => $user->id,
         ]);
 
+        // Recording/updating/detaching the linked check — mirrors
+        // ExpenseForm::update()'s "Handle existing check" block exactly.
+        $this->resolveCheckOnUpdate($expense, $data, (int) $data['vendor_id'], $hubVendorId, (int) $user->id);
+
         $this->replaceSplits($expense, $isSplit ? $data['splits'] : []);
 
         $this->guard->attachCrossVendorRelationships($expense);
@@ -378,6 +402,103 @@ class AppExpenseDirectory
         }
 
         return $expense;
+    }
+
+    /**
+     * Finds a matching already-recorded paper check (same bank/type/number/
+     * vendor) or creates a new one — mirrors ExpenseForm::store()'s
+     * check-creation branch. Returns null when bank_account_id/check_type
+     * weren't both submitted (or the bank account doesn't exist).
+     *
+     * @param  array{date: string, amount: float|string, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int}  $data
+     */
+    private function createCheckForNewExpense(array $data, int $vendorId, int $actingVendorId, int $actingUserId): ?Check
+    {
+        $bankAccountId = isset($data['bank_account_id']) && $data['bank_account_id'] !== null ? (int) $data['bank_account_id'] : null;
+        $checkType = $data['check_type'] ?? null;
+        $checkNumber = isset($data['check_number']) && $data['check_number'] !== null ? (int) $data['check_number'] : null;
+
+        if (! $bankAccountId || ! $checkType || ! BankAccount::whereKey($bankAccountId)->exists()) {
+            return null;
+        }
+
+        if ($checkType === 'Check' && $checkNumber !== null) {
+            $existing = Check::whereNull('deleted_at')
+                ->where('bank_account_id', $bankAccountId)
+                ->where('check_type', $checkType)
+                ->where('check_number', $checkNumber)
+                ->where('vendor_id', $vendorId)
+                ->first();
+
+            if ($existing) {
+                return $existing;
+            }
+        }
+
+        return Check::create([
+            'check_type' => $checkType,
+            'check_number' => $checkNumber,
+            'date' => $data['date'],
+            'bank_account_id' => $bankAccountId,
+            'amount' => $data['amount'],
+            'vendor_id' => $vendorId,
+            'belongs_to_vendor_id' => $actingVendorId,
+            'created_by_user_id' => $actingUserId,
+        ]);
+    }
+
+    /**
+     * Creates/reuses/detaches $expense's check on an edit — mirrors
+     * ExpenseForm::update()'s "Handle existing check" block exactly: when
+     * bank_account_id/check_type are (still) submitted and not paid_by, find
+     * or create the matching check and point the expense at it (recalculating
+     * the OLD check first if it's being swapped out); otherwise, if the
+     * expense had a check and the bank/check fields were cleared, detach it.
+     *
+     * @param  array{date: string, amount: float|string, paid_by?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int}  $data
+     */
+    private function resolveCheckOnUpdate(Expense $expense, array $data, int $vendorId, int $actingVendorId, int $actingUserId): void
+    {
+        $check = $expense->check;
+        $bankAccountId = isset($data['bank_account_id']) && $data['bank_account_id'] !== null ? (int) $data['bank_account_id'] : null;
+        $checkType = $data['check_type'] ?? null;
+        $checkNumber = isset($data['check_number']) && $data['check_number'] !== null ? (int) $data['check_number'] : null;
+
+        if (empty($data['paid_by']) && $bankAccountId && $checkType && BankAccount::whereKey($bankAccountId)->exists()) {
+            $existing = null;
+            if ($checkType === 'Check' && $checkNumber !== null) {
+                $existing = Check::whereNull('deleted_at')
+                    ->where('bank_account_id', $bankAccountId)
+                    ->where('check_type', $checkType)
+                    ->where('check_number', $checkNumber)
+                    ->where('vendor_id', $vendorId)
+                    ->first();
+            }
+
+            if ($existing) {
+                if ($check && $check->id !== $existing->id) {
+                    $check->recalculateAmount();
+                }
+                $check = $existing;
+            } elseif (! $check || (int) $check->check_number !== $checkNumber || (int) $check->bank_account_id !== $bankAccountId) {
+                $check = Check::create([
+                    'check_type' => $checkType,
+                    'check_number' => $checkNumber,
+                    'date' => $data['date'],
+                    'bank_account_id' => $bankAccountId,
+                    'amount' => $data['amount'],
+                    'vendor_id' => $vendorId,
+                    'belongs_to_vendor_id' => $actingVendorId,
+                    'created_by_user_id' => $actingUserId,
+                ]);
+            }
+
+            $expense->update(['check_id' => $check->id]);
+            $check->recalculateAmount();
+        } elseif ($check) {
+            $expense->update(['check_id' => null]);
+            $check->recalculateAmount();
+        }
     }
 
     /**

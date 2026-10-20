@@ -5,6 +5,7 @@ namespace App\Http\Resources\Api\App;
 use App\Models\Check;
 use App\Models\Client;
 use App\Models\Expense;
+use App\Models\ExpensePayment;
 use App\Models\ExpenseReceipts;
 use App\Models\ExpenseSplits;
 use App\Models\Transaction;
@@ -102,7 +103,27 @@ class ExpenseResource extends JsonResource
             // The matched bank charge(s) — mirrors the web's x-transactions.list_card,
             // fed by Expense::allTransactions() (own -> shared -> check).
             'transactions' => $expense->allTransactions()->map(fn (Transaction $transaction) => $this->transactionPayload($transaction))->values()->all(),
+            // Payments that never reached the bank (rebate checks, store
+            // credit, gift cards, points, cash) — mirrors the web's
+            // x-transactions.list_card $payments rows (ExpensePayment::isOffBank()).
+            'payments' => $expense->payments->filter(fn (ExpensePayment $payment) => $payment->isOffBank())
+                ->sortBy('id')
+                ->map(fn (ExpensePayment $payment) => $this->paymentPayload($payment, $expense))
+                ->values()->all(),
             'checks' => app(ExpenseAssociationService::class)->linkedChecks($expense)->map(fn (Check $check) => $this->checkPayload($check))->values()->all(),
+            // The expense's own singular check (not the merged list above) —
+            // pre-fills the edit form's "Record a New Check" fields exactly
+            // the way ExpenseForm::setExpense() does, so re-saving the
+            // expense without touching them reuses this same check instead
+            // of AppExpenseDirectory::resolveCheckOnUpdate() detaching it.
+            'linked_check' => $expense->check ? [
+                'bank_account_id' => $expense->check->bank_account_id,
+                'bank_account_label' => $expense->check->bank_account?->getNameAndType(),
+                'check_type' => $expense->check->check_type,
+                'check_number' => $expense->check->check_type === 'Check' && $expense->check->check_number !== null
+                    ? (string) $expense->check->check_number
+                    : null,
+            ] : null,
             'check_associated_expenses' => app(ExpenseAssociationService::class)->checkAssociatedExpenses($expense)->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
             'associated_expenses' => $expense->associated_expenses->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
             // Mirrors the @if wrapping <livewire:expenses.link-transaction>
@@ -139,6 +160,27 @@ class ExpenseResource extends JsonResource
             'bank' => $transaction->bank_account?->bank?->name,
             'account' => $transaction->bank_account?->account_number,
             'description' => $transaction->plaid_merchant_name ?: $transaction->plaid_merchant_description,
+        ];
+    }
+
+    /**
+     * An off-bank payment row — mirrors ExpensePayment::methodName()/
+     * notation() exactly, the same text the web's transaction card shows
+     * under each one ("Paid without a bank charge · Store credit · from the
+     * receipt").
+     *
+     * @return array{id: int, amount: float, method: string, label: string, last_four: ?string, paid_at: ?string, notation: string}
+     */
+    private function paymentPayload(ExpensePayment $payment, Expense $expense): array
+    {
+        return [
+            'id' => $payment->id,
+            'amount' => (float) $payment->amount,
+            'method' => $payment->methodName(),
+            'label' => $payment->label(),
+            'last_four' => $payment->last_four,
+            'paid_at' => ($payment->paid_at ?? $expense->date)?->format('Y-m-d'),
+            'notation' => $payment->notation(),
         ];
     }
 

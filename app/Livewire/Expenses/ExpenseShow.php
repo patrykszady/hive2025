@@ -5,13 +5,12 @@ namespace App\Livewire\Expenses;
 use App\Models\Check;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
-use App\Models\ReceiptLineItemDesc;
 use App\Services\Expenses\ExpenseAssociationService;
+use App\Services\Expenses\ReceiptLineItemDetail;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
-use Spatie\Activitylog\Models\Activity;
 
 class ExpenseShow extends Component
 {
@@ -109,59 +108,12 @@ class ExpenseShow extends Component
 
     public function selectReceiptItem(int $receiptId, int $itemIndex): void
     {
-        // Always fetch the latest receipt row to avoid stale in-memory relation data.
-        $receipt = ExpenseReceipts::query()
-            ->where('expense_id', $this->expense->id)
-            ->find($receiptId);
-
-        if (! $receipt) {
-            $receipt = $this->expense->orderedReceipts->firstWhere('id', $receiptId);
-        }
-
-        $items = $receipt?->receipt_items['items'] ?? [];
-        $item = $items[$itemIndex] ?? null;
+        // Extracted to ReceiptLineItemDetail, shared with the Hive
+        // Contractors app's ExpenseReceiptItemController.
+        $item = app(ReceiptLineItemDetail::class)->forItem($this->expense, $receiptId, $itemIndex);
 
         if (! $item) {
             return;
-        }
-
-        // Enrich with receipt_line_item_descs
-        $desc = ReceiptLineItemDesc::where('expense_receipt_id', $receiptId)
-            ->where('item_index', $itemIndex)
-            ->first();
-
-        if ($desc) {
-            if (empty($item['image_url']) && ! empty($desc->product_image_url)) {
-                $item['image_url'] = $desc->product_image_url;
-            }
-
-            if (empty($item['product_url']) && ! empty($desc->product_url)) {
-                $item['product_url'] = $desc->product_url;
-            }
-
-            if (empty($item['Area']) && ! empty($desc->area)) {
-                $item['Area'] = $desc->area;
-            }
-        }
-
-        $item['_vendor_name'] = $this->expense->vendor?->business_name;
-        $item['_expense_date'] = $this->expense->date?->format('M j, Y');
-
-        // Fetch activity log changes for this specific item
-        if ($receipt?->is_material_order) {
-            $item['_history'] = Activity::where('log_name', 'materials')
-                ->where('subject_type', 'App\\Models\\ExpenseReceipts')
-                ->where('subject_id', $receipt->id)
-                ->latest()
-                ->get()
-                ->flatMap(function ($log) use ($itemIndex) {
-                    $tz = auth()->user()?->vendor?->timezone ?? config('app.timezone');
-                    return collect($log->properties['items'] ?? [])
-                        ->filter(fn ($change) => ($change['item_index'] ?? null) === $itemIndex)
-                        ->map(fn ($change) => array_merge($change, ['date' => $log->created_at->timezone($tz)->format('n/j/y g:iA')]));
-                })
-                ->values()
-                ->toArray();
         }
 
         $this->selectedItem = $item;
