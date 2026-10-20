@@ -291,3 +291,77 @@ it('keeps communications to Admins, like the web project page, and says so on th
 
     $this->getJson("/api/app/v1/projects/{$project->id}")->assertOk()->assertJsonPath('data.permissions.view_communications', true);
 });
+
+// =========================================================================
+// The unplaced email inbox (/emails/unplaced): emails the AI could not put
+// on a project, for an Admin to sort — App\Http\Controllers\Api\App\V1\
+// EmailController::unplaced(), mirroring App\Livewire\Emails\
+// UnplacedEmails.
+// =========================================================================
+
+it('needs a token to list the unplaced inbox', function () {
+    $this->getJson('/api/app/v1/emails/unplaced')->assertUnauthorized();
+});
+
+it('keeps the unplaced inbox to Admins only, like the web', function () {
+    $world = appCommWorld(role: 2);
+    Sanctum::actingAs($world['user'], ['app']);
+
+    $this->getJson('/api/app/v1/emails/unplaced')->assertForbidden();
+});
+
+it('lists unplaced emails newest first, excluding placed/dismissed/unsummarized ones', function () {
+    $world = appCommWorld();
+    Sanctum::actingAs($world['user'], ['app']);
+
+    $unplaced = EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id, 'subject' => 'Unplaced', 'project_id' => null,
+        'summarized_at' => now(), 'unplaced_dismissed_at' => null, 'sent_at' => now(),
+    ]);
+    EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id, 'subject' => 'Already placed', 'project_id' => $world['project']->id,
+        'summarized_at' => now(), 'sent_at' => now(),
+    ]);
+    EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id, 'subject' => 'Dismissed', 'project_id' => null,
+        'summarized_at' => now(), 'unplaced_dismissed_at' => now(), 'sent_at' => now(),
+    ]);
+    EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id, 'subject' => 'Not yet summarized', 'project_id' => null,
+        'summarized_at' => null, 'sent_at' => now(),
+    ]);
+    EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => Vendor::factory()->create()->id, 'subject' => 'Someone else\'s inbox', 'project_id' => null,
+        'summarized_at' => now(), 'sent_at' => now(),
+    ]);
+
+    $response = $this->getJson('/api/app/v1/emails/unplaced')->assertOk();
+
+    expect(collect($response->json('data'))->pluck('subject')->all())->toBe(['Unplaced']);
+});
+
+it('pages the unplaced inbox 25 at a time, like the web\'s own paginator, instead of hard-capping at 100', function () {
+    $world = appCommWorld();
+    Sanctum::actingAs($world['user'], ['app']);
+
+    collect(range(1, 30))->each(fn (int $i) => EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id,
+        'subject' => "Email {$i}",
+        'project_id' => null,
+        'summarized_at' => now(),
+        'sent_at' => now()->subMinutes($i),
+    ]));
+
+    $first = $this->getJson('/api/app/v1/emails/unplaced')->assertOk();
+    expect($first->json('data'))->toHaveCount(25)
+        ->and($first->json('next_cursor'))->not->toBeNull();
+
+    $second = $this->getJson('/api/app/v1/emails/unplaced?cursor='.$first->json('next_cursor'))->assertOk();
+    expect($second->json('data'))->toHaveCount(5)
+        ->and($second->json('next_cursor'))->toBeNull();
+
+    // No email appears on both pages.
+    $firstIds = collect($first->json('data'))->pluck('id');
+    $secondIds = collect($second->json('data'))->pluck('id');
+    expect($firstIds->intersect($secondIds))->toBeEmpty();
+});

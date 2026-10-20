@@ -8,6 +8,7 @@ use App\Http\Resources\Api\App\VendorResource;
 use App\Models\User;
 use App\Services\Dashboard\AppHomeAgenda;
 use App\Services\Dashboard\MonthlyFinancialSummary;
+use App\Services\Tasks\TaskChecklistToggle;
 use App\Services\Users\AppTeamDirectory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -60,5 +61,29 @@ class HomeController extends Controller
             : null;
 
         return response()->json(['data' => $data]);
+    }
+
+    /**
+     * Ticks (or unticks) one checklist item on a task shown in the Home
+     * tab's schedule — same rule as the web Hub's cards
+     * (App\Livewire\Concerns\TogglesTaskChecklist, via the shared
+     * App\Services\Tasks\TaskChecklistToggle): team members only, own
+     * vendor's tasks only, and only from the task's scheduled day onward.
+     * Unlike the Livewire trait (a fire-and-forget event), the app needs a
+     * real response to tell a refused tap from a successful one.
+     */
+    public function toggleChecklistItem(Request $request, int $task, int $index, AppHomeAgenda $agenda, TaskChecklistToggle $toggle): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $updated = $toggle->toggle($user, $task, $index, $agenda->today());
+
+        abort_if($updated === null, 404);
+
+        return response()->json(['data' => [
+            'id' => $updated->id,
+            'checklist' => $agenda->checklistPayload($updated),
+        ]]);
     }
 }

@@ -53,6 +53,24 @@ it('lists an unlinked account without calling Nylas', function () {
         ->and($response->json('data.0.email'))->toBe('crew@gs.construction');
 });
 
+it('auto-probes a linked grant on first load, like the web\'s wire:init, instead of getting stuck "checking"', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appCompanyEmailsTeamUser(role: 1);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => 'crew@gs.construction', 'grant_id' => (string) Str::uuid()]);
+    Sanctum::actingAs($admin, ['app']);
+
+    Http::fake([
+        '*/v3/grants/*/messages*' => Http::response(['data' => []], 200),
+        '*/v3/grants/*' => Http::response(['data' => ['provider' => 'google', 'email' => 'crew@gs.construction', 'grant_status' => 'valid']], 200),
+    ]);
+
+    // A cold cache would otherwise read "checking" forever until a manual
+    // Recheck tap — the plain index load must resolve it itself.
+    $response = $this->getJson('/api/app/v1/company-emails')->assertOk();
+
+    expect($response->json('data.0.state'))->toBe('connected')
+        ->and($response->json('data.0.grant_email'))->toBe('crew@gs.construction');
+});
+
 it('recheck probes Nylas for a linked grant and reports it connected', function () {
     ['vendor' => $vendor, 'user' => $admin] = appCompanyEmailsTeamUser(role: 1);
     CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => 'crew@gs.construction', 'grant_id' => (string) Str::uuid()]);

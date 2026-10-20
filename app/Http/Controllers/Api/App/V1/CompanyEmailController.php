@@ -21,12 +21,22 @@ class CompanyEmailController extends Controller
     {
     }
 
+    /**
+     * Mirrors the web page's own first paint exactly: CompanyEmailsIndex
+     * renders from cache immediately, then `wire:init="probeHealth"` fires
+     * right after — but probeHealth() re-asks Nylas only when
+     * AppCompanyEmailDirectory::health()'s 5-minute cache has gone stale,
+     * so calling probe() here (rather than the cache-only list()) doesn't
+     * make this request any slower on a normal repeat visit, and it means
+     * the app never gets stuck showing "Checking…" the way a cache-only
+     * read would on a cold cache.
+     */
     public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', CompanyEmail::class);
 
         return response()->json([
-            'data' => $this->directory->list()->map(fn (CompanyEmail $email) => (new CompanyEmailResource($email))->toArray($request))->values()->all(),
+            'data' => $this->directory->probe()->map(fn (CompanyEmail $email) => (new CompanyEmailResource($email))->toArray($request))->values()->all(),
         ]);
     }
 

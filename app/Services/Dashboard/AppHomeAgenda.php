@@ -159,7 +159,7 @@ class AppHomeAgenda
     }
 
     /**
-     * @return array{id: int, title: string, type: ?string, arrival: ?string, day_counter: ?array{current: int, total: int}, progress: ?int, notes: ?string, users: list<string>, is_meet: bool, trashed: bool}
+     * @return array{id: int, title: string, type: ?string, arrival: ?string, previous_arrival: ?string, day_counter: ?array{current: int, total: int}, progress: ?int, notes: ?string, users: list<string>, is_meet: bool, trashed: bool, preferred_time_indicator: ?string, checklist: list<array{index: int, text: string, completed: bool}>, checklist_interactive: bool}
      */
     private function taskPayload(Task $task, string $date): array
     {
@@ -168,16 +168,20 @@ class AppHomeAgenda
             'title' => $task->title,
             'type' => $task->type,
             'arrival' => $task->getArrivalTimeLabel($date),
+            'previous_arrival' => $task->getPreviousArrivalTimeLabel($date),
             'day_counter' => $this->dayCounter($task, $date),
             'progress' => $task->progress !== null ? (int) $task->progress : null,
             'notes' => $this->notesFor($task),
             'users' => $this->taskUserNames($task),
             'is_meet' => $task->type === 'Meet',
             'trashed' => $task->trashed(),
+            'preferred_time_indicator' => $task->preferredTimeIndicator(),
+            'checklist' => $this->checklistPayload($task),
+            'checklist_interactive' => $this->checklistInteractive($task),
         ];
     }
 
-    /** @return array{id: int, title: string, type: ?string, notes: ?string, users: list<string>, is_meet: bool, trashed: bool} */
+    /** @return array{id: int, title: string, type: ?string, notes: ?string, users: list<string>, is_meet: bool, trashed: bool, preferred_time_indicator: ?string, checklist: list<array{index: int, text: string, completed: bool}>, checklist_interactive: bool} */
     private function undatedTaskPayload(Task $task): array
     {
         return [
@@ -188,7 +192,41 @@ class AppHomeAgenda
             'users' => $this->taskUserNames($task),
             'is_meet' => $task->type === 'Meet',
             'trashed' => $task->trashed(),
+            'preferred_time_indicator' => $task->preferredTimeIndicator(),
+            'checklist' => $this->checklistPayload($task),
+            // Undated tasks have no start_date, so checklistInteractive() is
+            // always false for them — same as x-schedule.task-details'
+            // $interactive, which requires a start_date too.
+            'checklist_interactive' => false,
         ];
+    }
+
+    /**
+     * Mirrors resources/views/components/schedule/task-details.blade.php's
+     * $detailChecklist: blank rows are skipped, original indexes preserved
+     * so a toggle writes back by real position.
+     *
+     * @return list<array{index: int, text: string, completed: bool}>
+     */
+    public function checklistPayload(Task $task): array
+    {
+        return collect((array) data_get($task->options, 'checklist', []))
+            ->map(fn ($item) => is_scalar($item) ? ['text' => $item] : (array) $item)
+            ->map(fn (array $item, int $index): array => [
+                'index' => $index,
+                'text' => trim((string) ($item['text'] ?? '')),
+                'completed' => (bool) ($item['completed'] ?? false),
+            ])
+            ->filter(fn (array $item): bool => $item['text'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /** Mirrors task-details.blade.php's $interactive: boxes go live on the task's scheduled day, not before. */
+    private function checklistInteractive(Task $task): bool
+    {
+        return (bool) $task->start_date
+            && $task->start_date->copy()->startOfDay()->lte($this->today());
     }
 
     /**

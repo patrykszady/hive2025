@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\Api\App\VendorDocResource;
 use App\Models\VendorDoc;
 use App\Services\Agents\AgentBusinessGrouping;
 use Illuminate\Http\JsonResponse;
@@ -38,7 +39,14 @@ class AgentController extends Controller
         return response()->json(['data' => $groups]);
     }
 
-    /** AgentsIndex::selectedVendorDocs() — the "View documents" modal for a business's agents. */
+    /**
+     * AgentsIndex::selectedVendorDocs() — the "View documents" modal for a
+     * business's agents. Reuses VendorDocResource (the regular Vendor
+     * Documents screen's own shape) rather than a hand-rolled array, so
+     * this modal gets the same effective_date and signed file_url that
+     * screen already has — the web's modal (agents/index.blade.php) shows
+     * both, and until now this endpoint had neither.
+     */
     public function vendorDocs(Request $request): JsonResponse
     {
         abort_unless($request->user()->id === 1, 403);
@@ -50,21 +58,17 @@ class AgentController extends Controller
         }
 
         $docs = VendorDoc::withoutGlobalScopes()
-            ->with('vendor')
+            ->with(['vendor', 'agent'])
             ->whereIn('agent_id', $agentIds)
             ->orderByDesc('expiration_date')
             ->orderByDesc('id')
             ->get();
 
         return response()->json([
-            'data' => $docs->map(fn (VendorDoc $doc) => [
-                'id' => $doc->id,
-                'type' => (string) $doc->getRawOriginal('type'),
-                'type_label' => $doc->type_label,
-                'number' => $doc->number,
-                'expiration_date' => $doc->expiration_date?->toDateString(),
-                'vendor' => $doc->vendor ? ['id' => $doc->vendor->id, 'business_name' => $doc->vendor->business_name] : null,
-            ])->values()->all(),
+            'data' => $docs->map(fn (VendorDoc $doc) => array_merge(
+                (new VendorDocResource($doc))->toArray($request),
+                ['vendor' => $doc->vendor ? ['id' => $doc->vendor->id, 'business_name' => $doc->vendor->business_name] : null],
+            ))->values()->all(),
         ]);
     }
 }

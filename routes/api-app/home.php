@@ -13,3 +13,7 @@ use Illuminate\Support\Facades\Route;
 | App\Http\Controllers\Api\App\V1\HomeController.
 */
 Route::get('home', [HomeController::class, 'show'])->name('home.show');
+Route::post('home/tasks/{task}/checklist/{index}/toggle', [HomeController::class, 'toggleChecklistItem'])
+    ->whereNumber('task')
+    ->whereNumber('index')
+    ->name('home.tasks.checklist.toggle');

@@ -53,7 +53,19 @@ it('shows an Admin the vendor options with defaults filled in', function () {
     expect($response->json('data.business_hours_start'))->toBe('07:00')
         ->and($response->json('data.business_hours_end'))->toBe('18:00')
         ->and($response->json('data.sms_team_enabled'))->toBeTrue()
+        ->and($response->json('data.timezone'))->toBe('America/Chicago') // Read-only default, like the web's disabled field.
         ->and(collect($response->json('data.admin_users'))->pluck('id'))->toContain($admin->id);
+});
+
+it('shows the vendor\'s own timezone once its business address sets one', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSettingsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $vendor->update(['timezone' => 'America/New_York']);
+
+    $response = $this->getJson('/api/app/v1/options')->assertOk();
+
+    expect($response->json('data.timezone'))->toBe('America/New_York');
 });
 
 it('saves options and reflects them back', function () {
