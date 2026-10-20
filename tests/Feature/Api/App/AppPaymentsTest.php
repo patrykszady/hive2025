@@ -302,3 +302,164 @@ it('silently drops a project id outside the tenant, never recording against it',
     expect(Payment::query()->where('reference', 'MIXED')->count())->toBe(1)
         ->and(Payment::withoutGlobalScopes()->where('project_id', $foreignProject->id)->where('reference', 'MIXED')->exists())->toBeFalse();
 });
+
+// PaymentCreate::editPayment()/update()/remove() have no app equivalent
+// until PaymentController::update()/destroy() — added alongside
+// PaymentRecorder::update() (extracted from PaymentForm::update() so both
+// share the exact same grouping/collapsing logic).
+it('updates a single-project payment\'s amount and reference', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $project = appPaymentsProject($vendor, $client);
+    $payment = appPaymentsRow($vendor, $project, ['amount' => 500, 'reference' => 'OLD']);
+
+    $response = $this->putJson("/api/app/v1/payments/{$payment->id}", [
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'NEW',
+        'projects' => [
+            ['id' => $project->id, 'amount' => '750'],
+        ],
+    ])->assertOk();
+
+    $payment->refresh();
+    expect((float) $payment->amount)->toBe(750.0)
+        ->and($payment->reference)->toBe('NEW')
+        ->and((float) $response->json('data.amount'))->toBe(750.0);
+});
+
+it('splits a single-project payment across a second project, grouping the new row under it', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $hallBath = appPaymentsProject($vendor, $client, ['project_name' => 'Hall Bath']);
+    $primaryBath = appPaymentsProject($vendor, $client, ['project_name' => 'Primary Bath']);
+    $payment = appPaymentsRow($vendor, $hallBath, ['amount' => 400, 'reference' => 'GRP']);
+
+    $this->putJson("/api/app/v1/payments/{$payment->id}", [
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'GRP',
+        'projects' => [
+            ['id' => $hallBath->id, 'amount' => '400'],
+            ['id' => $primaryBath->id, 'amount' => '600'],
+        ],
+    ])->assertOk();
+
+    $children = Payment::query()->where('parent_client_payment_id', $payment->id)->get();
+    expect($children)->toHaveCount(1)
+        ->and((float) $children->first()->amount)->toBe(600.0)
+        ->and($children->first()->project_id)->toBe($primaryBath->id);
+});
+
+// NOTE: this pins down the web's actual (and seemingly unintended) behavior
+// rather than "correct" behavior — PaymentForm::update()'s single-project
+// branch only fills/saves $this->payment; unlike its multi-project branch,
+// it never runs the "delete payments no longer selected" cleanup. Reducing
+// a grouped payment back to one project does NOT delete the other row, so
+// it survives, still grouped under the now-renumbered root. Flagged in the
+// parity report rather than silently changed, since this is pre-existing
+// web behavior this task was not asked to fix and it moves real accounting
+// data.
+it('reduces a grouped payment to one project in place, without deleting the other row (matches the web)', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $hallBath = appPaymentsProject($vendor, $client, ['project_name' => 'Hall Bath']);
+    $primaryBath = appPaymentsProject($vendor, $client, ['project_name' => 'Primary Bath']);
+    $parent = appPaymentsRow($vendor, $hallBath, ['amount' => 400, 'reference' => 'GRP']);
+    $child = appPaymentsRow($vendor, $primaryBath, ['amount' => 600, 'reference' => 'GRP', 'parent_client_payment_id' => $parent->id]);
+
+    $this->putJson("/api/app/v1/payments/{$parent->id}", [
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'GRP',
+        'projects' => [
+            ['id' => $hallBath->id, 'amount' => '1000'],
+            ['id' => $primaryBath->id, 'amount' => null],
+        ],
+    ])->assertOk();
+
+    expect(Payment::query()->whereKey($child->id)->exists())->toBeTrue()
+        ->and((float) $child->refresh()->amount)->toBe(600.0)
+        ->and((float) $parent->refresh()->amount)->toBe(1000.0)
+        ->and($parent->project_id)->toBe($hallBath->id)
+        ->and($parent->parent_client_payment_id)->toBeNull();
+});
+
+it('rejects an update whose projects sum to $0.00, like the web', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $project = appPaymentsProject($vendor, $client);
+    $payment = appPaymentsRow($vendor, $project, ['amount' => 500]);
+
+    $this->putJson("/api/app/v1/payments/{$payment->id}", [
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'ZERO',
+        'projects' => [
+            ['id' => $project->id, 'amount' => null],
+        ],
+    ])->assertStatus(422);
+
+    expect((float) $payment->refresh()->amount)->toBe(500.0);
+});
+
+it('refuses a Member updating a payment, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appPaymentsTeamUser(role: 2);
+    $client = appPaymentsClient($vendor);
+    $project = appPaymentsProject($vendor, $client);
+    $payment = appPaymentsRow($vendor, $project);
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->putJson("/api/app/v1/payments/{$payment->id}", [
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'NOPE',
+        'projects' => [
+            ['id' => $project->id, 'amount' => '100'],
+        ],
+    ])->assertForbidden();
+});
+
+it('deletes exactly the one payment row an admin opened, leaving its siblings', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $hallBath = appPaymentsProject($vendor, $client, ['project_name' => 'Hall Bath']);
+    $primaryBath = appPaymentsProject($vendor, $client, ['project_name' => 'Primary Bath']);
+    $parent = appPaymentsRow($vendor, $hallBath, ['amount' => 400, 'reference' => 'GRP']);
+    $child = appPaymentsRow($vendor, $primaryBath, ['amount' => 600, 'reference' => 'GRP', 'parent_client_payment_id' => $parent->id]);
+
+    $this->deleteJson("/api/app/v1/payments/{$parent->id}")->assertOk();
+
+    expect(Payment::query()->whereKey($parent->id)->exists())->toBeFalse()
+        ->and(Payment::query()->whereKey($child->id)->exists())->toBeTrue();
+});
+
+it('refuses a Member deleting a payment, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appPaymentsTeamUser(role: 2);
+    $client = appPaymentsClient($vendor);
+    $project = appPaymentsProject($vendor, $client);
+    $payment = appPaymentsRow($vendor, $project);
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->deleteJson("/api/app/v1/payments/{$payment->id}")->assertForbidden();
+});
+
+it('404s updating and deleting a payment that does not exist', function () {
+    ['user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->putJson('/api/app/v1/payments/999999', [
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'X',
+        'projects' => [['id' => 1, 'amount' => '100']],
+    ])->assertNotFound();
+
+    $this->deleteJson('/api/app/v1/payments/999999')->assertNotFound();
+});
