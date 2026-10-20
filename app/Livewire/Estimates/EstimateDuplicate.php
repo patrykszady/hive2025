@@ -5,8 +5,8 @@ namespace App\Livewire\Estimates;
 use App\Models\Client;
 use App\Models\Estimate;
 use App\Models\EstimateSection;
-use App\Models\EstimateLineItem;
 use App\Models\Project;
+use App\Services\Estimates\EstimateDuplicator;
 
 use Flux;
 
@@ -144,66 +144,12 @@ class EstimateDuplicate extends Component
             $new_estimate = Estimate::findOrFail($this->estimate_id);
         }
 
-        // Create new section by replicating the original
-        $new_section = $this->section->replicate();
-        $new_section->estimate_id = $new_estimate->id;
-        $new_section->bid_id = null;
-        $new_section->name = $this->section->name . ' - Copy from Estimate ' . $this->section->estimate_id;
-
-        // IMPORTANT: Reset total to 0 so the observer can calculate it correctly
-        $new_section->total = 0;
-
-        $saved = $new_section->save();
-
-        if (!$saved) {
-            throw new \Exception('Failed to save section');
-        }
-
-        // Duplicate all line items for this section
-        foreach ($this->section->estimate_line_items as $estimate_line_item) {
-            // Create a new EstimateLineItem instance instead of replicating
-            $new_line_item = new EstimateLineItem();
-
-            // Set the foreign keys for the new estimate and section
-            $new_line_item->estimate_id = $new_estimate->id;
-            $new_line_item->section_id = $new_section->id;
-
-            // Copy estimate-specific data from the original estimate_line_item
-            $new_line_item->quantity = $estimate_line_item->quantity;
-            // Don't set order - let Sortable trait handle it
-
-            // Use the related line_item template data
-            $line_item_template = $estimate_line_item->line_item;
-
-            // Use template data for these fields
-            $new_line_item->line_item_id = $line_item_template->id;
-            $new_line_item->name = $estimate_line_item->name ?? $line_item_template->name;
-            $new_line_item->category = $estimate_line_item->category ?? $line_item_template->category;
-            $new_line_item->sub_category = $estimate_line_item->sub_category ?? $line_item_template->sub_category;
-            $new_line_item->unit_type = $estimate_line_item->unit_type ?? $line_item_template->unit_type;
-            $new_line_item->desc = $estimate_line_item->desc ?? $line_item_template->desc;
-            $new_line_item->notes = $estimate_line_item->notes ?? $line_item_template->notes;
-
-            if ($this->cost_mode === 'exact') {
-                $new_line_item->cost = $estimate_line_item->cost;
-                $new_line_item->total = $estimate_line_item->cost * $estimate_line_item->quantity;
-            } else {
-                $new_line_item->cost = $line_item_template->cost;
-                $new_line_item->total = $line_item_template->cost * $estimate_line_item->quantity;
-            }
-
-            $new_line_item->save(); // Observer will add this to section total
-
-            // Duplicate allowances
-            if ($this->include_allowances) {
-                foreach ($estimate_line_item->allowances as $allowance) {
-                    $new_line_item->allowances()->create([
-                        'description' => $allowance->description,
-                        'amount' => $allowance->amount,
-                    ]);
-                }
-            }
-        }
+        $new_section = app(EstimateDuplicator::class)->duplicateSection(
+            $this->section,
+            $new_estimate,
+            $this->cost_mode,
+            $this->include_allowances,
+        );
 
         // Reset form
         $this->estimate_id = null;
@@ -234,54 +180,12 @@ class EstimateDuplicate extends Component
         $project = Project::query()->findOrFail($this->project_id);
         $this->authorize('create', [Estimate::class, $project]);
 
-        //get current estimate and duplicate sections and line_items
-        $new_estimate = Estimate::create([
-            'project_id' => $project->id,
-            'belongs_to_vendor_id' => auth()->user()->vendor->id,
-        ]);
-
-        foreach ($this->estimate->estimate_sections as $section) {
-            $new_section = $section->replicate();
-            $new_section->estimate_id = $new_estimate->id;
-            $new_section->bid_id = null;
-            $new_section->total = 0;
-            $new_section->save();
-
-            foreach ($section->estimate_line_items as $estimate_line_item) {
-                $new_line_item = new EstimateLineItem();
-                $new_line_item->estimate_id = $new_estimate->id;
-                $new_line_item->section_id = $new_section->id;
-                $new_line_item->line_item_id = $estimate_line_item->line_item_id;
-                $new_line_item->name = $estimate_line_item->name;
-                $new_line_item->category = $estimate_line_item->category;
-                $new_line_item->sub_category = $estimate_line_item->sub_category;
-                $new_line_item->unit_type = $estimate_line_item->unit_type;
-                $new_line_item->desc = $estimate_line_item->desc;
-                $new_line_item->notes = $estimate_line_item->notes;
-                $new_line_item->quantity = $estimate_line_item->quantity;
-
-                if ($this->cost_mode === 'current') {
-                    $template = $estimate_line_item->line_item;
-                    $new_line_item->cost = $template->cost;
-                    $new_line_item->total = $template->cost * $estimate_line_item->quantity;
-                } else {
-                    $new_line_item->cost = $estimate_line_item->cost;
-                    $new_line_item->total = $estimate_line_item->cost * $estimate_line_item->quantity;
-                }
-
-                $new_line_item->save(); // Observer updates section total
-
-                // Duplicate allowances
-                if ($this->include_allowances) {
-                    foreach ($estimate_line_item->allowances as $allowance) {
-                        $new_line_item->allowances()->create([
-                            'description' => $allowance->description,
-                            'amount' => $allowance->amount,
-                        ]);
-                    }
-                }
-            }
-        }
+        $new_estimate = app(EstimateDuplicator::class)->duplicateEstimate(
+            $this->estimate,
+            $project,
+            $this->cost_mode,
+            $this->include_allowances,
+        );
 
         $this->modal('estimate_duplicate_modal')->close();
 

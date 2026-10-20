@@ -196,6 +196,17 @@ Route::get('lien-waivers/{lienWaiver}/download/signed', [\App\Http\Controllers\L
     ->middleware('signed')
     ->name('lien-waivers.download.signed');
 
+// An estimate PDF for the Hive Contractors app: a time-limited signed link
+// handed out by GET /api/app/v1/estimates/{id}/pdf-url (see
+// Api\App\V1\EstimateController::pdfUrl), so the app's estimate detail
+// screen can show the same App\Support\EstimateDocumentGenerator PDF
+// EstimateShow::create_pdf() streams on the web, without a web session. The
+// `signed` middleware alone is the gate — see EstimatePdfController::signed().
+Route::get('estimates/{estimate}/pdf/signed', [\App\Http\Controllers\EstimatePdfController::class, 'signed'])
+    ->middleware('signed')
+    ->whereNumber('estimate')
+    ->name('estimates.pdf.signed');
+
 // The Hive Contractors app's "open full page" hand-off: a one-time signed
 // link from POST /api/app/v1/web-session that logs its user into THIS web
 // session (no session yet, so this must sit outside the 'auth' group) and

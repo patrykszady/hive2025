@@ -5,8 +5,8 @@ namespace App\Livewire\Forms;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
-use App\Models\LineItemAllowance;
 use App\Services\AllowanceReconciler;
+use App\Services\Estimates\EstimateLineItemWriter;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Rule;
@@ -113,23 +113,22 @@ class EstimateLineItemForm extends Form
         // another tenant's (or another estimate's) section.
         $section = $this->component->estimate->estimate_sections()->findOrFail($this->component->section_id);
 
-        $lineItem = EstimateLineItem::create([
-            'estimate_id' => $this->component->estimate->id,
-            'line_item_id' => $this->line_item->id,
-            'section_id' => $section->id,
-            'name' => $this->line_item->name,
-            'category' => $this->category,
-            'sub_category' => $this->sub_category,
-            'unit_type' => $this->unit_type,
-            'quantity' => $this->quantity,
-            'cost' => $this->cost,
-            'total' => $this->total,
-            'desc' => $this->desc,
-            'notes' => $this->notes,
-            'order' => $this->component->section_item_count + 1,
-        ]);
-
-        $this->syncAllowances($lineItem);
+        app(EstimateLineItemWriter::class)->create(
+            $this->component->estimate->id,
+            $section,
+            $this->line_item,
+            [
+                'category' => $this->category,
+                'sub_category' => $this->sub_category,
+                'unit_type' => $this->unit_type,
+                'quantity' => $this->quantity,
+                'cost' => $this->cost,
+                'total' => $this->total,
+                'desc' => $this->desc,
+                'notes' => $this->notes,
+            ],
+            $this->allowances,
+        );
 
         $this->reset();
     }
@@ -144,159 +143,35 @@ class EstimateLineItemForm extends Form
         // another tenant's (or another estimate's) section.
         $section = $this->component->estimate->estimate_sections()->findOrFail($this->component->section_id);
 
-        $this->estimate_line_item->update([
-            'estimate_id' => $this->component->estimate->id,
-            'line_item_id' => $this->estimate_line_item->line_item_id,
-            'section_id' => $section->id,
-            'name' => $this->estimate_line_item->name,
-            'category' => $this->category,
-            'sub_category' => $this->sub_category,
-            'unit_type' => $this->unit_type,
-            'quantity' => $this->quantity,
-            'cost' => $this->cost,
-            'total' => $this->total,
-            'desc' => $this->desc,
-            'notes' => $this->notes,
-        ]);
-
-        $this->syncAllowances($this->estimate_line_item);
+        app(EstimateLineItemWriter::class)->update(
+            $this->estimate_line_item,
+            $section,
+            [
+                'category' => $this->category,
+                'sub_category' => $this->sub_category,
+                'unit_type' => $this->unit_type,
+                'quantity' => $this->quantity,
+                'cost' => $this->cost,
+                'total' => $this->total,
+                'desc' => $this->desc,
+                'notes' => $this->notes,
+            ],
+            $this->allowances,
+        );
 
         $this->reset();
     }
 
     /**
-     * Sync allowance rows for the given estimate line item.
-     */
-    protected function syncAllowances(EstimateLineItem $lineItem): void
-    {
-        $keepIds = [];
-
-        foreach ($this->allowances as $entry) {
-            $description = trim($entry['description'] ?? '');
-            $amount = (float) ($entry['amount'] ?? 0);
-            $pricingMode = ($entry['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
-            $unitAmount = $pricingMode === 'lump_sum' || ($entry['unit_amount'] ?? '') === ''
-                ? null
-                : (float) $entry['unit_amount'];
-
-            if ($description === '' && $amount <= 0) {
-                continue;
-            }
-
-            $globalAllowance = $this->resolveGlobalAllowance($lineItem, $description, $pricingMode, $unitAmount, $amount);
-
-            if (! empty($entry['id'])) {
-                // $entry['id'] is a client-controlled array value: resolve it
-                // through this line item's own allowances so it can't be
-                // swapped for another line item's (or tenant's) allowance id.
-                $allowance = $lineItem->allowances()->find($entry['id']);
-                if ($allowance) {
-                    $allowance->update([
-                        'line_item_allowance_id' => $globalAllowance?->id,
-                        'description' => $description,
-                        'pricing_mode' => $pricingMode,
-                        'unit_amount' => $unitAmount,
-                        'amount' => $amount,
-                    ]);
-                    $keepIds[] = $allowance->id;
-
-                    continue;
-                }
-            }
-
-            $allowance = $lineItem->allowances()->create([
-                'line_item_allowance_id' => $globalAllowance?->id,
-                'description' => $description,
-                'pricing_mode' => $pricingMode,
-                'unit_amount' => $unitAmount,
-                'amount' => $amount,
-            ]);
-            $keepIds[] = $allowance->id;
-        }
-
-        // Soft-delete removed allowances
-        $lineItem->allowances()->whereNotIn('id', $keepIds)->delete();
-    }
-
-    /**
-     * Find or create the global allowance for this line item's catalog entry,
-     * mirroring how an estimate line item references a global line item.
-     */
-    protected function resolveGlobalAllowance(EstimateLineItem $lineItem, string $description, string $pricingMode, ?float $unitAmount, float $amount): ?LineItemAllowance
-    {
-        if ($description === '' || ! $lineItem->line_item_id) {
-            return null;
-        }
-
-        $reconciler = app(AllowanceReconciler::class);
-        $sameLineItemGlobals = LineItemAllowance::query()
-            ->where('line_item_id', $lineItem->line_item_id)
-            ->orderBy('id')
-            ->get();
-
-        $globalAllowance = $reconciler->matchGlobal($description, null, $sameLineItemGlobals);
-
-        if (! $globalAllowance && $sameLineItemGlobals->isEmpty()) {
-            $globalAllowance = $reconciler->matchGlobal($description, null, $this->vendorAllowancesFor($lineItem));
-        }
-
-        if (! $globalAllowance) {
-            $globalAllowance = LineItemAllowance::firstOrNew([
-                'line_item_id' => $lineItem->line_item_id,
-                'description' => $description,
-            ]);
-        }
-
-        if ((int) $globalAllowance->line_item_id === (int) $lineItem->line_item_id) {
-            $globalAllowance->pricing_mode = $pricingMode;
-            $globalAllowance->unit_amount = $unitAmount;
-            $globalAllowance->amount = $amount;
-            $globalAllowance->belongs_to_vendor_id = $lineItem->line_item?->belongs_to_vendor_id
-                ?? $globalAllowance->belongs_to_vendor_id;
-            $globalAllowance->save();
-        }
-
-        return $globalAllowance;
-    }
-
-    /**
      * Get the canonical allowance catalog for an estimate line item, falling
      * back to the vendor-wide catalog when the selected line item has no own
-     * curated allowances yet.
+     * curated allowances yet. Delegates to EstimateLineItemWriter, the single
+     * source of this logic shared with the Hive Contractors app's API.
+     *
+     * @return Collection<int, \App\Models\LineItemAllowance>
      */
     protected function globalAllowancesFor(EstimateLineItem $lineItem): Collection
     {
-        $sameLineItemGlobals = $lineItem->line_item_id
-            ? LineItemAllowance::query()
-                ->where('line_item_id', $lineItem->line_item_id)
-                ->orderBy('id')
-                ->get()
-            : collect();
-
-        if ($sameLineItemGlobals->isNotEmpty()) {
-            return $sameLineItemGlobals;
-        }
-
-        return $this->vendorAllowancesFor($lineItem);
-    }
-
-    /**
-     * Get the vendor-wide allowance catalog for the estimate line item.
-     */
-    protected function vendorAllowancesFor(EstimateLineItem $lineItem): Collection
-    {
-        $vendorId = $lineItem->line_item?->belongs_to_vendor_id
-            ?? LineItem::query()->whereKey($lineItem->line_item_id)->value('belongs_to_vendor_id')
-            ?? $lineItem->estimate?->belongs_to_vendor_id;
-
-        if (! $vendorId) {
-            return collect();
-        }
-
-        return LineItemAllowance::query()
-            ->where('belongs_to_vendor_id', $vendorId)
-            ->orderBy('line_item_id')
-            ->orderBy('id')
-            ->get();
+        return app(EstimateLineItemWriter::class)->globalAllowancesFor($lineItem);
     }
 }

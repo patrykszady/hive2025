@@ -6,6 +6,7 @@ use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
 use App\Models\LineItemAllowance;
 use App\Services\AllowanceAggregator;
+use App\Services\LineItems\LineItemWriter;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Rule;
 use Livewire\Form;
@@ -116,9 +117,7 @@ class LineItemForm extends Form
 
         // LineItemObserver::creating() stamps belongs_to_vendor_id from the
         // authenticated vendor; nothing to add here.
-        $lineItem = LineItem::create($this->except('allowances', 'line_item'));
-
-        $this->syncAllowances($lineItem);
+        app(LineItemWriter::class)->create($this->except('allowances', 'line_item'), $this->allowances);
 
         $this->reset();
     }
@@ -129,58 +128,8 @@ class LineItemForm extends Form
         abort_unless($this->line_item?->belongs_to_vendor_id === auth()->user()->vendor->id, 404);
         $this->validate();
 
-        $this->line_item->update($this->except('allowances', 'line_item'));
-
-        $this->syncAllowances($this->line_item);
+        app(LineItemWriter::class)->update($this->line_item, $this->except('allowances', 'line_item'), $this->allowances);
 
         $this->reset();
-    }
-
-    /**
-     * Sync the editable allowance rows into the line item's global allowance
-     * catalog, removing any rows that were deleted in the modal.
-     */
-    protected function syncAllowances(LineItem $lineItem): void
-    {
-        $keepIds = [];
-
-        foreach ($this->allowances as $entry) {
-            $description = trim($entry['description'] ?? '');
-
-            if ($description === '') {
-                continue;
-            }
-
-            $pricingMode = ($entry['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
-            $unitAmount = $pricingMode === 'lump_sum' || ($entry['unit_amount'] ?? '') === ''
-                ? null
-                : (float) $entry['unit_amount'];
-            $amount = $pricingMode === 'lump_sum' && ($entry['amount'] ?? '') !== ''
-                ? (float) $entry['amount']
-                : null;
-
-            $attributes = [
-                'description' => $description,
-                'pricing_mode' => $pricingMode,
-                'unit_amount' => $unitAmount,
-                'amount' => $amount,
-                'belongs_to_vendor_id' => $lineItem->belongs_to_vendor_id,
-            ];
-
-            // $entry['id'] is a client-controlled array value: resolve it
-            // through this line item's own allowances so it can't be swapped
-            // for another line item's (or tenant's) allowance id.
-            $allowance = ! empty($entry['id']) ? $lineItem->allowances()->find($entry['id']) : null;
-
-            if ($allowance) {
-                $allowance->update($attributes);
-            } else {
-                $allowance = $lineItem->allowances()->create($attributes);
-            }
-
-            $keepIds[] = $allowance->id;
-        }
-
-        $lineItem->allowances()->whereNotIn('id', $keepIds)->delete();
     }
 }
