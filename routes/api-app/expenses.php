@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\App\V1\ExpenseAssociationController;
 use App\Http\Controllers\Api\App\V1\ExpenseController;
 use App\Http\Controllers\Api\App\V1\ExpenseFormOptionsController;
 use App\Http\Controllers\Api\App\V1\ExpenseReceiptItemController;
+use App\Http\Controllers\Api\App\V1\ExpenseTransactionController;
 use App\Http\Controllers\Api\App\V1\ExpenseVendorOptionsController;
 use App\Http\Controllers\Api\App\V1\QuickReceiptController;
 use App\Http\Controllers\Api\App\V1\TransactionLinkController;
@@ -28,6 +29,16 @@ Route::get('expenses/form-options', ExpenseFormOptionsController::class)->name('
 // The "Upload Receipt" quick-capture button (App\Livewire\Expenses\
 // ExpenseCreate::uploadReceipt(), via App\Services\Expenses\QuickReceiptCapture).
 Route::post('expenses/quick-receipt', [QuickReceiptController::class, 'store'])->name('expenses.quick-receipt');
+// The Transactions card under Expenses (ExpenseIndex::transactions()) and
+// its "create an expense from this transaction" pre-fill — see
+// ExpenseTransactionController. Registered ahead of the numeric {expense}
+// routes for clarity (whereNumber() already keeps 'transactions' from
+// being swallowed as an id).
+Route::get('expenses/transactions', [ExpenseTransactionController::class, 'index'])->name('expenses.transactions.index');
+Route::get('expenses/transactions/{transaction}', [ExpenseTransactionController::class, 'show'])->whereNumber('transaction')->name('expenses.transactions.show');
+// Bulk-select "Delete selected" (ExpenseIndex::bulkDelete()) — ahead of the
+// numeric {expense} routes for the same reason.
+Route::delete('expenses/bulk', [ExpenseController::class, 'bulkDestroy'])->name('expenses.bulk-destroy');
 Route::get('expenses', [ExpenseController::class, 'index'])->name('expenses.index');
 Route::post('expenses', [ExpenseController::class, 'store'])->name('expenses.store');
 Route::get('expenses/{expense}', [ExpenseController::class, 'show'])->whereNumber('expense')->name('expenses.show');
@@ -36,6 +47,8 @@ Route::get('expenses/{expense}', [ExpenseController::class, 'show'])->whereNumbe
 // for on a PUT).
 Route::post('expenses/{expense}', [ExpenseController::class, 'update'])->whereNumber('expense')->name('expenses.update');
 Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy'])->whereNumber('expense')->name('expenses.destroy');
+// "Show deleted" + restore (ExpenseIndex::isShowingTrashed()/restoreExpense()).
+Route::post('expenses/{expense}/restore', [ExpenseController::class, 'restore'])->whereNumber('expense')->name('expenses.restore');
 
 // A receipt line item's detail (price history and product image) — mirrors
 // App\Livewire\Expenses\ExpenseShow::selectReceiptItem()'s item-detail modal,

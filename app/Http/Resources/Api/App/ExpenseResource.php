@@ -63,6 +63,14 @@ class ExpenseResource extends JsonResource
             'reimbursement' => $expense->reimbursment,
             'has_receipt' => $expense->relationLoaded('receipts') ? $expense->receipts->isNotEmpty() : $expense->receipts()->exists(),
             'web_path' => '/expenses/'.$expense->id,
+            // "Show deleted" + restore (ExpenseIndex::isShowingTrashed()):
+            // true only inside a trashed listing/show, false otherwise.
+            'trashed' => $expense->trashed(),
+            // Split rows under their parent on the list, exactly like the
+            // web's table (index.blade.php's "Show split rows if expense
+            // has splits" block) — lightweight enough to always include,
+            // same fields the detail payload already exposed below.
+            'splits' => $this->splitsPayload($expense, $hasSplits),
         ];
 
         if (! $this->detail) {
@@ -91,14 +99,6 @@ class ExpenseResource extends JsonResource
             'belongs_to_client' => $expense->belongs_to_client_id
                 ? $this->clientSummary($expense->belongs_to_client_id)
                 : null,
-            'splits' => $hasSplits ? $expense->splits->map(fn (ExpenseSplits $split) => [
-                'id' => $split->id,
-                'amount' => (float) $split->amount,
-                'project' => $split->project ? ['id' => $split->project->id, 'name' => $split->project->project_name] : null,
-                'distribution' => $split->distribution ? ['id' => $split->distribution->id, 'name' => $split->distribution->name] : null,
-                'reimbursement' => $split->reimbursment,
-                'note' => $split->note,
-            ])->values()->all() : [],
             'receipts' => $expense->receipts->map(fn (ExpenseReceipts $receipt) => $this->receiptPayload($receipt))->values()->all(),
             // The matched bank charge(s) — mirrors the web's x-transactions.list_card,
             // fed by Expense::allTransactions() (own -> shared -> check).
@@ -132,6 +132,25 @@ class ExpenseResource extends JsonResource
             'can_link_transaction' => $request->user()->can('update', $expense)
                 && app(TransactionLinkService::class)->canOffer($expense, app(ExpenseAssociationService::class)),
         ];
+    }
+
+    /**
+     * @return list<array{id: int, amount: float, project: ?array{id: int, name: string}, distribution: ?array{id: int, name: string}, reimbursement: ?string, note: ?string}>
+     */
+    private function splitsPayload(Expense $expense, bool $hasSplits): array
+    {
+        if (! $hasSplits) {
+            return [];
+        }
+
+        return $expense->splits->map(fn (ExpenseSplits $split) => [
+            'id' => $split->id,
+            'amount' => (float) $split->amount,
+            'project' => $split->project ? ['id' => $split->project->id, 'name' => $split->project->project_name] : null,
+            'distribution' => $split->distribution ? ['id' => $split->distribution->id, 'name' => $split->distribution->name] : null,
+            'reimbursement' => $split->reimbursment,
+            'note' => $split->note,
+        ])->values()->all();
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use App\Models\Transaction;
 use App\Models\Vendor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -25,6 +26,10 @@ use Illuminate\Validation\ValidationException;
  */
 class ExpenseAccessGuard
 {
+    public function __construct(private UnmatchedTransactionFinder $unmatchedTransactions)
+    {
+    }
+
     /**
      * The "material order" owner vendor is client-chosen, so it must be
      * whitelisted to a vendor the auth tenant can legitimately attribute an
@@ -70,6 +75,31 @@ class ExpenseAccessGuard
         }
 
         return $check;
+    }
+
+    /**
+     * "Create an expense from the transaction" (the app's own Transactions
+     * card, mirroring ExpenseCreate::createExpenseFromTransaction()) comes
+     * from a client-chosen id — check it against what this tenant's own
+     * bank accounts actually hold, and that it is STILL unmatched (someone
+     * else's concurrent request, or a reindex-free re-submit, may have
+     * already claimed it), rather than trusting the id outright.
+     */
+    public function assertTransactionAccessible(?int $transactionId, int $vendorId): ?Transaction
+    {
+        if (! $transactionId) {
+            return null;
+        }
+
+        $transaction = $this->unmatchedTransactions->find($vendorId, $transactionId);
+
+        if (! $transaction) {
+            throw ValidationException::withMessages([
+                'transaction_id' => 'This transaction is no longer available.',
+            ]);
+        }
+
+        return $transaction;
     }
 
     /**
