@@ -121,7 +121,9 @@ it('searches by business name, address, phone, or a person\'s name when Meilisea
     ['vendor' => $vendor, 'user' => $user] = appClientsTeam();
     Sanctum::actingAs($user, ['app']);
 
-    $johnson = appClientFixture($vendor, ['business_name' => 'Johnson Household']);
+    // A made-up surname: Faker's random street names ("Johnson Street") and
+    // people's names would otherwise make the other client match by chance.
+    $johnson = appClientFixture($vendor, ['business_name' => 'Zqvjohnson Household']);
     $smith = appClientFixture($vendor, ['business_name' => 'Smith Household']);
 
     // Fixtures are done; only now force the Scout call inside the search
@@ -130,7 +132,7 @@ it('searches by business name, address, phone, or a person\'s name when Meilisea
         $mock->shouldReceive('engine')->andThrow(new RuntimeException('no search engine in tests'));
     });
 
-    $response = $this->getJson('/api/app/v1/clients?search=Johnson')->assertOk();
+    $response = $this->getJson('/api/app/v1/clients?search=Zqvjohnson')->assertOk();
     $ids = collect($response->json('data'))->pluck('id');
 
     expect($ids->all())->toBe([$johnson->id])
