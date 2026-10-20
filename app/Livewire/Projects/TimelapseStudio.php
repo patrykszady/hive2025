@@ -2,9 +2,11 @@
 
 namespace App\Livewire\Projects;
 
+use App\Exceptions\Projects\DuplicateCollectionTitleException;
 use App\Models\Project;
 use App\Models\ProjectTimelapse;
 use App\Models\ProjectTimelapseFrame;
+use App\Services\Projects\TimelapseCollectionService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -136,24 +138,7 @@ class TimelapseStudio extends Component
     #[Computed]
     public function collections()
     {
-        return ProjectTimelapse::query()
-            ->where('project_id', $this->project->id)
-            ->with(['frames' => fn ($q) => $q->with('takenBy:id,first_name,nickname')
-                ->orderBy('sort_order')->orderBy('id')])
-            // The catch-all album leads, then the sequences in their own order.
-            ->orderByRaw("CASE WHEN title = 'Project Images' THEN 0 ELSE 1 END")
-            ->orderBy('sort_order')
-            ->orderBy('id')
-            ->get()
-            // The inverse of the `frames` eager load above isn't set
-            // automatically — every frame->timelapse->project chain
-            // (archiveVisibleTo(), the containment check in lightboxFrames())
-            // would otherwise lazy-load twice per frame (2.6k+ queries on a
-            // busy project). Both sides are already in memory.
-            ->each(function (ProjectTimelapse $collection) {
-                $collection->setRelation('project', $this->project);
-                $collection->frames->each(fn ($frame) => $frame->setRelation('timelapse', $collection));
-            });
+        return app(TimelapseCollectionService::class)->collectionsFor($this->project);
     }
 
     /** The collection the camera is open on, or null when it's closed. */
@@ -181,25 +166,13 @@ class TimelapseStudio extends Component
             'newTitle' => 'required|string|max:80',
         ], [], ['newTitle' => 'name']);
 
-        if (ProjectTimelapse::where('project_id', $this->project->id)
-            ->where('title', trim($this->newTitle))->exists()) {
+        try {
+            $collection = app(TimelapseCollectionService::class)->createCollection($this->project, $this->newTitle);
+        } catch (DuplicateCollectionTitleException) {
             $this->addError('newTitle', 'This project already has a collection with that name.');
 
             return;
         }
-
-        $collection = ProjectTimelapse::create([
-            'project_id' => $this->project->id,
-            'title' => trim($this->newTitle),
-            'kind' => ProjectTimelapse::KIND_TIMELAPSE,
-            // display_mode belongs to gs.construction's renderer, which only
-            // knows 'accordion' and 'slider' and silently falls back to
-            // 'slider' for anything else — a gallery pushed there would play
-            // as a before/after sequence. Keep the value it understands and
-            // let `kind` be the thing Hive reasons about.
-            'display_mode' => 'slider',
-            'sort_order' => ((int) ProjectTimelapse::where('project_id', $this->project->id)->max('sort_order')) + 1,
-        ]);
 
         $this->newTitle = '';
         $this->showNewCollection = false;
@@ -227,110 +200,31 @@ class TimelapseStudio extends Component
     {
         $this->authorize('manageImages', $this->project);
 
-        $frames = ProjectTimelapseFrame::query()
-            ->whereIn('id', array_map('intval', $frameIds))
-            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
-            ->get()
-            ->sortBy(fn (ProjectTimelapseFrame $f) => [$f->shot_at?->timestamp ?? 0, $f->id])
-            ->values();
+        $result = app(TimelapseCollectionService::class)->createTimelapseFromSelection($this->project, $frameIds);
 
-        if ($frames->count() < 2) {
+        if ($result['reason'] === 'too_few') {
             \Flux\Flux::toast(variant: 'warning', text: 'Pick at least two photos to build a timelapse.', duration: 4000, position: 'top right');
 
             return;
         }
 
-        $title = $this->uniqueCollectionTitle('Timelapse');
-
-        $timelapse = ProjectTimelapse::create([
-            'project_id' => $this->project->id,
-            'title' => $title,
-            'kind' => ProjectTimelapse::KIND_TIMELAPSE,
-            'display_mode' => 'slider',
-            'sort_order' => ((int) ProjectTimelapse::where('project_id', $this->project->id)->max('sort_order')) + 1,
-        ]);
-
-        $disk = Storage::disk('files');
-        $copied = [];
-
-        foreach ($frames as $position => $source) {
-            $filename = \Illuminate\Support\Str::uuid().'.jpg';
-            $directory = sprintf('timelapse/%d', $this->project->id);
-            $path = sprintf('%s/%s', $directory, $filename);
-
-            // The sequence copy is duplicated (alignment rewrites it); the
-            // archive original is SHARED — it is immutable by contract.
-            if (! $disk->exists($source->path) || ! $disk->copy($source->path, $path)) {
-                continue;
-            }
-
-            $copied[] = ProjectTimelapseFrame::create([
-                'project_timelapse_id' => $timelapse->id,
-                'taken_by_user_id' => $source->taken_by_user_id,
-                'taken_by_name' => $source->taken_by_name,
-                'filename' => $filename,
-                'original_filename' => $source->original_filename,
-                'path' => $path,
-                'original_path' => $source->original_path,
-                'disk' => 'files',
-                'shot_at' => $source->shot_at,
-                'latitude' => $source->latitude,
-                'longitude' => $source->longitude,
-                'location_accuracy' => $source->location_accuracy,
-                'sort_order' => $position + 1,
-            ]);
-        }
-
-        if (count($copied) < 2) {
-            $timelapse->forceDelete();
+        if ($result['reason'] === 'copy_failed') {
             \Flux\Flux::toast(variant: 'danger', text: 'Those photos could not be copied — nothing was created.', duration: 5000, position: 'top right');
 
             return;
         }
 
-        // Frame #1 is the anchor every other frame registers onto, and the
-        // chain runs in order so each frame has its predecessor to match.
-        $timelapse->forceFill(['anchor_frame_id' => $copied[0]->id])->save();
-
-        // onQueue: see the note in setAlignmentAnchor().
-        \Illuminate\Support\Facades\Bus::chain(
-            collect($copied)->skip(1)
-                ->map(fn (ProjectTimelapseFrame $f) => new \App\Jobs\AlignTimelapseFrame($f->id, reframe: true))
-                ->all()
-        )->onQueue('timelapse')->dispatch();
-
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
-        $this->collectionId = $timelapse->id;
+        $this->collectionId = $result['timelapse']->id;
         $this->dispatch('selection-consumed');
 
         \Flux\Flux::toast(
-            heading: $title.' created',
-            text: count($copied).' photos copied in shot order and now aligning — give it a minute, then refresh.',
+            heading: $result['title'].' created',
+            text: $result['count'].' photos copied in shot order and now aligning — give it a minute, then refresh.',
             variant: 'success',
             duration: 6000,
             position: 'top right',
         );
-    }
-
-    /** "Timelapse", "Timelapse 2", … — whatever this project doesn't have yet. */
-    protected function uniqueCollectionTitle(string $base): string
-    {
-        $taken = ProjectTimelapse::withTrashed()
-            ->where('project_id', $this->project->id)
-            ->pluck('title')
-            ->all();
-
-        if (! in_array($base, $taken, true)) {
-            return $base;
-        }
-
-        for ($n = 2; $n < 200; $n++) {
-            if (! in_array("{$base} {$n}", $taken, true)) {
-                return "{$base} {$n}";
-            }
-        }
-
-        return $base.' '.now()->format('M j H:i');
     }
 
     /**
@@ -347,79 +241,7 @@ class TimelapseStudio extends Component
     #[Computed]
     public function messageImages()
     {
-        $clientId = $this->project->client_id;
-
-        // client_id can be shared across vendors (a homeowner working with
-        // more than one company) — accessibleTo() keeps a thread that
-        // happens to share this project's client_id, but actually belongs to
-        // a DIFFERENT vendor's conversation, from leaking onto this page.
-        $threadIds = \App\Models\SmsGroupThread::query()
-            ->accessibleTo(auth()->user())
-            ->where(fn ($q) => $q->where('project_id', $this->project->id)
-                ->when($clientId, fn ($inner) => $inner->orWhere('client_id', $clientId)))
-            ->pluck('id');
-
-        // Messages pinned here by "Add to Project" — photos texted on some
-        // OTHER thread (a crew chat, say) that belong to this job.
-        $pinnedIds = \Illuminate\Support\Facades\DB::table('project_pinned_messages')
-            ->where('project_id', $this->project->id)
-            ->pluck('sms_message_id');
-
-        if ($threadIds->isEmpty() && $pinnedIds->isEmpty()) {
-            return collect();
-        }
-
-        $messages = \App\Models\SmsMessage::query()
-            ->withoutGlobalScopes()
-            ->where(function ($q) use ($threadIds, $pinnedIds) {
-                if ($threadIds->isNotEmpty()) {
-                    $q->whereIn('thread_id', $threadIds);
-                }
-
-                if ($pinnedIds->isNotEmpty()) {
-                    $threadIds->isNotEmpty()
-                        ? $q->orWhereIn('id', $pinnedIds)
-                        : $q->whereIn('id', $pinnedIds);
-                }
-            })
-            ->whereNotNull('media_urls')
-            ->latest('created_at')
-            ->limit(120)
-            ->get(['id', 'direction', 'media_urls', 'created_at', 'from_number', 'sent_by_user_id', 'text']);
-
-        // Resolve every sender in two queries rather than one per photo.
-        $senders = self::firstNames($this->senderNames($messages));
-        $tz = $this->vendorTimezone();
-
-        $images = $messages
-            ->flatMap(function ($message) use ($senders, $tz) {
-                $sender = $senders[$message->id] ?? ($message->direction === 'inbound' ? 'Client' : 'GS Construction');
-
-                return collect($message->media_urls ?? [])
-                    // Texts carry PDFs and videos too; this card is images.
-                    ->filter(fn ($url) => is_string($url)
-                        && preg_match('/\.(jpe?g|png|heic|webp|gif)$/i', $url) === 1)
-                    // Stored values are inconsistent — "/storage/sms-media/…",
-                    // bare "sms-media/…", absolute URLs — and the files have
-                    // since moved to the private disk. The messages UI already
-                    // resolves all those shapes to the authed streaming route;
-                    // use that same resolver rather than guessing a prefix.
-                    ->map(fn ($url) => [
-                        'url' => \App\Support\Sms\ConversationPresenter::mediaUrl($url),
-                        // What the grid tile loads — the lightbox still opens
-                        // the full photo from 'url'.
-                        'thumb' => \App\Support\Sms\ConversationPresenter::mediaUrl($url, thumb: true),
-                        // Inlined blur-up placeholder behind the tile.
-                        'micro' => $this->smsMicro($url),
-                        // The stored value, verbatim — selection hands it back
-                        // when texting these photos onward.
-                        'raw' => $url,
-                        'sent_at' => $message->created_at->copy()->timezone($tz),
-                        'sender' => $sender,
-                        'label' => $sender.' · '.$message->created_at->copy()->timezone($tz)->format('n/j/y'),
-                    ]);
-            })
-            ->values();
+        $images = app(TimelapseCollectionService::class)->allMessageImages($this->project);
 
         // A filter that matches nothing (its sender aged out of the
         // newest-120 window) would blank the whole card with no chip left
@@ -441,18 +263,10 @@ class TimelapseStudio extends Component
     #[Computed]
     public function messageSenders()
     {
-        // Counted across ALL of them, so the chips don't shrink to whatever
-        // is currently filtered.
-        $active = $this->messageSender;
-        $this->messageSender = null;
-        unset($this->messageImages);
-
-        $counts = $this->messageImages->groupBy('sender')->map->count()->sortDesc();
-
-        $this->messageSender = $active;
-        unset($this->messageImages);
-
-        return $counts;
+        // Counted across the FULL unfiltered list, so the chips don't shrink
+        // to whatever is currently filtered.
+        return app(TimelapseCollectionService::class)->allMessageImages($this->project)
+            ->groupBy('sender')->map->count()->sortDesc();
     }
 
     /** Click a sender to see only theirs; click again to clear. */
@@ -460,25 +274,6 @@ class TimelapseStudio extends Component
     {
         $this->messageSender = $this->messageSender === $sender ? null : $sender;
         unset($this->messageImages);
-    }
-
-    /** Blur-up placeholder for a texted photo — null when the file isn't local. */
-    protected function smsMicro(string $url): ?string
-    {
-        $path = app(\App\Services\ProjectImageImporter::class)->resolveSmsMediaPath($url);
-
-        if (! $path || ! is_file($path)) {
-            return null;
-        }
-
-        // Same key the sms media thumb route uses, so the micro can derive
-        // from the already-built 480px thumb instead of the full photo.
-        $key = $path.':'.filesize($path).':'.filemtime($path);
-
-        return \App\Support\ImageThumbs::microDataUri(
-            $key,
-            fn () => \App\Support\ImageThumbs::thumbFileFor($key) ?? $path,
-        );
     }
 
     /**
@@ -514,100 +309,6 @@ class TimelapseStudio extends Component
      *
      * @return array<int, array{id:int, url:string, original:string, label:string}>
      */
-    /**
-     * Who sent each message, keyed by message id.
-     *
-     * Outbound carries the crew member who typed it; inbound only has a
-     * number, matched against contacts the same way the messages screen does
-     * (raw digits, with and without the country code).
-     *
-     * @param  \Illuminate\Support\Collection<int, \App\Models\SmsMessage>  $messages
-     * @return array<int, string>
-     */
-    protected function senderNames($messages): array
-    {
-        $userIds = $messages->pluck('sent_by_user_id')->filter()->unique();
-
-        $users = $userIds->isEmpty()
-            ? collect()
-            : \App\Models\User::withoutGlobalScopes()
-                ->whereIn('id', $userIds)
-                ->get(['id', 'first_name', 'last_name', 'nickname'])
-                ->keyBy('id');
-
-        $digits = $messages
-            ->filter(fn ($m) => $m->direction === 'inbound')
-            ->map(fn ($m) => substr(preg_replace('/\D/', '', (string) $m->from_number) ?? '', -10))
-            ->filter()
-            ->unique();
-
-        $byPhone = $digits->isEmpty()
-            ? collect()
-            : \App\Models\User::withoutGlobalScopes()
-                ->where(function ($query) use ($digits) {
-                    foreach ($digits as $ten) {
-                        $query->orWhere('cell_phone', $ten)->orWhere('cell_phone', '1'.$ten);
-                    }
-                })
-                ->get(['id', 'first_name', 'last_name', 'nickname', 'cell_phone'])
-                ->keyBy(fn ($user) => substr(preg_replace('/\D/', '', (string) $user->cell_phone) ?? '', -10));
-
-        $name = fn ($user) => trim(($user->nickname ?: $user->first_name).' '.($user->last_name ?? '')) ?: 'Unknown';
-
-        // Outbound sent before the app stamped sent_by_user_id: the crew signs
-        // texts "-PS" / "-GS", so trailing initials name the sender. Matched
-        // against this vendor's team; "-GSC" (the company sign-off) matches
-        // nobody and falls through to the company label.
-        $sigs = $messages
-            ->filter(fn ($m) => $m->direction !== 'inbound' && ! $m->sent_by_user_id)
-            ->map(fn ($m) => self::signatureInitials((string) $m->text))
-            ->filter()
-            ->unique();
-
-        $bySignature = $sigs->isEmpty()
-            ? collect()
-            : \App\Models\User::withoutGlobalScopes()
-                ->join('user_vendor', 'user_vendor.user_id', '=', 'users.id')
-                ->where('user_vendor.vendor_id', $this->project->belongs_to_vendor_id)
-                ->get(['users.id', 'users.first_name', 'users.last_name', 'users.nickname'])
-                ->unique('id')
-                ->keyBy(fn ($u) => strtoupper(mb_substr((string) $u->first_name, 0, 1).mb_substr((string) $u->last_name, 0, 1)));
-
-        return $messages->mapWithKeys(function ($message) use ($users, $byPhone, $bySignature, $name) {
-            if ($message->direction !== 'inbound') {
-                if ($message->sent_by_user_id) {
-                    $user = $users->get($message->sent_by_user_id);
-
-                    return [$message->id => $user ? $name($user) : 'GS Construction'];
-                }
-
-                // Never label our own outbound with the shared business
-                // number — it reads as a mystery sender on every chip.
-                $sig = self::signatureInitials((string) $message->text);
-                $user = $sig ? $bySignature->get($sig) : null;
-
-                return [$message->id => $user ? $name($user) : 'GS Construction'];
-            }
-
-            $ten = substr(preg_replace('/\D/', '', (string) $message->from_number) ?? '', -10);
-            $user = $byPhone->get($ten);
-
-            return [$message->id => $user
-                ? $name($user)
-                : ($ten ? phone_display($ten) : 'Unknown')];
-        })->all();
-    }
-
-    /**
-     * Trailing "-PS"-style sign-off initials from a text, uppercased —
-     * null when the message doesn't end in one.
-     */
-    protected static function signatureInitials(string $text): ?string
-    {
-        return preg_match('/-\s*([A-Za-z]{2,3})\s*$/', trim($text), $m)
-            ? strtoupper($m[1])
-            : null;
-    }
 
     /**
      * First names only — "Mark & Gail Brodson" reads as "Mark & Gail",
@@ -788,24 +489,7 @@ class TimelapseStudio extends Component
     #[Computed]
     public function textableThreads(): \Illuminate\Support\Collection
     {
-        $vendorId = auth()->user()->vendor?->id;
-
-        if (! $vendorId) {
-            return collect();
-        }
-
-        return \App\Models\SmsGroupThread::query()
-            ->visibleToVendor($vendorId)
-            ->when($this->textThreadSearch !== '', function ($q) {
-                $term = '%'.trim($this->textThreadSearch).'%';
-                $q->where(fn ($inner) => $inner->where('name', 'like', $term)
-                    ->orWhereHas('client', fn ($c) => $c->where('business_name', 'like', $term))
-                    ->orWhereHas('project', fn ($p) => $p->where('address', 'like', $term)));
-            })
-            ->with(['client:id,business_name', 'project:id,address'])
-            ->orderByDesc('last_activity_at')
-            ->limit(100)
-            ->get();
+        return app(TimelapseCollectionService::class)->textableThreads($this->textThreadSearch);
     }
 
     /**
@@ -847,60 +531,21 @@ class TimelapseStudio extends Component
             return;
         }
 
-        if ($thread->hasPendingOptIn()) {
+        $result = app(TimelapseCollectionService::class)->sendTextImages(
+            $this->project, $thread, $this->textFrameIds, $this->textMessageUrls, $this->textNote, auth()->id(), $sms,
+        );
+
+        if ($result['reason'] === 'pending_opt_in') {
             \Flux\Flux::toast(variant: 'warning', heading: 'Awaiting START Replies', text: 'That conversation has participants who have not replied START yet.', duration: 5000, position: 'top right');
 
             return;
         }
 
-        $frames = ProjectTimelapseFrame::query()
-            ->whereIn('id', $this->textFrameIds)
-            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
-            ->get();
-
-        // MMS attachments live in sms-attachments/ — the send pipeline
-        // already knows how to sign and serve that path, so give it copies
-        // there rather than teaching it about timelapse storage.
-        $mediaUrls = $frames->map(function (ProjectTimelapseFrame $frame) {
-            $source = Storage::disk($frame->disk)->path($frame->display_path);
-
-            // A just-shot frame's sequence copy may still be in the queue —
-            // the archive copy stands in rather than silently dropping the
-            // photo from the text.
-            if (! is_file($source) && $frame->original_path) {
-                $source = Storage::disk($frame->disk)->path($frame->original_path);
-            }
-
-            if (! is_file($source)) {
-                return null;
-            }
-
-            $target = 'sms-attachments/'.Str::uuid().'.jpg';
-            Storage::disk('files')->put($target, file_get_contents($source));
-
-            return $target;
-        })->filter()->values()->all();
-
-        // Texted photos forward as-is: their stored sms-media/… values (or
-        // external URLs) are already shapes the send pipeline signs/serves —
-        // no copy needed. Re-checked against the card, same as on open.
-        $known = $this->messageImages->pluck('raw')->all();
-        $mediaUrls = array_merge(
-            $mediaUrls,
-            array_values(array_filter($this->textMessageUrls, fn ($raw) => in_array($raw, $known, true))),
-        );
-
-        if (empty($mediaUrls)) {
+        if ($result['reason'] === 'unavailable') {
             $this->addError('textFrameIds', 'Those photos are not available on this server.');
 
             return;
         }
-
-        $text = trim($this->textNote) !== ''
-            ? trim($this->textNote)
-            : 'Photos from '.($this->project->short_address ?? $this->project->address);
-
-        $sms->sendToThread($thread, $text, $mediaUrls, auth()->id());
 
         $this->showTextImagesModal = false;
         $this->textFrameIds = [];
@@ -911,7 +556,7 @@ class TimelapseStudio extends Component
         \Flux\Flux::toast(
             variant: 'success',
             heading: 'Sent',
-            text: count($mediaUrls).' '.\Illuminate\Support\Str::plural('photo', count($mediaUrls)).' texted to '.$this->textThreadLabel($thread).'.',
+            text: $result['count'].' '.\Illuminate\Support\Str::plural('photo', $result['count']).' texted to '.$this->textThreadLabel($thread).'.',
             duration: 4000,
             position: 'top right'
         );
@@ -930,17 +575,7 @@ class TimelapseStudio extends Component
     {
         $this->authorize('manageImages', $this->project);
 
-        $collection = ProjectTimelapse::query()
-            ->where('project_id', $this->project->id)
-            ->findOrFail($collectionId);
-
-        // The catch-all album is where an unaimed upload lands — removing it
-        // would leave those photos nowhere to go.
-        abort_if($collection->title === 'Project Images', 403);
-
-        // SOFT delete of the collection only: frames keep their rows and
-        // files untouched, so restoring the timelapse is one row.
-        $collection->delete();
+        $collection = app(TimelapseCollectionService::class)->deleteCollection($this->project, $collectionId);
 
         if ($this->editingCollectionId === $collection->id) {
             $this->editingCollectionId = null;
@@ -1294,34 +929,8 @@ class TimelapseStudio extends Component
     public function moveFrame(int $frameId, int $direction): void
     {
         $this->authorize('manageImages', $this->project);
-        abort_unless(in_array($direction, [-1, 1], true), 422);
 
-        $frame = ProjectTimelapseFrame::query()
-            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
-            ->findOrFail($frameId);
-
-        $ordered = ProjectTimelapseFrame::query()
-            ->where('project_timelapse_id', $frame->project_timelapse_id)
-            ->orderBy('sort_order')
-            ->orderBy('id')
-            ->get()
-            ->values();
-
-        $index = $ordered->search(fn ($f) => $f->id === $frame->id);
-        $target = $index + $direction;
-
-        if ($target < 0 || $target >= $ordered->count()) {
-            return;
-        }
-
-        $list = $ordered->all();
-        [$list[$index], $list[$target]] = [$list[$target], $list[$index]];
-
-        foreach ($list as $position => $sibling) {
-            if ($sibling->sort_order !== $position + 1) {
-                $sibling->forceFill(['sort_order' => $position + 1])->save();
-            }
-        }
+        app(TimelapseCollectionService::class)->moveFrame($this->project, $frameId, $direction);
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
     }
@@ -1631,13 +1240,7 @@ class TimelapseStudio extends Component
     /** The taker can remove their own bad frame; Admins can remove any. */
     public function deleteFrame(int $frameId): void
     {
-        $frame = ProjectTimelapseFrame::query()
-            ->whereHas('timelapse', fn ($q) => $q->where('project_id', $this->project->id))
-            ->findOrFail($frameId);
-
-        $this->authorize('manageImages', $this->project);
-
-        $frame->delete();
+        app(TimelapseCollectionService::class)->deleteFrame($this->project, $frameId);
 
         unset($this->collections, $this->collection, $this->frames, $this->latestFrame);
     }

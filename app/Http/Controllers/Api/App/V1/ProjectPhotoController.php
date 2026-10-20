@@ -24,6 +24,12 @@ use Illuminate\Support\Facades\Log;
  * ProjectTimelapse::generalFor(), the catch-all album every project has
  * (the same default App\Http\Controllers\TimelapseController::store() uses
  * when the camera doesn't name a specific collection).
+ *
+ * `collection_id` targets a specific collection (the Collections hub's
+ * capture flow — App\Services\Projects\TimelapseCollectionService::
+ * collectionsFor() lists them), exactly like the web camera's own
+ * `collection_id` field; a missing/foreign one falls back to the catch-all
+ * album, never another project's collection.
  */
 class ProjectPhotoController extends Controller
 {
@@ -34,7 +40,8 @@ class ProjectPhotoController extends Controller
         $found = $this->visibleProject($project);
 
         $page = ProjectTimelapseFrame::query()
-            ->whereHas('timelapse', fn ($query) => $query->where('project_id', $found->id))
+            ->whereHas('timelapse', fn ($query) => $query->where('project_id', $found->id)
+                ->when($request->filled('collection_id'), fn ($q) => $q->where('id', $request->integer('collection_id'))))
             ->orderByDesc('id')
             ->cursorPaginate(self::PER_PAGE);
 
@@ -69,8 +76,15 @@ class ProjectPhotoController extends Controller
             'takenAt' => $request->input('taken_at'),
         ]);
 
+        // The shot names its own collection, scoped to THIS project — a
+        // forged/foreign id lands in the catch-all album, never someone
+        // else's sequence (same rule as TimelapseController::store()).
+        $target = $request->filled('collection_id')
+            ? ProjectTimelapse::where('project_id', $found->id)->find($request->integer('collection_id'))
+            : null;
+
         $frame = app(ProjectImageImporter::class)->storeImage(
-            ProjectTimelapse::generalFor($found),
+            $target ?? ProjectTimelapse::generalFor($found),
             $sourcePath,
             $upload->getClientOriginalName(),
             null,
