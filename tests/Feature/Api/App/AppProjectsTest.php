@@ -213,7 +213,7 @@ it('shows the full detail shape, with photo URLs loadable without a session', fu
             'data' => [
                 'id', 'name', 'address', 'client', 'status', 'status_since', 'last_activity_at',
                 'upcoming_task', 'web_path', 'note', 'service_availability', 'areas', 'vendors',
-                'upcoming_tasks', 'status_history', 'counts' => ['estimates', 'expenses', 'payments', 'photos'],
+                'upcoming_tasks', 'pending_tasks', 'status_history', 'counts' => ['estimates', 'expenses', 'payments', 'photos'],
                 'latest_photos',
             ],
         ]);
@@ -260,4 +260,55 @@ it('rejects an invalid status code', function () {
     $this->postJson("/api/app/v1/projects/{$project->id}/status", ['code' => 999])
         ->assertStatus(422)
         ->assertJsonValidationErrors(['code']);
+});
+
+it('filters by client_id, like the web index\'s Client select', function () {
+    ['vendor' => $vendor, 'user' => $user] = appProjectsTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $clientA = Client::factory()->create();
+    $clientB = Client::factory()->create();
+
+    $projectA = appProjectFixture($vendor, $clientA, ['project_name' => 'Client A Job']);
+    appProjectStatus($projectA, $vendor, 6);
+
+    $projectB = appProjectFixture($vendor, $clientB, ['project_name' => 'Client B Job']);
+    appProjectStatus($projectB, $vendor, 6);
+
+    $response = $this->getJson('/api/app/v1/projects?status[]=6&client_id='.$clientA->id)->assertOk();
+    $ids = collect($response->json('data'))->pluck('id');
+
+    expect($ids->all())->toBe([$projectA->id]);
+});
+
+it('lists tasks with no date yet under pending_tasks, separate from upcoming_tasks', function () {
+    ['vendor' => $vendor, 'user' => $user] = appProjectsTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appProjectFixture($vendor, $client);
+    appProjectStatus($project, $vendor, 6);
+
+    $pending = \App\Models\Task::factory()->create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'title' => 'Pick a tile color',
+        'start_date' => null,
+        'end_date' => null,
+    ]);
+
+    \App\Models\Task::factory()->create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'title' => 'Tear out cabinets',
+        'start_date' => now()->addDay()->format('Y-m-d'),
+        'end_date' => now()->addDay()->format('Y-m-d'),
+    ]);
+
+    $response = $this->getJson('/api/app/v1/projects/'.$project->id)->assertOk();
+
+    expect($response->json('data.pending_tasks'))->toHaveCount(1)
+        ->and($response->json('data.pending_tasks.0.id'))->toBe($pending->id)
+        ->and($response->json('data.pending_tasks.0.title'))->toBe('Pick a tile color')
+        ->and($response->json('data.upcoming_tasks'))->toHaveCount(1);
 });

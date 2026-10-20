@@ -49,13 +49,15 @@ class AppProjectDirectory
 
     /**
      * Projects visible to $user (via ProjectScope, applied automatically),
-     * filtered to $statusCodes (empty = every status) and $search (name,
+     * filtered to $statusCodes (empty = every status), $search (name,
      * address, or client — Meilisearch first, a plain LIKE if that index
-     * call fails), newest-status-first like the web's default sort.
+     * call fails) and, if given, a single $clientId (the web index's own
+     * Client select filter), newest-status-first like the web's default
+     * sort.
      *
      * @param  list<int>  $statusCodes
      */
-    public function query(User $user, array $statusCodes, string $search): Builder
+    public function query(User $user, array $statusCodes, string $search, ?int $clientId = null): Builder
     {
         $vendorId = (int) $user->vendor->id;
 
@@ -77,6 +79,10 @@ class AppProjectDirectory
 
         if ($statusCodes !== []) {
             $query->status($statusCodes);
+        }
+
+        if ($clientId !== null) {
+            $query->where('projects.client_id', $clientId);
         }
 
         $this->applySearch($query, trim($search));

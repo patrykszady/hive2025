@@ -7,6 +7,7 @@ use App\Models\Project;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\URL;
 
 /**
  * The project page's Finances card, exactly as
@@ -42,6 +43,29 @@ class ProjectFinancesController extends Controller
                 'payments' => $finances['payments'],
                 'balance' => $finances['balance'],
                 'profit' => $showProfit ? $finances['profit'] : null,
+            ],
+        ]);
+    }
+
+    /**
+     * A fresh, time-limited signed link to this project's Reimbursements
+     * PDF — same App\Support\ProjectDocumentGenerator::generateReimbursements()
+     * output ProjectFinances::print_reimbursements() streams on the web,
+     * but reachable without a web session (the `signed` middleware alone
+     * is the gate — see routes/web.php's projects.finances.reimbursements.
+     * signed and ProjectReimbursementsPdfController::signed()).
+     */
+    public function reimbursementsPdfUrl(Request $request, int $project): JsonResponse
+    {
+        $found = $this->visibleProject($project);
+        Gate::authorize('viewFinancials', $found);
+
+        $expiresAt = now()->addMinutes(10);
+
+        return response()->json([
+            'data' => [
+                'url' => URL::temporarySignedRoute('projects.finances.reimbursements.signed', $expiresAt, ['project' => $found->id]),
+                'expires_at' => $expiresAt->toIso8601String(),
             ],
         ]);
     }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\StoreProjectRequest;
+use App\Http\Requests\Api\App\UpdateProjectRequest;
 use App\Http\Requests\Api\App\UpdateProjectStatusRequest;
 use App\Http\Resources\Api\App\ProjectResource;
 use App\Models\Project;
@@ -41,7 +42,9 @@ class ProjectController extends Controller
             ? $this->normalizeStatusCodes($request->query('status'))
             : [6];
 
-        $page = $directory->query($user, $statusCodes, (string) $request->query('search', ''))
+        $clientId = $request->query('client_id');
+
+        $page = $directory->query($user, $statusCodes, (string) $request->query('search', ''), is_numeric($clientId) ? (int) $clientId : null)
             ->cursorPaginate(self::PER_PAGE);
 
         $collection = $page->getCollection();
@@ -79,6 +82,56 @@ class ProjectController extends Controller
         return response()->json([
             'data' => (new ProjectResource($project))->forVendor($vendorId)->withDetail()->toArray($request),
         ], 201);
+    }
+
+    /**
+     * Update a project exactly like App\Livewire\Projects\ProjectCreate's
+     * "Update Project" modal — Admin-only (App\Policies\ProjectPolicy::
+     * update, the owning vendor's Admin). See
+     * App\Services\Projects\ProjectWriter::update() for the client-pivot
+     * repoint and re-index this shares with the web.
+     */
+    public function update(UpdateProjectRequest $request, int $project, ProjectWriter $writer): JsonResponse
+    {
+        $found = $this->visibleProject($project);
+        $this->authorize('update', $found);
+
+        $user = $request->user();
+        $vendorId = (int) $user->vendor->id;
+
+        $writer->update($found, (int) $request->validated('client_id'), (string) $request->validated('project_name'), [
+            'address' => $request->validated('address'),
+            'address_2' => $request->validated('address_2'),
+            'city' => $request->validated('city'),
+            'state' => $request->validated('state'),
+            'zip_code' => $request->validated('zip_code'),
+        ]);
+
+        $found = $found->fresh(['client.users', 'vendors']);
+        Project::primeLatestVendorStatuses(collect([$found]));
+        app(AppProjectDirectory::class)->attachUpcomingTaskSummaries(collect([$found]));
+
+        return response()->json([
+            'data' => (new ProjectResource($found))->forVendor($vendorId)->withDetail()->toArray($request),
+        ]);
+    }
+
+    /**
+     * Delete a project exactly like App\Livewire\Projects\ProjectCreate::
+     * delete() — a soft delete, never forceDelete (see
+     * App\Livewire\Forms\ProjectForm::delete()'s docblock for why).
+     * App\Policies\ProjectPolicy::delete already blocks this when the
+     * project has payments/timesheets/hours/tasks/expenses/distributions,
+     * same as the web's delete-confirmation warning.
+     */
+    public function destroy(Request $request, int $project, ProjectWriter $writer): JsonResponse
+    {
+        $found = $this->visibleProject($project);
+        $this->authorize('delete', $found);
+
+        $writer->delete($found);
+
+        return response()->json(['data' => ['deleted' => true]]);
     }
 
     public function show(Request $request, int $project): JsonResponse

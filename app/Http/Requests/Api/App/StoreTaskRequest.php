@@ -41,6 +41,13 @@ class StoreTaskRequest extends FormRequest
             'meeting_participants' => ['nullable', 'array'],
             'meeting_participants.*' => ['string'],
             'parent_task_id' => ['nullable', 'exists:tasks,id'],
+            // A brand-new task has nothing stored to merge against —
+            // App\Services\Tasks\TaskWriter::store() writes this list as-is,
+            // same as TaskForm::store().
+            'checklist' => ['nullable', 'array'],
+            'checklist.*.uid' => ['nullable', 'string'],
+            'checklist.*.text' => ['required', 'string'],
+            'checklist.*.completed' => ['nullable', 'boolean'],
             // The planner action item this task was created from
             // (actionItemToTask()'s mobile equivalent) — settled by the
             // controller, same as TaskCreate::save().

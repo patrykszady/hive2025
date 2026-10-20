@@ -42,6 +42,19 @@ class UpdateTaskRequest extends FormRequest
             'meeting_participants' => ['nullable', 'array'],
             'meeting_participants.*' => ['string'],
             'parent_task_id' => ['nullable', 'exists:tasks,id'],
+            // The three-way checklist merge (Task::mergeChecklist(), via
+            // App\Services\Tasks\TaskWriter::update()) needs BOTH of these:
+            // `checklist_original` is exactly what GET tasks/{id} last
+            // returned (before this screen's own edits), so a box ticked
+            // elsewhere while this screen was open isn't reverted.
+            'checklist' => ['nullable', 'array'],
+            'checklist.*.uid' => ['nullable', 'string'],
+            'checklist.*.text' => ['required', 'string'],
+            'checklist.*.completed' => ['nullable', 'boolean'],
+            'checklist_original' => ['nullable', 'array'],
+            'checklist_original.*.uid' => ['nullable', 'string'],
+            'checklist_original.*.text' => ['nullable', 'string'],
+            'checklist_original.*.completed' => ['nullable', 'boolean'],
         ];
     }
 }

@@ -3,6 +3,7 @@
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -156,4 +157,169 @@ it('rejects a client from another vendor and missing required fields', function 
     $this->postJson('/api/app/v1/projects', [])
         ->assertStatus(422)
         ->assertJsonValidationErrors(['client_id', 'project_name', 'project_existing_address']);
+});
+
+/**
+ * A project belonging to $vendor/$client, Active, with no payments/tasks/
+ * expenses — deletable per ProjectPolicy::delete. Created via
+ * Project::withoutEvents() (same reasoning as AppBidsTest's
+ * appJobsBidsProject()) — ProjectObserver::creating() stamps
+ * belongs_to_vendor_id from the CURRENTLY AUTHENTICATED user, which would
+ * silently override $vendor here (and crash with no one signed in yet).
+ */
+function appJobsProjectsProject(Vendor $vendor, Client $client, array $overrides = []): Project
+{
+    $project = Project::withoutEvents(fn () => Project::create(array_merge([
+        'project_name' => 'Test Project',
+        'client_id' => $client->id,
+        'address' => '123 Main St',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $vendor->id,
+    ], $overrides)));
+    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+    ProjectStatus::forceCreate([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => 6,
+        'start_date' => now(),
+    ]);
+
+    return $project;
+}
+
+// --- Update a project (App\Livewire\Projects\ProjectCreate's "Update Project" modal) ---
+
+it('needs a token to update a project', function () {
+    $this->postJson('/api/app/v1/projects/1', ['client_id' => 1, 'project_name' => 'X', 'address' => 'Y', 'city' => 'Z'])
+        ->assertUnauthorized();
+});
+
+it('lets an Admin update a project, repointing the client pivot and re-indexing when the client changes', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsProjectsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $client = appJobsProjectsClient($vendor);
+    $newClient = appJobsProjectsClient($vendor);
+    $project = appJobsProjectsProject($vendor, $client, ['project_name' => 'Old Name']);
+
+    $response = $this->postJson("/api/app/v1/projects/{$project->id}", [
+        'client_id' => $newClient->id,
+        'project_name' => 'New Name',
+        'address' => '99 Updated St',
+        'address_2' => 'Unit 2',
+        'city' => 'Evanston',
+        'state' => 'IL',
+        'zip_code' => '60201',
+    ])->assertOk();
+
+    $project->refresh();
+    expect($project->project_name)->toBe('New Name')
+        ->and($project->client_id)->toBe($newClient->id)
+        ->and($project->address)->toBe('99 Updated St')
+        ->and($project->city)->toBe('Evanston');
+
+    $pivotClientId = \DB::table('project_vendor')->where('project_id', $project->id)->value('client_id');
+    expect($pivotClientId)->toBe($newClient->id);
+
+    $response->assertJsonPath('data.name', 'New Name')
+        ->assertJsonPath('data.client.id', $newClient->id);
+});
+
+it('blocks a Member from updating a project, like the web\'s Admin-only ProjectPolicy::update', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appJobsProjectsTeamUser(1);
+    $client = appJobsProjectsClient($vendor);
+    $project = appJobsProjectsProject($vendor, $client, ['project_name' => 'Untouched']);
+
+    $member = User::factory()->create(['primary_vendor_id' => $vendor->id]);
+    $vendor->users()->attach($member->id, ['role_id' => 2]);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson("/api/app/v1/projects/{$project->id}", [
+        'client_id' => $client->id,
+        'project_name' => 'Hacked Name',
+        'address' => '1 Main St',
+        'city' => 'Chicago',
+    ])->assertForbidden();
+
+    expect($project->refresh()->project_name)->toBe('Untouched');
+});
+
+it('rejects a client from another vendor on update', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsProjectsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $client = appJobsProjectsClient($vendor);
+    $project = appJobsProjectsProject($vendor, $client);
+    $otherClient = Client::factory()->create();
+
+    $this->postJson("/api/app/v1/projects/{$project->id}", [
+        'client_id' => $otherClient->id,
+        'project_name' => 'Still Three Chars',
+        'address' => '1 Main St',
+        'city' => 'Chicago',
+    ])->assertStatus(422)->assertJsonValidationErrors(['client_id']);
+});
+
+it('404s updating a project that does not exist and 403s one belonging to another vendor', function () {
+    ['user' => $user] = appJobsProjectsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $this->postJson('/api/app/v1/projects/999999', ['client_id' => 1, 'project_name' => 'Valid Name', 'address' => 'Y', 'city' => 'Z'])
+        ->assertNotFound();
+
+    $otherVendor = Vendor::factory()->create();
+    $otherClient = Client::factory()->create();
+    $otherProject = appJobsProjectsProject($otherVendor, $otherClient);
+
+    $this->postJson("/api/app/v1/projects/{$otherProject->id}", ['client_id' => $otherClient->id, 'project_name' => 'Valid Name', 'address' => 'Y', 'city' => 'Z'])
+        ->assertForbidden();
+});
+
+// --- Delete a project (App\Livewire\Projects\ProjectCreate::delete()) ---
+
+it('needs a token to delete a project', function () {
+    $this->deleteJson('/api/app/v1/projects/1')->assertUnauthorized();
+});
+
+it('lets an Admin soft-delete a project with nothing blocking it', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsProjectsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $client = appJobsProjectsClient($vendor);
+    $project = appJobsProjectsProject($vendor, $client);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}")
+        ->assertOk()
+        ->assertJsonPath('data.deleted', true);
+
+    expect(Project::withoutGlobalScopes()->whereKey($project->id)->first()->trashed())->toBeTrue();
+});
+
+it('blocks deleting a project that has a task, like the web\'s ProjectPolicy::delete', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsProjectsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $client = appJobsProjectsClient($vendor);
+    $project = appJobsProjectsProject($vendor, $client);
+    Task::factory()->create(['project_id' => $project->id, 'belongs_to_vendor_id' => $vendor->id]);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}")->assertForbidden();
+
+    expect(Project::withoutGlobalScopes()->whereKey($project->id)->first()->trashed())->toBeFalse();
+});
+
+it('blocks a Member from deleting a project', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appJobsProjectsTeamUser(1);
+    $client = appJobsProjectsClient($vendor);
+    $project = appJobsProjectsProject($vendor, $client);
+
+    $member = User::factory()->create(['primary_vendor_id' => $vendor->id]);
+    $vendor->users()->attach($member->id, ['role_id' => 2]);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}")->assertForbidden();
+
+    expect(Project::withoutGlobalScopes()->whereKey($project->id)->first()->trashed())->toBeFalse();
 });

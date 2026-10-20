@@ -2,6 +2,8 @@
 
 use App\Models\Bid;
 use App\Models\Client;
+use App\Models\Estimate;
+use App\Models\EstimateSection;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Vendor;
@@ -157,4 +159,82 @@ it('cannot update another tenant\'s bid by forging its id', function () {
     ])->assertStatus(404);
 
     expect($otherBid->fresh()->amount)->toEqual(999);
+});
+
+// --- Remove a bid/change order (App\Livewire\Bids\BidCreate::removeChangeOrder()) ---
+
+it('needs a token to remove a bid', function () {
+    $this->deleteJson('/api/app/v1/projects/1/vendors/1/bids/1')->assertUnauthorized();
+});
+
+it('lets an Admin remove a change order', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsBidsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsBidsProject($vendor);
+    $original = Bid::withoutGlobalScopes()->create(['project_id' => $project->id, 'vendor_id' => $vendor->id, 'amount' => 15000, 'type' => 1]);
+    $changeOrder = Bid::withoutGlobalScopes()->create(['project_id' => $project->id, 'vendor_id' => $vendor->id, 'amount' => 2000, 'type' => 2]);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}/vendors/{$vendor->id}/bids/{$changeOrder->id}")
+        ->assertOk()
+        ->assertJsonPath('data.deleted', true);
+
+    expect(Bid::withoutGlobalScopes()->whereKey($changeOrder->id)->exists())->toBeFalse()
+        ->and(Bid::withoutGlobalScopes()->whereKey($original->id)->exists())->toBeTrue();
+});
+
+it('cannot remove the Original Bid, like the web\'s "Remove" button hidden on the first row', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsBidsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsBidsProject($vendor);
+    $original = Bid::withoutGlobalScopes()->create(['project_id' => $project->id, 'vendor_id' => $vendor->id, 'amount' => 15000, 'type' => 1]);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}/vendors/{$vendor->id}/bids/{$original->id}")
+        ->assertStatus(422);
+
+    expect(Bid::withoutGlobalScopes()->whereKey($original->id)->exists())->toBeTrue();
+});
+
+it('cannot remove a bid an estimate section already references', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsBidsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $project = appJobsBidsProject($vendor);
+    $changeOrder = Bid::withoutGlobalScopes()->create(['project_id' => $project->id, 'vendor_id' => $vendor->id, 'amount' => 2000, 'type' => 2]);
+    $estimate = Estimate::create(['project_id' => $project->id, 'belongs_to_vendor_id' => $vendor->id]);
+    EstimateSection::create(['estimate_id' => $estimate->id, 'order' => 1, 'name' => 'Section', 'total' => 2000, 'bid_id' => $changeOrder->id]);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}/vendors/{$vendor->id}/bids/{$changeOrder->id}")
+        ->assertStatus(422);
+
+    expect(Bid::withoutGlobalScopes()->whereKey($changeOrder->id)->exists())->toBeTrue();
+});
+
+it('blocks a Member from removing a bid, like BidPolicy::delete', function () {
+    ['vendor' => $vendor, 'user' => $member] = appJobsBidsTeamUser(2);
+    Sanctum::actingAs($member, ['app']);
+
+    $project = appJobsBidsProject($vendor);
+    $changeOrder = Bid::withoutGlobalScopes()->create(['project_id' => $project->id, 'vendor_id' => $vendor->id, 'amount' => 2000, 'type' => 2]);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}/vendors/{$vendor->id}/bids/{$changeOrder->id}")->assertForbidden();
+
+    expect(Bid::withoutGlobalScopes()->whereKey($changeOrder->id)->exists())->toBeTrue();
+});
+
+it('cannot remove another tenant\'s bid by forging its id', function () {
+    ['vendor' => $vendor, 'user' => $user] = appJobsBidsTeamUser(1);
+    Sanctum::actingAs($user, ['app']);
+
+    $otherVendor = Vendor::factory()->create();
+    $otherProject = appJobsBidsProject($otherVendor);
+    $otherChangeOrder = Bid::withoutGlobalScopes()->create(['project_id' => $otherProject->id, 'vendor_id' => $otherVendor->id, 'amount' => 2000, 'type' => 2]);
+
+    $project = appJobsBidsProject($vendor);
+
+    $this->deleteJson("/api/app/v1/projects/{$project->id}/vendors/{$vendor->id}/bids/{$otherChangeOrder->id}")
+        ->assertStatus(404);
+
+    expect(Bid::withoutGlobalScopes()->whereKey($otherChangeOrder->id)->exists())->toBeTrue();
 });

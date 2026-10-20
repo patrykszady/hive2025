@@ -53,34 +53,26 @@ class ProjectForm extends Form
         }
     }
 
+    /**
+     * The actual update logic — the client-accessible check, the
+     * project_vendor pivot repoint and re-index when the client changes —
+     * lives in App\Services\Projects\ProjectWriter so the Hive Contractors
+     * app's edit-project endpoint writes an identical row. This form's own
+     * job is just gathering what the writer needs from the component's
+     * address fields/validation before handing off.
+     */
     public function update()
     {
         $this->validate();
         $this->assertClientAccessible();
 
-        $oldClientId = $this->project->client_id;
-        $newClientId = $this->client_id;
-
-        $this->project->update([
-            'project_name' => $this->project_name,
-            'client_id' => $this->client_id,
+        return app(ProjectWriter::class)->update($this->project, (int) $this->client_id, (string) $this->project_name, [
             'address' => $this->component->address_1,
             'address_2' => $this->component->address_2,
             'city' => $this->component->city,
             'state' => $this->component->state,
             'zip_code' => $this->component->zip_code,
         ]);
-
-        // If client changed, update the project_vendor pivot table
-        if ($oldClientId != $newClientId) {
-            \DB::table('project_vendor')
-                ->where('project_id', $this->project->id)
-                ->update(['client_id' => $newClientId]);
-
-            $this->project->searchable();
-        }
-
-        return $this->project;
     }
 
     /**
@@ -90,13 +82,13 @@ class ProjectForm extends Form
      * its statuses, images, and history while trashed; ProjectObserver
      * cascades the estimates so they stop showing on /estimates, and restores
      * them if the project comes back. Permanent removal stays available via
-     * forceDelete() in tinker for a deliberate purge.
+     * forceDelete() in tinker for a deliberate purge. Delegates to
+     * App\Services\Projects\ProjectWriter so the app's delete-project
+     * endpoint does exactly the same thing.
      */
     public function delete()
     {
-        $this->project->delete();
-
-        return $this->project;
+        return app(ProjectWriter::class)->delete($this->project);
     }
 
     /**
