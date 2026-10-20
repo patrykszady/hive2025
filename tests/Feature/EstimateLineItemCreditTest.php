@@ -224,3 +224,54 @@ it('does not offer credit for items already in a change-order section', function
 
     expect(EstimateLineItem::query()->where('estimate_id', $s['estimate']->id)->count())->toBe(2);
 });
+
+it('offers the credit on a contract signed before signatures recorded who signed, once the backfill links them', function () {
+    $s = makeCreditScenario(signed: false);
+    $clientSigner = $s['project']->client()->first()->users()->first();
+
+    // How 39 production signatures were saved (Feb–Jul 2026): names and emails, no user —
+    // the vendor signed from a different address than his login (patryk@gs.construction).
+    $legacy = [
+        [$s['vendorSigner']->first_name.' F '.$s['vendorSigner']->last_name, 'signed-elsewhere@other.test'],
+        [$clientSigner->first_name.' '.$clientSigner->last_name, $clientSigner->email],
+        ['Someone Else', 'stranger@other.test'],
+    ];
+    foreach ($legacy as $i => [$name, $email]) {
+        EstimateSignature::query()->create([
+            'estimate_id' => $s['estimate']->id,
+            'user_id' => null,
+            'signer_name' => $name,
+            'signer_email' => $email,
+            'signature_data' => 'sig-'.$i,
+            'signature_type' => 'draw',
+            'ip_address' => '127.0.0.1',
+            'user_agent' => 'PHPUnit',
+            'document_hash' => 'hash-'.$i,
+            'signed_at' => now()->addMinutes($i),
+        ]);
+    }
+    $this->travel(1)->hour();
+
+    expect($s['estimate']->fresh()->isFullySigned())->toBeFalse()
+        ->and($s['section']->fresh()->isLocked())->toBeFalse();
+
+    $this->artisan('estimates:backfill-signature-users', ['--dry-run' => true])->assertSuccessful();
+    expect(EstimateSignature::query()->whereNull('user_id')->count())->toBe(3);
+
+    $this->artisan('estimates:backfill-signature-users')->assertSuccessful();
+
+    expect(EstimateSignature::query()->whereNotNull('user_id')->pluck('user_id')->sort()->values()->all())
+        ->toBe(collect([$s['vendorSigner']->id, $clientSigner->id])->sort()->values()->all())
+        ->and(EstimateSignature::query()->whereNull('user_id')->value('signer_name'))->toBe('Someone Else')
+        ->and($s['estimate']->fresh()->isFullySigned())->toBeTrue()
+        ->and($s['section']->fresh()->isLocked())->toBeTrue();
+
+    Livewire::test(EstimateLineItemCreate::class, ['estimate' => $s['estimate']->fresh()])
+        ->call('editOnEstimate', $s['estimateLineItem']->id)
+        ->call('creditToChangeOrder');
+
+    $credit = EstimateLineItem::query()->where('credit_for_id', $s['estimateLineItem']->id)->first();
+    expect($credit)->not->toBeNull()
+        ->and((float) $credit->total)->toBe(-2850.0)
+        ->and($credit->section_id)->not->toBe($s['section']->id);
+});
