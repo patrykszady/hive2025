@@ -101,17 +101,13 @@ class TaskCreate extends Component
     public string $participantSearch = '';
 
     /**
-     * Maps a homeowner-selected time frame to concrete arrival start/end times.
+     * Maps a homeowner-selected time frame to concrete arrival start/end
+     * times — shared with the Hive Contractors app's task screen, see
+     * App\Services\Tasks\TaskPreferredTimes.
      *
      * @var array<string, array{start: string, end: string}>
      */
-    private const SERVICE_TIME_FRAMES = [
-        '7-9 AM' => ['start' => '07:00', 'end' => '09:00'],
-        '9-11 AM' => ['start' => '09:00', 'end' => '11:00'],
-        '11-1 PM' => ['start' => '11:00', 'end' => '13:00'],
-        '1-3 PM' => ['start' => '13:00', 'end' => '15:00'],
-        '3-5 PM' => ['start' => '15:00', 'end' => '17:00'],
-    ];
+    private const SERVICE_TIME_FRAMES = \App\Services\Tasks\TaskPreferredTimes::SERVICE_TIME_FRAMES;
 
     private function ensureProjectOptionLoaded(?int $projectId): void
     {
@@ -257,64 +253,12 @@ class TaskCreate extends Component
     #[Computed]
     public function availableMeetingContacts(): array
     {
-        $contacts = collect();
-        $taggedEmails = collect();
+        $vendorId = $this->form->vendor_id && is_numeric($this->form->vendor_id) ? (int) $this->form->vendor_id : null;
 
-        // Client users from the selected project
-        if ($this->form->project_id) {
-            $project = \App\Models\Project::with('client.users')->find($this->form->project_id);
-            if ($project?->client) {
-                $clientContacts = collect($project->client->users)->map(fn ($user) => [
-                    'email' => strtolower(trim($user->email)),
-                    'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
-                    'group' => 'Client',
-                ])->filter(fn ($c) => $c['email'] !== '');
-
-                $contacts = $contacts->merge($clientContacts);
-                $taggedEmails = $taggedEmails->merge($clientContacts->pluck('email'));
-            }
-        }
-
-        // Team members (employees of the current vendor)
-        $vendor = auth()->user()?->vendor;
-        if ($vendor) {
-            $teamContacts = $vendor->users()->employed()->get()->map(fn ($user) => [
-                'email' => strtolower(trim($user->email)),
-                'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
-                'group' => 'Team',
-            ])->filter(fn ($c) => $c['email'] !== '');
-
-            $contacts = $contacts->merge($teamContacts);
-            $taggedEmails = $taggedEmails->merge($teamContacts->pluck('email'));
-        }
-
-        // Selected vendor contact (the sub being scheduled for the meeting).
-        // Scoped (no withoutGlobalScopes): form->vendor_id is a plain
-        // client-writable property, so an unscoped lookup here would let
-        // anyone read any vendor's business email/name by setting vendor_id
-        // to an arbitrary id, without ever saving the task.
-        if ($this->form->vendor_id && is_numeric($this->form->vendor_id)) {
-            $selectedVendor = Vendor::query()->find((int) $this->form->vendor_id);
-            $vendorEmail = strtolower(trim((string) ($selectedVendor?->email ?? $selectedVendor?->business_email ?? '')));
-
-            if ($vendorEmail !== '' && ! $taggedEmails->contains($vendorEmail)) {
-                $contacts->push([
-                    'email' => $vendorEmail,
-                    'name' => trim((string) ($selectedVendor?->business_name ?? '')),
-                    'group' => 'Vendor',
-                ]);
-                $taggedEmails->push($vendorEmail);
-            }
-        }
-
-        // No "every other platform user" fallback here: that used to list
-        // every signed-up user's name and email platform-wide (any
-        // company's staff, any homeowner) on every load of the "add
-        // participant" autocomplete. Team members, this project's client,
-        // and the assigned vendor above are what's offered with nothing
-        // typed; participantSearchResults() below widens the search to the
-        // company's own people (knownUsers()) once a term is typed.
-        return $contacts->unique('email')->values()->all();
+        return app(\App\Services\Tasks\MeetingContactsFinder::class)->availableContacts(
+            $this->form->project_id ? (int) $this->form->project_id : null,
+            $vendorId,
+        );
     }
 
     /**
@@ -333,75 +277,14 @@ class TaskCreate extends Component
     #[Computed]
     public function participantSearchResults(): array
     {
-        $selected = collect((array) $this->form->meeting_participants)
-            ->map(fn ($email) => strtolower(trim((string) $email)))
-            ->all();
+        $vendorId = $this->form->vendor_id && is_numeric($this->form->vendor_id) ? (int) $this->form->vendor_id : null;
 
-        $projectContacts = collect($this->availableMeetingContacts)
-            ->reject(fn (array $contact) => in_array($contact['email'], $selected, true));
-
-        $query = trim($this->participantSearch);
-
-        if ($query === '' || mb_strlen($query) < self::PARTICIPANT_SEARCH_MIN_LENGTH) {
-            return $projectContacts->values()->all();
-        }
-
-        $needle = strtolower($query);
-        $matchingProjectContacts = $projectContacts->filter(
-            fn (array $contact) => str_contains(strtolower($contact['name']), $needle)
-                || str_contains($contact['email'], $needle)
+        return app(\App\Services\Tasks\MeetingContactsFinder::class)->searchResults(
+            $this->form->project_id ? (int) $this->form->project_id : null,
+            $vendorId,
+            (array) $this->form->meeting_participants,
+            $this->participantSearch,
         );
-
-        $excludedEmails = $matchingProjectContacts->pluck('email')->merge($selected)->unique()->all();
-
-        $platformUsers = $this->knownUsers()
-            ->where(function ($userQuery) use ($query): void {
-                $userQuery->where('email', 'like', "%{$query}%")
-                    ->orWhereRaw("LOWER(CONCAT(first_name, ' ', last_name)) LIKE ?", ['%'.strtolower($query).'%']);
-            })
-            ->whereNotIn('email', $excludedEmails)
-            ->orderBy('first_name')
-            ->limit(self::PARTICIPANT_SEARCH_LIMIT)
-            ->get()
-            ->filter(fn (User $user) => $user->hasRoutableEmail())
-            ->map(fn (User $user) => [
-                'email' => strtolower(trim((string) $user->email)),
-                'name' => trim($user->full_name),
-                'group' => 'User',
-            ])
-            ->values();
-
-        return $matchingProjectContacts
-            ->merge($platformUsers)
-            ->unique('email')
-            ->take(self::PARTICIPANT_SEARCH_LIMIT)
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Every user the signed-in company knows: its own people (past ones
-     * too), the people of the vendors it works with, and its clients'
-     * users. Never another company's staff or homeowners; nobody without a
-     * company of its own.
-     *
-     * @return \Illuminate\Database\Eloquent\Builder<User>
-     */
-    protected function knownUsers(): \Illuminate\Database\Eloquent\Builder
-    {
-        if (! auth()->user()?->vendor) {
-            return User::query()->whereRaw('1 = 0');
-        }
-
-        // Both lists come through the global scopes: the company and its
-        // vendors (VendorScope), the company's clients (ClientScope).
-        $vendorIds = Vendor::query()->pluck('vendors.id');
-        $clientIds = \App\Models\Client::query()->pluck('clients.id');
-
-        return User::query()->where(function ($known) use ($vendorIds, $clientIds): void {
-            $known->whereHas('vendors', fn ($vendors) => $vendors->withoutGlobalScopes()->whereIn('vendors.id', $vendorIds))
-                ->orWhereHas('clients', fn ($clients) => $clients->withoutGlobalScopes()->whereIn('clients.id', $clientIds));
-        });
     }
 
     /**
@@ -443,42 +326,13 @@ class TaskCreate extends Component
             return [];
         }
 
-        // Homeowner preferred times only apply to unscheduled/pending tasks. Once a
-        // task has a persisted start date it's already scheduled, so hide the picker.
-        if ($this->form->task?->start_date) {
-            return [];
-        }
-
         $project = Project::find($this->form->project_id);
-        if (! $project || ! $this->currentTaskCoveredByPreferredTimes($project)) {
-            return [];
-        }
 
-        $slots = (array) ($project?->service_availability['slots'] ?? []);
-
-        if (empty($slots)) {
-            return [];
-        }
-
-        return collect($slots)
-            ->filter(fn ($slot) => is_array($slot) && isset($slot['date'], $slot['time']))
-            ->groupBy('date')
-            ->sortKeys()
-            ->map(fn ($group, string $date) => [
-                'date' => $date,
-                'label' => Carbon::parse($date)->format('D, M j'),
-                'times' => $group
-                    ->pluck('time')
-                    ->unique()
-                    ->values()
-                    ->map(fn (string $time) => [
-                        'time' => $time,
-                        'applied' => $this->servicePreferredSlotIsApplied($date, $time),
-                    ])
-                    ->all(),
-            ])
-            ->values()
-            ->all();
+        return app(\App\Services\Tasks\TaskPreferredTimes::class)->groupedSlots(
+            $project,
+            $this->form->task,
+            fn (string $date, string $time) => $this->servicePreferredSlotIsApplied($date, $time),
+        );
     }
 
     /**
@@ -492,49 +346,15 @@ class TaskCreate extends Component
             return false;
         }
 
-        if ($this->form->task?->start_date) {
-            return false;
-        }
-
-        if ($this->servicePreferredSlots() !== []) {
-            return false;
-        }
-
         $project = Project::query()
             ->with('latestStatus')
             ->find($this->form->project_id);
 
-        if (! $project) {
-            return false;
-        }
-
-        return (int) ($project->latestStatus->status_code ?? 0) === 8;
-    }
-
-    /**
-     * Whether the homeowner's submitted preferred times cover the task currently
-     * being edited. Tasks recorded in the saved task_ids are covered; when no
-     * task ids were recorded (legacy submissions) every pending task is treated
-     * as covered.
-     */
-    protected function currentTaskCoveredByPreferredTimes(Project $project): bool
-    {
-        if ((array) data_get($project->service_availability, 'slots', []) === []) {
-            return false;
-        }
-
-        $savedTaskIds = collect((array) data_get($project->service_availability, 'task_ids', []))
-            ->map(fn ($id) => (int) $id)
-            ->filter(fn (int $id) => $id > 0)
-            ->all();
-
-        if ($savedTaskIds === []) {
-            return true;
-        }
-
-        $taskId = (int) ($this->form->task?->id ?? 0);
-
-        return $taskId > 0 && in_array($taskId, $savedTaskIds, true);
+        return app(\App\Services\Tasks\TaskPreferredTimes::class)->showAwaitingCard(
+            $project,
+            $this->form->task,
+            $this->servicePreferredSlots(),
+        );
     }
 
     /**
@@ -549,7 +369,7 @@ class TaskCreate extends Component
 
         $project = Project::find($this->form->project_id);
 
-        return $project?->service_availability['submitted_at'] ?? null;
+        return app(\App\Services\Tasks\TaskPreferredTimes::class)->submittedAt($project);
     }
 
     /**
@@ -919,17 +739,13 @@ class TaskCreate extends Component
      */
     public function meetingParticipantDisplayName(string $email): string
     {
-        $email = strtolower(trim($email));
+        $vendorId = $this->form->vendor_id && is_numeric($this->form->vendor_id) ? (int) $this->form->vendor_id : null;
 
-        $contact = collect($this->availableMeetingContacts)->firstWhere('email', $email);
-
-        if ($contact && filled($contact['name'])) {
-            return $contact['name'];
-        }
-
-        $name = trim((string) ($this->knownUsers()->where('email', $email)->first()?->full_name));
-
-        return $name !== '' ? $name : $email;
+        return app(\App\Services\Tasks\MeetingContactsFinder::class)->displayName(
+            $email,
+            $this->form->project_id ? (int) $this->form->project_id : null,
+            $vendorId,
+        );
     }
 
     /**
@@ -1131,41 +947,13 @@ class TaskCreate extends Component
             return null;
         }
 
-        // Straight by client_id — Project::client() is a vendor-scoped
-        // HasOneThrough over the pivot, which is the wrong question here:
-        // we want THE project's client, not "the client as seen through the
-        // current vendor's pivot rows". Scoped (ProjectScope) rather than
-        // withoutGlobalScopes(): form->project_id is client-writable, so an
-        // unscoped lookup here would read another tenant's homeowner
-        // availability by simply setting a foreign project id.
-        $clientId = \App\Models\Project::query()
-            ->whereKey($this->form->project_id)
-            ->value('client_id');
+        // Project::find() already applies ProjectScope — form->project_id is
+        // client-writable, so an unscoped lookup here would read another
+        // tenant's homeowner availability by simply setting a foreign
+        // project id.
+        $project = \App\Models\Project::find($this->form->project_id);
 
-        $client = $clientId ? \App\Models\Client::withoutGlobalScopes()->find($clientId) : null;
-
-        if (! $client) {
-            return null;
-        }
-
-        // Shared resolver: excludes trashed leads (a deleted stub must not
-        // shadow the real one) and prefers freshest availability.
-        $lead = \App\Models\Lead::latestForClient($client);
-
-        $times = collect((array) ($lead?->lead_data['availability'] ?? []))
-            ->filter(fn ($slot) => is_array($slot) && \App\Models\Lead::slotIsBookable($slot))
-            ->values()
-            ->all();
-
-        if ($times === []) {
-            return null;
-        }
-
-        return [
-            'times' => $times,
-            'updated' => $lead->lead_data['availability_updated_at'] ?? null,
-            'preference' => $lead->lead_data['meeting_preference'] ?? null,
-        ];
+        return app(\App\Services\Tasks\TaskPreferredTimes::class)->homeownerAvailability($project);
     }
 
     /**
@@ -2670,21 +2458,19 @@ class TaskCreate extends Component
 
         $task = Task::find($this->form->task->id);
 
-        if (! $task || ! $task->vendor_id) {
+        if (! $task) {
             Flux::toast(text: 'Vendor not assigned.', variant: 'danger');
             return;
         }
 
         $this->authorize('update', $task);
 
-        if (! in_array($task->vendor_status, [Task::VENDOR_STATUS_REQUESTED, Task::VENDOR_STATUS_PROPOSED], true)) {
-            Flux::toast(text: 'Task is not awaiting vendor response.', variant: 'danger');
+        try {
+            app(\App\Services\Tasks\TaskVendorAvailability::class)->confirm($task);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            Flux::toast(text: $exception->validator->errors()->first(), variant: 'danger');
             return;
         }
-
-        $task->update([
-            'vendor_status' => Task::VENDOR_STATUS_CONFIRMED,
-        ]);
 
         $this->form->task->refresh();
         $this->refreshPlannerComponents();
@@ -2700,21 +2486,19 @@ class TaskCreate extends Component
 
         $task = Task::find($this->form->task->id);
 
-        if (! $task || ! $task->vendor_id) {
+        if (! $task) {
             Flux::toast(text: 'Vendor not assigned.', variant: 'danger');
             return;
         }
 
         $this->authorize('update', $task);
 
-        if (! in_array($task->vendor_status, [Task::VENDOR_STATUS_REQUESTED, Task::VENDOR_STATUS_PROPOSED], true)) {
-            Flux::toast(text: 'Task is not awaiting vendor response.', variant: 'danger');
+        try {
+            app(\App\Services\Tasks\TaskVendorAvailability::class)->reject($task);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            Flux::toast(text: $exception->validator->errors()->first(), variant: 'danger');
             return;
         }
-
-        $task->update([
-            'vendor_status' => Task::VENDOR_STATUS_REJECTED,
-        ]);
 
         $this->form->task->refresh();
         $this->refreshPlannerComponents();
@@ -2730,21 +2514,19 @@ class TaskCreate extends Component
 
         $task = Task::find($this->form->task->id);
 
-        if (! $task || ! $task->vendor_id) {
+        if (! $task) {
             Flux::toast(text: 'Vendor not assigned.', variant: 'danger');
             return;
         }
 
         $this->authorize('update', $task);
 
-        if ($task->vendor_status !== Task::VENDOR_STATUS_CONFIRMED) {
-            Flux::toast(text: 'Task is not confirmed.', variant: 'danger');
+        try {
+            app(\App\Services\Tasks\TaskVendorAvailability::class)->reset($task);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            Flux::toast(text: $exception->validator->errors()->first(), variant: 'danger');
             return;
         }
-
-        $task->update([
-            'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
-        ]);
 
         $this->form->task->refresh();
         $this->refreshPlannerComponents();
