@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\CreditEstimateLineItemRequest;
+use App\Http\Requests\Api\App\MoveEstimateLineItemRequest;
 use App\Http\Requests\Api\App\StoreEstimateLineItemRequest;
 use App\Http\Requests\Api\App\UpdateEstimateLineItemRequest;
 use App\Models\Estimate;
@@ -108,6 +110,50 @@ class EstimateLineItemController extends Controller
         $writer->restoreLineItem($existing);
 
         return response()->json(['data' => $this->lineItemArray($existing->fresh('allowances'))]);
+    }
+
+    /**
+     * Reorders a line item, optionally into a different section — mirrors
+     * App\Livewire\Estimates\EstimateShow::sort_line_item() exactly via
+     * App\Services\Estimates\EstimateLineItemWriter, the service both
+     * surfaces share.
+     */
+    public function move(MoveEstimateLineItemRequest $request, int $estimate, int $lineItem, EstimateLineItemWriter $writer): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('update', $found);
+
+        $existing = $found->estimate_line_items()->findOrFail($lineItem);
+
+        $sectionId = $request->validated('section_id');
+        // The destination must be one of this estimate's own sections too.
+        $section = $sectionId ? $found->estimate_sections()->findOrFail($sectionId) : null;
+
+        $moved = $writer->moveLineItem($existing, $request->validated('position'), $section);
+
+        return response()->json(['data' => $this->lineItemArray($moved->fresh('allowances'))]);
+    }
+
+    /**
+     * Credits a line item locked into the signed contract — a locked row's
+     * "Credit to change order" action, mirroring App\Livewire\LineItems\
+     * EstimateLineItemCreate::creditToChangeOrder() exactly via
+     * App\Services\Estimates\EstimateLineItemWriter, the service both
+     * surfaces share. The web only ever submits the item's own current
+     * quantity/cost here (its form fields are disabled once a row is
+     * locked), so the app does the same rather than taking them as input.
+     */
+    public function credit(CreditEstimateLineItemRequest $request, int $estimate, int $lineItem, EstimateLineItemWriter $writer): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+
+        $existing = $found->estimate_line_items()->findOrFail($lineItem);
+
+        $credit = $writer->creditToChangeOrder($existing, (float) $existing->quantity, (float) $existing->cost);
+
+        abort_unless($credit, 422, 'This line item is not locked into a signed contract.');
+
+        return response()->json(['data' => $this->lineItemArray($credit->fresh('allowances'))], 201);
     }
 
     /**

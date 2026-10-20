@@ -13,6 +13,7 @@ use App\Livewire\Estimates\EstimatesIndex;
 use App\Support\ProjectDocumentGenerator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Mail\EstimateSigningInvite;
+use App\Services\Estimates\EstimateLineItemWriter;
 use App\Services\Estimates\EstimateSectionWriter;
 
 use Flux;
@@ -465,15 +466,25 @@ class EstimateShow extends Component
         ]);
     }
 
+    /**
+     * Reorders a section — delegates to App\Services\Estimates\
+     * EstimateSectionWriter::moveSection(), shared with the Hive
+     * Contractors app's EstimateSectionController::move().
+     */
     public function sort_sections($item, $position): void
     {
         $this->authorize('update', $this->estimate);
 
         $section = $this->estimate->estimate_sections()->findOrFail($item);
-        $section->move($position);
+        app(EstimateSectionWriter::class)->moveSection($section, $position);
         $this->estimate_refresh();
     }
 
+    /**
+     * Reorders a line item, optionally into a different section — delegates
+     * to App\Services\Estimates\EstimateLineItemWriter::moveLineItem(),
+     * shared with the Hive Contractors app's EstimateLineItemController::move().
+     */
     public function sort_line_item($item, $position, $sectionId = null): void
     {
         $this->authorize('update', $this->estimate);
@@ -481,51 +492,17 @@ class EstimateShow extends Component
         $line_item = $this->estimate->estimate_line_items()->findOrFail($item);
 
         $sectionId = $sectionId ? (int) $sectionId : null;
-        $oldSectionId = $line_item->section_id;
+        $isCrossSection = $sectionId && $sectionId !== $line_item->section_id;
 
-        if ($sectionId && $sectionId !== $oldSectionId) {
-            // The destination must be one of this estimate's own sections too.
-            $this->estimate->estimate_sections()->findOrFail($sectionId);
+        // The destination must be one of this estimate's own sections too.
+        $section = $isCrossSection ? $this->estimate->estimate_sections()->findOrFail($sectionId) : null;
 
-            // Cross-section move: close the gap in the old section
-            $line_item->displace();
+        app(EstimateLineItemWriter::class)->moveLineItem($line_item, $position, $section);
 
-            // Move to the new section
-            $line_item->section_id = $sectionId;
-            $line_item->save();
-
-            // Refresh the relationship so scopeSortable picks up the new section
-            $line_item->unsetRelation('section');
-
-            // Insert at the correct position in the new section
-            $line_item->move($position);
-
-            // Recalculate totals on both sections
-            $oldSection = EstimateSection::find($oldSectionId);
-            $newSection = EstimateSection::find($sectionId);
-
-            foreach ([$oldSection, $newSection] as $section) {
-                if (! $section) {
-                    continue;
-                }
-
-                $section->total = $section->estimate_line_items()->sum('total');
-                $section->save();
-
-                if ($section->bid_id) {
-                    $bid = Bid::find($section->bid_id);
-                    if ($bid) {
-                        $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
-                        $bid->save();
-                    }
-                }
-            }
-
+        if ($isCrossSection) {
             $this->estimate_refresh();
             $this->refreshFinancialIslands();
         } else {
-            // Same-section reorder
-            $line_item->move($position);
             $this->estimate_refresh();
         }
     }

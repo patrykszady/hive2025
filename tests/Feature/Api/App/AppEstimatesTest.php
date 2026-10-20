@@ -1147,3 +1147,362 @@ it('refuses a Member reading or saving contract settings, like the web', functio
     $this->putJson("/api/app/v1/estimates/{$estimate->id}/contract-settings", [])->assertForbidden();
     $this->postJson("/api/app/v1/estimates/{$estimate->id}/contract-settings/bids")->assertForbidden();
 });
+
+// --- Credit a locked line item to a change order --------------------------
+
+/**
+ * Locks $section the same way a signed contract does: isLocked() needs
+ * isFullySigned() (vendor-signed is enough — appEstimatesClient() attaches
+ * no client users, so 0 client signatures are required) and the section's
+ * created_at at or before the earliest signature.
+ */
+function appEstimatesLockSection(Estimate $estimate, EstimateSection $section, User $vendorSigner): void
+{
+    $section->update(['created_at' => now()->subHour()]);
+
+    \App\Models\EstimateSignature::create([
+        'estimate_id' => $estimate->id,
+        'user_id' => $vendorSigner->id,
+        'signer_name' => $vendorSigner->first_name.' '.$vendorSigner->last_name,
+        'signer_email' => $vendorSigner->email,
+        'signer_phone' => '+12243334444',
+        'signature_data' => 'vendor-signature',
+        'signature_type' => 'draw',
+        'ip_address' => '127.0.0.1',
+        'user_agent' => 'Pest',
+        'document_hash' => 'hash-vendor',
+        'signed_at' => now(),
+    ]);
+}
+
+it('credits a line item locked into the signed contract, like EstimateLineItemCreate::creditToChangeOrder()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['total' => 500]);
+    $catalogItem = appEstimatesCatalogItem(['name' => 'Structural Header', 'cost' => 500]);
+    $lineItem = appEstimatesLineItemRow($estimate, $section, $catalogItem, ['quantity' => 1, 'cost' => 500, 'total' => 500]);
+
+    appEstimatesLockSection($estimate, $section, $admin);
+
+    $response = $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/credit")->assertCreated();
+
+    expect($response->json('data.name'))->toBe('Credit: Structural Header')
+        ->and((float) $response->json('data.total'))->toBe(-500.0)
+        ->and((float) $response->json('data.cost'))->toBe(-500.0);
+
+    $creditSection = EstimateSection::where('estimate_id', $estimate->id)->where('id', '!=', $section->id)->first();
+    expect($creditSection)->not->toBeNull()
+        ->and($creditSection->name)->toBe('Change Order')
+        ->and((float) $creditSection->fresh()->total)->toBe(-500.0)
+        // the original signed line item is untouched
+        ->and((float) $lineItem->fresh()->total)->toBe(500.0);
+});
+
+it('refuses crediting a line item that is not locked', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['total' => 500]);
+    $catalogItem = appEstimatesCatalogItem(['cost' => 500]);
+    $lineItem = appEstimatesLineItemRow($estimate, $section, $catalogItem, ['quantity' => 1, 'cost' => 500, 'total' => 500]);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/credit")->assertStatus(422);
+
+    expect(EstimateLineItem::where('estimate_id', $estimate->id)->count())->toBe(1);
+});
+
+it('refuses a Member crediting a line item, like the web', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['total' => 500]);
+    $catalogItem = appEstimatesCatalogItem(['cost' => 500]);
+    $lineItem = appEstimatesLineItemRow($estimate, $section, $catalogItem, ['quantity' => 1, 'cost' => 500, 'total' => 500]);
+    appEstimatesLockSection($estimate, $section, $admin);
+
+    ['user' => $member] = appEstimatesTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/credit")->assertForbidden();
+});
+
+// --- Reordering sections and line items ------------------------------------
+
+it('reorders sections, like EstimateShow::sort_sections()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $sectionA = appEstimatesSection($estimate, ['name' => 'A', 'order' => 0]);
+    $sectionB = appEstimatesSection($estimate, ['name' => 'B', 'order' => 1]);
+
+    $response = $this->patchJson("/api/app/v1/estimates/{$estimate->id}/sections/{$sectionA->id}/move", ['position' => 1])->assertOk();
+
+    expect($response->json('data.order'))->toBe(1)
+        ->and($sectionA->fresh()->order)->toBe(1)
+        ->and($sectionB->fresh()->order)->toBe(0);
+});
+
+it('refuses a Member reordering sections, like the web', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+
+    ['user' => $member] = appEstimatesTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->patchJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/move", ['position' => 0])->assertForbidden();
+});
+
+it('reorders a line item within its own section, like EstimateShow::sort_line_item()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalogItem = appEstimatesCatalogItem();
+    $first = appEstimatesLineItemRow($estimate, $section, $catalogItem, ['order' => 0]);
+    $second = appEstimatesLineItemRow($estimate, $section, $catalogItem, ['order' => 1]);
+
+    $this->patchJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$first->id}/move", ['position' => 1])->assertOk();
+
+    expect($first->fresh()->order)->toBe(1)
+        ->and($second->fresh()->order)->toBe(0);
+});
+
+it('moves a line item into a different section, rolling up both sections\' totals and bids', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $fromSection = appEstimatesSection($estimate, ['name' => 'From', 'order' => 0, 'total' => 100]);
+    $toSection = appEstimatesSection($estimate, ['name' => 'To', 'order' => 1, 'total' => 0]);
+    $catalogItem = appEstimatesCatalogItem(['cost' => 100]);
+    $lineItem = appEstimatesLineItemRow($estimate, $fromSection, $catalogItem, ['quantity' => 1, 'cost' => 100, 'total' => 100, 'order' => 0]);
+
+    $response = $this->patchJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/move", [
+        'position' => 0,
+        'section_id' => $toSection->id,
+    ])->assertOk();
+
+    expect($response->json('data.section_id'))->toBe($toSection->id)
+        ->and($lineItem->fresh()->section_id)->toBe($toSection->id)
+        ->and((float) $fromSection->fresh()->total)->toBe(0.0)
+        ->and((float) $toSection->fresh()->total)->toBe(100.0);
+});
+
+it('404s moving a line item into a section from a different estimate', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalogItem = appEstimatesCatalogItem();
+    $lineItem = appEstimatesLineItemRow($estimate, $section, $catalogItem);
+
+    $otherEstimate = appEstimatesRow($vendor, $project);
+    $otherSection = appEstimatesSection($otherEstimate);
+
+    $this->patchJson("/api/app/v1/estimates/{$estimate->id}/line-items/{$lineItem->id}/move", [
+        'position' => 0,
+        'section_id' => $otherSection->id,
+    ])->assertNotFound();
+});
+
+// --- AI estimating rules ---------------------------------------------------
+
+it('lists, adds, approves, dismisses and deletes AI estimating rules, like EstimateAIGenerator', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    $created = $this->postJson("/api/app/v1/estimates/{$estimate->id}/ai-rules", [
+        'text' => 'Always price flooring per square foot, not per box.',
+    ])->assertCreated();
+
+    $ruleId = $created->json('data.id');
+    expect($created->json('data.status'))->toBe('active');
+
+    $list = $this->getJson("/api/app/v1/estimates/{$estimate->id}/ai-rules")->assertOk();
+    expect(collect($list->json('data'))->pluck('id')->all())->toContain($ruleId);
+
+    $this->patchJson("/api/app/v1/estimates/{$estimate->id}/ai-rules/{$ruleId}/dismiss")->assertOk()
+        ->assertJsonPath('data.status', 'dismissed');
+
+    $this->patchJson("/api/app/v1/estimates/{$estimate->id}/ai-rules/{$ruleId}/approve")->assertOk()
+        ->assertJsonPath('data.status', 'active');
+
+    $this->deleteJson("/api/app/v1/estimates/{$estimate->id}/ai-rules/{$ruleId}")->assertOk();
+
+    expect(\App\Models\EstimateAiRule::find($ruleId))->toBeNull();
+});
+
+it('dismisses rather than deletes a proposed rule with a fingerprint, like EstimateAIGenerator::deleteRule()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    $rule = \App\Models\EstimateAiRule::create([
+        'vendor_id' => $vendor->id,
+        'text' => 'Pattern-sourced rule.',
+        'status' => \App\Models\EstimateAiRule::ACTIVE,
+        'source' => \App\Models\EstimateAiRule::FROM_PATTERN,
+        'fingerprint' => 'abc123',
+    ]);
+
+    $this->deleteJson("/api/app/v1/estimates/{$estimate->id}/ai-rules/{$rule->id}")->assertOk();
+
+    expect($rule->fresh()->status)->toBe(\App\Models\EstimateAiRule::DISMISSED);
+});
+
+it('refuses a Member managing AI estimating rules, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appEstimatesTeamUser(role: 2);
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson("/api/app/v1/estimates/{$estimate->id}/ai-rules")->assertForbidden();
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/ai-rules", ['text' => 'Nope, not allowed.'])->assertForbidden();
+});
+
+// --- Discarding an AI draft -------------------------------------------------
+
+it('discards an AI draft, force-deleting its line items and clearing the section scope', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalogItem = appEstimatesCatalogItem(['name' => 'Demo Bathroom', 'cost' => 850]);
+
+    app()->instance(EstimateAIService::class, new FakeClaudeEstimateService([
+        'text' => json_encode(['reasoning' => 'Hall bath demo.', 'line_items' => [
+            ['line_item_id' => $catalogItem->id, 'quantity' => 1],
+        ]]),
+        'stop_reason' => 'end_turn',
+    ]));
+
+    $draftResponse = $this->postJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/ai-draft", [
+        'inquiry' => 'Demo the hall bathroom before retiling.',
+    ])->assertCreated();
+
+    $draftId = $draftResponse->json('data.draft_id');
+    $draftedLineItemId = $draftResponse->json('data.line_items.0.id');
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/ai-draft/{$draftId}/discard")->assertOk()
+        ->assertJsonPath('data.discarded', true);
+
+    expect(EstimateLineItem::withTrashed()->find($draftedLineItemId))->toBeNull()
+        ->and($section->fresh()->ai_inquiry)->toBeNull()
+        ->and(\App\Models\EstimateAiDraft::find($draftId)->status)->toBe(\App\Models\EstimateAiDraft::DISCARDED);
+});
+
+it('refuses a Member discarding an AI draft, like the web', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+
+    $draft = \App\Models\EstimateAiDraft::create([
+        'vendor_id' => $vendor->id,
+        'estimate_id' => $estimate->id,
+        'section_id' => $section->id,
+        'inquiry' => 'Demo the hall bathroom before retiling.',
+        'drafted_items' => [],
+        'status' => \App\Models\EstimateAiDraft::DRAFTED,
+    ]);
+
+    ['user' => $member] = appEstimatesTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/ai-draft/{$draft->id}/discard")->assertForbidden();
+});
+
+// --- Floorplan image upload on the AI draft ---------------------------------
+
+it('measures an uploaded floorplan image via OCR and records its metrics on the draft', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalogItem = appEstimatesCatalogItem(['name' => 'Demo Bathroom', 'cost' => 850]);
+
+    config(['services.ocr_space.api_key' => 'test-key', 'services.ocr_space.endpoint' => 'https://api.ocr.space/parse/image']);
+    \Illuminate\Support\Facades\Http::fake([
+        'api.ocr.space/*' => \Illuminate\Support\Facades\Http::response([
+            'ParsedResults' => [['ParsedText' => 'Floor Area: 400 sq ft. Wall Area: 900 sq ft.']],
+        ]),
+    ]);
+
+    app()->instance(EstimateAIService::class, new FakeClaudeEstimateService([
+        'text' => json_encode(['reasoning' => 'Hall bath demo.', 'line_items' => [
+            ['line_item_id' => $catalogItem->id, 'quantity' => 1],
+        ]]),
+        'stop_reason' => 'end_turn',
+    ]));
+
+    $file = \Illuminate\Http\UploadedFile::fake()->image('floorplan.jpg');
+
+    $response = $this->postJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/ai-draft", [
+        'inquiry' => 'Demo the hall bathroom before retiling.',
+        'floorplans' => [$file],
+    ])->assertCreated();
+
+    $draft = \App\Models\EstimateAiDraft::findOrFail($response->json('data.draft_id'));
+
+    expect($draft->floorplan)->not->toBeNull()
+        ->and((float) $draft->floorplan['floor_sqft'])->toBe(400.0)
+        ->and((float) $draft->floorplan['wall_sqft'])->toBe(900.0);
+});
+
+it('refuses more than 5 floorplan images on an AI draft', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+
+    $files = array_map(fn ($i) => \Illuminate\Http\UploadedFile::fake()->image("floor-{$i}.jpg"), range(1, 6));
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/ai-draft", [
+        'inquiry' => 'Demo the hall bathroom before retiling.',
+        'floorplans' => $files,
+    ])->assertStatus(422);
+});
