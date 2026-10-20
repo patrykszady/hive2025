@@ -377,10 +377,12 @@ class LeadCreate extends Component
         $lead->origin = $this->origin;
         $lead->save();
 
-        $lead->statuses()->create([
-            'title' => $this->lead_status,
-            'belongs_to_vendor_id' => $lead->belongs_to_vendor_id,
-        ]);
+        // The footer status select already saves live via updated()'s
+        // setStatus() call; this only guards against writing a duplicate
+        // status row when Update is clicked without the status changing.
+        if ($this->lead_status) {
+            $lead->setStatus($this->lead_status);
+        }
 
         $this->lead_status = null;
         $this->modal('lead_form_modal')->close();

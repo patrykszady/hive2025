@@ -4,6 +4,7 @@ namespace App\Livewire\Forms;
 
 use App\Services\Timesheets\TimesheetConfirmation;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Attributes\Rule;
 use Livewire\Form;
 
 class TimesheetForm extends Form
@@ -33,6 +34,8 @@ class TimesheetForm extends Form
     /** @see TimesheetConfirmation::confirm() — the actual write, shared with the app's TimesheetCreateController. */
     public function store()
     {
+        $this->validate();
+
         return app(TimesheetConfirmation::class)->confirm(
             auth()->user(),
             $this->component->user,
