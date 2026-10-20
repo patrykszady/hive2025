@@ -73,7 +73,23 @@ class EmailPlacement
 
         $email->forceFill(['project_id' => $project->id, 'unplaced_dismissed_at' => null])->save();
 
-        if ((array) $email->action_items !== []) {
+        // The rest of the conversation goes with it: a reply in the same
+        // thread is about the same job (Kristin's "Re: Abbey-plumbing
+        // delivery" under Jenn's email, 2026-10-20).
+        $siblings = $email->thread_id
+            ? EmailMessage::query()
+                ->where('belongs_to_vendor_id', $email->belongs_to_vendor_id)
+                ->where('thread_id', $email->thread_id)
+                ->whereKeyNot($email->id)
+                ->whereNull('project_id')
+                ->get()
+            : collect();
+
+        foreach ($siblings as $sibling) {
+            $sibling->forceFill(['project_id' => $project->id, 'unplaced_dismissed_at' => null])->save();
+        }
+
+        if ((array) $email->action_items !== [] || $siblings->contains(fn (EmailMessage $sibling) => (array) $sibling->action_items !== [])) {
             ExtractProjectActionItems::dispatch($project->id)->delay(now()->addMinute());
         }
 

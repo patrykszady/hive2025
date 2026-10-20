@@ -83,7 +83,24 @@ class StakeholderEmailStore
         }
 
         $body = $this->mail->plainBody($message);
-        $projects = $match['projects'];
+        $subject = (string) ($message['subject'] ?? '');
+        $threadId = $message['thread_id'] ?? null;
+
+        // A client the subject names ("Abbey-plumbing delivery") is a
+        // candidate too, ahead of the sender's own jobs.
+        $projects = $this->stakeholders->namedInSubject($subject, $vendorId)
+            ->concat($match['projects'])
+            ->unique('id')
+            ->take(EmailStakeholders::MAX_CANDIDATES)
+            ->values();
+
+        // A reply goes where the rest of its thread already went.
+        $threadProjectId = $this->threadProjectId($vendorId, $threadId);
+        $projectId = $projects->count() === 1 ? $projects->first()->id : $threadProjectId;
+        $candidateIds = $projects->pluck('id')
+            ->when($threadProjectId && ! $projects->contains('id', $threadProjectId), fn ($ids) => $ids->push($threadProjectId))
+            ->values()
+            ->all();
 
         try {
             $row = EmailMessage::create([
@@ -92,7 +109,7 @@ class StakeholderEmailStore
                 'nylas_message_id' => $nylasId,
                 'grant_id' => $grantId,
                 'mailbox' => $mailbox,
-                'thread_id' => $message['thread_id'] ?? null,
+                'thread_id' => $threadId,
                 'rfc_message_id' => $rfcId !== '' ? Str::limit($rfcId, 990, '') : null,
                 'in_reply_to' => isset($headers['in-reply-to']) ? Str::limit(trim($headers['in-reply-to']), 990, '') : null,
                 'direction' => $outbound ? EmailMessage::DIRECTION_OUTBOUND : EmailMessage::DIRECTION_INBOUND,
@@ -100,15 +117,15 @@ class StakeholderEmailStore
                 'from_name' => isset($message['from'][0]['name']) ? Str::limit(trim((string) $message['from'][0]['name']), 255, '') : null,
                 'to' => $to,
                 'cc' => $cc,
-                'subject' => Str::limit((string) ($message['subject'] ?? ''), 500, ''),
+                'subject' => Str::limit($subject, 500, ''),
                 'snippet' => Str::limit(trim((string) ($message['snippet'] ?? '')) ?: Str::squish($body), 500, ''),
                 'body_text' => Str::limit($body, 200000, ''),
                 'sent_at' => isset($message['date']) ? Carbon::createFromTimestamp((int) $message['date']) : now(),
                 'client_id' => $match['client_id'],
                 'vendor_id' => $match['vendor_id'],
                 'user_id' => $match['user']?->id,
-                'project_id' => $projects->count() === 1 ? $projects->first()->id : null,
-                'candidate_project_ids' => $projects->pluck('id')->all(),
+                'project_id' => $projectId,
+                'candidate_project_ids' => $candidateIds,
             ]);
         } catch (UniqueConstraintViolationException) {
             // The webhook and the sweep raced on the same email.
@@ -124,6 +141,23 @@ class StakeholderEmailStore
         SummarizeEmailMessage::dispatch($row->id);
 
         return $row;
+    }
+
+    /** The project an earlier email of the same conversation was put on, if any. */
+    public function threadProjectId(int $vendorId, ?string $threadId): ?int
+    {
+        if (! $threadId) {
+            return null;
+        }
+
+        $projectId = EmailMessage::query()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->where('thread_id', $threadId)
+            ->whereNotNull('project_id')
+            ->latest('id')
+            ->value('project_id');
+
+        return $projectId ? (int) $projectId : null;
     }
 
     /**

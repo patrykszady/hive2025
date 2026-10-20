@@ -69,6 +69,8 @@ it('summarizes an email like a call and places it on the project it is about', f
         $prompt = $request['messages'][1]['content'];
 
         return str_contains($prompt, "id {$kitchen->id}: Kitchen")
+            // The client's name rides along, so "Abbey-plumbing delivery" can find the Abbeys' job.
+            && str_contains($prompt, '(client: ')
             && str_contains($prompt, "New message:\nCan you send the hardware options")
             && str_contains($prompt, 'Quoted history (context only)');
     });

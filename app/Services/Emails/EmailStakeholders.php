@@ -2,6 +2,7 @@
 
 namespace App\Services\Emails;
 
+use App\Models\Client;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Vendor;
@@ -22,6 +23,45 @@ class EmailStakeholders
 
     /** Candidate projects offered to the AI read, newest first. */
     public const MAX_CANDIDATES = 15;
+
+    /** Reply/forward prefixes that are never a client's name. */
+    private const SUBJECT_NOISE = ['re', 'fw', 'fwd'];
+
+    /**
+     * Open projects whose client a capitalized word in the subject names by
+     * last name — suppliers and designers write "Abbey-plumbing delivery"
+     * about a job they are not on as a vendor, so the sender alone never
+     * finds it (emails 2 and 144, 2026-10-20).
+     *
+     * @return Collection<int, Project>
+     */
+    public function namedInSubject(?string $subject, int $companyVendorId): Collection
+    {
+        preg_match_all("/\\p{Lu}[\\p{L}']{2,}/u", (string) $subject, $matches);
+
+        $words = collect($matches[0])
+            ->map(fn (string $word) => mb_strtolower($word))
+            ->reject(fn (string $word) => in_array($word, self::SUBJECT_NOISE, true))
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($words === []) {
+            return collect();
+        }
+
+        $clientIds = Client::withoutGlobalScopes()
+            ->whereHas('users', fn ($users) => $users->withoutGlobalScopes()->whereIn(DB::raw('LOWER(last_name)'), $words))
+            ->pluck('clients.id');
+
+        if ($clientIds->isEmpty()) {
+            return collect();
+        }
+
+        return $this->open(Project::withoutGlobalScopes()
+            ->whereIn('client_id', $clientIds)
+            ->where('belongs_to_vendor_id', $companyVendorId));
+    }
 
     /**
      * @param  list<string>  $addresses  external addresses, the most telling first (the sender, or whom we wrote to)

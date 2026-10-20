@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Client;
 use App\Models\EmailMessage;
 use App\Models\Project;
 use App\Models\User;
@@ -54,7 +55,7 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
         $model = (string) config('emails.stakeholder_sync.summary_model', 'gpt-4.1');
         $candidates = Project::withoutGlobalScopes()
             ->whereIn('id', (array) ($email->candidate_project_ids ?? []))
-            ->get(['id', 'project_name', 'address', 'city']);
+            ->get(['id', 'project_name', 'address', 'city', 'client_id']);
 
         $response = Http::withToken($apiKey)
             ->timeout(60)
@@ -155,7 +156,7 @@ Write in English, refer to people by first name, and stay factual — never inve
 - next_steps: the expected upcoming sequence of events.
 - sentiment: positive, neutral, negative or mixed.
 - intent: a few words on what the sender wants ("schedule a repair", "approve change order", "send invoice").
-- project_id: when several projects are listed, the one the email is about (match addresses, rooms and trades). Null when unclear or only one is listed.
+- project_id: when several projects are listed, the one the email is about (match the client's name, addresses, rooms and trades — suppliers and designers often name the homeowner by last name, as in "Abbey-plumbing delivery"). Null when unclear or only one is listed.
 
 Quoted history below the new message is context only: summarize the NEW message. Dates: resolve "tomorrow", "Monday" etc. against the email's sent time; never invent a month.
 PROMPT;
@@ -167,7 +168,17 @@ PROMPT;
         $latest = self::latestPart((string) $email->body_text);
         $history = Str::limit(trim(Str::after((string) $email->body_text, $latest)), 1500, '');
 
-        $projects = $candidates->map(fn (Project $project) => "- id {$project->id}: ".trim(($project->project_name ?: 'Untitled').', '.trim(implode(', ', array_filter([$project->address, $project->city])))))->implode("\n");
+        // The project's own client_id, not Project::client() — that goes
+        // through project_vendor scoped to whoever is signed in, and a queued
+        // job has nobody.
+        $clients = Client::withoutGlobalScopes()
+            ->with(['users' => fn ($users) => $users->withoutGlobalScopes()])
+            ->whereIn('id', $candidates->pluck('client_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
+
+        $projects = $candidates->map(fn (Project $project) => "- id {$project->id}: ".trim(($project->project_name ?: 'Untitled').', '.trim(implode(', ', array_filter([$project->address, $project->city]))))
+            .(($client = $clients->get($project->client_id)) ? ' (client: '.$client->name.')' : ''))->implode("\n");
 
         return 'Direction: '.($email->isInbound() ? 'received from the stakeholder' : 'sent by the team')."\n"
             .'Mailbox: '.($email->mailbox ?? 'unknown')." ({$staff})\n"

@@ -74,6 +74,42 @@ it('lets an Admin put an email on one of its candidate projects', function () {
     Queue::assertPushed(ExtractProjectActionItems::class, fn ($job) => $job->projectId === $world['project']->id);
 });
 
+it('brings the rest of the thread along when an email is put on a project', function () {
+    $world = serviceCallWorld();
+    $jenn = unplacedEmail($world, ['thread_id' => 'thread-abbey']);
+    $kristin = unplacedEmail($world, ['thread_id' => 'thread-abbey', 'subject' => 'Re: Abbey plumbing delivery', 'from_name' => 'Kristin Holthouse']);
+    $other = unplacedEmail($world, ['thread_id' => 'thread-other']);
+
+    app(\App\Services\Emails\EmailPlacement::class)->place($jenn, $world['project']->id, $world['admin']);
+
+    expect($jenn->fresh()->project_id)->toBe($world['project']->id)
+        ->and($kristin->fresh()->project_id)->toBe($world['project']->id)
+        ->and($other->fresh()->project_id)->toBeNull();
+});
+
+it('rematches the unplaced inbox by thread and by a client named in the subject', function () {
+    $world = serviceCallWorld();
+    $abbeys = sec3_makeClient($world['vendor']);
+    $erin = sec3_makeClientUser($abbeys, 'erin');
+    $erin->forceFill(['last_name' => 'Abbey'])->save();
+    $kitchen = sec3_makeProject($world['vendor'], $abbeys, ['project_name' => 'Kitchen']);
+    \App\Models\ProjectStatus::create(['project_id' => $kitchen->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+
+    $named = unplacedEmail($world, ['subject' => 'Abbey-plumbing delivery', 'thread_id' => 'thread-1']);
+    $placedSibling = unplacedEmail($world, ['thread_id' => 'thread-2', 'project_id' => $world['project']->id]);
+    $reply = unplacedEmail($world, ['subject' => 'Re: grout', 'thread_id' => 'thread-2']);
+    $nothing = unplacedEmail($world, ['subject' => 'Lunch', 'thread_id' => 'thread-3']);
+
+    $this->artisan('emails:rematch-unplaced')->assertSuccessful();
+
+    expect($reply->fresh()->project_id)->toBe($world['project']->id)
+        ->and($named->fresh()->summarized_at)->toBeNull()
+        ->and($named->fresh()->candidate_project_ids)->toContain($kitchen->id)
+        ->and($nothing->fresh()->summarized_at)->not->toBeNull();
+    Queue::assertPushed(\App\Jobs\SummarizeEmailMessage::class, fn ($job) => $job->emailMessageId === $named->id);
+    Queue::assertNotPushed(\App\Jobs\SummarizeEmailMessage::class, fn ($job) => $job->emailMessageId === $nothing->id);
+});
+
 it('puts an email on another open project, but never on another company\'s', function () {
     $world = serviceCallWorld();
     $email = unplacedEmail($world, ['action_items' => []]);

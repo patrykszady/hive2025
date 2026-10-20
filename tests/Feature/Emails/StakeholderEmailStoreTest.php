@@ -250,3 +250,48 @@ it('keeps an email the AI could not place off the client\'s projects', function 
     expect(EmailMessage::forProject($world['project'])->pluck('id')->sort()->values()->all())->toBe(collect([$pending->id, $placed->id])->sort()->values()->all())
         ->and(EmailMessage::forProject($world['project'])->pluck('id'))->not->toContain($unplaced->id);
 });
+
+it('offers the project of a client the subject names by last name', function () {
+    $world = serviceCallWorld();
+    $abbeys = sec3_makeClient($world['vendor']);
+    $erin = sec3_makeClientUser($abbeys, 'erin');
+    $erin->forceFill(['first_name' => 'Erin', 'last_name' => 'Abbey'])->save();
+    $kitchen = sec3_makeProject($world['vendor'], $abbeys, ['project_name' => 'Kitchen']);
+    ProjectStatus::create(['project_id' => $kitchen->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+
+    // A designer on Katie's job writes about the Abbeys', which she isn't on (emails 2 and 144).
+    $designer = Vendor::factory()->create(['business_name' => 'JP Design '.uniqid(), 'business_email' => 'jenn.'.uniqid().'@jpdesign.test']);
+    $world['project']->vendors()->attach($designer->id, ['client_id' => $world['client']->id]);
+
+    $row = app(StakeholderEmailStore::class)->store(nylasMessage($world, [
+        'subject' => 'Abbey-plumbing delivery',
+        'from' => [['name' => 'Jennifer Peterson', 'email' => $designer->business_email]],
+        'cc' => [],
+    ]), 'grant-1', $world['mailbox']);
+
+    expect($row->project_id)->toBeNull()
+        ->and($row->candidate_project_ids)->toEqualCanonicalizing([$kitchen->id, $world['project']->id]);
+});
+
+it('does not take a reply prefix or an unknown capitalized word for a client name', function () {
+    $world = serviceCallWorld();
+
+    expect(app(\App\Services\Emails\EmailStakeholders::class)->namedInSubject('Re: Fwd: Kitchen Delivery', $world['vendor']->id))->toBeEmpty();
+});
+
+it('puts a reply on the project its thread is already on', function () {
+    $world = serviceCallWorld();
+    $kitchen = sec3_makeProject($world['vendor'], $world['client'], ['project_name' => 'Kitchen']);
+    ProjectStatus::create(['project_id' => $kitchen->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+    EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id,
+        'thread_id' => 'thread-abbey',
+        'project_id' => $kitchen->id,
+        'summarized_at' => now(),
+    ]);
+
+    // Katie has two projects, so only the thread can tell which one.
+    $row = app(StakeholderEmailStore::class)->store(nylasMessage($world, ['thread_id' => 'thread-abbey']), 'grant-1', $world['mailbox']);
+
+    expect($row->project_id)->toBe($kitchen->id);
+});
