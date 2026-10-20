@@ -249,6 +249,33 @@ Route::get('estimates/{estimate}/signed-contract/signed', [\App\Http\Controllers
     ->whereNumber('estimate')
     ->name('estimates.signed-contract.signed');
 
+// The Sheets (profit & loss) report's Export > Excel/PDF menu items for the
+// Hive Contractors app: a time-limited signed link to a file already
+// rendered, while authenticated, by GET /api/app/v1/sheets/export/csv-url
+// or export/pdf-url — see Api\App\V1\SheetController and
+// SheetExportController's own docblocks for why this never re-runs the
+// report's query itself (the global scopes it depends on need a signed-in
+// user to filter by company).
+Route::get('sheets/export/csv/{token}/signed', [\App\Http\Controllers\SheetExportController::class, 'csvSigned'])
+    ->middleware('signed')
+    ->where('token', '[0-9a-fA-F-]{36}')
+    ->name('sheets.export.csv.signed');
+
+Route::get('sheets/export/pdf/{token}/signed', [\App\Http\Controllers\SheetExportController::class, 'pdfSigned'])
+    ->middleware('signed')
+    ->where('token', '[0-9a-fA-F-]{36}')
+    ->name('sheets.export.pdf.signed');
+
+// A bank's latest Plaid statement PDF for the Hive Contractors app: a
+// time-limited signed link to a file already fetched from Plaid and
+// rendered, while authenticated, by GET /api/app/v1/banks/{id}/statement-url
+// — see Api\App\V1\BankController::statementUrl() and
+// BankStatementExportController's own docblocks.
+Route::get('banks/statements/{token}/signed', [\App\Http\Controllers\BankStatementExportController::class, 'signed'])
+    ->middleware('signed')
+    ->where('token', '[0-9a-fA-F-]{36}')
+    ->name('banks.statement.signed');
+
 // A vendor document/certificate scan for the Hive Contractors app: a
 // time-limited signed link handed out by GET /api/app/v1/vendor-docs/{vendor}
 // (see VendorDocResource), so the app's Vendor Documents screen can show it

@@ -3,20 +3,41 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\CategorizeSheetExpenseRequest;
+use App\Http\Resources\Api\App\ExpenseResource;
+use App\Models\Category;
+use App\Models\Expense;
 use App\Models\Sheet;
 use App\Services\Dashboard\MonthlyFinancialSummary;
+use App\Services\Sheets\ProfitAndLossExporter;
 use App\Services\Sheets\ProfitAndLossFigures;
 use App\Services\Sheets\SheetBankOptions;
+use App\Services\Sheets\UncategorizedExpenseAssigner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\URL;
 
 /**
- * The app's Sheets tab — read-only, same figures as the web's
- * App\Livewire\Sheets\{SheetsIndex,SheetShow,SheetMonthly}. Exporting to
- * CSV/PDF and assigning an uncategorized expense's category both stay
- * web-only (file generation and an edit action, neither fits "read-only
- * figures") — see the "Open in Hive" button on the detail screen.
+ * The app's Sheets tab — same figures as the web's App\Livewire\Sheets\
+ * {SheetsIndex,SheetShow,SheetMonthly}, plus exporting to CSV/PDF
+ * (exportCsvUrl()/exportPdfUrl()) and assigning an uncategorized expense's
+ * category (categorizeExpense()).
+ *
+ * The export endpoints don't hand back a URL that re-runs the P&L query:
+ * App\Scopes\{ExpenseScope,CheckScope,TransactionScope} only filter by
+ * company when auth()->user() exists, and the signed download link
+ * (SheetExportController, in routes/web.php) is deliberately session-less
+ * like every other signed route in this app — re-running the report there
+ * would mix every tenant's books together. Instead the file is rendered
+ * once, right here, while still authenticated and correctly scoped (via
+ * App\Services\Sheets\ProfitAndLossExporter, the same renderer
+ * App\Livewire\Sheets\SheetShow::export_csv()/export_pdf() now call), then
+ * stored under storage/app/exports/sheets and served back by a dumb,
+ * scope-free file read — the same pattern EstimatePdfController::
+ * signedContract() uses for an already-generated file.
  */
 class SheetController extends Controller
 {
@@ -42,21 +63,7 @@ class SheetController extends Controller
     {
         $this->authorize('viewAny', Sheet::class);
 
-        $bankAccountIds = array_values(array_filter(array_map(
-            'intval',
-            (array) $request->query('bank_account_ids', [])
-        )));
-
-        abort_if(empty($bankAccountIds), 422, 'Select at least one bank account.');
-
-        $startDate = (string) $request->query('start_date', today()->subYear()->format('Y-m-d'));
-        $endDate = (string) $request->query('end_date', today()->format('Y-m-d'));
-        abort_unless(strtotime($startDate) !== false && strtotime($endDate) !== false, 422, 'Invalid date range.');
-        abort_if($endDate < $startDate, 422, 'End date must be after the start date.');
-
-        $cash = $request->query('cash', 'include') === 'hide' ? 'hide' : 'include';
-        $basis = $request->query('basis', 'accrual') === 'cash' ? 'cash' : 'accrual';
-
+        [$startDate, $endDate, $bankAccountIds, $cash, $basis] = $this->filtersFromRequest($request);
         $figures = new ProfitAndLossFigures($startDate, $endDate, $bankAccountIds, $cash, $basis);
 
         $materialsTotal = $figures->costOfMaterialsSum();
@@ -104,6 +111,15 @@ class SheetController extends Controller
                 ],
                 'net_operating_income' => round($netOperatingIncome, 2),
                 'net_income' => round($netOperatingIncome, 2),
+                // Mirrors SheetShow::uncategorizedExpenses() — expenses (not
+                // bank transactions) in range with no category_id, offered
+                // for inline categorization below.
+                'uncategorized_expenses' => $figures->uncategorizedExpenses()->map(fn (Expense $expense) => [
+                    'id' => $expense->id,
+                    'amount' => (float) $expense->amount,
+                    'date' => $expense->date?->toDateString(),
+                    'vendor' => $expense->vendor?->business_name,
+                ])->values()->all(),
                 'web_path' => '/sheets/show?'.http_build_query([
                     'start_date' => $startDate,
                     'end_date' => $endDate,
@@ -113,6 +129,88 @@ class SheetController extends Controller
                 ]),
             ],
         ]);
+    }
+
+    /** Assigns a category to an uncategorized expense — mirrors SheetShow::categorizeExpense(). */
+    public function categorizeExpense(CategorizeSheetExpenseRequest $request, int $expense): JsonResponse
+    {
+        $this->authorize('viewAny', Sheet::class);
+
+        $found = Expense::findOrFail($expense);
+        $category = Category::findOrFail($request->validated('category_id'));
+
+        app(UncategorizedExpenseAssigner::class)->assign($found, $category);
+
+        return response()->json(['data' => (new ExpenseResource($found->refresh()))->toArray($request)]);
+    }
+
+    /** A signed link to an XLSX of the current filters — see this class's own docblock for why it's pre-rendered. */
+    public function exportCsvUrl(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Sheet::class);
+
+        [$startDate, $endDate, $bankAccountIds, $cash, $basis] = $this->filtersFromRequest($request);
+        $figures = new ProfitAndLossFigures($startDate, $endDate, $bankAccountIds, $cash, $basis);
+        $companyName = $request->user()->vendor->business_name ?? config('app.name');
+
+        $export = app(ProfitAndLossExporter::class)->xlsx($figures, $startDate, $endDate, $basis, $companyName);
+
+        return response()->json(['data' => $this->storeAndSign($export, 'sheets.export.csv.signed')]);
+    }
+
+    /** A signed link to a PDF of the current filters — see this class's own docblock for why it's pre-rendered. */
+    public function exportPdfUrl(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Sheet::class);
+
+        [$startDate, $endDate, $bankAccountIds, $cash, $basis] = $this->filtersFromRequest($request);
+        $figures = new ProfitAndLossFigures($startDate, $endDate, $bankAccountIds, $cash, $basis);
+        $companyName = $request->user()->vendor->business_name ?? config('app.name');
+
+        $export = app(ProfitAndLossExporter::class)->pdf($figures, $startDate, $endDate, $basis, $companyName);
+
+        return response()->json(['data' => $this->storeAndSign($export, 'sheets.export.pdf.signed')]);
+    }
+
+    /**
+     * @param  array{binary: string, filename: string}  $export
+     * @return array{url: string, expires_at: string}
+     */
+    private function storeAndSign(array $export, string $routeName): array
+    {
+        $extension = $routeName === 'sheets.export.csv.signed' ? 'xlsx' : 'pdf';
+        $token = (string) Str::uuid();
+        Storage::disk('local')->put("exports/sheets/{$token}.{$extension}", $export['binary']);
+
+        $expiresAt = now()->addMinutes(10);
+
+        return [
+            'url' => URL::temporarySignedRoute($routeName, $expiresAt, ['token' => $token, 'filename' => $export['filename']]),
+            'expires_at' => $expiresAt->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{0: string, 1: string, 2: list<int>, 3: string, 4: string} [startDate, endDate, bankAccountIds, cash, basis]
+     */
+    private function filtersFromRequest(Request $request): array
+    {
+        $bankAccountIds = array_values(array_filter(array_map(
+            'intval',
+            (array) $request->query('bank_account_ids', [])
+        )));
+
+        abort_if(empty($bankAccountIds), 422, 'Select at least one bank account.');
+
+        $startDate = (string) $request->query('start_date', today()->subYear()->format('Y-m-d'));
+        $endDate = (string) $request->query('end_date', today()->format('Y-m-d'));
+        abort_unless(strtotime($startDate) !== false && strtotime($endDate) !== false, 422, 'Invalid date range.');
+        abort_if($endDate < $startDate, 422, 'End date must be after the start date.');
+
+        $cash = $request->query('cash', 'include') === 'hide' ? 'hide' : 'include';
+        $basis = $request->query('basis', 'accrual') === 'cash' ? 'cash' : 'accrual';
+
+        return [$startDate, $endDate, $bankAccountIds, $cash, $basis];
     }
 
     public function monthly(MonthlyFinancialSummary $monthlySummary): JsonResponse

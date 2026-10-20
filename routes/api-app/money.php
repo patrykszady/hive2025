@@ -26,8 +26,13 @@ Route::put('payments/{payment}', [AppPaymentController::class, 'update'])->where
 Route::delete('payments/{payment}', [AppPaymentController::class, 'destroy'])->whereNumber('payment')->name('payments.destroy');
 
 Route::get('checks', [AppCheckController::class, 'index'])->name('checks.index');
+// Ahead of checks/{check} in spirit only — whereNumber() already keeps a
+// non-numeric path from being swallowed as an id.
+Route::get('checks/bank-accounts', [AppCheckController::class, 'bankAccountOptions'])->name('checks.bank-accounts');
 Route::get('checks/{check}', [AppCheckController::class, 'show'])->whereNumber('check')->name('checks.show');
-// Mirrors App\Livewire\Checks\CheckShow::uploadCheckImage() — see
-// CheckController::uploadImage()'s docblock for why editing/creating a
-// check itself stays web-only while this does not.
+// Mirrors App\Livewire\Forms\CheckForm::update()/delete() via
+// App\Services\Checks\CheckUpdateService — see CheckController's docblock.
+Route::put('checks/{check}', [AppCheckController::class, 'update'])->whereNumber('check')->name('checks.update');
+Route::delete('checks/{check}', [AppCheckController::class, 'destroy'])->whereNumber('check')->name('checks.destroy');
+// Mirrors App\Livewire\Checks\CheckShow::uploadCheckImage().
 Route::post('checks/{check}/images', [AppCheckController::class, 'uploadImage'])->whereNumber('check')->name('checks.images.store');

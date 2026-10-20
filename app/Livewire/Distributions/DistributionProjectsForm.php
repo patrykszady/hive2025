@@ -4,6 +4,7 @@ namespace App\Livewire\Distributions;
 
 use App\Models\Distribution;
 use App\Models\Project;
+use App\Services\Distributions\DistributionProjectAssignment;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
@@ -71,16 +72,7 @@ class DistributionProjectsForm extends Component
         $this->resetErrorBag();
         $this->percent_distributions_sum = 0;
 
-        $this->distributions = Distribution::query()
-            ->orderBy('id')
-            ->get(['id', 'name'])
-            ->map(fn (Distribution $distribution): array => [
-                'id' => (int) $distribution->id,
-                'name' => (string) $distribution->name,
-                'percent' => null,
-                'amount' => null,
-            ])
-            ->all();
+        $this->distributions = app(DistributionProjectAssignment::class)->rows(null);
     }
 
     public function getPercentSumProperty(): int
@@ -92,10 +84,9 @@ class DistributionProjectsForm extends Component
 
     private function recalculateTotals(): void
     {
-        $this->percent_distributions_sum = (int) collect($this->distributions)
-            ->pluck('percent')
-            ->filter(fn ($percent) => is_numeric($percent) && (int) $percent > 0)
-            ->sum();
+        $this->percent_distributions_sum = app(DistributionProjectAssignment::class)->percentSum(
+            collect($this->distributions)->pluck('percent', 'id')->all()
+        );
 
         $profit = (float) data_get($this->project?->finances ?? [], 'profit', 0);
 
@@ -117,24 +108,8 @@ class DistributionProjectsForm extends Component
         $this->project = $project;
         $this->project->loadMissing(['distributions', 'client.users']);
 
-        $this->resetModal();
-
-        $existing = $this->project->distributions
-            ->mapWithKeys(fn (Distribution $distribution): array => [
-                (int) $distribution->id => [
-                    'percent' => (int) $distribution->pivot->percent,
-                    'amount' => (float) $distribution->pivot->amount,
-                ],
-            ]);
-
-        foreach ($this->distributions as $index => $row) {
-            $existingRow = $existing->get((int) $row['id']);
-
-            if ($existingRow) {
-                $this->distributions[$index]['percent'] = $existingRow['percent'];
-                $this->distributions[$index]['amount'] = $existingRow['amount'];
-            }
-        }
+        $this->resetErrorBag();
+        $this->distributions = app(DistributionProjectAssignment::class)->rows($this->project);
 
         $this->recalculateTotals();
         $this->modal('project_distributions_modal')->show();
@@ -151,28 +126,10 @@ class DistributionProjectsForm extends Component
         $this->recalculateTotals();
         $this->validate();
 
-        $profit = (float) data_get($this->project->finances ?? [], 'profit', 0);
-
-        // $this->distributions[*]['id'] is a client-controlled array value:
-        // only ever sync ids DistributionScope says belong to my vendor.
-        $validDistributionIds = Distribution::pluck('id')->all();
-
-        $syncData = [];
-
-        foreach ($this->distributions as $row) {
-            $percent = (int) ($row['percent'] ?? 0);
-
-            if ($percent <= 0 || ! in_array((int) $row['id'], $validDistributionIds, true)) {
-                continue;
-            }
-
-            $syncData[(int) $row['id']] = [
-                'percent' => $percent,
-                'amount' => round($profit * ($percent / 100), 2),
-            ];
-        }
-
-        $this->project->distributions()->sync($syncData);
+        app(DistributionProjectAssignment::class)->assign(
+            $this->project,
+            collect($this->distributions)->pluck('percent', 'id')->all()
+        );
 
         $this->modal('project_distributions_modal')->close();
 
@@ -207,43 +164,9 @@ class DistributionProjectsForm extends Component
             'percent_distributions_sum' => 'required|integer|min:100|max:100',
         ]);
 
-        // Get all completed projects without distributions
-        $projects = Project::query()
-            ->whereDoesntHave('distributions')
-            ->whereHas('statuses', function ($query) {
-                $query->where('status_code', 7);
-            })
-            ->get();
-
-        $count = 0;
-
-        // $this->distributions[*]['id'] is a client-controlled array value:
-        // only ever sync ids DistributionScope says belong to my vendor.
-        $validDistributionIds = Distribution::pluck('id')->all();
-
-        foreach ($projects as $project) {
-            $profit = (float) data_get($project->finances ?? [], 'profit', 0);
-
-            $syncData = [];
-
-            foreach ($this->distributions as $row) {
-                $percent = (int) ($row['percent'] ?? 0);
-
-                if ($percent <= 0 || ! in_array((int) $row['id'], $validDistributionIds, true)) {
-                    continue;
-                }
-
-                $syncData[(int) $row['id']] = [
-                    'percent' => $percent,
-                    'amount' => round($profit * ($percent / 100), 2),
-                ];
-            }
-
-            if (!empty($syncData)) {
-                $project->distributions()->sync($syncData);
-                $count++;
-            }
-        }
+        $count = app(DistributionProjectAssignment::class)->assignBulk(
+            collect($this->distributions)->pluck('percent', 'id')->all()
+        );
 
         $this->isBulkMode = false;
         $this->modal('bulk_distributions_modal')->close();

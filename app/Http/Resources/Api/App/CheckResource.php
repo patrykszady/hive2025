@@ -65,6 +65,27 @@ class CheckResource extends JsonResource
             'images' => $this->imagesArray(),
             'expenses' => $breakdown->expenses($this->resource),
             'timesheets' => $breakdown->timesheets($this->resource),
+            // The edit form's own fields — mirrors CheckForm::setCheck().
+            // vendor_id/user_id/bank_account_id are the raw ids (not the
+            // derived payee/bank labels above) so the app's edit screen can
+            // prefill its selects the same way the web's modal does.
+            'editable' => [
+                'bank_account_id' => $this->bank_account_id,
+                'check_type' => $this->check_type,
+                'check_number' => $this->check_number,
+                'vendor_id' => $this->vendor_id,
+                'user_id' => $this->user_id,
+                'date' => $this->date?->toDateString(),
+                // CheckForm's payee select only ever shows for a check
+                // written to a vendor (never a payroll/employee check) —
+                // same condition as the web modal's @if.
+                'payee_editable' => (bool) ($this->vendor_id && ! $this->user_id),
+                // Fields disable on the web once the bank has matched a
+                // transaction to this check for its full amount — same
+                // CheckForm::setCheck() condition.
+                'locked' => (bool) ($this->resource->transactions->sum('amount') == $this->resource->amount),
+                'can_delete' => $request->user()->can('delete', $this->resource),
+            ],
         ];
     }
 

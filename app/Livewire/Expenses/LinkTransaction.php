@@ -4,6 +4,7 @@ namespace App\Livewire\Expenses;
 
 use App\Models\Expense;
 use App\Models\Transaction;
+use App\Services\Expenses\TransactionLinkService;
 use Flux\Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
@@ -17,17 +18,19 @@ use Livewire\Component;
  * after its date, so an invoice that differs from what was charged (expense
  * 28594: a $498.03 Schwake Stone invoice dated 09/24 against a $497.23 charge
  * on 08/19) never matches. The expense keeps its own amount; only the link is
- * added.
+ * added. The query/write logic lives in App\Services\Expenses\
+ * TransactionLinkService, shared with the Hive Contractors app's
+ * TransactionLinkController so both write identically.
  */
 class LinkTransaction extends Component
 {
     use AuthorizesRequests;
 
     /** Days either side of the expense date to look for charges. */
-    public const WINDOW_DAYS = 60;
+    public const WINDOW_DAYS = TransactionLinkService::WINDOW_DAYS;
 
     /** Most candidates shown. */
-    public const LIMIT = 15;
+    public const LIMIT = TransactionLinkService::LIMIT;
 
     #[Locked]
     public Expense $expense;
@@ -54,57 +57,14 @@ class LinkTransaction extends Component
     #[Computed]
     public function candidates(): Collection
     {
-        $expense = $this->expense;
-        $amount = (float) $expense->amount;
-        $date = $expense->date ?? now();
-        $tolerance = max(5.0, abs($amount) * 0.05);
-
-        return Transaction::query()
-            ->with('bank_account.bank')
-            ->whereNull('expense_id')
-            ->whereNull('check_id')
-            ->whereNull('deleted_at')
-            ->whereBetween('transaction_date', [
-                $date->copy()->subDays(self::WINDOW_DAYS)->toDateString(),
-                $date->copy()->addDays(self::WINDOW_DAYS)->toDateString(),
-            ])
-            ->where('amount', $amount >= 0 ? '>' : '<', 0)
-            ->where(function ($query) use ($expense, $amount, $tolerance) {
-                if ($expense->vendor_id) {
-                    $query->where('vendor_id', $expense->vendor_id);
-                }
-
-                $query->orWhereBetween('amount', [$amount - $tolerance, $amount + $tolerance]);
-            })
-            ->limit(100)
-            ->get()
-            ->sortBy(fn (Transaction $transaction) => [
-                (int) ($transaction->vendor_id !== $expense->vendor_id),
-                round(abs((float) $transaction->amount - $amount), 2),
-                abs($transaction->transaction_date->diffInDays($date)),
-            ])
-            ->take(self::LIMIT)
-            ->values();
+        return app(TransactionLinkService::class)->candidates($this->expense);
     }
 
     public function link(int $transactionId): void
     {
         $this->authorize('update', $this->expense);
 
-        // TransactionScope limits this to the company's own bank accounts.
-        $transaction = Transaction::query()
-            ->whereKey($transactionId)
-            ->whereNull('expense_id')
-            ->whereNull('check_id')
-            ->whereNull('deleted_at')
-            ->first();
-
-        abort_unless($transaction, 404);
-
-        $transaction->expense_id = $this->expense->id;
-        $transaction->manualExpenseLink = true;
-        $transaction->save();
-        $this->expense->searchable();
+        app(TransactionLinkService::class)->link($this->expense, $transactionId);
 
         Flux::toast(
             text: 'The bank charge is linked. The expense keeps its own amount.',

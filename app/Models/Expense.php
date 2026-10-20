@@ -20,7 +20,12 @@ class Expense extends Model
 {
     use HasFactory, Searchable, SoftDeletes, HasNumericSearch;
 
-    protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'parent_expense_id', 'reimbursment', 'belongs_to_vendor_id', 'belongs_to_client_id', 'created_by_user_id', 'paid_by', 'created_at', 'updated_at', 'deleted_at'];
+    // category_id: without this, App\Livewire\Sheets\SheetShow::
+    // categorizeExpense()'s own $expense->update(['category_id' => ...])
+    // silently no-ops (Model::update() -> fill() drops any key outside
+    // $fillable) — a pre-existing bug fixed here so "Uncategorized
+    // Expenses" categorization actually persists, on the web and the app.
+    protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'parent_expense_id', 'reimbursment', 'belongs_to_vendor_id', 'belongs_to_client_id', 'created_by_user_id', 'paid_by', 'category_id', 'created_at', 'updated_at', 'deleted_at'];
 
     protected function casts(): array
     {

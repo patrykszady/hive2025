@@ -15,8 +15,8 @@ use Illuminate\Http\Request;
  * The app's Distributions tab — the same balance table, vendor breakdown
  * and create flow as the web's App\Livewire\Distributions\{DistributionsList,
  * DistributionsShow,DistributionCreate}. Assigning a project's profit
- * split across distributions (DistributionProjectsForm/Table) is a desktop
- * bookkeeping task, not something this mirrors — it stays web-only.
+ * split across distributions (DistributionProjectsForm/Table) is built in
+ * DistributionProjectAssignmentController.
  */
 class DistributionController extends Controller
 {

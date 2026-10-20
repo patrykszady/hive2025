@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\UpdateCheckRequest;
 use App\Http\Requests\Api\App\UploadCheckImageRequest;
 use App\Http\Resources\Api\App\CheckResource;
 use App\Models\Bank;
+use App\Models\BankAccount;
 use App\Models\Check;
 use App\Services\CheckImageUpload;
+use App\Services\Checks\CheckUpdateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -23,17 +26,15 @@ use Illuminate\Validation\ValidationException;
  * Creating a check stays web-only: the web's CheckCreate component is only
  * ever opened from an existing expense/vendor-payment flow to EDIT a check
  * (its own store() path is dead code — `dd('in store Check')`), so there is
- * no clean standalone "create a check" flow to mirror. Editing a check's own
- * fields (bank account, check number, payee, date — CheckForm::update(),
- * which can move every expense the check dated) also stays web-only: it is
- * a back-office correction with cascading side effects best made
- * deliberately at a desk, not a quick phone edit. See the detail screen's
- * "Open in Hive" button for both.
+ * no clean standalone "create a check" flow to mirror.
  *
- * Uploading a check image IS built here (uploadImage()) — unlike those two,
- * it is a natural phone-camera action, and reuses the exact same
- * App\Services\CheckImageUpload the web's CheckShow::uploadCheckImage()
- * calls, so both write identically.
+ * Editing a check's own fields (update()) and uploading a check image
+ * (uploadImage()) both reuse the exact services the web's CheckShow/
+ * CheckForm call (CheckUpdateService, CheckImageUpload), so the app writes
+ * identically, down to the cascading side effects a date or payee change
+ * triggers (Check::moveDate(), reassigning the vendor on the expenses this
+ * check paid). Reconnecting a bank via Plaid Link stays web-only — see
+ * BankController.
  */
 class CheckController extends Controller
 {
@@ -89,6 +90,61 @@ class CheckController extends Controller
         $found->load(['bank_account.bank', 'vendor', 'user']);
 
         return response()->json(['data' => (new CheckResource($found))->withDetail()->toArray($request)]);
+    }
+
+    /**
+     * The edit form's bank select — mirrors CheckCreate::mount()'s own
+     * $bank_accounts query (Checking accounts whose bank has a live Plaid
+     * connection) and getNameAndType()'s label.
+     */
+    public function bankAccountOptions(): JsonResponse
+    {
+        $this->authorize('viewAny', Check::class);
+
+        $accounts = BankAccount::with('bank')
+            ->where('type', 'Checking')
+            ->whereHas('bank', fn ($query) => $query->whereNotNull('plaid_access_token'))
+            ->get();
+
+        return response()->json([
+            'data' => $accounts->map(fn (BankAccount $account) => [
+                'id' => $account->id,
+                'name' => $account->getNameAndType(),
+            ])->values()->all(),
+        ]);
+    }
+
+    /**
+     * Edits a check's own fields — mirrors App\Livewire\Forms\CheckForm::
+     * update() exactly via the App\Services\Checks\CheckUpdateService it
+     * also now calls: a new date moves every expense the check dated, and
+     * a new payee reassigns onto the expenses this check paid.
+     */
+    public function update(UpdateCheckRequest $request, int $check, CheckUpdateService $updates): JsonResponse
+    {
+        $found = $this->visibleCheck($check);
+        $this->authorize('update', $found);
+
+        // check_type carries no validation rule on the web either (see
+        // CheckUpdateService::rules()'s docblock) — CheckForm::update()
+        // reads it straight off the component property, not a validated
+        // array, so this does the same from the raw request input.
+        $updates->update($found, $request->validated() + ['check_type' => $request->input('check_type')]);
+
+        $found->refresh()->load(['bank_account.bank', 'vendor', 'user']);
+
+        return response()->json(['data' => (new CheckResource($found))->withDetail()->toArray($request)]);
+    }
+
+    /** Removes a check — mirrors App\Livewire\Forms\CheckForm::delete(). */
+    public function destroy(Request $request, int $check, CheckUpdateService $updates): JsonResponse
+    {
+        $found = $this->visibleCheck($check);
+        $this->authorize('delete', $found);
+
+        $updates->remove($found);
+
+        return response()->json(['data' => ['deleted' => true]]);
     }
 
     /**

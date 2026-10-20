@@ -3,9 +3,8 @@
 namespace App\Livewire\Forms;
 
 use App\Models\Check;
-use App\Models\Expense;
+use App\Services\Checks\CheckUpdateService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Validation\Rule;
 use Livewire\Attributes\Validate;
 use Livewire\Form;
 
@@ -47,40 +46,17 @@ class CheckForm extends Form
     {
         $vendorId = auth()->user()->vendor->id;
 
-        return [
-            'bank_account_id' => [
-                'required',
-                Rule::exists('bank_accounts', 'id')->where('vendor_id', $vendorId),
-            ],
-            'user_id' => [
-                'nullable',
-                Rule::exists('user_vendor', 'user_id')->where('vendor_id', $vendorId)->where('is_employed', 1),
-            ],
-            'vendor_id' => ['nullable', 'exists:vendors,id'],
-            // A check cannot clear before it was written: when the bank has
-            // already matched it, the date may not be later than that.
-            'date' => array_values(array_filter([
-                isset($this->check) ? 'required' : 'nullable',
-                'date',
-                'before_or_equal:'.($this->latestAllowedDate() ?? 'today'),
-                'after:2017-01-01',
-            ])),
-            'check_number' => [
-                'required_if:check_type,Check',
-                'nullable',
-                'numeric',
+        // Not editing yet (the create path is dead code — see CheckCreate's
+        // docblock): skip the check-specific rules CheckUpdateService needs
+        // a $check for.
+        if (! isset($this->check)) {
+            return [
+                'bank_account_id' => ['required', \Illuminate\Validation\Rule::exists('bank_accounts', 'id')->where('vendor_id', $vendorId)],
+                'date' => ['nullable', 'date', 'after:2017-01-01'],
+            ];
+        }
 
-                //ignore if vendor_id of Check is same as request()->vendor_id
-                // ->ignore($this->check),
-                Rule::unique('checks', 'check_number')->where(function ($query) {
-                    //->where('vendor_id', '!=', $this->expense->vendor_id)
-
-                    //where per vendor bank_account ... all bank accounts that have the inst ID
-                    return $query->where('deleted_at', null)->where('bank_account_id', $this->bank_account_id);
-                })
-                    ->ignore($this->check),
-            ],
-        ];
+        return app(CheckUpdateService::class)->rules($this->check, $vendorId, $this->bank_account_id);
     }
 
     public function setCheck(Check $check)
@@ -104,38 +80,14 @@ class CheckForm extends Form
         $this->authorize('update', $this->check);
         $this->validate();
 
-        $oldVendorId = $this->check->vendor_id;
-
-        $this->check->update([
+        return app(CheckUpdateService::class)->update($this->check, [
             'bank_account_id' => $this->bank_account_id,
             'check_type' => $this->check_type,
             'check_number' => $this->check_number,
             'vendor_id' => $this->vendor_id,
             'user_id' => $this->user_id,
+            'date' => $this->date,
         ]);
-
-        // A new date moves the expenses dated by the check with it.
-        if ($this->date) {
-            $this->check->moveDate($this->date);
-        }
-
-        // Update expenses vendor when payee changes
-        if ($this->vendor_id && $oldVendorId !== (int) $this->vendor_id) {
-            // Direct FK expenses
-            Expense::where('check_id', $this->check->id)
-                ->where('vendor_id', $oldVendorId)
-                ->update(['vendor_id' => $this->vendor_id]);
-
-            // Pivot expenses
-            $pivotExpenseIds = $this->check->expensesMany()->pluck('expenses.id');
-            if ($pivotExpenseIds->isNotEmpty()) {
-                Expense::whereIn('id', $pivotExpenseIds)
-                    ->where('vendor_id', $oldVendorId)
-                    ->update(['vendor_id' => $this->vendor_id]);
-            }
-        }
-
-        return $this->check;
     }
 
     /** The latest date the check may carry: the day the bank cleared it, when it has. */
@@ -145,15 +97,13 @@ class CheckForm extends Form
             return null;
         }
 
-        return $this->check->transactions()->min('transaction_date')
-            ? \Illuminate\Support\Carbon::parse($this->check->transactions()->min('transaction_date'))->toDateString()
-            : null;
+        return app(CheckUpdateService::class)->latestAllowedDate($this->check);
     }
 
     public function delete()
     {
         $this->authorize('delete', $this->check);
-        $this->check->delete();
+        app(CheckUpdateService::class)->remove($this->check);
     }
 
     public function store()
