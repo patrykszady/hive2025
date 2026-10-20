@@ -42,6 +42,9 @@ class ClientForm extends Form
         $this->component->zip_code = $client->zip_code;
         $this->source = $client->source;
         $this->client_name = $client->name;
+        // Loaded like every other field: update() writes business_name back,
+        // so leaving it null here erased it on any unchanged edit.
+        $this->business_name = $client->business_name;
     }
 
     public function update(): Client
