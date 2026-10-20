@@ -53,6 +53,11 @@ Route::post('projects/{project}/materials', [AppProjectMaterialsController::clas
 Route::get('projects/{project}/distributions', [AppProjectDistributionsController::class, 'index'])->whereNumber('project')->name('projects.distributions.index');
 Route::get('projects/{project}/email-tracking', [AppProjectEmailTrackingController::class, 'index'])->whereNumber('project')->name('projects.email-tracking.index');
 
+// PROJECTS INDEX — the "Email Tracking" card beside the project list
+// itself (unscoped, or narrowed to one client with ?client_id=), beside
+// the project-scoped route above.
+Route::get('projects/email-tracking', [AppProjectEmailTrackingController::class, 'forClient'])->name('projects.email-tracking.for-client');
+
 // PROJECT PHOTOS — gallery + upload. Visible to anyone on the project
 // (manageImages/view, like the web); see ProjectImageImporter for storage.
 Route::get('projects/{project}/photos', [AppProjectPhotoController::class, 'index'])->whereNumber('project')->name('projects.photos.index');
