@@ -53,6 +53,14 @@ class TransactionMatchController extends Controller
                         'id' => $transaction->id,
                         'amount' => (float) $transaction->amount,
                         'date' => $transaction->transaction_date?->toDateString(),
+                        // Per-row Location/Bank | Type/Company — mirrors
+                        // match-vendor.blade.php's own transaction table
+                        // columns exactly (each row can differ even within
+                        // one merchant card, e.g. two cardholders' banks).
+                        'location' => $transaction->card_location !== '' ? $transaction->card_location : null,
+                        'bank' => $transaction->bank_account?->bank?->name,
+                        'type' => $transaction->bank_account?->type,
+                        'company' => $transaction->bank_account?->bank?->vendor?->business_name,
                     ])->values()->all(),
                 ])->values()->all(),
                 'expense_cards' => $cards->expenseCards($user)->map(fn ($expenses, $merchantName) => [

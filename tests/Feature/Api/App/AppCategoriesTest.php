@@ -126,6 +126,39 @@ it('sets a vendor\'s category and recategorizes its expenses in the given year',
         ->and($outOfYear->refresh()->category_id)->toBeNull();
 });
 
+it('appends the detailed category to the group heading when every expense in it shares one, like VendorCategoryCard', function () {
+    ['user' => $admin] = appCategoriesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+    $vendor = appCategoriesRetailVendor();
+
+    $lumber = Category::create(['primary' => 'materials', 'friendly_primary' => 'Materials', 'detailed' => 'lumber', 'friendly_detailed' => 'Lumber', 'icon_url' => '']);
+    $drywall = Category::create(['primary' => 'materials', 'friendly_primary' => 'Materials', 'detailed' => 'drywall', 'friendly_detailed' => 'Drywall', 'icon_url' => '']);
+
+    // Every "Materials" expense here is Lumber — the group heading should
+    // read "Materials — Lumber".
+    appCategoriesExpense($vendor, ['category_id' => $lumber->id, 'amount' => 10]);
+    appCategoriesExpense($vendor, ['category_id' => $lumber->id, 'amount' => 20]);
+
+    $response = $this->getJson("/api/app/v1/categories/vendors/{$vendor->id}")->assertOk();
+
+    $group = collect($response->json('data.expenses_by_category'))->firstWhere('label', 'Materials — Lumber');
+    expect($group)->not->toBeNull()
+        ->and($group['expenses'])->toHaveCount(2);
+
+    // Mixing in a Drywall expense under the same primary category makes the
+    // detailed suffix ambiguous — the heading falls back to the primary
+    // name alone.
+    appCategoriesExpense($vendor, ['category_id' => $drywall->id, 'amount' => 30]);
+
+    $mixedResponse = $this->getJson("/api/app/v1/categories/vendors/{$vendor->id}")->assertOk();
+    $mixedGroup = collect($mixedResponse->json('data.expenses_by_category'))->firstWhere('label', 'Materials');
+
+    expect($mixedGroup)->not->toBeNull()
+        ->and($mixedGroup['expenses'])->toHaveCount(3)
+        ->and(collect($mixedResponse->json('data.expenses_by_category'))->pluck('label'))
+        ->not->toContain('Materials — Lumber');
+});
+
 it('reassigns a vendor\'s expenses from one category to another', function () {
     ['user' => $admin] = appCategoriesTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

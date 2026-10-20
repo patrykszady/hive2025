@@ -59,7 +59,11 @@ class VendorCategoryResource extends JsonResource
 
         return $row + [
             'expenses_by_category' => collect($this->expensesByCategory)->map(fn ($group, string $label) => [
-                'label' => $label,
+                // Appends the detailed category ("Materials — Lumber") when
+                // every expense in the group shares one — mirrors
+                // VendorCategoryCard's own $groupTitle (vendor-category-card
+                // .blade.php's partials/category-content.blade.php).
+                'label' => $this->groupLabel($label, $group),
                 'expenses' => $group->map(fn ($expense) => [
                     'id' => $expense->id,
                     'amount' => (float) $expense->amount,
@@ -69,5 +73,22 @@ class VendorCategoryResource extends JsonResource
             ])->values()->all(),
             'available_categories' => collect($this->availableCategories)->map(fn ($category) => (new CategoryResource($category))->toArray($request))->values()->all(),
         ];
+    }
+
+    /**
+     * $categoryPrimary on its own, or "$categoryPrimary — $detailed" when
+     * every expense in the group shares one detailed category — exactly
+     * VendorCategoryCard's $groupTitle logic (its own $uniqueDetailed/
+     * $singleDetailed).
+     *
+     * @param  \Illuminate\Support\Collection<int, \App\Models\Expense>  $group
+     */
+    private function groupLabel(string $categoryPrimary, $group): string
+    {
+        $uniqueDetailed = $group->pluck('category.friendly_detailed')->unique()->filter();
+
+        return $uniqueDetailed->count() === 1
+            ? $categoryPrimary.' — '.$uniqueDetailed->first()
+            : $categoryPrimary;
     }
 }

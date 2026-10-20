@@ -53,10 +53,10 @@ class AppCheckBreakdown
     }
 
     /**
-     * This check's payee's own timesheet rows paid by it (CheckShow's
-     * "weekly_timesheets" — employee-paid-timesheets-for-others stays
-     * web-only). Nothing when the check has no payee user (a vendor/cash
-     * check never pays a timesheet).
+     * This check's payee's own timesheet rows paid by it — CheckShow's
+     * "weekly_timesheets" / "{payee}'s Timesheets" card. Nothing when the
+     * check has no payee user (a vendor/cash check never pays a
+     * timesheet).
      *
      * @return list<array{id: int, date: ?string, hours: ?float, amount: float, project: ?array{id: int, name: string}}>
      */
@@ -78,6 +78,39 @@ class AppCheckBreakdown
                 'hours' => $timesheet->hours !== null ? (float) $timesheet->hours : null,
                 'amount' => (float) $timesheet->amount,
                 'project' => $timesheet->project ? ['id' => $timesheet->project->id, 'name' => $timesheet->project->project_name] : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Timesheet rows this check's payee paid off for OTHER team members
+     * (Timesheet::paid_by = this check's payee) — CheckShow's
+     * $employee_weekly_timesheets / "Employee Paid Timesheets" card.
+     * Nothing when the check has no payee user.
+     *
+     * @return list<array{id: int, date: ?string, hours: ?float, amount: float, project: ?array{id: int, name: string}, team_member: ?string}>
+     */
+    public function employeePaidTimesheets(Check $check): array
+    {
+        if (! $check->user_id) {
+            return [];
+        }
+
+        return Timesheet::query()
+            ->where('check_id', $check->id)
+            ->where('paid_by', $check->user_id)
+            ->whereNotNull('paid_by')
+            ->with(['project:id,project_name', 'user:id,first_name,last_name,nickname'])
+            ->orderByDesc('date')
+            ->get()
+            ->map(fn (Timesheet $timesheet) => [
+                'id' => $timesheet->id,
+                'date' => $timesheet->date?->toDateString(),
+                'hours' => $timesheet->hours !== null ? (float) $timesheet->hours : null,
+                'amount' => (float) $timesheet->amount,
+                'project' => $timesheet->project ? ['id' => $timesheet->project->id, 'name' => $timesheet->project->project_name] : null,
+                'team_member' => $timesheet->user?->full_name,
             ])
             ->values()
             ->all();

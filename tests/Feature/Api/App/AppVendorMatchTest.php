@@ -88,6 +88,28 @@ it('only shows the signed-in company\'s own unmatched transactions and receipts,
         ->and(collect($response->json('data.expense_cards'))->pluck('merchant_name')->all())->toBe(['MINE RECEIPT CO']);
 });
 
+it('includes each transaction\'s location, bank, type and company, like the web\'s per-row columns', function () {
+    ['vendor' => $company, 'user' => $admin] = appBooksMatchTeamUser(role: 1);
+    $account = appBooksMatchBankAccount($company);
+
+    Transaction::create([
+        'transaction_date' => now()->subDay(), 'amount' => 45.00, 'bank_account_id' => $account->id,
+        'plaid_merchant_name' => 'Ace Hardware', 'plaid_merchant_description' => 'ACE HARDWARE #0412',
+        'details' => ['location' => ['city' => 'Arlington Heights', 'region' => 'IL']],
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson('/api/app/v1/transactions/unmatched')->assertOk();
+
+    $card = collect($response->json('data.merchant_cards'))->firstWhere('descriptor', 'ACE HARDWARE #0412');
+    $row = $card['transactions'][0];
+
+    expect($row['location'])->toBe('Arlington Heights, IL')
+        ->and($row['bank'])->toBe('Bank of '.$company->id)
+        ->and($row['type'])->toBe('Checking')
+        ->and($row['company'])->toBe($company->business_name);
+});
+
 it('matches a merchant card to an existing vendor, writing a rule and matching the transaction', function () {
     ['vendor' => $company, 'user' => $admin] = appBooksMatchTeamUser(role: 1);
     $account = appBooksMatchBankAccount($company);
@@ -248,6 +270,33 @@ it('refuses a Member managing bulk-match rules, like the web', function () {
     Sanctum::actingAs($member, ['app']);
 
     $this->getJson('/api/app/v1/vendor-transactions')->assertForbidden();
+});
+
+it('lists bank options for the rule form\'s "Bank" picker, one row per institution, like the web\'s banks() computed', function () {
+    ['user' => $admin] = appBooksMatchTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $companyA = Vendor::factory()->create();
+    $companyB = Vendor::factory()->create();
+    Bank::create(['name' => 'Citibank', 'vendor_id' => $companyA->id, 'plaid_ins_id' => 'ins_shared']);
+    // Same institution, a second row (two companies banking at the same
+    // place) — collapses to one option, keyed by plaid_ins_id.
+    Bank::create(['name' => 'Citibank', 'vendor_id' => $companyB->id, 'plaid_ins_id' => 'ins_shared']);
+    Bank::create(['name' => 'PSFCU', 'vendor_id' => $companyA->id, 'plaid_ins_id' => 'ins_psfcu']);
+
+    $response = $this->getJson('/api/app/v1/vendor-transactions/bank-options')->assertOk();
+
+    expect(collect($response->json('data'))->pluck('plaid_ins_id')->sort()->values()->all())
+        ->toBe(['ins_psfcu', 'ins_shared'])
+        ->and(collect($response->json('data'))->pluck('name')->sort()->values()->all())
+        ->toBe(['Citibank', 'PSFCU']);
+});
+
+it('refuses a Member listing bank options, like the web', function () {
+    ['user' => $member] = appBooksMatchTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson('/api/app/v1/vendor-transactions/bank-options')->assertForbidden();
 });
 
 it('lists every vendor for the card\'s picker, across every tenant', function () {

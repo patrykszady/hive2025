@@ -103,9 +103,15 @@ it('prefills a project\'s existing split, like the web\'s addDis()', function ()
     $response = $this->getJson("/api/app/v1/distributions/projects/{$project->id}/assignment")->assertOk();
 
     $row = collect($response->json('data.rows'))->firstWhere('id', $distribution->id);
+    $finances = $project->fresh()->finances ?? [];
     expect($row['percent'])->toBe(60)
         ->and((float) $row['amount'])->toBe(123.45)
-        ->and($response->json('data.project.id'))->toBe($project->id);
+        ->and($response->json('data.project.id'))->toBe($project->id)
+        // The assign modal's two summary tiles — mirrors
+        // projects-form.blade.php's own $projectProfit/$projectTotal, both
+        // read off the same `finances` array.
+        ->and((float) $response->json('data.project.balance'))->toBe((float) data_get($finances, 'balance', 0))
+        ->and((float) $response->json('data.project.total_project'))->toBe((float) data_get($finances, 'total_project', 0));
 });
 
 it('assigns a project\'s profit split, computing each distribution\'s amount from the project\'s profit', function () {

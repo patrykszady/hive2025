@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Api\App;
 
 use App\Models\CheckImage;
+use App\Models\Transaction;
 use App\Services\Checks\AppCheckBreakdown;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -63,8 +64,19 @@ class CheckResource extends JsonResource
 
         return $row + [
             'images' => $this->imagesArray(),
+            // The bank transaction(s) that cleared this check — mirrors the
+            // web's "Transactions" card (x-transactions.list_card), shown
+            // whenever $check->transactions->isNotEmpty().
+            'transactions' => $this->transactionsArray(),
             'expenses' => $breakdown->expenses($this->resource),
+            // The payee's own display name for the "{name}'s Timesheets"
+            // card heading — mirrors CheckShow's
+            // $check->user->nickname ?: $check->user->first_name.
+            'payee_first_name' => $this->resource->user
+                ? ($this->resource->user->nickname ?: $this->resource->user->first_name)
+                : null,
             'timesheets' => $breakdown->timesheets($this->resource),
+            'employee_paid_timesheets' => $breakdown->employeePaidTimesheets($this->resource),
             // The edit form's own fields — mirrors CheckForm::setCheck().
             // vendor_id/user_id/bank_account_id are the raw ids (not the
             // derived payee/bank labels above) so the app's edit screen can
@@ -101,6 +113,29 @@ class CheckResource extends JsonResource
         }
 
         return '/'.ltrim(parse_url($absoluteOrRelativeRoute, PHP_URL_PATH) ?? '', '/');
+    }
+
+    /**
+     * The bank transaction(s) matched to this check — mirrors
+     * x-transactions.list_card's Amount/Date/Bank/Account columns (the
+     * same "Account" shape PaymentResource's transactionArray() uses).
+     *
+     * @return list<array{id: int, amount: float, date: ?string, bank: ?string, account: ?string}>
+     */
+    private function transactionsArray(): array
+    {
+        return $this->resource->transactions
+            ->map(fn (Transaction $transaction) => [
+                'id' => $transaction->id,
+                'amount' => (float) $transaction->amount,
+                'date' => $transaction->transaction_date?->toDateString(),
+                'bank' => $transaction->bank_account?->bank?->name,
+                'account' => $transaction->owner !== null
+                    ? (string) $transaction->owner
+                    : ($transaction->bank_account?->account_number !== null ? (string) $transaction->bank_account->account_number : null),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

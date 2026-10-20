@@ -1,9 +1,12 @@
 <?php
 
+use App\Models\Bank;
+use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\CheckImage;
 use App\Models\Expense;
 use App\Models\Timesheet;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -110,7 +113,7 @@ it('shows a check\'s detail with its expenses, timesheets and images', function 
     ['vendor' => $vendor, 'user' => $admin] = appChecksTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);
 
-    $payee = User::factory()->create(['primary_vendor_id' => $vendor->id]);
+    $payee = User::factory()->create(['primary_vendor_id' => $vendor->id, 'nickname' => 'Czarek']);
     $vendor->users()->attach($payee->id, ['role_id' => 2, 'is_employed' => 1]);
 
     $check = appChecksCheck($vendor, ['user_id' => $payee->id, 'amount' => 900]);
@@ -125,6 +128,17 @@ it('shows a check\'s detail with its expenses, timesheets and images', function 
         'hours' => 40, 'amount' => 500, 'hourly' => 12.5, 'created_by_user_id' => $admin->id,
     ]);
 
+    // A timesheet belonging to ANOTHER team member, paid off by this check's
+    // payee — mirrors CheckShow's $employee_weekly_timesheets ("Employee
+    // Paid Timesheets" card).
+    $otherEmployee = User::factory()->create(['primary_vendor_id' => $vendor->id, 'first_name' => 'Robert', 'last_name' => 'Smith']);
+    $vendor->users()->attach($otherEmployee->id, ['role_id' => 2, 'is_employed' => 1]);
+    $employeePaidTimesheet = Timesheet::create([
+        'date' => now()->format('Y-m-d'), 'user_id' => $otherEmployee->id, 'paid_by' => $payee->id,
+        'vendor_id' => $vendor->id, 'check_id' => $check->id, 'hours' => 10, 'amount' => 125, 'hourly' => 12.5,
+        'created_by_user_id' => $admin->id,
+    ]);
+
     $image = CheckImage::create([
         'image_filename' => 'check-'.$check->id.'.jpg',
         'check_id' => $check->id,
@@ -132,14 +146,46 @@ it('shows a check\'s detail with its expenses, timesheets and images', function 
         'check_date' => now()->format('Y-m-d'),
     ]);
 
+    $bank = Bank::create(['name' => 'PSFCU', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_'.uniqid()]);
+    $bankAccount = BankAccount::create([
+        'bank_id' => $bank->id, 'vendor_id' => $vendor->id, 'type' => 'Checking',
+        'account_number' => 1234, 'plaid_account_id' => 'acc_'.uniqid(),
+    ]);
+    $transaction = Transaction::create([
+        'amount' => 900, 'transaction_date' => now()->format('Y-m-d'), 'bank_account_id' => $bankAccount->id, 'check_id' => $check->id,
+    ]);
+
     $response = $this->getJson("/api/app/v1/checks/{$check->id}")->assertOk();
 
     expect($response->json('data.id'))->toBe($check->id)
         ->and(collect($response->json('data.expenses'))->pluck('id')->all())->toBe([$expense->id])
         ->and($response->json('data.expenses.0.is_deduction'))->toBeFalse()
+        ->and($response->json('data.payee_first_name'))->toBe('Czarek')
         ->and(collect($response->json('data.timesheets'))->pluck('id')->all())->toBe([$timesheet->id])
+        ->and(collect($response->json('data.employee_paid_timesheets'))->pluck('id')->all())->toBe([$employeePaidTimesheet->id])
+        ->and($response->json('data.employee_paid_timesheets.0.team_member'))->toBe('Robert Smith')
+        ->and(collect($response->json('data.transactions'))->pluck('id')->all())->toBe([$transaction->id])
+        ->and($response->json('data.transactions.0.bank'))->toBe('PSFCU')
+        ->and($response->json('data.transactions.0.account'))->toBe('1234')
         ->and($response->json('data.images.0.id'))->toBe($image->id)
         ->and($response->json('data.images.0.url'))->toContain("checks/images/{$image->id}/signed");
+});
+
+it('falls back to the payee\'s first name when they have no nickname', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appChecksTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $payee = User::factory()->create(['primary_vendor_id' => $vendor->id, 'first_name' => 'Patryk', 'nickname' => null]);
+    $vendor->users()->attach($payee->id, ['role_id' => 2, 'is_employed' => 1]);
+    $check = appChecksCheck($vendor, ['user_id' => $payee->id]);
+    Timesheet::create([
+        'date' => now()->format('Y-m-d'), 'user_id' => $payee->id, 'vendor_id' => $vendor->id, 'check_id' => $check->id,
+        'hours' => 8, 'amount' => 100, 'hourly' => 12.5, 'created_by_user_id' => $admin->id,
+    ]);
+
+    $response = $this->getJson("/api/app/v1/checks/{$check->id}")->assertOk();
+
+    expect($response->json('data.payee_first_name'))->toBe('Patryk');
 });
 
 it('refuses viewing a check the Member does not own, like the web', function () {
