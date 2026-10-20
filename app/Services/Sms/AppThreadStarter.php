@@ -5,6 +5,7 @@ namespace App\Services\Sms;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\User;
+use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use Illuminate\Validation\ValidationException;
 
@@ -33,11 +34,27 @@ class AppThreadStarter
     }
 
     /**
-     * @param  array<int, string>  $phones  Ignored when $clientId is given.
+     * @param  array<int, string>  $phones  Ignored when $clientId or $vendorId is given.
      */
-    public function start(array $phones, ?int $clientId, string $body, User $actingUser): SmsGroupThread
+    public function start(array $phones, ?int $clientId, string $body, User $actingUser, ?int $vendorId = null): SmsGroupThread
     {
-        if ($clientId) {
+        if ($vendorId) {
+            // Deliberately NOT scoped to the acting vendor's own related
+            // vendors — same reasoning SmsNewThread's vendor branch and
+            // AssignThreadRequest's vendor_id rule use: texting a vendor not
+            // yet related to this tenant is how a new sub relationship starts.
+            $vendor = Vendor::query()->withoutGlobalScopes()->with('users')->find($vendorId);
+
+            if (! $vendor) {
+                throw ValidationException::withMessages(['vendor_id' => 'The selected vendor is invalid.']);
+            }
+
+            $phones = $this->vendorPhones($vendor);
+
+            if ($phones === []) {
+                throw ValidationException::withMessages(['vendor_id' => 'This vendor has no phone numbers on file.']);
+            }
+        } elseif ($clientId) {
             // withoutGlobalScopes(): the client may be hidden by ClientScope
             // in the acting user's vendor context — same reasoning as
             // ConversationPresenter::loadThreadForDisplay().
@@ -60,7 +77,7 @@ class AppThreadStarter
                 ->all();
         }
 
-        $existing = $this->findExistingThread($phones, $clientId);
+        $existing = $this->findExistingThread($phones, $clientId, $vendorId);
 
         if ($existing) {
             return $existing;
@@ -73,7 +90,7 @@ class AppThreadStarter
             $clientId,
             $actingUser->id,
             $actingUser->vendor?->id,
-            null,
+            $vendorId,
         );
     }
 
@@ -104,6 +121,32 @@ class AppThreadStarter
     }
 
     /**
+     * Every phone number on file for a vendor: its business line plus each
+     * of its users' cells — mirrors
+     * SmsNewThread::addVendorPhoneNumbers()/buildVendorRecipientPresetOptions().
+     *
+     * @return array<int, string>
+     */
+    private function vendorPhones(Vendor $vendor): array
+    {
+        $phones = collect();
+
+        $businessPhone = $vendor->getRawOriginal('business_phone');
+        if (is_string($businessPhone) && $businessPhone !== '') {
+            $phones->push(GroupSmsService::formatE164($businessPhone));
+        }
+
+        foreach ($vendor->users as $user) {
+            $cellPhone = $user->getRawOriginal('cell_phone');
+            if (is_string($cellPhone) && $cellPhone !== '') {
+                $phones->push(GroupSmsService::formatE164($cellPhone));
+            }
+        }
+
+        return $phones->unique()->values()->all();
+    }
+
+    /**
      * A thread already addressed to exactly this participant set — mirrors
      * the duplicate check in SmsNewThread::send(), except the app returns
      * the existing thread instead of erroring, since there is no "pick the
@@ -111,13 +154,17 @@ class AppThreadStarter
      *
      * @param  array<int, string>  $phones
      */
-    private function findExistingThread(array $phones, ?int $clientId): ?SmsGroupThread
+    private function findExistingThread(array $phones, ?int $clientId, ?int $vendorId = null): ?SmsGroupThread
     {
-        $query = SmsGroupThread::query()->when(
-            $clientId,
-            fn ($q) => $q->where('client_id', $clientId),
-            fn ($q) => $q->whereNull('client_id'),
-        );
+        $query = SmsGroupThread::query();
+
+        if ($vendorId) {
+            $query->where('subject_vendor_id', $vendorId);
+        } elseif ($clientId) {
+            $query->where('client_id', $clientId);
+        } else {
+            $query->whereNull('client_id')->whereNull('subject_vendor_id');
+        }
 
         foreach ($phones as $phone) {
             $query->whereJsonContains('participants', $phone);

@@ -23,7 +23,7 @@ trait LoadsThreadForApp
         'client.users:id,first_name,last_name,nickname,cell_phone',
         'subjectVendor:id,business_name,options',
         'latestMessage.sentByUser:id,first_name,last_name,nickname',
-        'threadParticipants:id,thread_id,phone_number',
+        'threadParticipants:id,thread_id,phone_number,opted_in_at',
     ];
 
     /**

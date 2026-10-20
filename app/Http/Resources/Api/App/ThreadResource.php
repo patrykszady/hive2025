@@ -37,6 +37,18 @@ class ThreadResource extends JsonResource
             // ThreadController::unreadCountsByThread()) — a real count of
             // unread inbound messages, not a fabricated one.
             'unread_count' => (int) ($this->unread_count ?? 0),
+            // Mirrors the composer's "Awaiting START reply" banner and the
+            // thread menu's Resend/Manual Opt-in items.
+            'pending_opt_in' => $this->threadParticipants->contains(fn ($participant) => $participant->opted_in_at === null),
+            'pending_participants' => $this->threadParticipants
+                ->filter(fn ($participant) => $participant->opted_in_at === null)
+                ->map(fn ($participant) => [
+                    'id' => $participant->id,
+                    'phone' => $participant->phone_number,
+                    'name' => ConversationPresenter::resolvePhoneDisplay($participant->phone_number),
+                ])
+                ->values()
+                ->all(),
             'last_message' => $latest ? [
                 'id' => $latest->id,
                 'body' => $latest->display_text,
