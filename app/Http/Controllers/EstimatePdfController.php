@@ -37,7 +37,12 @@ class EstimatePdfController extends Controller
             $type = 'estimate';
         }
 
-        $result = EstimateDocumentGenerator::generate($found, $type);
+        $result = EstimateDocumentGenerator::generate(
+            $found,
+            $type,
+            showChanges: $request->boolean('show_changes'),
+            showAllowances: $request->query('show_allowances') === null ? true : $request->boolean('show_allowances'),
+        );
 
         return response($result['binary'])
             ->header('Content-Type', 'application/pdf')
@@ -47,7 +52,7 @@ class EstimatePdfController extends Controller
     }
 
     /** Mirrors App\Livewire\Estimates\EstimateShow::export_csv() (an XLSX despite the method's name). */
-    public function xlsxSigned(int $estimate)
+    public function xlsxSigned(Request $request, int $estimate)
     {
         $found = Estimate::withoutGlobalScopes()
             ->with(['estimate_sections.estimate_line_items.allowances', 'vendor', 'project.client'])
@@ -55,7 +60,9 @@ class EstimatePdfController extends Controller
 
         abort_unless($found && $found->vendor, 404);
 
-        $result = EstimateDocumentGenerator::generateXlsx($found);
+        $showAllowances = $request->query('show_allowances') === null ? true : $request->boolean('show_allowances');
+
+        $result = EstimateDocumentGenerator::generateXlsx($found, $showAllowances);
 
         return response($result['binary'])
             ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

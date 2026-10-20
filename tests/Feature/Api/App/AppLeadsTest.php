@@ -1,15 +1,72 @@
 <?php
 
+use App\Jobs\CreateMeetTaskCalendarEvent;
+use App\Jobs\SendLeadReplyJob;
 use App\Models\Client;
+use App\Models\CompanyEmail;
+use App\Models\EmailTemplate;
 use App\Models\Lead;
 use App\Models\LeadFeedback;
+use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 
 uses(RefreshDatabase::class);
+
+/**
+ * A vendor-1 lead with a linked client contact (no phone, so the
+ * companion-text path is a no-op and tests never need to fake GroupSmsService/
+ * Telnyx) and whatever availability slots the caller wants — the Message
+ * composer and consult-booking endpoints need a resolvable client, unlike
+ * appSalesLead()'s bare lead.
+ *
+ * @return array{contact: User, client: Client, lead: Lead}
+ */
+function appSalesLeadWithClient(Vendor $vendor, array $availability = []): array
+{
+    $contact = User::query()->create([
+        'first_name' => 'Preet',
+        'last_name' => 'Singh',
+        'email' => 'preet.'.uniqid().'@example.test',
+    ]);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $client->users()->attach($contact->id);
+
+    $lead = Lead::create([
+        'date' => now(),
+        'origin' => 'Website',
+        'user_id' => $contact->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $contact->id,
+        'lead_data' => [
+            'name' => 'Preet Singh',
+            'email' => $contact->email,
+            'address' => '123 Main St, Palatine, IL 60067',
+            'message' => 'Kitchen remodel',
+            'availability' => $availability,
+        ],
+    ]);
+    $lead->statuses()->create(['title' => 'New', 'belongs_to_vendor_id' => $vendor->id]);
+
+    return compact('contact', 'client', 'lead');
+}
+
+/** The next bookable (non-weekend) weekday from today, as 'Y-m-d'. */
+function appSalesNextWeekday(int $daysOut = 2): string
+{
+    $date = now()->addDays($daysOut);
+    while ($date->isWeekend()) {
+        $date->addDay();
+    }
+
+    return $date->format('Y-m-d');
+}
 
 beforeEach(function () {
     // No real Meilisearch/Nylas round trips from fixture setup — same
@@ -353,4 +410,291 @@ it('warns instead of texting when the lead has no phone number', function () {
 
     expect($response->json('ok'))->toBeFalse()
         ->and($response->json('heading'))->toBe('No phone number');
+});
+
+// --- Message composer (App\Services\Leads\LeadReplyComposer) -----------
+
+it('returns reply-composer options with recipients, templates and availability, like LeadCreate::prepareEmailComposer()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $slot = ['date' => appSalesNextWeekday(), 'time' => '1-3 PM'];
+    ['contact' => $contact, 'client' => $client, 'lead' => $lead] = appSalesLeadWithClient($vendor, [$slot]);
+
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+    EmailTemplate::create(['vendor_id' => $vendor->id, 'name' => 'Intro', 'type' => 'lead', 'subject' => 'Re: your inquiry', 'body' => 'Hi {{client_first_name}}, {{lead_time_block}}']);
+
+    $response = $this->getJson("/api/app/v1/leads/{$lead->id}/reply-options")->assertOk();
+
+    expect($response->json('data.to'))->toContain($contact->email)
+        ->and($response->json('data.from'))->toBe($admin->email)
+        ->and($response->json('data.subject'))->toBe('Re: your inquiry')
+        ->and($response->json('data.body'))->toContain('Based on the availability you shared')
+        ->and($response->json('data.availability'))->toHaveCount(1)
+        ->and($response->json('data.slot_problems'))->toBe([null])
+        ->and($response->json('data.has_usable_availability'))->toBeTrue()
+        ->and($response->json('data.client.id'))->toBe($client->id);
+});
+
+it('refuses a Member reading reply options, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appSalesTeamUser(role: 2);
+    ['lead' => $lead] = appSalesLeadWithClient($vendor);
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson("/api/app/v1/leads/{$lead->id}/reply-options")->assertForbidden();
+});
+
+it('previews the template-filled subject/body for a selected slot, like every wire:click on the Message tab', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $slot = ['date' => appSalesNextWeekday(), 'time' => '1-3 PM'];
+    ['lead' => $lead] = appSalesLeadWithClient($vendor, [$slot]);
+    $template = EmailTemplate::create(['vendor_id' => $vendor->id, 'name' => 'Intro', 'type' => 'lead', 'subject' => 'Re:', 'body' => 'Pick one: {{lead_time_block}}']);
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/reply-preview", [
+        'template_id' => $template->id,
+        'from' => $admin->email,
+        'availability' => [$slot],
+        'selected_availability' => [0],
+    ])->assertOk();
+
+    expect($response->json('data.body'))->toContain('{{SELECT Time}}')
+        ->and($response->json('data.exact_time_options'))->not->toBeEmpty()
+        ->and($response->json('data.send_blocked_reason'))->toBe('Pick the exact consult time first');
+
+    $exactTime = $response->json('data.exact_time_options.0.value');
+
+    $confirmed = $this->postJson("/api/app/v1/leads/{$lead->id}/reply-preview", [
+        'template_id' => $template->id,
+        'from' => $admin->email,
+        'availability' => [$slot],
+        'selected_availability' => [0],
+        'selected_exact_time' => $exactTime,
+        'project_name' => 'Kitchen Remodel',
+    ])->assertOk();
+
+    expect($confirmed->json('data.body'))->not->toContain('{{SELECT')
+        ->and($confirmed->json('data.send_blocked_reason'))->toBeNull();
+});
+
+it('proposes an office consult day, mirroring updatedProposeDate()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    ['lead' => $lead] = appSalesLeadWithClient($vendor);
+
+    $date = appSalesNextWeekday(5);
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/propose-date", [
+        'date' => $date,
+        'availability' => [],
+    ])->assertOk();
+
+    expect($response->json('data.availability.0.date'))->toBe($date)
+        ->and($response->json('data.availability.0.office_proposed'))->toBeTrue()
+        ->and($response->json('data.selected_availability'))->toBe([0])
+        ->and($response->json('data.exact_time_options'))->not->toBeEmpty();
+});
+
+it('refuses a weekend office-proposed date, mirroring updatedProposeDate()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    ['lead' => $lead] = appSalesLeadWithClient($vendor);
+
+    $saturday = now()->next(\Carbon\Carbon::SATURDAY)->format('Y-m-d');
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/propose-date", [
+        'date' => $saturday,
+        'availability' => [],
+    ])->assertStatus(422)
+        ->assertJsonFragment(['message' => 'Consultations are scheduled Monday through Friday.']);
+});
+
+it('sends a lead reply and books the consult exactly like LeadCreate::send_message()', function () {
+    Queue::fake();
+
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $slot = ['date' => appSalesNextWeekday(), 'time' => '1-3 PM'];
+    ['contact' => $contact, 'client' => $client, 'lead' => $lead] = appSalesLeadWithClient($vendor, [$slot]);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+
+    $preview = $this->postJson("/api/app/v1/leads/{$lead->id}/reply-preview", [
+        'from' => $admin->email,
+        'body' => '{{lead_time_block}}',
+        'availability' => [$slot],
+        'selected_availability' => [0],
+    ])->assertOk();
+    $exactTime = $preview->json('data.exact_time_options.0.value');
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/reply", [
+        'to' => [$contact->email],
+        'from' => $admin->email,
+        'subject' => 'Your consultation',
+        'body' => 'Confirming: {{lead_time_block}}',
+        'availability' => [$slot],
+        'selected_availability' => [0],
+        'selected_exact_time' => $exactTime,
+        'project_name' => 'Kitchen Remodel',
+    ])->assertOk();
+
+    expect($response->json('data.booked'))->toBeTrue()
+        ->and($response->json('data.new_status'))->toBe('Won');
+
+    Queue::assertPushed(SendLeadReplyJob::class, 1);
+    Queue::assertPushed(CreateMeetTaskCalendarEvent::class, 1);
+
+    expect($lead->fresh()->last_status->title)->toBe('Won');
+    $project = $client->fresh()->projects()->first();
+    expect($project)->not->toBeNull();
+    expect(Task::where('project_id', $project->id)->where('type', 'Meet')->exists())->toBeTrue();
+});
+
+it('blocks sending while a consult time is still unresolved, like sendBlockedReason()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $slot = ['date' => appSalesNextWeekday(), 'time' => '1-3 PM'];
+    ['contact' => $contact, 'lead' => $lead] = appSalesLeadWithClient($vendor, [$slot]);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/reply", [
+        'to' => [$contact->email],
+        'from' => $admin->email,
+        'subject' => 'Your consultation',
+        'body' => 'Pick a time: {{SELECT Time}}',
+        'availability' => [$slot],
+        'selected_availability' => [0],
+    ])->assertStatus(422)
+        ->assertJsonFragment(['message' => 'Pick the exact consult time first.']);
+
+    expect($lead->fresh()->last_status->title)->toBe('New');
+});
+
+it('sends the one-click consult invite exactly like LeadCreate::sendConsultInvite()', function () {
+    Queue::fake();
+
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    // No availability at all — same fixture shape as the web's
+    // LeadConsultInviteButtonTest: the invite just asks the homeowner to
+    // self-schedule, so nothing here needs an exact time or project name.
+    ['contact' => $contact, 'lead' => $lead] = appSalesLeadWithClient($vendor);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+    EmailTemplate::create(['vendor_id' => $vendor->id, 'name' => 'Consult', 'type' => 'lead', 'subject' => '{{vendor_name}} Consultation', 'body' => '<p>{{lead_time_block}}</p>']);
+
+    $response = $this->postJson("/api/app/v1/leads/{$lead->id}/send-consult-invite", [
+        'to' => [$contact->email],
+        'from' => $admin->email,
+        'availability' => [],
+        'selected_availability' => [],
+    ])->assertOk();
+
+    expect($response->json('data.recipient_count'))->toBe(1);
+
+    Queue::assertPushed(SendLeadReplyJob::class, function (SendLeadReplyJob $job) {
+        $seen = (fn () => ['body' => $this->body, 'template' => $this->emailTemplateName])->call($job);
+
+        return $seen['template'] === 'Consult'
+            && str_contains($seen['body'], 'select consultation times')
+            && ! str_contains($seen['body'], 'select new consultation times');
+    });
+});
+
+it('reports "no Consult template" instead of failing silently', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    ['contact' => $contact, 'lead' => $lead] = appSalesLeadWithClient($vendor);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => '']);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/send-consult-invite", [
+        'to' => [$contact->email],
+        'from' => $admin->email,
+        'availability' => [],
+        'selected_availability' => [],
+    ])->assertStatus(422)
+        ->assertJsonFragment(['message' => 'No email template named "Consult" exists.']);
+});
+
+// --- Leads list bulk actions (App\Livewire\Leads\LeadsIndex) ------------
+
+it('bulk-updates several leads\' status at once, like LeadsIndex::bulkSetStatus()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $one = appSalesLead($vendor);
+    $two = appSalesLead($vendor);
+
+    $this->postJson('/api/app/v1/leads/bulk-status', [
+        'lead_ids' => [$one->id, $two->id],
+        'status' => 'Lost',
+    ])->assertOk()->assertJsonPath('data.updated', 2);
+
+    expect($one->fresh()->last_status->title)->toBe('Lost')
+        ->and($two->fresh()->last_status->title)->toBe('Lost');
+});
+
+it('reports bulk-delete impact across several leads, like LeadsIndex::bulkDeleteImpact()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    ['lead' => $withClient, 'client' => $client] = appSalesLeadWithClient($vendor);
+    $bare = appSalesLead($vendor);
+
+    $response = $this->postJson('/api/app/v1/leads/bulk-delete-impact', [
+        'lead_ids' => [$withClient->id, $bare->id],
+    ])->assertOk();
+
+    expect($response->json('data.count'))->toBe(2);
+});
+
+it('bulk-deletes several leads at once, like LeadsIndex::bulkDelete()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $one = appSalesLead($vendor);
+    $two = appSalesLead($vendor);
+
+    $this->postJson('/api/app/v1/leads/bulk-delete', [
+        'lead_ids' => [$one->id, $two->id],
+    ])->assertOk()->assertJsonPath('data.deleted', 2);
+
+    expect(Lead::withTrashed()->find($one->id)?->trashed())->toBeTrue()
+        ->and(Lead::withTrashed()->find($two->id)?->trashed())->toBeTrue();
+});
+
+it('refuses a Member doing any bulk lead action, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appSalesTeamUser(role: 2);
+    $lead = appSalesLead($vendor);
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson('/api/app/v1/leads/bulk-status', ['lead_ids' => [$lead->id], 'status' => 'Lost'])->assertForbidden();
+    $this->postJson('/api/app/v1/leads/bulk-delete-impact', ['lead_ids' => [$lead->id]])->assertForbidden();
+    $this->postJson('/api/app/v1/leads/bulk-delete', ['lead_ids' => [$lead->id]])->assertForbidden();
+});
+
+it('toggles consult-within-the-hour, like LeadCreate::updatedConsultWithinTheHour()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lead = appSalesLead($vendor);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/consult-within-the-hour", ['enabled' => true])
+        ->assertOk()
+        ->assertJsonPath('data.allows_consult_within_the_hour', true);
+
+    expect($lead->fresh()->lead_data['consult_notice_hours'])->toBe(1);
+
+    $this->postJson("/api/app/v1/leads/{$lead->id}/consult-within-the-hour", ['enabled' => false])
+        ->assertOk()
+        ->assertJsonPath('data.allows_consult_within_the_hour', false);
+
+    expect($lead->fresh()->lead_data['consult_notice_hours'] ?? null)->toBeNull();
 });

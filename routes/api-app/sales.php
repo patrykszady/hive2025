@@ -15,11 +15,14 @@ use Illuminate\Support\Facades\Route;
 | AppSectionPermissions hints the client to show.
 */
 
-// 'badge' and 'projects' are registered ahead of the numeric {lead}/
-// {lienWaiver} routes for clarity, though whereNumber() alone already keeps
-// either from being swallowed as an id.
+// 'badge', 'origins' and the bulk-* routes are registered ahead of the
+// numeric {lead} routes for clarity, though whereNumber() alone already
+// keeps any of them from being swallowed as an id.
 Route::get('leads/badge', [AppLeadController::class, 'badge'])->name('leads.badge');
 Route::get('leads/origins', [AppLeadController::class, 'origins'])->name('leads.origins');
+Route::post('leads/bulk-status', [AppLeadController::class, 'bulkStatus'])->name('leads.bulk-status');
+Route::post('leads/bulk-delete-impact', [AppLeadController::class, 'bulkDeleteImpact'])->name('leads.bulk-delete-impact');
+Route::post('leads/bulk-delete', [AppLeadController::class, 'bulkDelete'])->name('leads.bulk-delete');
 Route::get('leads', [AppLeadController::class, 'index'])->name('leads.index');
 Route::post('leads', [AppLeadController::class, 'store'])->name('leads.store');
 Route::get('leads/{lead}', [AppLeadController::class, 'show'])->whereNumber('lead')->name('leads.show');
@@ -28,8 +31,17 @@ Route::get('leads/{lead}', [AppLeadController::class, 'show'])->whereNumber('lea
 Route::put('leads/{lead}', [AppLeadController::class, 'update'])->whereNumber('lead')->name('leads.update');
 Route::delete('leads/{lead}', [AppLeadController::class, 'destroy'])->whereNumber('lead')->name('leads.destroy');
 Route::post('leads/{lead}/status', [AppLeadController::class, 'updateStatus'])->whereNumber('lead')->name('leads.status.update');
+Route::post('leads/{lead}/consult-within-the-hour', [AppLeadController::class, 'updateConsultWithinTheHour'])->whereNumber('lead')->name('leads.consult-within-the-hour');
 Route::post('leads/{lead}/schedule-link', [AppLeadController::class, 'scheduleLink'])->whereNumber('lead')->name('leads.schedule-link');
 Route::post('leads/{lead}/text-schedule-link', [AppLeadController::class, 'textScheduleLink'])->whereNumber('lead')->name('leads.text-schedule-link');
+
+// The Message composer — mirrors App\Livewire\Leads\LeadCreate's Message
+// tab (see App\Services\Leads\LeadReplyComposer).
+Route::get('leads/{lead}/reply-options', [AppLeadController::class, 'replyOptions'])->whereNumber('lead')->name('leads.reply-options');
+Route::post('leads/{lead}/reply-preview', [AppLeadController::class, 'previewReply'])->whereNumber('lead')->name('leads.reply-preview');
+Route::post('leads/{lead}/propose-date', [AppLeadController::class, 'proposeDate'])->whereNumber('lead')->name('leads.propose-date');
+Route::post('leads/{lead}/reply', [AppLeadController::class, 'reply'])->whereNumber('lead')->name('leads.reply');
+Route::post('leads/{lead}/send-consult-invite', [AppLeadController::class, 'sendConsultInvite'])->whereNumber('lead')->name('leads.send-consult-invite');
 
 Route::get('lien-waivers/projects', [AppLienWaiverController::class, 'eligibleProjects'])->name('lien-waivers.projects');
 Route::get('lien-waivers/sub-vendors', [AppLienWaiverController::class, 'subVendors'])->name('lien-waivers.sub-vendors');

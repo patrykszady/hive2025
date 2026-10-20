@@ -10,6 +10,7 @@ use App\Models\CompanyEmail;
 use App\Models\EmailTemplate;
 use App\Models\Lead;
 use App\Models\Vendor;
+use App\Services\Leads\LeadReplyComposer;
 use App\Services\NylasService;
 use Carbon\Carbon;
 use Flux;
@@ -781,193 +782,25 @@ class LeadCreate extends Component
      * Project creation also flips the lead to Won (MarkClientLeadWon via the
      * project observer).
      */
+    /**
+     * Sending a reply with an availability slot selected books the consult —
+     * delegates to App\Services\Leads\LeadReplyComposer::bookConsult(), the
+     * service the Hive Contractors app's LeadController shares, so both
+     * surfaces book the identical project/Meet task/calendar event.
+     */
     protected function bookConsult(): bool
     {
-        $slotIndex = $this->selectedAvailability[0] ?? null;
-        $slot = $slotIndex !== null ? ($this->availability[$slotIndex] ?? null) : null;
-
-        if (! $slot || ! ($slot['date'] ?? null) || ! $this->client) {
-            return false;
-        }
-
-        $project = $this->resolvedConsultProject();
-
-        if (! $project) {
-            $addressParts = $this->lead->shortAddressParts();
-            preg_match('/\b([A-Z]{2})\b[,\s]*(\d{5})?/', (string) $this->address, $m);
-
-            $project = \App\Models\Project::create([
-                'project_name' => $this->newProjectName() !== '' ? $this->newProjectName() : 'Consult',
-                'client_id' => $this->client->id,
-                'address' => ($addressParts['street'] ?: $this->address) ?? '',
-                'city' => $addressParts['city'] ?: '',
-                // Nothing stated → the client's state → the IL service area.
-                'state' => ($m[1] ?? '') ?: (trim((string) $this->client->state) ?: 'IL'),
-                'zip_code' => ($m[2] ?? '') ?: (string) ($this->client->zip_code ?? ''),
-            ]);
-        }
-
-        $title = $this->consultTaskTitle();
-
-        $date = $slot['date'];
-
-        // A consult is a 30-minute meeting: it starts at the exact time picked
-        // (or at the start of the offered window) and ends half an hour later.
-        // Without this the task was zero-length — start and end were identical
-        // — so the calendar event had no duration.
-        $startTime = $this->selectedExactTime
-            ?: (($window = $this->parseSlotTimes((string) ($slot['time'] ?? ''))) ? $window[0] : null);
-
-        $times = $startTime
-            ? [$startTime, Carbon::createFromFormat('H:i', $startTime)->addMinutes(self::CONSULT_MINUTES)->format('H:i')]
-            : null;
-
-        $timeSettings = $times
-            ? ['use_time' => true, 'start_time' => $times[0], 'end_time' => $times[1]]
-            : ['use_time' => false];
-
-        $notes = 'Booked from lead email reply — ' . $this->bookedSlotLabel((array) $slot) . '.';
-
-        // This client's consult, if we already booked one — INCLUDING a
-        // soft-deleted one: deleting the consult is how "that date didn't
-        // work" is expressed, so booking a new date revives the same task
-        // rather than leaving it dead (which silently blocked the booking) or
-        // spawning a duplicate. Matching on project+title (not on the date)
-        // is what makes a resend idempotent.
-        $task = \App\Models\Task::withoutGlobalScopes()
-            ->where('project_id', $project->id)
-            ->where('title', $title)
-            ->first();
-
-        if ($task) {
-            $wasTrashed = $task->trashed();
-
-            // Resending the same slot changes nothing — don't touch the task or
-            // re-notify the client's calendar. A trashed consult is never
-            // "unchanged": the point of rebooking is to bring it back.
-            $unchanged = ! $wasTrashed
-                && optional($task->start_date)->format('Y-m-d') === $date
-                && (array) data_get($task->options, 'time_settings.' . $date) == $timeSettings;
-
-            if ($unchanged) {
-                return false;
-            }
-
-            if ($wasTrashed) {
-                $task->restore();
-            }
-
-            $options = (array) ($task->options ?? []);
-            $options['dates'] = [$date];
-            // Drop the previous date's entry, or the task keeps a stale time.
-            $options['time_settings'] = [$date => $timeSettings];
-            // Rebooking is also when "let's do a video call instead" happens.
-            $options['meeting_location_type'] = $this->consultMeetingType;
-
-            // Backfill an empty list only — consults booked before participants
-            // were defaulted here have nobody on them, and rebooking is the
-            // moment to fix that. A list someone has edited is left alone:
-            // removing an attendee is a decision, not a gap.
-            if (empty($options['meeting_participants'])) {
-                $options['meeting_participants'] = \App\Services\MeetingParticipants::defaults(
-                    $project,
-                    [auth()->id()],
-                );
-            }
-
-            $task->update([
-                'start_date' => $date,
-                'end_date' => $date,
-                'notes' => $notes,
-                'options' => $options,
-            ]);
-
-            // Move the existing calendar event; a task that never got one (the
-            // grant was missing at booking) still needs one created.
-            data_get($task->options, 'nylas_meet_event.event_id')
-                ? \App\Jobs\UpdateMeetTaskCalendarEvent::dispatch($task->id)
-                : \App\Jobs\CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
-
-            $this->parkProjectInConsult($project, $task);
-
-            return true;
-        }
-
-        $task = \App\Models\Task::create([
-            'title' => $title,
-            'project_id' => $project->id,
-            'type' => 'Meet',
-            'start_date' => $date,
-            'end_date' => $date,
-            'order' => 0,
-            'user_ids' => [auth()->id()],
-            'notes' => $notes,
-            'options' => [
-                'dates' => [$date],
-                'checklist' => [],
-                'time_settings' => [$date => $timeSettings],
-                // The homeowner is the point of a consult — invite them, and
-                // whoever is going, exactly as the task form would. This used
-                // to be an empty list, so the calendar invite went only to the
-                // company mailboxes the calendar service adds on its own and
-                // the client never saw their own appointment.
-                'meeting_participants' => \App\Services\MeetingParticipants::defaults(
-                    $project,
-                    [auth()->id()],
-                ),
-                'meeting_location_type' => $this->consultMeetingType,
-            ],
-        ]);
-
-        // Earlier reply emails now belong to this project too — stamp them so
-        // the project/client tracking cards show the full thread.
-        \App\Models\EmailTracking::withoutGlobalScopes()
-            ->where('lead_id', $this->lead->id)
-            ->whereNull('project_id')
-            ->update(['project_id' => $project->id]);
-
-        // Same path TaskCreate uses — the queued job creates the Nylas
-        // calendar event for the Meet task.
-        \App\Jobs\CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
-
-        $this->parkProjectInConsult($project, $task);
-
-        return true;
-    }
-
-    /**
-     * A booked consult puts its project in Consult, whatever stage it was in.
-     *
-     * A new project arrives in Estimate (the observer's default); a returning
-     * client's project may be Cancelled or Complete — "Primary Bath —
-     * Cancelled" picked in the composer is that bath coming back for a new
-     * look — and either way the calendar says Consult from here until the
-     * meeting has happened, when projects:advance-past-consults moves it on
-     * to Estimate. Left alone only when it already says Consult, or when the
-     * meeting is already in the past.
-     */
-    protected function parkProjectInConsult(\App\Models\Project $project, \App\Models\Task $task): void
-    {
-        if ($task->meetHasPassed(PickTimes::timezone())) {
-            return;
-        }
-
-        $latestCode = \App\Models\ProjectStatus::withoutGlobalScopes()
-            ->where('project_id', $project->id)
-            ->orderByDesc('start_date')
-            ->orderByDesc('id')
-            ->value('status_code');
-
-        if ((int) $latestCode === 9) {
-            return;
-        }
-
-        \App\Models\ProjectStatus::create([
-            'project_id' => $project->id,
-            'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
-            'status_code' => 9, // Consult
-            'start_date' => today()->format('Y-m-d'),
-        ]);
+        return app(LeadReplyComposer::class)->bookConsult(
+            $this->lead,
+            $this->client,
+            (string) $this->full_name,
+            $this->address,
+            $this->consultMeetingType,
+            $this->availability,
+            $this->selectedAvailability,
+            $this->selectedExactTime,
+            $this->projectName,
+        );
     }
 
     /**
@@ -1289,6 +1122,11 @@ class LeadCreate extends Component
      * consult?" outreach in a single press. With a usable shared time
      * selected it confirms that time instead, same as the manual flow.
      */
+    /**
+     * One click: apply the "Consult" template and send it — delegates to
+     * App\Services\Leads\LeadReplyComposer::sendConsultInvite(), the same
+     * service the Hive Contractors app's LeadController calls.
+     */
     public function sendConsultInvite(): void
     {
         // Same scoping as the modal's template picker (vendor global scope
@@ -1343,107 +1181,59 @@ class LeadCreate extends Component
             'emailBody' => ['required', 'string'],
         ]);
 
-        $vendorId = $this->lead->belongs_to_vendor_id;
-        $trackingProvider = (string) config('email_tracking.provider', 'nylas');
+        $result = app(LeadReplyComposer::class)->send(
+            $this->lead,
+            $this->client,
+            auth()->user(),
+            (string) $this->full_name,
+            $this->replyInput() + [
+                'subject' => $this->subject,
+                'body' => $this->emailBody,
+            ],
+        );
 
-        $companyEmailQuery = CompanyEmail::query()
-            ->where('email', $this->from)
-            ->where('vendor_id', $vendorId);
-
-        if ($trackingProvider !== 'mailtrap') {
-            $companyEmailQuery->whereNotNull('grant_id');
-        }
-
-        $companyEmail = $companyEmailQuery->first();
-
-        if (! $companyEmail) {
+        if (! $result['ok']) {
             Flux::toast(
                 duration: 7000,
                 position: 'top right',
                 variant: 'danger',
                 heading: 'Email Not Sent',
-                text: $trackingProvider === 'mailtrap'
-                    ? 'The selected sender email is not available.'
-                    : 'The selected sender email is not connected to Nylas.',
+                text: (string) $result['error'],
             );
+
             return;
         }
 
-        $templateName = null;
-        if ($this->selectedTemplateId) {
-            $template = EmailTemplate::find($this->selectedTemplateId);
-            $templateName = $template?->name;
+        $this->finishSend($result);
+    }
+
+    /**
+     * @param  array{ok: bool, error: ?string, booked: bool, confirmed: bool, texted: ?string, unbooked: bool, new_status: ?string, recipient_count: int}  $result
+     */
+    protected function finishSend(array $result): void
+    {
+        if (! $result['ok']) {
+            Flux::toast(
+                duration: 7000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Not sent',
+                text: (string) $result['error'],
+            );
+
+            return;
         }
 
-        SendLeadReplyJob::dispatch(
-            leadId: $this->lead->id,
-            companyEmailId: $companyEmail->id,
-            userId: auth()->id(),
-            recipients: $this->to,
-            fromEmail: $this->from,
-            subject: $this->subject,
-            body: $this->emailBody,
-            emailTemplateName: $templateName,
-            senderIp: request()->ip(),
-            inReplyToMessageId: $this->nylasMessageId,
-            references: $this->nylasReferences,
-        );
-
-        // Replying moves a New lead to Replied (never downgrades a lead that
-        // already progressed — Won/Lost/etc stay put). Runs BEFORE bookConsult
-        // so a booked consult's MarkClientLeadWon job (which only converts New
-        // leads) can't race this into Won — booking sets Won explicitly below.
-        if (($this->lead->last_status?->title ?? 'New') === 'New') {
-            $this->lead->setStatus('Replied');
-            $this->lead->unsetRelation('last_status');
-            $this->lead_status = 'Replied';
+        if ($result['new_status'] !== null) {
+            $this->lead_status = $result['new_status'];
             unset($this->hasReplied);
-        }
-
-        $booked = $this->bookConsult();
-
-        // bookConsult() may have converted the lead through the task observer;
-        // read the status fresh before deciding anything on it.
-        $this->lead->unsetRelation('last_status');
-
-        // Re-sending the confirmation of a time already on the calendar (after
-        // the homeowner re-picked and put the lead back to New) books nothing
-        // new, but it IS the office confirming the consult: that converts too.
-        $confirmed = $booked || ($this->selectedExactTime !== null
-            && ($consult = $this->bookedConsult()) !== null
-            && ! ($consult['past'] ?? true));
-
-        // Whatever the email said, the client's thread hears it too — the
-        // same people, both channels — and a client with no thread yet is
-        // sent the START prompt so the next one can be texted.
-        // A re-sent confirmation books nothing new but confirms all the same:
-        // the text must say "confirmed for…", not "pick a time" (Jeanne
-        // Bondi's thread, 2026-09-16).
-        $texted = $this->textAlongsideEmail($confirmed);
-
-        // A time was chosen for this email but nothing was booked: the lead
-        // has no client to hang a project on. Say so — the email is out,
-        // the calendar is not, and silence here is how a homeowner turns up
-        // to an appointment nobody wrote down.
-        $unbooked = ! $booked && ($this->selectedAvailability[0] ?? null) !== null && ! $this->client;
-
-        // A booked consult is a converted lead: the client now has a project
-        // and a Meet task on the calendar. Move it out of New/Replied so the
-        // Replied filter keeps showing only leads still waiting on us. Lost /
-        // Not a Fit are someone's decision — never resurrect those here.
-        if ($confirmed && in_array($this->lead->last_status?->title ?? 'New', ['New', 'Replied'], true)) {
-            $this->lead->setStatus('Won');
-            $this->lead->unsetRelation('last_status');
-            $this->lead_status = 'Won';
         }
 
         $this->modal('lead_form_modal')->close();
         $this->dispatch('refreshComponent')->to('leads.leads-index');
         $this->dispatch('lead-status-updated');
 
-        if ($unbooked) {
-            Log::warning('Lead consult not booked: no client for the lead', ['lead_id' => $this->lead->id]);
-
+        if ($result['unbooked']) {
             Flux::toast(
                 duration: 9000,
                 position: 'top right',
@@ -1461,294 +1251,66 @@ class LeadCreate extends Component
             position: 'top right',
             variant: 'success',
             heading: 'Email Queued',
-            text: 'Sending message to ' . count($this->to) . ' recipient(s)'
-                . ($booked ? '. Consult booked — project and Meet task created.' : '')
-                . ($texted ? ' '.$texted : ''),
+            text: 'Sending message to ' . $result['recipient_count'] . ' recipient(s)'
+                . ($result['booked'] ? '. Consult booked — project and Meet task created.' : '')
+                . ($result['texted'] ? ' '.$result['texted'] : ''),
         );
     }
 
     /**
-     * Text the client what the email just said — the booked consult, the
-     * pick-times link, or a heads-up that an email is waiting — on their
-     * thread. A client with no thread yet gets the START prompt instead, so
-     * the next message can go by text; a thread still awaiting START gets
-     * nothing more. Returns a short note for the toast, or null when there
-     * was nobody to text.
+     * The composer's current selections, shaped the way
+     * App\Services\Leads\LeadReplyComposer expects them — shared by
+     * send_message() and sendConsultInvite().
+     *
+     * @return array{to: array<int, string>, from: string, selected_template_id: ?int, availability: array, selected_availability: array<int>, selected_exact_time: ?string, project_name: string, consult_meeting_type: string, nylas_message_id: ?string, nylas_references: array<int, string>, sender_ip: ?string}
      */
-    protected function textAlongsideEmail(bool $booked): ?string
+    protected function replyInput(): array
     {
-        $numbers = $this->clientTextNumbers();
-        if ($numbers === []) {
-            return null;
-        }
-
-        $client = $this->client;
-        $sms = app(\App\Services\GroupSmsService::class);
-        $thread = $this->threadFor($numbers);
-
-        try {
-            if (! $thread) {
-                $sms->sendNewGroup(
-                    $numbers,
-                    '',
-                    null,
-                    $client?->id,
-                    auth()->id(),
-                    auth()->user()?->vendor?->id ?? $this->lead->belongs_to_vendor_id,
-                );
-
-                return 'Consent text sent — they get the START prompt first; this message went by email only.';
-            }
-
-            if ($thread->hasPendingOptIn()) {
-                return 'Not texted — they have not replied START yet.';
-            }
-
-            $sms->sendToThread($thread, $this->textForEmail($booked, $thread), [], auth()->id());
-        } catch (\Throwable $e) {
-            Log::warning('Lead email: companion text failed', ['lead_id' => $this->lead->id, 'thread_id' => $thread?->id, 'error' => $e->getMessage()]);
-
-            return null;
-        }
-
-        return $booked ? 'Confirmation texted too.' : 'Texted too.';
+        return [
+            'to' => $this->to,
+            'from' => $this->from,
+            'selected_template_id' => $this->selectedTemplateId,
+            'availability' => $this->availability,
+            'selected_availability' => $this->selectedAvailability,
+            'selected_exact_time' => $this->selectedExactTime,
+            'project_name' => $this->projectName,
+            'consult_meeting_type' => $this->consultMeetingType,
+            'nylas_message_id' => $this->nylasMessageId,
+            'nylas_references' => $this->nylasReferences,
+            'sender_ip' => request()->ip(),
+        ];
     }
 
     /**
-     * The numbers the client is texted on: every contact's cell phone, else
-     * the phone on the lead. E.164, unique.
-     *
-     * @return array<int, string>
+     * Everything the Message tab prefills — delegates to
+     * App\Services\Leads\LeadReplyComposer::composerOptions(), the same
+     * service the Hive Contractors app's LeadController calls.
      */
-    protected function clientTextNumbers(): array
-    {
-        $tenDigits = function (?string $phone): ?string {
-            $digits = preg_replace('/\D/', '', (string) $phone);
-            if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-                $digits = substr($digits, 1);
-            }
-
-            return strlen($digits) === 10 ? $digits : null;
-        };
-
-        $numbers = collect($this->client?->users ?? [])
-            ->map(fn ($user) => $tenDigits($user->cell_phone))
-            ->filter();
-
-        if ($numbers->isEmpty()) {
-            $numbers = collect([$tenDigits($this->lead->lead_data['phone'] ?? null)])->filter();
-        }
-
-        return $numbers
-            ->map(fn (string $digits) => \App\Services\GroupSmsService::formatE164($digits))
-            ->unique()
-            ->values()
-            ->all();
-    }
-
-    /**
-     * The client's thread to text on: one already tied to the client
-     * (the one carrying every number we would text, else the most recent),
-     * or the group made up of exactly these numbers.
-     *
-     * @param  array<int, string>  $numbers  E.164
-     */
-    protected function threadFor(array $numbers): ?\App\Models\SmsGroupThread
-    {
-        $client = $this->client;
-
-        if ($client) {
-            $threads = \App\Models\SmsGroupThread::query()
-                ->accessibleTo(auth()->user())
-                ->where('client_id', $client->id)
-                ->latest('last_activity_at')
-                ->get();
-
-            $covering = $threads->first(fn ($thread) => collect($numbers)->every(
-                fn ($number) => in_array($number, (array) $thread->participants, true),
-            ));
-
-            if ($covering ?? $threads->first()) {
-                return $covering ?? $threads->first();
-            }
-        }
-
-        $query = \App\Models\SmsGroupThread::query()
-            ->accessibleTo(auth()->user())
-            ->whereJsonLength('participants', count($numbers));
-        foreach ($numbers as $number) {
-            $query->whereJsonContains('participants', $number);
-        }
-
-        return $query->latest('last_activity_at')->first();
-    }
-
-    /** The text that says what the email said, greeting everyone on the thread. */
-    protected function textForEmail(bool $booked, \App\Models\SmsGroupThread $thread): string
-    {
-        $client = $this->client;
-        $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
-        $contractor = trim((string) (data_get($vendor?->options, 'short_name') ?: $vendor?->name)) ?: config('app.name');
-        $names = $client
-            ? \App\Services\ConsultScheduleLinkTexter::greetingNames($thread, $client, (string) ($this->lead->lead_data['name'] ?? ''))
-            : (string) strtok(trim((string) ($this->lead->lead_data['name'] ?? '')), ' ');
-        $greeting = 'Hi'.($names !== '' ? " {$names}" : '').",\n\n";
-
-        $consult = $booked ? $this->bookedConsult() : null;
-        if ($consult) {
-            $task = \App\Models\Task::withoutGlobalScopes()->find($consult['task_id']);
-            $project = $task?->project()->withoutGlobalScopes()->first();
-            $where = trim(implode(', ', array_filter([trim((string) $project?->address), trim((string) $project?->city)])));
-            $place = $consult['virtual']
-                ? ' as a video call — the calendar invite has the Microsoft Teams link'
-                : ($where !== '' ? ' at '.$where : '');
-
-            return $greeting
-                ."Your consultation with {$contractor} is confirmed for {$consult['label']}{$place}. "
-                ."If this time no longer works for you, you can pick new consultation times here: ".$this->scheduleLink().' and we’ll confirm the new one ASAP.';
-        }
-
-        // The email asks them to pick times: the same ask, with the link.
-        if (str_contains($this->emailBody, '/lead/times/')) {
-            return $greeting."Pick a consultation time with {$contractor} here: ".$this->scheduleLink();
-        }
-
-        $subject = trim((string) $this->subject);
-
-        return $greeting
-            ."We just emailed you".($subject !== '' ? " about \"{$subject}\"" : '')
-            ." — please check your inbox. If texting is easier, just reply here.";
-    }
-
     protected function prepareEmailComposer(): void
     {
-        $vendorId = $this->lead->belongs_to_vendor_id;
+        $options = app(LeadReplyComposer::class)->composerOptions(
+            $this->lead,
+            $this->client,
+            $this->user,
+            (string) $this->full_name,
+            $this->origin,
+            auth()->user(),
+            $this->availability,
+            $this->consultMeetingType,
+        );
 
-        // From: vendor's connected company emails
-        $companyEmails = CompanyEmail::where('vendor_id', $vendorId)
+        $this->to = $options['to'];
+        $this->availableContacts = $options['available_contacts'];
+        $this->availableFromEmails = CompanyEmail::where('vendor_id', $this->lead->belongs_to_vendor_id)
             ->whereNotNull('grant_id')
             ->get();
-
-        $this->availableFromEmails = $companyEmails;
-
-        $currentUserEmail = auth()->user()?->email;
-        $current = $companyEmails->firstWhere('email', $currentUserEmail);
-        $this->from = $current?->email ?? ($companyEmails->first()?->email ?? '');
-
-        // To: lead user emails + lead_data emails
-        $recipients = collect();
-        $leadEmail = $this->lead->lead_data['email'] ?? null;
-        $replyToEmail = $this->lead->lead_data['reply_to_email'] ?? null;
-
-        if ($this->client) {
-            foreach ($this->client->users as $u) {
-                // Placeholder addresses exist so a phone-only household member
-                // can have a user row — never offer them as a recipient.
-                if ($u->hasRoutableEmail()) {
-                    $recipients->push($u->email);
-                }
-            }
-        } elseif ($this->user && ! empty($this->user->email)) {
-            $recipients->push($this->user->email);
-        }
-
-        if ($leadEmail) {
-            $recipients->push($leadEmail);
-        }
-        if ($replyToEmail) {
-            $recipients->push($replyToEmail);
-        }
-
-        $this->to = $recipients->filter()->unique()->values()->all();
-
-        // Available contacts (display)
-        $contacts = collect();
-        if ($this->client) {
-            foreach ($this->client->users as $u) {
-                if (! empty($u->email)) {
-                    $contacts->push([
-                        'email' => $u->email,
-                        'name' => trim(($u->first_name ?? '') . ' ' . ($u->last_name ?? '')) ?: $u->email,
-                        'group' => 'Client',
-                    ]);
-                }
-            }
-        }
-        if ($leadEmail) {
-            $contacts->push([
-                'email' => $leadEmail,
-                'name' => $this->full_name ?: $leadEmail,
-                'group' => 'Lead',
-            ]);
-        }
-        if ($replyToEmail && $replyToEmail !== $leadEmail) {
-            $contacts->push([
-                'email' => $replyToEmail,
-                'name' => $replyToEmail,
-                'group' => 'Reply-To',
-            ]);
-        }
-        $this->availableContacts = $contacts->unique('email')->values()->all();
-
-        // Templates
-        $this->availableTemplates = EmailTemplate::where('type', 'lead')
-            ->orderBy('name')
-            ->get();
-
-        $defaultTemplate = $this->availableTemplates->first();
-        $this->selectedTemplateId = $defaultTemplate?->id;
-        $this->subject = $defaultTemplate ? $this->replacePlaceholders((string) $defaultTemplate->subject) : 'Re: ' . ($this->origin ? ucfirst($this->origin) . ' inquiry' : 'your inquiry');
-        $this->emailBody = $defaultTemplate ? $this->replacePlaceholders((string) $defaultTemplate->body) : '';
-
-        // Look up matching inbound Nylas message for threading
-        $this->lookupNylasInboundMessage($current ?? $companyEmails->first(), $leadEmail ?: $replyToEmail);
-    }
-
-    protected function lookupNylasInboundMessage(?CompanyEmail $companyEmail, ?string $leadEmail): void
-    {
-        $this->nylasMessageId = null;
-        $this->nylasReferences = [];
-
-        if (! $companyEmail || ! $companyEmail->grant_id || empty($leadEmail)) {
-            return;
-        }
-
-        try {
-            $nylas = app(NylasService::class);
-
-            $receivedAfter = $this->lead->date
-                ? Carbon::parse($this->lead->date)->subDays(2)->timestamp
-                : Carbon::now()->subDays(60)->timestamp;
-
-            $response = $nylas->getMessages($companyEmail->grant_id, [
-                'any_email' => $leadEmail,
-                'limit' => 5,
-                'received_after' => $receivedAfter,
-            ], false, $companyEmail);
-
-            $messages = data_get($response, 'data', []);
-
-            $match = collect($messages)->first(function ($message) use ($leadEmail) {
-                $from = data_get($message, 'from', []);
-                foreach ($from as $sender) {
-                    if (strcasecmp((string) data_get($sender, 'email', ''), $leadEmail) === 0) {
-                        return true;
-                    }
-                }
-                return false;
-            }) ?? collect($messages)->first();
-
-            if ($match) {
-                $this->nylasMessageId = data_get($match, 'id') ?: null;
-                $references = (array) data_get($match, 'references', []);
-                $this->nylasReferences = array_values(array_filter(array_map('strval', $references)));
-            }
-        } catch (\Throwable $exception) {
-            Log::warning('Lead Nylas inbound lookup failed', [
-                'lead_id' => $this->lead?->id,
-                'error' => $exception->getMessage(),
-            ]);
-        }
+        $this->from = $options['from'];
+        $this->availableTemplates = EmailTemplate::where('type', 'lead')->orderBy('name')->get();
+        $this->selectedTemplateId = $options['selected_template_id'];
+        $this->subject = $options['subject'];
+        $this->emailBody = $options['body'];
+        $this->nylasMessageId = $options['nylas_message_id'];
+        $this->nylasReferences = $options['nylas_references'];
     }
 
     public function insertAvailabilitySlot(int $index): void
@@ -1784,11 +1346,7 @@ class LeadCreate extends Component
     #[Computed]
     public function selectedSlotWindowKnown(): bool
     {
-        $slotIndex = $this->selectedAvailability[0] ?? null;
-        $slot = $slotIndex !== null ? ($this->availability[$slotIndex] ?? null) : null;
-        $slotTime = trim((string) ($slot['time'] ?? ''));
-
-        return $slot && ($this->parseSlotTimes($slotTime) || strcasecmp($slotTime, 'Anytime') === 0);
+        return app(LeadReplyComposer::class)->selectedSlotWindowKnown($this->availability, $this->selectedAvailability);
     }
 
     /**
@@ -1801,74 +1359,7 @@ class LeadCreate extends Component
     #[Computed]
     public function exactTimeOptions(): array
     {
-        $slotIndex = $this->selectedAvailability[0] ?? null;
-        $slot = $slotIndex !== null ? ($this->availability[$slotIndex] ?? null) : null;
-
-        return $slot ? $this->startTimesFor((array) $slot) : [];
-    }
-
-    /**
-     * The half-hour starts still open inside a slot's window, after Patryk's
-     * and Greg's calendars have had their say.
-     *
-     * @return array<int, array{value: string, label: string}>
-     */
-    protected function startTimesFor(array $slot): array
-    {
-        $slotTime = trim((string) ($slot['time'] ?? ''));
-        $times = $this->parseSlotTimes($slotTime);
-
-        if (! $times && strcasecmp($slotTime, 'Anytime') === 0) {
-            // "Anytime" is the whole bookable day, not an unparseable window:
-            // offer every start in it so the confirmation names a real time
-            // instead of asking the client to read "Anytime" back to us.
-            $times = PickTimes::dayBounds();
-        }
-
-        if (! $times) {
-            return [];
-        }
-
-        $cursor = Carbon::createFromFormat('H:i', $times[0]);
-        $end = Carbon::createFromFormat('H:i', $times[1]);
-
-        // Starts that collide with what's already on Patryk's or Greg's
-        // calendar are withheld — offering them books a clash the office then
-        // has to untangle — with the same travel buffer the homeowner's
-        // windows get. selectExactTime() validates against this list, so the
-        // filter holds server-side too.
-        $busy = app(\App\Services\AdminCalendarBusy::class);
-        $date = (string) ($slot['date'] ?? '');
-
-        // Same-day scheduling (an office-proposed date can be today) must not
-        // offer starts that have already passed.
-        $tz = PickTimes::timezone();
-        $minStart = ((string) ($slot['date'] ?? '')) === Carbon::now($tz)->format('Y-m-d')
-            ? Carbon::now($tz)->format('H:i')
-            : null;
-
-        $options = [];
-        while ($cursor < $end) {
-            $chipStart = $cursor->format('H:i');
-            $chipEnd = $cursor->copy()->addMinutes(self::CONSULT_MINUTES)->format('H:i');
-
-            $clashes = $busy->startIsBusy($date, $chipStart, self::CONSULT_MINUTES);
-
-            if ($minStart !== null && $chipStart <= $minStart) {
-                $clashes = true;
-            }
-
-            if (! $clashes) {
-                $options[] = [
-                    'value' => $chipStart,
-                    'label' => $cursor->format('g:i A'),
-                ];
-            }
-
-            $cursor->addMinutes(30);
-        }
-
-        return $options;
+        return app(LeadReplyComposer::class)->exactTimeOptions($this->availability, $this->selectedAvailability);
     }
 
     /**
@@ -1879,45 +1370,14 @@ class LeadCreate extends Component
      */
     public function slotProblem(array $slot): ?string
     {
-        if (! Lead::slotIsBookable($slot)) {
-            return 'past';
-        }
-
-        $slotTime = trim((string) ($slot['time'] ?? ''));
-        $windowKnown = $this->parseSlotTimes($slotTime) || strcasecmp($slotTime, 'Anytime') === 0;
-
-        return $windowKnown && $this->startTimesFor($slot) === [] ? 'booked' : null;
+        return app(LeadReplyComposer::class)->slotProblem($slot);
     }
 
     /** Which of the lead's preferred slots can still be confirmed, by index. @return array<int, string|null> */
     #[Computed]
     public function slotProblems(): array
     {
-        return collect($this->availability)
-            ->map(fn ($slot) => $this->slotProblem((array) $slot))
-            ->all();
-    }
-
-    /**
-     * The Meet-task title bookConsult() books and rebooks under — the match
-     * key that makes rebooking idempotent, and therefore the ONLY task the
-     * composer may present as "this lead's consult".
-     */
-    protected function consultTaskTitle(): ?string
-    {
-        if (! $this->client || ! $this->lead) {
-            return null;
-        }
-
-        $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
-        $shortVendorName = data_get($vendor?->options, 'short_name') ?: ($vendor?->name ?? config('app.name'));
-
-        $name = preg_replace('/\s+/', ' ', trim((string) $this->full_name));
-        $parts = $name !== '' ? explode(' ', $name) : [];
-        $lastName = count($parts) > 1 ? array_pop($parts) : $name;
-        $clientLastNames = $this->client->last_names ?: $lastName;
-
-        return $shortVendorName . ' | ' . $clientLastNames . ' | Consult';
+        return app(LeadReplyComposer::class)->slotProblems($this->availability);
     }
 
     /**
@@ -1933,43 +1393,7 @@ class LeadCreate extends Component
     #[Computed]
     public function bookedConsult(): ?array
     {
-        $project = $this->client?->projects()->first();
-        $title = $this->consultTaskTitle();
-
-        if (! $project || $title === null) {
-            return null;
-        }
-
-        $task = \App\Models\Task::withoutGlobalScopes()
-            ->whereNull('deleted_at')
-            ->where('project_id', $project->id)
-            ->where('type', 'Meet')
-            ->where('title', $title)
-            ->first();
-
-        if (! $task || ! $task->start_date) {
-            return null;
-        }
-
-        $date = Carbon::parse($task->start_date)->format('Y-m-d');
-        $settings = (array) data_get($task->options, 'time_settings.' . $date, []);
-
-        $label = Carbon::parse($task->start_date)->format('D, M j');
-        if (($settings['use_time'] ?? false) && ! empty($settings['start_time'])) {
-            $label .= ' · ' . Carbon::createFromFormat('H:i', $settings['start_time'])->format('g:i A');
-        }
-
-        $tz = PickTimes::timezone();
-
-        return [
-            'label' => $label,
-            'virtual' => data_get($task->options, 'meeting_location_type') === 'virtual',
-            'task_id' => $task->id,
-            // A consult whose day has passed isn't "booked" to a reader — it
-            // either happened or was missed; both mean the email must talk
-            // about a NEW time, not confirm the old one.
-            'past' => Carbon::parse($task->start_date, $tz)->startOfDay()->lt(Carbon::now($tz)->startOfDay()),
-        ];
+        return app(LeadReplyComposer::class)->bookedConsult($this->client, $this->lead, (string) $this->full_name);
     }
 
     /**
@@ -2094,87 +1518,28 @@ class LeadCreate extends Component
     }
 
     /** "Primary Bath — Cancelled": how a project reads in the Project box. */
-    protected function consultProjectLabel(\App\Models\Project $project): string
-    {
-        return $project->project_name . ' — ' . ($project->latestStatus?->title ?? 'No status');
-    }
-
-    /** Stages a project can be at for a consult to land on it. */
-    protected const CONSULT_PROJECT_STAGES = ['Consult', 'Estimate', 'Cancelled'];
-
-    /**
-     * The client's projects a consult may go on, newest first: those still
-     * at Consult or Estimate, or Cancelled (a job that never started can be
-     * picked back up) — never one that has ever been Complete, whatever it
-     * says now. A returning client's finished bathrooms are not where their
-     * new bedroom consult goes; that gets a project of its own.
-     *
-     * @return \Illuminate\Support\Collection<int, \App\Models\Project>
-     */
-    protected function consultProjects(): \Illuminate\Support\Collection
-    {
-        if (! $this->client) {
-            return collect();
-        }
-
-        return $this->client->projects()
-            ->with('latestStatus')
-            ->whereDoesntHave('statuses', fn ($q) => $q->where('status_code', 7))
-            ->orderByDesc('id')
-            ->get()
-            ->filter(fn (\App\Models\Project $project) => in_array($project->latestStatus?->title, self::CONSULT_PROJECT_STAGES, true))
-            ->values();
-    }
-
-    /**
-     * The client's projects as the composer's Project box suggests them —
-     * consultProjects(), each with its stage as the badge the projects
-     * table draws for it. `label` is what lands in the box when one is
-     * picked. Typing a name that matches none of them creates a new project.
-     *
-     * @return array<int, array{id: int, label: string, name: string, stage: string, color: string}>
-     */
+    /** @return array<int, array{id: int, label: string, name: string, stage: string, color: string}> */
     #[Computed]
     public function consultProjectOptions(): array
     {
-        return $this->consultProjects()
-            ->map(fn (\App\Models\Project $project) => [
-                'id' => $project->id,
-                'label' => $this->consultProjectLabel($project),
-                'name' => (string) $project->project_name,
-                'stage' => $project->latestStatus?->title ?? 'No status',
-                'color' => $project->latestStatus?->badge_color ?? 'zinc',
-            ])
-            ->values()
-            ->all();
+        return app(LeadReplyComposer::class)->consultProjectOptions($this->client);
+    }
+
+    /** "Primary Bath — Cancelled": how a project reads in the Project box. */
+    protected function consultProjectLabel(\App\Models\Project $project): string
+    {
+        return app(LeadReplyComposer::class)->consultProjectLabel($project);
     }
 
     /**
-     * The client's project the Project box names — by its suggested label
-     * or by bare name, case-insensitively — or null when the text names
-     * none of them (a new project).
+     * The project pre-filled into the box: the client's newest project still
+     * at Consult or Estimate. A Cancelled one stays on offer in the list but
+     * is not proposed; with nothing open the box is left for a name, which
+     * is what needsProjectName() then asks for.
      */
-    protected function resolvedConsultProject(): ?\App\Models\Project
+    protected function openProjectForConsult(): ?\App\Models\Project
     {
-        $typed = mb_strtolower(trim($this->projectName));
-
-        if ($typed === '') {
-            return null;
-        }
-
-        // Only a project the box offers can be picked: typing the name of a
-        // finished job makes a new project by that name instead.
-        return $this->consultProjects()
-            ->first(fn (\App\Models\Project $project) => in_array($typed, [
-                mb_strtolower($this->consultProjectLabel($project)),
-                mb_strtolower(trim((string) $project->project_name)),
-            ], true));
-    }
-
-    /** What a new project is called: the typed text, less any stage suffix a suggestion carried. */
-    protected function newProjectName(): string
-    {
-        return trim((string) preg_replace('/\s+—\s+[^—]*$/u', '', trim($this->projectName)));
+        return app(LeadReplyComposer::class)->openProjectForConsult($this->client);
     }
 
     /**
@@ -2185,7 +1550,7 @@ class LeadCreate extends Component
     #[Computed]
     public function hasUsableAvailability(): bool
     {
-        return collect($this->slotProblems)->contains(null);
+        return app(LeadReplyComposer::class)->hasUsableAvailability($this->availability);
     }
 
     /**
@@ -2197,7 +1562,7 @@ class LeadCreate extends Component
     #[Computed]
     public function awaitingExactTime(): bool
     {
-        return str_contains($this->emailBody, '{{SELECT');
+        return app(LeadReplyComposer::class)->awaitingExactTime($this->emailBody);
     }
 
     /**
@@ -2207,37 +1572,14 @@ class LeadCreate extends Component
     #[Computed]
     public function needsProjectName(): bool
     {
-        return $this->selectedExactTime !== null
-            && $this->client !== null
-            && $this->resolvedConsultProject() === null
-            && $this->newProjectName() === '';
-    }
-
-    /**
-     * The project pre-filled into the box: the client's newest project still
-     * at Consult or Estimate. A Cancelled one stays on offer in the list but
-     * is not proposed; with nothing open the box is left for a name, which
-     * is what needsProjectName() then asks for.
-     */
-    protected function openProjectForConsult(): ?\App\Models\Project
-    {
-        return $this->consultProjects()
-            ->first(fn (\App\Models\Project $project) => $project->latestStatus?->title !== 'Cancelled');
+        return app(LeadReplyComposer::class)->needsProjectName($this->client, $this->selectedExactTime, $this->projectName);
     }
 
     /** Why Send Email is blocked right now, or null when it isn't. */
     #[Computed]
     public function sendBlockedReason(): ?string
     {
-        if ($this->awaitingExactTime) {
-            return 'Pick the exact consult time first';
-        }
-
-        if ($this->needsProjectName) {
-            return 'Name the project for this consult first';
-        }
-
-        return null;
+        return app(LeadReplyComposer::class)->sendBlockedReason($this->client, $this->emailBody, $this->selectedExactTime, $this->projectName);
     }
 
     protected function rerenderTemplate(): void
@@ -2256,234 +1598,28 @@ class LeadCreate extends Component
         $this->emailBody = $this->replacePlaceholders((string) $template->body);
     }
 
-    protected function formatAvailabilityList(): string
-    {
-        if (empty($this->availability)) {
-            return '';
-        }
-
-        if (empty($this->selectedAvailability)) {
-            return '{{SELECT Availability}}';
-        }
-
-        $slots = collect($this->selectedAvailability)
-            ->map(fn ($i) => $this->availability[$i] ?? null)
-            ->filter()
-            ->values();
-
-        if ($slots->count() === 1) {
-            $slot = (array) $slots->first();
-
-            if ($this->selectedExactTime) {
-                return $this->bookedSlotLabel($slot);
-            }
-
-            // A parseable window offers exact-time chips — hold the email back
-            // until one is picked. Unparseable windows have no chips, so the
-            // range itself is the final value.
-            if ($this->exactTimeOptions !== []) {
-                return '{{SELECT Time}}';
-            }
-
-            return $this->formatAvailabilitySlot($slot);
-        }
-
-        return $slots
-            ->map(fn ($slot) => '• ' . $this->formatAvailabilitySlot((array) $slot))
-            ->implode("\n");
-    }
-
     /**
-     * How a booked slot reads once a time is settled: the exact time when one
-     * was picked, otherwise the slot as the client offered it. The email line
-     * and the Meet task's note both use this, so a task can't say "Anytime"
-     * while the client was told 10:30 AM.
+     * Fills a template's placeholders for THIS lead/composer state —
+     * delegates to App\Services\Leads\LeadReplyComposer::replacePlaceholders(),
+     * the same service the Hive Contractors app's LeadController calls. Kept
+     * as a one-argument instance method (tests reach it via Reflection on a
+     * live component instance).
      */
-    protected function bookedSlotLabel(array $slot): string
-    {
-        if (! $this->selectedExactTime) {
-            return $this->formatAvailabilitySlot($slot);
-        }
-
-        $date = $slot['date'] ?? null;
-        $datePart = $date ? \Carbon\Carbon::parse($date)->format('D, M j') : '';
-
-        return trim($datePart . ' · ' . Carbon::createFromFormat('H:i', $this->selectedExactTime)->format('g:i A'));
-    }
-
-    protected function formatAvailabilitySlot(array $slot): string
-    {
-        $date = $slot['date'] ?? null;
-        $time = $slot['time'] ?? null;
-
-        $datePart = $date ? \Carbon\Carbon::parse($date)->format('D, M j') : '';
-
-        return trim($datePart . ($time ? ' · ' . $time : ''));
-    }
-
     protected function replacePlaceholders(string $text): string
     {
-        $name = preg_replace('/\s+/', ' ', trim((string) $this->full_name));
-        $parts = $name !== '' ? explode(' ', $name) : [];
-        $lastName = count($parts) > 1 ? array_pop($parts) : '';
-        $firstNames = $parts ? implode(' ', $parts) : ($lastName !== '' ? '' : $name);
-
-        $clientName = $this->client?->name ?: $name;
-        $clientFirstNames = $this->client?->first_names ?: $firstNames;
-        $clientLastNames = $this->client?->last_names ?: $lastName;
-
-        // {{client_first_name}}: the people on the client, by first name —
-        // "Carri and Alan" for a couple (their email said "Hi Carri," to
-        // both of them). Only a name typed on the lead is trimmed to its
-        // first word, so "Preet Kanwal Singh" still greets as Preet.
-        $clientFirstName = $this->client && empty($this->client->business_name) && $this->client->users->isNotEmpty()
-            ? $clientFirstNames
-            : (strtok(trim((string) $clientFirstNames), ' ') ?: $clientFirstNames);
-
-        $vendor = Vendor::find($this->lead->belongs_to_vendor_id);
-        $vendorName = $vendor?->name ?? config('app.name');
-        $shortVendorName = data_get($vendor?->options, 'short_name') ?: $vendorName;
-
-        $sender = null;
-        if ($this->from) {
-            $sender = \App\Models\User::where('email', $this->from)->first();
-        }
-        $sender = $sender ?: auth()->user();
-        $senderFirstName = $sender?->first_name ?? '';
-        $senderLastName = $sender?->last_name ?? '';
-
-        $availabilityList = $this->formatAvailabilityList();
-
-        // The consult email's middle paragraph: confirm a shared time when one
-        // is still bookable, otherwise ask for new times via the signed public
-        // picker (also the path for leads that never gave any availability).
-        $rescheduled = $this->lead->hasRescheduled();
-
-        // An office-proposed slot was never "availability you shared" — the
-        // homeowner sees an offer, not a confirmation of their own words.
-        // Resolved before the intro so neither line contradicts the other.
-        $selectedSlotIndex = $this->selectedAvailability[0] ?? null;
-        $officeProposed = $selectedSlotIndex !== null
-            && ! empty(((array) ($this->availability[$selectedSlotIndex] ?? []))['office_proposed']);
-
-        // A consult already on the calendar changes the whole register of the
-        // email: greeting a Won client weeks in with "thank you for reaching
-        // out!" reads like we forgot who they are.
-        $booked = $this->bookedConsult;
-
-        // Opening line: a first reply greets them; a reply after they sent new
-        // times thanks them for rescheduling — unless the office is proposing
-        // its own time, where thanking them for availability we are about to
-        // override would read as a contradiction.
-        $intro = match (true) {
-            $officeProposed && $rescheduled => 'Thank you for your patience while we line up your consultation.',
-            $rescheduled => 'Thank you for sending over your new availability! We appreciate you taking the time to reschedule.',
-            $booked !== null && ($booked['past'] ?? false) => 'We&rsquo;d love to get your consultation with '.e($vendorName).' back on the calendar.',
-            $booked !== null => 'A quick note about your upcoming consultation with '.e($vendorName).'.',
-            default => 'Thank you for reaching out to '.e($vendorName).'! We&rsquo;d love to learn more about your project and set up a consultation.',
-        };
-
-        // Say what KIND of meeting this books — a homeowner expecting a
-        // doorbell should not get a Teams link, and vice versa.
-        $formatLine = $this->consultMeetingType === 'virtual'
-            ? ' This will be a video consultation &mdash; the calendar invite includes the Microsoft Teams link to join.'
-            : '';
-
-        if ($this->hasUsableAvailability) {
-            // A time being confirmed/offered while another sits on the
-            // calendar is a MOVE — say so, or the homeowner has two
-            // "confirmed" times and no idea which one is real.
-            $replacesLine = $booked !== null && ! ($booked['past'] ?? false)
-                ? '</p><p></p><p>This replaces the consultation previously scheduled for '
-                    .'<strong>'.e($booked['label']).'</strong>.'
-                : '';
-
-            $timeBlock = ($officeProposed
-                    ? 'We&rsquo;d like to offer this consultation time'
-                    : ($rescheduled ? 'Based on your updated availability' : 'Based on the availability you shared')
-                        .', we&rsquo;d like to confirm this consultation time')
-                .':<br><strong>'
-                .$availabilityList.'</strong>'
-                .$formatLine
-                .$replacesLine
-                // Same signed picker as the no-time branch: let them reschedule
-                // themselves rather than asking for a reply we'd hand-handle.
-                .'</p><p></p><p>If this time no longer works for you, you can '
-                .'<a href="'.e($this->lead->availabilityUrl()).'">pick new consultation times</a>'
-                .' and we&rsquo;ll confirm the new one ASAP.';
-        } elseif ($booked !== null && ! ($booked['past'] ?? false)) {
-            // Nothing newly selected, but a consult IS on the books — this
-            // email is a nudge about it, not a first contact.
-            $timeBlock = 'Your consultation is booked for <strong>'.e($booked['label']).'</strong>.'
-                .$formatLine
-                .'</p><p></p><p>If that time no longer works for you, you can '
-                .'<a href="'.e($this->lead->availabilityUrl()).'">pick new consultation times</a>'
-                .' and we&rsquo;ll confirm the change ASAP.';
-        } elseif ($booked !== null) {
-            // The booked day has passed with nothing new selected: name it,
-            // then ask for fresh times.
-            $timeBlock = 'We had your consultation scheduled for <strong>'.e($booked['label']).'</strong>'
-                .' &mdash; let&rsquo;s find a new time. Please '
-                .'<a href="'.e($this->lead->availabilityUrl()).'">select new consultation times</a>'
-                .' that suit you and we&rsquo;ll confirm ASAP.';
-        } else {
-            // No proposed time, so the "if that time doesn't work" follow-up
-            // would be nonsense — each branch carries its own closing line.
-            //
-            // "New" times only when they gave some that have since lapsed; a
-            // first contact never picked any, so there is nothing new about
-            // the ones we are asking for.
-            // The intro already said "we'd love" once; twice in a row reads
-            // like a form letter.
-            // Times they gave that the calendars have since filled deserve
-            // the reason — "find a new time" with no why reads as if we lost
-            // the ones they sent.
-            $timeBlock = (in_array('booked', $this->slotProblems, true)
-                    ? 'The times you shared are no longer open on our calendar &mdash; please '
-                    : 'Let&rsquo;s find a time that works for you &mdash; please ')
-                .'<a href="'.e($this->lead->availabilityUrl()).'">'
-                .($this->availability === [] ? 'select consultation times' : 'select new consultation times')
-                .'</a> that suit you and we&rsquo;ll confirm ASAP.';
-        }
-
-        return str_replace(
-            [
-                '{{client_name}}',
-                '{{client_first_name}}',
-                '{{client_first_names}}',
-                '{{client_last_names}}',
-                '{{lead_message}}',
-                '{{lead_address}}',
-                '{{lead_origin}}',
-                '{{lead_availability}}',
-                '{{lead_intro}}',
-                '{{lead_time_block}}',
-                '{{vendor_name}}',
-                '{{short_vendor_name}}',
-                '{{sender_first_name}}',
-                '{{sender_last_name}}',
-                '{{schedule_link}}',
-            ],
-            [
-                $clientName,
-                $clientFirstName,
-                $clientFirstNames,
-                $clientLastNames,
-                (string) ($this->message ?? ''),
-                (string) ($this->address ?? ''),
-                (string) ($this->origin ?? ''),
-                $availabilityList,
-                $intro,
-                $timeBlock,
-                $vendorName,
-                $shortVendorName,
-                $senderFirstName,
-                $senderLastName,
-                // The signed pick-times page needs only the LEAD — no project,
-                // no account. Any template can carry it.
-                $this->scheduleLink(),
-            ],
-            $text
+        return app(LeadReplyComposer::class)->replacePlaceholders(
+            $text,
+            $this->lead,
+            $this->client,
+            (string) $this->full_name,
+            $this->origin,
+            $this->message,
+            $this->address,
+            (string) $this->from,
+            $this->availability,
+            $this->selectedAvailability,
+            $this->selectedExactTime,
+            $this->consultMeetingType,
         );
     }
 
@@ -2511,35 +1647,17 @@ class LeadCreate extends Component
         return view('livewire.leads.form');
     }
 
+    /**
+     * The client a reply/consult should be booked against — delegates to
+     * App\Services\Leads\LeadReplyComposer::resolveClientForLead(), the same
+     * service the Hive Contractors app's LeadController calls.
+     */
     protected function resolveClientForLead(): ?\App\Models\Client
     {
-        // No linked contact (an intake that skipped provisioning, a lead
-        // whose email the contact never used): the lead can still be a
-        // client we know by address — Lead::resolveClient() is the same
-        // lookup the leads table and the Won backfill use. Without it the
-        // composer had no client, bookConsult() quietly did nothing, and
-        // the email went out with a time nobody put on the calendar
-        // (2026-09-15, Jeanne Bondi).
-        if (! $this->lead?->user || $this->lead->user->clients->isEmpty()) {
-            return $this->lead?->resolveClient();
+        if (! $this->lead) {
+            return null;
         }
 
-        $clients = $this->lead->user->clients;
-
-        $address = $this->lead->lead_data->address ?? null;
-
-        if (is_string($address) && $address !== '') {
-            $needle = mb_strtolower($address);
-
-            $matched = $clients->first(
-                fn ($c) => $c->address && str_contains($needle, mb_strtolower((string) $c->address))
-            );
-
-            if ($matched) {
-                return $matched;
-            }
-        }
-
-        return $clients->first();
+        return app(LeadReplyComposer::class)->resolveClientForLead($this->lead);
     }
 }

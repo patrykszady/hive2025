@@ -10,6 +10,7 @@ use App\Models\Estimate;
 use App\Models\Project;
 use App\Services\Estimates\EstimateDuplicator;
 use App\Services\Estimates\EstimateSectionWriter;
+use App\Support\EstimateDocumentGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\URL;
@@ -144,9 +145,18 @@ class EstimateController extends Controller
 
         $expiresAt = now()->addMinutes(10);
 
+        // showChanges/showAllowances mirror EstimateShow's own toggles (Export
+        // menu respects whatever they're currently set to) — carried as
+        // extra signed params, same as `type`, so the link can't be edited
+        // to flip them after minting.
         return response()->json([
             'data' => [
-                'url' => URL::temporarySignedRoute('estimates.pdf.signed', $expiresAt, ['estimate' => $found->id, 'type' => $type]),
+                'url' => URL::temporarySignedRoute('estimates.pdf.signed', $expiresAt, [
+                    'estimate' => $found->id,
+                    'type' => $type,
+                    'show_changes' => $request->boolean('show_changes') ? '1' : '0',
+                    'show_allowances' => $request->query('show_allowances') === null || $request->boolean('show_allowances') ? '1' : '0',
+                ]),
                 'expires_at' => $expiresAt->toIso8601String(),
             ],
         ]);
@@ -166,7 +176,10 @@ class EstimateController extends Controller
 
         return response()->json([
             'data' => [
-                'url' => URL::temporarySignedRoute('estimates.xlsx.signed', $expiresAt, ['estimate' => $found->id]),
+                'url' => URL::temporarySignedRoute('estimates.xlsx.signed', $expiresAt, [
+                    'estimate' => $found->id,
+                    'show_allowances' => $request->query('show_allowances') === null || $request->boolean('show_allowances') ? '1' : '0',
+                ]),
                 'expires_at' => $expiresAt->toIso8601String(),
             ],
         ]);
@@ -211,6 +224,35 @@ class EstimateController extends Controller
         }
 
         return response()->json(['data' => ['kind' => $result['kind'], 'sent' => $result['sent']]]);
+    }
+
+    /**
+     * What's changed on this estimate since it was created — mirrors the
+     * "Show Changes" toggle on App\Livewire\Estimates\EstimateShow (via
+     * App\Support\EstimateDocumentGenerator::collectRecentChanges()), so the
+     * app can badge the same sections/line items the web highlights.
+     */
+    public function recentChanges(Request $request, int $estimate): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('view', $found);
+
+        $found->loadMissing('estimate_sections');
+
+        $changes = EstimateDocumentGenerator::collectRecentChanges($found);
+
+        $shape = fn (array $changes) => collect($changes)->map(fn (array $c, $id) => [
+            'id' => (int) $id,
+            'event' => $c['event'],
+            'changed_at' => optional($c['changed_at'])->toIso8601String(),
+            'causer' => $c['causer'],
+        ])->values()->all();
+
+        return response()->json(['data' => [
+            'sections' => $shape($changes['sections']),
+            'line_items' => $shape($changes['line_items']),
+            'since' => optional($changes['since'])->toIso8601String(),
+        ]]);
     }
 
     private function visibleEstimate(int $id, bool $withTrashed = false): Estimate

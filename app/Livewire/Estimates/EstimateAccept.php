@@ -412,47 +412,30 @@ class EstimateAccept extends Component
             ]);
 
             $estimate = $estimate->fresh();
-            $estimate_options = $estimate->options;
 
-            // Persist required vendor signer IDs
-            $estimate_options['required_vendor_signer_ids'] = array_map('intval', $this->requiredVendorSignerIds);
+            // Signer ids, contract template ids and the section -> bid
+            // reassignment are shared with the Hive Contractors app via
+            // App\Services\Estimates\EstimateContractSettingsWriter — see
+            // its docblock. bid_index is this component's own position in
+            // $this->bids (a Livewire array), so it's converted to the
+            // bid's real id here before handing off.
+            $sectionBidIds = $this->sections->mapWithKeys(
+                fn ($section) => [$section->id => $this->bids[$section->bid_index]->id ?? null]
+            )->filter()->all();
 
-            // Persist contract template IDs
-            $estimate_options['contract_template_ids'] = array_map('intval', $this->contractTemplateIds);
+            app(\App\Services\Estimates\EstimateContractSettingsWriter::class)->save(
+                $estimate,
+                $this->requiredVendorSignerIds,
+                $this->contractTemplateIds,
+                $sectionBidIds,
+            );
 
-            $estimate->options = $estimate_options;
-            $estimate->save();
-
-            foreach ($this->bids as $bid_index => $bid) {
-                $bid_sections = $this->sections->where('bid_index', $bid_index);
-
-                if ($bid_sections->isEmpty()) {
-                    // If no sections assigned to this bid, delete it (except for the first bid)
-                    if ($bid_index != 0) {
-                        $bid->delete();
-                    } else {
-                        // Keep the original bid but set amount to 0
-                        $bid->amount = 0.00;
-                        $bid->save();
-                    }
-                } else {
-                    // Update bid amount and associate sections
-                    $bid_amount = $bid_sections->sum('total');
-                    $bid->amount = $bid_amount;
-                    $bid->save();
-
-                    foreach ($bid_sections as $section) {
-                        // Find the actual EstimateSection model and update it
-                        $sectionModel = $this->estimate->estimate_sections()->find($section->id);
-                        if ($sectionModel) {
-                            $sectionModel->bid_id = $bid->id;
-                            $sectionModel->save();
-                        }
-
-                        // Keep the bid_index for UI purposes
-                        $section->bid_index = $bid_index;
-                    }
-                }
+            // Keep the bid_index for UI purposes, now that every section's
+            // bid_id on the DB side matches what was just saved.
+            foreach ($this->sections as $section) {
+                $bidId = $sectionBidIds[$section->id] ?? null;
+                $matchIndex = $this->bids->search(fn ($bid) => $bid->id === $bidId);
+                $section->bid_index = $matchIndex !== false ? $matchIndex : 0;
             }
 
             $this->modal('accept_estimate_modal')->close();

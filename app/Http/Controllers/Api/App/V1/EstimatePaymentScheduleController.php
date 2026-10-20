@@ -15,8 +15,8 @@ use Illuminate\Validation\ValidationException;
  * payments/dates slice of App\Livewire\Estimates\EstimateAccept's "Settings"
  * modal via App\Services\Estimates\EstimatePaymentScheduler, the service both
  * surfaces share. Required contract signer selection, contract template
- * choice and manually reassigning a section's bid stay web-only — see that
- * service's docblock.
+ * choice and manually reassigning a section's bid are
+ * EstimateContractSettingsController's job instead — see that controller.
  */
 class EstimatePaymentScheduleController extends Controller
 {

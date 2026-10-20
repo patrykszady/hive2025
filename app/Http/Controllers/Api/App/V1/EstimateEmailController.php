@@ -16,9 +16,9 @@ use Illuminate\Http\Request;
  * Emailing an estimate — mirrors App\Livewire\Estimates\EstimateEmail
  * exactly: the same recipient/from/template resolution (options()) and the
  * same App\Jobs\SendEstimateEmailJob dispatch (send()), which does the
- * actual PDF generation and sending identically to the web. Extra file
- * attachments (additionalAttachments) are left web-only — see this
- * class's docblock on send().
+ * actual PDF generation and sending identically to the web — including the
+ * chosen template (for tracking), showChanges, and up to 5 extra uploaded
+ * attachments.
  */
 class EstimateEmailController extends Controller
 {
@@ -86,11 +86,9 @@ class EstimateEmailController extends Controller
      * Queues App\Jobs\SendEstimateEmailJob exactly as
      * App\Livewire\Estimates\EstimateEmail::send() does — the PDF/XLSX
      * attachment generation and the actual send happen inside that job on
-     * the web too, so nothing here is forked. Only the optional extra file
-     * attachments (additionalAttachments) and the inline project-status
-     * update (update_project()) are left web-only — neither changes what
-     * gets sent, and both are edge cases a phone compose screen rarely
-     * needs.
+     * the web too, so nothing here is forked. The inline project-status
+     * update (update_project()) stays web-only — a rare edge case a phone
+     * compose screen doesn't need.
      */
     public function send(SendEstimateEmailRequest $request, int $estimate): JsonResponse
     {
@@ -115,6 +113,11 @@ class EstimateEmailController extends Controller
             ? 'The selected sender email is not available.'
             : 'The selected sender email is not connected to Nylas.');
 
+        $templateName = null;
+        if ($request->filled('template_id')) {
+            $templateName = EmailTemplate::find($request->validated('template_id'))?->name;
+        }
+
         SendEstimateEmailJob::dispatch(
             estimateId: $found->id,
             companyEmailId: $companyEmail->id,
@@ -126,13 +129,52 @@ class EstimateEmailController extends Controller
             includeEstimatePdf: $request->boolean('include_estimate_pdf', true),
             includeReimbursementsPdf: $request->boolean('include_reimbursements_pdf', false),
             includeEstimateXlsx: $request->boolean('include_estimate_xlsx', false),
-            emailTemplateName: null,
+            emailTemplateName: $templateName,
             senderIp: $request->ip(),
-            additionalAttachmentPaths: [],
-            showChanges: false,
+            additionalAttachmentPaths: $this->storeAdditionalAttachments($request),
+            showChanges: $request->boolean('show_changes', false),
         );
 
         return response()->json(['data' => ['queued' => true, 'recipient_count' => count($request->validated('to'))]]);
+    }
+
+    /**
+     * Stores any extra uploaded files to the same temp directory
+     * App\Livewire\Estimates\EstimateEmail::send() writes to, so
+     * SendEstimateEmailJob (which deletes them once sent) picks them up
+     * identically regardless of which surface uploaded them.
+     *
+     * @return list<string>
+     */
+    private function storeAdditionalAttachments(SendEstimateEmailRequest $request): array
+    {
+        $files = $request->file('additional_attachments', []);
+
+        if (empty($files)) {
+            return [];
+        }
+
+        $tempDir = storage_path('app/temp');
+        if (! is_dir($tempDir)) {
+            mkdir($tempDir, 0755, true);
+        }
+
+        $paths = [];
+
+        foreach ($files as $file) {
+            $safeName = preg_replace('/[^\w.\-]/', '_', $file->getClientOriginalName());
+            $tempPath = $tempDir.'/'.$safeName;
+
+            if (file_exists($tempPath)) {
+                $info = pathinfo($safeName);
+                $tempPath = $tempDir.'/'.($info['filename'] ?? 'file').'_'.uniqid().'.'.($info['extension'] ?? 'bin');
+            }
+
+            file_put_contents($tempPath, file_get_contents($file->getRealPath()));
+            $paths[] = $tempPath;
+        }
+
+        return $paths;
     }
 
     private function visibleEstimate(int $id): Estimate

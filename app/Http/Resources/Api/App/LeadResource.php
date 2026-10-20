@@ -78,6 +78,7 @@ class LeadResource extends JsonResource
             'state' => $lead->lead_data['state'] ?? null,
             'zip' => $lead->lead_data['zip'] ?? null,
             'attachments' => $this->attachments($lead),
+            'email_replies' => $this->emailReplies($lead),
             'availability' => $lead->usableAvailability(),
             'has_rescheduled' => $lead->hasRescheduled(),
             'allows_consult_within_the_hour' => $lead->allowsConsultWithinTheHour(),
@@ -112,6 +113,27 @@ class LeadResource extends JsonResource
                 'mime' => $file['mime'] ?? null,
                 'url' => URL::temporarySignedRoute('leads.file.signed', now()->addHours(24), ['lead' => $lead->id, 'index' => $index]),
             ])
+            ->all();
+    }
+
+    /**
+     * What the lead has written back — mirrors the details-panel partial's
+     * "Their replies" card (lead_data.email_replies, filed by the crew@
+     * ingest), newest first same as the web shows them.
+     *
+     * @return list<array{subject: ?string, body: ?string, at: ?string}>
+     */
+    private function emailReplies(Lead $lead): array
+    {
+        $replies = (array) ($lead->lead_data['email_replies'] ?? []);
+
+        return collect($replies)
+            ->map(fn ($reply) => [
+                'subject' => $reply['subject'] ?? null,
+                'body' => $reply['body'] ?? null,
+                'at' => $reply['at'] ?? null,
+            ])
+            ->values()
             ->all();
     }
 
