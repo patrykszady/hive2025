@@ -27,6 +27,10 @@ use Illuminate\Support\Facades\Route;
 // member, exactly like the web's TimesheetCreate — see
 // TimesheetConfirmation's docblock), then pay a team member (Admin-only to
 // submit; viewing the form is open to the member themself too).
+// 'pending' is registered ahead of the numeric {hour} route for clarity,
+// though its own literal 2-vs-3-segment path already keeps it from being
+// swallowed as an hour id.
+Route::get('timesheets/create', [TimesheetCreateController::class, 'pending'])->name('timesheets.create.pending');
 Route::get('timesheets/create/{hour}', [TimesheetCreateController::class, 'show'])->whereNumber('hour')->name('timesheets.create.show');
 Route::post('timesheets/create/{hour}', [TimesheetCreateController::class, 'store'])->whereNumber('hour')->name('timesheets.create.store');
 
