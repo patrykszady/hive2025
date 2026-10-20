@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\StoreProjectRequest;
 use App\Http\Requests\Api\App\UpdateProjectStatusRequest;
 use App\Http\Resources\Api\App\ProjectResource;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Services\Projects\AppProjectDirectory;
+use App\Services\Projects\ProjectWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -50,6 +52,33 @@ class ProjectController extends Controller
             'data' => $collection->map(fn (Project $project) => (new ProjectResource($project))->forVendor($vendorId)->toArray($request))->all(),
             'next_cursor' => $page->nextCursor()?->encode(),
         ]);
+    }
+
+    /**
+     * Create a project exactly like App\Livewire\Projects\ProjectCreate's
+     * modal — Admin-only (App\Policies\ProjectPolicy::create), authorized by
+     * StoreProjectRequest. See App\Services\Projects\ProjectWriter for the
+     * address resolution, the client-accessible check, and the
+     * double-submit guard this shares with the web.
+     */
+    public function store(StoreProjectRequest $request, ProjectWriter $writer): JsonResponse
+    {
+        $user = $request->user();
+        $vendorId = (int) $user->vendor->id;
+
+        $project = $writer->create(
+            (int) $request->validated('client_id'),
+            (string) $request->validated('project_name'),
+            $request->validated(),
+        );
+
+        $project->load(['client.users', 'vendors']);
+        Project::primeLatestVendorStatuses(collect([$project]));
+        app(AppProjectDirectory::class)->attachUpcomingTaskSummaries(collect([$project]));
+
+        return response()->json([
+            'data' => (new ProjectResource($project))->forVendor($vendorId)->withDetail()->toArray($request),
+        ], 201);
     }
 
     public function show(Request $request, int $project): JsonResponse

@@ -4,6 +4,7 @@ namespace App\Livewire\Forms;
 
 use App\Models\Client;
 use App\Models\Project;
+use App\Services\Projects\ProjectWriter;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Rule;
@@ -98,55 +99,25 @@ class ProjectForm extends Form
         return $this->project;
     }
 
+    /**
+     * The actual create logic — address resolution, the client-accessible
+     * check, the double-submit guard, and the Project::create() call — lives
+     * in App\Services\Projects\ProjectWriter so the Hive Contractors app's
+     * create-project endpoint creates identical rows. This form's own job is
+     * just gathering what the writer needs from the component's address
+     * fields/validation before handing off.
+     */
     public function store()
     {
-        if ($this->project_existing_address == 'CLIENT_PROJECT') {
-            $client_address = $this->component->client_addresses->first();
-            $this->component->address_1 = $client_address['address'];
-            $this->component->address_2 = $client_address['address_2'];
-            $this->component->city = $client_address['city'];
-            $this->component->state = $client_address['state'];
-            $this->component->zip_code = $client_address['zip_code'];
-        } elseif(numeric($this->project_existing_address)){
-            $existing_project = Project::findOrFail($this->project_existing_address);
-            $this->component->address_1 = $existing_project->address;
-            $this->component->address_2 = $existing_project->address_2;
-            $this->component->city = $existing_project->city;
-            $this->component->state = $existing_project->state;
-            $this->component->zip_code = $existing_project->zip_code;
-        }
-
         $this->validate();
-        $this->assertClientAccessible();
 
-        // A double-tapped Create fires two identical requests a breath
-        // apart, and both used to mint a project ("Basement Stairs" twins,
-        // two seconds apart). The second request must FIND the first's
-        // project instead. Only a same-name project created moments ago
-        // counts — a deliberate same-name project down the road stays
-        // possible.
-        $twin = Project::query()
-            ->where('client_id', $this->client_id)
-            ->whereRaw('LOWER(TRIM(project_name)) = ?', [mb_strtolower(trim((string) $this->project_name))])
-            ->where('created_at', '>=', now()->subMinutes(2))
-            ->first();
-
-        if ($twin) {
-            return $twin;
-        }
-
-        return Project::create([
-            'project_name' => $this->project_name,
-            'client_id' => $this->client_id,
+        return app(ProjectWriter::class)->create($this->client_id, (string) $this->project_name, [
+            'project_existing_address' => (string) $this->project_existing_address,
             'address' => $this->component->address_1,
             'address_2' => $this->component->address_2,
             'city' => $this->component->city,
-            // projects.state is NOT NULL — a client saved stateless (old
-            // lead imports) must not crash project creation. IL is the
-            // service area default.
-            'state' => trim((string) $this->component->state) ?: 'IL',
-            'zip_code' => $this->component->zip_code ?? '',
+            'state' => $this->component->state,
+            'zip_code' => $this->component->zip_code,
         ]);
-        // ProjectStatus with Estimate (code 2) is created automatically via ProjectObserver
     }
 }

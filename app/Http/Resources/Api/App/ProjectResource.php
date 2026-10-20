@@ -89,9 +89,22 @@ class ProjectResource extends JsonResource
             return $row;
         }
 
+        $user = $request->user();
+
         return $row + [
             'note' => $this->note,
             'service_availability' => $this->service_availability,
+            // Per-project, not a static section flag — the app's sections
+            // the web would hide for this project/role too (Finances,
+            // Vendors invite/materials/distributions/email tracking are all
+            // Admin-only on the web project page; Task/Bid creation is not
+            // gated here at all — see TaskPolicy/BidPolicy instead).
+            'permissions' => [
+                'view_finances' => (bool) $user?->can('viewFinancials', $this->resource),
+                'view_materials' => (bool) $user?->can('viewMaterials', $this->resource),
+                'manage_vendors' => (bool) $user?->can('update', $this->resource),
+                'manage_images' => (bool) $user?->can('manageImages', $this->resource),
+            ],
             // Project has no areas relation or table at all (checked the
             // model and the schema), so this is always empty rather than
             // fabricated; kept as a plain string[] so the app doesn't need
