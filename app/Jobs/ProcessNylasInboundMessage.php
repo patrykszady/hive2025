@@ -70,6 +70,18 @@ class ProcessNylasInboundMessage implements ShouldQueue
             $service->grantMailboxEmail($this->grantId),
         );
 
+        // Email with a project stakeholder goes into the project timeline
+        // now rather than at the next five-minute sync.
+        try {
+            app(\App\Services\Emails\StakeholderEmailStore::class)->store(
+                $message,
+                $this->grantId,
+                $service->grantMailboxEmail($this->grantId),
+            );
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('Nylas inbound job: stakeholder email store failed', ['message_id' => $this->messageId, 'error' => $e->getMessage()]);
+        }
+
         Log::channel('nylas')->info('Nylas inbound job: processed', [
             'grant_id' => $this->grantId,
             'message_id' => $this->messageId,

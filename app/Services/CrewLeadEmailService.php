@@ -728,7 +728,7 @@ class CrewLeadEmailService
     }
 
     /** @return array<string, string> lowercased header name => value */
-    protected function headerMap(array $message): array
+    public function headerMap(array $message): array
     {
         $out = [];
         foreach ((array) ($message['headers'] ?? []) as $key => $header) {
@@ -1511,7 +1511,7 @@ TXT;
      *
      * @return array<string, string>
      */
-    protected function rawMimeAttachmentContents(array $base): array
+    public function rawMimeAttachmentContents(array $base): array
     {
         $response = Http::withToken(config('nylas.api_key'))
             ->timeout(180)
@@ -1598,7 +1598,7 @@ TXT;
     }
 
     /** Prefer a plain-text part; fall back to stripping the HTML body. */
-    protected function plainBody(array $message): string
+    public function plainBody(array $message): string
     {
         $body = (string) ($message['body'] ?? '');
         if ($body === '') {

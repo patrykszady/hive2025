@@ -186,6 +186,34 @@ Route::get('leads/{lead}/file/{index}/signed', function (\App\Models\Lead $lead,
     ]);
 })->middleware('signed')->whereNumber('index')->name('leads.file.signed');
 
+// A stakeholder email's attachment, for the project timeline on the web and
+// in the Hive Contractors app: a time-limited signed link minted only for an
+// email the viewer could already see (EmailMessage::attachmentUrl()), so the
+// `signed` middleware alone is the gate, same as the lead file route above.
+Route::get('emails/{emailMessage}/attachments/{index}/signed', function (\App\Models\EmailMessage $emailMessage, int $index) {
+    $file = ((array) $emailMessage->attachments)[$index] ?? null;
+    $disk = \Illuminate\Support\Facades\Storage::disk('files');
+
+    abort_unless(is_array($file) && ($file['path'] ?? '') !== '' && $disk->exists($file['path']), 404);
+
+    if (request()->boolean('thumb') && str_starts_with((string) $file['mime'], 'image/')) {
+        $thumb = \App\Support\ImageThumbs::path(
+            'email:'.$file['path'].':'.$disk->size($file['path']),
+            fn () => $disk->path($file['path']),
+        );
+
+        if ($thumb) {
+            return response()->file($thumb, \App\Support\ImageThumbs::headers());
+        }
+    }
+
+    return response()->file($disk->path($file['path']), [
+        'Content-Type' => (string) ($file['mime'] ?? 'application/octet-stream'),
+        'Content-Disposition' => 'inline; filename="'.addslashes((string) ($file['name'] ?? 'attachment')).'"',
+        'Cache-Control' => 'private, max-age=604800, immutable',
+    ]);
+})->middleware('signed')->whereNumber(['emailMessage', 'index'])->name('email-messages.attachment.signed');
+
 // A lien waiver's PDF for the Hive Contractors app: a time-limited signed
 // link handed out by GET /api/app/v1/lien-waivers/{id} (see
 // LienWaiverResource), so the app's detail screen can show/download it

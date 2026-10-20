@@ -34,6 +34,17 @@ Schedule::command('crew:ingest-leads')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Email with project stakeholders (clients, vendors on the job) from every
+// connected mailbox, inbox and sent, into the project timeline next to calls
+// and texts. The Nylas webhook stores inbound mail sooner; this catches sent
+// mail and anything the webhook missed.
+Schedule::command('emails:sync')
+    ->everyFiveMinutes()
+    ->name('sync-stakeholder-emails')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // Keeps the Nylas message.created webhook converged without any deploy step:
 // registers it if missing (the challenge handshake needs the LIVE endpoint,
 // so deploy-time registration would race opcache), and rotates a lost signing
