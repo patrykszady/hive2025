@@ -10,16 +10,25 @@ use Illuminate\Support\Facades\Route;
 | Field: Vendors, Hours and Timesheets
 |--------------------------------------------------------------------------
 |
-| The Vendors tab (App\Services\Vendors\AppVendorDirectory), the Hours tab
-| (App\Services\Hours\AppHoursDay / HourEntryWriter), and the Timesheets tab
-| (App\Services\Timesheets\AppTimesheetDirectory / AppPendingBalance) — see
-| each controller's docblock for the web component it mirrors.
+| The Vendors tab, including "New Vendor"/"Edit Vendor"/"Add Existing
+| Vendor" (App\Services\Vendors\AppVendorDirectory), the Hours tab
+| (App\Services\Hours\AppHoursDay / HourEntryWriter), and the Timesheets tab,
+| including "Revert Timesheet" (App\Services\Timesheets\AppTimesheetDirectory
+| / AppPendingBalance) — see each controller's docblock for the web
+| component it mirrors.
 */
 
-// VENDORS — directory + detail only; create/edit and payments stay web-only.
+// VENDORS — directory, detail, "New Vendor"/"Edit Vendor"/"Add Existing
+// Vendor". 'types', 'search' and 'owner-lookup' are registered ahead of the
+// numeric {vendor} routes for clarity, same reasoning as Timesheets' 'balance'.
 Route::get('vendors/types', [AppVendorController::class, 'types'])->name('vendors.types');
+Route::get('vendors/search', [AppVendorController::class, 'search'])->name('vendors.search');
+Route::get('vendors/owner-lookup', [AppVendorController::class, 'ownerLookup'])->name('vendors.owner-lookup');
 Route::get('vendors', [AppVendorController::class, 'index'])->name('vendors.index');
+Route::post('vendors', [AppVendorController::class, 'store'])->name('vendors.store');
 Route::get('vendors/{vendor}', [AppVendorController::class, 'show'])->whereNumber('vendor')->name('vendors.show');
+Route::put('vendors/{vendor}', [AppVendorController::class, 'update'])->whereNumber('vendor')->name('vendors.update');
+Route::post('vendors/{vendor}/link', [AppVendorController::class, 'link'])->whereNumber('vendor')->name('vendors.link');
 
 // HOURS — the day the member taps, its offered projects, and saving the
 // whole day at once. 'other-projects' is registered ahead of the bare
@@ -35,3 +44,4 @@ Route::get('timesheets/balance', [AppTimesheetController::class, 'balance'])->na
 Route::get('timesheets/payable', [AppTimesheetController::class, 'payable'])->name('timesheets.payable');
 Route::get('timesheets', [AppTimesheetController::class, 'index'])->name('timesheets.index');
 Route::get('timesheets/{timesheet}', [AppTimesheetController::class, 'show'])->whereNumber('timesheet')->name('timesheets.show');
+Route::post('timesheets/{timesheet}/revert', [AppTimesheetController::class, 'revert'])->whereNumber('timesheet')->name('timesheets.revert');
