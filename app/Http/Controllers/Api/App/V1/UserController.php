@@ -76,6 +76,23 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * "Remove User from Vendor" — App\Livewire\Users\UserCreate::removeMember().
+     * Ends $user's employment on THEIR OWN primary vendor; the gate is on
+     * that vendor (VendorPolicy::update), same as the web's menu item —
+     * an Admin may only remove a teammate from their own company.
+     */
+    public function destroy(Request $request, int $user, AppTeamDirectory $directory): JsonResponse
+    {
+        $found = User::query()->findOrFail($user);
+        abort_unless($found->vendor, 404);
+        $this->authorize('update', $found->vendor);
+
+        $directory->removeTeamMember($found);
+
+        return response()->json(['data' => ['removed' => true]]);
+    }
+
     /** App\Livewire\Users\UserNotificationSettings — always the signed-in person's own. */
     public function notificationSettings(Request $request, AppTeamDirectory $directory): JsonResponse
     {

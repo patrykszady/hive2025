@@ -8,6 +8,7 @@ use App\Http\Resources\Api\App\VendorDocResource;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 use App\Services\VendorDocs\AppVendorDocDirectory;
+use App\Services\VendorDocs\VendorDocRequester;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -73,5 +74,25 @@ class VendorDocController extends Controller
                 default => 'Vendor document added.',
             },
         ], $result === true ? 201 : 200);
+    }
+
+    /**
+     * "Request Documents" — the card's second button
+     * (VendorDocCreate::requestDocument(), via the shared VendorDocRequester
+     * so both surfaces queue the exact same emails). Only ever does
+     * anything when this vendor has an expired document of some type.
+     */
+    public function request(Request $request, Vendor $vendor, VendorDocRequester $requester): JsonResponse
+    {
+        $this->authorize('create', VendorDoc::class);
+
+        $result = $requester->requestExpired($vendor, $request->user()->vendor);
+
+        return response()->json([
+            'data' => $result,
+            'message' => $result['sent']
+                ? 'License and insurance requests were routed to the appropriate recipients.'
+                : 'There are no expired vendor documents to request right now.',
+        ]);
     }
 }

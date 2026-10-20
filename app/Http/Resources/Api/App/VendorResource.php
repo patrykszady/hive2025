@@ -2,6 +2,8 @@
 
 namespace App\Http\Resources\Api\App;
 
+use App\Models\Check;
+use App\Models\Expense;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
@@ -115,6 +117,15 @@ class VendorResource extends JsonResource
             'documents' => ($this->canManage && in_array($vendor->business_type, ['Sub', 'DBA'], true))
                 ? $this->documents($vendor)
                 : null,
+            // show.blade's Checks card: any viewer of a non-Retail vendor,
+            // when it has at least one check written to it (no @can wrapper
+            // on the web — unlike documents/YTD paid, which stay admin-only).
+            'payments' => (! $isRetail && $vendor->checks()->where('belongs_to_vendor_id', $viewerVendorId)->exists())
+                ? $this->payments($vendor, $viewerVendorId)
+                : null,
+            // show.blade's Expenses card (expense-index 'vendors.show' view):
+            // Retail vendors only, same unrestricted visibility as Checks.
+            'expense_summary' => $isRetail ? $this->expenseSummary($vendor, $viewerVendorId) : null,
         ];
     }
 
@@ -213,5 +224,70 @@ class VendorResource extends JsonResource
                 'tip' => (string) ($verification['tip'] ?? ''),
             ];
         })->values()->all();
+    }
+
+    /**
+     * The most recent 15 checks written to this (non-Retail) vendor by the
+     * viewer's own company — show.blade's `<livewire:checks.checks-index
+     * :vendor="$vendor->id" :view="'vendors.show'" />` card, condensed to a
+     * list (the full searchable/paginated Checks index stays web-only).
+     * Scoped to belongs_to_vendor_id like every other tenant-scoped query
+     * here — a sub shared by two GCs never shows one company's checks to
+     * the other.
+     *
+     * @return list<array{id: int, date: ?string, amount: float, check_number: ?int, status: array{label: string, color: string}, web_path: string}>
+     */
+    private function payments(Vendor $vendor, int $viewerVendorId): array
+    {
+        return Check::where('vendor_id', $vendor->id)
+            ->where('belongs_to_vendor_id', $viewerVendorId)
+            ->orderByDesc('date')
+            ->limit(15)
+            ->get()
+            ->map(fn (Check $check): array => [
+                'id' => $check->id,
+                'date' => $check->date?->toDateString(),
+                'amount' => (float) $check->amount,
+                'check_number' => $check->check_number,
+                'status' => ['label' => $check->status, 'color' => $check->statusColor],
+                'web_path' => '/checks/'.$check->id,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Retail vendor expense summary — show.blade's
+     * `<livewire:expenses.expense-index :expense_vendor="$vendor->id"
+     * :view="'vendors.show'" />` card condensed to a YTD total plus the 15
+     * most recent rows (the full searchable/paginated Expenses index, with
+     * its Meilisearch filters, stays web-only). Scoped to
+     * belongs_to_vendor_id, same reasoning as payments() above.
+     *
+     * @return array{ytd_total: float, recent: list<array{id: int, date: ?string, amount: float, category: ?string, project: ?string}>}
+     */
+    private function expenseSummary(Vendor $vendor, int $viewerVendorId): array
+    {
+        $base = Expense::where('vendor_id', $vendor->id)
+            ->where('belongs_to_vendor_id', $viewerVendorId);
+
+        $ytdTotal = (clone $base)->where('date', '>=', today()->subYear())->sum('amount');
+
+        $recent = (clone $base)
+            ->with('category:id,friendly_primary', 'project:id,project_name,address')
+            ->orderByDesc('date')
+            ->limit(15)
+            ->get()
+            ->map(fn (Expense $expense): array => [
+                'id' => $expense->id,
+                'date' => $expense->date?->toDateString(),
+                'amount' => (float) $expense->amount,
+                'category' => $expense->category?->friendly_primary,
+                'project' => $expense->project?->name,
+            ])
+            ->values()
+            ->all();
+
+        return ['ytd_total' => (float) $ytdTotal, 'recent' => $recent];
     }
 }

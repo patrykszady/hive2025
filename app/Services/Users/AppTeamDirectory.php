@@ -99,6 +99,23 @@ class AppTeamDirectory
     }
 
     /**
+     * "Remove User from Vendor" — App\Livewire\Users\UserCreate::removeMember(),
+     * exactly: ends employment on $user's own PRIMARY vendor (never an
+     * arbitrary one), today, and clears is_employed. The controller
+     * authorizes against that same vendor (VendorPolicy::update) before
+     * calling this, same gate the web's removeMember() uses.
+     */
+    public function removeTeamMember(User $user): void
+    {
+        $user->vendor->users()->wherePivot('is_employed', '1')
+            ->updateExistingPivot($user->id, [
+                'end_date' => today()->format('Y-m-d'),
+                'is_employed' => 0,
+                'updated_at' => now(),
+            ]);
+    }
+
+    /**
      * Current notification settings for $user, seeded from the vendor's
      * business hours the same way UserNotificationSettings::mount() does.
      *

@@ -244,6 +244,56 @@ it('gets and saves my own notification settings, always forcing realtime sms on'
     expect($user->notificationSetting()->first()->realtime_sms)->toBeTrue();
 });
 
+it('shows can_remove only to an admin of the member\'s own vendor', function () {
+    ['user' => $admin] = appPeopleUsersTeam();
+    ['user' => $member] = appPeopleUsersTeam(role: 2);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->getJson('/api/app/v1/users/'.$member->id)
+        ->assertOk()
+        ->assertJsonPath('data.can_remove', true);
+
+    Sanctum::actingAs($member, ['app']);
+    $this->getJson('/api/app/v1/users/'.$admin->id)
+        ->assertOk()
+        ->assertJsonPath('data.can_remove', false);
+});
+
+it('removes a team member from the vendor, like UserCreate::removeMember', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+    ['user' => $member] = appPeopleUsersTeam(role: 2);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->deleteJson('/api/app/v1/users/'.$member->id)
+        ->assertOk()
+        ->assertJsonPath('data.removed', true);
+
+    $pivot = $vendor->users()->where('user_id', $member->id)->first()->pivot;
+    expect((bool) $pivot->is_employed)->toBeFalse()
+        ->and($pivot->end_date)->not->toBeNull();
+});
+
+it('refuses removeMember for a member, and for a user employed by a different company', function () {
+    ['user' => $memberA] = appPeopleUsersTeam(role: 2);
+    ['user' => $memberB] = appPeopleUsersTeam(role: 2);
+
+    Sanctum::actingAs($memberA, ['app']);
+    $this->deleteJson('/api/app/v1/users/'.$memberB->id)->assertForbidden();
+
+    ['vendor' => $companyA, 'user' => $adminA] = appPeopleUsersTeam();
+    // A real, registered tenant — not an unclaimed directory contact — so
+    // VendorPolicy::isEditableBy correctly refuses company A's admin.
+    $companyB = Vendor::factory()->create(['business_type' => 'Sub']);
+    $companyB->forceFill(['registration' => ['registered' => true]])->save();
+    $victim = User::factory()->create(['primary_vendor_id' => $companyB->id]);
+    $companyB->users()->attach($victim->id, ['role_id' => 1, 'is_employed' => 1, 'start_date' => today()->format('Y-m-d')]);
+
+    Sanctum::actingAs($adminA, ['app']);
+    $this->deleteJson('/api/app/v1/users/'.$victim->id)->assertForbidden();
+
+    expect((bool) $companyB->users()->where('user_id', $victim->id)->first()->pivot->is_employed)->toBeTrue();
+});
+
 it('422s notification settings with an end time before the start time', function () {
     ['user' => $user] = appPeopleUsersTeam();
     Sanctum::actingAs($user, ['app']);

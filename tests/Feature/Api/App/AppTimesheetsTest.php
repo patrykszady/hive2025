@@ -67,6 +67,20 @@ it('shows a Member only their own confirmed timesheets, and an Admin everyone\'s
     expect(count($asAdmin->json('data')))->toBe(2);
 });
 
+it('filters the list to one member via user_id, like the web\'s employee select', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    $member = appFieldTimesheetsMember($vendor);
+
+    appFieldTimesheetFixture($vendor, $member, ['date' => '2026-05-11']);
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-18']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson('/api/app/v1/timesheets?user_id='.$member->id)->assertOk();
+
+    expect(collect($response->json('data'))->pluck('member_name')->unique()->all())
+        ->toBe([trim($member->first_name.' '.$member->last_name)]);
+});
+
 it('flags an unpaid week "Pay" and a paid week "Paid"', function () {
     ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
     Sanctum::actingAs($admin, ['app']);

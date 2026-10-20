@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Check;
+use App\Models\Expense;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
@@ -214,4 +216,85 @@ it('includes a vendor\'s upcoming tasks on the detail screen', function () {
         ->assertOk()
         ->assertJsonCount(1, 'data.upcoming_tasks')
         ->assertJsonPath('data.upcoming_tasks.0.project.id', $project->id);
+});
+
+it('shows a non-Retail vendor\'s payment history, scoped to the company\'s own checks', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $sub = Vendor::factory()->create(['business_name' => 'Acme Drywall', 'business_type' => 'Sub']);
+    appFieldAttach($company, $sub);
+
+    $ourCheck = Check::create([
+        'check_type' => 'Check', 'check_number' => 5001, 'date' => now()->format('Y-m-d'),
+        'amount' => 400, 'vendor_id' => $sub->id, 'belongs_to_vendor_id' => $company->id,
+        'created_by_user_id' => $admin->id,
+    ]);
+
+    // A different tenant's check to the same shared sub must never leak in.
+    $otherCompany = Vendor::factory()->create(['business_type' => 'Sub']);
+    Check::create([
+        'check_type' => 'Check', 'check_number' => 6002, 'date' => now()->format('Y-m-d'),
+        'amount' => 999, 'vendor_id' => $sub->id, 'belongs_to_vendor_id' => $otherCompany->id,
+        'created_by_user_id' => $admin->id,
+    ]);
+
+    $response = $this->getJson('/api/app/v1/vendors/'.$sub->id)->assertOk();
+
+    expect(collect($response->json('data.payments'))->pluck('id')->all())->toBe([$ourCheck->id])
+        ->and((float) $response->json('data.payments.0.amount'))->toBe(400.0)
+        ->and($response->json('data.payments.0.check_number'))->toBe(5001);
+});
+
+it('has no payments card for a vendor with no checks, or for a Retail vendor', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    // Both attached up front: VendorPolicy::view caches $user->vendor's
+    // loaded 'vendors' relation on first access, so attaching a second
+    // vendor BETWEEN requests (within the one test) would leave it stale.
+    $sub = Vendor::factory()->create(['business_type' => 'Sub']);
+    $retail = Vendor::factory()->create(['business_type' => 'Retail']);
+    appFieldAttach($company, $sub);
+    appFieldAttach($company, $retail);
+
+    $this->getJson('/api/app/v1/vendors/'.$sub->id)
+        ->assertOk()
+        ->assertJsonPath('data.payments', null);
+
+    $this->getJson('/api/app/v1/vendors/'.$retail->id)
+        ->assertOk()
+        ->assertJsonPath('data.payments', null);
+});
+
+it('summarizes a Retail vendor\'s YTD expenses, scoped to the company\'s own spend', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $retail = Vendor::factory()->create(['business_name' => 'Home Depot', 'business_type' => 'Retail']);
+    appFieldAttach($company, $retail);
+
+    Expense::withoutEvents(fn () => Expense::create([
+        'amount' => 60, 'date' => now()->format('Y-m-d'), 'vendor_id' => $retail->id,
+        'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]));
+    Expense::withoutEvents(fn () => Expense::create([
+        'amount' => 40, 'date' => now()->subYears(2)->format('Y-m-d'), 'vendor_id' => $retail->id,
+        'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]));
+
+    // A different tenant's spend at the same shared retailer must never leak in.
+    $otherCompany = Vendor::factory()->create(['business_type' => 'Sub']);
+    Expense::withoutEvents(fn () => Expense::create([
+        'amount' => 999, 'date' => now()->format('Y-m-d'), 'vendor_id' => $retail->id,
+        'belongs_to_vendor_id' => $otherCompany->id, 'created_by_user_id' => $admin->id,
+    ]));
+
+    $response = $this->getJson('/api/app/v1/vendors/'.$retail->id)->assertOk();
+
+    // ytd_total only counts the past year; "recent" is the last 15 rows
+    // regardless of date (same "recent activity" idea as payments()).
+    $recentAmounts = collect($response->json('data.expense_summary.recent'))->pluck('amount')->map(fn ($a) => (float) $a)->all();
+    expect((float) $response->json('data.expense_summary.ytd_total'))->toBe(60.0)
+        ->and($recentAmounts)->toBe([60.0, 40.0]);
 });
