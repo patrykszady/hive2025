@@ -3,7 +3,7 @@
 namespace App\Livewire\Receipts;
 
 use App\Models\Receipt;
-use App\Models\Vendor;
+use App\Services\Receipts\ReceiptPatternDirectory;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -73,32 +73,15 @@ class ReceiptsIndex extends Component
     #[Computed]
     public function receipts()
     {
-        $query = Receipt::query()
-            ->with('vendor')
-            ->whereNotNull('receipt_type')
-            ->where('receipt_type', '!=', 0)
-            ->orderBy('id', 'desc');
-
-        if ($this->search !== '') {
-            $search = $this->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('from_address', 'like', "%{$search}%")
-                  ->orWhere('from_subject', 'like', "%{$search}%")
-                  ->orWhereHas('vendor', function ($vq) use ($search) {
-                      $vq->where('business_name', 'like', "%{$search}%");
-                  });
-            });
-        }
-
-        return $query->paginate(25);
+        // $page omitted — Livewire's own WithPagination resolver decides it,
+        // exactly as before this list query moved into the service.
+        return app(ReceiptPatternDirectory::class)->list($this->search);
     }
 
     #[Computed]
     public function vendors()
     {
-        return Vendor::withoutGlobalScopes()
-            ->orderBy('business_name')
-            ->get(['id', 'business_name']);
+        return app(ReceiptPatternDirectory::class)->vendors();
     }
 
     public function create(): void
@@ -132,33 +115,21 @@ class ReceiptsIndex extends Component
 
         $this->validate();
 
-        // Determine from_type based on from_address pattern
-        $fromType = str_starts_with($this->from_address, '@') ? 2 : 3;
-
-        // Filter out empty option values
-        $cleanOptions = array_filter($this->options, fn ($v) => $v !== null && $v !== '');
-
-        $cleanSubjects = array_values(array_filter(
-            array_map('trim', $this->from_subjects),
-            fn ($v) => $v !== ''
-        ));
-
         $data = [
             'vendor_id' => $this->vendor_id,
-            'from_type' => $fromType,
             'from_address' => $this->from_address,
-            'from_subject' => empty($cleanSubjects) ? null : $cleanSubjects,
+            'from_subjects' => $this->from_subjects,
             'receipt_type' => $this->receipt_type,
-            'options' => $cleanOptions ?: (object) [],
+            'options' => $this->options,
         ];
 
+        $directory = app(ReceiptPatternDirectory::class);
+
         if ($this->editing_id) {
-            // Through the model so the array casts encode from_subject and
-            // options; a query-builder update() skips casts and fails on them.
-            Receipt::findOrFail($this->editing_id)->update($data);
+            $directory->update(Receipt::findOrFail($this->editing_id), $data);
             $message = 'Receipt Updated';
         } else {
-            Receipt::create($data);
+            $directory->create($data);
             $message = 'Receipt Created';
         }
 
@@ -178,7 +149,10 @@ class ReceiptsIndex extends Component
     {
         abort_unless(auth()->id() === 1, 403);
 
-        Receipt::where('id', $id)->delete();
+        $receipt = Receipt::find($id);
+        if ($receipt) {
+            app(ReceiptPatternDirectory::class)->delete($receipt);
+        }
         unset($this->receipts);
 
         Flux::toast(

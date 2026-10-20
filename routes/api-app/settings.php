@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\App\V1\CompanyEmailController;
 use App\Http\Controllers\Api\App\V1\EmailTemplateController;
 use App\Http\Controllers\Api\App\V1\OptionsController;
 use App\Http\Controllers\Api\App\V1\PhoneSystemController;
+use App\Http\Controllers\Api\App\V1\ReceiptPatternController;
 use App\Http\Controllers\Api\App\V1\VendorCategoryController;
 use App\Http\Controllers\Api\App\V1\VendorDocController;
 use App\Http\Controllers\Api\App\V1\VendorMatchController;
@@ -73,3 +74,15 @@ Route::put('vendor-match/{vendor}', [VendorMatchController::class, 'update'])->w
 // AGENTS — Patryk (user id 1) only, exactly as the web — App\Livewire\Agents\AgentsIndex.
 Route::get('agents', [AgentController::class, 'index'])->name('agents.index');
 Route::get('agents/vendor-docs', [AgentController::class, 'vendorDocs'])->name('agents.vendor-docs');
+
+// RECEIPT PATTERNS — Patryk (user id 1) only (see ReceiptPatternController's
+// own docblock for why reads are locked here too) — the email
+// receipt-PARSING setup, App\Livewire\Receipts\ReceiptsIndex. 'vendors' is
+// registered ahead of the numeric {receipt} routes for clarity, though
+// whereNumber() alone already keeps it from being swallowed as an id.
+Route::get('receipt-patterns/vendors', [ReceiptPatternController::class, 'vendors'])->name('receipt-patterns.vendors');
+Route::get('receipt-patterns', [ReceiptPatternController::class, 'index'])->name('receipt-patterns.index');
+Route::post('receipt-patterns', [ReceiptPatternController::class, 'store'])->name('receipt-patterns.store');
+Route::get('receipt-patterns/{receipt}', [ReceiptPatternController::class, 'show'])->whereNumber('receipt')->name('receipt-patterns.show');
+Route::put('receipt-patterns/{receipt}', [ReceiptPatternController::class, 'update'])->whereNumber('receipt')->name('receipt-patterns.update');
+Route::delete('receipt-patterns/{receipt}', [ReceiptPatternController::class, 'destroy'])->whereNumber('receipt')->name('receipt-patterns.destroy');

@@ -83,6 +83,10 @@ class AppSectionPermissions
             // via the same gate) the EWCCV browser.
             'menards_browser' => Gate::forUser($user)->allows('menards-browser'),
             'ewccv_browser' => Gate::forUser($user)->allows('ewccv-browser'),
+            // Email receipt-PARSING patterns (/receipts) — a URL-only admin
+            // tool on the web with no sidebar entry; same id-1-only
+            // convention as 'agents' above.
+            'receipt_patterns' => $user->id === 1,
         ];
     }
 }

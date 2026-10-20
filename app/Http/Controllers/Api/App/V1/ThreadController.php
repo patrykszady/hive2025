@@ -14,6 +14,7 @@ use App\Models\SmsGroupThread;
 use App\Models\Vendor;
 use App\Services\Sms\AppThreadStarter;
 use App\Services\Sms\ThreadAdminActions;
+use App\Services\Sms\ThreadSearch;
 use App\Services\Sms\ThreadSpamBlocker;
 use App\Support\Sms\ConversationPresenter;
 use Illuminate\Http\JsonResponse;
@@ -24,7 +25,9 @@ use Illuminate\Http\Request;
  * web Messages page exactly via SmsGroupThread::scopeAccessibleTo() — the
  * Hive Contractors app is GS team only, so every caller here is a vendor
  * user (never a client-browsing one), but the scope is reused as-is rather
- * than re-derived.
+ * than re-derived. index()'s search goes through App\Services\Sms\
+ * ThreadSearch, the same Meilisearch (+ LIKE fallback) path App\Livewire\
+ * Sms\SmsThreadList uses, so the app finds the same threads the web would.
  */
 class ThreadController extends Controller
 {
@@ -33,7 +36,7 @@ class ThreadController extends Controller
 
     private const PER_PAGE = 20;
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, ThreadSearch $threadSearch): JsonResponse
     {
         $user = $request->user();
         $search = trim((string) $request->query('search', ''));
@@ -44,24 +47,27 @@ class ThreadController extends Controller
             $filter = 'all';
         }
 
+        // Fast path: the same Meilisearch search SmsThreadList uses (App\
+        // Services\Sms\ThreadSearch), so the app finds the same threads the
+        // web would for the same query. $ids stays null (meaning: no
+        // search, or Meilisearch itself is unavailable) to fall back to the
+        // LIKE query below — same reasoning as SmsThreadList's own
+        // try/catch around its Meilisearch call.
+        $ids = null;
+        if ($search !== '') {
+            try {
+                $ids = $threadSearch->matchingThreadIds($search, $user->vendor?->id ? (int) $user->vendor->id : null, $filter, self::PER_PAGE);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
         $threads = SmsGroupThread::query()
             ->accessibleTo($user)
             ->with(self::THREAD_RELATIONS)
             ->withCount($this->scheduledMessagesCountRelation())
-            ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($inner) use ($search) {
-                    $inner->whereJsonContains('participants', $search)
-                        ->orWhereHas('project', fn ($q) => $q->where('address', 'like', "%{$search}%"))
-                        ->orWhereHas('client', fn ($q) => $q->where('business_name', 'like', "%{$search}%"))
-                        ->orWhereHas('messages', fn ($q) => $q->where('text', 'like', "%{$search}%"));
-
-                    // Phone digit search, mirroring SmsThreadList's SQL fallback.
-                    $digits = preg_replace('/\D/', '', $search);
-                    if (is_string($digits) && strlen($digits) >= 4) {
-                        $inner->orWhereHas('threadParticipants', fn ($q) => $q->where('phone_number', 'like', "%{$digits}%"));
-                    }
-                });
-            })
+            ->when($ids !== null, fn ($q) => $q->whereIn('id', $ids))
+            ->when($ids === null && $search !== '', fn ($q) => $threadSearch->applyLikeFallback($q, $search))
             ->when($filter === 'client', fn ($q) => $q->whereNotNull('client_id'))
             ->when($filter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'))
             ->when($filter === 'unread', fn ($q) => $q->unreadForUser((int) $user->id))
