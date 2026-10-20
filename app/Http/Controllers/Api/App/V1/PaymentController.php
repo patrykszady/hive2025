@@ -69,8 +69,10 @@ class PaymentController extends Controller
      * Candidate projects for a new payment against this client — the same
      * filter and order PaymentCreate::updatedClientId() builds for the web's
      * project picker (Active always; Completed/Service Call only once a
-     * balance remains), minus its "opened from this project" priority bump,
-     * which has no phone-side equivalent yet.
+     * balance remains), including PaymentCreate::addProject()'s "opened
+     * from this project" priority bump (`?opened_from_project_id=`): that
+     * project is sorted first and flagged `is_current_project`, same as the
+     * web's own sortBy() tiebreaker and its "This project" badge.
      */
     public function eligibleProjects(Request $request): JsonResponse
     {
@@ -81,6 +83,9 @@ class PaymentController extends Controller
 
         $client = Client::query()->whereKey((int) $clientId)->first();
         abort_unless($client, 404);
+
+        $openedFromProjectId = $request->query('opened_from_project_id');
+        $openedFromProjectId = is_numeric($openedFromProjectId) ? (int) $openedFromProjectId : null;
 
         $projects = $client->projects()
             ->status([6, 7, 8]) // Active, Complete, Service Call
@@ -97,6 +102,7 @@ class PaymentController extends Controller
                 return true;
             })
             ->sortBy([
+                fn ($a, $b) => (int) ($b->id === $openedFromProjectId) <=> (int) ($a->id === $openedFromProjectId),
                 ['latestStatus.status_code', 'asc'],
                 ['latestStatus.start_date', 'desc'],
             ])
@@ -112,6 +118,7 @@ class PaymentController extends Controller
                     'code' => $project->latestStatus->status_code,
                     'title' => $project->latestStatus->title,
                 ] : null,
+                'is_current_project' => $openedFromProjectId !== null && $project->id === $openedFromProjectId,
             ])->all(),
         ]);
     }
