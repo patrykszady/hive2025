@@ -2338,6 +2338,10 @@ class TransactionController extends Controller
         // Now match checks to expenses using many-to-many relationship
         // Find expenses that don't have checks (via pivot) and match checks that sum to expense amount
         $this->matchChecksToExpenses();
+
+        // Supplier expenses paid by checks nobody entered: write the checks
+        // from their bank lines when they add up to the expense.
+        app(\App\Services\Transactions\UnenteredCheckMatcher::class)->run();
     }
     
     /**
