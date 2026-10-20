@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Livewire\Leads\PickTimes;
 use App\Models\Client;
 use App\Models\Lead;
+use App\Models\Project;
 use App\Models\SmsGroupThread;
 use App\Models\Task;
 use App\Models\User;
@@ -25,6 +26,9 @@ use Carbon\Carbon;
  */
 class ConsultScheduleLinkTexter
 {
+    /** ProjectStatus code 8 — "Service Call". */
+    private const SERVICE_CALL_STATUS = 8;
+
     public function __construct(
         protected GroupSmsService $sms,
         protected UrlShortener $shortener,
@@ -53,6 +57,14 @@ class ConsultScheduleLinkTexter
 
         if ($thread->hasPendingOptIn()) {
             return $this->result(false, 'warning', 'Awaiting START reply', 'This number has not replied START yet — the link can go out once they do.');
+        }
+
+        // A client on an open service call is asking for a repair, not a
+        // consult: a consult link would mint a "New" lead for them (lead 201,
+        // Katie Love, 2026-10-19). Send Schedule texts the service-call link,
+        // which needs no lead. A contact already on a consult keeps theirs.
+        if (! $this->openLeadFor($contact) && $this->hasOpenServiceCall($client)) {
+            return $this->result(false, 'warning', 'This is a service call', 'Use Send Schedule to text the service-call availability link. A consult link would add them to Leads.');
         }
 
         $vendorId = (int) ($actor->vendor?->id ?? $client->vendors()->withoutGlobalScopes()->value('vendors.id') ?? 0);
@@ -174,16 +186,30 @@ class ConsultScheduleLinkTexter
             ->values();
     }
 
-    /** The contact's open lead, or a quiet one made for this purpose. */
-    protected function leadFor(User $contact, Client $client, int $vendorId, User $actor): Lead
+    /** The contact's open lead, if they have one. */
+    protected function openLeadFor(User $contact): ?Lead
     {
-        $lead = Lead::withoutGlobalScopes()
+        return Lead::withoutGlobalScopes()
             ->whereNull('deleted_at')
             ->where('user_id', $contact->id)
             ->latest('id')
             ->first();
+    }
 
-        if ($lead) {
+    /** Whether any of the client's projects is currently in Service Call status. */
+    protected function hasOpenServiceCall(Client $client): bool
+    {
+        return Project::withoutGlobalScopes()
+            ->where('client_id', $client->id)
+            ->with('latestStatus')
+            ->get()
+            ->contains(fn (Project $project) => (int) ($project->latestStatus->status_code ?? 0) === self::SERVICE_CALL_STATUS);
+    }
+
+    /** The contact's open lead, or a quiet one made for this purpose. */
+    protected function leadFor(User $contact, Client $client, int $vendorId, User $actor): Lead
+    {
+        if ($lead = $this->openLeadFor($contact)) {
             return $lead;
         }
 

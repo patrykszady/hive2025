@@ -5,6 +5,7 @@ use App\Models\AppNotification;
 use App\Models\Client;
 use App\Models\Lead;
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use App\Models\SmsGroupThread;
 use App\Models\Task;
 use App\Models\User;
@@ -179,6 +180,63 @@ it('sends nothing while the number has not opted in', function () {
     expect($result['ok'])->toBeFalse()->and($result['heading'])->toBe('Awaiting START reply')
         // No lead is minted for a text that never went out.
         ->and(Lead::withoutGlobalScopes()->count())->toBe(0);
+});
+
+/** Puts one of the fixture client's projects in Service Call status (code 8). */
+function consultTextServiceCallProject(array $fx): Project
+{
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Bathrooms',
+        'client_id' => $fx['client']->id,
+        'address' => '415 Lincoln Ave',
+        'city' => 'Lake Bluff',
+        'state' => 'IL',
+        'zip_code' => '60044',
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+    ]));
+    ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+        'status_code' => 8,
+        'start_date' => today()->format('Y-m-d'),
+    ]);
+
+    return $project;
+}
+
+it('points to Send Schedule and adds no lead when the client is on an open service call', function () {
+    $fx = consultTextFixture();
+    consultTextServiceCallProject($fx);
+    $this->actingAs($fx['admin']);
+    $this->mock(GroupSmsService::class, fn ($mock) => $mock->shouldReceive('sendToThread')->never());
+
+    $result = app(ConsultScheduleLinkTexter::class)->composeForThread($fx['thread'], $fx['admin']);
+
+    expect($result['ok'])->toBeFalse()
+        ->and($result['heading'])->toBe('This is a service call')
+        ->and($result['text'])->toContain('Send Schedule')
+        // Katie Love, 2026-10-19: drafting the consult text made a "New" lead for a repair request.
+        ->and(Lead::withoutGlobalScopes()->count())->toBe(0);
+});
+
+it('still drafts the consult link for a service-call client who is already on a consult lead', function () {
+    $fx = consultTextFixture();
+    consultTextServiceCallProject($fx);
+    $this->actingAs($fx['admin']);
+    $lead = Lead::withoutEvents(fn () => Lead::create([
+        'date' => now(),
+        'origin' => 'Website',
+        'user_id' => $fx['contact']->id,
+        'belongs_to_vendor_id' => $fx['vendor']->id,
+        'created_by_user_id' => $fx['admin']->id,
+        'lead_data' => ['name' => 'Debby Hill'],
+    ]));
+
+    $result = app(ConsultScheduleLinkTexter::class)->composeForThread($fx['thread'], $fx['admin']);
+
+    expect($result['ok'])->toBeTrue()
+        ->and($result['lead_id'])->toBe($lead->id)
+        ->and(Lead::withoutGlobalScopes()->count())->toBe(1);
 });
 
 it('sends nothing when the thread has no client to hang the link on', function () {
