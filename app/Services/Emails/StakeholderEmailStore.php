@@ -69,38 +69,19 @@ class StakeholderEmailStore
         $to = $this->addresses($message['to'] ?? []);
         $cc = $this->addresses($message['cc'] ?? []);
         $outbound = $this->mail->isOurAddress($fromEmail);
-
-        $external = collect($outbound ? [...$to, ...$cc] : [$fromEmail, ...$to, ...$cc])
-            ->reject(fn (string $address) => $this->mail->isOurAddress($address))
-            ->unique()
-            ->values()
-            ->all();
-
-        $match = $external === [] ? null : $this->stakeholders->resolve($external, $vendorId);
-
-        if (! $match) {
-            return null;
-        }
-
-        $body = $this->mail->plainBody($message);
         $subject = (string) ($message['subject'] ?? '');
         $threadId = $message['thread_id'] ?? null;
 
-        // A client the subject names ("Abbey-plumbing delivery") is a
-        // candidate too, ahead of the sender's own jobs.
-        $projects = $this->stakeholders->namedInSubject($subject, $vendorId)
-            ->concat($match['projects'])
-            ->unique('id')
-            ->take(EmailStakeholders::MAX_CANDIDATES)
-            ->values();
+        $placement = $this->placementFor($fromEmail, $to, $cc, $subject, $threadId, $vendorId);
 
-        // A reply goes where the rest of its thread already went.
-        $threadProjectId = $this->threadProjectId($vendorId, $threadId);
-        $projectId = $projects->count() === 1 ? $projects->first()->id : $threadProjectId;
-        $candidateIds = $projects->pluck('id')
-            ->when($threadProjectId && ! $projects->contains('id', $threadProjectId), fn ($ids) => $ids->push($threadProjectId))
-            ->values()
-            ->all();
+        if (! $placement) {
+            return null;
+        }
+
+        $match = $placement['match'];
+        $projectId = $placement['project_id'];
+        $candidateIds = $placement['candidate_ids'];
+        $body = $this->mail->plainBody($message);
 
         try {
             $row = EmailMessage::create([
@@ -141,6 +122,56 @@ class StakeholderEmailStore
         SummarizeEmailMessage::dispatch($row->id);
 
         return $row;
+    }
+
+    /**
+     * Who an email is with and which projects it could be about: everyone
+     * outside the company on it, a client the subject names ("Abbey-plumbing
+     * delivery"), and the project the rest of its thread is already on.
+     * Shared by storing new mail and `emails:rematch-unplaced`.
+     *
+     * @param  list<string>  $to
+     * @param  list<string>  $cc
+     * @return array{match: array{user: ?\App\Models\User, client_id: ?int, vendor_id: ?int, projects: \Illuminate\Support\Collection<int, \App\Models\Project>}, project_id: ?int, candidate_ids: list<int>}|null
+     */
+    public function placementFor(string $fromEmail, array $to, array $cc, string $subject, ?string $threadId, int $vendorId): ?array
+    {
+        $fromEmail = mb_strtolower(trim($fromEmail));
+        $outbound = $this->mail->isOurAddress($fromEmail);
+
+        $external = collect($outbound ? [...$to, ...$cc] : [$fromEmail, ...$to, ...$cc])
+            ->map(fn ($address) => mb_strtolower(trim((string) $address)))
+            ->reject(fn (string $address) => $address === '' || $this->mail->isOurAddress($address))
+            ->unique()
+            ->values()
+            ->all();
+
+        $match = $external === [] ? null : $this->stakeholders->resolve($external, $vendorId);
+
+        if (! $match) {
+            return null;
+        }
+
+        // A client the subject names is a candidate too, ahead of the rest.
+        $projects = $this->stakeholders->namedInSubject($subject, $vendorId)
+            ->concat($match['projects'])
+            ->unique('id')
+            ->take(EmailStakeholders::MAX_CANDIDATES)
+            ->values();
+
+        // A reply goes where the rest of its thread already went.
+        $threadProjectId = $this->threadProjectId($vendorId, $threadId);
+        $candidateIds = $projects->pluck('id')
+            ->when($threadProjectId && ! $projects->contains('id', $threadProjectId), fn ($ids) => $ids->push($threadProjectId))
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+
+        return [
+            'match' => $match,
+            'project_id' => $projects->count() === 1 ? (int) $projects->first()->id : $threadProjectId,
+            'candidate_ids' => $candidateIds,
+        ];
     }
 
     /** The project an earlier email of the same conversation was put on, if any. */

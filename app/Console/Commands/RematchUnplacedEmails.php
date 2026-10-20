@@ -4,70 +4,79 @@ namespace App\Console\Commands;
 
 use App\Jobs\SummarizeEmailMessage;
 use App\Models\EmailMessage;
-use App\Services\Emails\EmailStakeholders;
 use App\Services\Emails\StakeholderEmailStore;
 use Illuminate\Console\Command;
 
 /**
- * Give the unplaced inbox a second look with what placement knows now: a
- * reply goes to the project the rest of its thread is on, and a client the
- * subject names by last name ("Abbey-plumbing delivery") becomes a candidate
- * — those emails are read again so the AI can pick the project. Safe to run
- * again: placed emails are skipped and an email is only re-read when it
- * gained a candidate.
+ * Give the unplaced inbox a second look with what placement knows now:
+ * everyone on the email (a homeowner in To counts — Jenn's "tile is on the
+ * way" to the Jordans), a client the subject names ("Abbey-plumbing
+ * delivery"), and the project the rest of its thread is on. An email with
+ * one clear project is placed; one that gained candidates is read again so
+ * the AI can pick. Safe to run again: placed emails are skipped and nothing
+ * is re-read unless its candidates changed.
  */
 class RematchUnplacedEmails extends Command
 {
     protected $signature = 'emails:rematch-unplaced
         {--dry-run : List what would change without changing anything}';
 
-    protected $description = 'Place unplaced stakeholder emails by thread, and re-read those whose subject names a client.';
+    protected $description = 'Re-match unplaced stakeholder emails by who is on them, the subject and the thread.';
 
-    public function handle(EmailStakeholders $stakeholders, StakeholderEmailStore $store): int
+    public function handle(StakeholderEmailStore $store): int
     {
         $dryRun = (bool) $this->option('dry-run');
-        $byThread = 0;
+        $placed = 0;
         $reread = 0;
 
         foreach (EmailMessage::query()->unplaced()->orderBy('id')->get() as $email) {
-            $threadProjectId = $store->threadProjectId((int) $email->belongs_to_vendor_id, $email->thread_id);
+            $placement = $store->placementFor(
+                (string) $email->from_email,
+                (array) $email->to,
+                (array) $email->cc,
+                (string) $email->subject,
+                $email->thread_id,
+                (int) $email->belongs_to_vendor_id,
+            );
 
-            if ($threadProjectId) {
-                $this->line("#{$email->id} \"{$email->subject}\" → project {$threadProjectId} (same thread)");
-                $byThread++;
+            if (! $placement) {
+                continue;
+            }
+
+            $match = $placement['match'];
+            $who = [
+                'client_id' => $match['client_id'],
+                'vendor_id' => $match['vendor_id'],
+                'user_id' => $match['user']?->id,
+                'candidate_project_ids' => $placement['candidate_ids'],
+            ];
+
+            if ($placement['project_id']) {
+                $this->line("#{$email->id} \"{$email->subject}\" → project {$placement['project_id']}");
+                $placed++;
 
                 if (! $dryRun) {
-                    $email->forceFill(['project_id' => $threadProjectId])->save();
+                    $email->forceFill($who + ['project_id' => $placement['project_id']])->save();
                 }
 
                 continue;
             }
 
             $current = array_map('intval', (array) ($email->candidate_project_ids ?? []));
-            $named = $stakeholders->namedInSubject($email->subject, (int) $email->belongs_to_vendor_id)
-                ->pluck('id')
-                ->map(fn ($id) => (int) $id)
-                ->reject(fn (int $id) => in_array($id, $current, true))
-                ->values()
-                ->all();
-
-            if ($named === []) {
+            if (array_diff($placement['candidate_ids'], $current) === []) {
                 continue;
             }
 
-            $this->line("#{$email->id} \"{$email->subject}\" → read again with project(s) ".implode(', ', $named));
+            $this->line("#{$email->id} \"{$email->subject}\" → read again with project(s) ".implode(', ', $placement['candidate_ids']));
             $reread++;
 
             if (! $dryRun) {
-                $email->forceFill([
-                    'candidate_project_ids' => array_values(array_unique([...$named, ...$current])),
-                    'summarized_at' => null,
-                ])->save();
+                $email->forceFill($who + ['summarized_at' => null])->save();
                 SummarizeEmailMessage::dispatch($email->id);
             }
         }
 
-        $this->info(sprintf('%s %d by thread, %d queued to read again.', $dryRun ? 'Would place' : 'Placed', $byThread, $reread));
+        $this->info(sprintf('%s %d, %d queued to read again.', $dryRun ? 'Would place' : 'Placed', $placed, $reread));
 
         return self::SUCCESS;
     }

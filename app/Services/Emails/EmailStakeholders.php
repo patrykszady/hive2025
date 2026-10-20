@@ -89,6 +89,14 @@ class EmailStakeholders
             ->get()
             ->keyBy(fn (Vendor $vendor) => mb_strtolower((string) $vendor->business_email));
 
+        // A homeowner on the email makes it about their job, wherever they
+        // are on it: Jenn Peterson's "tile is on the way" went to Emily and
+        // Wyeth Jordan, but Jenn — a client herself and a vendor — came first
+        // and the email was filed against her own jobs (2026-10-06).
+        if ($homeowners = $this->homeowners($addresses, $users, $companyVendorId)) {
+            return $homeowners + ['vendor_id' => $this->vendorOnThread($homeowners['projects'], $addresses, $users, $vendors, $companyVendorId)];
+        }
+
         foreach ($addresses as $address) {
             if ($user = $users->get($address)) {
                 // A designer can be a client (her own house) and a vendor on
@@ -128,6 +136,81 @@ class EmailStakeholders
         }
 
         return null;
+    }
+
+    /**
+     * Everyone on the email who is only a client — a contact on a client of
+     * the company and nobody's vendor — with their open projects, in address
+     * order. A designer who is also a client (her own house) doesn't count:
+     * on a job email she is working, not the homeowner.
+     *
+     * @param  list<string>  $addresses
+     * @param  Collection<string, User>  $users
+     * @return array{user: User, client_id: int, projects: Collection<int, Project>}|null
+     */
+    protected function homeowners(array $addresses, Collection $users, int $companyVendorId): ?array
+    {
+        $found = collect();
+
+        foreach ($addresses as $address) {
+            $user = $users->get($address);
+
+            if (! $user || $user->vendors()->withoutGlobalScopes()->where('vendors.id', '!=', $companyVendorId)->exists()) {
+                continue;
+            }
+
+            $clientIds = $user->clients()->withoutGlobalScopes()->pluck('clients.id')->map(fn ($id) => (int) $id);
+            $projects = $this->clientProjects($clientIds, $companyVendorId);
+
+            if ($projects->isNotEmpty()) {
+                $found->push(['user' => $user, 'client_id' => (int) $projects->first()->client_id, 'projects' => $projects]);
+            }
+        }
+
+        if ($found->isEmpty()) {
+            return null;
+        }
+
+        return [
+            'user' => $found->first()['user'],
+            'client_id' => $found->first()['client_id'],
+            'projects' => $found->flatMap(fn (array $homeowner) => $homeowner['projects'])
+                ->unique('id')
+                ->sortByDesc('id')
+                ->take(self::MAX_CANDIDATES)
+                ->values(),
+        ];
+    }
+
+    /**
+     * The vendor company of anyone else on the email (a designer, a sub,
+     * a supplier), preferring one already on these projects.
+     *
+     * @param  Collection<int, Project>  $projects
+     * @param  list<string>  $addresses
+     * @param  Collection<string, User>  $users
+     * @param  Collection<string, Vendor>  $vendors
+     */
+    protected function vendorOnThread(Collection $projects, array $addresses, Collection $users, Collection $vendors, int $companyVendorId): ?int
+    {
+        $vendorIds = collect($addresses)
+            ->flatMap(function (string $address) use ($users, $vendors, $companyVendorId) {
+                $ids = $users->get($address)?->vendors()->withoutGlobalScopes()
+                    ->where('vendors.id', '!=', $companyVendorId)
+                    ->pluck('vendors.id')
+                    ->all() ?? [];
+
+                if ($vendor = $vendors->get($address)) {
+                    $ids[] = $vendor->id;
+                }
+
+                return $ids;
+            })
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        return $vendorIds->isEmpty() ? null : $this->vendorOn($projects, $vendorIds);
     }
 
     /**

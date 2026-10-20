@@ -295,3 +295,34 @@ it('puts a reply on the project its thread is already on', function () {
 
     expect($row->project_id)->toBe($kitchen->id);
 });
+
+it('files a designer\'s email to the homeowners on it under their job, not hers', function () {
+    $world = serviceCallWorld();
+
+    // Jenn: a client herself (her own house) and a designer (a vendor) on other jobs.
+    $jennsHouse = sec3_makeClient($world['vendor']);
+    $jenn = sec3_makeClientUser($jennsHouse, 'jenn');
+    $ownProject = sec3_makeProject($world['vendor'], $jennsHouse, ['project_name' => 'Peterson House']);
+    ProjectStatus::create(['project_id' => $ownProject->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+    $studio = Vendor::factory()->create(['business_name' => 'JP Design '.uniqid()]);
+    $studio->users()->attach($jenn->id, ['role_id' => 1]);
+
+    // The Jordans: homeowners only, one open job.
+    $jordans = sec3_makeClient($world['vendor']);
+    $emily = sec3_makeClientUser($jordans, 'emily');
+    $wyeth = sec3_makeClientUser($jordans, 'wyeth');
+    $kitchen = sec3_makeProject($world['vendor'], $jordans, ['project_name' => 'Kitchen']);
+    ProjectStatus::create(['project_id' => $kitchen->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+
+    $row = app(StakeholderEmailStore::class)->store(nylasMessage($world, [
+        'subject' => 'tile is on the way',
+        'from' => [['name' => 'Jennifer Peterson', 'email' => $jenn->email]],
+        'to' => [['email' => $world['mailbox']], ['email' => $emily->email], ['email' => $wyeth->email]],
+        'cc' => [],
+    ]), 'grant-1', $world['mailbox']);
+
+    expect($row->project_id)->toBe($kitchen->id)
+        ->and($row->client_id)->toBe($jordans->id)
+        ->and($row->user_id)->toBe($emily->id)
+        ->and($row->vendor_id)->toBe($studio->id);
+});
