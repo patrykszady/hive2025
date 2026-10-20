@@ -29,16 +29,20 @@ class AppNotificationFeed
      * $notifications' own order (expected newest first), and two otherwise-
      * identical notifications on different days never collapse together.
      *
+     * $timezone picks whose calendar day counts: the web passes none (its
+     * page groups and labels by the app timezone, UTC); the app passes
+     * America/Chicago so tonight's notifications stay on tonight.
+     *
      * @param  Collection<int, AppNotification>  $notifications
      * @return list<array{notification: AppNotification, count: int, ids: list<int>, unread: bool, date: string}>
      */
-    public function collapse(Collection $notifications): array
+    public function collapse(Collection $notifications, ?string $timezone = null): array
     {
         $entries = [];
         $indexByKey = [];
 
         foreach ($notifications as $notification) {
-            $date = $notification->created_at->toDateString();
+            $date = $this->dayOf($notification, $timezone);
             $key = $date.'|'.$notification->type.'|'.$notification->title.'|'.$notification->body;
 
             if (array_key_exists($key, $indexByKey)) {
@@ -78,6 +82,14 @@ class AppNotificationFeed
             ->map(fn (Collection $day) => collect($this->collapse($day)));
     }
 
+    /** The notification's calendar day (Y-m-d) in $timezone, or in the app timezone when none is given. */
+    private function dayOf(AppNotification $notification, ?string $timezone): string
+    {
+        return $timezone === null
+            ? $notification->created_at->toDateString()
+            : $notification->created_at->copy()->setTimezone($timezone)->toDateString();
+    }
+
     /** A notification $userId owns, or null — every lookup below goes through this so one user never touches another's row. */
     public function find(int $userId, int $notificationId): ?AppNotification
     {
@@ -109,13 +121,24 @@ class AppNotificationFeed
      *
      * @return list<int> every id marked read (including $notification's own, if it was unread)
      */
-    public function markGroupRead(AppNotification $notification): array
+    public function markGroupRead(AppNotification $notification, ?string $timezone = null): array
     {
-        $siblingIds = AppNotification::where('user_id', $notification->user_id)
+        $query = AppNotification::where('user_id', $notification->user_id)
             ->where('type', $notification->type)
             ->where('title', $notification->title)
-            ->where('body', $notification->body)
-            ->whereDate('created_at', $notification->created_at->toDateString())
+            ->where('body', $notification->body);
+
+        if ($timezone === null) {
+            $query->whereDate('created_at', $notification->created_at->toDateString());
+        } else {
+            $localDay = $notification->created_at->copy()->setTimezone($timezone);
+            $query->whereBetween('created_at', [
+                $localDay->copy()->startOfDay()->setTimezone(config('app.timezone')),
+                $localDay->copy()->endOfDay()->setTimezone(config('app.timezone')),
+            ]);
+        }
+
+        $siblingIds = $query
             ->whereNull('read_at')
             ->pluck('id')
             ->all();

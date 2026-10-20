@@ -37,7 +37,7 @@ class NotificationController extends Controller
 
         // Collapsing happens within this one page, exactly like the web's
         // NotificationIndex::grouped() operates on its own paginated 25.
-        $entries = $feed->collapse($page->getCollection());
+        $entries = $feed->collapse($page->getCollection(), self::TIMEZONE);
 
         return response()->json([
             'data' => array_map(fn (array $entry) => $this->entryPayload($entry), $entries),
@@ -59,7 +59,7 @@ class NotificationController extends Controller
         $found = $feed->find((int) $request->user()->id, $notification);
         abort_unless($found, 404);
 
-        $feed->markGroupRead($found);
+        $feed->markGroupRead($found, self::TIMEZONE);
 
         return response()->json([
             'data' => ['marked' => true, 'unread_count' => $feed->unreadCount((int) $request->user()->id)],

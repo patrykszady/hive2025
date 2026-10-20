@@ -192,3 +192,26 @@ it('keeps the web notification bell\'s own Livewire components in sync with the 
 
     expect($response->json('unread_count'))->toBe(1);
 });
+
+it('groups and labels by the Chicago day, so an evening notification is not split from its afternoon twin', function () {
+    // 8 PM Chicago on Oct 19 is already Oct 20 in UTC.
+    $this->travelTo(\Illuminate\Support\Carbon::parse('2026-10-20 01:00:00', 'UTC'));
+    ['user' => $user] = appNotificationsTeamUser();
+    Sanctum::actingAs($user, ['app']);
+
+    $evening = appNotificationsRow($user, ['title' => 'Missed Call', 'type' => 'missed_call', 'body' => 'From (224) 555-0100', 'created_at' => now()]);
+    $afternoon = appNotificationsRow($user, ['title' => 'Missed Call', 'type' => 'missed_call', 'body' => 'From (224) 555-0100', 'created_at' => now()->subHours(3)]);
+    $yesterday = appNotificationsRow($user, ['title' => 'Missed Call', 'type' => 'missed_call', 'body' => 'From (224) 555-0100', 'created_at' => now()->subDay()]);
+
+    $data = collect($this->getJson('/api/app/v1/notifications')->assertOk()->json('data'));
+
+    expect($data)->toHaveCount(2);
+    expect($data->firstWhere('date_label', 'Today')['ids'])->toEqualCanonicalizing([$evening->id, $afternoon->id]);
+    expect($data->firstWhere('date_label', 'Yesterday')['ids'])->toBe([$yesterday->id]);
+
+    $this->postJson("/api/app/v1/notifications/{$evening->id}/read")->assertOk();
+
+    expect($afternoon->refresh()->read_at)->not->toBeNull()
+        ->and($yesterday->refresh()->read_at)->toBeNull();
+});
+
