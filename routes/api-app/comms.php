@@ -1,6 +1,10 @@
 <?php
 
+use App\Http\Controllers\Api\App\V1\CallLogController as AppCallLogController;
+use App\Http\Controllers\Api\App\V1\MessageProjectLinkController as AppMessageProjectLinkController;
+use App\Http\Controllers\Api\App\V1\MessageTaskSuggestionController as AppMessageTaskSuggestionController;
 use App\Http\Controllers\Api\App\V1\ThreadController as AppThreadController;
+use App\Http\Controllers\Api\App\V1\ThreadForwardController as AppThreadForwardController;
 use App\Http\Controllers\Api\App\V1\ThreadMessageController as AppThreadMessageController;
 use App\Http\Controllers\Api\App\V1\ThreadOptInController as AppThreadOptInController;
 use Illuminate\Support\Facades\Route;
@@ -26,7 +30,10 @@ Route::post('threads/{thread}/opt-in/manual', [AppThreadOptInController::class, 
     ->whereNumber('thread')
     ->name('threads.opt-in.manual');
 
-// Scheduled message management — cancel, send now, and (view-only) translate.
+// Scheduled message management — edit, cancel, send now, and (view-only) translate.
+Route::put('threads/{thread}/messages/{message}', [AppThreadMessageController::class, 'update'])
+    ->whereNumber(['thread', 'message'])
+    ->name('threads.messages.update');
 Route::delete('threads/{thread}/messages/{message}', [AppThreadMessageController::class, 'destroy'])
     ->whereNumber(['thread', 'message'])
     ->name('threads.messages.destroy');
@@ -36,6 +43,36 @@ Route::post('threads/{thread}/messages/{message}/send-now', [AppThreadMessageCon
 Route::post('threads/{thread}/messages/{message}/translate', [AppThreadMessageController::class, 'translate'])
     ->whereNumber(['thread', 'message'])
     ->name('threads.messages.translate');
+
+// Forward one or more messages to another thread — App\Livewire\Sms\
+// SmsConversation::forwardableThreads()/forwardSingleMessage()/forwardMessages().
+Route::get('threads/{thread}/forward-targets', [AppThreadForwardController::class, 'targets'])
+    ->whereNumber('thread')
+    ->name('threads.forward-targets');
+Route::post('threads/{thread}/forward', [AppThreadForwardController::class, 'store'])
+    ->whereNumber('thread')
+    ->name('threads.forward');
+
+// Add a message's photos to a project — App\Livewire\Sms\SmsConversation::
+// openAddToProjectModal()/addableProjects()/addImagesToProject().
+Route::get('threads/{thread}/messages/{message}/project-candidates', [AppMessageProjectLinkController::class, 'candidates'])
+    ->whereNumber(['thread', 'message'])
+    ->name('threads.messages.project-candidates');
+Route::post('threads/{thread}/messages/{message}/add-to-project', [AppMessageProjectLinkController::class, 'store'])
+    ->whereNumber(['thread', 'message'])
+    ->name('threads.messages.add-to-project');
+
+// Create a task from a message — App\Livewire\Sms\SmsConversation::
+// createTaskFromMessage(); the app opens its own task create screen with
+// the returned suggestion instead of the web's in-page modal.
+Route::post('threads/{thread}/messages/{message}/task-suggestion', [AppMessageTaskSuggestionController::class, 'store'])
+    ->whereNumber(['thread', 'message'])
+    ->name('threads.messages.task-suggestion');
+
+// The web's finer per-person recipient picker for a new thread —
+// App\Livewire\Sms\SmsNewThread's recipientPreset dropdown.
+Route::get('recipient-presets', [AppThreadController::class, 'recipientPresets'])
+    ->name('recipient-presets');
 
 // Thread admin actions — mark/unmark spam, delete, assign client/vendor.
 Route::post('threads/{thread}/spam', [AppThreadController::class, 'markSpam'])
@@ -50,3 +87,8 @@ Route::put('threads/{thread}/assign', [AppThreadController::class, 'assign'])
 Route::delete('threads/{thread}', [AppThreadController::class, 'destroy'])
     ->whereNumber('thread')
     ->name('threads.destroy');
+
+// New-call contact picker + the web's multi-admin ring recipient choice —
+// App\Livewire\Sms\CallList::contactUsers()/callRecipients().
+Route::get('calls/contacts', [AppCallLogController::class, 'contacts'])
+    ->name('calls.contacts');

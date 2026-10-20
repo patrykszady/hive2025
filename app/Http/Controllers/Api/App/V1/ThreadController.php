@@ -8,7 +8,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\AssignThreadRequest;
 use App\Http\Requests\Api\App\StartThreadRequest;
 use App\Http\Resources\Api\App\ThreadResource;
+use App\Livewire\Sms\SmsNewThread;
+use App\Models\Client;
 use App\Models\SmsGroupThread;
+use App\Models\Vendor;
 use App\Services\Sms\AppThreadStarter;
 use App\Services\Sms\ThreadAdminActions;
 use App\Services\Sms\ThreadSpamBlocker;
@@ -103,6 +106,52 @@ class ThreadController extends Controller
         $this->attachThreadUnreadCounts(collect([$found]), $user);
 
         return response()->json(['data' => new ThreadResource($found)]);
+    }
+
+    /**
+     * The web's finer per-person recipient picker —
+     * App\Livewire\Sms\SmsNewThread::buildRecipientPresetOptions()/
+     * buildVendorRecipientPresetOptions() — which household members/numbers
+     * of a client or vendor can be texted, instead of defaulting to
+     * everyone. SmsNewThread's option-building methods are pure (no Livewire
+     * state), so they're called directly here rather than duplicated.
+     */
+    public function recipientPresets(Request $request): JsonResponse
+    {
+        $clientId = $request->query('client_id');
+        $vendorId = $request->query('vendor_id');
+
+        $composer = new SmsNewThread();
+
+        if ($vendorId) {
+            // withoutGlobalScopes(): same reasoning as AppThreadStarter/
+            // StartThreadRequest's vendor_id — a vendor not yet related to
+            // this tenant is how a new sub relationship starts, so it must
+            // still be reachable here.
+            $vendor = Vendor::withoutGlobalScopes()->with('users')->find($vendorId);
+            abort_unless($vendor, 404);
+
+            $threads = SmsGroupThread::query()->where('subject_vendor_id', $vendor->id)->get(['id', 'participants']);
+            $options = $composer->buildVendorRecipientPresetOptions($vendor, $threads);
+        } elseif ($clientId) {
+            // withoutGlobalScopes(): the client may be hidden by ClientScope
+            // in the acting user's vendor context — same reasoning as
+            // AppThreadStarter/ConversationPresenter::loadThreadForDisplay().
+            $client = Client::withoutGlobalScopes()->with('users')->find($clientId);
+            abort_unless($client, 404);
+
+            $threads = SmsGroupThread::query()->where('client_id', $client->id)->get(['id', 'participants']);
+            $options = $composer->buildRecipientPresetOptions($client->users, $threads);
+        } else {
+            abort(422, 'Provide client_id or vendor_id.');
+        }
+
+        return response()->json(['data' => array_map(fn (array $option) => [
+            'value' => $option['value'],
+            'label' => $option['label'],
+            'recipients' => $option['recipients'],
+            'existing_thread_id' => $option['existingThreadId'],
+        ], $options)]);
     }
 
     public function store(StartThreadRequest $request, AppThreadStarter $starter): JsonResponse

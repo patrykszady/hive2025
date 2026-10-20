@@ -164,22 +164,7 @@ class CallList extends Component
         // platform-wide, in the "place a new call" contact picker. Limit to
         // people this company would plausibly call — its own team, its
         // clients, and its related sub-vendors.
-        $vendor = auth()->user()->vendor;
-
-        if (! $vendor) {
-            return collect();
-        }
-
-        $vendorIds = $vendor->vendors()->pluck('vendors.id')->push($vendor->id)->unique();
-
-        return User::whereNotNull('cell_phone')
-            ->where('cell_phone', '!=', '')
-            ->where(function ($query) use ($vendorIds, $vendor) {
-                $query->whereHas('vendors', fn ($q) => $q->whereIn('vendors.id', $vendorIds))
-                    ->orWhereHas('clients', fn ($q) => $q->whereHas('vendors', fn ($cq) => $cq->where('vendors.id', $vendor->id)));
-            })
-            ->orderBy('first_name')
-            ->get();
+        return app(\App\Services\Calls\CallContactDirectory::class)->contacts(auth()->user());
     }
 
     /**
@@ -188,13 +173,7 @@ class CallList extends Component
     #[Computed]
     public function callRecipients(): mixed
     {
-        $vendor = auth()->user()->vendor;
-        if (! $vendor) {
-            return collect();
-        }
-
-        return $vendor->getAdminUsersWithCellPhones()
-            ->sortBy('first_name');
+        return app(\App\Services\Calls\CallContactDirectory::class)->ringRecipients(auth()->user());
     }
 
     /**
