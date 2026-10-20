@@ -9,8 +9,6 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use Flux;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 trait HasCallActions
 {
@@ -306,107 +304,27 @@ trait HasCallActions
      * Dial someone into a live conference. $participantId is a User id when
      * inviting a known team/client/vendor contact, and null for a vendor's
      * bare business line or a hand-typed phone number — it is only used for
-     * logging here.
+     * logging here. The actual dialing — and the same on-call/conference
+     * guards — live in App\Services\Calls\ConferenceInviter, shared with the
+     * app's CallParticipantController.
      */
     public function inviteParticipantToCall(int $callLogId, ?int $participantId, string $participantPhone, string $participantName): void
     {
         $user = auth()->user();
-        if (!$user) {
+        if (! $user) {
             Flux::toast(variant: 'danger', heading: 'Not Authenticated', text: 'You must be logged in to add participants.', duration: 5000, position: 'top right');
             return;
         }
 
-        // Only someone actually ON this call may pull in another person — but
-        // that's the outbound initiator (user_id) OR an admin who joined an
-        // inbound conference (joined_admin_ids). The old owner-only check
-        // rejected every inbound invite, since user_id is the external caller.
-        $callLog = CallLog::find($callLogId);
-        $joinedAdminIds = array_map('intval', ($callLog?->metadata['joined_admin_ids'] ?? []));
-        $isOwner = $callLog && $callLog->user_id === $user->id;
-        $isConferenceAdmin = in_array($user->id, $joinedAdminIds, true);
-        if (! $callLog || (! $isOwner && ! $isConferenceAdmin)) {
-            Flux::toast(variant: 'danger', heading: 'Invalid Call', text: 'Call not found or you are not on this call.', duration: 5000, position: 'top right');
-            return;
-        }
+        $result = app(\App\Services\Calls\ConferenceInviter::class)
+            ->invite($user, $callLogId, $participantId, $participantPhone, $participantName);
 
-        // Ensure call is in a conference (TRANSFERRED status with conference_id in metadata)
-        $metadata = $callLog->metadata ?? [];
-        $conferenceId = $metadata['conference_id'] ?? null;
-
-        if (!$conferenceId) {
-            Flux::toast(variant: 'danger', heading: 'No Conference', text: 'This call is not currently in a conference.', duration: 5000, position: 'top right');
-            return;
-        }
-
-        $apiKey = config('services.telnyx.api_key');
-        $connectionId = config('services.telnyx.connection_id');
-        $from = config('services.telnyx.from');
-
-        if (!$apiKey || !$connectionId) {
-            Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Voice calling is not configured.', duration: 5000, position: 'top right');
-            return;
-        }
-
-        try {
-            $response = Http::withHeaders([
-                'Authorization' => "Bearer {$apiKey}",
-                'Accept' => 'application/json',
-            ])->post('https://api.telnyx.com/v2/calls', [
-                'connection_id' => $connectionId,
-                'to' => $participantPhone,
-                'from' => $from,
-                'from_display_name' => 'GS Construction',
-                'timeout_secs' => 30,
-                'preferred_codecs' => config('services.telnyx.preferred_codecs'),
-                // Same detection the team legs use (ADMIN_LEG_AMD_CONFIG): an
-                // invited client, vendor, or hand-typed number can just as
-                // easily reach a voicemail box, and a voicemail box must
-                // never join a live conference.
-                'answering_machine_detection' => 'premium',
-                'answering_machine_detection_config' => \App\Http\Controllers\Api\TelnyxWebhookController::ADMIN_LEG_AMD_CONFIG,
-                'client_state' => base64_encode(json_encode([
-                    'action' => 'conference_invite',
-                    'call_log_id' => $callLogId,
-                    'conference_name' => $metadata['conference_name'] ?? null,
-                    'caller_name' => $user->first_name ?? 'Someone',
-                    'invited_by_user_id' => $user->id,
-                    // Carried through so the intro TTS and the AMD-machine
-                    // toast can name this leg without a non-user phone
-                    // number (a vendor line, a hand-typed number) having to
-                    // be re-resolved from the Telnyx API after the fact.
-                    'participant_name' => $participantName,
-                ])),
-                'webhook_url' => config('app.url') . '/webhooks/telnyx/voice',
-            ]);
-
-            if ($response->successful()) {
-                Log::channel('telnyx')->info('Conference invite: participant call initiated', [
-                    'call_log_id' => $callLogId,
-                    'participant_id' => $participantId,
-                    'participant_phone' => $participantPhone,
-                    'participant_name' => $participantName,
-                    'conference_id' => $conferenceId,
-                ]);
-
-                Flux::toast(variant: 'success', heading: 'Invited', text: "Calling {$participantName}...", duration: 5000, position: 'top right');
-            } else {
-                Log::channel('telnyx')->error('Conference invite: API call failed', [
-                    'call_log_id' => $callLogId,
-                    'participant_id' => $participantId,
-                    'status' => $response->status(),
-                    'error' => $response->json(),
-                ]);
-
-                Flux::toast(variant: 'danger', heading: 'Failed', text: 'Unable to invite participant. Please try again.', duration: 5000, position: 'top right');
-            }
-        } catch (\Exception $e) {
-            Log::channel('telnyx')->error('Conference invite: exception', [
-                'call_log_id' => $callLogId,
-                'participant_id' => $participantId,
-                'error' => $e->getMessage(),
-            ]);
-
-            Flux::toast(variant: 'danger', heading: 'Error', text: 'Something went wrong inviting the participant.', duration: 5000, position: 'top right');
-        }
+        Flux::toast(
+            variant: $result['ok'] ? 'success' : 'danger',
+            heading: $result['heading'],
+            text: $result['message'],
+            duration: 5000,
+            position: 'top right',
+        );
     }
 }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\App\V1\CallLogController as AppCallLogController;
+use App\Http\Controllers\Api\App\V1\CallParticipantController as AppCallParticipantController;
 use App\Http\Controllers\Api\App\V1\MessageProjectLinkController as AppMessageProjectLinkController;
 use App\Http\Controllers\Api\App\V1\MessageTaskSuggestionController as AppMessageTaskSuggestionController;
 use App\Http\Controllers\Api\App\V1\ThreadController as AppThreadController;
@@ -92,3 +93,14 @@ Route::delete('threads/{thread}', [AppThreadController::class, 'destroy'])
 // App\Livewire\Sms\CallList::contactUsers()/callRecipients().
 Route::get('calls/contacts', [AppCallLogController::class, 'contacts'])
     ->name('calls.contacts');
+
+// Add anyone to a live call — the global "In a call" badge's "Add
+// Participant" button (App\Livewire\Sms\CallStatusBadge), for the app's
+// call detail screen. App\Services\Calls\ConferenceParticipantSearch /
+// ConferenceInviter, shared with the web component.
+Route::get('calls/{call}/participants/search', [AppCallParticipantController::class, 'search'])
+    ->whereNumber('call')
+    ->name('calls.participants.search');
+Route::post('calls/{call}/participants', [AppCallParticipantController::class, 'store'])
+    ->whereNumber('call')
+    ->name('calls.participants.store');
