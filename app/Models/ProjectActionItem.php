@@ -89,8 +89,13 @@ class ProjectActionItem extends Model
     public static function sourceLabel(array $source): string
     {
         $when = ! empty($source['at']) ? Carbon::parse($source['at'])->format('M j') : '';
+        $noun = match ($source['kind'] ?? null) {
+            'call' => 'call',
+            'email' => 'email',
+            default => 'text',
+        };
 
-        return trim((($source['kind'] ?? '') === 'call' ? 'call' : 'text').' '.$when);
+        return trim($noun.' '.$when);
     }
 
     /** Still to be acted on: not done, not dismissed, not yet a Task. */

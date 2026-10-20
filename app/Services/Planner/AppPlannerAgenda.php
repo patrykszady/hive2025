@@ -450,7 +450,7 @@ class AppPlannerAgenda
     }
 
     /**
-     * @return array{id: int, title: string, owner: ?string, due_on: ?string, mentions: int, last_mentioned_at: ?string, sources: list<array{label: string, excerpt: string, url: ?string}>}
+     * @return array{id: int, title: string, owner: ?string, due_on: ?string, mentions: int, last_mentioned_at: ?string, sources: list<array{kind: ?string, label: string, excerpt: string, url: ?string}>}
      */
     private function actionItemPayload(ProjectActionItem $item): array
     {
@@ -461,8 +461,12 @@ class AppPlannerAgenda
             'due_on' => $item->due_on?->toDateString(),
             'mentions' => (int) $item->mentions,
             'last_mentioned_at' => $item->last_mentioned_at?->toIso8601String(),
+            // 'kind' rides alongside the human label so the app can pick an
+            // icon (call/sms/email — see ProjectActionItem::sourceLabel())
+            // without having to parse the label string back apart.
             'sources' => collect($item->sources ?? [])
                 ->map(fn (array $source): array => [
+                    'kind' => $source['kind'] ?? null,
                     'label' => ProjectActionItem::sourceLabel($source),
                     'excerpt' => (string) ($source['excerpt'] ?? ''),
                     'url' => ProjectActionItem::sourceUrl($source),

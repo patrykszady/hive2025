@@ -432,6 +432,42 @@ it('groups and ranks action items: the signed-in person, then the crew, then oth
         ]);
 });
 
+it('passes an email-kind source through with its own label and a null url', function () {
+    // No extractor writes an 'email' source yet (ProjectActionItemExtractor
+    // only reads calls/texts) — this guards the app's rendering/the server's
+    // passthrough for the day it does, same reasoning as the 'sms'/'call'
+    // cases above (AppPlannerAgenda::actionItemPayload, ProjectActionItem::
+    // sourceLabel()/sourceUrl()).
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appPlannerProject($vendor, $client, ['project_name' => 'Email Job']);
+    appPlannerStatus($project, $vendor, 6, Carbon::parse('2026-10-10'));
+
+    appPlannerActionItem($project, [
+        'title' => 'Send the cabinet hardware options',
+        'owner' => null,
+        'sources' => [[
+            'kind' => 'email',
+            'id' => 42,
+            'at' => now()->toIso8601String(),
+            'excerpt' => 'Can you send the hardware options?',
+        ]],
+    ]);
+
+    $response = $this->getJson('/api/app/v1/action-items')->assertOk();
+    $row = collect($response->json('data'))->firstWhere('project.id', $project->id);
+    $item = collect($row['groups'])->firstWhere('owner', 'Unassigned')['items'][0];
+
+    expect($item['sources'][0])->toMatchArray([
+        'kind' => 'email',
+        'label' => 'email '.now()->format('M j'),
+        'excerpt' => 'Can you send the hardware options?',
+        'url' => null,
+    ]);
+});
+
 it('marks an action item done, with done_evidence', function () {
     ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
     Sanctum::actingAs($user, ['app']);
