@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\App\V1\EstimateAiController;
+use App\Http\Controllers\Api\App\V1\EstimateAiRuleController;
 use App\Http\Controllers\Api\App\V1\EstimateContractSettingsController;
 use App\Http\Controllers\Api\App\V1\EstimateController;
 use App\Http\Controllers\Api\App\V1\EstimateEmailController;
@@ -54,8 +55,19 @@ Route::post('estimates/{estimate}/sections/{section}/duplicate', [EstimateSectio
 Route::get('estimates/{estimate}/sections/{section}/duplicate-targets', [EstimateSectionController::class, 'duplicateTargets'])->whereNumber(['estimate', 'section'])->name('estimates.sections.duplicate-targets');
 Route::post('estimates/{estimate}/sections/{section}/duplicate-to-estimate', [EstimateSectionController::class, 'duplicateToEstimate'])->whereNumber(['estimate', 'section'])->name('estimates.sections.duplicate-to-estimate');
 Route::post('estimates/{estimate}/sections/{section}/ai-draft', [EstimateAiController::class, 'draft'])->whereNumber(['estimate', 'section'])->name('estimates.sections.ai-draft');
+Route::post('estimates/{estimate}/ai-draft/{draft}/discard', [EstimateAiController::class, 'discard'])->whereNumber(['estimate', 'draft'])->name('estimates.ai-draft.discard');
+
+Route::get('estimates/{estimate}/ai-rules', [EstimateAiRuleController::class, 'index'])->whereNumber('estimate')->name('estimates.ai-rules.index');
+Route::post('estimates/{estimate}/ai-rules', [EstimateAiRuleController::class, 'store'])->whereNumber('estimate')->name('estimates.ai-rules.store');
+Route::patch('estimates/{estimate}/ai-rules/{rule}/approve', [EstimateAiRuleController::class, 'approve'])->whereNumber(['estimate', 'rule'])->name('estimates.ai-rules.approve');
+Route::patch('estimates/{estimate}/ai-rules/{rule}/dismiss', [EstimateAiRuleController::class, 'dismiss'])->whereNumber(['estimate', 'rule'])->name('estimates.ai-rules.dismiss');
+Route::delete('estimates/{estimate}/ai-rules/{rule}', [EstimateAiRuleController::class, 'destroy'])->whereNumber(['estimate', 'rule'])->name('estimates.ai-rules.destroy');
 
 Route::post('estimates/{estimate}/line-items', [EstimateLineItemController::class, 'store'])->whereNumber('estimate')->name('estimates.line-items.store');
 Route::put('estimates/{estimate}/line-items/{lineItem}', [EstimateLineItemController::class, 'update'])->whereNumber(['estimate', 'lineItem'])->name('estimates.line-items.update');
 Route::delete('estimates/{estimate}/line-items/{lineItem}', [EstimateLineItemController::class, 'destroy'])->whereNumber(['estimate', 'lineItem'])->name('estimates.line-items.destroy');
 Route::post('estimates/{estimate}/line-items/{lineItem}/restore', [EstimateLineItemController::class, 'restore'])->whereNumber(['estimate', 'lineItem'])->name('estimates.line-items.restore');
+Route::post('estimates/{estimate}/line-items/{lineItem}/credit', [EstimateLineItemController::class, 'credit'])->whereNumber(['estimate', 'lineItem'])->name('estimates.line-items.credit');
+
+Route::patch('estimates/{estimate}/sections/{section}/move', [EstimateSectionController::class, 'move'])->whereNumber(['estimate', 'section'])->name('estimates.sections.move');
+Route::patch('estimates/{estimate}/line-items/{lineItem}/move', [EstimateLineItemController::class, 'move'])->whereNumber(['estimate', 'lineItem'])->name('estimates.line-items.move');

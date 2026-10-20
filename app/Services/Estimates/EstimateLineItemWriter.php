@@ -168,6 +168,117 @@ class EstimateLineItemWriter
     }
 
     /**
+     * Create an offsetting "Credit" copy of a line item locked into the
+     * signed contract — the way to back it out of the contract without
+     * touching the original. Returns null when the item isn't actually
+     * locked (credits only exist for signed-contract items) — the shared
+     * body of App\Livewire\LineItems\EstimateLineItemCreate::creditToChangeOrder()
+     * and the Hive Contractors app's EstimateLineItemController::credit().
+     */
+    public function creditToChangeOrder(EstimateLineItem $original, float $quantity, float $cost): ?EstimateLineItem
+    {
+        if (! $original->section?->isLocked()) {
+            return null;
+        }
+
+        $section = app(EstimateSectionWriter::class)->resolveChangeOrderSection($original->estimate);
+
+        $quantity = $quantity ?: ($original->quantity ?: 1);
+        $total = number_format($quantity * $cost, 2, '.', '');
+
+        return EstimateLineItem::create([
+            'estimate_id' => $original->estimate_id,
+            'line_item_id' => $original->line_item_id,
+            'credit_for_id' => $original->id,
+            'section_id' => $section->id,
+            'name' => 'Credit: '.$original->name,
+            'category' => $original->category,
+            'sub_category' => $original->sub_category,
+            'unit_type' => $original->unit_type,
+            'quantity' => $quantity,
+            'cost' => -$cost,
+            'total' => -$total,
+            // The credit doesn't repeat the original scope text — it just
+            // points back at the credited line item by its estimate number.
+            'desc' => 'Credit for Line Item #'.$this->lineItemNumber($original).': '.$original->name,
+            'notes' => null,
+            'order' => $section->estimate_line_items()->count() + 1,
+        ]);
+    }
+
+    /**
+     * Reorders a line item to the given 0-indexed position, optionally
+     * moving it into a different section first — the shared body of
+     * App\Livewire\Estimates\EstimateShow::sort_line_item() and the Hive
+     * Contractors app's EstimateLineItemController::move(). $section must
+     * already be resolved as one of the estimate's own sections (same
+     * check sort_line_item makes via findOrFail before calling this).
+     */
+    public function moveLineItem(EstimateLineItem $lineItem, int $position, ?EstimateSection $section = null): EstimateLineItem
+    {
+        $oldSectionId = $lineItem->section_id;
+
+        if ($section && $section->id !== $oldSectionId) {
+            // Cross-section move: close the gap in the old section.
+            $lineItem->displace();
+
+            $lineItem->section_id = $section->id;
+            $lineItem->save();
+
+            // Refresh the relationship so scopeSortable picks up the new section.
+            $lineItem->unsetRelation('section');
+
+            // Insert at the correct position in the new section.
+            $lineItem->move($position);
+
+            // Recalculate totals on both sections.
+            $oldSection = EstimateSection::find($oldSectionId);
+            $newSection = $section;
+
+            foreach ([$oldSection, $newSection] as $affected) {
+                if (! $affected) {
+                    continue;
+                }
+
+                $affected->total = $affected->estimate_line_items()->sum('total');
+                $affected->save();
+
+                if ($affected->bid_id) {
+                    $bid = \App\Models\Bid::find($affected->bid_id);
+                    if ($bid) {
+                        $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
+                        $bid->save();
+                    }
+                }
+            }
+        } else {
+            // Same-section reorder.
+            $lineItem->move($position);
+        }
+
+        return $lineItem->fresh();
+    }
+
+    /**
+     * The "{section}.{item}" number a line item displays as on the estimate
+     * (both ordered by their order column, matching the page's default sort).
+     */
+    public function lineItemNumber(EstimateLineItem $lineItem): string
+    {
+        $sectionIndex = $lineItem->estimate->estimate_sections()
+            ->orderBy('order')
+            ->pluck('id')
+            ->search($lineItem->section_id);
+
+        $itemIndex = $lineItem->section->estimate_line_items()
+            ->orderBy('order')
+            ->pluck('id')
+            ->search($lineItem->id);
+
+        return ($sectionIndex === false ? '?' : $sectionIndex + 1).'.'.($itemIndex === false ? '?' : $itemIndex + 1);
+    }
+
+    /**
      * Get the canonical allowance catalog for an estimate line item, falling
      * back to the vendor-wide catalog when the selected line item has no own
      * curated allowances yet.

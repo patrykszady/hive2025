@@ -228,6 +228,43 @@ it('updates a catalog item, syncing allowances', function () {
         ->and((float) $lineItem->fresh()->cost)->toBe(15.0);
 });
 
+it('updates only the scope fields when name and allowances are resubmitted unchanged, like EstimateLineItemCreate::updateGlobalLineItem()', function () {
+    // The app's "Update main line item" action (from an estimate line
+    // item's edit screen) reuses this same PUT endpoint rather than a
+    // dedicated one — EstimateLineItemCreate::updateGlobalLineItem() only
+    // ever touches desc/notes/category/sub_category/unit_type/cost itself
+    // (its modal has no name field and never edits allowances), so the app
+    // gets the same effect by resubmitting the catalog item's current
+    // name and allowances alongside the edited fields.
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $lineItem = appLineItemsRow(['name' => 'Structural Header', 'category' => 'Framing', 'cost' => 2850]);
+    $allowance = $lineItem->allowances()->create(['description' => 'Keep me', 'pricing_mode' => 'lump_sum', 'amount' => 100, 'belongs_to_vendor_id' => $lineItem->belongs_to_vendor_id]);
+
+    $this->putJson("/api/app/v1/line-items/{$lineItem->id}", [
+        'name' => $lineItem->name,
+        'desc' => 'Updated scope text',
+        'notes' => 'New note',
+        'category' => 'Rough Carpentry',
+        'sub_category' => $lineItem->sub_category,
+        'unit_type' => $lineItem->unit_type,
+        'cost' => 3100,
+        'allowances' => [
+            ['id' => $allowance->id, 'description' => $allowance->description, 'pricing_mode' => $allowance->pricing_mode, 'amount' => (float) $allowance->amount],
+        ],
+    ])->assertOk();
+
+    $fresh = $lineItem->fresh();
+    expect($fresh->name)->toBe('Structural Header')
+        ->and($fresh->desc)->toBe('Updated scope text')
+        ->and($fresh->notes)->toBe('New note')
+        ->and($fresh->category)->toBe('Rough Carpentry')
+        ->and((float) $fresh->cost)->toBe(3100.0)
+        ->and($fresh->allowances()->count())->toBe(1)
+        ->and($fresh->allowances()->first()->description)->toBe('Keep me');
+});
+
 it('validation rejects a cost with more than 2 decimal places, like the web', function () {
     ['user' => $admin] = appLineItemsTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

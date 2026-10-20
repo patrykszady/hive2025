@@ -46,6 +46,19 @@ class EstimateSectionWriter
         return $section;
     }
 
+    /**
+     * Reorders a section to the given 0-indexed position among its
+     * estimate's sections — the shared body of App\Livewire\Estimates\
+     * EstimateShow::sort_sections() and the Hive Contractors app's
+     * EstimateSectionController::move().
+     */
+    public function moveSection(EstimateSection $section, int $position): EstimateSection
+    {
+        $section->move($position);
+
+        return $section->fresh();
+    }
+
     public function deleteSection(EstimateSection $section): void
     {
         // Push deleted sections to the end so restores can be reinserted cleanly.
@@ -226,6 +239,58 @@ class EstimateSectionWriter
      * (otherwise the finances double-count: the section sums into the
      * estimate fallback AND its CO bid).
      */
+    /**
+     * The section a credit lands in: the newest unlocked section already
+     * attached to a change-order bid, or a fresh "Change Order" section with
+     * its own change-order bid — the shared body of
+     * App\Livewire\LineItems\EstimateLineItemCreate::resolveChangeOrderSection()
+     * and EstimateLineItemWriter::creditToChangeOrder(). Unlike
+     * maybeCreateChangeOrderBid() (which only fires once a base bid exists),
+     * this is unconditional — crediting is an explicit change-order action.
+     */
+    public function resolveChangeOrderSection(Estimate $estimate): EstimateSection
+    {
+        $existing = $estimate->estimate_sections()
+            ->with('bid')
+            ->orderByDesc('order')
+            ->get()
+            ->first(fn ($section) => $section->bid && (int) $section->bid->type >= 2 && ! $section->isLocked());
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $maxOrder = $estimate->estimate_sections()->where('order', '<', 999999)->max('order');
+
+        $section = EstimateSection::create([
+            'estimate_id' => $estimate->id,
+            'order' => is_null($maxOrder) ? 0 : $maxOrder + 1,
+            'name' => 'Change Order',
+            'total' => 0.00,
+        ]);
+
+        $projectId = $estimate->project_id;
+        $vendorId = $estimate->belongs_to_vendor_id;
+
+        if ($projectId && $vendorId) {
+            $nextType = (int) (Bid::where('project_id', $projectId)
+                ->where('vendor_id', $vendorId)
+                ->max('type') ?? 1) + 1;
+
+            $bid = Bid::create([
+                'amount' => 0.00,
+                'type' => $nextType,
+                'project_id' => $projectId,
+                'vendor_id' => $vendorId,
+            ]);
+
+            $section->bid_id = $bid->id;
+            $section->save();
+        }
+
+        return $section;
+    }
+
     public function maybeCreateChangeOrderBid(EstimateSection $section): void
     {
         $estimate = $section->estimate;

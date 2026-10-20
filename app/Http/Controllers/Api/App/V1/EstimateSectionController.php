@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\DuplicateEstimateSectionToEstimateRequest;
+use App\Http\Requests\Api\App\MoveEstimateSectionRequest;
 use App\Http\Requests\Api\App\StoreEstimateSectionRequest;
 use App\Http\Requests\Api\App\UpdateEstimateSectionRequest;
 use App\Models\Estimate;
@@ -62,6 +63,23 @@ class EstimateSectionController extends Controller
         $sectionModel = app(EstimateSectionWriter::class)->restoreSection($sectionModel);
 
         return response()->json(['data' => $this->sectionArray($sectionModel->fresh())]);
+    }
+
+    /**
+     * Reorders a section to the given 0-indexed position — mirrors
+     * App\Livewire\Estimates\EstimateShow::sort_sections() exactly via
+     * App\Services\Estimates\EstimateSectionWriter, the service both
+     * surfaces share.
+     */
+    public function move(MoveEstimateSectionRequest $request, int $estimate, int $section): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('update', $found);
+
+        $sectionModel = $found->estimate_sections()->findOrFail($section);
+        $moved = app(EstimateSectionWriter::class)->moveSection($sectionModel, $request->validated('position'));
+
+        return response()->json(['data' => $this->sectionArray($moved)]);
     }
 
     /** Mirrors App\Livewire\Estimates\EstimateShow::sectionDuplicate() — an exact in-place copy, named " -Copy". */

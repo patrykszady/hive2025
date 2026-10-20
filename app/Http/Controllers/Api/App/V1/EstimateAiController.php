@@ -7,32 +7,39 @@ use App\Http\Requests\Api\App\GenerateEstimateAiDraftRequest;
 use App\Models\Estimate;
 use App\Models\EstimateAiDraft;
 use App\Models\EstimateLineItem;
+use App\Services\Estimates\EstimateAiDraftWriter;
+use App\Services\Estimates\FloorplanParser;
 use App\Services\EstimateAIService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /**
  * The AI estimate drafter — reuses App\Services\EstimateAIService exactly
  * (the same catalog-constrained Claude call App\Livewire\Estimates\
  * EstimateAIGenerator uses), but synchronously and without the web's
  * per-line streaming: the app gets the finished draft in one response
- * instead of watching rows arrive one at a time. Floorplan uploads are left
- * web-only (parsing a PDF/image floorplan into room metrics is a sizeable
- * feature on its own — see EstimateAIGenerator::parseFloorplans() — and a
- * phone compose flow can describe the job in words instead).
+ * instead of watching rows arrive one at a time. Floorplan uploads are
+ * images only (expo-image-picker has no document/CSV picker in this Expo
+ * Go build), measured by the same App\Services\Estimates\FloorplanParser
+ * the web's EstimateAIGenerator uses.
  */
 class EstimateAiController extends Controller
 {
-    public function draft(GenerateEstimateAiDraftRequest $request, int $estimate, int $section): JsonResponse
+    public function draft(GenerateEstimateAiDraftRequest $request, int $estimate, int $section, FloorplanParser $parser): JsonResponse
     {
         $found = $this->visibleEstimate($estimate);
         $this->authorize('update', $found);
 
         $sectionModel = $found->estimate_sections()->findOrFail($section);
 
+        $files = $request->file('floorplans') ?? [];
+        $labels = array_map(fn ($i) => 'Floor '.($i + 1), array_keys($files));
+        $floorplanData = $files !== [] ? $parser->parseFloorplans($files, $labels) : null;
+
         $service = app(EstimateAIService::class);
         $result = $service->generateEstimate(
             inquiry: $request->validated('inquiry'),
-            floorplanData: null,
+            floorplanData: $floorplanData,
             vendorId: $found->belongs_to_vendor_id ?? 1,
         );
 
@@ -56,7 +63,7 @@ class EstimateAiController extends Controller
             'request_id' => $result['meta']['request_id'] ?? null,
             'model' => $result['meta']['model'] ?? null,
             'inquiry' => $request->validated('inquiry'),
-            'floorplan' => null,
+            'floorplan' => $result['meta']['floorplan'] ?? null,
             'reasoning' => $result['reasoning'] ?: null,
             'drafted_items' => collect($created)->map(fn (EstimateLineItem $line) => [
                 'estimate_line_item_id' => $line->id,
@@ -91,6 +98,30 @@ class EstimateAiController extends Controller
                 ])->values()->all(),
             ],
         ], 201);
+    }
+
+    /**
+     * Discards a draft — every line item it added force-deleted, the
+     * section's recorded inquiry/scope cleared. Mirrors
+     * App\Livewire\Estimates\EstimateAIGenerator::discardDraft() exactly via
+     * App\Services\Estimates\EstimateAiDraftWriter, the service both
+     * surfaces share. Unlike the web (which discards its live, possibly
+     * already-edited row list), the app discards exactly what the draft
+     * itself recorded — the app has no intermediate "remove one row" step
+     * between drafting and discarding.
+     */
+    public function discard(Request $request, int $estimate, int $draft, EstimateAiDraftWriter $writer): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('update', $found);
+
+        $draftModel = EstimateAiDraft::where('estimate_id', $found->id)->findOrFail($draft);
+
+        $lineItemIds = collect($draftModel->drafted_items ?? [])->pluck('estimate_line_item_id')->filter()->map(fn ($id) => (int) $id)->values()->all();
+
+        $writer->discard($found, (int) $draftModel->section_id, $draftModel->id, $lineItemIds);
+
+        return response()->json(['data' => ['discarded' => true]]);
     }
 
     private function visibleEstimate(int $id): Estimate
