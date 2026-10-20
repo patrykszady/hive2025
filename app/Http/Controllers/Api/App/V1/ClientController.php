@@ -33,6 +33,10 @@ class ClientController extends Controller
     public function index(Request $request): JsonResponse
     {
         $search = trim((string) $request->query('search', ''));
+        // 'Created' is the only sortable column ClientsTable's own blade
+        // wires up (resources/views/livewire/clients/clients-table.blade.php) —
+        // mirrors ClientsTable::sort() exactly.
+        $direction = $request->query('direction') === 'asc' ? 'asc' : 'desc';
 
         $query = Client::query()
             ->with('users')
@@ -41,8 +45,8 @@ class ClientController extends Controller
         $this->applySearch($query, $search);
 
         $page = $query
-            ->orderByDesc('created_at')
-            ->orderByDesc('id')
+            ->orderBy('created_at', $direction)
+            ->orderBy('id', $direction)
             ->cursorPaginate(self::PER_PAGE);
 
         return response()->json([
@@ -51,6 +55,8 @@ class ClientController extends Controller
             // The web's "New Client" button — @can('create', Client::class)
             // on resources/views/livewire/clients/partials/table-actions.blade.php.
             'can_create_client' => $request->user()->can('create', Client::class),
+            'sort' => 'created_at',
+            'direction' => $direction,
         ]);
     }
 

@@ -7,6 +7,7 @@ use App\Http\Requests\Api\App\StoreLineItemRequest;
 use App\Http\Requests\Api\App\UpdateLineItemRequest;
 use App\Http\Resources\Api\App\LineItemResource;
 use App\Models\LineItem;
+use App\Services\LineItems\InlineAllowanceResolver;
 use App\Services\LineItems\LineItemWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,7 +24,7 @@ class LineItemController extends Controller
 {
     private const PER_PAGE = 20;
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, InlineAllowanceResolver $resolver): JsonResponse
     {
         $this->authorize('viewAny', LineItem::class);
 
@@ -45,8 +46,16 @@ class LineItemController extends Controller
 
         $page = $query->paginate(self::PER_PAGE);
 
+        // The inline allowance rows shown beneath each catalog row on the
+        // web (curated allowances, or a historical fallback when a line
+        // item has none) — see InlineAllowanceResolver, shared with
+        // LineItemsIndex::inlineAllowances().
+        $inlineAllowances = $resolver->resolve($page->getCollection());
+
         return response()->json([
-            'data' => $page->getCollection()->map(fn (LineItem $lineItem) => (new LineItemResource($lineItem))->toArray($request))->all(),
+            'data' => $page->getCollection()->map(fn (LineItem $lineItem) => (new LineItemResource($lineItem))->toArray($request) + [
+                'inline_allowances' => ($inlineAllowances->get($lineItem->id) ?? collect())->values()->all(),
+            ])->all(),
             'meta' => [
                 'total' => $page->total(),
                 'current_page' => $page->currentPage(),

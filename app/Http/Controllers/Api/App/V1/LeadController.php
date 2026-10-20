@@ -47,6 +47,9 @@ class LeadController extends Controller
 {
     private const PER_PAGE = 15;
 
+    /** Columns the client may sort by — mirrors LeadsIndex::SORTABLE_COLUMNS exactly. Never pass $sort straight to orderBy(). */
+    private const SORTABLE_COLUMNS = ['date', 'origin', 'created_at'];
+
     public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Lead::class);
@@ -54,6 +57,8 @@ class LeadController extends Controller
         $origin = trim((string) $request->query('origin', ''));
         $statuses = array_values(array_filter((array) $request->query('statuses', [])));
         $search = trim((string) $request->query('search', ''));
+        $sort = in_array($request->query('sort'), self::SORTABLE_COLUMNS, true) ? $request->query('sort') : 'date';
+        $direction = $request->query('direction') === 'asc' ? 'asc' : 'desc';
 
         $query = Lead::with(['user.clients', 'last_status'])
             ->withCount('feedback')
@@ -66,14 +71,16 @@ class LeadController extends Controller
                         ->orWhereRaw('LOWER(notes) like ?', ["%{$term}%"]);
                 });
             })
-            ->orderByDesc('date')
-            ->orderByDesc('id');
+            ->orderBy($sort, $direction)
+            ->orderBy('id', $direction);
 
         $page = $query->cursorPaginate(self::PER_PAGE);
 
         return response()->json([
             'data' => $page->getCollection()->map(fn (Lead $lead) => (new LeadResource($lead))->toArray($request))->all(),
             'next_cursor' => $page->nextCursor()?->encode(),
+            'sort' => $sort,
+            'direction' => $direction,
         ]);
     }
 

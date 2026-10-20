@@ -149,6 +149,71 @@ it('allows an Admin to list leads, newest date first, filtered by status', funct
         ->and($filtered->json('data.0.status.code'))->toBe('Won');
 });
 
+it('sorts the leads list by date asc/desc via sort/direction, like LeadsIndex::sort()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $older = appSalesLead($vendor, ['date' => now()->subDays(3)]);
+    $newer = appSalesLead($vendor, ['date' => now()->subDay()]);
+
+    $desc = $this->getJson('/api/app/v1/leads?'.http_build_query(['sort' => 'date', 'direction' => 'desc']))->assertOk();
+    expect(collect($desc->json('data'))->pluck('id')->all())->toBe([$newer->id, $older->id])
+        ->and($desc->json('sort'))->toBe('date')
+        ->and($desc->json('direction'))->toBe('desc');
+
+    $asc = $this->getJson('/api/app/v1/leads?'.http_build_query(['sort' => 'date', 'direction' => 'asc']))->assertOk();
+    expect(collect($asc->json('data'))->pluck('id')->all())->toBe([$older->id, $newer->id])
+        ->and($asc->json('direction'))->toBe('asc');
+});
+
+it('ignores an unsortable column, falling back to date desc', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    appSalesLead($vendor, ['date' => now()->subDays(3)]);
+    appSalesLead($vendor, ['date' => now()->subDay()]);
+
+    $response = $this->getJson('/api/app/v1/leads?sort=notes')->assertOk();
+
+    expect($response->json('sort'))->toBe('date');
+});
+
+it('shows has_feedback true only for a lead with feedback, on the list and the detail — the fixed LeadResource bug', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $withFeedback = appSalesLead($vendor);
+    \App\Models\LeadFeedback::create(['lead_id' => $withFeedback->id, 'rating' => 5, 'message' => 'Great!']);
+    $withoutFeedback = appSalesLead($vendor);
+
+    $list = $this->getJson('/api/app/v1/leads')->assertOk();
+    $rows = collect($list->json('data'));
+
+    expect($rows->firstWhere('id', $withFeedback->id)['has_feedback'])->toBeTrue()
+        ->and($rows->firstWhere('id', $withFeedback->id)['feedback_count'])->toBe(1)
+        ->and($rows->firstWhere('id', $withoutFeedback->id)['has_feedback'])->toBeFalse();
+
+    $detail = $this->getJson("/api/app/v1/leads/{$withFeedback->id}")->assertOk();
+    expect($detail->json('data.has_feedback'))->toBeTrue();
+
+    $detailWithout = $this->getJson("/api/app/v1/leads/{$withoutFeedback->id}")->assertOk();
+    expect($detailWithout->json('data.has_feedback'))->toBeFalse();
+});
+
+it('shows the "Last" column\'s date only for a status that isn\'t a lifecycle bookend, like leads/index.blade.php', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $new = appSalesLead($vendor, [], 'New');
+    $replied = appSalesLead($vendor, [], 'Replied');
+
+    $response = $this->getJson('/api/app/v1/leads')->assertOk();
+    $rows = collect($response->json('data'));
+
+    expect($rows->firstWhere('id', $new->id)['last_status_at'])->toBeNull()
+        ->and($rows->firstWhere('id', $replied->id)['last_status_at'])->not->toBeNull();
+});
+
 it('filters the leads list by origin and search', function () {
     ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

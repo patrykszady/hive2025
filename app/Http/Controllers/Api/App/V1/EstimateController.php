@@ -8,6 +8,7 @@ use App\Http\Requests\Api\App\StoreEstimateRequest;
 use App\Http\Resources\Api\App\EstimateResource;
 use App\Models\Estimate;
 use App\Models\Project;
+use App\Services\Estimates\EstimateDestroyer;
 use App\Services\Estimates\EstimateDuplicator;
 use App\Services\Estimates\EstimateSectionWriter;
 use App\Support\EstimateDocumentGenerator;
@@ -101,6 +102,25 @@ class EstimateController extends Controller
         $found->restore();
 
         return response()->json(['data' => (new EstimateResource($found->fresh()))->toArray($request)]);
+    }
+
+    /**
+     * Permanently deletes a DISABLED estimate — mirrors the trashed branch
+     * of App\Livewire\Estimates\EstimatesIndex::removeEstimate() exactly via
+     * App\Services\Estimates\EstimateDestroyer, the service both surfaces
+     * share. Only a disabled (already soft-deleted) estimate may be force
+     * deleted this way — same as the web, where the "Delete" menu item only
+     * ever appears on a disabled row.
+     */
+    public function forceDelete(Request $request, int $estimate, EstimateDestroyer $destroyer): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate, withTrashed: true);
+        abort_unless($found->trashed(), 422, 'Only a disabled estimate can be permanently deleted.');
+        $this->authorize('forceDelete', $found);
+
+        $destroyer->forceDelete($found);
+
+        return response()->json(['data' => ['deleted' => true]]);
     }
 
     public function duplicate(DuplicateEstimateRequest $request, int $estimate): JsonResponse

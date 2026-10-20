@@ -5,6 +5,7 @@ namespace App\Livewire\Estimates;
 use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\Estimate;
 use App\Models\Project;
+use App\Services\Estimates\EstimateDestroyer;
 
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -102,12 +103,7 @@ class EstimatesIndex extends Component
         if ($estimate->trashed()) {
             $this->authorize('forceDelete', $estimate);
 
-            $estimate->estimate_line_items()->each(function ($lineItem) {
-                $lineItem->allowances()->delete();
-                $lineItem->forceDelete();
-            });
-            $estimate->estimate_sections()->forceDelete();
-            $estimate->forceDelete();
+            app(EstimateDestroyer::class)->forceDelete($estimate);
             $message = 'Estimate permanently deleted';
         } else {
             // Otherwise, soft delete (disable)

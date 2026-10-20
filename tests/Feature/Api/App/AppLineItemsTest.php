@@ -71,6 +71,72 @@ it('lists the catalog newest first, scoped to the vendor, with allowances', func
         ->and($response->json('data.0.allowances.0.description'))->toBe('Standard');
 });
 
+it('carries curated allowances through as inline_allowances, like the web list card', function () {
+    ['user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $item = appLineItemsRow(['name' => 'Crown Molding']);
+    $item->allowances()->create(['description' => 'Standard', 'pricing_mode' => 'per_unit', 'unit_amount' => 3, 'belongs_to_vendor_id' => $item->belongs_to_vendor_id]);
+
+    $response = $this->getJson('/api/app/v1/line-items')->assertOk();
+
+    $row = collect($response->json('data'))->firstWhere('id', $item->id);
+    expect($row['inline_allowances'])->toHaveCount(1)
+        ->and($row['inline_allowances'][0]['description'])->toBe('Standard')
+        ->and((float) $row['inline_allowances'][0]['unit_amount'])->toBe(3.0);
+});
+
+it('falls back to a historical allowance aggregated from past estimates when the catalog item has none, like LineItemsIndex::inlineAllowances()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appLineItemsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $catalogItem = appLineItemsRow(['name' => 'Wine Cellar Cooler', 'unit_type' => 'pieces']);
+
+    $client = \App\Models\Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Kitchen Remodel',
+        'client_id' => $client->id,
+        'address' => '123 Main St',
+        'city' => 'Northbrook',
+        'state' => 'IL',
+        'zip_code' => '60062',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
+
+    $estimate = \App\Models\Estimate::create(['project_id' => $project->id, 'belongs_to_vendor_id' => $vendor->id]);
+    $section = \App\Models\EstimateSection::create(['estimate_id' => $estimate->id, 'order' => 0, 'name' => 'Kitchen', 'total' => 0]);
+    $estimateLineItem = \App\Models\EstimateLineItem::create([
+        'estimate_id' => $estimate->id,
+        'section_id' => $section->id,
+        'line_item_id' => $catalogItem->id,
+        'name' => $catalogItem->name,
+        'category' => $catalogItem->category,
+        'sub_category' => $catalogItem->sub_category,
+        'unit_type' => $catalogItem->unit_type,
+        'quantity' => 1,
+        'cost' => $catalogItem->cost,
+        'total' => $catalogItem->cost,
+        'desc' => $catalogItem->desc,
+        'order' => 1,
+    ]);
+    \App\Models\EstimateLineItemAllowance::create([
+        'estimate_line_item_id' => $estimateLineItem->id,
+        'description' => 'Tile allowance $5/sqft',
+        'pricing_mode' => 'per_unit',
+        'unit_amount' => 5,
+        'amount' => 0,
+    ]);
+
+    $response = $this->getJson('/api/app/v1/line-items')->assertOk();
+
+    $row = collect($response->json('data'))->firstWhere('id', $catalogItem->id);
+    expect($row['allowances'])->toBe([])
+        ->and($row['inline_allowances'])->toHaveCount(1)
+        ->and((float) $row['inline_allowances'][0]['unit_amount'])->toBe(5.0);
+});
+
 it('searches the catalog by name, description and notes', function () {
     ['user' => $admin] = appLineItemsTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);
