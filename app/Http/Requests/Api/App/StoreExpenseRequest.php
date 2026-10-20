@@ -97,6 +97,12 @@ class StoreExpenseRequest extends FormRequest
             // ExpenseAccessGuard::assertCheckAccessible(), not an `exists:`
             // rule, for the same reason as belongs_to_vendor_id above.
             'existing_check_id' => ['nullable', 'integer'],
+            // "Create an expense from the transaction" (create only) — the
+            // Transactions card's row action. Scoped against this tenant's
+            // own still-unmatched transactions by
+            // ExpenseAccessGuard::assertTransactionAccessible(), not an
+            // `exists:` rule, for the same reason as existing_check_id above.
+            'transaction_id' => ['nullable', 'integer'],
             // Recording a brand-new check — mirrors App\Traits\HandlesChecks'
             // handlesChecksRules() exactly (same scoping, same messages).
             'bank_account_id' => [

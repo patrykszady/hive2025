@@ -93,6 +93,31 @@ class CheckController extends Controller
     }
 
     /**
+     * The standalone Checks list's Bank filter options — mirrors
+     * ChecksIndex::mount()'s $banks query and its filter-fields partial's
+     * groupBy('plaid_ins_id') (several Bank rows can share one physical
+     * bank across accounts; the filter offers one option per actual bank).
+     * A different list/shape than bankAccountOptions() below, which is the
+     * EDIT form's own Checking-accounts picker.
+     */
+    public function bankOptions(): JsonResponse
+    {
+        $this->authorize('viewAny', Check::class);
+
+        $banks = Bank::orderByDesc('created_at')
+            ->with('accounts')
+            ->whereHas('accounts', fn ($query) => $query->whereIn('type', ['Checking', 'Savings']))
+            ->get();
+
+        return response()->json([
+            'data' => $banks->groupBy('plaid_ins_id')
+                ->map(fn ($group) => ['id' => $group->first()->id, 'name' => $group->first()->name])
+                ->values()
+                ->all(),
+        ]);
+    }
+
+    /**
      * The edit form's bank select — mirrors CheckCreate::mount()'s own
      * $bank_accounts query (Checking accounts whose bank has a live Plaid
      * connection) and getNameAndType()'s label.

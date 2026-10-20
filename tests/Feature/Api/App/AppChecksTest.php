@@ -92,6 +92,23 @@ it('filters checks by check number and amount', function () {
     expect(collect($byAmount->json('data'))->pluck('id')->all())->toBe([$target->id]);
 });
 
+it('lists one Bank filter option per plaid_ins_id, grouping sibling accounts under it like ChecksIndex::mount()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appChecksTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $bank = Bank::create(['name' => 'Citibank', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_shared']);
+    BankAccount::create(['vendor_id' => $vendor->id, 'bank_id' => $bank->id, 'account_number' => '1', 'plaid_account_id' => 'acc_'.uniqid(), 'type' => 'Checking']);
+    // A sibling Bank row sharing the same plaid_ins_id (another account at
+    // the same institution) must collapse into the SAME filter option.
+    $siblingBank = Bank::create(['name' => 'Citibank Savings', 'vendor_id' => $vendor->id, 'plaid_ins_id' => 'ins_shared']);
+    BankAccount::create(['vendor_id' => $vendor->id, 'bank_id' => $siblingBank->id, 'account_number' => '2', 'plaid_account_id' => 'acc_'.uniqid(), 'type' => 'Savings']);
+
+    $response = $this->getJson('/api/app/v1/checks/bank-options')->assertOk();
+
+    expect($response->json('data'))->toHaveCount(1)
+        ->and($response->json('data.0.name'))->toBe('Citibank');
+});
+
 it('404s a check that does not exist', function () {
     ['user' => $admin] = appChecksTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

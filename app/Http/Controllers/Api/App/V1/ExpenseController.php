@@ -36,6 +36,8 @@ class ExpenseController extends Controller
             'date_to' => $request->query('date_to'),
             'status' => Arr::wrap($request->query('status', [])),
             'amount' => $request->query('amount'),
+            'reimbursement' => $request->query('reimbursement'),
+            'direction' => $request->query('direction'),
         ];
 
         $page = $this->directory->query($request->user(), $filters)
@@ -111,12 +113,53 @@ class ExpenseController extends Controller
         return response()->json(['data' => ['deleted' => true]]);
     }
 
+    /**
+     * Bulk-select "Delete selected" — mirrors ExpenseIndex::bulkDelete().
+     * Unlike single destroy() this never 403s the whole request: each
+     * selected id that the acting user may not delete (a Member's pick
+     * that already has a matched transaction) is silently skipped, exactly
+     * like the web's toast ("N skipped (admin-only: has transactions)").
+     */
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer'],
+        ]);
+
+        $result = $this->directory->bulkDelete($request->user(), $validated['ids']);
+
+        return response()->json(['data' => $result]);
+    }
+
+    /** Mirrors ExpenseIndex::restoreExpense(): Admin-only (ExpensePolicy::restore()), trashed rows only. */
+    public function restore(Request $request, int $expense): JsonResponse
+    {
+        $found = $this->visibleTrashedExpense($request, $expense);
+        abort_unless($request->user()->can('restore', $found), 403, 'Only an admin can restore a deleted expense.');
+
+        $restored = $this->directory->restore($found);
+        $restored->load(['vendor', 'project', 'distribution', 'splits.project:id,project_name', 'splits.distribution:id,name', 'receipts', 'checks.bank_account.bank', 'check.bank_account.bank', 'payments']);
+
+        return response()->json(['data' => (new ExpenseResource($restored))->withDetail()->toArray($request)]);
+    }
+
     /** An expense the person may see: 404 when it doesn't exist, 403 when it isn't theirs (ExpensePolicy::view(), the richer check ExpenseScope's list filtering approximates). */
     private function visibleExpense(Request $request, int $id): Expense
     {
         abort_unless(Expense::withoutGlobalScopes()->whereKey($id)->exists(), 404);
 
         $found = Expense::withoutGlobalScopes()->whereKey($id)->first();
+        abort_unless($request->user()->can('view', $found), 403, 'You do not have access to this expense.');
+
+        return $found;
+    }
+
+    /** A soft-deleted expense the person may see — same 404-vs-403 split as visibleExpense(), restricted to trashed rows. */
+    private function visibleTrashedExpense(Request $request, int $id): Expense
+    {
+        $found = Expense::withoutGlobalScopes()->onlyTrashed()->whereKey($id)->first();
+        abort_unless($found, 404);
         abort_unless($request->user()->can('view', $found), 403, 'You do not have access to this expense.');
 
         return $found;

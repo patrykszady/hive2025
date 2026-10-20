@@ -12,6 +12,7 @@ use App\Models\Project;
 use App\Services\Payments\PaymentRecorder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * The app's Payments tab — Admin-only, exactly like the web: PaymentPolicy's
@@ -35,7 +36,13 @@ class PaymentController extends Controller
 
         $query->with(['project.client.users:id,first_name,last_name,nickname']);
 
-        $page = $query->orderByDesc('date')->orderByDesc('id')->cursorPaginate(self::PER_PAGE);
+        // Only the Date column is actually wired to wire:click="sort('date')"
+        // on the web (resources/views/livewire/payments/index.blade.php) —
+        // PaymentsIndex::SORTABLE_COLUMNS also whitelists amount/reference/
+        // created_at, but nothing in the template ever calls sort() with
+        // them — so Date is the only direction the app offers too.
+        $direction = $request->query('direction') === 'asc' ? 'asc' : 'desc';
+        $page = $query->orderBy('date', $direction)->orderBy('id', $direction)->cursorPaginate(self::PER_PAGE);
 
         return response()->json([
             'data' => $page->getCollection()->map(fn (Payment $payment) => (new PaymentResource($payment))->toArray($request))->all(),
@@ -107,6 +114,42 @@ class PaymentController extends Controller
                 ] : null,
             ])->all(),
         ]);
+    }
+
+    /**
+     * The standalone Payments list's Project/Client filter options — the
+     * exact same cached lists PaymentsIndex::mount() builds for the web's
+     * filter dropdowns (same cache keys, so the app never duplicates that
+     * work): every project/client with at least one payment on this vendor.
+     */
+    public function filterOptions(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Payment::class);
+
+        $vendorId = $request->user()->vendor->id;
+
+        $projects = Cache::remember("filters:v{$vendorId}:payment-projects", 600, function () use ($vendorId) {
+            return Project::where('belongs_to_vendor_id', $vendorId)
+                ->whereHas('payments')
+                ->orderByDesc('created_at')
+                ->get(['id', 'project_name', 'address']);
+        });
+
+        $clients = Cache::remember("filters:v{$vendorId}:payment-clients:v2", 600, function () use ($vendorId) {
+            return Client::whereHas('projects.payments', function ($query) use ($vendorId) {
+                $query->where('belongs_to_vendor_id', $vendorId);
+            })
+                ->with('users:id,first_name,last_name,nickname')
+                ->orderBy('business_name')
+                ->orderBy('id')
+                ->get(['id', 'business_name'])
+                ->map(fn (Client $client) => ['id' => $client->id, 'name' => $client->name]);
+        });
+
+        return response()->json(['data' => [
+            'projects' => $projects->map(fn (Project $project) => ['id' => $project->id, 'name' => $project->project_name])->values()->all(),
+            'clients' => $clients->values()->all(),
+        ]]);
     }
 
     public function store(StorePaymentRequest $request, PaymentRecorder $recorder): JsonResponse

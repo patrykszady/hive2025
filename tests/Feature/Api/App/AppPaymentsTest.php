@@ -138,6 +138,44 @@ it('filters the payments list by transaction status', function () {
     expect(collect($missingResponse->json('data'))->pluck('id')->all())->toBe([$missing->id]);
 });
 
+it('sorts the payments list by date ascending when asked, descending by default', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor);
+    $project = appPaymentsProject($vendor, $client);
+    $older = appPaymentsRow($vendor, $project, ['date' => '2026-09-01']);
+    $newer = appPaymentsRow($vendor, $project, ['date' => '2026-10-01']);
+
+    expect(collect($this->getJson('/api/app/v1/payments')->json('data'))->pluck('id')->all())->toBe([$newer->id, $older->id])
+        ->and(collect($this->getJson('/api/app/v1/payments?direction=asc')->json('data'))->pluck('id')->all())->toBe([$older->id, $newer->id]);
+});
+
+it('lists the Project/Client filter options, the same cached lists PaymentsIndex::mount() builds for the web', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPaymentsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appPaymentsClient($vendor, ['business_name' => 'Acme Co']);
+    $project = appPaymentsProject($vendor, $client, ['project_name' => 'Kitchen Remodel']);
+    appPaymentsRow($vendor, $project);
+
+    // A project/client with no payment at all must not show up as a filter option.
+    $otherClient = appPaymentsClient($vendor, ['business_name' => 'No Payments LLC']);
+    appPaymentsProject($vendor, $otherClient, ['project_name' => 'Unpaid Job']);
+
+    $response = $this->getJson('/api/app/v1/payments/filter-options')->assertOk();
+
+    expect(collect($response->json('data.projects'))->pluck('name'))->toContain('Kitchen Remodel')->not->toContain('Unpaid Job')
+        ->and(collect($response->json('data.clients'))->pluck('name'))->toContain('Acme Co')->not->toContain('No Payments LLC');
+});
+
+it('refuses a Member requesting filter options, like the web\'s Admin-only Payments page', function () {
+    ['user' => $member] = appPaymentsTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson('/api/app/v1/payments/filter-options')->assertForbidden();
+});
+
 it('404s a payment that does not exist', function () {
     ['user' => $admin] = appPaymentsTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

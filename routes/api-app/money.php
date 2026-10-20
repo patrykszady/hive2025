@@ -15,10 +15,14 @@ use Illuminate\Support\Facades\Route;
 | and CheckController for the web components these mirror.
 */
 
-// "eligible-projects" is registered ahead of the numeric {payment} route so
-// it is never swallowed as an id — whereNumber() alone already prevents
-// that, but this keeps the ordering obvious for the next person reading it.
+// "eligible-projects"/"filter-options" are registered ahead of the numeric
+// {payment} route so they are never swallowed as an id — whereNumber()
+// alone already prevents that, but this keeps the ordering obvious for the
+// next person reading it.
 Route::get('payments/eligible-projects', [AppPaymentController::class, 'eligibleProjects'])->name('payments.eligible-projects');
+// The standalone Payments list's Project/Client filter dropdown options —
+// mirrors PaymentsIndex::mount()'s own cached lists.
+Route::get('payments/filter-options', [AppPaymentController::class, 'filterOptions'])->name('payments.filter-options');
 Route::get('payments', [AppPaymentController::class, 'index'])->name('payments.index');
 Route::post('payments', [AppPaymentController::class, 'store'])->name('payments.store');
 Route::get('payments/{payment}', [AppPaymentController::class, 'show'])->whereNumber('payment')->name('payments.show');
@@ -29,6 +33,10 @@ Route::get('checks', [AppCheckController::class, 'index'])->name('checks.index')
 // Ahead of checks/{check} in spirit only — whereNumber() already keeps a
 // non-numeric path from being swallowed as an id.
 Route::get('checks/bank-accounts', [AppCheckController::class, 'bankAccountOptions'])->name('checks.bank-accounts');
+// The standalone Checks list's Bank filter dropdown options — mirrors
+// ChecksIndex::mount()'s $banks query, grouped the same way its
+// filter-fields partial does.
+Route::get('checks/bank-options', [AppCheckController::class, 'bankOptions'])->name('checks.bank-options');
 Route::get('checks/{check}', [AppCheckController::class, 'show'])->whereNumber('check')->name('checks.show');
 // Mirrors App\Livewire\Forms\CheckForm::update()/delete() via
 // App\Services\Checks\CheckUpdateService — see CheckController's docblock.

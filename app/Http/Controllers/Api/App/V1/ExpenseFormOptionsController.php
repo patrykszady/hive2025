@@ -34,6 +34,13 @@ class ExpenseFormOptionsController extends Controller
                 'id' => $vendor->id,
                 'name' => $vendor->business_name,
             ])->values()->all(),
+            // The Reimbursement FILTER's "person" options on the Expenses
+            // list — mirrors ExpenseIndex::via_vendor_employees() (a
+            // narrower list than 'employees' above).
+            'via_vendor_employees' => $directory->viaVendorEmployees($user)->map(fn (User $employee) => [
+                'id' => $employee->id,
+                'name' => $employee->first_name,
+            ])->values()->all(),
             'checks' => $directory->checkOptions(),
             'bank_accounts' => $directory->bankAccounts()->map(fn (BankAccount $account) => [
                 'id' => $account->id,
