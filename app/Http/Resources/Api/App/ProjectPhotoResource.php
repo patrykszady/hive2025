@@ -27,6 +27,8 @@ class ProjectPhotoResource extends JsonResource
             'thumb_url' => $this->signedUrl(thumb: true),
             'taken_at' => $this->shot_at?->toIso8601String(),
             'taken_by' => $this->resource->taker_name,
+            'collection_id' => $this->project_timelapse_id,
+            'sort_order' => $this->sort_order,
         ];
     }
 

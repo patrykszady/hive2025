@@ -28,6 +28,10 @@ class StoreProjectPhotoRequest extends FormRequest
             'lat' => ['nullable', 'numeric'],
             'lng' => ['nullable', 'numeric'],
             'accuracy' => ['nullable', 'numeric'],
+            // The collection (timelapse/album) this shot targets — the
+            // Collections hub's selected camera target. A missing/foreign
+            // id falls back to the catch-all album server-side.
+            'collection_id' => ['nullable', 'integer'],
         ];
     }
 }

@@ -1,11 +1,13 @@
 <?php
 
 use App\Http\Controllers\Api\App\V1\BidController as AppBidController;
+use App\Http\Controllers\Api\App\V1\ProjectCollectionController as AppProjectCollectionController;
 use App\Http\Controllers\Api\App\V1\ProjectController as AppProjectController;
 use App\Http\Controllers\Api\App\V1\ProjectDistributionsController as AppProjectDistributionsController;
 use App\Http\Controllers\Api\App\V1\ProjectEmailTrackingController as AppProjectEmailTrackingController;
 use App\Http\Controllers\Api\App\V1\ProjectFinancesController as AppProjectFinancesController;
 use App\Http\Controllers\Api\App\V1\ProjectMaterialsController as AppProjectMaterialsController;
+use App\Http\Controllers\Api\App\V1\ProjectMessageImageController as AppProjectMessageImageController;
 use App\Http\Controllers\Api\App\V1\ProjectPhotoController as AppProjectPhotoController;
 use App\Http\Controllers\Api\App\V1\ProjectVendorsController as AppProjectVendorsController;
 use App\Http\Controllers\Api\App\V1\TaskController as AppTaskController;
@@ -55,6 +57,29 @@ Route::get('projects/{project}/email-tracking', [AppProjectEmailTrackingControll
 // (manageImages/view, like the web); see ProjectImageImporter for storage.
 Route::get('projects/{project}/photos', [AppProjectPhotoController::class, 'index'])->whereNumber('project')->name('projects.photos.index');
 Route::post('projects/{project}/photos', [AppProjectPhotoController::class, 'store'])->whereNumber('project')->name('projects.photos.store');
+
+// PROJECT IMAGES — the Collections hub (App\Livewire\Projects\
+// TimelapseStudio's collection cards): list/create/delete a named
+// collection, a collection's frames in play order for native playback, and
+// curation (reorder/delete a frame, build a timelapse from a selection).
+// Every write shares App\Services\Projects\TimelapseCollectionService with
+// the web studio, so authorization (view to browse/shoot, manageImages to
+// curate) is identical.
+Route::get('projects/{project}/collections', [AppProjectCollectionController::class, 'index'])->whereNumber('project')->name('projects.collections.index');
+Route::post('projects/{project}/collections', [AppProjectCollectionController::class, 'store'])->whereNumber('project')->name('projects.collections.store');
+Route::delete('projects/{project}/collections/{collection}', [AppProjectCollectionController::class, 'destroy'])->whereNumber(['project', 'collection'])->name('projects.collections.destroy');
+Route::get('projects/{project}/collections/{collection}/frames', [AppProjectCollectionController::class, 'frames'])->whereNumber(['project', 'collection'])->name('projects.collections.frames');
+Route::post('projects/{project}/collections/from-selection', [AppProjectCollectionController::class, 'createFromSelection'])->whereNumber('project')->name('projects.collections.from-selection');
+Route::post('projects/{project}/frames/{frame}/move', [AppProjectCollectionController::class, 'moveFrame'])->whereNumber(['project', 'frame'])->name('projects.frames.move');
+Route::delete('projects/{project}/frames/{frame}', [AppProjectCollectionController::class, 'destroyFrame'])->whereNumber(['project', 'frame'])->name('projects.frames.destroy');
+
+// PROJECT MESSAGE IMAGES — photos texted about the project, and texting
+// project/message photos onward to a conversation (the web studio's
+// Message Images card + "Text Selected" modal). Never actually sends in
+// tests — fake Queue (SendGroupMms) and Http.
+Route::get('projects/{project}/message-images', [AppProjectMessageImageController::class, 'index'])->whereNumber('project')->name('projects.message-images.index');
+Route::get('projects/{project}/message-images/threads', [AppProjectMessageImageController::class, 'threads'])->whereNumber('project')->name('projects.message-images.threads');
+Route::post('projects/{project}/message-images/text', [AppProjectMessageImageController::class, 'send'])->whereNumber('project')->name('projects.message-images.text');
 
 // BIDS — view and add bids on a project, for a specific vendor (the bid's
 // own tenant — see App\Services\Bids\AppBidDirectory/BidWriter).
