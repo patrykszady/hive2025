@@ -74,6 +74,8 @@ class AppSectionPermissions
             // The sidebar shows Vendor Match under the same gate as Email Accounts.
             'vendor_match' => $user->can('viewAny', CompanyEmail::class),
             'vendor_docs' => $user->can('viewAny', VendorDoc::class),
+            // The unplaced email inbox: Admins, the same gate as Email Accounts.
+            'unplaced_emails' => $user->can('viewAny', CompanyEmail::class),
             'agents' => $user->id === 1,
         ];
     }

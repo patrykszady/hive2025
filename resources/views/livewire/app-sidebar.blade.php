@@ -28,7 +28,12 @@
                     <flux:sidebar.item wire:navigate.hover icon="computer-desktop" href="{{ route('menards.browser') }}" badge="Sign-in" badge:color="red">Menards</flux:sidebar.item>
                 @endif
 
-                @if($canViewBanks && ($hasBankErrors || $menardsNeedsLogin))
+                {{-- UNPLACED EMAIL: stakeholder emails the AI couldn't put on a project --}}
+                @if(($unplacedEmailCount ?? 0) > 0)
+                    <flux:sidebar.item wire:navigate.hover icon="inbox-arrow-down" href="{{ route('emails.unplaced') }}" :badge="$unplacedEmailCount" badge:color="amber">Unplaced email</flux:sidebar.item>
+                @endif
+
+                @if(($canViewBanks && ($hasBankErrors || $menardsNeedsLogin)) || ($unplacedEmailCount ?? 0) > 0)
                     <flux:separator class="my-2" />
                 @endif
 

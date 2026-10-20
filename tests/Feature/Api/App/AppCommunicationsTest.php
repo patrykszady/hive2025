@@ -184,8 +184,8 @@ it('keeps another vendor\'s email out of reach, and says when it does not exist'
     $this->getJson('/api/app/v1/emails/999999')->assertNotFound();
 });
 
-it('hides an email whose vendor matches but whose client has no project the viewer can see', function () {
-    $world = appCommWorld();
+it('shows an email on no project only to the Admins who sort the unplaced inbox', function () {
+    $world = appCommWorld(role: 2);
     Sanctum::actingAs($world['user'], ['app']);
 
     $unrelatedClient = Client::factory()->create();
@@ -196,6 +196,12 @@ it('hides an email whose vendor matches but whose client has no project the view
     ]);
 
     $this->getJson("/api/app/v1/emails/{$email->id}")->assertForbidden();
+
+    $admin = User::factory()->create(['primary_vendor_id' => $world['vendor']->id]);
+    $world['vendor']->users()->attach($admin->id, ['role_id' => 1, 'is_employed' => 1]);
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->getJson("/api/app/v1/emails/{$email->id}")->assertOk();
 });
 
 it('shows an email filed with no project yet, once the viewer can see any of its client\'s projects', function () {

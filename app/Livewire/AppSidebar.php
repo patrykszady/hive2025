@@ -37,6 +37,12 @@ class AppSidebar extends Component
         $sidebarData['menardsNeedsLogin'] = $user->can('menards-browser')
             && ($this->menardsNeedsLogin());
 
+        // Stakeholder emails waiting to be put on a project: live, so the item
+        // disappears the moment the last one is sorted.
+        $sidebarData['unplacedEmailCount'] = ($sidebarData['canViewCompanyEmails'] ?? false) && $user->vendor
+            ? \App\Models\EmailMessage::query()->where('belongs_to_vendor_id', $user->vendor->id)->unplaced()->count()
+            : 0;
+
         // Route-dependent state should not be cached — it changes per request.
         $sidebarData['accountingExpanded'] = request()->is('banks*', 'distributions*', 'sheets*', 'vendors/categories*', 'lien-waivers*')
             || request()->routeIs('banks*', 'distributions*', 'sheets*', 'categories*', 'lien-waivers*');

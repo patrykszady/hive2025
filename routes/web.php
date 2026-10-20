@@ -981,6 +981,8 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //VENDOR MATCH
     Route::get('/vendor_match', ReceiptAccountsIndex::class)->name('vendor_match.index');
+    // Stakeholder emails the AI could not put on a project, for an Admin to sort.
+    Route::get('/emails/unplaced', \App\Livewire\Emails\UnplacedEmails::class)->name('emails.unplaced');
 
     //CLIENTS
     Route::get('/clients', ClientsIndex::class)->name('clients.index');

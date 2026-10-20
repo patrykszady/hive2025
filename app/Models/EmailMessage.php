@@ -40,6 +40,7 @@ class EmailMessage extends Model
             'next_steps' => 'array',
             'sent_at' => 'datetime',
             'summarized_at' => 'datetime',
+            'unplaced_dismissed_at' => 'datetime',
         ];
     }
 
@@ -60,6 +61,22 @@ class EmailMessage extends Model
                     ->where('client_id', $project->client_id));
             }
         });
+    }
+
+    /**
+     * Read by the AI, placed on no project, and not dismissed: the emails an
+     * admin still has to sort (the unplaced inbox).
+     */
+    public function scopeUnplaced(Builder $query): Builder
+    {
+        return $query->whereNull('project_id')
+            ->whereNotNull('summarized_at')
+            ->whereNull('unplaced_dismissed_at');
+    }
+
+    public function isUnplaced(): bool
+    {
+        return $this->project_id === null && $this->summarized_at !== null && $this->unplaced_dismissed_at === null;
     }
 
     /**

@@ -18,9 +18,11 @@ if (! function_exists('serviceCallWorld')) {
     /**
      * @return array{vendor: Vendor, admin: User, mailbox: string, client: Client, katie: User, jon: User, project: Project}
      */
-    function serviceCallWorld(string $projectStatus = 'complete'): array
+    function serviceCallWorld(string $projectStatus = 'complete', ?Vendor $vendor = null): array
     {
-        $vendor = sec3_makeVendor('GS');
+        // The app API admits GS Construction's own team only (vendor 1):
+        // app tests pass that vendor in.
+        $vendor ??= sec3_makeVendor('GS');
         $admin = sec3_makeAdmin($vendor, 'office');
         $mailbox = 'patryk.'.uniqid().'@gs.construction';
         $admin->forceFill(['email' => $mailbox])->save();

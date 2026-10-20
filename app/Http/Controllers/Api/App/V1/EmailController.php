@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\PlaceEmailRequest;
 use App\Http\Resources\Api\App\EmailResource;
 use App\Models\EmailMessage;
 use App\Models\Project;
+use App\Services\Emails\EmailPlacement;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -26,9 +28,79 @@ class EmailController extends Controller
 
         $user = $request->user();
         abort_unless($found->belongs_to_vendor_id === (int) $user->vendor?->id, 403, 'You do not have access to this email.');
-        abort_unless($this->canViewEmailProject($found), 403, 'You do not have access to this email.');
+        abort_unless(
+            $this->canViewEmailProject($found) || ($found->project_id === null && EmailPlacement::canSort($user, $found->belongs_to_vendor_id)),
+            403,
+            'You do not have access to this email.',
+        );
 
         return response()->json(['data' => (new EmailResource($found))->toArray($request)]);
+    }
+
+    /**
+     * The unplaced inbox: emails the AI read but could not put on a project,
+     * for an Admin to sort. Newest first, at most 100.
+     */
+    public function unplaced(Request $request, EmailPlacement $placement): JsonResponse
+    {
+        $user = $request->user();
+        $vendorId = (int) $user->vendor?->id;
+        abort_unless($vendorId && EmailPlacement::canSort($user, $vendorId), 403);
+
+        $emails = EmailMessage::query()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->unplaced()
+            ->orderByDesc('sent_at')
+            ->limit(100)
+            ->get();
+
+        return response()->json([
+            'data' => $emails->map(fn (EmailMessage $email) => [
+                'id' => $email->id,
+                'direction' => $email->direction,
+                'subject' => $email->subject,
+                'from' => ['email' => $email->from_email, 'name' => $email->from_name],
+                'sent_at' => $email->sent_at->toIso8601String(),
+                'summary' => $email->summary,
+                'snippet' => $email->snippet,
+                'attachment_count' => count((array) $email->attachments),
+                'candidates' => EmailResource::candidatesFor($email, $placement),
+            ])->values(),
+        ]);
+    }
+
+    public function place(PlaceEmailRequest $request, int $email, EmailPlacement $placement): JsonResponse
+    {
+        $found = $this->sortable($request, $email);
+
+        $placement->place($found, (int) $request->validated('project_id'), $request->user());
+
+        return response()->json(['data' => (new EmailResource($found->fresh()))->toArray($request)]);
+    }
+
+    public function dismiss(Request $request, int $email, EmailPlacement $placement): JsonResponse
+    {
+        $found = $this->sortable($request, $email);
+
+        $placement->dismiss($found);
+
+        return response()->json(['data' => ['id' => $found->id, 'dismissed' => true]]);
+    }
+
+    /** An email of the viewer's company that they, an Admin, may sort. */
+    private function sortable(Request $request, int $email): EmailMessage
+    {
+        $found = EmailMessage::withoutGlobalScopes()->whereKey($email)->first();
+        abort_unless($found, 404);
+
+        $user = $request->user();
+        abort_unless(
+            $found->belongs_to_vendor_id === (int) $user->vendor?->id && EmailPlacement::canSort($user, $found->belongs_to_vendor_id),
+            403,
+            'You do not have access to this email.',
+        );
+
+        return $found;
     }
 
     /**

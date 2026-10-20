@@ -2,6 +2,9 @@
 
 namespace App\Http\Resources\Api\App;
 
+use App\Models\EmailMessage;
+use App\Models\Project;
+use App\Services\Emails\EmailPlacement;
 use App\Jobs\SummarizeEmailMessage;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -51,6 +54,9 @@ class EmailResource extends JsonResource
             'body_full' => (string) ($email->body_text ?? ''),
             'attachments' => $this->attachmentsArray(),
             'project' => $project ? ['id' => $project->id, 'name' => $project->project_name] : null,
+            // Read by the AI but on no project yet: the app offers these to assign it.
+            'unplaced' => $this->resource->isUnplaced(),
+            'candidates' => $this->resource->isUnplaced() ? self::candidatesFor($this->resource, app(EmailPlacement::class)) : [],
         ];
     }
 
@@ -71,6 +77,21 @@ class EmailResource extends JsonResource
                 'url' => $email->attachmentUrl($index),
                 'thumb_url' => str_starts_with((string) ($file['mime'] ?? ''), 'image/') ? $email->attachmentUrl($index, true) : null,
             ])
+            ->all();
+    }
+
+    /**
+     * @return list<array{id: int, name: string, address: ?string}>
+     */
+    public static function candidatesFor(EmailMessage $email, EmailPlacement $placement): array
+    {
+        return $placement->candidates($email)
+            ->map(fn (Project $project) => [
+                'id' => $project->id,
+                'name' => (string) ($project->project_name ?: 'Untitled project'),
+                'address' => trim(implode(', ', array_filter([$project->address, $project->city]))) ?: null,
+            ])
+            ->values()
             ->all();
     }
 }
