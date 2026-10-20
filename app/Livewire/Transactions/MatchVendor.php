@@ -7,6 +7,7 @@ use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Services\Transactions\TransactionVendorMatcher;
 use App\Services\Transactions\UnmatchedTransactionCards;
 use App\Services\VendorSuggestionService;
 use Flux;
@@ -161,8 +162,11 @@ class MatchVendor extends Component
     /**
      * Accept an AI suggestion: an existing vendor is reused, a new one is
      * created with the AI's details, then a match rule is written and the
-     * transactions linked — both branches differ only in how the vendor is
-     * obtained.
+     * transactions linked. The actual resolution and writes are
+     * TransactionVendorMatcher::applySuggestion() — the app API's
+     * TransactionMatchController::applySuggestion() accepts the same
+     * suggestion shape and calls the same method, so both write identical
+     * rows.
      */
     public function applySuggestion(int $index)
     {
@@ -173,53 +177,12 @@ class MatchVendor extends Component
             return;
         }
 
-        $vendor = null;
-        if (! empty($suggestion['existing_vendor_id'])) {
-            $vendor = Vendor::withoutGlobalScopes()->find($suggestion['existing_vendor_id']);
-        }
-
-        // Duplicate guard: the suggestion may predate a vendor created since
-        // (stale cache, another tab, a colleague) — reuse it instead. Also
-        // catches an existing_vendor_id that has since been deleted.
-        $vendor ??= Vendor::withoutGlobalScopes()
-            ->whereRaw('LOWER(business_name) = ?', [mb_strtolower(trim($suggestion['vendor_name']))])
-            ->first();
-
-        $vendor ??= Vendor::create([
-            'business_name' => $suggestion['vendor_name'],
-            'business_type' => 'Retail',
-            'business_website' => $suggestion['website'] ?? null,
-            'city' => $suggestion['city'] ?? null,
-            'state' => $suggestion['state'] ?? null,
-        ]);
-
-        // What future transactions get matched on. A typed "Match As" wins
-        // outright and is used verbatim — someone chose those characters. The
-        // machine-generated options (the AI's pattern, then the raw descriptor)
-        // get the store number stripped first.
+        $descriptor = (string) $this->merchantCards->keys()->get($index, '');
         $typed = $this->match_merchant_names[$index]['match_desc'] ?? null;
-        $matchDesc = filled($typed)
-            ? $typed
-            : collect([
-                $suggestion['match_desc'] ?? null,
-                $this->merchantCards->keys()->get($index),
-            ])
-                ->map(fn ($value) => $this->stripStoreNumber((string) $value))
-                ->first(fn ($value) => filled($value));
 
-        if (filled($matchDesc)) {
-            VendorTransaction::create([
-                'vendor_id' => $vendor->id,
-                'deposit_check' => null,
-                'desc' => str_replace('*', "\*", $matchDesc),
-                'plaid_inst_id' => null,
-                'options' => json_encode('/i'),
-            ]);
-        }
-
-        $this->linkVendorToCompany($vendor->id);
-
-        app(TransactionController::class)->add_vendor_to_transactions();
+        $result = app(TransactionVendorMatcher::class)->applySuggestion(auth()->user(), $descriptor, $suggestion, $typed);
+        $vendor = $result['vendor'];
+        $matchDesc = $result['match_desc'];
 
         $this->refreshLists();
 
@@ -230,26 +193,6 @@ class MatchVendor extends Component
             heading: $vendor->wasRecentlyCreated ? 'Vendor created and matched.' : 'Vendor matched.',
             text: $vendor->business_name.(filled($matchDesc) ? ' — future "'.$matchDesc.'" transactions will match automatically.' : ''),
         );
-    }
-
-    /**
-     * Drop a card descriptor's trailing store number.
-     *
-     * "CITY-MARKET #0430" describes one store; matching on it would leave every
-     * other City Market unmatched, and each new location would need its own
-     * rule. "CITY-MARKET" catches the chain.
-     *
-     * Only a trailing "#<digits>" is removed, and deliberately nothing else. A
-     * bare trailing number is NOT a store number often enough to touch: the
-     * unmatched transactions here include "CHECK 1378" and "Deposit by
-     * CheckMobile REF: 492821733", where stripping the digits would collapse
-     * every cheque in the account onto a single rule.
-     */
-    protected function stripStoreNumber(string $descriptor): string
-    {
-        $stripped = preg_replace('/\s*#\s*\d+\s*$/', '', $descriptor);
-
-        return filled(trim((string) $stripped)) ? trim((string) $stripped) : trim($descriptor);
     }
 
     /**
