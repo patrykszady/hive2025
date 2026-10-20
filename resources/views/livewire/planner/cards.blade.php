@@ -418,7 +418,7 @@
                                 <flux:heading size="lg" class="whitespace-nowrap">To schedule</flux:heading>
                                 <flux:badge color="amber" size="sm">{{ $this->boardBacklog->sum('undated') }}</flux:badge>
                             </div>
-                            <flux:text size="sm" class="mt-0.5">Tasks without a date, and asks from calls &amp; texts.</flux:text>
+                            <flux:text size="sm" class="mt-0.5">Tasks without a date, and asks from calls, texts &amp; email.</flux:text>
                         </div>
 
                         @foreach ($this->boardBacklog as $row)
@@ -996,15 +996,16 @@
         </flux:modal>
     </div>
 
-    {{-- From calls & texts: the open action items a project's calls and
-         texts asked for (ProjectActionItem), to book, tick off or dismiss. --}}
+    {{-- From calls, texts & email: the open action items a project's calls,
+         texts and email asked for (ProjectActionItem), to book, tick off or
+         dismiss. --}}
     <div
         x-data="plannerActionItemsModal()"
         x-on:open-action-items.window="open($event.detail.projectId)"
     >
         <flux:modal name="planner_action_items_modal" class="min-w-[22rem] md:min-w-[36rem]">
             <div class="space-y-1">
-                <flux:heading size="lg">From calls &amp; texts</flux:heading>
+                <flux:heading size="lg">From calls, texts &amp; email</flux:heading>
                 <flux:subheading class="truncate" x-show="title" x-text="title"></flux:subheading>
             </div>
 
@@ -1045,12 +1046,17 @@
                                             @endif
                                             @foreach (collect($item->sources ?? [])->reverse()->take(3) as $source)
                                                 <a
-                                                    href="{{ \App\Models\ProjectActionItem::sourceUrl($source) }}"
+                                                    href="{{ \App\Models\ProjectActionItem::sourceUrl($source, $item->project_id) }}"
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    class="underline decoration-dotted underline-offset-2 hover:text-indigo-600 dark:hover:text-indigo-400"
+                                                    class="inline-flex items-center gap-0.5 underline decoration-dotted underline-offset-2 hover:text-indigo-600 dark:hover:text-indigo-400"
                                                     title="{{ $source['excerpt'] ?? '' }}"
-                                                >{{ \App\Models\ProjectActionItem::sourceLabel($source) }}</a>
+                                                >
+                                                    @if (($source['kind'] ?? null) === 'email')
+                                                        <flux:icon.envelope variant="micro" class="size-3" />
+                                                    @endif
+                                                    {{ \App\Models\ProjectActionItem::sourceLabel($source) }}
+                                                </a>
                                             @endforeach
                                         </div>
                                     </div>
@@ -1076,7 +1082,7 @@
             <p
                 x-show="selectedProjectId !== null && ! $root.querySelector(`[data-action-project='${selectedProjectId}']`)"
                 class="text-sm text-zinc-500 dark:text-zinc-400"
-            >Nothing open from calls or texts.</p>
+            >Nothing open from calls, texts or email.</p>
             @endisland
         </flux:modal>
     </div>

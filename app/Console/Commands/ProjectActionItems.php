@@ -118,15 +118,15 @@ class ProjectActionItems extends Command
     }
 
     /**
-     * @param  array{calls: int, messages: int, created: int, merged: int, done: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}  $stats
+     * @param  array{calls: int, messages: int, emails: int, created: int, merged: int, done: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}  $stats
      */
     protected function summary(array $stats): string
     {
         $c = $stats['consolidated'];
 
         return sprintf(
-            'Read %d calls and %d messages: %d new items, %d folded into existing ones, %d closed by texts, %d lapsed; review merged %d, closed %d, dropped %d.',
-            $stats['calls'], $stats['messages'], $stats['created'], $stats['merged'], $stats['done'], $stats['lapsed'], $c['merged'], $c['done'], $c['dropped'],
+            'Read %d calls, %d messages and %d emails: %d new items, %d folded into existing ones, %d closed by texts, %d lapsed; review merged %d, closed %d, dropped %d.',
+            $stats['calls'], $stats['messages'], $stats['emails'], $stats['created'], $stats['merged'], $stats['done'], $stats['lapsed'], $c['merged'], $c['done'], $c['dropped'],
         );
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Services\ActionItems;
 
 use App\Models\CallLog;
+use App\Models\EmailMessage;
 use App\Models\Project;
 use App\Models\ProjectActionItem;
 use App\Models\SmsGroupThread;
@@ -16,10 +17,11 @@ use Illuminate\Support\Str;
 /**
  * The model's review of a project's open action items, in two passes.
  *
- * Closing pass: batches of items beside the window's call summaries and
- * recent texts, deciding keep / done (a quoted log line shows it happened
- * or became moot) / drop (not a task). Small batches keep every item in
- * view — one pass over 226 items closed four and one of them wrongly.
+ * Closing pass: batches of items beside the window's call summaries, recent
+ * texts and recent email, deciding keep / done (a quoted log line shows it
+ * happened or became moot) / drop (not a task). Small batches keep every
+ * item in view — one pass over 226 items closed four and one of them
+ * wrongly.
  *
  * Merging pass: every still-open title at once, no log, grouping the ones
  * that state the same task in other words ("pull the trigger on the Extend
@@ -40,6 +42,8 @@ class ProjectActionItemConsolidator
     public const MAX_CALL_SUMMARIES = 60;
 
     public const MAX_TEXTS = 80;
+
+    public const MAX_EMAILS = 60;
 
     /**
      * @return array{merged: int, done: int, dropped: int}
@@ -104,9 +108,9 @@ class ProjectActionItemConsolidator
         ))->implode("\n");
 
         $system = <<<PROMPT
-You keep the open task list for a home remodeling project ({$project->short_address}) between the contractor (GS; people: Patryk, Greg, the crew) and the client. The items below were extracted from phone calls and text messages, so some have since happened. Today is {$this->today()}.
+You keep the open task list for a home remodeling project ({$project->short_address}) between the contractor (GS; people: Patryk, Greg, the crew) and the client. The items below were extracted from phone calls, text messages and stakeholder email, so some have since happened. Today is {$this->today()}.
 
-Decide for EVERY item id, using only the conversation log (call summaries and texts, oldest first) as evidence:
+Decide for EVERY item id, using only the conversation log (call summaries, texts and email, oldest first) as evidence:
 - "done": a log entry explicitly says the task was completed, delivered, paid, ordered, scheduled, decided, or that its event has passed or the plan changed so it no longer applies. In reason, quote the log line (date and words) that shows it. Do not infer completion from related activity.
 - "drop": not something a person has to do — a statement, the crew's normal scheduled construction work, or a reminder of something already decided. Give the reason.
 - "keep": everything else, including anything you are not sure about.
@@ -161,7 +165,7 @@ PROMPT;
         ))->implode("\n");
 
         $system = <<<PROMPT
-These are the open tasks of a home remodeling project ({$project->short_address}), extracted from phone calls and texts one per mention, so the same task appears more than once in different words or at different levels of detail (ordering the Extend windows; scheduling Ram Jack; picking up the water heater; getting Agnes's door quote).
+These are the open tasks of a home remodeling project ({$project->short_address}), extracted from phone calls, texts and email one per mention, so the same task appears more than once in different words or at different levels of detail (ordering the Extend windows; scheduling Ram Jack; picking up the water heater; getting Agnes's door quote).
 
 Group the items that are the same task. For each group name keep_id — the clearest, most complete wording, preferring the most recent — and merge_ids, the others. Two different tasks on the same topic (research the heater / pick up the heater) are NOT a group; a task for Mark and the same task for Patryk are NOT a group. Leave out items that stand alone. Return JSON only, matching the schema.
 PROMPT;
@@ -313,8 +317,8 @@ PROMPT;
     }
 
     /**
-     * The window's call summaries and the latest texts, oldest first, as the
-     * evidence for "done".
+     * The window's call summaries, latest texts and latest email, oldest
+     * first, as the evidence for "done".
      */
     protected function conversationLog(Project $project, Carbon $since): string
     {
@@ -388,6 +392,28 @@ PROMPT;
                     Str::limit(trim((string) preg_replace('/\s+/', ' ', (string) ($message->display_text ?? $message->text))), 240, '…'),
                 );
             }
+        }
+
+        // Email is only evidence once it is placed on this exact project —
+        // same rule the extractor uses, so an email the AI could not confidently
+        // place on one of the client's projects is never guessed onto this log.
+        $emails = EmailMessage::query()
+            ->where('project_id', $project->id)
+            ->where('sent_at', '>=', $since)
+            ->whereNotNull('summary')
+            ->orderByDesc('sent_at')
+            ->limit(self::MAX_EMAILS)
+            ->get()
+            ->reverse();
+
+        foreach ($emails as $email) {
+            $nextSteps = collect((array) ($email->next_steps ?? []))->filter()->implode('; ');
+            $lines[] = sprintf(
+                "[email %s] %s%s",
+                Carbon::parse($email->sent_at)->format('Y-m-d'),
+                Str::limit(trim((string) preg_replace('/\s+/', ' ', (string) $email->summary)), 700, '…'),
+                $nextSteps !== '' ? ' Next: '.Str::limit($nextSteps, 300, '…') : '',
+            );
         }
 
         return $lines === [] ? '(nothing in the window)' : implode("\n", $lines);

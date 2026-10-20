@@ -3,6 +3,7 @@
 use App\Models\CallLog;
 use App\Models\CallTranscript;
 use App\Models\Client;
+use App\Models\EmailMessage;
 use App\Models\Project;
 use App\Models\ProjectActionItem;
 use App\Models\ProjectActionItemScan;
@@ -12,6 +13,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Services\ActionItems\ProjectActionItemExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
@@ -374,4 +376,156 @@ it('runs every planner project in one nightly pass', function () {
 
     expect(ProjectActionItem::where('project_id', $project->id)->count())->toBe(1)
         ->and(ProjectActionItem::where('project_id', $parked->id)->count())->toBe(0);
+});
+
+// =========================================================================
+// Action tasks from a project's stakeholder email (2026-10-19): email
+// already carries action items from its own AI read
+// (EmailMessage::action_items, written by SummarizeEmailMessage) in the
+// same "Owner: do the thing" shape as a call, so it is read the same way.
+// Unlike calls and texts, email is matched by project id directly — an
+// email the AI could not confidently place on one of the client's projects
+// is never guessed onto any of them.
+// =========================================================================
+
+/** @param  list<string>  $items */
+function summarizedEmail(?Project $project, array $items, string $sentAt, ?string $subject = 'Project update'): EmailMessage
+{
+    return EmailMessage::factory()->create([
+        'project_id' => $project?->id,
+        'sent_at' => $sentAt,
+        'subject' => $subject,
+        'action_items' => $items,
+        'summarized_at' => now(),
+    ]);
+}
+
+it('reads a project\'s stakeholder email for action items, grounding the due date on the email\'s sent date', function () {
+    ['project' => $project] = actionItemFixture();
+    $email = summarizedEmail($project, ['Patryk: Send the window quote by Friday', 'Mark: Pick the tile color'], '2026-10-08 09:00:00', 'Window quote');
+
+    $stats = app(ProjectActionItemExtractor::class)->run($project);
+
+    expect($stats)->toMatchArray(['calls' => 0, 'messages' => 0, 'emails' => 1, 'created' => 2, 'merged' => 0]);
+
+    $items = ProjectActionItem::where('project_id', $project->id)->orderBy('id')->get();
+    expect($items)->toHaveCount(2);
+
+    $quote = $items->firstWhere('title', 'Send the window quote by Friday');
+    expect($quote->owner)->toBe('Patryk')
+        ->and($quote->due_on->toDateString())->toBe(Carbon::parse('2026-10-08 09:00:00')->next(Carbon::FRIDAY)->toDateString())
+        ->and($quote->sources)->toBe([[
+            'kind' => 'email',
+            'id' => $email->id,
+            'thread_id' => null,
+            'at' => Carbon::parse('2026-10-08 09:00:00')->toIso8601String(),
+            'excerpt' => 'Patryk: Send the window quote by Friday',
+            'subject' => 'Window quote',
+        ]]);
+
+    expect($items->firstWhere('title', 'Pick the tile color')->owner)->toBe('Mark');
+    expect(ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS))->toBe($email->id);
+});
+
+it('reads a project\'s email only past where it left off', function () {
+    ['project' => $project] = actionItemFixture();
+    $first = summarizedEmail($project, ['Patryk: Send Mark the latest window invoice'], '2026-10-08 10:00:00');
+    app(ProjectActionItemExtractor::class)->run($project);
+
+    // Running again with nothing new changes nothing.
+    app(ProjectActionItemExtractor::class)->run($project);
+    expect(ProjectActionItem::where('project_id', $project->id)->first()->mentions)->toBe(1)
+        ->and(ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS))->toBe($first->id);
+
+    $second = summarizedEmail($project, ['Patryk: Send Mark the window invoice'], '2026-10-11 10:00:00');
+    $stats = app(ProjectActionItemExtractor::class)->run($project);
+
+    expect($stats['emails'])->toBe(1)
+        ->and(ProjectActionItem::where('project_id', $project->id)->count())->toBe(1)
+        ->and(ProjectActionItem::where('project_id', $project->id)->first()->mentions)->toBe(2)
+        ->and(ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS))->toBe($second->id);
+});
+
+it('still reads an email once it is summarized, even after a later email was already read', function () {
+    ['project' => $project] = actionItemFixture();
+
+    // $early is placed on the project (one candidate) the moment it arrives,
+    // but its AI read (which fills action_items) has not finished yet.
+    $early = EmailMessage::factory()->create([
+        'project_id' => $project->id, 'sent_at' => '2026-10-08 09:00:00',
+        'action_items' => null, 'summarized_at' => null,
+    ]);
+    $late = summarizedEmail($project, ['Mark: Pick the tile color'], '2026-10-10 09:00:00');
+
+    $stats = app(ProjectActionItemExtractor::class)->run($project);
+
+    // $early still blocks the bookmark — a hole behind it must stay open.
+    expect($stats['emails'])->toBe(1)
+        ->and(ProjectActionItem::where('project_id', $project->id)->count())->toBe(1)
+        ->and(ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS))->toBe(0);
+
+    // $early's AI read finishes later.
+    $early->forceFill(['action_items' => ['Patryk: Send the revised window quote'], 'summarized_at' => now()])->save();
+
+    $stats = app(ProjectActionItemExtractor::class)->run($project);
+
+    expect(ProjectActionItem::where('project_id', $project->id)->count())->toBe(2)
+        ->and(ProjectActionItem::where('title', 'Send the revised window quote')->exists())->toBeTrue()
+        // The already-read item from $late is seen again (no bookmark to skip
+        // it with) but is not duplicated: its one source stays one source.
+        ->and(ProjectActionItem::where('title', 'Pick the tile color')->first()->mentions)->toBe(1)
+        ->and(ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS))->toBe($late->id);
+});
+
+it('never reads an email\'s action items for a project it was not placed on', function () {
+    ['project' => $project] = actionItemFixture();
+    $other = Project::factory()->create(['client_id' => $project->client_id, 'address' => '9 Elsewhere']);
+
+    summarizedEmail(null, ['Patryk: Unplaced, the AI could not tell which project'], '2026-10-08 09:00:00');
+    summarizedEmail($other, ['Patryk: On the other project, not this one'], '2026-10-08 09:00:00');
+
+    $stats = app(ProjectActionItemExtractor::class)->run($project);
+
+    expect($stats['emails'])->toBe(0)
+        ->and(ProjectActionItem::where('project_id', $project->id)->count())->toBe(0)
+        ->and(ProjectActionItem::count())->toBe(0);
+});
+
+it('shows the model recent email as evidence too, and can close an item on what one reports', function () {
+    config(['services.openai.api_key' => 'test-key']);
+    ['project' => $project] = actionItemFixture();
+    transcribedCall('+17732513666', ['Mark: Pick up the water heater'], '2026-09-29 15:00:00');
+    EmailMessage::factory()->create([
+        'project_id' => $project->id,
+        'sent_at' => '2026-10-05 09:00:00',
+        'summary' => 'Mark confirms he already picked up the water heater.',
+        'summarized_at' => now(),
+    ]);
+
+    $requests = [];
+    Http::fake([
+        'api.openai.com/v1/embeddings' => Http::response(['data' => []]),
+        'api.openai.com/v1/chat/completions' => function ($request) use (&$requests, $project) {
+            $name = data_get($request->data(), 'response_format.json_schema.name');
+            $requests[$name][] = $request->data();
+            $ids = ProjectActionItem::where('project_id', $project->id)->pluck('id', 'title');
+
+            if ($name === 'action_item_closures') {
+                return Http::response(['choices' => [['message' => ['content' => json_encode(['decisions' => [
+                    ['id' => $ids['Pick up the water heater'], 'action' => 'done', 'reason' => '[email 2026-10-05] Mark confirms he already picked up the water heater.'],
+                ]])]]]]);
+            }
+
+            return Http::response(['choices' => [['message' => ['content' => json_encode(['groups' => []])]]]]);
+        },
+    ]);
+
+    $stats = app(ProjectActionItemExtractor::class)->run($project);
+
+    expect($stats['consolidated']['done'])->toBe(1);
+    $closing = (string) data_get($requests['action_item_closures'][0], 'messages.1.content');
+    expect($closing)->toContain('[email 2026-10-05] Mark confirms he already picked up the water heater.');
+
+    $item = ProjectActionItem::where('project_id', $project->id)->where('title', 'Pick up the water heater')->first();
+    expect($item->status)->toBe(ProjectActionItem::STATUS_DONE);
 });

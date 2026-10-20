@@ -184,3 +184,15 @@ it('links each source to where it can be read back', function () {
         ->and(ProjectActionItem::sourceLabel(['kind' => 'call', 'at' => '2026-10-10T19:37:00+00:00']))->toBe('call Oct 10')
         ->and(ProjectActionItem::sourceLabel(['kind' => 'sms', 'at' => '2026-10-12T12:42:00+00:00']))->toBe('text Oct 12');
 });
+
+it('links an email source to the project page and labels it with its subject', function () {
+    $projectId = 123; // only used to build the URL — no row needs to exist for that
+    $source = ['kind' => 'email', 'id' => 91, 'thread_id' => null, 'at' => '2026-10-15T09:00:00+00:00', 'subject' => 'Cabinet hardware'];
+
+    expect(ProjectActionItem::sourceUrl($source, $projectId))->toBe(route('projects.show', $projectId))
+        ->and(ProjectActionItem::sourceUrl($source))->toBeNull()
+        ->and(ProjectActionItem::sourceLabel($source))->toBe('Cabinet hardware Oct 15')
+        ->and(ProjectActionItem::sourceLabel(['kind' => 'email', 'at' => '2026-10-15T09:00:00+00:00']))->toBe('email Oct 15')
+        ->and(ProjectActionItem::sourceArticle($source))->toBe('an')
+        ->and(ProjectActionItem::sourceArticle(['kind' => 'call']))->toBe('a');
+});

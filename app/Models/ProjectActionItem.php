@@ -71,21 +71,23 @@ class ProjectActionItem extends Model
     }
 
     /**
-     * Where a source can be read back: the thread on the Messages page, or
-     * the call on its Calls tab.
+     * Where a source can be read back: the thread on the Messages page, the
+     * call on its Calls tab, or (an email — no dedicated tab yet) the
+     * project page.
      *
      * @param  array{kind: string, id: int, thread_id?: int|null, at?: string}  $source
      */
-    public static function sourceUrl(array $source): ?string
+    public static function sourceUrl(array $source, ?int $projectId = null): ?string
     {
         return match ($source['kind'] ?? null) {
             'sms' => route('sms.index', ['threadId' => $source['thread_id'] ?? null]),
             'call' => route('sms.index', ['activeTab' => 'calls', 'callId' => $source['id']]),
+            'email' => $projectId ? route('projects.show', $projectId) : null,
             default => null,
         };
     }
 
-    /** @param  array{kind: string, at?: string}  $source */
+    /** @param  array{kind: string, at?: string, subject?: ?string}  $source */
     public static function sourceLabel(array $source): string
     {
         $when = ! empty($source['at']) ? Carbon::parse($source['at'])->format('M j') : '';
@@ -95,7 +97,17 @@ class ProjectActionItem extends Model
             default => 'text',
         };
 
+        if ($noun === 'email' && ! empty($source['subject'])) {
+            return trim(Str::limit((string) $source['subject'], 30).' '.$when);
+        }
+
         return trim($noun.' '.$when);
+    }
+
+    /** The article "sourceLabel" wants in front of it: "a call", "an email". */
+    public static function sourceArticle(array $source): string
+    {
+        return ($source['kind'] ?? null) === 'email' ? 'an' : 'a';
     }
 
     /** Still to be acted on: not done, not dismissed, not yet a Task. */

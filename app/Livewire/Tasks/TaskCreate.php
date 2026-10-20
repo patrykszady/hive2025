@@ -2279,8 +2279,8 @@ class TaskCreate extends Component
     {
         $task = $this->form->store();
 
-        // Opened from the planner's "From calls & texts" list: the item is
-        // now this task, so it leaves that list and keeps the link.
+        // Opened from the planner's "From calls, texts & email" list: the item
+        // is now this task, so it leaves that list and keeps the link.
         if ($task instanceof Task && $this->actionItemId) {
             ProjectActionItem::query()
                 ->whereKey($this->actionItemId)
