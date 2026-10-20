@@ -10,26 +10,28 @@ use Illuminate\Pagination\CursorPaginator;
 use Illuminate\Support\Collection;
 
 /**
- * The app's Timesheets tab: the same confirmed-timesheets list and week
- * detail as the web's TimesheetsIndex/TimesheetShow — see those Livewire
- * components for the table/card this mirrors. TimesheetScope (applied
- * automatically on every Timesheet query) already limits a Member to their
- * own rows and an Admin to their whole company, exactly like the web;
- * nothing here re-derives that. Creating a Timesheet from Hours, paying one,
- * and reverting one stay web-only (admin-only write flows, not simple
- * read views).
+ * The app's Timesheets tab: the same confirmed-timesheets list, week
+ * detail, text search, sortable columns and "Revert Timesheet" as the
+ * web's TimesheetsIndex/TimesheetShow — see those Livewire components for
+ * the table/card this mirrors. TimesheetScope (applied automatically on
+ * every Timesheet query) already limits a Member to their own rows and an
+ * Admin to their whole company, exactly like the web; nothing here
+ * re-derives that. Creating a Timesheet from Hours and paying one stay
+ * web-only (admin-only multi-step forms, not simple read views or a single
+ * confirm).
  */
 class AppTimesheetDirectory
 {
     private const PER_PAGE = 20;
 
     /**
-     * One row per person-week (the per-project rows summed), newest first —
-     * mirrors TimesheetsIndex::timesheets()'s grouping, minus the Meilisearch
-     * text search (not a phone-sized filter) and the sortable columns (a
-     * card list, not a sortable table).
+     * One row per person-week (the per-project rows summed) — mirrors
+     * TimesheetsIndex::timesheets()'s grouping, including its text search
+     * (Meilisearch — user name/note/invoice/amount, same as $search there)
+     * and sortable columns (date/hours/amount, same mapping as
+     * TimesheetsIndex::$sortBy).
      */
-    public function groups(?int $userId, ?string $paid): CursorPaginator
+    public function groups(?int $userId, ?string $paid, string $search = '', string $sortBy = 'date', string $sortDirection = 'desc'): CursorPaginator
     {
         $query = Timesheet::query();
 
@@ -43,6 +45,17 @@ class AppTimesheetDirectory
             $query->whereNull('check_id');
         }
 
+        if ($search !== '') {
+            $this->applySearch($query, $search);
+        }
+
+        $sortColumn = match ($sortBy) {
+            'hours' => 'total_hours',
+            'amount' => 'total_amount',
+            default => 'date',
+        };
+        $direction = $sortDirection === 'asc' ? 'asc' : 'desc';
+
         return $query
             ->selectRaw('user_id, date')
             ->selectRaw('SUM(hours) as total_hours')
@@ -53,7 +66,8 @@ class AppTimesheetDirectory
             ->selectRaw('MIN(check_id) as single_check_id')
             ->selectRaw('MIN(id) as first_timesheet_id')
             ->groupBy('user_id', 'date')
-            ->orderByDesc('date')
+            ->orderBy($sortColumn, $direction)
+            ->when($sortColumn !== 'date', fn (Builder $q) => $q->orderBy('date', 'desc'))
             ->orderBy('user_id')
             ->cursorPaginate(self::PER_PAGE);
     }
@@ -168,6 +182,11 @@ class AppTimesheetDirectory
                 'total_hours' => (float) $weeklyHours->sum('hours'),
                 'hourly' => (float) $timesheet->hourly,
                 'user' => ['id' => $timesheet->user->id, 'name' => $timesheet->user->full_name],
+                // TimesheetShow::mount()'s $not_paid — every row's status
+                // (as THIS viewer sees it) is still "Pay". Gates "Revert
+                // Timesheet" on the detail screen; revert() below
+                // recomputes this itself rather than trusting the client.
+                'not_paid' => $this->isNotPaid($weeklyHours, $viewer),
             ],
             'rows' => $weeklyHours->map(function (Timesheet $row) use ($viewer): array {
                 $status = $this->detailRowStatus($row, $viewer);
@@ -224,5 +243,72 @@ class AppTimesheetDirectory
         return $row->check->check_type !== 'Check'
             ? substr((string) $row->check->check_type, 0, 1).' #'.$row->check->id
             : (string) $row->check->check_number;
+    }
+
+    /**
+     * $search against Meilisearch (user name/note/invoice/amount, same as
+     * TimesheetsIndex::filteredRows()), falling back to a plain name/note
+     * LIKE if that index call fails — same reasoning as
+     * AppVendorDirectory::applySearch().
+     */
+    private function applySearch(Builder $query, string $search): void
+    {
+        try {
+            $ids = Timesheet::scopedSearch($search)->take(5000)->keys();
+            $query->whereIn('timesheets.id', $ids);
+
+            return;
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+
+        $query->where(function (Builder $q) use ($search): void {
+            $q->whereHas('user', function (Builder $userQuery) use ($search): void {
+                $userQuery->where('first_name', 'like', '%'.$search.'%')
+                    ->orWhere('last_name', 'like', '%'.$search.'%');
+            })
+                ->orWhere('note', 'like', '%'.$search.'%')
+                ->orWhere('invoice', 'like', '%'.$search.'%');
+        });
+    }
+
+    /**
+     * Every row in $weeklyHours still shows "Pay" to $viewer — mirrors
+     * TimesheetShow::mount()'s `$this->weekly_hours->pluck('status')->every(...)`.
+     *
+     * @param  Collection<int, Timesheet>  $weeklyHours
+     */
+    private function isNotPaid(Collection $weeklyHours, User $viewer): bool
+    {
+        return $weeklyHours->isNotEmpty()
+            && $weeklyHours->every(fn (Timesheet $row) => $this->detailRowStatus($row, $viewer)['label'] === 'Pay');
+    }
+
+    /**
+     * "Revert Timesheet" — TimesheetShow::revert() exactly: every Hour that
+     * made up the week goes back to unconfirmed (timesheet_id = null) and
+     * the week's Timesheet rows are deleted outright. Only when every row
+     * is still "Pay" for $viewer (TimesheetShow's own $not_paid gate,
+     * recomputed here rather than trusted from the client — the button is
+     * hidden client-side, but the write must refuse it independently).
+     */
+    public function revert(Timesheet $timesheet, User $viewer): void
+    {
+        $weeklyHours = Timesheet::where('date', $timesheet->date->format('Y-m-d'))
+            ->where('user_id', $timesheet->user_id)
+            ->get();
+
+        abort_unless($this->isNotPaid($weeklyHours, $viewer), 403, 'This timesheet can no longer be reverted.');
+
+        foreach ($weeklyHours as $row) {
+            // $row->hours is the decimal column (the HasMany relation shares
+            // the name) — go through the relation method itself, exactly
+            // like TimesheetShow::revert().
+            foreach ($row->hours()->get() as $hour) {
+                $hour->timesheet_id = null;
+                $hour->save();
+            }
+            $row->delete();
+        }
     }
 }

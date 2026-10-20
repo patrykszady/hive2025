@@ -193,6 +193,98 @@ it('refuses balance and payable views to a 1099 vendor, even for one\'s own page
     $this->getJson('/api/app/v1/timesheets/balance')->assertForbidden();
 });
 
+it('sorts the list by hours or amount, like the web\'s sortable columns', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'hours' => 5, 'amount' => 900]);
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-18', 'hours' => 20, 'amount' => 100]);
+
+    $byHours = $this->getJson('/api/app/v1/timesheets?sort=hours&direction=desc')->assertOk();
+    expect(collect($byHours->json('data'))->pluck('date')->all())->toBe(['2026-05-18', '2026-05-11']);
+
+    $byAmount = $this->getJson('/api/app/v1/timesheets?sort=amount&direction=asc')->assertOk();
+    expect(collect($byAmount->json('data'))->pluck('date')->all())->toBe(['2026-05-18', '2026-05-11']);
+});
+
+it('searches the list by member name when Meilisearch is unavailable', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    $alice = User::factory()->create(['primary_vendor_id' => $vendor->id, 'first_name' => 'Alice', 'last_name' => 'Anders']);
+    $alice->vendors()->attach($vendor->id, ['role_id' => 2, 'is_employed' => 1]);
+    Sanctum::actingAs($admin, ['app']);
+
+    appFieldTimesheetFixture($vendor, $alice, ['date' => '2026-05-11']);
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-18']);
+
+    $this->mock(\Laravel\Scout\EngineManager::class, function ($mock) {
+        $mock->shouldReceive('engine')->andThrow(new \RuntimeException('no search engine in tests'));
+    });
+
+    $response = $this->getJson('/api/app/v1/timesheets?search=Alice')->assertOk();
+    expect(collect($response->json('data'))->pluck('date')->all())->toBe(['2026-05-11']);
+});
+
+it('includes the week\'s not_paid flag on the detail screen', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $unpaid = appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'check_id' => null]);
+    $this->getJson('/api/app/v1/timesheets/'.$unpaid->id)->assertOk()->assertJsonPath('data.week.not_paid', true);
+
+    $paid = appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-18', 'check_id' => 9999]);
+    $this->getJson('/api/app/v1/timesheets/'.$paid->id)->assertOk()->assertJsonPath('data.week.not_paid', false);
+});
+
+it('reverts an unpaid timesheet, unconfirming its hours, exactly like the web', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = \App\Models\Client::factory()->create();
+    $project = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Kitchen Remodel', 'client_id' => $client->id,
+        'address' => '123 Main St', 'city' => 'Northbrook', 'state' => 'IL', 'zip_code' => '60062',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+
+    $timesheet = appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'check_id' => null, 'project_id' => $project->id]);
+    $hour = Hour::forceCreate([
+        'date' => '2026-05-11', 'user_id' => $admin->id, 'vendor_id' => $vendor->id, 'project_id' => $project->id,
+        'hours' => 10, 'timesheet_id' => $timesheet->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    $this->postJson('/api/app/v1/timesheets/'.$timesheet->id.'/revert')
+        ->assertOk()
+        ->assertJsonPath('data.reverted', true);
+
+    // Timesheet uses SoftDeletes — delete() leaves the row with deleted_at
+    // set, same as the web's $timesheet->delete() — so withTrashed() is
+    // needed to see it's actually gone from the normal query.
+    expect(Timesheet::query()->whereKey($timesheet->id)->exists())->toBeFalse()
+        ->and(Timesheet::withTrashed()->whereKey($timesheet->id)->first()?->trashed())->toBeTrue()
+        ->and($hour->refresh()->timesheet_id)->toBeNull();
+});
+
+it('refuses to revert an already-paid timesheet', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $timesheet = appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'check_id' => 9999]);
+
+    $this->postJson('/api/app/v1/timesheets/'.$timesheet->id.'/revert')->assertForbidden();
+    expect(Timesheet::withoutGlobalScopes()->whereKey($timesheet->id)->exists())->toBeTrue();
+});
+
+it('refuses a Member reverting their own unpaid timesheet (Admin-only, same as the web\'s render() gate)', function () {
+    ['vendor' => $vendor] = appFieldTimesheetsAdmin();
+    $member = appFieldTimesheetsMember($vendor);
+    Sanctum::actingAs($member, ['app']);
+
+    $timesheet = appFieldTimesheetFixture($vendor, $member, ['date' => '2026-05-11', 'check_id' => null]);
+
+    $this->postJson('/api/app/v1/timesheets/'.$timesheet->id.'/revert')->assertForbidden();
+    expect(Timesheet::withoutGlobalScopes()->whereKey($timesheet->id)->exists())->toBeTrue();
+});
+
 it('shows the payable list only to an Admin', function () {
     ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
     $member = appFieldTimesheetsMember($vendor);

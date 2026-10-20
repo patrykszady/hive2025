@@ -10,11 +10,12 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * The app's Timesheets tab: the same confirmed-timesheets list, week
- * detail, and "what am I owed" balance as the web's Timesheets pages — see
+ * The app's Timesheets tab: the same confirmed-timesheets list (with its
+ * text search and sortable columns), week detail, "Revert Timesheet", and
+ * "what am I owed" balance as the web's Timesheets pages — see
  * App\Services\Timesheets\AppTimesheetDirectory and AppPendingBalance for
- * the shared shaping. Creating a timesheet from Hours, paying one, and
- * reverting one stay web-only.
+ * the shared shaping. Creating a timesheet from Hours and paying one stay
+ * web-only.
  */
 class TimesheetController extends Controller
 {
@@ -24,8 +25,11 @@ class TimesheetController extends Controller
 
         $userId = $request->filled('user_id') ? (int) $request->query('user_id') : null;
         $paid = in_array($request->query('status'), ['confirmed', 'unpaid'], true) ? $request->query('status') : null;
+        $search = trim((string) $request->query('search', ''));
+        $sortBy = in_array($request->query('sort'), ['date', 'hours', 'amount'], true) ? $request->query('sort') : 'date';
+        $sortDirection = $request->query('direction') === 'asc' ? 'asc' : 'desc';
 
-        $page = $directory->groups($userId, $paid);
+        $page = $directory->groups($userId, $paid, $search, $sortBy, $sortDirection);
         $groups = $page->getCollection();
         $hydrated = $directory->hydrateGroups($groups);
 
@@ -59,6 +63,15 @@ class TimesheetController extends Controller
         $found = $this->visibleTimesheet($timesheet);
 
         return response()->json(['data' => $directory->detail($found, $request->user())]);
+    }
+
+    /** "Revert Timesheet" — TimesheetShow::revert(). Any row's id for the week works; the whole week is reverted. */
+    public function revert(Request $request, int $timesheet, AppTimesheetDirectory $directory): JsonResponse
+    {
+        $found = $this->visibleTimesheet($timesheet);
+        $directory->revert($found, $request->user());
+
+        return response()->json(['data' => ['reverted' => true]]);
     }
 
     /** The signed-in member's own outstanding balance — TimesheetPaymentCreate's read-only own-page view. */

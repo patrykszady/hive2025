@@ -267,6 +267,182 @@ it('has no payments card for a vendor with no checks, or for a Retail vendor', f
         ->assertJsonPath('data.payments', null);
 });
 
+it('needs the Admin ability to create a vendor', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    $member = appFieldMember($company);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson('/api/app/v1/vendors', [
+        'business_name' => 'Acme Drywall', 'business_type' => 'Sub',
+        'owner_cell_phone' => '3125551234', 'owner_first_name' => 'Jane', 'owner_last_name' => 'Owner', 'owner_email' => 'jane@example.com',
+    ])->assertForbidden();
+});
+
+it('creates a Sub vendor with a brand-new owner, attached as Admin at $0/hr, exactly like VendorCreate::store()', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/vendors', [
+        'business_name' => 'Acme Drywall',
+        'business_type' => 'Sub',
+        'address' => '1 Elm St', 'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601',
+        'business_phone' => '3125559876', 'business_email' => 'office@acme.test', 'business_website' => 'https://acme.test',
+        'owner_cell_phone' => '3125551234', 'owner_first_name' => 'Jane', 'owner_last_name' => 'Owner', 'owner_email' => 'jane@example.com',
+    ])->assertCreated();
+
+    $vendorId = $response->json('data.id');
+    $vendor = Vendor::withoutGlobalScopes()->findOrFail($vendorId);
+
+    expect($vendor->business_name)->toBe('Acme Drywall')
+        ->and($vendor->address)->toBe('1 Elm St')
+        ->and($vendor->timezone)->toBe('America/Chicago')
+        ->and($company->vendors()->where('vendors.id', $vendor->id)->exists())->toBeTrue();
+
+    $owner = User::where('cell_phone', '3125551234')->first();
+    expect($owner)->not->toBeNull()
+        ->and($owner->first_name)->toBe('Jane');
+
+    // Raw pivot lookup — $owner->vendors() goes through Vendor's own
+    // VendorScope global scope, which scopes to the currently AUTHENTICATED
+    // user's company tree, not $owner's.
+    $pivot = \Illuminate\Support\Facades\DB::table('user_vendor')->where('user_id', $owner->id)->where('vendor_id', $vendor->id)->first();
+    expect($pivot)->not->toBeNull()
+        ->and((int) $pivot->role_id)->toBe(1)
+        ->and((float) $pivot->hourly_rate)->toBe(0.0);
+});
+
+it('creates a Retail vendor without requiring an owner', function () {
+    ['user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/vendors', [
+        'business_name' => 'Home Depot', 'business_type' => 'Retail',
+    ])->assertCreated()
+        ->assertJsonPath('data.business_type', 'Retail');
+});
+
+it('reuses an existing person by phone as the new vendor\'s owner, instead of creating a duplicate', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    $existingPerson = User::factory()->create(['cell_phone' => '3125551234', 'first_name' => 'Established']);
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/vendors', [
+        'business_name' => 'Acme Drywall', 'business_type' => 'Sub',
+        'owner_cell_phone' => '3125551234', 'owner_first_name' => 'Ignored', 'owner_last_name' => 'Ignored', 'owner_email' => 'ignored@example.com',
+    ])->assertCreated();
+
+    expect(User::where('cell_phone', '3125551234')->count())->toBe(1)
+        ->and($existingPerson->refresh()->first_name)->toBe('Established');
+});
+
+it('requires an owner phone for a non-Retail vendor', function () {
+    ['user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/vendors', ['business_name' => 'Acme Drywall', 'business_type' => 'Sub'])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('owner_cell_phone');
+});
+
+it('updates a vendor\'s details but never its business_type, like the web\'s disabled radio on edit', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $sub = Vendor::factory()->create(['business_name' => 'Acme Drywall', 'business_type' => 'Sub']);
+    appFieldAttach($company, $sub);
+
+    $this->putJson('/api/app/v1/vendors/'.$sub->id, [
+        'business_name' => 'Acme Drywall LLC',
+        'address' => '2 Oak St', 'city' => 'Evanston', 'state' => 'IL', 'zip_code' => '60201',
+        'business_phone' => '3125550000', 'business_email' => 'new@acme.test', 'business_website' => 'https://acme.test',
+    ])->assertOk()
+        // Vendor::businessName()'s own mutator title-cases every save, web
+        // or app alike — "LLC" becomes "Llc", same as it always has.
+        ->assertJsonPath('data.business_name', 'Acme Drywall Llc')
+        ->assertJsonPath('data.business_type', 'Sub');
+
+    expect($sub->refresh()->business_type)->toBe('Sub')
+        ->and($sub->address)->toBe('2 Oak St')
+        ->and($sub->timezone)->toBe('America/Chicago');
+});
+
+it('403s editing a Retail vendor, an unconnected vendor, and refuses a Member outright', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    $member = appFieldMember($company);
+
+    $retail = Vendor::factory()->create(['business_type' => 'Retail']);
+    appFieldAttach($company, $retail);
+
+    $unconnected = Vendor::factory()->create(['business_type' => 'Sub']);
+
+    Sanctum::actingAs($admin, ['app']);
+    // isEditableBy() returns false outright for Retail — VendorPolicy::update's
+    // own business rule, same gate the web's YTD-paid figure and the
+    // vendor-docs card use.
+    $this->putJson('/api/app/v1/vendors/'.$retail->id, ['business_name' => 'Nope'])->assertForbidden();
+    // Not even in VendorScope's visible tree — 403 at the view step, same
+    // as the read tests above.
+    $this->putJson('/api/app/v1/vendors/'.$unconnected->id, ['business_name' => 'Nope'])->assertForbidden();
+
+    auth()->forgetGuards();
+    Sanctum::actingAs($member, ['app']);
+    $privateSub = Vendor::factory()->create(['business_type' => 'Sub']);
+    appFieldAttach($company, $privateSub);
+    // A Member never has VendorPolicy::update, regardless of the vendor.
+    $this->putJson('/api/app/v1/vendors/'.$privateSub->id, ['business_name' => 'Nope'])->assertForbidden();
+});
+
+it('finds existing-and-linkable vendors by business name, like VendorCreate::updatedBusinessNameText()', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $linked = Vendor::factory()->create(['business_name' => 'Acme Drywall', 'business_type' => 'Sub']);
+    appFieldAttach($company, $linked);
+    $unlinked = Vendor::factory()->create(['business_name' => 'Acme Roofing', 'business_type' => 'Sub']);
+
+    $response = $this->getJson('/api/app/v1/vendors/search?name=Acme')->assertOk();
+
+    expect(collect($response->json('data.existing'))->pluck('id')->all())->toBe([$linked->id])
+        ->and(collect($response->json('data.linkable'))->pluck('id')->all())->toBe([$unlinked->id]);
+});
+
+it('links an existing unlinked vendor to the company, like VendorCreate::addVendorToCompany()', function () {
+    ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $unlinked = Vendor::factory()->create(['business_type' => 'Sub']);
+
+    $this->postJson('/api/app/v1/vendors/'.$unlinked->id.'/link')
+        ->assertOk()
+        ->assertJsonPath('data.id', $unlinked->id);
+
+    expect($company->vendors()->where('vendors.id', $unlinked->id)->exists())->toBeTrue();
+});
+
+it('refuses to link another tenant\'s own registered vendor', function () {
+    ['user' => $admin] = appFieldAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $registered = Vendor::factory()->create(['business_type' => 'Sub', 'registration' => ['registered' => true]]);
+
+    $this->postJson('/api/app/v1/vendors/'.$registered->id.'/link')->assertForbidden();
+});
+
+it('looks up an existing person by phone for the owner step, like UserCreate::user_cell_find()', function () {
+    ['user' => $admin] = appFieldAdmin();
+    $existing = User::factory()->create(['cell_phone' => '3125551234', 'first_name' => 'Jane']);
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->getJson('/api/app/v1/vendors/owner-lookup?cell_phone=3125551234')
+        ->assertOk()
+        ->assertJsonPath('data.id', $existing->id)
+        ->assertJsonPath('data.first_name', 'Jane');
+
+    $this->getJson('/api/app/v1/vendors/owner-lookup?cell_phone=3125559999')
+        ->assertOk()
+        ->assertJsonPath('data', null);
+});
+
 it('summarizes a Retail vendor\'s YTD expenses, scoped to the company\'s own spend', function () {
     ['vendor' => $company, 'user' => $admin] = appFieldAdmin();
     Sanctum::actingAs($admin, ['app']);
