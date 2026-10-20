@@ -42,11 +42,15 @@ Route::get('sheets/monthly', [SheetController::class, 'monthly'])->name('sheets.
 Route::get('sheets/show', [SheetController::class, 'show'])->name('sheets.show');
 
 // Match Vendor (a "Global Action" on the web, visible only to Patryk) —
-// the unmatched-transaction/receipt cards and matching a card to a vendor.
-// AI-assisted suggestions stay web-only.
+// the unmatched-transaction/receipt cards, the vendor picker's options,
+// matching a card to a vendor, and the AI-assisted suggestion flow
+// (suggest then apply).
 Route::get('transactions/unmatched', [TransactionMatchController::class, 'unmatched'])->name('transactions.unmatched');
+Route::get('transactions/vendor-options', [TransactionMatchController::class, 'vendorOptions'])->name('transactions.vendor-options');
 Route::post('transactions/match', [TransactionMatchController::class, 'match'])->name('transactions.match');
 Route::post('transactions/match-expense', [TransactionMatchController::class, 'matchExpense'])->name('transactions.match-expense');
+Route::post('transactions/suggest-vendor', [TransactionMatchController::class, 'suggestVendor'])->name('transactions.suggest-vendor');
+Route::post('transactions/apply-suggestion', [TransactionMatchController::class, 'applySuggestion'])->name('transactions.apply-suggestion');
 
 // The bulk-match rules list behind Match Vendor (VendorTransaction rows —
 // "what pattern maps to which vendor"), not to be confused with

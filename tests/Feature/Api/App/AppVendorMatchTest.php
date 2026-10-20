@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Services\VendorSuggestionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 
@@ -247,4 +248,179 @@ it('refuses a Member managing bulk-match rules, like the web', function () {
     Sanctum::actingAs($member, ['app']);
 
     $this->getJson('/api/app/v1/vendor-transactions')->assertForbidden();
+});
+
+it('lists every vendor for the card\'s picker, across every tenant', function () {
+    ['user' => $admin] = appBooksMatchTeamUser(role: 1);
+    $other = Vendor::factory()->create(['business_name' => 'Zebra Supply', 'city' => 'Chicago', 'state' => 'IL']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->getJson('/api/app/v1/transactions/vendor-options')->assertOk();
+
+    expect(collect($response->json('data'))->pluck('id'))->toContain($other->id)
+        ->and(collect($response->json('data'))->firstWhere('id', $other->id))
+        ->toMatchArray(['legal' => 'Zebra Supply', 'city' => 'Chicago', 'state' => 'IL']);
+});
+
+it('refuses a Member listing vendor options, like the web', function () {
+    ['user' => $member] = appBooksMatchTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson('/api/app/v1/transactions/vendor-options')->assertForbidden();
+});
+
+it('asks the AI who a card\'s merchant is and returns the suggestion', function () {
+    ['vendor' => $company, 'user' => $admin] = appBooksMatchTeamUser(role: 1);
+    $account = appBooksMatchBankAccount($company);
+
+    Transaction::create([
+        'transaction_date' => now()->subDay(), 'amount' => 20.50, 'bank_account_id' => $account->id,
+        'plaid_merchant_name' => 'Rocket', 'plaid_merchant_description' => 'ROCKET 6546',
+    ]);
+
+    $this->mock(VendorSuggestionService::class, function ($mock) {
+        $mock->shouldReceive('suggest')
+            ->once()
+            ->withArgs(fn (string $descriptor) => $descriptor === 'ROCKET 6546')
+            ->andReturn([
+                'vendor_name' => 'Rocket Fizz',
+                'existing_vendor_id' => null,
+                'website' => 'https://rocketfizz.com',
+                'city' => 'Arlington Heights',
+                'state' => 'IL',
+                'match_desc' => 'ROCKET ',
+                'confidence' => 'medium',
+                'reasoning' => 'Candy and soda shop chain.',
+            ]);
+    });
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->postJson('/api/app/v1/transactions/suggest-vendor', ['descriptor' => 'ROCKET 6546'])
+        ->assertOk()
+        ->assertJsonPath('data.vendor_name', 'Rocket Fizz')
+        ->assertJsonPath('data.confidence', 'medium');
+});
+
+it('reports an error when the AI cannot identify the merchant', function () {
+    ['user' => $admin] = appBooksMatchTeamUser(role: 1);
+
+    $this->mock(VendorSuggestionService::class, fn ($mock) => $mock->shouldReceive('suggest')->once()->andReturn(null));
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->postJson('/api/app/v1/transactions/suggest-vendor', ['descriptor' => 'UNKNOWN MERCHANT'])
+        ->assertOk()
+        ->assertJsonPath('data.error', 'Could not identify this merchant — try again or match manually.');
+});
+
+it('refuses a Member asking for a suggestion, like the web', function () {
+    ['user' => $member] = appBooksMatchTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson('/api/app/v1/transactions/suggest-vendor', ['descriptor' => 'X'])->assertForbidden();
+});
+
+it('applies a suggestion to an existing vendor, writing a rule and matching the transaction', function () {
+    ['vendor' => $company, 'user' => $admin] = appBooksMatchTeamUser(role: 1);
+    $account = appBooksMatchBankAccount($company);
+
+    $transaction = Transaction::create([
+        'transaction_date' => now()->subDay(), 'amount' => 20.50, 'bank_account_id' => $account->id,
+        'plaid_merchant_name' => 'Rocket', 'plaid_merchant_description' => 'ROCKET 6546',
+    ]);
+    $existing = Vendor::factory()->create(['business_name' => 'Rocket Fizz', 'business_type' => 'Retail']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->postJson('/api/app/v1/transactions/apply-suggestion', [
+        'descriptor' => 'ROCKET 6546',
+        'suggestion' => [
+            'vendor_name' => 'Rocket Fizz',
+            'existing_vendor_id' => $existing->id,
+            'match_desc' => 'ROCKET ',
+        ],
+    ])->assertOk()
+        ->assertJsonPath('data.vendor.id', $existing->id)
+        ->assertJsonPath('data.vendor.created', false)
+        ->assertJsonPath('data.match_desc', 'ROCKET');
+
+    expect(VendorTransaction::where('vendor_id', $existing->id)->where('desc', 'ROCKET')->exists())->toBeTrue()
+        ->and($company->vendors()->where('vendor_id', $existing->id)->exists())->toBeTrue()
+        ->and($transaction->refresh()->vendor_id)->toBe($existing->id);
+});
+
+it('applies a suggestion by creating a new vendor with the AI\'s details', function () {
+    ['vendor' => $company, 'user' => $admin] = appBooksMatchTeamUser(role: 1);
+    $account = appBooksMatchBankAccount($company);
+
+    $transaction = Transaction::create([
+        'transaction_date' => now()->subDay(), 'amount' => 20.50, 'bank_account_id' => $account->id,
+        'plaid_merchant_name' => 'Rocket', 'plaid_merchant_description' => 'ROCKET 6546',
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->postJson('/api/app/v1/transactions/apply-suggestion', [
+        'descriptor' => 'ROCKET 6546',
+        'suggestion' => [
+            'vendor_name' => 'Rocket Fizz',
+            'existing_vendor_id' => null,
+            'website' => 'https://rocketfizz.com',
+            'city' => 'Arlington Heights',
+            'state' => 'IL',
+            'match_desc' => 'ROCKET ',
+        ],
+    ])->assertOk()->assertJsonPath('data.vendor.created', true);
+
+    $vendor = Vendor::withoutGlobalScopes()->where('business_name', 'Rocket Fizz')->first();
+
+    expect($vendor)->not->toBeNull()
+        ->and($vendor->city)->toBe('Arlington Heights')
+        ->and($vendor->business_website)->toBe('https://rocketfizz.com')
+        ->and(VendorTransaction::where('vendor_id', $vendor->id)->where('desc', 'ROCKET')->exists())->toBeTrue()
+        ->and($transaction->refresh()->vendor_id)->toBe($vendor->id)
+        ->and($company->vendors()->where('vendor_id', $vendor->id)->exists())->toBeTrue();
+});
+
+it('keeps a hand-typed "Match As" exactly as typed when applying a suggestion', function () {
+    ['vendor' => $company, 'user' => $admin] = appBooksMatchTeamUser(role: 1);
+    appBooksMatchBankAccount($company);
+    $existing = Vendor::factory()->create(['business_name' => 'City Market']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->postJson('/api/app/v1/transactions/apply-suggestion', [
+        'descriptor' => 'CITY-MARKET #0430',
+        'match_desc' => 'CITY-MARKET #0430',
+        'suggestion' => [
+            'vendor_name' => 'City Market',
+            'existing_vendor_id' => $existing->id,
+            'match_desc' => 'CITY-MARKET',
+        ],
+    ])->assertOk();
+
+    expect(VendorTransaction::where('vendor_id', $existing->id)->value('desc'))->toBe('CITY-MARKET #0430');
+});
+
+it('strips the store number from the raw descriptor when neither typed text nor the AI supply a match pattern', function () {
+    ['vendor' => $company, 'user' => $admin] = appBooksMatchTeamUser(role: 1);
+    appBooksMatchBankAccount($company);
+    $existing = Vendor::factory()->create(['business_name' => 'City Market']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->postJson('/api/app/v1/transactions/apply-suggestion', [
+        'descriptor' => 'CITY-MARKET #0430',
+        'suggestion' => [
+            'vendor_name' => 'City Market',
+            'existing_vendor_id' => $existing->id,
+        ],
+    ])->assertOk();
+
+    expect(VendorTransaction::where('vendor_id', $existing->id)->value('desc'))->toBe('CITY-MARKET');
+});
+
+it('refuses a Member applying a suggestion, like the web', function () {
+    ['user' => $member] = appBooksMatchTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->postJson('/api/app/v1/transactions/apply-suggestion', [
+        'descriptor' => 'X',
+        'suggestion' => ['vendor_name' => 'X', 'existing_vendor_id' => null],
+    ])->assertForbidden();
 });
