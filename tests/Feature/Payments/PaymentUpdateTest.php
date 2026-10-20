@@ -197,3 +197,87 @@ it('deletes exactly the one payment row the edit modal was opened for', function
     expect(Payment::query()->whereKey($parent->id)->exists())->toBeFalse()
         ->and(Payment::query()->whereKey($child->id)->exists())->toBeTrue();
 });
+
+/**
+ * update()/remove() had their authorize() calls commented out since the
+ * file's original scaffold (git blame: both lines are dead from the very
+ * first commit that added this file — no bug is recorded against them).
+ * mount()/render() already gate the whole component on PaymentPolicy::
+ * create() (Admin-only), but mount() only runs once and render() runs
+ * *after* the action already wrote to the database — neither actually
+ * guards update()/remove() themselves. Restored using PaymentPolicy::
+ * view() — the same ability App\Http\Controllers\Api\App\V1\
+ * PaymentController::update()/destroy() already use for this exact write
+ * ("App API: edit and delete client payments") — rather than literally
+ * 'update'/'delete': PaymentPolicy has no delete() ability at all (so
+ * authorize('delete', ...) would 403 every user, Admin included) and
+ * update() is stricter than this screen ever enforced (it also requires
+ * created_by_user_id to be set and on the creator's own vendor team).
+ *
+ * These two tests call update()/remove() directly on a bare instance,
+ * bypassing mount(): mount()'s own Admin-only gate means a Member can
+ * never legitimately reach this component through the normal Livewire
+ * request lifecycle, so that's not what these particular lines protect
+ * against — this proves the methods refuse a Member on their own, too.
+ */
+it('refuses a Member calling update() directly, even bypassing mount()', function () {
+    [$admin, $client, $hallBath] = payupdate_fixture();
+
+    $member = User::query()->create([
+        'first_name' => 'Pay', 'last_name' => 'Member',
+        'email' => 'payupdate-member-'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224555####'),
+        'primary_vendor_id' => $admin->vendor->id,
+    ]);
+    $admin->vendor->users()->attach($member->id, ['role_id' => 2]);
+
+    $payment = Payment::create([
+        'project_id' => $hallBath->id,
+        'amount' => 500,
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'OLD',
+        'belongs_to_vendor_id' => $admin->vendor->id,
+        'created_by_user_id' => $admin->id,
+    ]);
+
+    test()->actingAs($member);
+
+    $component = new PaymentCreate;
+    $component->payment = $payment;
+
+    expect(fn () => $component->update())->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+
+    $payment->refresh();
+    expect((float) $payment->amount)->toBe(500.0)
+        ->and($payment->reference)->toBe('OLD');
+});
+
+it('refuses a Member calling remove() directly, even bypassing mount()', function () {
+    [$admin, $client, $hallBath] = payupdate_fixture();
+
+    $member = User::query()->create([
+        'first_name' => 'Pay', 'last_name' => 'Member',
+        'email' => 'payupdate-member-'.uniqid().'@example.test',
+        'cell_phone' => fake()->unique()->numerify('224555####'),
+        'primary_vendor_id' => $admin->vendor->id,
+    ]);
+    $admin->vendor->users()->attach($member->id, ['role_id' => 2]);
+
+    $payment = Payment::create([
+        'project_id' => $hallBath->id,
+        'amount' => 500,
+        'date' => now()->format('Y-m-d'),
+        'reference' => 'OLD',
+        'belongs_to_vendor_id' => $admin->vendor->id,
+        'created_by_user_id' => $admin->id,
+    ]);
+
+    test()->actingAs($member);
+
+    $component = new PaymentCreate;
+    $component->payment = $payment;
+
+    expect(fn () => $component->remove())->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+
+    expect(Payment::query()->whereKey($payment->id)->exists())->toBeTrue();
+});

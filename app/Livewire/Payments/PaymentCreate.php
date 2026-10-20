@@ -215,7 +215,13 @@ class PaymentCreate extends Component
 
     public function update()
     {
-        // $this->authorize('update', $this->payment ?? Payment::class);
+        // Admin-only, matching PaymentPolicy::view() — the same gate the app
+        // API's PaymentController::update()/destroy() use, since Payment has
+        // no separate update/delete ability (PaymentPolicy::update() is
+        // stricter — requires created_by_user_id on the creator's own vendor
+        // team — and delete() doesn't exist at all, so either one would 403
+        // an Admin acting on a payment they can otherwise see).
+        $this->authorize('view', $this->payment);
 
         $this->normalizeProjectAmounts();
         $this->validate();
@@ -273,7 +279,9 @@ class PaymentCreate extends Component
 
     public function remove()
     {
-        // $this->authorize('delete', $this->payment);
+        // Admin-only, matching PaymentPolicy::view() — see update()'s
+        // comment for why (no update/delete ability exists for Payment).
+        $this->authorize('view', $this->payment);
 
         $projectId = $this->payment->project_id;
         $this->payment->delete();

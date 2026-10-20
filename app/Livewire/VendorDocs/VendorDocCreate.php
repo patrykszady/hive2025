@@ -72,6 +72,12 @@ class VendorDocCreate extends Component
 
     public function store()
     {
+        // Defense in depth, same as requestDocument(): the blade only shows
+        // this form when $canCreateDoc, but this callable method had no
+        // server-side check of its own — matches the app API's
+        // StoreVendorDocRequest::authorize() (VendorDocController::store()).
+        $this->authorize('create', VendorDoc::class);
+
         $this->validate();
         $docType = strtolower($this->doc_file->getClientOriginalExtension());
 
