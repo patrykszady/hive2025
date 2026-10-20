@@ -37,7 +37,9 @@ class TimesheetController extends Controller
         $groups = $page->getCollection();
         $hydrated = $directory->hydrateGroups($groups);
 
-        $data = $groups->map(function (object $group) use ($directory, $hydrated): array {
+        $viewer = $request->user();
+
+        $data = $groups->map(function (object $group) use ($directory, $hydrated, $viewer): array {
             $key = $group->user_id.'|'.$group->date->format('Y-m-d');
             $extra = $hydrated[$key] ?? ['member_name' => '', 'week_rows' => collect()];
             $weekRows = $extra['week_rows'];
@@ -49,7 +51,7 @@ class TimesheetController extends Controller
                 'member_name' => $extra['member_name'],
                 'total_hours' => (float) $group->total_hours,
                 'total_amount' => (float) $group->total_amount,
-                'status' => $directory->groupStatus($group, $singleRow),
+                'status' => $directory->groupStatus($group, $singleRow, $viewer),
                 'projects' => $singleRow
                     ? [$singleRow->project ? ($singleRow->project->short_address ?? $singleRow->project->name) : null]
                     : $weekRows->map(fn (Timesheet $row) => $row->project?->short_address ?? $row->project?->name)->filter()->values()->all(),

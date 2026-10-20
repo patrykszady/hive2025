@@ -95,6 +95,57 @@ it('flags an unpaid week "Pay" and a paid week "Paid"', function () {
         ->and($byDate['2026-05-18']['status']['label'])->toBe('Paid');
 });
 
+it('links an Admin\'s "Pay" status to the payment form, and "Paid" to the check', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'check_id' => null]);
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-18', 'check_id' => 9999]);
+
+    $response = $this->getJson('/api/app/v1/timesheets')->assertOk();
+    $byDate = collect($response->json('data'))->keyBy('date');
+
+    expect($byDate['2026-05-11']['status']['link'])->toBe(['type' => 'payment', 'id' => $admin->id])
+        ->and($byDate['2026-05-18']['status']['link'])->toBe(['type' => 'check', 'id' => 9999]);
+});
+
+it('never links a Member\'s "Pay" status (list-row payment stays Admin-only)', function () {
+    ['vendor' => $vendor] = appFieldTimesheetsAdmin();
+    $member = appFieldTimesheetsMember($vendor);
+    Sanctum::actingAs($member, ['app']);
+
+    appFieldTimesheetFixture($vendor, $member, ['date' => '2026-05-11', 'check_id' => null]);
+
+    $response = $this->getJson('/api/app/v1/timesheets')->assertOk();
+
+    expect($response->json('data.0.status.link'))->toBeNull();
+});
+
+it('links a multi-project week\'s "Pay" to the payment form too', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = \App\Models\Client::factory()->create();
+    $projectA = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Job A', 'client_id' => $client->id,
+        'address' => '1 A St', 'city' => 'Northbrook', 'state' => 'IL', 'zip_code' => '60062',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+    $projectB = \App\Models\Project::withoutEvents(fn () => \App\Models\Project::create([
+        'project_name' => 'Job B', 'client_id' => $client->id,
+        'address' => '2 B St', 'city' => 'Northbrook', 'state' => 'IL', 'zip_code' => '60062',
+        'belongs_to_vendor_id' => $vendor->id,
+    ]));
+
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'check_id' => null, 'project_id' => $projectA->id]);
+    appFieldTimesheetFixture($vendor, $admin, ['date' => '2026-05-11', 'check_id' => null, 'project_id' => $projectB->id]);
+
+    $response = $this->getJson('/api/app/v1/timesheets')->assertOk();
+
+    expect($response->json('data.0.status.label'))->toBe('Pay')
+        ->and($response->json('data.0.status.link'))->toBe(['type' => 'payment', 'id' => $admin->id]);
+});
+
 it('filters the list by paid status', function () {
     ['vendor' => $vendor, 'admin' => $admin] = appFieldTimesheetsAdmin();
     Sanctum::actingAs($admin, ['app']);

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\App\V1;
 use App\Http\Controllers\Controller;
 use App\Models\EmailTracking;
 use App\Models\Project;
+use App\Services\Projects\AppEmailTrackingDirectory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -42,6 +43,32 @@ class ProjectEmailTrackingController extends Controller
                 'recipient_emails' => $event->recipient_emails ?? [],
                 'event_at' => $event->event_at?->toIso8601String(),
             ])->values()->all(),
+        ]);
+    }
+
+    /**
+     * The Projects tab's own "Email Tracking" card — unscoped (every
+     * client-facing event the signed-in team can see) or narrowed to one
+     * client with `?client_id=`, exactly like the web index's
+     * `<livewire:projects.email-tracking-table :client-id="$client_id" />`
+     * (App\Livewire\Projects\ProjectsIndex::hasEmailTrackingForClient()'s
+     * own gate: visible to any team member, never Admin-only, and never to
+     * a client-browsing user). See App\Services\Projects\
+     * AppEmailTrackingDirectory for what is simplified versus the web
+     * table's full thread-inference.
+     */
+    public function forClient(Request $request, AppEmailTrackingDirectory $directory): JsonResponse
+    {
+        abort_if($request->user()->is_browsing_as_client, 403);
+
+        $clientId = $request->query('client_id');
+        $page = max(1, (int) $request->query('cursor', 1));
+
+        $paginator = $directory->events(is_numeric($clientId) ? (int) $clientId : null, $page);
+
+        return response()->json([
+            'data' => $paginator->items(),
+            'next_cursor' => $paginator->hasMorePages() ? (string) ($page + 1) : null,
         ]);
     }
 

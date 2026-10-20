@@ -171,25 +171,48 @@ class AppTimesheetDirectory
      * The week-level aggregate status shown on the grouped row — mirrors
      * timesheets/index.blade.php's inline logic exactly (a single-project
      * week takes that row's own status; a multi-project week summarizes by
-     * paid/unpaid counts).
+     * paid/unpaid counts), including its $statusHref: "Pay" links to the
+     * payment form for an Admin, "Paid" links straight to the check when
+     * the whole week settled on one, and "Paid By" never links.
      *
-     * @return array{label: string, color: string}
+     * @return array{label: string, color: string, link: ?array{type: 'payment'|'check', id: int}}
      */
-    public function groupStatus(object $group, ?Timesheet $singleRow): array
+    public function groupStatus(object $group, ?Timesheet $singleRow, User $viewer): array
     {
+        $isAdmin = $viewer->vendor_role === 'Admin';
+
         if ($singleRow) {
-            return $this->listRowStatus($singleRow);
+            $status = $this->listRowStatus($singleRow);
+
+            $status['link'] = match ($status['label']) {
+                'Pay' => $isAdmin ? ['type' => 'payment', 'id' => (int) $singleRow->user_id] : null,
+                'Paid' => $singleRow->check_id ? ['type' => 'check', 'id' => (int) $singleRow->check_id] : null,
+                default => null,
+            };
+
+            return $status;
         }
 
         if ((int) $group->unpaid_count > 0) {
-            return ['label' => 'Pay', 'color' => 'yellow'];
+            return [
+                'label' => 'Pay',
+                'color' => 'yellow',
+                'link' => $isAdmin ? ['type' => 'payment', 'id' => (int) $group->user_id] : null,
+            ];
         }
 
         if ((int) $group->paid_count > 0) {
-            return ['label' => 'Paid', 'color' => 'green'];
+            // Link straight to the check only when the whole week settled
+            // on one — otherwise the web links to the week itself, which
+            // tapping the row already does, so there is nothing extra to link.
+            $link = (int) $group->distinct_checks === 1 && $group->single_check_id
+                ? ['type' => 'check', 'id' => (int) $group->single_check_id]
+                : null;
+
+            return ['label' => 'Paid', 'color' => 'green', 'link' => $link];
         }
 
-        return ['label' => 'Paid By', 'color' => 'yellow'];
+        return ['label' => 'Paid By', 'color' => 'yellow', 'link' => null];
     }
 
     /**

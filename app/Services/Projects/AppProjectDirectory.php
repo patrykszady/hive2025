@@ -48,6 +48,26 @@ class AppProjectDirectory
     }
 
     /**
+     * Every selectable status, in lifecycle order — the web's full Status
+     * filter dropdown (resources/views/livewire/projects/partials/
+     * filter-fields.blade.php) and Change Status menu, unlike statuses()
+     * above which only offers the dashboard-card subset.
+     *
+     * @return list<array{code: int, title: string, color: string}>
+     */
+    public function filterStatuses(): array
+    {
+        return collect(ProjectStatus::selectableStatuses())
+            ->map(fn (array $status): array => [
+                'code' => $status['code'],
+                'title' => $status['label'],
+                'color' => $status['color'],
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * Projects visible to $user (via ProjectScope, applied automatically),
      * filtered to $statusCodes (empty = every status), $search (name,
      * address, or client — Meilisearch first, a plain LIKE if that index
@@ -78,7 +98,18 @@ class AppProjectDirectory
             ->with(['client']);
 
         if ($statusCodes !== []) {
-            $query->status($statusCodes);
+            // Mirrors ProjectsTable::projects(): a project whose latest
+            // status is Complete (7) can still have an open Service Call
+            // (8) against it, so filtering by Complete also surfaces those
+            // — otherwise a completed job with a fresh service call would
+            // silently vanish from the Complete filter.
+            $expanded = collect($statusCodes)
+                ->flatMap(fn (int $code) => $code === 7 ? [7, 8] : [$code])
+                ->unique()
+                ->values()
+                ->all();
+
+            $query->status($expanded);
         }
 
         if ($clientId !== null) {

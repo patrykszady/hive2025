@@ -32,9 +32,15 @@ class ProjectController extends Controller
 {
     private const PER_PAGE = 20;
 
-    public function statuses(AppProjectDirectory $directory): JsonResponse
+    /**
+     * `?all=1` returns every selectable status (the web's full Status
+     * filter dropdown / Change Status menu — ProjectStatus::
+     * selectableStatuses()); the default stays the dashboard-card subset
+     * (STATUS_CARD_CODES) other callers (ChangeStatusSheet) already rely on.
+     */
+    public function statuses(Request $request, AppProjectDirectory $directory): JsonResponse
     {
-        return response()->json(['data' => $directory->statuses()]);
+        return response()->json(['data' => $request->boolean('all') ? $directory->filterStatuses() : $directory->statuses()]);
     }
 
     public function index(Request $request, AppProjectDirectory $directory): JsonResponse
