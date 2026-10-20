@@ -4,6 +4,8 @@ namespace App\Services\Checks;
 
 use App\Models\BankAccount;
 use App\Models\Check;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Unique;
 
 /**
  * The next paper check number for a bank account — mirrors
@@ -39,5 +41,34 @@ class CheckNumberSuggester
     public function siblingAccountIds(BankAccount $bankAccount): array
     {
         return $bankAccount->bank?->accounts()->withoutGlobalScopes()->pluck('id')->toArray() ?? [$bankAccount->id];
+    }
+
+    /**
+     * A check_number uniqueness rule scoped across every sibling account
+     * under the submitted bank account's own bank (siblingAccountIds()),
+     * paper checks only, excluding soft-deleted rows — the one shared
+     * version of the scoping App\Traits\HandlesChecks::handlesChecksRules()
+     * inlines for the web's own Livewire forms, and that
+     * StoreVendorPaymentRequest/StoreTimesheetPaymentRequest now reuse so a
+     * re-linked Plaid item's duplicate account can never collide with a
+     * number already recorded under the same physical bank.
+     */
+    public function uniqueRule(?int $bankAccountId): Unique
+    {
+        return Rule::unique('checks', 'check_number')->where(function ($query) use ($bankAccountId) {
+            $query->where('check_type', 'Check')->whereNull('deleted_at');
+
+            $account = $bankAccountId ? BankAccount::withoutGlobalScopes()->find($bankAccountId) : null;
+
+            if ($account) {
+                $query->whereIn('bank_account_id', $this->siblingAccountIds($account));
+            } else {
+                // No bank account submitted (or an invalid one, already
+                // caught by the bank_account_id rule) — fall back to this
+                // one id so the uniqueness check still scopes narrowly
+                // rather than matching every bank's check numbers.
+                $query->where('bank_account_id', $bankAccountId);
+            }
+        });
     }
 }

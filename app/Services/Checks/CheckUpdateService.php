@@ -76,13 +76,25 @@ class CheckUpdateService
     {
         $oldVendorId = $check->vendor_id;
 
-        $check->update([
+        $updateData = [
             'bank_account_id' => $attributes['bank_account_id'],
             'check_type' => $attributes['check_type'] ?? null,
             'check_number' => $attributes['check_number'] ?? null,
             'vendor_id' => $attributes['vendor_id'] ?? null,
-            'user_id' => $attributes['user_id'] ?? null,
-        ]);
+        ];
+
+        // user_id (the employee a payroll check was written to) is never
+        // actually editable through either edit form — CheckForm::
+        // setCheck()/update() only ever round-trips the SAME value, it just
+        // always includes the key explicitly. Only write it when the
+        // caller's payload genuinely contains the key, so a client that
+        // omits it (the app used to) can never silently null out a payroll
+        // check's employee.
+        if (array_key_exists('user_id', $attributes)) {
+            $updateData['user_id'] = $attributes['user_id'];
+        }
+
+        $check->update($updateData);
 
         if (! empty($attributes['date'])) {
             $check->moveDate($attributes['date']);

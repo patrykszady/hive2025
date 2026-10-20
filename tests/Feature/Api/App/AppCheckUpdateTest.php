@@ -108,6 +108,47 @@ it('reassigns the vendor on expenses this check paid when the payee changes, sam
         ->and($expense->fresh()->vendor_id)->toBe($newPayee->id);
 });
 
+it('keeps a payroll check\'s user_id when the app sends it back unchanged, and never nulls it when a caller omits the key', function () {
+    ['vendor' => $gc, 'admin' => $admin, 'member' => $member] = appCheckUpdateTeam();
+    Sanctum::actingAs($admin, ['app']);
+    ['account' => $account] = appCheckUpdateFixture($gc, $admin);
+
+    // CheckUpdateService::rules()'s user_id exists-rule needs an employed pivot.
+    $member->vendors()->updateExistingPivot($gc->id, ['is_employed' => 1]);
+
+    $payrollCheck = Check::create([
+        'check_type' => 'Check', 'check_number' => '4001', 'date' => '2026-08-17', 'amount' => 300,
+        'bank_account_id' => $account->id, 'vendor_id' => null, 'user_id' => $member->id,
+        'belongs_to_vendor_id' => $gc->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    // The fixed app payload (CheckUpdateInput/edit.tsx): sends the check's
+    // own current user_id back unchanged, same as the web's CheckForm.
+    $this->putJson("/api/app/v1/checks/{$payrollCheck->id}", [
+        'bank_account_id' => $account->id,
+        'check_type' => 'Check',
+        'check_number' => $payrollCheck->check_number,
+        'vendor_id' => null,
+        'user_id' => $member->id,
+        'date' => '2026-08-18',
+    ])->assertOk();
+
+    expect($payrollCheck->fresh()->user_id)->toBe($member->id);
+
+    // The server-side safety net: a caller that omits the key entirely
+    // (the app's old, buggy payload) must never null it out either.
+    $this->putJson("/api/app/v1/checks/{$payrollCheck->id}", [
+        'bank_account_id' => $account->id,
+        'check_type' => 'Check',
+        'check_number' => $payrollCheck->check_number,
+        'vendor_id' => null,
+        'date' => '2026-08-19',
+    ])->assertOk();
+
+    expect($payrollCheck->fresh()->user_id)->toBe($member->id)
+        ->and($payrollCheck->fresh()->date->toDateString())->toBe('2026-08-19');
+});
+
 it('refuses a check number already used on the same bank account', function () {
     ['vendor' => $gc, 'admin' => $admin] = appCheckUpdateTeam();
     Sanctum::actingAs($admin, ['app']);

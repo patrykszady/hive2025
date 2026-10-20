@@ -6,6 +6,7 @@ use App\Models\Check;
 use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\User;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Pays a team member: settles the selected weekly timesheets, timesheets
@@ -44,6 +45,20 @@ class TimesheetPaymentRecorder
         ?int $paidBy,
         ?string $invoice,
     ): ?Check {
+        // Paid-for or reimbursement expenses can only settle through a
+        // check — same business rule, and the same error copy, as
+        // App\Services\Vendors\VendorPaymentRecorder::record()'s own
+        // guard. Mirrors the web's own TimesheetPaymentCreate::
+        // getDisablePaidByProperty(), which disables the Paid By select
+        // under this exact condition (timesheets/payment-form.blade.php's
+        // $this->disablePaidBy); this is the server backstop for a client
+        // that submits around it.
+        if (! empty($paidBy) && (! empty($selection['paid_expense_ids']) || ! empty($selection['reimbursement_expense_ids']))) {
+            throw ValidationException::withMessages([
+                'paid_by' => 'Reimbursement deductions can only be settled by a check — clear Paid By or unselect the reimbursements.',
+            ]);
+        }
+
         $check = null;
 
         if (empty($paidBy)) {
