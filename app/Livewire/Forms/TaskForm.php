@@ -32,7 +32,8 @@ class TaskForm extends Form
     public $time_settings = [];
 
     /**
-     * Mirror start_time to end_time on the same date when start_time changes.
+     * Mirror start_time to end_time on the same date when start_time changes
+     * and the end is missing or no longer after it.
      * Each date is independent — times never propagate across dates.
      * Fires for any nested update on time_settings via wire:model.live.
      *
@@ -54,7 +55,9 @@ class TaskForm extends Form
             return;
         }
 
-        if (is_string($value) && trim($value) !== '') {
+        $end = trim((string) ($this->time_settings[$date]['end_time'] ?? ''));
+
+        if (is_string($value) && trim($value) !== '' && ($end === '' || $end <= trim($value))) {
             $this->time_settings[$date]['end_time'] = $value;
         }
     }

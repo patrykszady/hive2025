@@ -50,3 +50,17 @@ it('mirrors end_time to start_time on the same date when start_time changes', fu
     expect($component->get("form.time_settings.{$may20}.start_time"))->toBe('09:30')
         ->and($component->get("form.time_settings.{$may20}.end_time"))->toBe('09:30');
 });
+
+it('keeps a chosen end time when only the start moves and the end is still after it', function (): void {
+    $may20 = '2026-05-20';
+
+    $component = Livewire::test(TaskCreate::class)
+        ->set('form.dates', [$may20])
+        ->set('form.time_settings', [
+            $may20 => ['use_time' => true, 'start_time' => '09:00', 'end_time' => '12:00'],
+        ])
+        ->set("form.time_settings.{$may20}.start_time", '10:00');
+
+    expect($component->get("form.time_settings.{$may20}.start_time"))->toBe('10:00')
+        ->and($component->get("form.time_settings.{$may20}.end_time"))->toBe('12:00');
+});

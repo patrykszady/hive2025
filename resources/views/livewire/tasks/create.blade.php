@@ -455,67 +455,70 @@
                         <flux:error name="form.dates" />
                     </flux:field>
 
-                    {{-- TIME SETTINGS --}}
+                    {{-- TIME SETTINGS — kept in the browser (resources/js/task-arrival-times.js):
+                         form.time_settings is entangled without .live, so the
+                         switches, the pickers and the end-time fill never wait
+                         on a round trip; the times reach TaskCreate with the
+                         next request (Create, a date pick). --}}
                     @if(!empty($form->dates))
-                        <flux:field data-arrival-times-section class="mt-4">
+                        <flux:field
+                            data-arrival-times-section
+                            class="mt-4"
+                            x-data="taskArrivalTimes($wire.entangle('form.time_settings'))"
+                        >
                             <div class="flex items-center justify-between">
                                 <flux:label>Arrival Time</flux:label>
-                                <flux:switch
-                                    {{-- The pickers this reveals sit below the fold — follow them down. --}}
-                                    x-on:change="$wire.toggleAllArrivalTimes($event.target.checked).then(() =>
-                                        $el.closest('[data-arrival-times-section]')?.scrollIntoView({ behavior: 'smooth', block: 'end' }))"
-                                    :checked="collect($form->time_settings)->contains('use_time', true)"
-                                    size="sm"
-                                />
+                                <flux:switch x-model="allOn" size="sm" />
                             </div>
 
                             <div class="mt-2 space-y-3 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
                                 @foreach($form->dates as $date)
-                                    <div wire:key="arrival-{{ $date }}" class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 space-y-2">
+                                    <div
+                                        wire:key="arrival-{{ $date }}"
+                                        data-arrival-date="{{ $date }}"
+                                        x-init="ensure('{{ $date }}')"
+                                        class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 space-y-2"
+                                    >
                                         <div class="flex items-center justify-between">
                                             <flux:subheading class="text-sm">
                                                 {{ \Carbon\Carbon::parse($date)->format('D, M j') }}
                                             </flux:subheading>
                                             <flux:switch
-                                                wire:model.live="form.time_settings.{{ $date }}.use_time"
-                                                x-on:change="$wire.copyTimesToDate('{{ $date }}').then(() =>
-                                                    $el.closest('[data-arrival-times-section]')?.scrollIntoView({ behavior: 'smooth', block: 'end' }))"
+                                                x-model="day('{{ $date }}').use_time"
+                                                x-on:change="dayToggled('{{ $date }}'); $nextTick(() => $root.scrollIntoView({ behavior: 'smooth', block: 'end' }))"
                                                 size="sm"
                                             />
                                         </div>
 
-                                        @if($form->time_settings[$date]['use_time'] ?? false)
-                                            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                                                @foreach (['start_time' => 'Start', 'end_time' => 'End'] as $field => $placeholder)
-                                                    @php
-                                                        $isEnd = $field === 'end_time';
-                                                        $fieldValue = data_get($form->time_settings, $date . '.' . $field);
-                                                        $fieldValueToken = is_string($fieldValue) && $fieldValue !== ''
-                                                            ? str_replace(':', '-', $fieldValue)
-                                                            : 'empty';
-                                                        // A Meet's end opens at start + 30: a meeting that
-                                                        // ends when it starts is not a meeting.
-                                                        $minTime = $isEnd ? $this->minimumEndTime($date) : '06:00';
-                                                        $openTo = $isEnd ? '10:00' : '08:00';
-                                                    @endphp
-                                                    <div wire:key="time-{{ $date }}-{{ $field }}-{{ $fieldValueToken }}">
-                                                        {{-- type="input": the dropdown offers the half-hour
-                                                             grid, but any exact time (9:45 AM) can be typed.
-                                                             No decorative clock overlay here — the segmented
-                                                             input needs its left edge for the hh field. --}}
-                                                        <flux:time-picker
-                                                            type="input"
-                                                            wire:model.live="form.time_settings.{{ $date }}.{{ $field }}"
-                                                            interval="30"
-                                                            min="{{ $minTime }}"
-                                                            max="23:00"
-                                                            open-to="{{ $openTo }}"
-                                                            :placeholder="$placeholder"
-                                                        />
-                                                    </div>
-                                                @endforeach
+                                        <div x-show="day('{{ $date }}').use_time" x-cloak class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                                            {{-- type="input": the dropdown offers the half-hour
+                                                 grid, but any exact time (9:45 AM) can be typed.
+                                                 A Meet's end opens at start + 30: a meeting that
+                                                 ends when it starts is not a meeting. --}}
+                                            <div wire:key="time-{{ $date }}-start_time">
+                                                <flux:time-picker
+                                                    type="input"
+                                                    x-model="day('{{ $date }}').start_time"
+                                                    x-on:change="startPicked('{{ $date }}')"
+                                                    interval="30"
+                                                    min="06:00"
+                                                    max="23:00"
+                                                    open-to="08:00"
+                                                    placeholder="Start"
+                                                />
                                             </div>
-                                        @endif
+                                            <div wire:key="time-{{ $date }}-end_time">
+                                                <flux:time-picker
+                                                    type="input"
+                                                    x-model="day('{{ $date }}').end_time"
+                                                    x-bind:min="minimumEndTime('{{ $date }}')"
+                                                    interval="30"
+                                                    max="23:00"
+                                                    open-to="10:00"
+                                                    placeholder="End"
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                 @endforeach
                             </div>
@@ -811,7 +814,9 @@
             <flux:button type="button" wire:click="duplicateTask">Duplicate</flux:button>
         @endif
 
-        <flux:button type="submit" form="task_create_form_modal_form" variant="primary" wire:loading.attr="disabled">{{$view_text['button_text']}}</flux:button>
+        {{-- Disabled only while this very save runs — never because some
+             other modal update is still in flight. --}}
+        <flux:button type="submit" form="task_create_form_modal_form" variant="primary" wire:loading.attr="disabled" wire:target="{{ $view_text['form_submit'] }}">{{$view_text['button_text']}}</flux:button>
     </x-slot>
 </x-form-modal>
 

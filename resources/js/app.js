@@ -1,5 +1,6 @@
 import './plaid-link';
 import './vendor-picker';
+import './task-arrival-times';
 import './timezone';
 import './planner-infinite-scroll';
 import Echo from 'laravel-echo';

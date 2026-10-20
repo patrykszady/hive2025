@@ -895,7 +895,10 @@ class TaskCreate extends Component
         if (str_ends_with($property, '.start_time')) {
             $date = substr($property, strlen('form.time_settings.'), -strlen('.start_time'));
             $start = is_string($value) ? trim($value) : '';
-            $endMissing = true; // an explicit start move always re-derives the end
+            // The modal now sends its times as leaves with the save, the end
+            // after the start — a chosen end that is still after the start stays.
+            $end = trim((string) data_get($this->form->time_settings, $date.'.end_time', ''));
+            $endMissing = $end === '' || $end <= $start;
         } else {
             $date = substr($property, strlen('form.time_settings.'));
 
