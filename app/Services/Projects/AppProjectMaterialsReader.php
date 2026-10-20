@@ -11,9 +11,10 @@ use Carbon\Carbon;
 
 /**
  * The project's material orders exactly as
- * App\Livewire\Projects\ProjectMaterials shows them (read-only here — the
- * OCR receipt upload/vendor-match flow that component also drives is
- * web-only). Admin-only, same as the web's viewMaterials gate.
+ * App\Livewire\Projects\ProjectMaterials shows them — listFor() for the
+ * whole card, one() for the single order the app's upload screen shows
+ * right after App\Services\Projects\ProjectMaterialsUploader creates it.
+ * Admin-only, same as the web's viewMaterials gate.
  */
 class AppProjectMaterialsReader
 {
@@ -41,46 +42,73 @@ class AppProjectMaterialsReader
                 ->keyBy(fn ($d) => $d->expense_receipt_id.'|'.$d->item_index)
             : collect();
 
-        return $expenses->map(function (Expense $expense) use ($descsByKey) {
-            $receipt = $expense->orderedReceipts->first(fn ($r) => $r->is_material_order);
+        return $expenses->map(fn (Expense $expense) => $this->transform($expense, $descsByKey))->filter()->values()->all();
+    }
 
-            if (! $receipt) {
-                return null;
-            }
+    /**
+     * The single order the app's upload screen shows right after a receipt
+     * is OCR'd — same shape as a `listFor()` row, for the one expense just
+     * created by App\Services\Projects\ProjectMaterialsUploader.
+     *
+     * @return array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string}>}|null
+     */
+    public function one(Expense $expense): ?array
+    {
+        $expense->loadMissing(['vendor', 'orderedReceipts']);
 
-            $rawItems = $receipt->receipt_items['items'] ?? [];
-            $availableCount = 0;
-            $unavailableCount = 0;
+        $receipt = $expense->orderedReceipts->first(fn ($r) => $r->is_material_order);
 
-            $items = collect($rawItems)->values()->map(function (array $item, int $index) use ($receipt, $descsByKey, &$availableCount, &$unavailableCount) {
-                $desc = $descsByKey->get($receipt->id.'|'.$index);
-                $isAvailable = $this->isItemAvailable($item);
-                $isAvailable ? $availableCount++ : $unavailableCount++;
+        $descsByKey = $receipt
+            ? ReceiptLineItemDesc::where('expense_receipt_id', $receipt->id)->get()->keyBy(fn ($d) => $d->expense_receipt_id.'|'.$d->item_index)
+            : collect();
 
-                return [
-                    'name' => $item['name'] ?? $item['description'] ?? null,
-                    'status' => MaterialOrderStatus::normalize($item['Status'] ?? null),
-                    'eta' => $item['ETA'] ?? null,
-                    'area' => $item['Area'] ?? $desc?->area,
-                    'image_url' => $item['image_url'] ?? $desc?->product_image_url,
-                ];
-            })->values()->all();
+        return $this->transform($expense, $descsByKey);
+    }
 
-            $availability = match (true) {
-                $unavailableCount === 0 => 'green',
-                $availableCount === 0 => 'red',
-                default => 'amber',
-            };
+    /**
+     * @param  \Illuminate\Support\Collection<string, ReceiptLineItemDesc>  $descsByKey
+     * @return array{expense_id: int, vendor_name: ?string, order_number: ?string, date: ?string, availability: string, items: list<array{name: ?string, status: ?string, eta: ?string, area: ?string, image_url: ?string}>}|null
+     */
+    private function transform(Expense $expense, $descsByKey): ?array
+    {
+        $receipt = $expense->orderedReceipts->first(fn ($r) => $r->is_material_order);
+
+        if (! $receipt) {
+            return null;
+        }
+
+        $rawItems = $receipt->receipt_items['items'] ?? [];
+        $availableCount = 0;
+        $unavailableCount = 0;
+
+        $items = collect($rawItems)->values()->map(function (array $item, int $index) use ($receipt, $descsByKey, &$availableCount, &$unavailableCount) {
+            $desc = $descsByKey->get($receipt->id.'|'.$index);
+            $isAvailable = $this->isItemAvailable($item);
+            $isAvailable ? $availableCount++ : $unavailableCount++;
 
             return [
-                'expense_id' => $expense->id,
-                'vendor_name' => $expense->vendor?->business_name,
-                'order_number' => $receipt->receipt_items['invoice_number'] ?? $expense->invoice,
-                'date' => $expense->date?->toDateString(),
-                'availability' => $availability,
-                'items' => $items,
+                'name' => $item['name'] ?? $item['description'] ?? null,
+                'status' => MaterialOrderStatus::normalize($item['Status'] ?? null),
+                'eta' => $item['ETA'] ?? null,
+                'area' => $item['Area'] ?? $desc?->area,
+                'image_url' => $item['image_url'] ?? $desc?->product_image_url,
             ];
-        })->filter()->values()->all();
+        })->values()->all();
+
+        $availability = match (true) {
+            $unavailableCount === 0 => 'green',
+            $availableCount === 0 => 'red',
+            default => 'amber',
+        };
+
+        return [
+            'expense_id' => $expense->id,
+            'vendor_name' => $expense->vendor?->business_name,
+            'order_number' => $receipt->receipt_items['invoice_number'] ?? $expense->invoice,
+            'date' => $expense->date?->toDateString(),
+            'availability' => $availability,
+            'items' => $items,
+        ];
     }
 
     /** Mirrors ProjectMaterials::isItemAvailable(). */

@@ -17,6 +17,7 @@ Route::post('clients/lookup-person', [AppClientController::class, 'lookupPerson'
 Route::post('clients', [AppClientController::class, 'store'])->name('clients.store');
 Route::put('clients/{client}', [AppClientController::class, 'update'])->whereNumber('client')->name('clients.update');
 Route::post('clients/{client}/people', [AppClientController::class, 'addPerson'])->whereNumber('client')->name('clients.people.store');
+Route::delete('clients/{client}', [AppClientController::class, 'destroy'])->whereNumber('client')->name('clients.destroy');
 
 /*
 |--------------------------------------------------------------------------

@@ -130,21 +130,7 @@ class ClientCreate extends Component
             return;
         }
 
-        // Contact people keep their account when they're connected to anything
-        // else (another client or a vendor); only fully orphaned users go.
-        $users = $this->client->users()->get();
-
-        $this->client->users()->detach();
-        $this->client->vendors()->detach();
-
-        foreach ($users as $user) {
-            if (! $user->clients()->exists() && ! $user->vendors()->exists()) {
-                $user->delete();
-            }
-        }
-
-        $this->client->unsearchable();
-        $this->client->delete();
+        app(\App\Services\Clients\AppClientDirectory::class)->deleteClient($this->client);
 
         $this->modal('client_form_modal')->close();
 

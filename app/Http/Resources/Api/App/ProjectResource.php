@@ -243,21 +243,28 @@ class ProjectResource extends JsonResource
 
     /**
      * The latest 10 status changes for the viewing vendor — ProjectStatus's
-     * own global scope already limits this to that vendor's rows.
+     * own global scope already limits this to that vendor's rows. `id` and
+     * `can_edit` are here so the app's edit/delete history entry screen
+     * (App\Services\Projects\ProjectStatusHistoryWriter) can target a row
+     * and know up front whether it belongs to the viewing vendor.
      *
-     * @return list<array{code: int, title: string, start_date: string}>
+     * @return list<array{id: int, code: int, title: string, start_date: string, can_edit: bool}>
      */
     private function statusHistory(): array
     {
+        $vendorId = (int) ($this->vendorId ?? 0);
+
         return $this->resource->statuses()
             ->orderByDesc('start_date')
             ->orderByDesc('id')
             ->limit(10)
             ->get()
             ->map(fn (ProjectStatus $status) => [
+                'id' => $status->id,
                 'code' => $status->status_code,
                 'title' => $status->title,
                 'start_date' => $status->start_date?->toDateString(),
+                'can_edit' => (int) $status->belongs_to_vendor_id === $vendorId,
             ])
             ->values()
             ->all();

@@ -29,6 +29,17 @@ Route::post('projects', [AppProjectController::class, 'store'])->name('projects.
 Route::post('projects/{project}', [AppProjectController::class, 'update'])->whereNumber('project')->name('projects.update');
 Route::delete('projects/{project}', [AppProjectController::class, 'destroy'])->whereNumber('project')->name('projects.destroy');
 
+// PROJECTS INDEX — the status dashboard cards, and the deleted-projects
+// recovery table (App\Livewire\Projects\DeletedProjectsTable).
+Route::get('projects/status-cards', [AppProjectController::class, 'statusCards'])->name('projects.status-cards');
+Route::get('projects/deleted', [AppProjectController::class, 'deleted'])->name('projects.deleted');
+Route::post('projects/{project}/restore', [AppProjectController::class, 'restore'])->whereNumber('project')->name('projects.restore');
+
+// PROJECT STATUS HISTORY — edit/delete a past entry, like the web's history
+// list (App\Livewire\ProjectStatus\StatusCreate::updateStatus()/deleteStatus()).
+Route::post('projects/{project}/statuses/{status}', [AppProjectController::class, 'updateStatusHistory'])->whereNumber(['project', 'status'])->name('projects.statuses.update');
+Route::delete('projects/{project}/statuses/{status}', [AppProjectController::class, 'destroyStatusHistory'])->whereNumber(['project', 'status'])->name('projects.statuses.destroy');
+
 // PROJECT SECTIONS the app didn't show yet — each Admin-only, same as the
 // web project page's own gates (see each controller's docblock).
 Route::get('projects/{project}/finances', [AppProjectFinancesController::class, 'show'])->whereNumber('project')->name('projects.finances.show');
@@ -36,6 +47,7 @@ Route::get('projects/{project}/finances/reimbursements-pdf-url', [AppProjectFina
 Route::get('projects/{project}/vendors', [AppProjectVendorsController::class, 'index'])->whereNumber('project')->name('projects.vendors.index');
 Route::post('projects/{project}/vendors', [AppProjectVendorsController::class, 'store'])->whereNumber('project')->name('projects.vendors.store');
 Route::get('projects/{project}/materials', [AppProjectMaterialsController::class, 'index'])->whereNumber('project')->name('projects.materials.index');
+Route::post('projects/{project}/materials', [AppProjectMaterialsController::class, 'store'])->whereNumber('project')->name('projects.materials.store');
 Route::get('projects/{project}/distributions', [AppProjectDistributionsController::class, 'index'])->whereNumber('project')->name('projects.distributions.index');
 Route::get('projects/{project}/email-tracking', [AppProjectEmailTrackingController::class, 'index'])->whereNumber('project')->name('projects.email-tracking.index');
 
@@ -56,3 +68,9 @@ Route::post('tasks', [AppTaskController::class, 'store'])->name('tasks.store');
 Route::get('tasks/{task}', [AppTaskController::class, 'show'])->whereNumber('task')->name('tasks.show');
 Route::post('tasks/{task}', [AppTaskController::class, 'update'])->whereNumber('task')->name('tasks.update');
 Route::delete('tasks/{task}', [AppTaskController::class, 'destroy'])->whereNumber('task')->name('tasks.destroy');
+
+// TASK DEPENDENCIES — predecessor/lag/type, like the web's Dependencies
+// panel (App\Livewire\Tasks\TaskCreate, via App\Services\Tasks\TaskDependencyWriter).
+Route::get('tasks/{task}/available-predecessors', [AppTaskController::class, 'availablePredecessors'])->whereNumber('task')->name('tasks.available-predecessors');
+Route::post('tasks/{task}/dependencies', [AppTaskController::class, 'storeDependency'])->whereNumber('task')->name('tasks.dependencies.store');
+Route::delete('tasks/{task}/dependencies/{dependency}', [AppTaskController::class, 'destroyDependency'])->whereNumber(['task', 'dependency'])->name('tasks.dependencies.destroy');

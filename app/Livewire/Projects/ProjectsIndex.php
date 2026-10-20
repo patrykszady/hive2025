@@ -270,8 +270,21 @@ class ProjectsIndex extends Component
             return [];
         }
 
+        return self::buildStatusCards($vendorId, $this->selectedStatusCodes());
+    }
+
+    /**
+     * The status cards' data, independent of this Livewire component — also
+     * called by App\Http\Controllers\Api\App\V1\ProjectController::statusCards()
+     * so the app's Projects tab shows the exact same counts, deltas and
+     * sparkline points as the web.
+     *
+     * @param  list<int>  $selectedCodes
+     * @return list<array{code: int, label: string, color: string, count: int, before: int, delta: int, better: bool|null, points: list<int>, selected: bool, style: array{line: string, area: string, selected: string, count: string}}>
+     */
+    public static function buildStatusCards(int $vendorId, array $selectedCodes = []): array
+    {
         $trends = app(ProjectStatusTrends::class)->forVendor($vendorId, now(vendor_timezone()));
-        $selectedCodes = $this->selectedStatusCodes();
         $quiet = ['now' => 0, 'before' => 0, 'points' => array_fill(0, ProjectStatusTrends::WEEKS + 1, 0)];
 
         $statuses = collect(ProjectStatus::selectableStatuses())->keyBy('code');

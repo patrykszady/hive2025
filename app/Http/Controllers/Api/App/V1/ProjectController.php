@@ -5,15 +5,21 @@ namespace App\Http\Controllers\Api\App\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\StoreProjectRequest;
 use App\Http\Requests\Api\App\UpdateProjectRequest;
+use App\Http\Requests\Api\App\UpdateProjectStatusHistoryRequest;
 use App\Http\Requests\Api\App\UpdateProjectStatusRequest;
 use App\Http\Resources\Api\App\ProjectResource;
+use App\Livewire\Projects\DeletedProjectsTable;
+use App\Livewire\Projects\ProjectsIndex;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Services\Projects\AppProjectDirectory;
+use App\Services\Projects\ProjectStatusHistoryWriter;
 use App\Services\Projects\ProjectWriter;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The app's Projects tab: the same cards, filters, search and status change
@@ -148,6 +154,124 @@ class ProjectController extends Controller
         return response()->json([
             'data' => (new ProjectResource($found))->forVendor($vendorId)->withDetail()->toArray($request),
         ]);
+    }
+
+    /**
+     * The Projects tab's status dashboard cards (counts per status, 30-day
+     * deltas, sparkline points) — mirrors
+     * App\Livewire\Projects\ProjectsIndex::statusCards() exactly (same
+     * builder, App\Services\ProjectStatusTrends, so the numbers always
+     * agree with the web). Empty for a client-browsing user, same as the web.
+     */
+    public function statusCards(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $vendorId = (int) ($user->vendor?->id ?? 0);
+
+        if ($user->is_browsing_as_client || ! $vendorId) {
+            return response()->json(['data' => []]);
+        }
+
+        $selected = $this->normalizeStatusCodes($request->query('status', []));
+
+        return response()->json(['data' => ProjectsIndex::buildStatusCards($vendorId, $selected)]);
+    }
+
+    /**
+     * Trashed projects, with a way back — mirrors
+     * App\Livewire\Projects\DeletedProjectsTable exactly (same query, same
+     * page size).
+     */
+    public function deleted(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $page = Project::onlyTrashed()
+            ->where('belongs_to_vendor_id', $user->vendor->id)
+            ->with('client.users:id,first_name,last_name,nickname')
+            ->orderByDesc('deleted_at')
+            ->orderByDesc('id')
+            ->cursorPaginate(DeletedProjectsTable::PER_PAGE);
+
+        return response()->json([
+            'data' => $page->getCollection()->map(fn (Project $project) => [
+                'id' => $project->id,
+                'name' => $project->project_name,
+                'address' => ['short' => $project->short_address],
+                'client' => $project->client ? ['id' => $project->client->id, 'name' => $project->client->name] : null,
+                'deleted_at' => $project->deleted_at?->toIso8601String(),
+            ])->all(),
+            'next_cursor' => $page->nextCursor()?->encode(),
+        ]);
+    }
+
+    /**
+     * Mirrors App\Livewire\Projects\DeletedProjectsTable::restoreProject()
+     * exactly, including its own comment: "same gate as deleting it:
+     * whoever may delete a project may undo that."
+     */
+    public function restore(Request $request, int $project): JsonResponse
+    {
+        $found = Project::onlyTrashed()->find($project);
+        abort_unless($found, 404);
+
+        $this->authorize('delete', $found);
+
+        $found->restore();
+
+        return response()->json(['data' => ['id' => $found->id, 'restored' => true]]);
+    }
+
+    /**
+     * Edit a past status-history entry — mirrors
+     * App\Livewire\ProjectStatus\StatusCreate::updateStatus() exactly, via
+     * the shared App\Services\Projects\ProjectStatusHistoryWriter.
+     */
+    public function updateStatusHistory(UpdateProjectStatusHistoryRequest $request, int $project, int $status, ProjectStatusHistoryWriter $writer): JsonResponse
+    {
+        $user = $request->user();
+        abort_if($user->is_browsing_as_client, 403);
+
+        $found = $this->visibleProject($project);
+        $foundStatus = ProjectStatus::withoutGlobalScopes()->where('project_id', $found->id)->findOrFail($status);
+
+        try {
+            $writer->update($foundStatus, $user, (int) $request->validated('status_code'), (string) $request->validated('start_date'));
+        } catch (AuthorizationException $exception) {
+            abort(403, $exception->getMessage());
+        }
+
+        return response()->json(['data' => [
+            'id' => $foundStatus->id,
+            'code' => $foundStatus->status_code,
+            'title' => $foundStatus->title,
+            'start_date' => $foundStatus->start_date?->toDateString(),
+        ]]);
+    }
+
+    /**
+     * Delete a past status-history entry — mirrors
+     * App\Livewire\ProjectStatus\StatusCreate::deleteStatus() exactly
+     * (including its "must keep at least one status" guard), via the
+     * shared App\Services\Projects\ProjectStatusHistoryWriter.
+     */
+    public function destroyStatusHistory(Request $request, int $project, int $status, ProjectStatusHistoryWriter $writer): JsonResponse
+    {
+        $user = $request->user();
+        abort_if($user->is_browsing_as_client, 403);
+
+        $found = $this->visibleProject($project);
+        $foundStatus = ProjectStatus::withoutGlobalScopes()->where('project_id', $found->id)->findOrFail($status);
+
+        try {
+            $writer->delete($found, $foundStatus, $user);
+        } catch (ValidationException $exception) {
+            return response()->json(['message' => $exception->getMessage(), 'errors' => $exception->errors()], 422);
+        } catch (AuthorizationException $exception) {
+            abort(403, $exception->getMessage());
+        }
+
+        return response()->json(['data' => ['id' => $status, 'deleted' => true]]);
     }
 
     public function updateStatus(UpdateProjectStatusRequest $request, int $project): JsonResponse

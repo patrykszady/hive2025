@@ -5,14 +5,13 @@ namespace App\Livewire\Projects;
 use Carbon\Carbon;
 use App\Models\Expense;
 use App\Models\Project;
-use App\Models\ProjectStatus;
 use App\Models\ReceiptLineItemDesc;
 use App\Models\Vendor;
 use App\Scopes\ExpenseScope;
+use App\Services\Projects\ProjectMaterialsUploader;
 use App\Support\MaterialOrderStatus;
-use Illuminate\Support\Facades\DB;
 use Spatie\Activitylog\Models\Activity;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -129,100 +128,23 @@ class ProjectMaterials extends Component
     {
         $this->validate();
 
-        // belongs_to_vendor_id is client-chosen — whitelist it to the hub
-        // vendor or a vendor already linked to it (same set the "Belongs To
-        // Vendor" dropdown offers), never an arbitrary vendor id.
-        if ($this->belongs_to_vendor_id && ! Vendor::whereKey($this->belongs_to_vendor_id)->exists()) {
-            $this->addError('belongs_to_vendor_id', 'Invalid vendor selected.');
-
-            return;
-        }
-
-        $docType = $this->file->getClientOriginalExtension();
-        $ocrFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.' . $docType;
-        $ocrPath = '_temp_ocr/' . $ocrFilename;
-
-        Storage::disk('files')->put($ocrPath, file_get_contents($this->file->getRealPath()));
-
-        $analyzerId = config('services.azure_cu.analyzer_id_material_order');
-
-        $ocrData = app(\App\Http\Controllers\ReceiptController::class)
-            ->extractReceipt($ocrPath, 'material_order', null, null, null, $analyzerId);
-
-        if (isset($ocrData['error']) && $ocrData['error'] === true) {
-            Storage::disk('files')->delete($ocrPath);
-            $this->addError('file', 'Unable to process receipt. Please check the file and try again.');
-
-            return;
-        }
-
-        $fields = $ocrData['fields'] ?? [];
-
-        // Match vendor from OCR merchant name
-        $vendorId = null;
-        $merchantName = $fields['merchant_name'] ?? null;
-
-        if ($merchantName) {
-            $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
-            $matched = app(\App\Http\Controllers\CompanyEmailController::class)
-                ->fuzzyMatchVendor($merchantName, $vendors, 70.0);
-
-            if ($matched) {
-                $vendorId = $matched->id;
-            }
-        }
-
         $hubVendorId = auth()->user()->vendor->id;
-        $ownerVendorId = $this->belongs_to_vendor_id ?: $hubVendorId;
 
-        $expense = Expense::create([
-            'amount' => $fields['total'] ?? 0,
-            'date' => $fields['transaction_date'] ?? now()->format('Y-m-d'),
-            'invoice' => $fields['invoice_number'] ?? null,
-            'vendor_id' => $vendorId,
-            'project_id' => $this->project->id,
-            'belongs_to_vendor_id' => $ownerVendorId,
-            'created_by_user_id' => auth()->user()->id,
-        ]);
-
-        // Ensure the matched vendor is in the owner vendor's vendor list.
-        // Scoped: $ownerVendorId was checked above against the hub vendor or
-        // a vendor already linked to it.
-        if ($vendorId && $ownerVendorId !== $hubVendorId) {
-            $ownerVendor = Vendor::find($ownerVendorId);
-            if ($ownerVendor && ! $ownerVendor->vendors()->where('vendor_id', $vendorId)->exists()) {
-                $ownerVendor->vendors()->attach($vendorId);
+        try {
+            app(ProjectMaterialsUploader::class)->upload(
+                $this->project,
+                $this->file,
+                $this->belongs_to_vendor_id ? (int) $this->belongs_to_vendor_id : null,
+                auth()->id(),
+                $hubVendorId,
+            );
+        } catch (ValidationException $exception) {
+            foreach ($exception->errors() as $field => $messages) {
+                $this->addError($field, $messages[0] ?? 'Invalid.');
             }
+
+            return;
         }
-
-        // Attach project to the owner vendor with Invited status
-        if ($ownerVendorId !== $hubVendorId) {
-            if (! $this->project->vendors()->withoutGlobalScopes()->where('vendor_id', $ownerVendorId)->exists()) {
-                $this->project->vendors()->withoutGlobalScopes()->attach($ownerVendorId, ['client_id' => $this->project->client_id]);
-
-                if ($this->project->client_id && ! DB::table('client_vendor')->where('client_id', $this->project->client_id)->where('vendor_id', $ownerVendorId)->exists()) {
-                    DB::table('client_vendor')->insert([
-                        'client_id' => $this->project->client_id,
-                        'vendor_id' => $ownerVendorId,
-                        'source' => 'auto-attach',
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                }
-
-                ProjectStatus::create([
-                    'project_id' => $this->project->id,
-                    'belongs_to_vendor_id' => $ownerVendorId,
-                    'status_code' => ProjectStatus::getCodeForLabel('Invited') ?? 1,
-                    'start_date' => today()->format('Y-m-d'),
-                ]);
-            }
-        }
-
-        app(\App\Http\Controllers\CompanyEmailController::class)
-            ->saveExpenseReceipt($expense->id, $ocrData, $ocrFilename, null, false, true);
-
-        Storage::disk('files')->delete($ocrPath);
 
         $this->reset('file');
         $this->belongs_to_vendor_id = null;
