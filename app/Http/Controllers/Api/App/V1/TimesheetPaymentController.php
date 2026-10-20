@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The app's "Pay" screen — mirrors
@@ -90,17 +91,23 @@ class TimesheetPaymentController extends Controller
             ], 422);
         }
 
-        $check = $recorder->record(
-            $request->user(),
-            $target,
-            $selection,
-            (string) $request->validated('date'),
-            $request->validated('check_type'),
-            $request->filled('check_number') ? (int) $request->validated('check_number') : null,
-            $request->filled('bank_account_id') ? (int) $request->validated('bank_account_id') : null,
-            $request->filled('paid_by') ? (int) $request->validated('paid_by') : null,
-            $request->validated('invoice'),
-        );
+        try {
+            $check = $recorder->record(
+                $request->user(),
+                $target,
+                $selection,
+                (string) $request->validated('date'),
+                $request->validated('check_type'),
+                $request->filled('check_number') ? (int) $request->validated('check_number') : null,
+                $request->filled('bank_account_id') ? (int) $request->validated('bank_account_id') : null,
+                $request->filled('paid_by') ? (int) $request->validated('paid_by') : null,
+                $request->validated('invoice'),
+            );
+        } catch (ValidationException $e) {
+            $firstMessage = collect($e->errors())->flatten()->first() ?? 'Could not save this payment.';
+
+            return response()->json(['message' => $firstMessage, 'errors' => $e->errors()], 422);
+        }
 
         if (! $check) {
             return response()->json(['data' => ['check' => null]]);

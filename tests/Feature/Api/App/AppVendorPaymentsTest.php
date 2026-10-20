@@ -249,6 +249,34 @@ it('422s pairing paid_by with a selected reimbursement — deductions only settl
     expect(Check::withoutGlobalScopes()->where('vendor_id', $sub->id)->exists())->toBeFalse();
 });
 
+it('refuses a check number already used on a sibling account under the same bank, like the web', function () {
+    ['vendor' => $company, 'admin' => $admin] = appVendorPaymentsAdmin();
+    $this->actingAs($admin);
+    ['bank' => $bank, 'account' => $accountA] = appVendorPaymentsBankAccount($company);
+    // A re-linked Plaid item duplicates accounts under the same bank — same
+    // scenario CheckNumberSuggester::siblingAccountIds() exists for.
+    $accountB = BankAccount::query()->create([
+        'bank_id' => $bank->id, 'vendor_id' => $company->id, 'account_number' => 9877,
+        'plaid_account_id' => 'acct_vendor_pay_sibling_'.uniqid(), 'type' => 'Checking',
+    ]);
+    $sub = appVendorPaymentsSub($company);
+    $project = appVendorPaymentsProject($company, $sub, 1000.00);
+
+    Check::create(['check_type' => 'Check', 'check_number' => '5050', 'date' => '2026-07-01', 'amount' => 100, 'bank_account_id' => $accountA->id, 'vendor_id' => $sub->id, 'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson("/api/app/v1/vendors/{$sub->id}/payment", [
+        'date' => '2026-07-14',
+        'bank_account_id' => $accountB->id,
+        'check_type' => 'Check',
+        'check_number' => '5050',
+        'projects' => [['id' => $project->id, 'amount' => 500]],
+    ])->assertStatus(422)->assertJsonValidationErrors('check_number');
+
+    expect(Check::withoutGlobalScopes()->where('bank_account_id', $accountB->id)->exists())->toBeFalse();
+});
+
 it('never pays a project outside the tenant, even if the id rides in on the request', function () {
     ['vendor' => $company, 'admin' => $admin] = appVendorPaymentsAdmin();
     $this->actingAs($admin);

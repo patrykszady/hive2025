@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api\App;
 
 use App\Models\Timesheet;
+use App\Services\Checks\CheckNumberSuggester;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -48,9 +49,11 @@ class StoreTimesheetPaymentRequest extends FormRequest
             'check_type' => ['required_with:bank_account_id', 'nullable', 'in:Check,Transfer,Cash'],
             'check_number' => [
                 'required_if:check_type,Check', 'nullable', 'integer',
-                Rule::unique('checks', 'check_number')->where(function ($query) {
-                    $query->where('check_type', 'Check')->whereNull('deleted_at')->where('bank_account_id', $this->input('bank_account_id'));
-                }),
+                // Unique across every account under the same physical bank
+                // (CheckNumberSuggester::siblingAccountIds()), not just the
+                // one submitted account — a re-linked Plaid item duplicates
+                // accounts under one bank.
+                app(CheckNumberSuggester::class)->uniqueRule($this->filled('bank_account_id') ? (int) $this->input('bank_account_id') : null),
             ],
             'paid_by' => [
                 'nullable', 'required_without:bank_account_id', 'integer',

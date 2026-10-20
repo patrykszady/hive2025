@@ -340,6 +340,63 @@ it('pays via an employee (paid_by) instead of writing a check', function () {
     expect(Check::withoutGlobalScopes()->where('user_id', $member->id)->exists())->toBeFalse();
 });
 
+it('422s pairing paid_by with a selected reimbursement expense — deductions only settle through a check, same as vendor payments', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appPayrollAdmin();
+    $member = appPayrollMember($vendor);
+    $payer = appPayrollMember($vendor);
+
+    $timesheet = Timesheet::forceCreate([
+        'date' => '2026-05-11', 'user_id' => $member->id, 'vendor_id' => $vendor->id,
+        'hours' => 10, 'amount' => 300, 'hourly' => 30, 'created_by_user_id' => $member->id,
+    ]);
+    $reimbursement = Expense::create([
+        'date' => '2026-05-12', 'amount' => 50, 'reimbursment' => (string) $member->id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $member->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson("/api/app/v1/timesheets/payment/{$member->id}", [
+        'date' => '2026-05-20',
+        'paid_by' => $payer->id,
+        'invoice' => 'INV-1',
+        'weekly_timesheet_ids' => [$timesheet->id],
+        'reimbursement_expense_ids' => [$reimbursement->id],
+    ])->assertStatus(422)->assertJsonValidationErrors('paid_by');
+
+    expect(Check::withoutGlobalScopes()->where('user_id', $member->id)->exists())->toBeFalse()
+        ->and($timesheet->fresh()->check_id)->toBeNull()
+        ->and($reimbursement->fresh()->check_id)->toBeNull();
+});
+
+it('422s pairing paid_by with a selected paid-for expense — the web disables Paid By under the same condition', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appPayrollAdmin();
+    $member = appPayrollMember($vendor);
+    $payer = appPayrollMember($vendor);
+
+    $timesheet = Timesheet::forceCreate([
+        'date' => '2026-05-11', 'user_id' => $member->id, 'vendor_id' => $vendor->id,
+        'hours' => 10, 'amount' => 300, 'hourly' => 30, 'created_by_user_id' => $member->id,
+    ]);
+    $paidExpense = Expense::create([
+        'date' => '2026-05-12', 'amount' => 50, 'paid_by' => $member->id,
+        'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $member->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson("/api/app/v1/timesheets/payment/{$member->id}", [
+        'date' => '2026-05-20',
+        'paid_by' => $payer->id,
+        'invoice' => 'INV-2',
+        'weekly_timesheet_ids' => [$timesheet->id],
+        'paid_expense_ids' => [$paidExpense->id],
+    ])->assertStatus(422)->assertJsonValidationErrors('paid_by');
+
+    expect(Check::withoutGlobalScopes()->where('user_id', $member->id)->exists())->toBeFalse()
+        ->and($paidExpense->fresh()->check_id)->toBeNull();
+});
+
 it('422s a payment selection that totals $0 or less', function () {
     ['vendor' => $vendor, 'admin' => $admin] = appPayrollAdmin();
     ['account' => $account] = appPayrollBankAccount($vendor);
@@ -353,6 +410,36 @@ it('422s a payment selection that totals $0 or less', function () {
         'check_type' => 'Cash',
         'weekly_timesheet_ids' => [999999],
     ])->assertStatus(422)->assertJsonValidationErrors('payment_total');
+});
+
+it('refuses a check number already used on a sibling account under the same bank, like the web', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appPayrollAdmin();
+    ['bank' => $bank, 'account' => $accountA] = appPayrollBankAccount($vendor);
+    // A re-linked Plaid item duplicates accounts under the same bank — same
+    // scenario CheckNumberSuggester::siblingAccountIds() exists for.
+    $accountB = BankAccount::query()->create([
+        'bank_id' => $bank->id, 'vendor_id' => $vendor->id, 'account_number' => 4322,
+        'plaid_account_id' => 'acct_payroll_sibling_'.uniqid(), 'type' => 'Checking',
+    ]);
+    $member = appPayrollMember($vendor);
+    $timesheet = Timesheet::forceCreate([
+        'date' => '2026-05-11', 'user_id' => $member->id, 'vendor_id' => $vendor->id,
+        'hours' => 10, 'amount' => 300, 'hourly' => 30, 'created_by_user_id' => $member->id,
+    ]);
+
+    Check::create(['check_type' => 'Check', 'check_number' => '6060', 'date' => '2026-05-01', 'amount' => 100, 'bank_account_id' => $accountA->id, 'user_id' => $member->id, 'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson("/api/app/v1/timesheets/payment/{$member->id}", [
+        'date' => '2026-05-20',
+        'bank_account_id' => $accountB->id,
+        'check_type' => 'Check',
+        'check_number' => '6060',
+        'weekly_timesheet_ids' => [$timesheet->id],
+    ])->assertStatus(422)->assertJsonValidationErrors('check_number');
+
+    expect(Check::withoutGlobalScopes()->where('bank_account_id', $accountB->id)->exists())->toBeFalse();
 });
 
 it('never settles a timesheet id that is not genuinely this member\'s own unsettled row', function () {
