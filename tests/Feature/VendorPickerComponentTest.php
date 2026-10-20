@@ -94,3 +94,33 @@ it('prints the chosen vendor as the one option, and keeps its Alpine settings th
         ->and($settings($vendor))->toBe($settings($none))
         ->and($settings($noVendor))->toBe($settings($none));
 });
+
+it('gives vendor rows their Flux avatar, the same one the vendor has everywhere else, and none to a static choice', function (): void {
+    $company = Vendor::factory()->create(['business_name' => 'Owner LLC']);
+    $chosen = Vendor::factory()->create(['business_name' => 'Menards, Inc']);
+    $user = User::query()->create([
+        'first_name' => 'Patryk', 'last_name' => 'Szady', 'email' => 'vendor-picker-avatar-'.uniqid().'@example.test',
+        'cell_phone' => '2245550005', 'password' => null, 'primary_vendor_id' => $company->id,
+    ]);
+    $user->vendors()->attach($company->id, ['role_id' => 1]);
+    $this->actingAs($user);
+
+    $vendor = Livewire::withQueryParams(['expense_vendor' => $chosen->id])->test(ExpenseIndex::class)->html();
+    $noVendor = Livewire::withQueryParams(['expense_vendor' => '0'])->test(ExpenseIndex::class)->html();
+
+    // The chosen vendor is printed with the avatar flux:avatar gives it everywhere (name + color seeded by its id).
+    $everywhere = \Illuminate\Support\Facades\Blade::render('<flux:avatar size="xs" :name="$name" color="auto" :color:seed="$id" />', ['name' => $chosen->name, 'id' => $chosen->id]);
+    preg_match('/class="([^"]*bg-[a-z]+-200 text-[a-z]+-800[^"]*)"/', $everywhere, $classes);
+    $printed = substr($vendor, strpos($vendor, 'data-vendor-picker-options>'), 4000);
+
+    expect($classes[1] ?? null)->not->toBeNull()
+        ->and($printed)->toContain('data-flux-avatar')
+        ->and($printed)->toContain($classes[1])
+        // Same initials as flux:avatar prints for the vendor's display name.
+        ->and(preg_match('/<span class="select-none">([^<]+)<\/span>/', $everywhere, $initials))->toBe(1)
+        ->and(substr($printed, strpos($printed, 'data-flux-avatar'), 1500))->toContain('<span class="select-none">'.$initials[1].'</span>')
+        // The browser builds the other rows from the avatar template it is handed.
+        ->and($vendor)->toContain('__VP_INITIALS__')
+        // NO VENDOR is not a vendor: no avatar.
+        ->and(substr($noVendor, strpos($noVendor, 'data-vendor-picker-options>'), 3000))->not->toContain('data-flux-avatar');
+});

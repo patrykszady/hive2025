@@ -21,6 +21,44 @@ function escapeHtml(text) {
         .replaceAll("'", '&#039;');
 }
 
+// Flux's avatar, worked out the way its Blade component does
+// (vendor/livewire/flux/stubs/resources/views/flux/avatar/index.blade.php):
+// initials from the name, and a color picked by crc32(seed) — the vendor id —
+// from the same 17 colors in the same order, so a vendor's avatar here matches
+// the one it has everywhere else on the site.
+const AVATAR_COLORS = ['red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'];
+
+const CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        table[n] = c >>> 0;
+    }
+    return table;
+})();
+
+function crc32(text) {
+    const bytes = new TextEncoder().encode(String(text));
+    let crc = 0xffffffff;
+    for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+}
+
+function avatarInitials(name) {
+    const parts = String(name ?? '').trim().split(' ').filter(Boolean);
+    if (parts.length > 1) return (Array.from(parts[0])[0] + Array.from(parts[1])[0]).toUpperCase();
+    if (parts.length === 1) {
+        const chars = Array.from(parts[0]);
+        return chars[0].toUpperCase() + (chars[1] ?? '').toLowerCase();
+    }
+    return '';
+}
+
+function avatarColor(seed) {
+    return AVATAR_COLORS[crc32(seed) % AVATAR_COLORS.length];
+}
+
 function loadVendors(url) {
     if (!lists.has(url)) {
         const promise = fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
@@ -54,6 +92,7 @@ document.addEventListener('alpine:init', () => {
         details: !!config.details,
         url: config.url,
         template: config.template || '',
+        avatarTemplate: config.avatarTemplate || '',
         initial: null,        // the chosen option the server printed: {value, label}
         limit: config.limit || 60,
         vendors: [],
@@ -152,11 +191,33 @@ document.addEventListener('alpine:init', () => {
             return scored.slice(0, this.limit).map((entry) => entry[1]);
         },
 
-        option(value, label, hidden = false) {
-            const html = this.template
-                .replaceAll('__VP_VALUE__', escapeHtml(value))
-                .replaceAll('__VP_LABEL__', escapeHtml(label));
+        // avatarName: the vendor's name for its avatar, or null for a row
+        // without one (a static choice like "NO VENDOR").
+        option(value, label, hidden = false, avatarName = null) {
+            let html;
+            if (avatarName !== null && this.avatarTemplate) {
+                const color = avatarColor(value);
+                html = this.avatarTemplate
+                    .replaceAll('__VP_VALUE__', escapeHtml(value))
+                    .replaceAll('__VP_LABEL__', escapeHtml(label))
+                    .replaceAll('__VP_INITIALS__', escapeHtml(avatarInitials(avatarName)))
+                    .replace('bg-red-200 text-red-800', `bg-${color}-200 text-${color}-800`);
+            } else {
+                html = this.template
+                    .replaceAll('__VP_VALUE__', escapeHtml(value))
+                    .replaceAll('__VP_LABEL__', escapeHtml(label));
+            }
             return hidden ? html.replace('<ui-option', '<ui-option data-hidden') : html;
+        },
+
+        // The name a value's avatar is made from: the vendor's own name, the
+        // label the server printed, or none for a static choice.
+        avatarNameFor(value) {
+            const key = String(value);
+            if (this.extra.some((option) => option.value === key)) return null;
+            const vendor = this.vendors.find((candidate) => String(candidate.id) === key);
+            if (vendor) return vendor.name;
+            return /^\d+$/.test(key) ? (this.initial && this.initial.value === key ? this.initial.label : '') : null;
         },
 
         note(text) {
@@ -171,24 +232,24 @@ document.addEventListener('alpine:init', () => {
         render() {
             if (!this.open) {
                 const chosen = this.selectedOption;
-                return chosen ? this.option(chosen.value, chosen.label) : '';
+                return chosen ? this.option(chosen.value, chosen.label, false, this.avatarNameFor(chosen.value)) : '';
             }
             const rows = [];
             const seen = new Set();
-            const add = (value, label, hidden = false) => {
+            const add = (value, label, hidden = false, avatarName = null) => {
                 const key = String(value);
                 if (seen.has(key)) return;
                 seen.add(key);
-                rows.push(this.option(value, label, hidden));
+                rows.push(this.option(value, label, hidden, avatarName));
             };
             const listed = this.extra.filter((option) => this.matches(option.label))
-                .map((option) => [option.value, option.label])
-                .concat(this.filtered.map((vendor) => [String(vendor.id), this.optionLabel(vendor)]));
+                .map((option) => [option.value, option.label, null])
+                .concat(this.filtered.map((vendor) => [String(vendor.id), this.optionLabel(vendor), vendor.name]));
             const selected = this.selectedOption;
             if (selected && !listed.some(([value]) => value === String(selected.value))) {
-                add(selected.value, selected.label, !this.matches(selected.label));
+                add(selected.value, selected.label, !this.matches(selected.label), this.avatarNameFor(selected.value));
             }
-            listed.forEach(([value, label]) => add(value, label));
+            listed.forEach(([value, label, avatarName]) => add(value, label, false, avatarName));
 
             if (this.failed) rows.push(this.note('Could not load the vendor list. Reload the page to try again.'));
             else if (!this.loaded) rows.push(this.note('Loading vendors…'));

@@ -17,7 +17,10 @@
      - all:        every vendor, not only the ones visible to the company (Admins)
      - project-id: only vendors billed to that project
      - order:      "ytd" lists the most spent with over the last year first
-                   (before any search) instead of A–Z --}}
+                   (before any search) instead of A–Z
+     - avatars:    each vendor row carries its Flux avatar (initials, color
+                   seeded by the vendor id — the same avatar the vendor has
+                   everywhere on the site); on by default --}}
 @props([
     'label' => null,
     'placeholder' => 'Choose vendor...',
@@ -28,6 +31,7 @@
     'all' => false,
     'projectId' => null,
     'order' => null,
+    'avatars' => true,
     'size' => null,
 ])
 @php
@@ -38,6 +42,12 @@
     // each vendor, so every option is exactly Flux's markup.
     $optionTemplate = once(fn () => \Illuminate\Support\Facades\Blade::render(
         '<flux:select.option variant="listbox" value="__VP_VALUE__" label="__VP_LABEL__">__VP_LABEL__</flux:select.option>'
+    ));
+    // The same option with the vendor's Flux avatar. Rendered once in red; the
+    // browser swaps in each vendor's initials and color (Flux's own rules, see
+    // resources/js/vendor-picker.js).
+    $avatarTemplate = once(fn () => \Illuminate\Support\Facades\Blade::render(
+        '<flux:select.option variant="listbox" value="__VP_VALUE__" label="__VP_LABEL__"><div class="flex items-center gap-2 whitespace-nowrap"><flux:avatar size="xs" initials="__VP_INITIALS__" color="red" />__VP_LABEL__</div></flux:select.option>'
     ));
     // The chosen vendor's option is printed by the server, so the button shows
     // its name on the first paint instead of waiting for the list.
@@ -51,6 +61,7 @@
                 $selected = [
                     'value' => (string) $vendor->id,
                     'label' => $details && $vendor->city ? $vendor->name.' — '.$vendor->city.($vendor->state ? ', '.$vendor->state : '') : $vendor->name,
+                    'name' => $vendor->name,
                 ];
             }
         }
@@ -63,7 +74,19 @@
         'extra' => $extra,
         'details' => (bool) $details,
         'template' => $optionTemplate,
+        'avatarTemplate' => $avatars ? $avatarTemplate : null,
     ];
+    // The chosen option, printed by the server for the first paint — with the
+    // vendor's real Flux avatar when it is a vendor.
+    $printedSelected = null;
+    if ($selected) {
+        $printedSelected = $avatars && is_numeric($selected['value']) && ! collect($extra)->contains('value', $selected['value'])
+            ? \Illuminate\Support\Facades\Blade::render(
+                '<flux:select.option variant="listbox" :value="$value" :label="$label"><div class="flex items-center gap-2 whitespace-nowrap"><flux:avatar size="xs" :name="$name" color="auto" :color:seed="$value" />{{ $label }}</div></flux:select.option>',
+                ['value' => $selected['value'], 'label' => $selected['label'], 'name' => $selected['name'] ?? $selected['label']],
+            )
+            : str_replace(['__VP_VALUE__', '__VP_LABEL__'], [e($selected['value']), e($selected['label'])], $optionTemplate);
+    }
 @endphp
 <div
     x-data="vendorPicker(@js($config))"
@@ -98,6 +121,6 @@
         </x-slot>
 
         {{-- Livewire leaves these options to the browser (wire:ignore). --}}
-        <div class="contents" wire:ignore x-html="render()" data-vendor-picker-options>@if($selected){!! str_replace(['__VP_VALUE__', '__VP_LABEL__'], [e($selected['value']), e($selected['label'])], $optionTemplate) !!}@endif</div>
+        <div class="contents" wire:ignore x-html="render()" data-vendor-picker-options>@if($printedSelected){!! $printedSelected !!}@endif</div>
     </flux:select>
 </div>
