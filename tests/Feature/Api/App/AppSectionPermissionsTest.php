@@ -35,7 +35,25 @@ test('me carries the sections the web sidebar would show an admin', function () 
         ->and($permissions['expenses'])->toBeTrue()
         ->and($permissions['expenses_create'])->toBeTrue()
         ->and($permissions['clients'])->toBeTrue()
-        ->and($permissions['checks'])->toBeTrue();
+        ->and($permissions['checks'])->toBeTrue()
+        // Vendor id 1 is the Menards/EWCCV owner company by default
+        // (MENARDS_OWNER_VENDOR_ID defaults to 1), so its Admin passes
+        // both Gates, same as the web sidebar's Menards link.
+        ->and($permissions['menards_browser'])->toBeTrue()
+        ->and($permissions['ewccv_browser'])->toBeTrue();
+});
+
+test('hides Menards/EWCCV when vendor 1 is not the configured owner company, like the web Gate', function () {
+    // Every app user is vendor 1 (EnsureAppUserAllowed) — the only other way
+    // the Gate can fail here is the owner_vendor_id itself pointing elsewhere.
+    config(['services.menards.owner_vendor_id' => 999999]);
+
+    Sanctum::actingAs(appSectionPermissionsUser(1), ['app']);
+
+    $permissions = $this->getJson('/api/app/v1/me')->assertOk()->json('user.permissions');
+
+    expect($permissions['menards_browser'])->toBeFalse()
+        ->and($permissions['ewccv_browser'])->toBeFalse();
 });
 
 test('a member sees what the web shows a member, and never the money sections', function () {
@@ -56,6 +74,7 @@ test('a member sees what the web shows a member, and never the money sections', 
             'checks' => $member->can('viewAny', \App\Models\Check::class),
             'vendors', 'team' => true,
             'own_balance' => $member->can('viewPayment', [\App\Models\Timesheet::class, $member]),
+            'menards_browser', 'ewccv_browser' => false, // vendor_role isn't Admin
             default => $allowed,
         }, "section {$section}");
     }

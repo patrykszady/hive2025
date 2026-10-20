@@ -20,6 +20,7 @@ use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Which sections of Hive the signed-in person may open, for the app's
@@ -77,6 +78,11 @@ class AppSectionPermissions
             // The unplaced email inbox: Admins, the same gate as Email Accounts.
             'unplaced_emails' => $user->can('viewAny', CompanyEmail::class),
             'agents' => $user->id === 1,
+            // Global Actions' shared server browsers — same Gates the web
+            // sidebar checks for the Menards sign-in link and (indirectly,
+            // via the same gate) the EWCCV browser.
+            'menards_browser' => Gate::forUser($user)->allows('menards-browser'),
+            'ewccv_browser' => Gate::forUser($user)->allows('ewccv-browser'),
         ];
     }
 }
