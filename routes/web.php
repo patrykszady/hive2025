@@ -224,6 +224,20 @@ Route::get('lien-waivers/{lienWaiver}/download/signed', [\App\Http\Controllers\L
     ->middleware('signed')
     ->name('lien-waivers.download.signed');
 
+// A draw's GCSS sworn statement / full package PDF for the Hive Contractors
+// app: time-limited signed links handed out by GET
+// /api/app/v1/lien-waivers/draws/{id} (see
+// App\Http\Resources\Api\App\SwornStatementResource), so the app's draw
+// detail screen can preview/download the same documents
+// LienWaiverController::downloadSwornStatement()/downloadDrawPackage() the
+// web's auth-gated routes use, without a web session.
+Route::get('sworn-statements/{swornStatement}/download/signed', [\App\Http\Controllers\LienWaiverController::class, 'downloadSwornStatementSigned'])
+    ->middleware('signed')
+    ->name('sworn-statements.download.signed');
+Route::get('sworn-statements/{swornStatement}/download-package/signed', [\App\Http\Controllers\LienWaiverController::class, 'downloadDrawPackageSigned'])
+    ->middleware('signed')
+    ->name('sworn-statements.download-package.signed');
+
 // An estimate PDF for the Hive Contractors app: a time-limited signed link
 // handed out by GET /api/app/v1/estimates/{id}/pdf-url (see
 // Api\App\V1\EstimateController::pdfUrl), so the app's estimate detail

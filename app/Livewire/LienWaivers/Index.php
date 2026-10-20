@@ -548,8 +548,8 @@ class Index extends Component
         // whichever draw was opened last.
         $this->editingStatementId = null;
         $this->ssThisPayment = null;
-        $this->ssRows = \App\Support\SwornStatementGenerator::buildRows($this->project, $this->contractorVendor);
-        $this->attachPriorSignedWaivers();
+        $this->ssRows = app(\App\Services\LienWaivers\DrawPackageService::class)
+            ->newDrawRows($this->project, $this->contractorVendor);
         unset($this->kindOfWorkOptions);
         $this->showSwornStatement = true;
     }
@@ -585,103 +585,28 @@ class Index extends Component
             return;
         }
 
+        $this->resetValidation();
+
         // A notarized GCSS swears to specific figures. Once its signed scan is
         // back the draw's numbers are settled — its unsigned waivers can still
         // be sent and signed, they just can't be re-priced underneath it.
-        if ($statement->status === LienWaiverStatus::Signed) {
+        try {
+            $draw = app(\App\Services\LienWaivers\DrawPackageService::class)
+                ->editableDraw($statement, $this->project, $this->contractorVendor);
+        } catch (\App\Exceptions\LienWaivers\DrawAlreadySignedException $e) {
             Flux::toast(
-                text: 'Draw ' . $statement->drawNumber() . ' has a signed sworn statement and can no longer be edited.',
+                text: 'Draw ' . $e->drawNumber() . ' has a signed sworn statement and can no longer be edited.',
                 variant: 'danger',
             );
 
             return;
         }
 
-        $this->resetValidation();
-
-        $waivers = LienWaiver::withoutGlobalScopes()
-            ->where('sworn_statement_id', $statement->id)
-            ->where('belongs_to_vendor_id', $tenantId)
-            ->whereNull('deleted_at')
-            ->get()
-            ->keyBy(fn ($waiver) => (int) $waiver->vendor_id);
-
-        $rows = \App\Support\SwornStatementGenerator::buildRows($this->project, $this->contractorVendor);
-        $seen = [];
-
-        foreach ($rows as $i => $row) {
-            $vendorId = (int) ($row['vendor_id'] ?? 0);
-            $waiver = $waivers->get($vendorId);
-
-            if (! $waiver) {
-                // Has money on the job but isn't on this draw — offered
-                // unchecked so it can be added.
-                $rows[$i]['include'] = false;
-
-                continue;
-            }
-
-            $seen[] = $vendorId;
-            $rows[$i] = $this->applyWaiverToRow($rows[$i], $waiver);
-        }
-
-        // A vendor can be on the draw yet fall out of buildRows() later (its
-        // expense was recategorised, its bid deleted). Keep it on the form —
-        // dropping it silently would delete its waiver on the next save.
-        foreach ($waivers as $vendorId => $waiver) {
-            if (in_array((int) $vendorId, $seen, true) || (int) $vendorId === $tenantId) {
-                continue;
-            }
-
-            $rows[] = $this->applyWaiverToRow([
-                'vendor_id' => (int) $vendorId,
-                'name' => (string) ($waiver->vendor?->business_name ?? 'Vendor #' . $vendorId),
-                'include' => true,
-                'kind' => '',
-                'is_retail' => false,
-                'is_material' => false,
-                'contract' => '',
-                'paid' => 0.0,
-                'this_payment' => '',
-            ], $waiver);
-        }
-
-        $this->ssRows = $rows;
-        // Offer the previous draw's signed amount on any row still pending, so
-        // a vendor whose figure hasn't really moved can be carried over instead
-        // of chased for another signature.
-        $this->attachPriorSignedWaivers(excludeStatementId: (int) $statement->id, defaultOn: false);
-        $this->ssThisPayment = number_format((float) $statement->this_payment, 2, '.', '');
+        $this->ssRows = $draw['rows'];
+        $this->ssThisPayment = $draw['this_payment'];
         $this->editingStatementId = (int) $statement->id;
         unset($this->kindOfWorkOptions);
         $this->showSwornStatement = true;
-    }
-
-    /**
-     * Overlay an existing waiver onto a statement row.
-     *
-     * The stored amount is paid-to-date PLUS what was entered for the draw, so
-     * the entry is re-derived against today's paid figure. That way reopening
-     * a draw and saving it unchanged leaves every waiver amount exactly where
-     * it was, even if payments landed in between.
-     */
-    protected function applyWaiverToRow(array $row, LienWaiver $waiver): array
-    {
-        $entry = round((float) $waiver->amount - (float) ($row['paid'] ?? 0), 2);
-        $notes = json_decode((string) $waiver->notes, true) ?: [];
-        $kind = trim((string) ($notes['kind_of_work'] ?? ''));
-
-        $row['include'] = true;
-        $row['waiver_id'] = (int) $waiver->id;
-        $row['waiver_signed'] = $waiver->isSigned();
-        $row['waiver_status'] = $waiver->statusLabel();
-        $row['this_payment'] = $entry > 0 ? number_format($entry, 2, '.', '') : '';
-
-        if ($kind !== '') {
-            $row['kind'] = $kind;
-        }
-
-        return $row;
     }
 
     /**
@@ -692,73 +617,8 @@ class Index extends Component
     #[Computed]
     public function kindOfWorkOptions(): array
     {
-        $defaults = [
-            'Carpentry', 'Plumbing', 'Electrical', 'HVAC', 'Roofing', 'Drywall',
-            'Painting', 'Flooring', 'Tile', 'Masonry', 'Concrete', 'Excavation',
-            'Demolition', 'Insulation', 'Windows & doors', 'Landscaping',
-            'Materials', 'Equipment rental', 'Debris removal',
-        ];
-
-        $tenantId = (int) ($this->contractorVendor?->id ?? 0);
-
-        // Saved work types (the table is the source of record going forward)…
-        $saved = \App\Models\WorkType::query()
-            ->where('belongs_to_vendor_id', $tenantId)
-            ->pluck('name');
-
-        // …plus kinds used on past waivers before the table existed.
-        $used = LienWaiver::withoutGlobalScopes()
-            ->where('belongs_to_vendor_id', $tenantId)
-            ->whereNotNull('notes')
-            ->pluck('notes')
-            ->map(fn ($notes) => trim((string) (json_decode((string) $notes, true)['kind_of_work'] ?? '')))
-            ->filter();
-
-        $unique = [];
-        foreach ($saved->merge($used)->merge($defaults) as $kind) {
-            $key = mb_strtolower($kind);
-            if (! array_key_exists($key, $unique)) {
-                $unique[$key] = $kind;
-            }
-        }
-
-        return collect(array_values($unique))
-            ->sort(fn (string $a, string $b) => strcasecmp($a, $b))
-            ->values()
-            ->all();
-    }
-
-    /** Map the project's state to a lien-waiver jurisdiction code. */
-    protected function projectJurisdiction(): string
-    {
-        return app(\App\Services\LienWaivers\LienWaiverCreator::class)->jurisdictionFor($this->project);
-    }
-
-    /**
-     * The vendor ids a draw's rows may legitimately carry: whoever
-     * buildRows() would offer today (has an expense, check-payment or bid on
-     * this project) plus, when editing, whoever is already on that draw's
-     * existing waivers — a vendor can fall out of buildRows() later (its
-     * expense was recategorised, its bid deleted) and must stay editable
-     * rather than be treated as tampering. The contractor's own id is always
-     * allowed (the GC's own row).
-     */
-    protected function allowedSwornStatementVendorIds($contractor): \Illuminate\Support\Collection
-    {
-        $allowed = collect(\App\Support\SwornStatementGenerator::buildRows($this->project, $contractor))
-            ->pluck('vendor_id')
-            ->map(fn ($id) => (int) $id);
-
-        if ($this->editingStatementId) {
-            $existing = LienWaiver::withoutGlobalScopes()
-                ->where('sworn_statement_id', $this->editingStatementId)
-                ->pluck('vendor_id')
-                ->map(fn ($id) => (int) $id);
-
-            $allowed = $allowed->merge($existing);
-        }
-
-        return $allowed->merge([(int) $contractor->id])->unique();
+        return app(\App\Services\LienWaivers\DrawPackageService::class)
+            ->kindOfWorkOptions($this->contractorVendor);
     }
 
     /**
@@ -780,44 +640,14 @@ class Index extends Component
             return;
         }
 
-        // Money inputs format with thousands separators as you type.
-        $this->ssThisPayment = $this->ssThisPayment !== null
-            ? str_replace(',', '', $this->ssThisPayment)
-            : null;
+        $service = app(\App\Services\LienWaivers\DrawPackageService::class);
 
-        foreach ($this->ssRows as $i => $row) {
-            foreach (['contract', 'this_payment'] as $field) {
-                if (($row[$field] ?? '') !== '') {
-                    $this->ssRows[$i][$field] = str_replace(',', '', (string) $row[$field]);
-                }
-            }
-        }
+        [$this->ssRows, $this->ssThisPayment] = $service->normalize($this->ssRows, $this->ssThisPayment);
 
         // One validation pass so every problem shows at once — the draw
         // amount, the money fields, and the type of work required for each
         // included vendor (it prints on the statement and the affidavit).
-        $validator = \Illuminate\Support\Facades\Validator::make(
-            ['ssThisPayment' => $this->ssThisPayment, 'ssRows' => $this->ssRows],
-            [
-                'ssThisPayment' => ['required', 'numeric', 'gte:0.01'],
-                'ssRows.*.kind' => ['nullable', 'string', 'max:120'],
-                // bids.amount is decimal(8,2) — cap so a saved bid can't overflow.
-                'ssRows.*.contract' => ['nullable', 'numeric', 'gte:0', 'lte:999999.99'],
-                'ssRows.*.this_payment' => ['nullable', 'numeric', 'gte:0'],
-            ],
-            [
-                'ssThisPayment.required' => 'Enter the amount the owner is paying with this draw.',
-                'ssThisPayment.gte' => 'The draw amount must be at least $0.01.',
-            ],
-        );
-
-        $validator->after(function ($v) {
-            foreach ($this->ssRows as $i => $row) {
-                if (! empty($row['include']) && trim((string) ($row['kind'] ?? '')) === '') {
-                    $v->errors()->add("ssRows.{$i}.kind", 'Select the type of work.');
-                }
-            }
-        });
+        $validator = $service->buildValidator($this->ssRows, $this->ssThisPayment);
 
         $this->resetErrorBag();
 
@@ -827,146 +657,95 @@ class Index extends Component
             return;
         }
 
-        // ssRows is a public array — its vendor_id values round-trip through
-        // the browser on every request and are not otherwise checksummed.
-        // Drop any row whose vendor wasn't actually offered by buildRows()
-        // (has money/a bid on this project) or already on this draw, so a
-        // tampered id can't create a Bid, rewrite a Vendor, or mail a lien
-        // waiver to an unrelated company.
-        $allowedVendorIds = $this->allowedSwornStatementVendorIds($contractor);
-        $this->ssRows = collect($this->ssRows)
-            ->filter(fn ($row) => $allowedVendorIds->contains((int) ($row['vendor_id'] ?? 0)))
-            ->values()
-            ->all();
-
-        // Contract amounts typed here for vendors with no bid on the project are
-        // saved as their bid, so the next statement prefills itself. Existing
-        // bids are never overwritten (they may be structured base + extras).
-        $savedBids = 0;
-
-        foreach ($this->ssRows as $row) {
-            $contract = (string) ($row['contract'] ?? '');
-
-            if (empty($row['include']) || $contract === '' || (float) $contract <= 0) {
-                continue;
-            }
-
-            $hasBid = \App\Models\Bid::withoutGlobalScopes()
-                ->where('project_id', $this->project->id)
-                ->where('vendor_id', (int) $row['vendor_id'])
-                ->exists();
-
-            if (! $hasBid) {
-                \App\Models\Bid::withoutGlobalScopes()->create([
-                    'project_id' => $this->project->id,
-                    'vendor_id' => (int) $row['vendor_id'],
-                    'amount' => (float) $contract,
-                    'type' => 1,
-                ]);
-                $savedBids++;
-            }
-        }
-
-        // Create the full draw package: the GC's own waiver+affidavit for this
-        // Selected kinds of work become WorkType records and each vendor's
-        // default, so the next statement (and the planner/tasks) prefill them.
-        $this->saveWorkTypesFromStatement($contractor);
-
-        // Editing an existing draw reuses everything above (normalisation,
-        // validation, bid + work-type saving) and then diverges: it must
-        // preserve signed waivers rather than create a second package.
+        // Editing an existing draw reuses the same write logic and then
+        // diverges: it must preserve signed waivers rather than create a
+        // second package.
         if ($this->editingStatementId) {
-            return $this->updateSwornStatement($contractor);
-        }
+            $statement = \App\Models\SwornStatement::query()
+                ->where('belongs_to_vendor_id', $contractor->id)
+                ->find($this->editingStatementId);
 
-        // The statement record anchors the draw: waivers created below are
-        // stamped with its id so the card groups per draw and the package can
-        // be downloaded per statement.
-        $statement = \App\Models\SwornStatement::create([
-            'project_id' => $this->project->id,
-            'belongs_to_vendor_id' => $contractor->id,
-            'this_payment' => (float) $this->ssThisPayment,
-            'created_by_user_id' => auth()->id(),
-        ]);
+            if (! $statement) {
+                $this->editingStatementId = null;
+                Flux::toast(text: 'That draw no longer exists.', variant: 'danger');
 
-        // Create the draw package: the GC's own waiver+affidavit for this
-        // draw, plus a waiver for every sub on the statement.
-        $createdGcWaiver = $this->createGcWaiverForStatement($contractor, $statement->id);
-        $subWaivers = $this->createSubWaiversForStatement($contractor, $statement->id);
-
-        $doc = \App\Support\SwornStatementGenerator::generate(
-            $this->project,
-            $contractor,
-            $this->ssRows,
-            (float) $this->ssThisPayment,
-            $statement->drawNumber(),
-            $statement->id,
-        );
-
-        $relativePath = sprintf('sworn-statements/%d/%d/%s', $this->project->id, $statement->id, $doc['filename']);
-        \Illuminate\Support\Facades\Storage::disk('files')->put($relativePath, $doc['binary']);
-        $statement->forceFill(['filename' => $doc['filename'], 'path' => $relativePath])->save();
-
-        // The immediate download bundles the GCSS with the GC's own waiver.
-        $downloadBinary = $doc['binary'];
-        $downloadName = $doc['filename'];
-        $gcWaiver = LienWaiver::withoutGlobalScopes()
-            ->where('sworn_statement_id', $statement->id)
-            ->where('vendor_id', $contractor->id)
-            ->whereNull('deleted_at')
-            ->latest('id')
-            ->first();
-
-        if ($gcWaiver) {
-            try {
-                $gcDoc = \App\Support\LienWaiverDocumentGenerator::generate($gcWaiver);
-                $merged = \App\Support\PdfMerger::merge([$doc['binary'], $gcDoc['binary']]);
-
-                if ($merged !== null && $merged !== $doc['binary']) {
-                    $downloadBinary = $merged;
-                    $downloadName = \App\Mail\DrawPackageMail::packageFilenameFor($statement);
-                }
-            } catch (\Throwable) {
-                // GC waiver render failed — the GCSS alone still downloads.
+                return;
             }
+
+            try {
+                $result = $service->updateDraw($statement, $this->project, $contractor, $this->ssRows, (float) $this->ssThisPayment, auth()->user());
+            } catch (\App\Exceptions\LienWaivers\DrawAlreadySignedException $e) {
+                Flux::toast(
+                    text: 'Draw ' . $e->drawNumber() . ' was signed while you were editing — no changes saved.',
+                    variant: 'danger',
+                );
+                $this->showSwornStatement = false;
+                $this->editingStatementId = null;
+
+                return;
+            }
+
+            $this->showSwornStatement = false;
+            $this->editingStatementId = null;
+            unset($this->waivers, $this->swornStatements, $this->drawGroups);
+
+            $parts = [];
+            if ($result['revised'] > 0) {
+                $parts[] = $result['revised'] . ' waiver' . ($result['revised'] === 1 ? '' : 's') . ' revised and re-sent';
+            }
+            if (($result['added_sent'] ?? 0) > 0) {
+                $parts[] = $result['added_sent'] . ' added';
+            }
+            if (($result['added_printed'] ?? 0) > 0) {
+                $parts[] = $result['added_printed'] . ' added and emailed to you to forward';
+            }
+            if (($result['added_reused'] ?? 0) > 0) {
+                $parts[] = $result['added_reused'] . ' carried over from a prior signed waiver';
+            }
+            if ($result['removed'] > 0) {
+                $parts[] = $result['removed'] . ' removed';
+            }
+            if ($result['frozen'] > 0) {
+                $parts[] = $result['frozen'] . ' signed waiver' . ($result['frozen'] === 1 ? '' : 's') . ' left untouched';
+            }
+
+            Flux::toast(
+                text: 'Draw ' . $result['statement']->drawNumber() . ' updated' . ($parts ? ' — ' . implode(', ', $parts) . '.' : '.'),
+                variant: 'success',
+            );
+
+            return;
         }
 
-        // The producer also gets the package by email for their records; the
-        // job flips the statement + GC waiver to Sent after the actual send.
-        $producer = auth()->user();
-        $emailedProducer = false;
-        if ($producer && ! empty($producer->email)) {
-            \App\Jobs\SendDrawPackageJob::dispatch($statement->id, $producer->id);
-            $emailedProducer = true;
-        }
+        $result = $service->createDraw($this->project, $contractor, $this->ssRows, (float) $this->ssThisPayment, auth()->user());
 
         $this->showSwornStatement = false;
         unset($this->waivers, $this->swornStatements);
 
         $parts = [];
-        if ($createdGcWaiver) {
+        if ($result['gc_waiver_created']) {
             $parts[] = 'GC waiver created';
         }
-        if ($subWaivers['sent'] > 0) {
-            $parts[] = $subWaivers['sent'] . ' sub waiver' . ($subWaivers['sent'] === 1 ? '' : 's') . ' sent for signature';
+        if ($result['sub_sent'] > 0) {
+            $parts[] = $result['sub_sent'] . ' sub waiver' . ($result['sub_sent'] === 1 ? '' : 's') . ' sent for signature';
         }
-        if ($subWaivers['printed'] > 0) {
-            $parts[] = $subWaivers['printed'] . ' waiver' . ($subWaivers['printed'] === 1 ? '' : 's') . ' emailed to you to forward (no vendor email on file)';
+        if ($result['sub_printed'] > 0) {
+            $parts[] = $result['sub_printed'] . ' waiver' . ($result['sub_printed'] === 1 ? '' : 's') . ' emailed to you to forward (no vendor email on file)';
         }
-        if (($subWaivers['reused'] ?? 0) > 0) {
-            $parts[] = $subWaivers['reused'] . ' signed waiver' . ($subWaivers['reused'] === 1 ? '' : 's') . ' carried over from the last draw';
+        if (($result['sub_reused'] ?? 0) > 0) {
+            $parts[] = $result['sub_reused'] . ' signed waiver' . ($result['sub_reused'] === 1 ? '' : 's') . ' carried over from the last draw';
         }
-        if ($savedBids > 0) {
-            $parts[] = $savedBids . ' contract amount' . ($savedBids === 1 ? '' : 's') . ' saved as bids';
+        if ($result['saved_bids'] > 0) {
+            $parts[] = $result['saved_bids'] . ' contract amount' . ($result['saved_bids'] === 1 ? '' : 's') . ' saved as bids';
         }
-        if ($emailedProducer) {
+        if ($result['emailed_producer']) {
             $parts[] = 'package emailed to you';
         }
 
         // Waiver requests to subs wait for the GC's business hours; say so,
         // otherwise "sent for signature" reads as already-in-their-inbox.
-        $waiverSendAt = $this->waiverSendAt();
-        if ($waiverSendAt->isFuture() && (($subWaivers['sent'] ?? 0) + ($subWaivers['printed'] ?? 0)) > 0) {
+        $waiverSendAt = $result['send_at'];
+        if ($waiverSendAt->isFuture() && (($result['sub_sent'] ?? 0) + ($result['sub_printed'] ?? 0)) > 0) {
             $parts[] = 'signature requests send ' . $waiverSendAt->diffForHumans() . ' (' . $waiverSendAt->format('D g:i A') . '), during business hours';
         }
 
@@ -976,8 +755,8 @@ class Index extends Component
         );
 
         return response()->streamDownload(
-            fn () => print($downloadBinary),
-            $downloadName,
+            fn () => print($result['download_binary']),
+            $result['download_filename'],
             ['Content-Type' => 'application/pdf'],
         );
     }
@@ -991,15 +770,12 @@ class Index extends Component
     #[Computed]
     public function hasSignedContract(): bool
     {
-        if (! $this->project || ! $this->contractorVendor) {
+        if (! $this->project) {
             return false;
         }
 
-        return \App\Models\Bid::withoutGlobalScopes()
-            ->where('project_id', $this->project->id)
-            ->where('vendor_id', $this->contractorVendor->id)
-            ->where('type', 1)
-            ->exists();
+        return app(\App\Services\LienWaivers\DrawPackageService::class)
+            ->hasSignedContract($this->project, $this->contractorVendor);
     }
 
     /**
@@ -1012,38 +788,12 @@ class Index extends Component
     #[Computed]
     public function drawGroups(): array
     {
-        $tenantId = (int) ($this->contractorVendor?->id ?? 0);
-
-        if (! $tenantId || ! $this->project) {
+        if (! $this->project) {
             return ['draws' => collect(), 'other' => collect()];
         }
 
-        $statements = \App\Models\SwornStatement::query()
-            ->where('belongs_to_vendor_id', $tenantId)
-            ->where('project_id', $this->project->id)
-            ->orderByDesc('created_at')
-            ->get();
-
-        $waivers = LienWaiver::query()
-            ->where('project_id', $this->project->id)
-            ->with(['vendor' => fn ($q) => $q->withoutGlobalScopes()])
-            ->orderByRaw('vendor_id = ? DESC', [$tenantId])
-            ->orderBy('vendor_id')
-            ->get();
-
-        $byStatement = $waivers->groupBy(fn ($w) => (int) ($w->sworn_statement_id ?? 0));
-        $statementIds = $statements->pluck('id')->map(fn ($id) => (int) $id)->all();
-
-        $draws = $statements->map(fn ($statement) => [
-            'statement' => $statement,
-            'waivers' => $byStatement->get((int) $statement->id, collect()),
-        ]);
-
-        $other = $waivers
-            ->filter(fn ($w) => ! in_array((int) ($w->sworn_statement_id ?? 0), $statementIds, true))
-            ->values();
-
-        return ['draws' => $draws, 'other' => $other];
+        return app(\App\Services\LienWaivers\DrawPackageService::class)
+            ->drawGroups($this->project, $this->contractorVendor);
     }
 
     /**
@@ -1091,18 +841,8 @@ class Index extends Component
     #[Computed]
     public function swornStatements()
     {
-        $tenantId = (int) ($this->contractorVendor?->id ?? 0);
-
-        if (! $tenantId) {
-            return collect();
-        }
-
-        return \App\Models\SwornStatement::query()
-            ->where('belongs_to_vendor_id', $tenantId)
-            ->when($this->project, fn ($q) => $q->where('project_id', $this->project->id))
-            ->with('project:id,project_name,address')
-            ->orderByDesc('created_at')
-            ->get();
+        return app(\App\Services\LienWaivers\DrawPackageService::class)
+            ->swornStatements($this->contractorVendor, $this->project);
     }
 
     /** Draw pending delete confirmation (drives the confirm modal). */
@@ -1131,27 +871,8 @@ class Index extends Component
             return null;
         }
 
-        $statement = \App\Models\SwornStatement::query()
-            ->where('belongs_to_vendor_id', (int) ($this->contractorVendor?->id ?? 0))
-            ->find($this->deletingDrawId);
-
-        if (! $statement) {
-            return null;
-        }
-
-        $waivers = LienWaiver::withoutGlobalScopes()
-            ->where('sworn_statement_id', $statement->id)
-            ->where('belongs_to_vendor_id', (int) ($this->contractorVendor?->id ?? 0))
-            ->whereNull('deleted_at')
-            ->get(['id', 'status']);
-
-        return [
-            'statement' => $statement,
-            'number' => $statement->drawNumber(),
-            'total' => $waivers->count(),
-            'sent' => $waivers->where('status', LienWaiverStatus::Sent)->count(),
-            'signed' => $waivers->where('status', LienWaiverStatus::Signed)->count(),
-        ];
+        return app(\App\Services\LienWaivers\DrawPackageService::class)
+            ->deletingDrawSummary($this->deletingDrawId, $this->contractorVendor);
     }
 
     public function deleteConfirmedDraw(): void
@@ -1178,459 +899,19 @@ class Index extends Component
         // Deleting a draw removes the whole package: the GCSS and every waiver
         // stamped with it. Everything is soft-deleted (recoverable, stops
         // blocking dedup on the next draw) — the stored PDFs stay on disk.
-        LienWaiver::withoutGlobalScopes()
-            ->where('sworn_statement_id', $statement->id)
-            ->where('belongs_to_vendor_id', (int) ($this->contractorVendor?->id ?? 0))
-            ->whereNull('deleted_at')
-            ->get()
-            ->each
-            ->delete();
+        app(\App\Services\LienWaivers\DrawPackageService::class)
+            ->deleteDraw($statement, $this->contractorVendor);
 
-        $statement->delete();
         unset($this->swornStatements, $this->waivers, $this->drawGroups);
 
         Flux::toast(text: 'Draw deleted.', variant: 'success');
     }
 
     /**
-     * Persist each included row's Kind of Work: find-or-create the WorkType
-     * (per tenant, case-insensitive) and set it as the vendor's default so
-     * future statements, planner entries and tasks prefill it.
-     */
-    protected function saveWorkTypesFromStatement($contractor): void
-    {
-        foreach ($this->ssRows as $row) {
-            $kind = trim((string) ($row['kind'] ?? ''));
-            $vendorId = (int) ($row['vendor_id'] ?? 0);
-
-            if (empty($row['include']) || $kind === '' || $vendorId === 0) {
-                continue;
-            }
-
-            $workType = \App\Models\WorkType::resolve((int) $contractor->id, $kind);
-
-            if (! $workType) {
-                continue;
-            }
-
-            \App\Models\Vendor::withoutGlobalScopes()
-                ->whereKey($vendorId)
-                ->where(fn ($q) => $q->whereNull('work_type_id')->orWhere('work_type_id', '!=', $workType->id))
-                ->update(['work_type_id' => $workType->id]);
-        }
-    }
-
-    /**
-     * Create the GC's own waiver+affidavit for the draw the statement covers —
-     * claimant and payer-of-record are both the GC, the payer on the document
-     * is the project client, amount is "Net amount of this payment". Skipped
-     * when the draw is zero or the GC already has an open waiver.
-     */
-    /**
-     * Apply edits to an existing draw.
-     *
-     * Locking is per waiver, not per draw: a signed waiver is frozen (it can't
-     * be re-priced or dropped), while every unsigned one on the same draw stays
-     * fully adjustable. Changed waivers keep their status and access token, so
-     * the link the vendor already has now serves the corrected document — and
-     * they get a fresh email flagging that the earlier copy is void.
-     */
-    protected function updateSwornStatement($contractor)
-    {
-        $tenantId = (int) ($contractor?->id ?? 0);
-
-        $statement = \App\Models\SwornStatement::query()
-            ->where('belongs_to_vendor_id', $tenantId)
-            ->find($this->editingStatementId);
-
-        if (! $statement) {
-            $this->editingStatementId = null;
-            Flux::toast(text: 'That draw no longer exists.', variant: 'danger');
-
-            return;
-        }
-
-        // Re-checked here, not just in editDraw(): the GCSS scan can land while
-        // the modal is open.
-        if ($statement->status === LienWaiverStatus::Signed) {
-            Flux::toast(
-                text: 'Draw ' . $statement->drawNumber() . ' was signed while you were editing — no changes saved.',
-                variant: 'danger',
-            );
-            $this->showSwornStatement = false;
-            $this->editingStatementId = null;
-
-            return;
-        }
-
-        $existing = LienWaiver::withoutGlobalScopes()
-            ->where('sworn_statement_id', $statement->id)
-            ->where('belongs_to_vendor_id', $tenantId)
-            ->whereNull('deleted_at')
-            ->get()
-            ->keyBy(fn ($waiver) => (int) $waiver->vendor_id);
-
-        $revised = 0;
-        $removed = 0;
-        $frozen = 0;
-        $addedRows = [];
-
-        foreach ($this->ssRows as $row) {
-            $vendorId = (int) ($row['vendor_id'] ?? 0);
-
-            // The GC's own waiver tracks the draw amount, handled below.
-            if ($vendorId === 0 || $vendorId === $tenantId) {
-                continue;
-            }
-
-            $waiver = $existing->get($vendorId);
-            $included = ! empty($row['include']);
-
-            // Signed waivers are immovable in both directions — neither
-            // re-priced nor dropped off the draw they were sworn against.
-            if ($waiver && $waiver->isSigned()) {
-                $frozen++;
-
-                continue;
-            }
-
-            if (! $waiver) {
-                if ($included) {
-                    $addedRows[] = $row;
-                }
-
-                continue;
-            }
-
-            if (! $included) {
-                // Soft delete: recoverable, and stops it blocking dedup on the
-                // next draw.
-                $waiver->delete();
-                $removed++;
-
-                continue;
-            }
-
-            // Carrying the prior signature in: the pending waiver gives way to
-            // a copy of the signed one. Soft-deleting it first also clears the
-            // open-waiver dedup, so the creation path builds the reused row.
-            if (! empty($row['reuse_signed']) && ! empty($row['prior_signed_id'])) {
-                $waiver->delete();
-                $addedRows[] = $row;
-
-                continue;
-            }
-
-            if ($this->reviseWaiverFromRow($waiver, $row)) {
-                $revised++;
-            }
-        }
-
-        // New vendors go through the normal creation path so they pick up the
-        // same typing, finality and send rules as a fresh draw.
-        if ($addedRows !== []) {
-            $allRows = $this->ssRows;
-            $this->ssRows = $addedRows;
-
-            try {
-                $added = $this->createSubWaiversForStatement($contractor, $statement->id);
-            } finally {
-                $this->ssRows = $allRows;
-            }
-        } else {
-            $added = ['sent' => 0, 'printed' => 0, 'reused' => 0];
-        }
-
-        // The GC's own waiver swears to the draw amount, so it moves with it.
-        $gcWaiver = $existing->get($tenantId);
-        $drawAmount = (float) $this->ssThisPayment;
-
-        if ($gcWaiver && ! $gcWaiver->isSigned() && abs((float) $gcWaiver->amount - $drawAmount) >= 0.01) {
-            $this->reviseWaiver($gcWaiver, ['amount' => $drawAmount]);
-            $revised++;
-        }
-
-        // The GCSS lists every vendor and amount, so it re-renders whenever
-        // anything on the draw moves. Signed rows are still on $this->ssRows,
-        // so they keep printing exactly as sworn.
-        $doc = \App\Support\SwornStatementGenerator::generate(
-            $this->project,
-            $contractor,
-            $this->ssRows,
-            $drawAmount,
-            $statement->drawNumber(),
-            $statement->id,
-        );
-
-        // The renderer falls back to raw HTML when Chrome is unavailable, and
-        // the GCSS filename carries today's date — so a failed re-render writes
-        // to a NEW path and repoints the statement at it, orphaning the PDF
-        // that was already there. The amount still has to be saved; only the
-        // document is held back.
-        if (str_starts_with((string) $doc['binary'], '%PDF')) {
-            $relativePath = sprintf('sworn-statements/%d/%d/%s', $this->project->id, $statement->id, $doc['filename']);
-            \Illuminate\Support\Facades\Storage::disk('files')->put($relativePath, $doc['binary']);
-            $statement->forceFill([
-                'filename' => $doc['filename'],
-                'path' => $relativePath,
-                'this_payment' => $drawAmount,
-            ])->save();
-        } else {
-            \Illuminate\Support\Facades\Log::warning('Sworn statement re-render produced HTML, not a PDF — keeping the existing document.', [
-                'sworn_statement_id' => $statement->id,
-                'kept_path' => $statement->path,
-            ]);
-
-            $statement->forceFill(['this_payment' => $drawAmount])->save();
-        }
-
-        $this->showSwornStatement = false;
-        $this->editingStatementId = null;
-        unset($this->waivers, $this->swornStatements, $this->drawGroups);
-
-        $parts = [];
-        if ($revised > 0) {
-            $parts[] = $revised . ' waiver' . ($revised === 1 ? '' : 's') . ' revised and re-sent';
-        }
-        if (($added['sent'] ?? 0) > 0) {
-            $parts[] = $added['sent'] . ' added';
-        }
-        if (($added['printed'] ?? 0) > 0) {
-            $parts[] = $added['printed'] . ' added and emailed to you to forward';
-        }
-        if (($added['reused'] ?? 0) > 0) {
-            $parts[] = $added['reused'] . ' carried over from a prior signed waiver';
-        }
-        if ($removed > 0) {
-            $parts[] = $removed . ' removed';
-        }
-        if ($frozen > 0) {
-            $parts[] = $frozen . ' signed waiver' . ($frozen === 1 ? '' : 's') . ' left untouched';
-        }
-
-        Flux::toast(
-            text: 'Draw ' . $statement->drawNumber() . ' updated' . ($parts ? ' — ' . implode(', ', $parts) . '.' : '.'),
-            variant: 'success',
-        );
-    }
-
-    /**
-     * Re-price one waiver from its statement row. Returns whether anything
-     * actually changed — an untouched row must not bump the revision, or every
-     * save would void documents nobody edited.
-     */
-    protected function reviseWaiverFromRow(LienWaiver $waiver, array $row): bool
-    {
-        $paid = (float) ($row['paid'] ?? 0);
-        $entry = ($row['this_payment'] ?? '') !== ''
-            ? (float) str_replace(',', '', (string) $row['this_payment'])
-            : 0.0;
-
-        $notes = json_decode((string) $waiver->notes, true) ?: [];
-        $kind = trim((string) ($row['kind'] ?? ''));
-
-        $changes = [];
-
-        $amount = round($paid + $entry, 2);
-        if (abs((float) $waiver->amount - $amount) >= 0.01) {
-            $changes['amount'] = $amount;
-        }
-
-        if ($kind !== '' && $kind !== trim((string) ($notes['kind_of_work'] ?? ''))) {
-            $notes['kind_of_work'] = $kind;
-            $changes['notes'] = json_encode($notes);
-        }
-
-        if ($changes === []) {
-            return false;
-        }
-
-        $this->reviseWaiver($waiver, $changes);
-
-        return true;
-    }
-
-    /**
-     * Persist a revision: apply the changes, bump the revision counter, refresh
-     * the tamper hash, re-render the stored PDF, and re-notify the vendor.
-     *
-     * Status and access_token are deliberately preserved — the vendor's link
-     * keeps working and now returns the corrected document, rather than dying
-     * and stranding them.
-     */
-    protected function reviseWaiver(LienWaiver $waiver, array $changes): void
-    {
-        $amountChanged = array_key_exists('amount', $changes);
-
-        $waiver->forceFill($changes);
-        $waiver->document_revision = (int) ($waiver->document_revision ?: 1) + 1;
-        // Recomputed explicitly: the observer only hashes on create, so without
-        // this the fingerprint would still describe the superseded figures.
-        $waiver->document_hash = $waiver->computeDocumentHash();
-        $waiver->save();
-
-        try {
-            \App\Support\LienWaiverDocumentGenerator::generate($waiver->refresh(), store: true);
-        } catch (\Throwable) {
-            // The record is already correct; the document rebuilds on download.
-        }
-
-        // Only an amount change is worth re-emailing over — a corrected kind of
-        // work doesn't invalidate a signature.
-        if ($amountChanged && $waiver->status === LienWaiverStatus::Sent) {
-            \App\Jobs\SendLienWaiverSigningRequestJob::dispatch($waiver->id, superseded: true)
-                ->delay($this->waiverSendAt());
-        }
-    }
-
-    protected function createGcWaiverForStatement($contractor, int $statementId): bool
-    {
-        $amount = (float) $this->ssThisPayment;
-
-        if ($amount <= 0) {
-            return false;
-        }
-
-        $hasOpen = LienWaiver::withoutGlobalScopes()
-            ->where('project_id', $this->project->id)
-            ->where('vendor_id', $contractor->id)
-            ->where('belongs_to_vendor_id', $contractor->id)
-            ->whereNull('deleted_at')
-            ->whereIn('status', [LienWaiverStatus::Draft, LienWaiverStatus::Sent])
-            ->exists();
-
-        if ($hasOpen) {
-            // Re-stamp the lingering GC draft onto this draw so grouping and
-            // the per-draw download include it.
-            LienWaiver::withoutGlobalScopes()
-                ->where('project_id', $this->project->id)
-                ->where('vendor_id', $contractor->id)
-                ->where('belongs_to_vendor_id', $contractor->id)
-                ->whereNull('deleted_at')
-                ->whereIn('status', [LienWaiverStatus::Draft, LienWaiverStatus::Sent])
-                ->update(['sworn_statement_id' => $statementId]);
-
-            return false;
-        }
-
-        // ClientScope limits clients to ones linked to the auth vendor — load
-        // directly so the payer block always fills in.
-        $client = $this->project->client()->withoutGlobalScopes()->first();
-        $payerCityStateZip = trim(sprintf(
-            '%s%s %s',
-            $client?->city ?? $this->project->city ?? '',
-            ($client?->state ?? $this->project->state)
-                ? ', ' . ($client?->state ?? $this->project->state)
-                : '',
-            $client?->zip_code ?? $this->project->zip_code ?? '',
-        ));
-
-        LienWaiver::create([
-            'belongs_to_vendor_id' => $contractor->id,
-            'vendor_id' => $contractor->id,
-            'project_id' => $this->project->id,
-            'sworn_statement_id' => $statementId,
-            'check_id' => null,
-            'payment_id' => null,
-            'type' => LienWaiverType::ConditionalProgress,
-            'status' => LienWaiverStatus::Draft,
-            'amount' => $amount,
-            'exceptions_amount' => 0,
-            'through_date' => now()->toDateString(),
-            'jurisdiction' => $this->projectJurisdiction(),
-            'notes' => json_encode([
-                'manual' => true,
-                'source' => 'sworn_statement',
-                'payer' => [
-                    'name' => (string) ($client?->name ?? ''),
-                    'address' => trim((string) ($client?->address ?? $this->project->address ?? '')),
-                    'city_state_zip' => $payerCityStateZip,
-                ],
-            ]),
-            'created_by_user_id' => auth()->id(),
-        ]);
-
-        return true;
-    }
-
-    /**
-     * Create a sub Waiver of Lien (to date) for each included row on the sworn
-     * statement, unless that sub already has an open (draft/sent) waiver on the
-     * project. Amount is money received to date. Waivers are emailed only when
-     * the vendor has an email on file (retail/material suppliers usually
-     * don't) — the rest stay as drafts to print and hand over.
-     *
-     * @return array{sent:int, printed:int}
-     */
-    /**
-     * Stamp each statement row with the sub's latest SIGNED waiver on this
-     * project (id + amount). When the paid-to-date hasn't moved since that
-     * signature, the row defaults to reusing it — a second draw with an
-     * unchanged sub shouldn't chase a fresh signature for the same figure.
-     * When the figure HAS moved, the checkbox lets the GC deliberately carry
-     * the prior sworn amount for this draw instead of requiring a new waiver.
-     */
-    /**
-     * @param  int|null  $excludeStatementId  Draw being edited. Its own waivers
-     *                   are not "prior" — without this, a vendor that signed on
-     *                   THIS draw would be offered its own signature to reuse.
-     * @param  bool  $defaultOn  Whether an unchanged figure pre-checks the box.
-     *                   Off when editing: a draw already has pending waivers,
-     *                   and silently swapping one for a carried-over signature
-     *                   on save is not something the user asked for.
-     */
-    protected function attachPriorSignedWaivers(?int $excludeStatementId = null, bool $defaultOn = true): void
-    {
-        $contractorId = (int) ($this->contractorVendor?->id ?? 0);
-        $vendorIds = collect($this->ssRows)
-            ->pluck('vendor_id')
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->reject(fn (int $id) => $id === $contractorId);
-
-        $signedByVendor = $vendorIds->isEmpty() ? collect() : LienWaiver::withoutGlobalScopes()
-            ->where('project_id', $this->project->id)
-            ->where('belongs_to_vendor_id', $contractorId)
-            ->whereIn('vendor_id', $vendorIds)
-            ->whereNull('deleted_at')
-            ->where('status', LienWaiverStatus::Signed)
-            ->whereNotNull('signed_path')
-            ->when($excludeStatementId, fn ($q) => $q->where(function ($q) use ($excludeStatementId) {
-                $q->whereNull('sworn_statement_id')
-                    ->orWhere('sworn_statement_id', '!=', $excludeStatementId);
-            }))
-            ->orderBy('id') // keyBy keeps the LAST row per vendor = newest
-            ->get()
-            ->keyBy('vendor_id');
-
-        foreach ($this->ssRows as $i => $row) {
-            // A waiver already signed on this draw is settled — there is
-            // nothing to carry into it.
-            if (! empty($row['waiver_signed'])) {
-                $this->ssRows[$i]['prior_signed_id'] = null;
-                $this->ssRows[$i]['prior_signed_amount'] = null;
-                $this->ssRows[$i]['reuse_signed'] = false;
-
-                continue;
-            }
-
-            $prior = $signedByVendor->get((int) ($row['vendor_id'] ?? 0));
-            $paid = (float) ($row['paid'] ?? 0);
-
-            $this->ssRows[$i]['prior_signed_id'] = $prior?->id;
-            $this->ssRows[$i]['prior_signed_amount'] = $prior ? (string) $prior->amount : null;
-            // Unchanged figure → reuse by default; changed figure → opt-in.
-            $this->ssRows[$i]['reuse_signed'] = $defaultOn
-                && $prior !== null
-                && abs((float) $prior->amount - $paid) < 0.01;
-        }
-    }
-
-    /**
-     * When a waiver email should actually leave. Subs get lien waiver requests
-     * during the GC's working day — a draw generated at 9 PM shouldn't put a
-     * signature request in a sub's inbox overnight. Inside business hours this
-     * is "now", so the normal path is unchanged.
+     * When a waiver email should actually leave. Subs get lien waiver
+     * requests during the GC's working day — a request made at 9 PM
+     * shouldn't put a signature request in a sub's inbox overnight. Inside
+     * business hours this is "now", so the normal path is unchanged.
      */
     protected function waiverSendAt($contractor = null): \Carbon\Carbon
     {
@@ -1639,215 +920,6 @@ class Index extends Component
         return $vendor
             ? $vendor->nextBusinessHoursOpening()
             : now();
-    }
-
-    protected function createSubWaiversForStatement($contractor, int $statementId): array
-    {
-        $jurisdiction = $this->projectJurisdiction();
-        $throughDate = now()->toDateString();
-        $sendAt = $this->waiverSendAt($contractor);
-        $sent = 0;
-        $printed = 0;
-        $reused = 0;
-
-        // Which row vendors have a deliverable email: a business email, or an
-        // employed user with one (mirrors the send job's resolution).
-        $rowVendorIds = collect($this->ssRows)->pluck('vendor_id')->filter()->map(fn ($id) => (int) $id);
-        $withBusinessEmail = \App\Models\Vendor::withoutGlobalScopes()
-            ->whereIn('id', $rowVendorIds)
-            ->whereNotNull('business_email')
-            ->where('business_email', '!=', '')
-            ->pluck('id');
-        $withUserEmail = \App\Models\UserVendor::query()
-            ->whereIn('vendor_id', $rowVendorIds)
-            ->where('is_employed', true)
-            ->whereIn('user_id', fn ($q) => $q->select('id')->from('users')->whereNotNull('email'))
-            ->pluck('vendor_id');
-        $emailableVendorIds = $withBusinessEmail->merge($withUserEmail)->map(fn ($id) => (int) $id)->unique();
-
-        foreach ($this->ssRows as $row) {
-            if (empty($row['include'])) {
-                continue;
-            }
-
-            $vendorId = (int) ($row['vendor_id'] ?? 0);
-
-            // Never issue a sub waiver to the GC itself.
-            if ($vendorId === 0 || $vendorId === (int) $contractor->id) {
-                continue;
-            }
-
-            // Every party listed on the statement swears a waiver — including
-            // retail vendors (rentals, haulers, incidentals). They rarely have
-            // an email on file, so their waiver is mailed to the draw's creator
-            // with a "please forward to {vendor}" banner (see $canEmail below)
-            // rather than being skipped, which left Groot and National
-            // Construction Rental on the GCSS with no waiver to chase.
-
-            // Money received to date = discovered paid + any amount entered for
-            // this draw. That's the "to date" consideration for the waiver.
-            $paid = (float) ($row['paid'] ?? 0);
-            $thisPayment = ($row['this_payment'] ?? '') !== ''
-                ? (float) str_replace(',', '', (string) $row['this_payment'])
-                : 0.0;
-            $amount = $paid + $thisPayment;
-
-            if ($amount <= 0) {
-                continue;
-            }
-
-            // Subs with an open waiver on this project don't get a duplicate.
-            // A lingering Draft still goes out for signature (no waiver is
-            // left unsent); already-Sent ones aren't re-sent. Trashed waivers
-            // never block (withoutGlobalScopes drops SoftDeletes too), and the
-            // check is tenant-scoped so another GC's waiver can't interfere.
-            $openWaiver = LienWaiver::withoutGlobalScopes()
-                ->where('project_id', $this->project->id)
-                ->where('vendor_id', $vendorId)
-                ->where('belongs_to_vendor_id', $contractor->id)
-                ->whereNull('deleted_at')
-                ->whereIn('status', [LienWaiverStatus::Draft, LienWaiverStatus::Sent])
-                ->orderByDesc('id')
-                ->first();
-
-            // The statement's Kind of Work rides along so the waiver's
-            // affidavit prints the same "What For" as the GCSS row. Retail
-            // vendors print the kind as typed, without the labor & material
-            // suffix (they supply goods/services, not trade packages).
-            $notes = ['manual' => true, 'source' => 'sworn_statement'];
-            $kind = trim((string) ($row['kind'] ?? ''));
-            if ($kind !== '') {
-                $notes['kind_of_work'] = $kind;
-            }
-            if (! empty($row['is_retail'])) {
-                $notes['retail'] = true;
-            }
-            // Material suppliers sign the WAIVER ONLY — they furnish goods, so
-            // there's no contract math to swear to. Everyone else (subs and
-            // retail/rental/haulers alike) signs the affidavit too.
-            if (! empty($row['is_material'])) {
-                $notes['material'] = true;
-            }
-
-            $canEmail = $emailableVendorIds->contains($vendorId);
-
-            // Automatic finality: a REAL contract (typed or from a bid) that is
-            // fully covered by the money received means the sub's work is
-            // complete → final waiver (PAID IN FULL). No recorded contract
-            // (money-paid fallback) means still running → waiver to date with
-            // OPEN markers. A real contract with a balance → plain waiver to
-            // date.
-            $typedContract = ($row['contract'] ?? '') !== '' ? (float) $row['contract'] : null;
-            $isFinal = $typedContract !== null && $amount + 0.009 >= $typedContract;
-
-
-            // Reuse a previously SIGNED waiver instead of chasing a fresh
-            // signature: automatic when the paid-to-date equals the signed
-            // amount, or deliberately via the row's checkbox when the figure
-            // moved and the GC chooses to carry the prior sworn amount into
-            // this draw. The signed PDF is referenced, not re-generated — the
-            // new row keeps its own copy of the metadata so each draw's
-            // package stands alone (deletes are soft; the file is shared).
-            if (! empty($row['reuse_signed']) && ! empty($row['prior_signed_id'])) {
-                $prior = LienWaiver::withoutGlobalScopes()
-                    ->whereKey((int) $row['prior_signed_id'])
-                    ->where('project_id', $this->project->id)
-                    ->where('belongs_to_vendor_id', $contractor->id)
-                    ->where('vendor_id', $vendorId)
-                    ->whereNull('deleted_at')
-                    ->where('status', LienWaiverStatus::Signed)
-                    ->whereNotNull('signed_path')
-                    ->first();
-
-                if ($prior) {
-                    LienWaiver::create([
-                        'belongs_to_vendor_id' => $contractor->id,
-                        'vendor_id' => $vendorId,
-                        'project_id' => $this->project->id,
-                        'sworn_statement_id' => $statementId,
-                        'check_id' => null,
-                        'payment_id' => null,
-                        'type' => $prior->type,
-                        'status' => LienWaiverStatus::Signed,
-                        'amount' => $prior->amount,
-                        'exceptions_amount' => $prior->exceptions_amount,
-                        'through_date' => $prior->through_date,
-                        'jurisdiction' => $prior->jurisdiction,
-                        'document_hash' => $prior->document_hash,
-                        'draft_path' => $prior->draft_path,
-                        'signed_path' => $prior->signed_path,
-                        'sent_at' => $prior->sent_at,
-                        'signed_at' => $prior->signed_at,
-                        'notes' => json_encode(array_merge($notes, ['reused_from' => $prior->id])),
-                        'created_by_user_id' => auth()->id(),
-                    ]);
-
-                    $reused++;
-
-                    continue;
-                }
-            }
-
-            if ($openWaiver) {
-                if ($openWaiver->status === LienWaiverStatus::Draft) {
-                    // Sync this run's row data (amount, kind, type) onto the
-                    // lingering draft so the re-sent document reflects the
-                    // statement it accompanies.
-                    $existingNotes = json_decode((string) $openWaiver->notes, true) ?: [];
-                    unset($existingNotes['kind_of_work'], $existingNotes['open'], $existingNotes['retail']);
-
-                    $openWaiver->forceFill([
-                        'type' => $isFinal ? LienWaiverType::UnconditionalFinal : LienWaiverType::ConditionalProgress,
-                        'sworn_statement_id' => $statementId,
-                        'amount' => $amount,
-                        'through_date' => $throughDate,
-                        'notes' => json_encode(array_merge($existingNotes, $notes)),
-                    ])->save();
-
-                    // No vendor email → the job mails the draw's creator with
-                    // a "please forward" banner instead of skipping.
-                    SendLienWaiverSigningRequestJob::dispatch($openWaiver->id)->delay($sendAt);
-                    if ($canEmail) {
-                        $sent++;
-                    } else {
-                        $printed++;
-                    }
-                }
-
-                continue;
-            }
-
-            $waiver = LienWaiver::create([
-                'belongs_to_vendor_id' => $contractor->id,
-                'vendor_id' => $vendorId,
-                'project_id' => $this->project->id,
-                'sworn_statement_id' => $statementId,
-                'check_id' => null,
-                'payment_id' => null,
-                'type' => $isFinal ? LienWaiverType::UnconditionalFinal : LienWaiverType::ConditionalProgress,
-                'status' => LienWaiverStatus::Draft,
-                'amount' => $amount,
-                'exceptions_amount' => 0,
-                'through_date' => $throughDate,
-                'jurisdiction' => $jurisdiction,
-                'notes' => json_encode($notes),
-                'created_by_user_id' => auth()->id(),
-            ]);
-
-            // Every waiver goes out by email: straight to the vendor when they
-            // have an address on file (dev delivery is redirected to the dev
-            // inbox by Mail::alwaysTo), otherwise to the GC user creating the
-            // draw with a "please forward to {vendor}" banner — typical for
-            // material suppliers like Home Depot.
-            SendLienWaiverSigningRequestJob::dispatch($waiver->id)->delay($sendAt);
-            if ($canEmail) {
-                $sent++;
-            } else {
-                $printed++;
-            }
-        }
-
-        return ['sent' => $sent, 'printed' => $printed, 'reused' => $reused];
     }
 
     public function sendForSignature(int $waiverId): void
