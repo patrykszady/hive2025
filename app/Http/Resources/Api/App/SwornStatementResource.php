@@ -56,6 +56,10 @@ class SwornStatementResource extends JsonResource
             'this_payment' => (float) $this->this_payment,
             'created_at' => $this->created_at?->toIso8601String(),
             'project' => $project ? ['id' => $project->id, 'name' => $project->project_name, 'address' => $project->short_address] : null,
+            // No standalone web page for a draw — it lives in its project's
+            // Lien Waivers card, same as OpenInHiveButton elsewhere falls
+            // back to the nearest page that actually shows the thing.
+            'web_path' => $project ? '/projects/'.$project->id : '/lien-waivers',
             'waiver_counts' => [
                 'total' => $waivers->count(),
                 'sent' => $waivers->where('status', LienWaiverStatus::Sent)->count(),
