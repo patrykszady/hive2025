@@ -294,6 +294,107 @@ it('refuses removeMember for a member, and for a user employed by a different co
     expect((bool) $companyB->users()->where('user_id', $victim->id)->first()->pivot->is_employed)->toBeTrue();
 });
 
+it('looks up a phone before adding a member, with their via-vendor options, a Member is refused', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+    ['user' => $member] = appPeopleUsersTeam(role: 2);
+
+    $existing1099 = Vendor::factory()->create(['business_type' => '1099', 'business_name' => "Found Guy's LLC"]);
+    $sub = Vendor::factory()->create(['business_type' => 'Sub', 'business_name' => 'Excluded Sub Co']);
+    $found = User::factory()->create(['cell_phone' => '2245558181']);
+    $found->vendors()->attach($existing1099->id, ['role_id' => 1, 'start_date' => today()->format('Y-m-d')]);
+    $found->vendors()->attach($sub->id, ['role_id' => 2, 'start_date' => today()->format('Y-m-d')]);
+
+    Sanctum::actingAs($member, ['app']);
+    $this->getJson('/api/app/v1/users/lookup?cell_phone=2245558181')->assertForbidden();
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->getJson('/api/app/v1/users/lookup?cell_phone=2245558181')
+        ->assertOk()
+        ->assertJsonPath('data.user.id', $found->id)
+        ->assertJsonPath('data.already_employed', false)
+        ->assertJsonPath('data.via_vendor_options.0.id', $existing1099->id)
+        ->assertJsonCount(1, 'data.via_vendor_options');
+
+    $this->getJson('/api/app/v1/users/lookup?cell_phone=2245550000')
+        ->assertOk()
+        ->assertJsonPath('data.user', null)
+        ->assertJsonPath('data.via_vendor_options', []);
+});
+
+it('routes a new member\'s pay through a vendor they already own, like UserCreate::save()\'s via_vendor', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+
+    $ownedVendor = Vendor::factory()->create(['business_type' => '1099', 'business_name' => 'Owned Co']);
+    $found = User::factory()->create(['cell_phone' => '2245557070']);
+    $found->vendors()->attach($ownedVendor->id, ['role_id' => 1, 'start_date' => today()->format('Y-m-d')]);
+    // AppVendorDirectory::createVendor always links a brand-new vendor into
+    // the acting company's own vendor list (so it's visible under
+    // VendorScope) — the real "Create New Vendor" step the app calls
+    // before this one would already have done this.
+    $vendor->vendors()->syncWithoutDetaching([$ownedVendor->id]);
+
+    Sanctum::actingAs($admin, ['app']);
+    $response = $this->postJson('/api/app/v1/users', [
+        'cell_phone' => '2245557070',
+        'role' => 2,
+        'hourly_rate' => 30,
+        'via_vendor_id' => $ownedVendor->id,
+    ])->assertCreated();
+
+    $response->assertJsonPath('data.via_vendor.id', $ownedVendor->id);
+    $pivot = $found->vendors()->where('vendors.id', $vendor->id)->first()->pivot;
+    expect((int) $pivot->via_vendor_id)->toBe($ownedVendor->id);
+});
+
+it('422s via_vendor_id when the person does not already own that vendor, or it is a Sub', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+
+    $unrelatedVendor = Vendor::factory()->create(['business_type' => '1099']);
+    $subVendor = Vendor::factory()->create(['business_type' => 'Sub']);
+    $found = User::factory()->create(['cell_phone' => '2245556060']);
+    $found->vendors()->attach($subVendor->id, ['role_id' => 1, 'start_date' => today()->format('Y-m-d')]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    // Not attached to this vendor at all.
+    $this->postJson('/api/app/v1/users', [
+        'cell_phone' => '2245556060',
+        'role' => 2,
+        'hourly_rate' => 20,
+        'via_vendor_id' => $unrelatedVendor->id,
+    ])->assertStatus(422)->assertJsonValidationErrors('via_vendor_id');
+
+    // Attached, but it's a Sub — never a valid pay-routing vendor.
+    $this->postJson('/api/app/v1/users', [
+        'cell_phone' => '2245556060',
+        'role' => 2,
+        'hourly_rate' => 20,
+        'via_vendor_id' => $subVendor->id,
+    ])->assertStatus(422)->assertJsonValidationErrors('via_vendor_id');
+
+    expect($vendor->users()->where('user_id', $found->id)->exists())->toBeFalse();
+});
+
+it('ignores via_vendor_id for an Admin, like the web hides the picker once role is 1', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appPeopleUsersTeam();
+    $someVendor = Vendor::factory()->create(['business_type' => '1099']);
+
+    Sanctum::actingAs($admin, ['app']);
+    $email = 'new-admin-'.uniqid().'@example.test';
+    $this->postJson('/api/app/v1/users', [
+        'cell_phone' => '2245555050',
+        'first_name' => 'New',
+        'last_name' => 'Admin',
+        'email' => $email,
+        'role' => 1,
+        'hourly_rate' => 0,
+        'via_vendor_id' => $someVendor->id,
+    ])->assertCreated()->assertJsonPath('data.via_vendor', null);
+
+    $hire = User::where('email', $email)->firstOrFail();
+    expect($hire->vendors()->where('vendors.id', $vendor->id)->first()->pivot->via_vendor_id)->toBeNull();
+});
+
 it('422s notification settings with an end time before the start time', function () {
     ['user' => $user] = appPeopleUsersTeam();
     Sanctum::actingAs($user, ['app']);

@@ -28,6 +28,7 @@ Route::post('clients/{client}/people', [AppClientController::class, 'addPerson']
 | App\Http\Controllers\Api\App\V1\UserController.
 */
 Route::get('users', [AppUserController::class, 'index'])->name('users.index');
+Route::get('users/lookup', [AppUserController::class, 'lookup'])->name('users.lookup');
 Route::post('users', [AppUserController::class, 'store'])->name('users.store');
 Route::get('users/me', [AppUserController::class, 'me'])->name('users.me');
 Route::get('users/me/notification-settings', [AppUserController::class, 'notificationSettings'])->name('users.notification-settings');

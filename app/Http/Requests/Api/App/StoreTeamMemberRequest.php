@@ -33,6 +33,15 @@ class StoreTeamMemberRequest extends FormRequest
             'preferred_language' => ['nullable', 'string', 'max:255'],
             'role' => ['required', Rule::in([1, 2])],
             'hourly_rate' => ['required_with:role', 'numeric', 'min:0'],
+            // "Member Type" on the web (form.blade.php's via_vendor radio
+            // group): route this member's pay through a 1099/DBA vendor
+            // they already own instead of direct payroll. Only meaningful
+            // for role 2 (Member) — AppTeamDirectory::addTeamMember ignores
+            // it for an Admin, same as the web hides the picker entirely
+            // once role is 1. The vendor must already have this person
+            // attached (any role) and must not be a Sub — checked in the
+            // service, where the resolved person is known.
+            'via_vendor_id' => ['nullable', 'integer', 'exists:vendors,id'],
         ];
     }
 }
