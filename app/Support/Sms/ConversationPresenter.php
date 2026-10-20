@@ -8,6 +8,7 @@ use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Services\GroupSmsService;
 use App\Services\SmsTranslationService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\URL;
@@ -778,6 +779,197 @@ class ConversationPresenter
         }
 
         return trim($first . ' ' . trim((string) $user->last_name));
+    }
+
+    /**
+     * The name shown before a thread list row's last-message preview
+     * (thread-list.blade.php's $previewPrefix, GS-team branch only — the
+     * Hive Contractors app is GS Construction's own team, so the web's
+     * client-browsing "GS Construciton:" branch never applies here): null
+     * for the viewer's own outbound message (the caller renders "You"),
+     * the sending teammate's name for a teammate's outbound message, and
+     * the resolved sender's name for an inbound one.
+     */
+    public static function previewSenderName(SmsMessage $message, ?SmsGroupThread $thread, ?int $viewerId): ?string
+    {
+        if ($message->isOutbound()) {
+            if ($viewerId !== null && $message->sent_by_user_id === $viewerId) {
+                return null;
+            }
+
+            return static::outboundSenderName($message);
+        }
+
+        if ($message->isInbound()) {
+            return static::inboundPreviewSenderName($message->from_number, $thread);
+        }
+
+        return null;
+    }
+
+    /**
+     * The sender name shown above an outbound bubble / before an outbound
+     * preview: the sending teammate's nickname or first name, or "GS Crew"
+     * for an automated send (sent_by_user_id null — consent/welcome
+     * prompts, scheduled blasts sent by the system).
+     */
+    public static function outboundSenderName(SmsMessage $message): string
+    {
+        $sender = $message->sentByUser;
+
+        return $sender ? (string) ($sender->nickname ?: $sender->first_name) : 'GS Crew';
+    }
+
+    /**
+     * Mirrors SmsThreadList::resolvePreviewSender(): prefers a thread
+     * client user's own nickname/first name when their phone matches the
+     * inbound sender, otherwise the resolved phone display's first word
+     * (only when it starts with a letter — a formatted phone number stays
+     * whole, same as the web).
+     */
+    public static function inboundPreviewSenderName(?string $fromNumber, ?SmsGroupThread $thread): ?string
+    {
+        if (! is_string($fromNumber) || $fromNumber === '') {
+            return null;
+        }
+
+        $normalizedFrom = preg_replace('/[^0-9]/', '', $fromNumber);
+        if (strlen($normalizedFrom) === 11 && str_starts_with($normalizedFrom, '1')) {
+            $normalizedFrom = substr($normalizedFrom, 1);
+        }
+
+        if ($thread?->client) {
+            $users = $thread->client->relationLoaded('users')
+                ? $thread->client->users
+                : $thread->client->users()->get();
+
+            foreach ($users as $user) {
+                $cellPhone = preg_replace('/[^0-9]/', '', (string) $user->getRawOriginal('cell_phone'));
+
+                if ($cellPhone === '') {
+                    continue;
+                }
+
+                if (strlen($cellPhone) === 11 && str_starts_with($cellPhone, '1')) {
+                    $cellPhone = substr($cellPhone, 1);
+                }
+
+                if ($cellPhone === $normalizedFrom) {
+                    $display = trim((string) ($user->nickname ?: $user->first_name));
+
+                    if ($display !== '') {
+                        return $display;
+                    }
+                }
+            }
+        }
+
+        $display = static::resolvePhoneDisplay($fromNumber);
+
+        if (preg_match('/^[A-Za-z]/', $display) === 1) {
+            return (string) explode(' ', trim($display))[0];
+        }
+
+        return $display;
+    }
+
+    /**
+     * Participants this thread can click-to-call, as the conversation
+     * header's quick-call row computes them (conversation.blade.php's
+     * $callableContacts): thread-attached client users (the primary client
+     * and any extra client referenced in name_data) labelled with their
+     * first name, then any remaining participant phone not yet covered —
+     * labelled with its resolved name only when it's a known contact, the
+     * formatted number otherwise. The business number itself never appears.
+     *
+     * @return array<int, array{name: ?string, phone: string, display: string}>
+     */
+    public function callableContacts(): array
+    {
+        $thread = $this->thread;
+
+        if (! $thread) {
+            return [];
+        }
+
+        $seen = [];
+        $contacts = [];
+        $participantPhones = $thread->threadParticipants->pluck('phone_number')->filter()->values();
+
+        $addClientUsers = function (Collection $users) use (&$contacts, &$seen): void {
+            foreach ($users as $user) {
+                $raw = $user->getRawOriginal('cell_phone');
+                if (! $raw) {
+                    continue;
+                }
+
+                $e164 = $user->routeNotificationForTelnyx();
+                if (! is_string($e164) || $e164 === '' || GroupSmsService::isOurNumber($e164) || isset($seen[$e164])) {
+                    continue;
+                }
+
+                $seen[$e164] = true;
+                $contacts[] = [
+                    'name' => $user->first_name,
+                    'phone' => $e164,
+                    'display' => static::formatUsNumber((string) $raw),
+                ];
+            }
+        };
+
+        if ($thread->client) {
+            $addClientUsers($this->threadClientUsersFor($thread->client));
+        }
+
+        if (! empty($thread->name_data)) {
+            $extraClientIds = collect($thread->name_data)
+                ->pluck('client_id')
+                ->filter()
+                ->reject(fn ($id) => $id == $thread->client_id)
+                ->unique();
+
+            foreach ($extraClientIds as $clientId) {
+                $extraClient = Client::with('users:id,first_name,last_name,cell_phone')->find($clientId);
+
+                if ($extraClient) {
+                    $addClientUsers($this->threadClientUsersFor($extraClient));
+                }
+            }
+        }
+
+        foreach ($participantPhones as $phone) {
+            if (GroupSmsService::isOurNumber($phone) || isset($seen[$phone])) {
+                continue;
+            }
+
+            $seen[$phone] = true;
+            $name = static::resolvePhoneDisplay($phone);
+            $display = static::formatUsNumber($phone);
+
+            $contacts[] = [
+                'name' => ($name !== $display && static::isKnownContact($phone)) ? $name : null,
+                'phone' => $phone,
+                'display' => $display,
+            ];
+        }
+
+        return $contacts;
+    }
+
+    /**
+     * "+18475551234"/"8475551234" → "(847) 555-1234"; falls back to the
+     * raw string when it isn't a 10-digit US number.
+     */
+    private static function formatUsNumber(string $phone): string
+    {
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        return strlen($digits) === 10
+            ? '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6)
+            : $phone;
     }
 
     /* ─── Viewer-language translation pipeline ────────────────────── */

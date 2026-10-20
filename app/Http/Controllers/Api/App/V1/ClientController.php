@@ -202,7 +202,9 @@ class ClientController extends Controller
         }
 
         $thread->load(self::THREAD_RELATIONS);
+        $thread->loadCount($this->scheduledMessagesCountRelation());
         $this->attachThreadUnreadCounts(collect([$thread]), $user);
+        $this->attachThreadSpamFlags(collect([$thread]));
 
         return response()->json(['data' => new ThreadResource($thread)]);
     }

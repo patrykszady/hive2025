@@ -61,12 +61,18 @@ class VoiceController extends Controller
         ]]);
     }
 
-    /** Place a call: Hive rings the app (or the person's cell), then dials the number. */
+    /**
+     * Place a call: Hive rings the app (or the person's cell), then dials
+     * the number(s) — a single `to`, or every thread participant at once
+     * for the conversation screen's "Call All" (App\Livewire\Sms\
+     * SmsConversation::initiateCallAll()).
+     */
     public function store(PlaceAppCallRequest $request, ClickToCall $clickToCall): JsonResponse
     {
         $ringsApp = $request->validated('ring', 'app') !== 'cell';
         $recipientIds = array_map('intval', (array) $request->validated('recipient_ids', []));
-        $result = $clickToCall->start($request->user(), [$request->validated('to')], $recipientIds, ringApp: $ringsApp);
+        $targets = $request->validated('targets') ?? [$request->validated('to')];
+        $result = $clickToCall->start($request->user(), $targets, $recipientIds, ringApp: $ringsApp);
 
         if (! $result['ok']) {
             return response()->json(['message' => $result['error']], 422);
@@ -75,6 +81,7 @@ class VoiceController extends Controller
         return response()->json([
             'call_log_id' => $result['call_log']->id,
             'to' => $result['targets'][0],
+            'targets' => $result['targets'],
             'ring' => $ringsApp ? 'app' : 'cell',
         ], 201);
     }

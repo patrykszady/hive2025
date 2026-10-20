@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Sms\SmsNewThread;
+use App\Models\BlockedCaller;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
@@ -396,4 +397,112 @@ it('keeps a message scheduled for later in the thread, marked with its send time
     expect($row)->not->toBeNull()
         ->and($row['status'])->toBe('scheduled')
         ->and($row['scheduled_at'])->not->toBeNull();
+});
+
+// =========================================================================
+// Visual fidelity pass (2026-10-20): the thread list preview's sender
+// prefix, the conversation's quick-call row, the scheduled-message badge
+// and the spam flag — all computed server-side so the app can render them
+// exactly like thread-list.blade.php / conversation.blade.php.
+// =========================================================================
+
+it('names the last message\'s sender in the thread list, mirroring the web\'s preview prefix', function () {
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    $teammate = User::factory()->create(['first_name' => 'Jordan', 'primary_vendor_id' => $vendor->id]);
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $katie = new User();
+    $katie->forceFill([
+        'first_name' => 'Katie',
+        'last_name' => 'Love',
+        'email' => 'katie-'.uniqid().'@example.test',
+        'cell_phone' => '2245551234',
+    ]);
+    $katie->save();
+    $katie->clients()->attach($client->id);
+
+    $thread = appMessagingThread($vendor, ['participants' => ['+12245551234'], 'client_id' => $client->id]);
+
+    $entry = fn () => collect($this->getJson('/api/app/v1/threads')->assertOk()->json('data'))->firstWhere('id', $thread->id);
+
+    // Inbound: the resolved sender's first name (a thread client user whose
+    // phone matches the inbound from_number), not blank.
+    $inbound = SmsMessage::create(['thread_id' => $thread->id, 'direction' => 'inbound', 'from_number' => '+12245551234', 'text' => 'On my way', 'status' => 'received']);
+    $inbound->forceFill(['created_at' => now()->subMinutes(3)])->saveQuietly();
+    expect($entry()['last_message']['sender_name'])->toBe('Katie');
+
+    // Outbound, sent by the viewer themself: null — the app renders "You".
+    $own = SmsMessage::create(['thread_id' => $thread->id, 'direction' => 'outbound', 'from_number' => '+12247354200', 'text' => 'On it', 'status' => 'sent', 'sent_by_user_id' => $user->id]);
+    $own->forceFill(['created_at' => now()->subMinutes(2)])->saveQuietly();
+    expect($entry()['last_message']['sender_name'])->toBeNull();
+
+    // Outbound, sent by a different teammate: that teammate's name, not "You".
+    $teammateSent = SmsMessage::create(['thread_id' => $thread->id, 'direction' => 'outbound', 'from_number' => '+12247354200', 'text' => 'Confirmed', 'status' => 'sent', 'sent_by_user_id' => $teammate->id]);
+    $teammateSent->forceFill(['created_at' => now()->subMinute()])->saveQuietly();
+    expect($entry()['last_message']['sender_name'])->toBe('Jordan');
+});
+
+it('lists who a thread can click-to-call, excluding the business number', function () {
+    config(['services.telnyx.numbers' => ['+12247354200']]);
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $client->vendors()->attach($vendor->id);
+    $katie = new User();
+    $katie->forceFill([
+        'first_name' => 'Katie',
+        'last_name' => 'Love',
+        'email' => 'katie-'.uniqid().'@example.test',
+        'cell_phone' => '2245550400',
+    ]);
+    $katie->save();
+    $katie->clients()->attach($client->id);
+
+    $thread = appMessagingThread($vendor, [
+        'participants' => ['+12245550400', '+12247354200'],
+        'client_id' => $client->id,
+    ]);
+
+    $contacts = $this->getJson("/api/app/v1/threads/{$thread->id}")->assertOk()->json('data.callable_contacts');
+
+    expect($contacts)->toHaveCount(1)
+        ->and($contacts[0]['phone'])->toBe('+12245550400')
+        ->and($contacts[0]['name'])->toBe('Katie');
+});
+
+it('counts a thread\'s not-yet-sent scheduled messages, for the list\'s clock badge', function () {
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+    $thread = appMessagingThread($vendor, ['participants' => ['+12245550200']]);
+
+    SmsMessage::create([
+        'thread_id' => $thread->id, 'direction' => 'outbound', 'from_number' => '+12247354200',
+        'text' => 'See you then', 'status' => 'scheduled', 'scheduled_at' => now()->addDay(), 'sent_by_user_id' => $user->id,
+    ]);
+    SmsMessage::create([
+        'thread_id' => $thread->id, 'direction' => 'inbound', 'from_number' => '+12245550200', 'text' => 'Sounds good', 'status' => 'received',
+    ]);
+
+    $entry = collect($this->getJson('/api/app/v1/threads')->assertOk()->json('data'))->firstWhere('id', $thread->id);
+    expect($entry['scheduled_messages_count'])->toBe(1);
+
+    expect($this->getJson("/api/app/v1/threads/{$thread->id}")->assertOk()->json('data.scheduled_messages_count'))->toBe(1);
+});
+
+it('flags a thread as spam in the list and detail once its participant number is blocked', function () {
+    ['vendor' => $vendor, 'user' => $user] = appMessagingTeam();
+    Sanctum::actingAs($user, ['app']);
+    $thread = appMessagingThread($vendor, ['participants' => ['+12245550300']]);
+
+    $entry = fn () => collect($this->getJson('/api/app/v1/threads')->assertOk()->json('data'))->firstWhere('id', $thread->id);
+    expect($entry()['is_spam'])->toBeFalse();
+    expect($this->getJson("/api/app/v1/threads/{$thread->id}")->assertOk()->json('data.is_spam'))->toBeFalse();
+
+    BlockedCaller::create(['phone_number' => '+12245550300']);
+
+    expect($entry()['is_spam'])->toBeTrue();
+    expect($this->getJson("/api/app/v1/threads/{$thread->id}")->assertOk()->json('data.is_spam'))->toBeTrue();
 });

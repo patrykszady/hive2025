@@ -47,6 +47,7 @@ class ThreadController extends Controller
         $threads = SmsGroupThread::query()
             ->accessibleTo($user)
             ->with(self::THREAD_RELATIONS)
+            ->withCount($this->scheduledMessagesCountRelation())
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->whereJsonContains('participants', $search)
@@ -77,6 +78,7 @@ class ThreadController extends Controller
         );
 
         $this->attachThreadUnreadCounts($collection, $user);
+        $this->attachThreadSpamFlags($collection);
 
         return response()->json([
             'data' => ThreadResource::collection($collection),
@@ -101,11 +103,13 @@ class ThreadController extends Controller
         }
 
         $found->load(self::THREAD_RELATIONS);
+        $found->loadCount($this->scheduledMessagesCountRelation());
 
         ConversationPresenter::warmPhoneDisplays($found->threadParticipants->pluck('phone_number')->filter()->unique());
         $this->attachThreadUnreadCounts(collect([$found]), $user);
+        $this->attachThreadSpamFlags(collect([$found]));
 
-        return response()->json(['data' => new ThreadResource($found)]);
+        return response()->json(['data' => (new ThreadResource($found))->withCallableContacts()]);
     }
 
     /**
@@ -169,6 +173,8 @@ class ThreadController extends Controller
         );
 
         $thread->loadMissing(self::THREAD_RELATIONS);
+        $thread->loadCount($this->scheduledMessagesCountRelation());
+        $this->attachThreadSpamFlags(collect([$thread]));
 
         return response()->json(['data' => new ThreadResource($thread)], 201);
     }
@@ -201,7 +207,9 @@ class ThreadController extends Controller
         );
 
         $smsThread->refresh()->loadMissing(self::THREAD_RELATIONS);
+        $smsThread->loadCount($this->scheduledMessagesCountRelation());
         $this->attachThreadUnreadCounts(collect([$smsThread]), $request->user());
+        $this->attachThreadSpamFlags(collect([$smsThread]));
 
         return response()->json(['data' => new ThreadResource($smsThread)]);
     }

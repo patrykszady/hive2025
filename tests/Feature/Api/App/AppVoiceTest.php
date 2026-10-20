@@ -68,6 +68,31 @@ it('keeps calling to GS Construction\'s team and to app tokens', function () {
     $this->postJson('/api/app/v1/calls', ['to' => '8475550100'])->assertForbidden();
 });
 
+it('calls every target in one click-to-call session for the conversation\'s "Call All"', function () {
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['call_control_id' => 'app-leg']], 200)]);
+    Sanctum::actingAs($this->member, ['app']);
+
+    $response = $this->postJson('/api/app/v1/calls', ['targets' => ['(847) 555-0100', '(224) 555-0200']])->assertCreated();
+
+    expect($response->json('to'))->toBe('+18475550100')
+        ->and($response->json('targets'))->toBe(['+18475550100', '+12245550200']);
+
+    $callLog = CallLog::find($response->json('call_log_id'));
+    expect($callLog->metadata['target_phones'])->toBe(['+18475550100', '+12245550200'])
+        ->and($callLog->metadata['type'])->toBe('click_to_call_multi');
+
+    // Hive still only rings the caller once, same as a single-target call.
+    Http::assertSentCount(1);
+});
+
+it('rejects a call with neither `to` nor `targets`', function () {
+    Sanctum::actingAs($this->member, ['app']);
+
+    $this->postJson('/api/app/v1/calls', [])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['to', 'targets']);
+});
+
 it('rings the person\'s cell instead when the app asks, as Expo Go does before the app has its own calling', function () {
     Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['call_control_id' => 'cell-leg']], 200)]);
     Sanctum::actingAs($this->member, ['app']);

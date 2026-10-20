@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\App\V1\Concerns;
 
+use App\Models\BlockedCaller;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\User;
@@ -55,5 +56,73 @@ trait LoadsThreadForApp
         $threads->each(function (SmsGroupThread $thread) use ($counts) {
             $thread->unread_count = (int) ($counts[$thread->id] ?? 0);
         });
+    }
+
+    /**
+     * The withCount()/loadCount() relation for the thread list row's amber
+     * clock badge — scheduled, not-yet-sent messages. Shared so index(),
+     * show(), store() and assign() all count the same way.
+     *
+     * @return array<string, \Closure>
+     */
+    protected function scheduledMessagesCountRelation(): array
+    {
+        return ['messages as scheduled_messages_count' => fn ($q) => $q->where('status', 'scheduled')];
+    }
+
+    /**
+     * Flags each thread as spam when any of its participant numbers is
+     * blocked — mirrors App\Livewire\Sms\SmsThreadList::threadIsSpam()/
+     * phoneMatchCandidates(), computed once for every thread on the page
+     * instead of once per thread.
+     *
+     * @param  Collection<int, SmsGroupThread>  $threads
+     */
+    protected function attachThreadSpamFlags(Collection $threads): void
+    {
+        $blockedPhones = BlockedCaller::query()
+            ->pluck('phone_number')
+            ->filter(fn ($phone) => is_string($phone) && trim($phone) !== '');
+
+        if ($blockedPhones->isEmpty()) {
+            $threads->each(fn (SmsGroupThread $thread) => $thread->is_spam = false);
+
+            return;
+        }
+
+        $blockedMap = $blockedPhones
+            ->flatMap(fn (string $phone) => $this->phoneMatchCandidates($phone))
+            ->flip();
+
+        $threads->each(function (SmsGroupThread $thread) use ($blockedMap) {
+            $thread->is_spam = $thread->threadParticipants
+                ->pluck('phone_number')
+                ->filter(fn ($phone) => is_string($phone) && trim($phone) !== '')
+                ->contains(fn ($phone) => collect($this->phoneMatchCandidates($phone))->contains(fn ($candidate) => $blockedMap->has($candidate)));
+        });
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function phoneMatchCandidates(string $phone): array
+    {
+        $digits = preg_replace('/\D/', '', $phone);
+
+        if (! is_string($digits) || $digits === '') {
+            return [];
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $ten = substr($digits, 1);
+
+            return array_values(array_unique([$digits, '+1'.$ten, $ten]));
+        }
+
+        if (strlen($digits) === 10) {
+            return array_values(array_unique([$digits, '1'.$digits, '+1'.$digits]));
+        }
+
+        return array_values(array_unique([$digits, '+'.$digits]));
     }
 }
