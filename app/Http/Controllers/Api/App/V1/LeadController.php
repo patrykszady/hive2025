@@ -3,6 +3,12 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\BulkLeadIdsRequest;
+use App\Http\Requests\Api\App\BulkUpdateLeadStatusRequest;
+use App\Http\Requests\Api\App\PreviewLeadReplyRequest;
+use App\Http\Requests\Api\App\ProposeLeadConsultDateRequest;
+use App\Http\Requests\Api\App\SendConsultInviteRequest;
+use App\Http\Requests\Api\App\SendLeadReplyRequest;
 use App\Http\Requests\Api\App\StoreLeadRequest;
 use App\Http\Requests\Api\App\UpdateLeadRequest;
 use App\Http\Requests\Api\App\UpdateLeadStatusRequest;
@@ -11,6 +17,7 @@ use App\Livewire\Leads\LeadsSidebarBadge;
 use App\Models\Lead;
 use App\Services\LeadContactProvisioner;
 use App\Services\Leads\LeadDuplicateFinder;
+use App\Services\Leads\LeadReplyComposer;
 use App\Services\Leads\LeadScheduleLinkTexter;
 use App\Services\UrlShortener;
 use Illuminate\Http\JsonResponse;
@@ -27,13 +34,14 @@ use Illuminate\Support\Facades\Log;
  * controller mirrors that exactly: every action below authorizes
  * 'viewAny', never 'create'/'update'/'delete'.
  *
- * Left web-only (see the PR notes): the Message composer (template-based
- * email send, duplicate-contact merge UI, booking an exact consult time) —
- * a desktop-sized paperwork flow the task scopes out in favor of the app's
- * existing call/text flows. Booking a consult (the one path that creates a
- * Project and flips a lead to Won) is therefore also web-only; the app
- * changes a lead's status and offers the scheduling link, same as the web
- * lets anyone reach a lead's own picker.
+ * The Message composer (replyOptions/previewReply/reply/sendConsultInvite/
+ * proposeDate below) and leads-list bulk actions (bulkStatus/
+ * bulkDeleteImpact/bulkDelete) delegate to
+ * App\Services\Leads\LeadReplyComposer — the same service
+ * App\Livewire\Leads\LeadCreate's Message tab calls — so sending, booking a
+ * consult and the companion text are byte-for-byte identical to the web.
+ * Duplicate-contact detection already happens in store() above via
+ * App\Services\Leads\LeadDuplicateFinder.
  */
 class LeadController extends Controller
 {
@@ -240,6 +248,30 @@ class LeadController extends Controller
         return response()->json(['message' => 'Lead deleted.']);
     }
 
+    /**
+     * Mirrors LeadCreate::updatedConsultWithinTheHour(): lets this lead's
+     * own homeowner pick a consult slot as soon as an hour from now on the
+     * public picker, instead of the usual three days.
+     */
+    public function updateConsultWithinTheHour(Request $request, int $lead): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+        $data = $found->lead_data;
+
+        if ($request->boolean('enabled')) {
+            $data['consult_notice_hours'] = 1;
+        } else {
+            unset($data['consult_notice_hours']);
+        }
+
+        $found->lead_data = $data;
+        $found->saveQuietly();
+
+        return response()->json(['data' => (new LeadResource($found->fresh()))->withDetail()->toArray($request)]);
+    }
+
     /** Mirrors LeadCreate::copyScheduleLink(): hand back the lead's own scheduling link. */
     public function scheduleLink(Request $request, int $lead, UrlShortener $shortener): JsonResponse
     {
@@ -265,6 +297,229 @@ class LeadController extends Controller
         $result = $texter->text($found, $found->resolveClient(), $request->user());
 
         return response()->json($result);
+    }
+
+    /**
+     * Everything the Message composer prefills — mirrors
+     * App\Livewire\Leads\LeadCreate::prepareEmailComposer() via
+     * App\Services\Leads\LeadReplyComposer::composerOptions(), plus the
+     * availability picker's current state (slot problems, exact-time
+     * chips, the consult already on the calendar) so the app's compose
+     * screen opens exactly like the web's Message tab does.
+     */
+    public function replyOptions(Request $request, int $lead, LeadReplyComposer $composer): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+        $client = $composer->resolveClientForLead($found);
+        $fullName = $this->leadFullName($found);
+        $availability = $composer->rawAvailability($found);
+
+        $options = $composer->composerOptions(
+            $found,
+            $client,
+            $found->user,
+            $fullName,
+            $found->origin,
+            $request->user(),
+            $availability,
+            $this->leadMeetingPreference($found),
+        );
+
+        return response()->json(['data' => $options + [
+            'availability' => $availability,
+            'slot_problems' => $composer->slotProblems($availability),
+            'has_usable_availability' => $composer->hasUsableAvailability($availability),
+            'booked_consult' => $composer->bookedConsult($client, $found, $fullName),
+            'consult_project_options' => $composer->consultProjectOptions($client),
+            'consult_meeting_type' => $this->leadMeetingPreference($found),
+            'consult_within_the_hour' => $found->allowsConsultWithinTheHour(),
+            'schedule_link' => $composer->scheduleLink($found),
+            'client' => $client ? ['id' => $client->id, 'name' => $client->name] : null,
+        ]]);
+    }
+
+    /**
+     * Recomputes the template-filled subject/body and picker state for the
+     * composer's CURRENT selection — mirrors every wire:click on the web's
+     * Message tab (insertAvailabilitySlot/selectExactTime/updatedProjectName/
+     * the template and From selects) via
+     * App\Services\Leads\LeadReplyComposer::preview().
+     */
+    public function previewReply(PreviewLeadReplyRequest $request, int $lead, LeadReplyComposer $composer): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+        $client = $composer->resolveClientForLead($found);
+        $fullName = $this->leadFullName($found);
+
+        $result = $composer->preview($found, $client, $fullName, $request->validated());
+
+        return response()->json(['data' => $result]);
+    }
+
+    /**
+     * Office-side (re)scheduling: propose any weekday — mirrors
+     * App\Livewire\Leads\LeadCreate::updatedProposeDate() via
+     * App\Services\Leads\LeadReplyComposer::proposeDate().
+     */
+    public function proposeDate(ProposeLeadConsultDateRequest $request, int $lead, LeadReplyComposer $composer): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $this->findOrFail($lead);
+
+        $result = $composer->proposeDate($request->validated('availability') ?? [], $request->validated('date'));
+
+        if (! $result['ok']) {
+            return response()->json([
+                'message' => $result['error'],
+                'availability' => $result['availability'],
+            ], 422);
+        }
+
+        return response()->json(['data' => $result]);
+    }
+
+    /**
+     * Sends the reply email and, with a time selected, books the consult —
+     * mirrors App\Livewire\Leads\LeadCreate::send_message() exactly via
+     * App\Services\Leads\LeadReplyComposer::send(): the same
+     * SendLeadReplyJob, the same Project/Meet task booking, the same
+     * companion text, the same status transitions.
+     */
+    public function reply(SendLeadReplyRequest $request, int $lead, LeadReplyComposer $composer): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+        $client = $composer->resolveClientForLead($found);
+        $fullName = $this->leadFullName($found);
+
+        $result = $composer->send($found, $client, $request->user(), $fullName, $request->validated() + [
+            'selected_template_id' => $request->validated('template_id'),
+            'sender_ip' => $request->ip(),
+        ]);
+
+        if (! $result['ok']) {
+            return response()->json(['message' => $result['error']], 422);
+        }
+
+        LeadsSidebarBadge::bustBadgeCache((int) $found->belongs_to_vendor_id);
+
+        return response()->json(['data' => $result]);
+    }
+
+    /**
+     * One call: apply the "Consult" lead template and send — mirrors
+     * App\Livewire\Leads\LeadCreate::sendConsultInvite().
+     */
+    public function sendConsultInvite(SendConsultInviteRequest $request, int $lead, LeadReplyComposer $composer): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $found = $this->findOrFail($lead);
+        $client = $composer->resolveClientForLead($found);
+        $fullName = $this->leadFullName($found);
+
+        $result = $composer->sendConsultInvite($found, $client, $request->user(), $fullName, $request->validated() + [
+            'sender_ip' => $request->ip(),
+        ]);
+
+        if (! $result['ok']) {
+            return response()->json(['message' => $result['error']], 422);
+        }
+
+        LeadsSidebarBadge::bustBadgeCache((int) $found->belongs_to_vendor_id);
+
+        return response()->json(['data' => $result]);
+    }
+
+    /** Mirrors App\Livewire\Leads\LeadsIndex::bulkSetStatus(). */
+    public function bulkStatus(BulkUpdateLeadStatusRequest $request): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $leads = Lead::whereIn('id', $request->validated('lead_ids'))->get();
+
+        foreach ($leads as $lead) {
+            $lead->setStatus($request->validated('status'));
+        }
+
+        if ($leads->isNotEmpty()) {
+            LeadsSidebarBadge::bustBadgeCache((int) $leads->first()->belongs_to_vendor_id);
+        }
+
+        return response()->json(['data' => ['updated' => $leads->count()]]);
+    }
+
+    /** Mirrors App\Livewire\Leads\LeadsIndex::bulkDeleteImpact(). */
+    public function bulkDeleteImpact(BulkLeadIdsRequest $request): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $leads = Lead::whereIn('id', $request->validated('lead_ids'))->get();
+
+        $clients = [];
+        $users = [];
+        $holding = [];
+
+        foreach ($leads as $lead) {
+            $impact = $lead->deleteImpact();
+            array_push($clients, ...$impact['clients']);
+
+            if ($impact['user']) {
+                $users[] = $impact['user'];
+            }
+
+            if ($impact['schedule_link'] || $impact['booked_consult']) {
+                $holding[] = trim((string) ($lead->lead_data['name'] ?? '')) ?: 'Lead #'.$lead->id;
+            }
+        }
+
+        return response()->json(['data' => [
+            'count' => $leads->count(),
+            'clients' => array_values(array_unique($clients)),
+            'users' => array_values(array_unique($users)),
+            'holding' => array_values(array_unique($holding)),
+        ]]);
+    }
+
+    /** Mirrors App\Livewire\Leads\LeadsIndex::bulkDelete(). */
+    public function bulkDelete(BulkLeadIdsRequest $request): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $leads = Lead::whereIn('id', $request->validated('lead_ids'))->get();
+        $vendorId = $leads->first()?->belongs_to_vendor_id;
+
+        foreach ($leads as $lead) {
+            $lead->deleteWithOrphans();
+        }
+
+        if ($vendorId) {
+            LeadsSidebarBadge::bustBadgeCache((int) $vendorId);
+        }
+
+        return response()->json(['data' => ['deleted' => $leads->count()]]);
+    }
+
+    /** The lead's current full name, same resolution LeadCreate::editLead() gives $this->full_name. */
+    private function leadFullName(Lead $lead): string
+    {
+        return $lead->user !== null
+            ? (string) $lead->user->full_name
+            : (string) ($lead->lead_data['name'] ?? '');
+    }
+
+    /** Mirrors LeadCreate::editLead()'s $this->consultMeetingType resolution. */
+    private function leadMeetingPreference(Lead $lead): string
+    {
+        $preference = $lead->lead_data['meeting_preference'] ?? null;
+
+        return in_array($preference, ['in_person', 'virtual'], true) ? $preference : 'in_person';
     }
 
     /** A lead the current vendor may see: 404 when it doesn't exist (LeadScope already keeps this tenant-only). */

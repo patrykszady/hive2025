@@ -16,13 +16,14 @@ use Illuminate\Validation\ValidationException;
  * so both write the exact same payments/dates and project-status side
  * effects.
  *
- * Deliberately NOT covered here — left to the web's full Settings modal:
- * required contract signer selection, contract template choice, and manually
- * reassigning which bid (original contract vs. a specific change order) a
- * section belongs to. Those are rare, desktop-sized settings; this service
+ * NOT covered here — required contract signer selection, contract template
+ * choice, and manually reassigning which bid (original contract vs. a
+ * specific change order) a section belongs to — see
+ * App\Services\Estimates\EstimateContractSettingsWriter (and the app's
+ * EstimateContractSettingsController) for that slice instead. This service
  * only ever touches sections already on the ORIGINAL contract (no bid_id, or
  * the project's type-1 "Original Bid"), which is how every section sits
- * before anyone has manually reassigned one in that modal.
+ * before anyone has manually reassigned one via that other service.
  */
 class EstimatePaymentScheduler
 {

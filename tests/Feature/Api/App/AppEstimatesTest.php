@@ -801,3 +801,275 @@ it('refuses a Member drafting with AI, like the web', function () {
         'inquiry' => 'Demo the hall bathroom before retiling.',
     ])->assertForbidden();
 });
+
+// --- Email: template switcher, extra attachments, showChanges -----------
+
+it('queues the email with the chosen template name and showChanges, like EstimateEmail::send()', function () {
+    Queue::fake();
+
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => 'grant-1']);
+    $template = EmailTemplate::create(['vendor_id' => $vendor->id, 'name' => 'Follow-up', 'type' => 'estimate', 'subject' => 'x', 'body' => 'y']);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/email", [
+        'to' => ['client@example.test'],
+        'from' => $admin->email,
+        'subject' => 'Your estimate',
+        'body' => 'Please review.',
+        'template_id' => $template->id,
+        'show_changes' => true,
+    ])->assertOk();
+
+    Queue::assertPushed(SendEstimateEmailJob::class, function (SendEstimateEmailJob $job) {
+        $seen = (fn () => ['template' => $this->emailTemplateName, 'showChanges' => $this->showChanges])->call($job);
+
+        return $seen['template'] === 'Follow-up' && $seen['showChanges'] === true;
+    });
+});
+
+it('uploads extra attachments and hands their temp paths to the job, like EstimateEmail::send()', function () {
+    Queue::fake();
+
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => 'grant-1']);
+
+    // A unique name per run — the real storage/app/temp dir (same one
+    // EstimateEmail::send() writes to, not behind the Storage facade) is
+    // shared across test runs and Queue::fake() means the job never runs
+    // to clean its own file up, so a fixed name collides across runs.
+    $filename = 'floorplan_'.uniqid().'.pdf';
+    $file = Illuminate\Http\UploadedFile::fake()->create($filename, 50, 'application/pdf');
+
+    $this->post("/api/app/v1/estimates/{$estimate->id}/email", [
+        'to' => ['client@example.test'],
+        'from' => $admin->email,
+        'subject' => 'Your estimate',
+        'body' => 'Please review.',
+        'additional_attachments' => [$file],
+    ], ['Accept' => 'application/json'])->assertOk();
+
+    $capturedPaths = [];
+
+    Queue::assertPushed(SendEstimateEmailJob::class, function (SendEstimateEmailJob $job) use (&$capturedPaths, $filename) {
+        $paths = (fn () => $this->additionalAttachmentPaths)->call($job);
+        $capturedPaths = $paths;
+
+        return count($paths) === 1 && str_contains($paths[0], $filename) && file_exists($paths[0]);
+    });
+
+    // Clean up — SendEstimateEmailJob (never run here, Queue::fake()) is
+    // what deletes this on the real send path.
+    foreach ($capturedPaths as $path) {
+        @unlink($path);
+    }
+});
+
+it('refuses more than 5 extra attachments, like the web\'s WithFileUploads rule', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => $admin->email, 'grant_id' => 'grant-1']);
+
+    $files = array_map(fn ($i) => Illuminate\Http\UploadedFile::fake()->create("file{$i}.pdf", 10), range(1, 6));
+
+    $this->post("/api/app/v1/estimates/{$estimate->id}/email", [
+        'to' => ['client@example.test'],
+        'from' => $admin->email,
+        'subject' => 'Your estimate',
+        'body' => 'Please review.',
+        'additional_attachments' => $files,
+    ], ['Accept' => 'application/json'])->assertStatus(422);
+});
+
+// --- showChanges/showAllowances on PDF/XLSX exports ----------------------
+
+it('carries show_changes and show_allowances into the signed PDF url', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    $response = $this->getJson("/api/app/v1/estimates/{$estimate->id}/pdf-url?show_changes=1&show_allowances=0")->assertOk();
+
+    expect($response->json('data.url'))->toContain('show_changes=1')
+        ->and($response->json('data.url'))->toContain('show_allowances=0');
+
+    $default = $this->getJson("/api/app/v1/estimates/{$estimate->id}/pdf-url")->assertOk();
+    expect($default->json('data.url'))->toContain('show_changes=0')
+        ->and($default->json('data.url'))->toContain('show_allowances=1');
+});
+
+it('carries show_allowances into the signed XLSX url', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    $response = $this->getJson("/api/app/v1/estimates/{$estimate->id}/xlsx-url?show_allowances=0")->assertOk();
+
+    expect($response->json('data.url'))->toContain('show_allowances=0');
+});
+
+it('reports recent changes since estimate creation, like the Show Changes toggle', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    appEstimatesSection($estimate, ['created_at' => now()->subDay()]);
+
+    $response = $this->getJson("/api/app/v1/estimates/{$estimate->id}/recent-changes")->assertOk();
+
+    expect($response->json('data'))->toHaveKeys(['sections', 'line_items', 'since']);
+});
+
+// --- Duplicate section to another estimate --------------------------------
+
+it('lists the other estimates in the same project as duplicate targets', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $other = appEstimatesRow($vendor, $project);
+
+    $response = $this->getJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/duplicate-targets")->assertOk();
+
+    expect(collect($response->json('data'))->pluck('id')->all())->toBe([$other->id]);
+});
+
+it('duplicates a section onto an existing estimate in the same project', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['total' => 500]);
+    $catalogItem = appEstimatesCatalogItem();
+    appEstimatesLineItemRow($estimate, $section, $catalogItem, ['cost' => 50, 'quantity' => 10, 'total' => 500]);
+    $target = appEstimatesRow($vendor, $project);
+
+    $response = $this->postJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/duplicate-to-estimate", [
+        'target_estimate_id' => $target->id,
+        'cost_mode' => 'exact',
+        'include_allowances' => true,
+    ])->assertCreated();
+
+    expect($response->json('data.target_estimate_id'))->toBe($target->id);
+    expect(EstimateSection::where('estimate_id', $target->id)->count())->toBe(1);
+});
+
+it('duplicates a section onto a brand new estimate when no target is given', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['total' => 500]);
+
+    $response = $this->postJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/duplicate-to-estimate", [])
+        ->assertCreated();
+
+    $newEstimateId = $response->json('data.target_estimate_id');
+    expect($newEstimateId)->not->toBe($estimate->id);
+    expect(Estimate::withoutGlobalScopes()->find($newEstimateId)?->project_id)->toBe($project->id);
+});
+
+it('refuses duplicating a section onto its own estimate', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/sections/{$section->id}/duplicate-to-estimate", [
+        'target_estimate_id' => $estimate->id,
+    ])->assertStatus(422);
+});
+
+// --- Contract settings: signers, templates, bid reassignment -------------
+
+it('returns contract-settings options with templates, vendor users and bids', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['total' => 1000]);
+    EmailTemplate::create(['vendor_id' => $vendor->id, 'type' => 'contract', 'name' => 'Standard', 'subject' => 'x', 'body' => 'y']);
+
+    $response = $this->getJson("/api/app/v1/estimates/{$estimate->id}/contract-settings")->assertOk();
+
+    expect($response->json('data.contract_templates.0.name'))->toBe('Standard')
+        ->and(collect($response->json('data.vendor_users'))->pluck('id'))->toContain($admin->id)
+        ->and($response->json('data.bids'))->toHaveCount(1)
+        ->and($response->json('data.sections.0.id'))->toBe($section->id);
+});
+
+it('saves signer ids, template ids and reassigns a section to a new bid', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['total' => 1000]);
+    $template = EmailTemplate::create(['vendor_id' => $vendor->id, 'type' => 'contract', 'name' => 'Standard', 'subject' => 'x', 'body' => 'y']);
+
+    $originalBidId = $this->getJson("/api/app/v1/estimates/{$estimate->id}/contract-settings")->json('data.original_bid_id');
+
+    $newBid = $this->postJson("/api/app/v1/estimates/{$estimate->id}/contract-settings/bids")->assertCreated();
+    $newBidId = $newBid->json('data.id');
+
+    $this->putJson("/api/app/v1/estimates/{$estimate->id}/contract-settings", [
+        'required_vendor_signer_ids' => [$admin->id],
+        'contract_template_ids' => [$template->id],
+        'section_bids' => [(string) $section->id => $newBidId],
+    ])->assertOk()
+        ->assertJsonPath('data.required_vendor_signer_ids', [$admin->id])
+        ->assertJsonPath('data.contract_template_ids', [$template->id]);
+
+    expect($section->fresh()->bid_id)->toBe($newBidId)
+        ->and((float) \App\Models\Bid::withoutGlobalScopes()->find($newBidId)->amount)->toBe(1000.0)
+        ->and((float) \App\Models\Bid::withoutGlobalScopes()->find($originalBidId)->amount)->toBe(0.0);
+});
+
+it('refuses a Member reading or saving contract settings, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appEstimatesTeamUser(role: 2);
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson("/api/app/v1/estimates/{$estimate->id}/contract-settings")->assertForbidden();
+    $this->putJson("/api/app/v1/estimates/{$estimate->id}/contract-settings", [])->assertForbidden();
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/contract-settings/bids")->assertForbidden();
+});
