@@ -648,8 +648,18 @@ class AppServiceProvider extends ServiceProvider
 
     public function bootRoute()
     {
+        // The Hive Contractors app opens most screens with several calls at
+        // once (a project is detail + finances + photos + vendors + action
+        // items), so a signed-in app user gets their own, larger budget.
+        // Sign-in keeps its own app-login limiters below.
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+            $user = $request->user();
+
+            if ($user && $request->is('api/app/*')) {
+                return Limit::perMinute(300)->by('app:'.$user->id);
+            }
+
+            return Limit::perMinute(60)->by($user?->id ?: $request->ip());
         });
 
         // App login-code requests: per IP (keeps one phone/network from
