@@ -94,6 +94,22 @@ class LeadController extends Controller
         return response()->json(['data' => (new LeadResource($found))->withDetail()->toArray($request)]);
     }
 
+    /** The Origin filter's options — mirrors App\Livewire\Leads\LeadsIndex::origins() exactly. */
+    public function origins(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Lead::class);
+
+        $origins = Lead::query()
+            ->whereNotNull('origin')
+            ->where('origin', '!=', '')
+            ->distinct()
+            ->orderBy('origin')
+            ->pluck('origin')
+            ->all();
+
+        return response()->json(['data' => $origins]);
+    }
+
     /**
      * Create a lead by hand — the person who called instead of emailing or
      * filling the website form. Mirrors LeadCreate::save(): a duplicate

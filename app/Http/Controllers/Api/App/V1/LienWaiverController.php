@@ -111,6 +111,33 @@ class LienWaiverController extends Controller
     }
 
     /**
+     * Candidate claimants for a sub/supplier waiver on a project — mirrors
+     * App\Livewire\LienWaivers\Index::projectSubVendors(), exposed so the
+     * app's "Request a waiver" screen can offer the same vendor picker the
+     * web's create modal shows once a project is chosen.
+     */
+    public function subVendors(Request $request): JsonResponse
+    {
+        $this->authorize('create', LienWaiver::class);
+
+        $contractor = $request->user()->vendor;
+        abort_unless($contractor, 422, 'Your account is missing a vendor association.');
+
+        $project = Project::query()->find($request->query('project_id'));
+        abort_unless($project, 404);
+
+        $vendors = $this->projectSubVendors($project, $contractor)
+            ->map(fn (Vendor $vendor) => [
+                'id' => $vendor->id,
+                'name' => $vendor->business_name,
+            ])
+            ->values()
+            ->all();
+
+        return response()->json(['data' => $vendors]);
+    }
+
+    /**
      * A single, ad-hoc lien waiver — mirrors
      * App\Livewire\LienWaivers\Index::createWaiver() via
      * App\Services\LienWaivers\LienWaiverCreator.

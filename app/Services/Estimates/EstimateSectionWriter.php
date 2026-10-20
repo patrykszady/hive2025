@@ -108,6 +108,98 @@ class EstimateSectionWriter
     }
 
     /**
+     * Duplicate a section IN PLACE on its own estimate — name suffixed
+     * " -Copy", every active line item (and its allowances) copied over —
+     * the shared body of App\Livewire\Estimates\EstimateShow::sectionDuplicate()
+     * and the Hive Contractors app's EstimateSectionController::duplicate().
+     * Unlike duplicateSection() on App\Services\Estimates\EstimateDuplicator
+     * (which can retarget cost mode and cross estimates), this is an exact
+     * copy onto the SAME estimate — the "Duplicate Section" menu item, not
+     * "Duplicate to Estimate".
+     */
+    public function duplicateSection(EstimateSection $section): EstimateSection
+    {
+        $newSection = $this->addSection($section->estimate, trim((string) $section->name).' -Copy');
+
+        foreach ($section->estimate_line_items as $lineItem) {
+            $newLineItem = EstimateLineItem::create([
+                'estimate_id' => $section->estimate_id,
+                'line_item_id' => $lineItem->line_item_id,
+                'section_id' => $newSection->id,
+                'order' => $lineItem->order,
+                'name' => $lineItem->name,
+                'category' => $lineItem->category,
+                'sub_category' => $lineItem->sub_category,
+                'unit_type' => $lineItem->unit_type,
+                'quantity' => $lineItem->quantity,
+                'cost' => $lineItem->cost,
+                'total' => $lineItem->total,
+                'desc' => $lineItem->desc,
+                'notes' => $lineItem->notes,
+            ]);
+
+            foreach ($lineItem->allowances as $allowance) {
+                $newLineItem->allowances()->create([
+                    'description' => $allowance->description,
+                    'amount' => $allowance->amount,
+                ]);
+            }
+        }
+
+        $newSection->total = $newSection->estimate_line_items()->sum('total');
+        $newSection->save();
+
+        $this->rollUpBid($newSection);
+
+        return $newSection;
+    }
+
+    /**
+     * Restore a disabled line item back into its (active) section, re-inserted
+     * at its original position when the activity log still has one — the
+     * shared body of App\Livewire\Estimates\EstimateShow::lineItemRestore()
+     * and the Hive Contractors app's EstimateLineItemController::restore().
+     */
+    public function restoreLineItem(EstimateLineItem $lineItem): EstimateSection
+    {
+        $section = $lineItem->estimate->estimate_sections()->findOrFail($lineItem->section_id);
+
+        // displace() logs this FIRST (before LogsActivity fires its own
+        // 'deleted' entry), so ASC by id gets the displace log, which carries
+        // the order.
+        $deletedActivity = \Spatie\Activitylog\Models\Activity::query()
+            ->where('subject_type', EstimateLineItem::class)
+            ->where('subject_id', $lineItem->id)
+            ->where('event', 'deleted')
+            ->orderBy('id')
+            ->first();
+
+        $originalOrder = isset($deletedActivity->properties['old']['order'])
+            ? (int) $deletedActivity->properties['old']['order']
+            : null;
+
+        // Restore the line item (order remains 999999 until moved below).
+        $lineItem->restore();
+
+        if ($originalOrder !== null) {
+            $lineItem->move($originalOrder);
+        } else {
+            $currentMaxOrder = EstimateLineItem::where('section_id', $section->id)
+                ->where('order', '<', 999999)
+                ->max('order');
+            $lineItem->order = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
+            $lineItem->save();
+        }
+
+        $section->total = $section->estimate_line_items()->sum('total');
+        $section->save();
+
+        $this->rollUpBid($section);
+
+        return $section;
+    }
+
+    /**
      * Recompute and persist the section's bid total, deleting the bid once it
      * no longer has any amount to show.
      */

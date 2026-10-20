@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Route;
 // {lienWaiver} routes for clarity, though whereNumber() alone already keeps
 // either from being swallowed as an id.
 Route::get('leads/badge', [AppLeadController::class, 'badge'])->name('leads.badge');
+Route::get('leads/origins', [AppLeadController::class, 'origins'])->name('leads.origins');
 Route::get('leads', [AppLeadController::class, 'index'])->name('leads.index');
 Route::post('leads', [AppLeadController::class, 'store'])->name('leads.store');
 Route::get('leads/{lead}', [AppLeadController::class, 'show'])->whereNumber('lead')->name('leads.show');
@@ -31,6 +32,7 @@ Route::post('leads/{lead}/schedule-link', [AppLeadController::class, 'scheduleLi
 Route::post('leads/{lead}/text-schedule-link', [AppLeadController::class, 'textScheduleLink'])->whereNumber('lead')->name('leads.text-schedule-link');
 
 Route::get('lien-waivers/projects', [AppLienWaiverController::class, 'eligibleProjects'])->name('lien-waivers.projects');
+Route::get('lien-waivers/sub-vendors', [AppLienWaiverController::class, 'subVendors'])->name('lien-waivers.sub-vendors');
 Route::get('lien-waivers', [AppLienWaiverController::class, 'index'])->name('lien-waivers.index');
 Route::post('lien-waivers', [AppLienWaiverController::class, 'store'])->name('lien-waivers.store');
 Route::get('lien-waivers/{lienWaiver}', [AppLienWaiverController::class, 'show'])->whereNumber('lienWaiver')->name('lien-waivers.show');

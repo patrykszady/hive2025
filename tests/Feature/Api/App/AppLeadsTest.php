@@ -106,6 +106,27 @@ it('filters the leads list by origin and search', function () {
     expect(collect($bySearch->json('data'))->pluck('id')->all())->toBe([$angi->id]);
 });
 
+it('lists distinct, sorted origins for the Origin filter, like LeadsIndex::origins()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    appSalesLead($vendor, ['origin' => 'Website']);
+    appSalesLead($vendor, ['origin' => 'Angi']);
+    appSalesLead($vendor, ['origin' => 'Website']);
+    appSalesLead($vendor, ['origin' => '']);
+
+    $response = $this->getJson('/api/app/v1/leads/origins')->assertOk();
+
+    expect($response->json('data'))->toBe(['Angi', 'Website']);
+});
+
+it('refuses a Member listing lead origins', function () {
+    ['user' => $member] = appSalesTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson('/api/app/v1/leads/origins')->assertForbidden();
+});
+
 it('shows the new-lead badge count to an Admin and 0 to a Member, like the web sidebar', function () {
     ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
     ['user' => $member] = appSalesTeamUser(role: 2);
@@ -141,6 +162,9 @@ it('shows a lead detail with its message, attachments and status history', funct
 
     $lead = appSalesLead($vendor, [
         'lead_data' => appSalesLeadData([
+            'city' => 'Palatine',
+            'state' => 'IL',
+            'zip' => '60067',
             'attachments' => [
                 ['name' => 'bid.pdf', 'mime' => 'application/pdf', 'path' => 'leads/bid.pdf'],
             ],
@@ -152,6 +176,9 @@ it('shows a lead detail with its message, attachments and status history', funct
 
     expect($response->json('data.id'))->toBe($lead->id)
         ->and($response->json('data.message'))->toBe('Looking for a kitchen remodel quote.')
+        ->and($response->json('data.city'))->toBe('Palatine')
+        ->and($response->json('data.state'))->toBe('IL')
+        ->and($response->json('data.zip'))->toBe('60067')
         ->and($response->json('data.attachments.0.name'))->toBe('bid.pdf')
         ->and($response->json('data.attachments.0.url'))->toContain('/leads/'.$lead->id.'/file/0/signed')
         ->and($response->json('data.feedback.0.rating'))->toBe(5)

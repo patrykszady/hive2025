@@ -160,6 +160,40 @@ it('lists eligible projects for a new waiver', function () {
     expect(collect($response->json('data'))->pluck('id')->all())->toContain($project->id);
 });
 
+it('lists only vendors with money on the project as sub-waiver candidates', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesWaiverTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appSalesWaiverClient($vendor);
+    $project = appSalesWaiverProject($vendor, $client);
+    $sub = Vendor::factory()->create(['business_name' => 'Acme Plumbing']);
+    Expense::withoutEvents(fn () => Expense::create([
+        'project_id' => $project->id,
+        'vendor_id' => $sub->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'amount' => 400,
+        'date' => now()->toDateString(),
+        'created_by_user_id' => $admin->id,
+    ]));
+    $outsider = Vendor::factory()->create(['business_name' => 'Not On This Job']);
+
+    $response = $this->getJson("/api/app/v1/lien-waivers/sub-vendors?project_id={$project->id}")->assertOk();
+
+    $ids = collect($response->json('data'))->pluck('id')->all();
+    expect($ids)->toContain($sub->id)
+        ->and($ids)->not->toContain($vendor->id)
+        ->and($ids)->not->toContain($outsider->id);
+});
+
+it('refuses a Member listing sub-vendor candidates', function () {
+    ['vendor' => $vendor, 'user' => $member] = appSalesWaiverTeamUser(role: 2);
+    $client = appSalesWaiverClient($vendor);
+    $project = appSalesWaiverProject($vendor, $client);
+    Sanctum::actingAs($member, ['app']);
+
+    $this->getJson("/api/app/v1/lien-waivers/sub-vendors?project_id={$project->id}")->assertForbidden();
+});
+
 it("creates the contractor's own waiver, requiring the payer fields", function () {
     ['vendor' => $vendor, 'user' => $admin] = appSalesWaiverTeamUser(role: 1);
     Sanctum::actingAs($admin, ['app']);

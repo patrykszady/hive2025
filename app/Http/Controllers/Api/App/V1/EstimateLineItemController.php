@@ -98,6 +98,18 @@ class EstimateLineItemController extends Controller
         return response()->json(['data' => ['deleted' => true]]);
     }
 
+    /** Mirrors App\Livewire\Estimates\EstimateShow::lineItemRestore() via EstimateSectionWriter::restoreLineItem(). */
+    public function restore(Request $request, int $estimate, int $lineItem, \App\Services\Estimates\EstimateSectionWriter $writer): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('update', $found);
+
+        $existing = $found->estimate_line_items()->onlyTrashed()->findOrFail($lineItem);
+        $writer->restoreLineItem($existing);
+
+        return response()->json(['data' => $this->lineItemArray($existing->fresh('allowances'))]);
+    }
+
     /**
      * @return array<string, mixed>
      */

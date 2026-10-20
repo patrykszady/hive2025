@@ -62,6 +62,18 @@ class EstimateSectionController extends Controller
         return response()->json(['data' => $this->sectionArray($sectionModel->fresh())]);
     }
 
+    /** Mirrors App\Livewire\Estimates\EstimateShow::sectionDuplicate() — an exact in-place copy, named " -Copy". */
+    public function duplicate(Request $request, int $estimate, int $section): JsonResponse
+    {
+        $found = $this->visibleEstimate($estimate);
+        $this->authorize('update', $found);
+
+        $sectionModel = $found->estimate_sections()->findOrFail($section);
+        $newSection = app(EstimateSectionWriter::class)->duplicateSection($sectionModel);
+
+        return response()->json(['data' => $this->sectionArray($newSection->fresh())], 201);
+    }
+
     /**
      * @return array<string, mixed>
      */

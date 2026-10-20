@@ -378,36 +378,41 @@ class EstimateAccept extends Component
             $this->addError('payments_remaining_error', 'Amount Remaining cannot be less than $0.00');
         } else {
             $estimate = $this->estimate;
-            $estimate_options = $this->estimate->options;
 
-            $this->payments = $this->payments
-                ->map(function (array $payment): array {
-                    $payment['description'] = $this->canonicalPaymentDescription((string) ($payment['description'] ?? ''));
-
-                    return $payment;
-                })
-                ->values();
-
-            if ($this->hasDuplicatePaymentDescriptions()) {
+            // The payments/dates slice (canonicalizing descriptions, the
+            // duplicate-description and outstanding-balance checks, the
+            // options write, and the Scheduled-status side effect) is shared
+            // with the Hive Contractors app via
+            // App\Services\Estimates\EstimatePaymentScheduler — see its
+            // docblock for what stays here instead (signer ids, contract
+            // template ids, bid assignment).
+            try {
+                $result = app(\App\Services\Estimates\EstimatePaymentScheduler::class)->save(
+                    $estimate,
+                    $this->payments->map(fn ($payment) => collect($payment)->except('uid')->all())->values()->all(),
+                    $this->start_date ?: null,
+                    $this->end_date ?: null,
+                );
+            } catch (\Illuminate\Validation\ValidationException $e) {
                 $this->dispatch('notify',
                     type: 'error',
-                    content: 'Payment descriptions must be unique.'
+                    content: $e->validator->errors()->first('payments') ?: 'Payment descriptions must be unique.'
                 );
 
                 return;
             }
 
-            if ($this->payments->where('amount', '!=', '')->sum('amount') != 0) {
-                // uid is view-only (stable wire:key across reindexing) — keep it
-                // out of the stored estimate options.
-                $estimate_options['payments'] = $this->payments
-                    ->map(fn ($payment) => collect($payment)->except('uid')->all())
-                    ->values()
-                    ->all();
-            }
+            // uid is view-only (stable wire:key across reindexing) — the
+            // service strips it before persisting, so it's re-attached here
+            // from the payments already on screen rather than lost.
+            $this->payments = collect($result['payments'])->values()->map(fn ($payment, $i) => [
+                'uid' => $this->payments[$i]['uid'] ?? ('p'.$i),
+                'description' => $payment['description'],
+                'amount' => $payment['amount'],
+            ]);
 
-            $estimate_options['start_date'] = $this->start_date;
-            $estimate_options['end_date'] = $this->end_date;
+            $estimate = $estimate->fresh();
+            $estimate_options = $estimate->options;
 
             // Persist required vendor signer IDs
             $estimate_options['required_vendor_signer_ids'] = array_map('intval', $this->requiredVendorSignerIds);
@@ -417,27 +422,6 @@ class EstimateAccept extends Component
 
             $estimate->options = $estimate_options;
             $estimate->save();
-
-            // Auto-transition to Scheduled when a start date is set and status is Response or Prep
-            if ($this->start_date) {
-                $latestStatus = $this->project->latestStatus;
-
-                if ($latestStatus && in_array($latestStatus->status_code, [3, 4], true)) {
-                    ProjectStatus::create([
-                        'project_id'           => $this->project->id,
-                        'belongs_to_vendor_id' => $latestStatus->belongs_to_vendor_id,
-                        'status_code'          => 5,
-                        'start_date'           => $this->start_date,
-                    ]);
-                } elseif ($latestStatus && $latestStatus->status_code === 5
-                    && $latestStatus->start_date?->toDateString() !== $this->start_date) {
-                    // RESCHEDULE: the project is already Scheduled — move that
-                    // status row to the new date. Leaving the old date behind
-                    // makes it outrank the eventual Active row (latestOfMany
-                    // by start_date), freezing the project as "Scheduled".
-                    $latestStatus->update(['start_date' => $this->start_date]);
-                }
-            }
 
             foreach ($this->bids as $bid_index => $bid) {
                 $bid_sections = $this->sections->where('bid_index', $bid_index);
