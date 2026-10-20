@@ -5,7 +5,6 @@ namespace App\Livewire\Sms;
 use App\Livewire\Sms\SmsIndex;
 use App\Livewire\Sms\SmsNewThread;
 use App\Livewire\Tasks\TaskCreate;
-use App\Models\BlockedCaller;
 use App\Models\CallLog;
 use App\Models\Client;
 use App\Models\Project;
@@ -1056,7 +1055,7 @@ class SmsConversation extends Component
         $this->showAssignClientModal = true;
     }
 
-    public function assignClient(): void
+    public function assignClient(\App\Services\Sms\ThreadAdminActions $adminActions): void
     {
         if ($this->isClientUser) {
             abort(403);
@@ -1083,17 +1082,7 @@ class SmsConversation extends Component
 
         $thread = SmsGroupThread::findOrFail($this->threadId);
 
-        if ($this->assignSubjectType === 'client') {
-            $thread->update([
-                'client_id' => $this->assignClientId ?: null,
-                'subject_vendor_id' => null,
-            ]);
-        } else {
-            $thread->update([
-                'client_id' => null,
-                'subject_vendor_id' => $this->assignVendorId ?: null,
-            ]);
-        }
+        $adminActions->assign($thread, $this->assignSubjectType, $this->assignClientId, $this->assignVendorId);
 
         $this->showAssignClientModal = false;
 
@@ -1140,25 +1129,24 @@ class SmsConversation extends Component
         );
     }
 
-    public function markThreadAsSpam(): void
+    public function markThreadAsSpam(\App\Services\Sms\ThreadSpamBlocker $spamBlocker): void
     {
         if ($this->isClientUser) {
             abort(403);
         }
 
-        $targets = $this->threadSpamTargetPhones();
+        if (! $this->thread) {
+            return;
+        }
+
+        $targets = $spamBlocker->targetPhones($this->thread);
 
         if ($targets === []) {
             Flux::toast(variant: 'warning', heading: 'No Number', text: 'No external participant number found for this thread.', duration: 4000, position: 'top right');
             return;
         }
 
-        foreach ($targets as $phone) {
-            BlockedCaller::firstOrCreate(
-                ['phone_number' => $phone],
-                ['reason' => 'Manually marked as spam from messages', 'blocked_by_user_id' => auth()->id(), 'auto_blocked' => false]
-            );
-        }
+        $targets = $spamBlocker->markAsSpam($this->thread, (int) auth()->id());
 
         $count = count($targets);
 
@@ -1179,20 +1167,24 @@ class SmsConversation extends Component
     /**
      * Remove the current thread's external participant numbers from spam block list.
      */
-    public function unblockThreadSpam(): void
+    public function unblockThreadSpam(\App\Services\Sms\ThreadSpamBlocker $spamBlocker): void
     {
         if ($this->isClientUser) {
             abort(403);
         }
 
-        $targets = $this->threadSpamTargetPhones();
+        if (! $this->thread) {
+            return;
+        }
+
+        $targets = $spamBlocker->targetPhones($this->thread);
 
         if ($targets === []) {
             Flux::toast(variant: 'warning', heading: 'No Number', text: 'No external participant number found for this thread.', duration: 4000, position: 'top right');
             return;
         }
 
-        $deleted = BlockedCaller::query()->whereIn('phone_number', $targets)->delete();
+        $deleted = $spamBlocker->unblock($this->thread);
 
         if ($deleted === 0) {
             Flux::toast(variant: 'warning', heading: 'Not Blocked', text: 'Thread participant numbers are not currently blocked.', duration: 4000, position: 'top right');
@@ -1207,35 +1199,11 @@ class SmsConversation extends Component
 
     public function hasBlockedThreadSpamTargets(): bool
     {
-        $targets = $this->threadSpamTargetPhones();
-
-        if ($targets === []) {
+        if (! $this->thread) {
             return false;
         }
 
-        return BlockedCaller::query()->whereIn('phone_number', $targets)->exists();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    protected function threadSpamTargetPhones(): array
-    {
-        if (! $this->thread) {
-            return [];
-        }
-
-        $targets = collect()
-            ->merge($this->thread->threadParticipants?->pluck('phone_number')->all() ?? [])
-            ->merge(is_array($this->thread->participants) ? $this->thread->participants : [])
-            ->filter(fn ($phone) => is_string($phone) && trim($phone) !== '')
-            ->map(fn ($phone) => $this->normalizeDialTarget($phone))
-            ->filter(fn ($phone) => is_string($phone) && $phone !== '')
-            ->reject(fn ($phone) => GroupSmsService::isOurNumber($phone))
-            ->unique()
-            ->values();
-
-        return $targets->all();
+        return app(\App\Services\Sms\ThreadSpamBlocker::class)->isBlocked($this->thread);
     }
 
     #[Computed]
@@ -1250,7 +1218,7 @@ class SmsConversation extends Component
         return Vendor::orderBy('business_name')->get();
     }
 
-    public function deleteThread(): void
+    public function deleteThread(\App\Services\Sms\ThreadAdminActions $adminActions): void
     {
         if ($this->isClientUser) {
             abort(403, 'Client users cannot delete threads.');
@@ -1262,10 +1230,7 @@ class SmsConversation extends Component
 
         $thread = SmsGroupThread::findOrFail($this->threadId);
 
-        $thread->messages()->delete();
-        $thread->reads()->delete();
-        $thread->threadParticipants()->delete();
-        $thread->delete();
+        $adminActions->delete($thread);
 
         $this->showDeleteConfirm = false;
         $this->threadId = null;
@@ -1887,7 +1852,7 @@ class SmsConversation extends Component
         $this->dispatch('sms-schedule-changed');
     }
 
-    public function cancelScheduledMessage(): void
+    public function cancelScheduledMessage(\App\Services\Sms\ScheduledMessageActions $scheduledActions): void
     {
         if ($this->isClientUser) {
             abort(403);
@@ -1898,7 +1863,7 @@ class SmsConversation extends Component
             ->where('status', 'scheduled')
             ->firstOrFail();
 
-        $message->delete();
+        $scheduledActions->cancel($message);
 
         $this->cancelScheduledId = null;
         $this->showCancelModal = false;
@@ -1915,7 +1880,7 @@ class SmsConversation extends Component
         $this->dispatch('sms-schedule-changed');
     }
 
-    public function sendScheduledNow(int $messageId): void
+    public function sendScheduledNow(int $messageId, \App\Services\Sms\ScheduledMessageActions $scheduledActions): void
     {
         if ($this->isClientUser) {
             abort(403);
@@ -1926,51 +1891,7 @@ class SmsConversation extends Component
             ->where('status', 'scheduled')
             ->firstOrFail();
 
-        $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
-
-        $taskIds = collect((array) ($rawPayload['scheduled_task_ids'] ?? []))
-            ->map(fn ($id) => (int) $id)
-            ->filter(fn ($id) => $id > 0)
-            ->values()
-            ->all();
-
-        if ($taskIds !== [] && $message->thread?->subject_vendor_id) {
-            Task::whereIn('id', $taskIds)
-                ->where('vendor_id', $message->thread->subject_vendor_id)
-                ->whereNull('vendor_status')
-                ->update([
-                    'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
-                ]);
-        }
-
-        $updates = ['status' => 'sending', 'scheduled_at' => null];
-
-        $currentUserId = auth()->id();
-        $newSignature = SmsNewThread::getSignature($currentUserId);
-        $existingSignature = $this->extractSignatureLine((string) ($message->text ?? ''));
-
-        if ($existingSignature !== null && $existingSignature !== $newSignature) {
-            $body = rtrim(preg_replace('/\n?-(?:PS|GS|GSC)$/', '', rtrim((string) $message->text)));
-            $updates['text'] = $body . "\n" . $newSignature;
-        }
-
-        $updates['sent_by_user_id'] = $currentUserId;
-
-        $message->update($updates);
-
-        \App\Jobs\SendGroupMms::dispatch($message->id);
-
-        $message->thread?->update(['last_activity_at' => now()]);
-
-        try {
-            \App\Events\SmsMessageReceived::dispatch($message->thread_id);
-        } catch (\Throwable $e) {
-            Log::warning('SMS broadcast failed', ['message_id' => $message->id, 'error' => $e->getMessage()]);
-        }
-
-        if ($message->sent_by_user_id) {
-            \App\Jobs\SendOutboundSmsBrowserNotifications::dispatch($message->id, $message->sent_by_user_id);
-        }
+        $scheduledActions->sendNow($message, (int) auth()->id());
 
         unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
@@ -2073,7 +1994,7 @@ class SmsConversation extends Component
         return null;
     }
 
-    public function resendOptInPrompt(GroupSmsService $smsService): void
+    public function resendOptInPrompt(\App\Services\Sms\ThreadOptInManager $optInManager): void
     {
         if ($this->isClientUser) {
             abort(403, 'Client users cannot send messages.');
@@ -2091,7 +2012,7 @@ class SmsConversation extends Component
             return;
         }
 
-        $smsService->resendConsentPrompt($thread);
+        $optInManager->resend($thread);
 
         Flux::toast(variant: 'success', heading: 'Prompt Sent', text: 'START opt-in message was resent to this thread.', duration: 4500, position: 'top right');
 
@@ -2105,7 +2026,7 @@ class SmsConversation extends Component
         $this->manualOptInParticipantId = null;
     }
 
-    public function manualOptIn(GroupSmsService $smsService): void
+    public function manualOptIn(\App\Services\Sms\ThreadOptInManager $optInManager): void
     {
         if ($this->isClientUser) {
             abort(403, 'Client users cannot send messages.');
@@ -2119,25 +2040,13 @@ class SmsConversation extends Component
             'manualOptInReason.required' => 'Please provide a reason for the manual opt-in.',
         ]);
 
-        $participant = SmsThreadParticipant::findOrFail($this->manualOptInParticipantId);
-
-        if ((int) $participant->thread_id !== $this->threadId) {
-            abort(403);
-        }
-
-        $participant->update([
-            'opted_in_at' => now(),
-            'manual_opt_in_reason' => $this->manualOptInReason,
-            'manual_opt_in_by' => auth()->id(),
-        ]);
-
         $thread = SmsGroupThread::findOrFail($this->threadId);
 
-        // If all participants are now opted in, send the welcome message
-        $smsService->markParticipantOptedInAndSendWelcomeIfReady(
+        $participant = $optInManager->manualOptIn(
             $thread,
-            $participant->phone_number,
-            auth()->id(),
+            (int) $this->manualOptInParticipantId,
+            $this->manualOptInReason,
+            (int) auth()->id(),
         );
 
         $name = $this->resolvePhoneDisplay($participant->phone_number);

@@ -10,8 +10,11 @@ use App\Livewire\Sms\SmsNewThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadRead;
 use App\Services\GroupSmsService;
+use App\Services\Sms\ScheduledMessageActions;
+use App\Services\SmsTranslationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The app's native texting screens over the existing SMS system: messages
@@ -126,5 +129,76 @@ class ThreadMessageController extends Controller
         }
 
         return response()->json(['read' => true]);
+    }
+
+    /**
+     * Cancel a scheduled (not-yet-sent) message —
+     * App\Livewire\Sms\SmsConversation::cancelScheduledMessage().
+     */
+    public function destroy(Request $request, int $thread, int $message, ScheduledMessageActions $scheduledActions): JsonResponse
+    {
+        $this->resolveAppThread($thread, $request->user());
+
+        $smsMessage = SmsMessage::where('id', $message)
+            ->where('thread_id', $thread)
+            ->where('status', 'scheduled')
+            ->firstOrFail();
+
+        $scheduledActions->cancel($smsMessage);
+
+        return response()->json(['deleted' => true]);
+    }
+
+    /**
+     * Send a scheduled message right now instead of waiting —
+     * App\Livewire\Sms\SmsConversation::sendScheduledNow().
+     */
+    public function sendNow(Request $request, int $thread, int $message, ScheduledMessageActions $scheduledActions): JsonResponse
+    {
+        $user = $request->user();
+        $this->resolveAppThread($thread, $user);
+
+        $smsMessage = SmsMessage::where('id', $message)
+            ->where('thread_id', $thread)
+            ->where('status', 'scheduled')
+            ->firstOrFail();
+
+        $scheduledActions->sendNow($smsMessage, (int) $user->id);
+
+        return response()->json(['data' => new MessageResource($smsMessage->fresh('sentByUser'))]);
+    }
+
+    /**
+     * Translate one message into the viewer's own preferred language, for
+     * the per-message translate badge — App\Livewire\Sms\SmsConversation::toggleMessageTranslation().
+     * Never persisted: the thread itself always renders in English: the app
+     * re-requests this each time the badge is pressed and reverts to the
+     * message's own (English) body itself.
+     */
+    public function translate(Request $request, int $thread, int $message, SmsTranslationService $translator): JsonResponse
+    {
+        $user = $request->user();
+        $this->resolveAppThread($thread, $user);
+
+        $smsMessage = SmsMessage::where('id', $message)
+            ->where('thread_id', $thread)
+            ->firstOrFail();
+
+        $language = $translator->normalizeLanguage((string) ($user->preferred_language ?: 'English'));
+
+        if (strcasecmp($language, 'English') === 0) {
+            throw ValidationException::withMessages(['message' => 'You read messages in English — nothing to translate.']);
+        }
+
+        $text = trim((string) ($smsMessage->translated_display_text ?? $smsMessage->display_text ?? ''));
+
+        if ($text === '') {
+            throw ValidationException::withMessages(['message' => 'This message has no text to translate.']);
+        }
+
+        return response()->json([
+            'translated' => $translator->translate($text, $language, 'English'),
+            'language' => $language,
+        ]);
     }
 }
