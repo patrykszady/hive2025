@@ -1327,6 +1327,13 @@ class ReceiptController extends Controller
             }
         }
 
+        // A subtotal CU did not pick up as a field ("Taxable Subtotal" +
+        // "Nontaxable Subtotal" on Climate Solutions invoices) is read off the
+        // text, and only kept when it adds up to the total.
+        if (($subtotal === null || $subtotal <= 0) && $amount !== null) {
+            $subtotal = $this->subtotalFromContent((string) ($rawContent ?? ''), $totalTax, $amount, $shipping) ?? $subtotal;
+        }
+
         if (is_array($formattedItems) && !empty($formattedItems)) {
             $formattedItems = $this->normalizeMaterialOrderOcr($formattedItems, (string) ($rawContent ?? ''));
             if ($isMaterialOrderDoc) {
@@ -1334,9 +1341,11 @@ class ReceiptController extends Controller
             }
             $formattedItems = $this->supplementLineItemsFromContent($formattedItems, (string) ($content ?? ''), $subtotal);
             $formattedItems = $this->supplementQuantitiesFromContent($formattedItems, (string) ($content ?? ''));
-            $formattedItems = $this->deduplicateLineItems($formattedItems);
+            $formattedItems = $this->deduplicateLineItems($formattedItems, $subtotal);
             $formattedItems = $this->reorderItemsByContentPosition($formattedItems, (string) ($rawContent ?? ''));
         }
+
+        $formattedItems = $this->recoverMissingLineItems($formattedItems, (string) ($rawContent ?? ''), $subtotal);
 
         // ── 11c. Reconcile missing subtotal / tax / total from line items ─
         // When Azure CU misses one of the summary fields (e.g. "Subtotal"
@@ -2016,6 +2025,92 @@ class ReceiptController extends Controller
         return $found ? $total : null;
     }
 
+    /**
+     * The subtotal printed on the receipt, read from labelled lines in the OCR
+     * text: a plain "Subtotal", or "Taxable Subtotal" plus "Nontaxable
+     * Subtotal". Null unless subtotal + tax + shipping equals the total.
+     */
+    private function subtotalFromContent(string $content, ?float $totalTax, float $amount, ?float $shipping): ?float
+    {
+        if ($content === '') {
+            return null;
+        }
+
+        preg_match_all(
+            '/^[ \t]*(non-?\s*taxable|taxable)?[ \t]*sub[ \t-]*total[ \t]*:?[ \t]*\$?[ \t]*(-?[\d,]+\.\d{2})\b/im',
+            $content,
+            $matches,
+            PREG_SET_ORDER,
+        );
+
+        $plain = null;
+        $split = [];
+        foreach ($matches as $match) {
+            $value = (float) str_replace(',', '', $match[2]);
+            $kind = strtolower(preg_replace('/[^a-z]/i', '', (string) $match[1]));
+
+            if ($kind === '') {
+                $plain ??= $value;
+            } else {
+                $split[$kind] ??= $value;
+            }
+        }
+
+        $candidates = array_filter([
+            $plain,
+            $split !== [] ? round(array_sum($split), 2) : null,
+        ], fn ($value) => $value !== null);
+
+        foreach ($candidates as $candidate) {
+            if (abs(round($candidate + ($totalTax ?? 0) + ($shipping ?? 0), 2) - $amount) <= 0.02) {
+                return round($candidate, 2);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * When CU's line items fall short of the printed subtotal, the lines are
+     * re-read from the whole OCR text (App\Services\Receipts\ReceiptLineItemRecovery)
+     * and replace CU's only if they add up to the subtotal exactly.
+     *
+     * @param  array<int, array<string, mixed>>|null  $items
+     * @return array<int, array<string, mixed>>|null
+     */
+    private function recoverMissingLineItems(?array $items, string $content, ?float $subtotal): ?array
+    {
+        if ($subtotal === null || $subtotal <= 0 || $content === '') {
+            return $items;
+        }
+
+        // Only a list that came back short: receipts CU reads without any
+        // lines (fuel, permits) and lists that add up are left alone.
+        $itemsTotal = $this->sumLineItemTotals($items ?? []);
+
+        if ($itemsTotal === null || $subtotal - $itemsTotal <= 0.02) {
+            return $items;
+        }
+
+        $recovered = app(\App\Services\Receipts\ReceiptLineItemRecovery::class)->recover($content, $subtotal);
+
+        if ($recovered === null) {
+            return $items;
+        }
+
+        return array_map(fn (array $line): array => [
+            'Area' => [],
+            'Unit' => null,
+            'Price' => $line['unit_price'] ?? round($line['total_price'] / max($line['quantity'], 1), 2),
+            'Quantity' => $line['quantity'],
+            'TotalPrice' => $line['total_price'],
+            'VendorCode' => $line['vendor_code'],
+            'Description' => $line['description'],
+            'Manufacturer' => null,
+            'ManufacturerPartNumber' => null,
+        ], $recovered);
+    }
+
     private function supplementLineItemsFromContent(array $items, string $content, ?float $subtotal): array
     {
         if ($content === '' || is_null($subtotal)) {
@@ -2187,7 +2282,15 @@ class ReceiptController extends Controller
         return $items;
     }
 
-    private function deduplicateLineItems(array $items): array
+    /**
+     * Drops lines that repeat an earlier line's code, quantity and amount —
+     * unless the repeats are what makes the list add up to the subtotal. An
+     * invoice can list the same product on two lines: Climate Solutions
+     * invoice 68405 (expense 28901) has the same slider on lines 2 and 9, the
+     * same window on 12 and 13 and the same mullion on 8, 14 and 15, all
+     * without item codes, and lost four of its eleven lines here.
+     */
+    private function deduplicateLineItems(array $items, ?float $subtotal = null): array
     {
         $normalized = [];
         foreach ($items as $item) {
@@ -2255,6 +2358,16 @@ class ReceiptController extends Controller
 
             if (!$hasSpecificMatch) {
                 $final[] = $item;
+            }
+        }
+
+        if ($subtotal !== null && count($final) < count($normalized)) {
+            $allTotal = $this->sumLineItemTotals($normalized);
+            $dedupedTotal = $this->sumLineItemTotals($final);
+
+            if ($allTotal !== null && abs($allTotal - $subtotal) <= 0.02
+                && ($dedupedTotal === null || abs($dedupedTotal - $subtotal) > 0.02)) {
+                return array_values($normalized);
             }
         }
 

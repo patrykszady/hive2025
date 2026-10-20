@@ -20,6 +20,7 @@
     <env name="SESSION_DRIVER" value="array"/>
     <env name="TELESCOPE_ENABLED" value="false"/>
     <env name="URL_SHORTENER_ENABLED" value="false"/>
+    <env name="OPENAI_RECEIPT_ITEM_RECOVERY" value="false" force="true"/>
     <!-- Blank every credential scripts/pull-prod-env.sh brings from production:
          tests must never see (or call Google/Bing/Meta with) real keys. -->
     <env name="GOOGLE_OAUTH_CLIENT_ID" value="" force="true"/>

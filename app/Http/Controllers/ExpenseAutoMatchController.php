@@ -416,12 +416,7 @@ class ExpenseAutoMatchController extends Controller
                     $hasCompetingNonAmbiguousMatch = false;
 
                     foreach ($purchaseOrderCandidates as $purchaseOrder) {
-                        $distributionMatch = $distributionIndex !== []
-                            ? $this->matchPurchaseOrderToDistribution($purchaseOrder, $distributionIndex)
-                            : null;
-                        $projectMatch = $this->matchPurchaseOrderToProjectAtDate($purchaseOrder, $expense->date, $projectCandidates);
-
-                        $candidateBest = $this->pickBestMatch($distributionMatch, $projectMatch);
+                        $candidateBest = $this->matchPurchaseOrderTarget($purchaseOrder, $expense->date, $distributionIndex, $projectCandidates);
 
                         if (! $candidateBest) {
                             continue;
@@ -675,6 +670,44 @@ class ExpenseAutoMatchController extends Controller
             }
 
         }
+    }
+
+    /**
+     * The distribution or project one purchase order names.
+     *
+     * A PO can name an employee AND a job: "BATES GREG" is Greg ordering for
+     * the Bates job (expense 28901 went to "Greg - Home", 2026-10-20). When
+     * the distribution's name leaves words of the PO unexplained, those
+     * words are matched against projects on their own, and a project they
+     * name outright (client name, street, city) wins.
+     *
+     * @param  array<int, array{id:int,normalized:string}>  $distributionIndex
+     * @param  array<int, array<string, mixed>>  $projectCandidates
+     * @return array{type:'distribution'|'project',id:int,score:float,ambiguous:bool}|null
+     */
+    protected function matchPurchaseOrderTarget(string $purchaseOrder, $expenseDate, array $distributionIndex, array $projectCandidates): ?array
+    {
+        $distributionMatch = $distributionIndex !== []
+            ? $this->matchPurchaseOrderToDistribution($purchaseOrder, $distributionIndex)
+            : null;
+        $projectMatch = $this->matchPurchaseOrderToProjectAtDate($purchaseOrder, $expenseDate, $projectCandidates);
+
+        $unexplained = $distributionMatch['unexplained'] ?? [];
+
+        if ($unexplained !== []) {
+            $jobMatch = $this->matchPurchaseOrderToProjectAtDate(implode(' ', $unexplained), $expenseDate, $projectCandidates);
+
+            if ($jobMatch && ! $jobMatch['ambiguous'] && $jobMatch['score'] >= 0.95) {
+                return [
+                    'type' => 'project',
+                    'id' => (int) $jobMatch['project_id'],
+                    'score' => (float) $jobMatch['score'],
+                    'ambiguous' => false,
+                ];
+            }
+        }
+
+        return $this->pickBestMatch($distributionMatch, $projectMatch);
     }
 
     /**
@@ -1238,7 +1271,7 @@ class ExpenseAutoMatchController extends Controller
 
     /**
      * @param array<int, array{id:int,normalized:string}> $distributionIndex
-     * @return array{distribution_id:int,score:float,ambiguous:bool}|null
+     * @return array{distribution_id:int,score:float,ambiguous:bool,unexplained:list<string>}|null
      */
     protected function matchPurchaseOrderToDistribution(string $purchaseOrder, array $distributionIndex): ?array
     {
@@ -1311,7 +1344,44 @@ class ExpenseAutoMatchController extends Controller
             'distribution_id' => (int) $best['distribution_id'],
             'score' => (float) $best['score'],
             'ambiguous' => $ambiguous,
+            'unexplained' => $this->wordsNotInDistributionName($po, $distributionIndex, (int) $best['distribution_id']),
         ];
+    }
+
+    /**
+     * The PO's words (3+ letters) that the matched distribution's name does
+     * not account for: "bates" in "BATES GREG" against "Greg - Home". None
+     * when the PO reads as the whole name.
+     *
+     * @param  array<int, array{id:int,normalized:string}>  $distributionIndex
+     * @return list<string>
+     */
+    protected function wordsNotInDistributionName(string $normalizedPo, array $distributionIndex, int $distributionId): array
+    {
+        $name = (string) (collect($distributionIndex)->firstWhere('id', $distributionId)['normalized'] ?? '');
+
+        if ($name === '' || $this->similarityScore($normalizedPo, $name) >= 0.90) {
+            return [];
+        }
+
+        $nameWords = array_filter(explode(' ', $name), fn ($word) => mb_strlen($word) >= 3);
+
+        return array_values(array_filter(
+            explode(' ', $normalizedPo),
+            function (string $word) use ($nameWords): bool {
+                if (mb_strlen($word) < 3) {
+                    return false;
+                }
+
+                foreach ($nameWords as $nameWord) {
+                    if ($this->tokenSimilarityScore($word, $nameWord) >= 0.70) {
+                        return false;
+                    }
+                }
+
+                return true;
+            },
+        ));
     }
 
     /**
