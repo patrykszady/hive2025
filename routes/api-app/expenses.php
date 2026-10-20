@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\App\V1\ExpenseAssociationController;
 use App\Http\Controllers\Api\App\V1\ExpenseController;
 use App\Http\Controllers\Api\App\V1\ExpenseVendorOptionsController;
+use App\Http\Controllers\Api\App\V1\TransactionLinkController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -34,3 +35,10 @@ Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy'])->wher
 Route::get('expenses/{expense}/associate-options', [ExpenseAssociationController::class, 'options'])->whereNumber('expense')->name('expenses.associate-options');
 Route::post('expenses/{expense}/associate', [ExpenseAssociationController::class, 'associate'])->whereNumber('expense')->name('expenses.associate');
 Route::delete('expenses/{expense}/checks/{check}', [ExpenseAssociationController::class, 'removeFromCheck'])->whereNumber('expense')->whereNumber('check')->name('expenses.checks.destroy');
+
+// Manually linking a bank charge to an expense (App\Livewire\Expenses\
+// LinkTransaction) — see TransactionLinkController and the
+// App\Services\Expenses\TransactionLinkService it shares with that
+// Livewire component.
+Route::get('expenses/{expense}/link-transaction-options', [TransactionLinkController::class, 'options'])->whereNumber('expense')->name('expenses.link-transaction-options');
+Route::post('expenses/{expense}/link-transaction', [TransactionLinkController::class, 'store'])->whereNumber('expense')->name('expenses.link-transaction');

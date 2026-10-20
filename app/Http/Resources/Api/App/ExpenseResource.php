@@ -8,6 +8,7 @@ use App\Models\ExpenseReceipts;
 use App\Models\ExpenseSplits;
 use App\Models\User;
 use App\Services\Expenses\ExpenseAssociationService;
+use App\Services\Expenses\TransactionLinkService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\URL;
@@ -79,6 +80,11 @@ class ExpenseResource extends JsonResource
             'checks' => app(ExpenseAssociationService::class)->linkedChecks($expense)->map(fn (Check $check) => $this->checkPayload($check))->values()->all(),
             'check_associated_expenses' => app(ExpenseAssociationService::class)->checkAssociatedExpenses($expense)->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
             'associated_expenses' => $expense->associated_expenses->map(fn (Expense $other) => $this->associatedPayload($other))->values()->all(),
+            // Mirrors the @if wrapping <livewire:expenses.link-transaction>
+            // on the web's expense page: offered only when nothing has
+            // settled this expense yet (see TransactionLinkService::canOffer()).
+            'can_link_transaction' => $request->user()->can('update', $expense)
+                && app(TransactionLinkService::class)->canOffer($expense, app(ExpenseAssociationService::class)),
         ];
     }
 
