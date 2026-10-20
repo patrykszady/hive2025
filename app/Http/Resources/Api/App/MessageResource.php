@@ -32,20 +32,7 @@ class MessageResource extends JsonResource
             // Waiting to go out (the composer's "Schedule send"), or saved as
             // "schedule only" until someone sends it by hand.
             'scheduled_at' => $this->scheduled_at?->toIso8601String(),
-            'sender_name' => $this->isOutbound() ? $this->outboundSenderName() : null,
+            'sender_name' => $this->isOutbound() ? ConversationPresenter::outboundSenderName($this->resource) : null,
         ];
-    }
-
-    /**
-     * The sender shown above an outbound bubble, as the web conversation
-     * shows it: the acting user's nickname or first name, or "GS Crew" for an
-     * automated send (sent_by_user_id null — consent/welcome prompts,
-     * scheduled blasts sent by the system).
-     */
-    private function outboundSenderName(): string
-    {
-        $sender = $this->sentByUser;
-
-        return $sender ? (string) ($sender->nickname ?: $sender->first_name) : 'GS Crew';
     }
 }

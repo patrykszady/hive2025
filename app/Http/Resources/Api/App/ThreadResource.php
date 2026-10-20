@@ -54,8 +54,25 @@ class ThreadResource extends JsonResource
                 'body' => $latest->display_text,
                 'direction' => $latest->direction,
                 'sent_at' => $latest->created_at?->toIso8601String(),
+                // Mirrors thread-list.blade.php's $previewPrefix: null for
+                // the viewer's own outbound message ("You"), the sending
+                // teammate's name for a teammate's, the resolved sender's
+                // name for an inbound one.
+                'sender_name' => ConversationPresenter::previewSenderName($latest, $this->resource, $request->user()?->id),
             ] : null,
             'last_activity_at' => ($this->last_activity_at ?? $this->created_at)?->toIso8601String(),
+            // Mirrors the thread list row's amber clock badge — only present
+            // when the controller computed it via withCount(), same reasoning
+            // as unread_count above.
+            'scheduled_messages_count' => (int) ($this->scheduled_messages_count ?? 0),
+            // Mirrors the thread list row's dimmed/shield-exclamation spam
+            // styling — only present when the controller computed it (see
+            // LoadsThreadForApp::attachThreadSpamFlags()).
+            'is_spam' => (bool) ($this->is_spam ?? false),
+            // The quick-call row under the web conversation's title
+            // (conversation.blade.php's $callableContacts) — who this thread
+            // can click-to-call, excluding the business number itself.
+            'callable_contacts' => (new ConversationPresenter($this->resource, null))->callableContacts(),
         ];
     }
 

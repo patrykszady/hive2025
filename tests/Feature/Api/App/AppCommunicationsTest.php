@@ -340,6 +340,25 @@ it('lists unplaced emails newest first, excluding placed/dismissed/unsummarized 
     expect(collect($response->json('data'))->pluck('subject')->all())->toBe(['Unplaced']);
 });
 
+it('carries an outbound unplaced email\'s recipients, for the "To <recipients>" row the web shows instead of a from-address', function () {
+    $world = appCommWorld();
+    Sanctum::actingAs($world['user'], ['app']);
+
+    $inbound = EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id, 'subject' => 'Inbound', 'project_id' => null,
+        'summarized_at' => now(), 'sent_at' => now(), 'from_email' => 'client@example.test', 'from_name' => 'A Client',
+    ]);
+    $outbound = EmailMessage::factory()->outbound()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id, 'subject' => 'Outbound', 'project_id' => null,
+        'summarized_at' => now(), 'sent_at' => now()->addSecond(), 'to' => ['client@example.test', 'spouse@example.test'],
+    ]);
+
+    $data = collect($this->getJson('/api/app/v1/emails/unplaced')->assertOk()->json('data'));
+
+    expect($data->firstWhere('id', $inbound->id)['to'])->toBe(['office@gs.construction'])
+        ->and($data->firstWhere('id', $outbound->id)['to'])->toBe(['client@example.test', 'spouse@example.test']);
+});
+
 it('pages the unplaced inbox 25 at a time, like the web\'s own paginator, instead of hard-capping at 100', function () {
     $world = appCommWorld();
     Sanctum::actingAs($world['user'], ['app']);

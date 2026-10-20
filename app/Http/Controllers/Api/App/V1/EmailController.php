@@ -66,6 +66,10 @@ class EmailController extends Controller
                 'direction' => $email->direction,
                 'subject' => $email->subject,
                 'from' => ['email' => $email->from_email, 'name' => $email->from_name],
+                // For an outbound email the web's row shows "To <recipients>"
+                // instead of the from-address (unplaced-emails.blade.php) —
+                // the app needs the recipients to do the same.
+                'to' => (array) $email->to,
                 'sent_at' => $email->sent_at->toIso8601String(),
                 'summary' => $email->summary,
                 'snippet' => $email->snippet,
