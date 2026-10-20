@@ -15,6 +15,7 @@ use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
+use App\Services\Navigation\SidebarAlerts;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Component;
 
@@ -34,13 +35,12 @@ class AppSidebar extends Component
         // Live alert state should not sit in the 5-minute cache: the Menards
         // flag flips the moment a sign-in fails or succeeds, and a stale
         // cached payload from before this key existed must not break the view.
-        $sidebarData['menardsNeedsLogin'] = $user->can('menards-browser')
-            && ($this->menardsNeedsLogin());
+        $sidebarData['menardsNeedsLogin'] = app(SidebarAlerts::class)->menardsNeedsLogin($user);
 
         // Stakeholder emails waiting to be put on a project: live, so the item
         // disappears the moment the last one is sorted.
-        $sidebarData['unplacedEmailCount'] = ($sidebarData['canViewCompanyEmails'] ?? false) && $user->vendor
-            ? \App\Models\EmailMessage::query()->where('belongs_to_vendor_id', $user->vendor->id)->unplaced()->count()
+        $sidebarData['unplacedEmailCount'] = ($sidebarData['canViewCompanyEmails'] ?? false)
+            ? app(SidebarAlerts::class)->unplacedEmailCount($user)
             : 0;
 
         // Route-dependent state should not be cached — it changes per request.
@@ -78,12 +78,8 @@ class AppSidebar extends Component
                 })
                 ->first();
             $clientHome = $client ? route('clients.show', $client) : route('account_selection');
-        } elseif ($user->can('viewAny', Bank::class) && $user->vendor) {
-            $hasBankErrors = $user->vendor->banks()
-                ->whereNotNull('plaid_access_token')
-                ->get()
-                ->where('plaid_options.error', '!=', false)
-                ->isNotEmpty();
+        } else {
+            $hasBankErrors = app(SidebarAlerts::class)->hasBankErrors($user);
         }
 
         return [
@@ -119,17 +115,6 @@ class AppSidebar extends Component
         ];
     }
 
-    /**
-     * Menards receipt browser needs a human: the extension reported a dead
-     * session, or an automated sign-in failed (e.g. the Imperva challenge).
-     */
-    private function menardsNeedsLogin(): bool
-    {
-        $syncStatus = Cache::get(\App\Http\Controllers\MenardsSyncStatusController::CACHE_KEY);
-
-        return (bool) ($syncStatus['session_expired'] ?? false)
-            || Cache::has(\App\Services\MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY);
-    }
 
     /**
      * Bust the sidebar cache for a specific user.

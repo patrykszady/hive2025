@@ -54,7 +54,8 @@ it('shows an Admin the vendor options with defaults filled in', function () {
         ->and($response->json('data.business_hours_end'))->toBe('18:00')
         ->and($response->json('data.sms_team_enabled'))->toBeTrue()
         ->and($response->json('data.timezone'))->toBe('America/Chicago') // Read-only default, like the web's disabled field.
-        ->and(collect($response->json('data.admin_users'))->pluck('id'))->toContain($admin->id);
+        ->and(collect($response->json('data.admin_users'))->pluck('id'))->toContain($admin->id)
+        ->and($response->json('data.business_name'))->toBe(Vendor::query()->find(1)->business_name);
 });
 
 it('shows the vendor\'s own timezone once its business address sets one', function () {

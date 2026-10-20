@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Storage;
 class AppVendorOptions
 {
     /**
-     * @return array{short_name: ?string, logo_url: ?string, timezone: string, sms_team_enabled: bool, sms_client_enabled: bool, sms_vendor_enabled: bool, default_contract_signers: list<int>, business_hours_start: string, business_hours_end: string, business_hours_days: list<int>, admin_users: list<array{id: int, name: string, cell_phone: ?string}>}
+     * @return array{business_name: ?string, short_name: ?string, logo_url: ?string, timezone: string, sms_team_enabled: bool, sms_client_enabled: bool, sms_vendor_enabled: bool, default_contract_signers: list<int>, business_hours_start: string, business_hours_end: string, business_hours_days: list<int>, admin_users: list<array{id: int, name: string, cell_phone: ?string}>}
      */
     public function present(Vendor $vendor): array
     {
@@ -26,6 +26,8 @@ class AppVendorOptions
         $logo = data_get($vendor->options, 'logo');
 
         return [
+            // The Short Business Name field's placeholder on the web.
+            'business_name' => $vendor->business_name,
             'short_name' => $vendor->options?->short_name ?? '',
             'logo_url' => $logo && Storage::disk('public')->exists($logo) ? Storage::disk('public')->url($logo) : null,
             // Read-only, set from the vendor's business address — mirrors
