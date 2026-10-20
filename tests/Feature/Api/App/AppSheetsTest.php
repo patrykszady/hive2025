@@ -124,3 +124,45 @@ it('refuses a Member viewing the monthly trend, like the web', function () {
 
     $this->getJson('/api/app/v1/sheets/monthly')->assertForbidden();
 });
+
+it('counts only expenses paid out of the selected accounts on a cash basis, and every dated expense on accrual', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appBooksSheetsTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+    $account = appBooksSheetBankAccount($vendor);
+    $otherAccount = appBooksSheetBankAccount($vendor);
+    $materialsVendor = Vendor::factory()->create(['business_name' => 'Home Depot', 'sheets_type' => 'Materials']);
+    $vendor->vendors()->attach($materialsVendor->id);
+
+    $expense = fn (float $amount, array $extra = []) => Expense::create(array_merge([
+        'amount' => $amount,
+        'date' => '2026-06-01',
+        'vendor_id' => $materialsVendor->id,
+        'belongs_to_vendor_id' => $vendor->id,
+        'created_by_user_id' => $admin->id,
+    ], $extra));
+
+    // Matched to a transaction on the selected account: paid, counts on both bases.
+    $matched = $expense(100);
+    \App\Models\Transaction::create(['transaction_date' => '2026-06-02', 'amount' => 100, 'bank_account_id' => $account->id, 'expense_id' => $matched->id]);
+
+    // Paid by a check that cleared the selected account: paid, counts on both bases.
+    $check = \App\Models\Check::create(['check_type' => 'Check', 'check_number' => 1001, 'date' => '2026-06-03', 'amount' => 40, 'bank_account_id' => $account->id, 'vendor_id' => $materialsVendor->id, 'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id]);
+    $expense(40, ['check_id' => $check->id]);
+    \App\Models\Transaction::create(['transaction_date' => '2026-06-05', 'amount' => 40, 'bank_account_id' => $account->id, 'check_id' => $check->id]);
+
+    // Not paid from the selected account (unmatched, or another account): accrual only.
+    $expense(7);
+    $elsewhere = $expense(3);
+    \App\Models\Transaction::create(['transaction_date' => '2026-06-02', 'amount' => 3, 'bank_account_id' => $otherAccount->id, 'expense_id' => $elsewhere->id]);
+
+    $sheet = fn (string $basis) => $this->getJson('/api/app/v1/sheets/show?'.http_build_query([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-12-31',
+        'bank_account_ids' => [$account->id],
+        'basis' => $basis,
+    ]))->assertOk();
+
+    expect((float) $sheet('accrual')->json('data.cost_of_goods_sold.materials.total'))->toBe(150.0)
+        ->and((float) $sheet('cash')->json('data.cost_of_goods_sold.materials.total'))->toBe(140.0);
+});
+

@@ -10,6 +10,7 @@ use App\Models\Timesheet;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -20,12 +21,12 @@ use Illuminate\Support\Facades\DB;
  * Exporting (CSV/PDF) and in-place category assignment stay web-only; this
  * class only ever reads.
  *
- * Note: `$basis` ('cash'|'accrual') carries over SheetShow's own behaviour
- * exactly, including a quirk worth flagging rather than "fixing" here —
- * getCashBasisExpenseIds()/applyCashBasisFilter() exist but no computed
- * property actually calls applyCashBasisFilter(), so today `$basis` changes
- * none of the dollar figures below (only the exported file's header
- * label). Kept as-is for parity with the web.
+ * `$basis`: 'accrual' counts every expense dated in the period; 'cash'
+ * counts only the expenses that actually left the selected bank accounts —
+ * matched to one of their transactions directly, or paid by a check that
+ * cleared one of them. Revenue is already tied to deposits in those
+ * accounts (plus cash payments) and labor to checks, so the basis only
+ * narrows the expense lines.
  */
 class ProfitAndLossFigures
 {
@@ -41,8 +42,6 @@ class ProfitAndLossFigures
 
     private ?Collection $cachedGeneralExpenseCategories = null;
 
-    private ?array $cashBasisExpenseIds = null;
-
     /**
      * @param  list<int>  $bankAccountIds
      */
@@ -55,29 +54,26 @@ class ProfitAndLossFigures
     ) {
     }
 
-    private function getCashBasisExpenseIds(): array
+    /**
+     * On a cash basis, keeps only expenses paid out of the selected bank
+     * accounts: matched to one of their transactions, or paid by a check
+     * that cleared one of them. On an accrual basis, $query is unchanged.
+     *
+     * @param  Builder<Expense>  $query
+     * @return Builder<Expense>
+     */
+    private function applyCashBasisFilter(Builder $query): Builder
     {
-        if ($this->cashBasisExpenseIds === null) {
-            $directIds = DB::table('transactions')
-                ->whereIn('bank_account_id', $this->bankAccountIds)
-                ->whereNotNull('expense_id')
-                ->pluck('expense_id')
-                ->toArray();
-
-            $checkIds = DB::table('transactions')
-                ->whereIn('bank_account_id', $this->bankAccountIds)
-                ->whereNotNull('check_id')
-                ->pluck('check_id')
-                ->toArray();
-
-            $checkExpenseIds = $checkIds
-                ? DB::table('expenses')->whereIn('check_id', $checkIds)->pluck('id')->toArray()
-                : [];
-
-            $this->cashBasisExpenseIds = array_unique(array_merge($directIds, $checkExpenseIds));
+        if ($this->basis !== 'cash') {
+            return $query;
         }
 
-        return $this->cashBasisExpenseIds;
+        $accountTransactions = fn () => Transaction::withoutGlobalScopes()->whereIn('bank_account_id', $this->bankAccountIds);
+
+        return $query->where(function (Builder $paid) use ($accountTransactions) {
+            $paid->whereIn('expenses.id', $accountTransactions()->whereNotNull('expense_id')->select('expense_id'))
+                ->orWhereIn('expenses.check_id', $accountTransactions()->whereNotNull('check_id')->select('check_id'));
+        });
     }
 
     public function transactionsNoAssociations(): Collection
@@ -329,9 +325,9 @@ class ProfitAndLossFigures
             return $this->cachedCostOfMaterialsVendors;
         }
 
-        $vendors = Expense::whereBetween('date', [$this->startDate, $this->endDate])
+        $vendors = $this->applyCashBasisFilter(Expense::whereBetween('date', [$this->startDate, $this->endDate])
             ->whereIn('vendor_id', $this->materialVendorIds())
-            ->with(['vendor'])
+            ->with(['vendor']))
             ->get()
             ->groupBy('vendor.business_name')
             ->toBase();
@@ -341,16 +337,16 @@ class ProfitAndLossFigures
 
     public function costOfMaterialsSum(): float
     {
-        return (float) Expense::whereBetween('date', [$this->startDate, $this->endDate])
-            ->whereIn('vendor_id', $this->materialVendorIds())
+        return (float) $this->applyCashBasisFilter(Expense::whereBetween('date', [$this->startDate, $this->endDate])
+            ->whereIn('vendor_id', $this->materialVendorIds()))
             ->sum('amount');
     }
 
     public function generalExpenses(): float
     {
-        return (float) Expense::whereBetween('date', [$this->startDate, $this->endDate])
+        return (float) $this->applyCashBasisFilter(Expense::whereBetween('date', [$this->startDate, $this->endDate])
             ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
-            ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
+            ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128]))
             ->sum('amount');
     }
 
@@ -360,10 +356,10 @@ class ProfitAndLossFigures
             return $this->cachedGeneralExpenseCategories;
         }
 
-        return $this->cachedGeneralExpenseCategories = Expense::whereBetween('date', [$this->startDate, $this->endDate])
+        return $this->cachedGeneralExpenseCategories = $this->applyCashBasisFilter(Expense::whereBetween('date', [$this->startDate, $this->endDate])
             ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
             ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
-            ->with(['category', 'vendor'])
+            ->with(['category', 'vendor']))
             ->get()
             ->groupBy('category.friendly_primary')
             ->toBase();
@@ -419,10 +415,10 @@ class ProfitAndLossFigures
             return collect();
         }
 
-        return Expense::whereBetween('date', [$this->startDate, $this->endDate])
+        return $this->applyCashBasisFilter(Expense::whereBetween('date', [$this->startDate, $this->endDate])
             ->whereNull('category_id')
             ->with(['vendor'])
-            ->orderByDesc('amount')
+            ->orderByDesc('amount'))
             ->get();
     }
 
