@@ -44,6 +44,7 @@ Route::post('hours', [AppHourController::class, 'store'])->name('hours.store');
 // never collides with a numeric {timesheet} id.
 Route::get('timesheets/balance', [AppTimesheetController::class, 'balance'])->name('timesheets.balance');
 Route::get('timesheets/payable', [AppTimesheetController::class, 'payable'])->name('timesheets.payable');
+Route::get('timesheets/employees', [AppTimesheetController::class, 'employees'])->name('timesheets.employees');
 Route::get('timesheets', [AppTimesheetController::class, 'index'])->name('timesheets.index');
 Route::get('timesheets/{timesheet}', [AppTimesheetController::class, 'show'])->whereNumber('timesheet')->name('timesheets.show');
 Route::post('timesheets/{timesheet}/revert', [AppTimesheetController::class, 'revert'])->whereNumber('timesheet')->name('timesheets.revert');
