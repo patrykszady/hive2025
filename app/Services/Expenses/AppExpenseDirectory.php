@@ -272,10 +272,11 @@ class AppExpenseDirectory
 
     /**
      * Create an expense the way ExpenseForm::store() does for the fields
-     * the app's own form offers (no check/bank-account recording — a
-     * desktop accounting feature the app doesn't surface): same ownership
-     * whitelisting (ExpenseAccessGuard), same cross-vendor attach, same
-     * optional receipt OCR.
+     * the app's own form offers (the app can attach an already-existing
+     * check via existing_check_id, but never creates one — recording a new
+     * bank account/check number stays a desktop accounting feature): same
+     * ownership whitelisting (ExpenseAccessGuard), same cross-vendor
+     * attach, same optional receipt OCR.
      *
      * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, splits?: list<array{amount: float|string, project_id: int, note?: ?string, reimbursement?: ?string}>}  $data
      */
