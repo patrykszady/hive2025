@@ -387,7 +387,29 @@
                     </x-slot:toolbar>
                 </x-index-table.placeholder>
             @endplaceholder
-        <x-index-table heading="Transactions" :paginator="$this->transactions">
+        {{-- Bulk link: tick card charges and make them all expenses on one
+             project or distribution (ExpenseCreate::linkBulkTransactions()),
+             the way the Expenses card above selects rows for its bulk actions. --}}
+        <x-index-table heading="Transactions" :paginator="$this->transactions"
+            x-data="{ txBulkMode: false }"
+            x-on:transactions-bulk-linked.window="txBulkMode = false">
+            <x-slot:badge>
+                <flux:badge as="button" size="sm" color="zinc" icon="cursor-arrow-rays" x-show="!txBulkMode" x-on:click="txBulkMode = true">Select Items</flux:badge>
+                <div class="flex items-center gap-2" x-show="txBulkMode" x-cloak>
+                    <flux:badge color="indigo" size="sm">
+                        <span x-text="$wire.selectedTransactions.length"></span>&nbsp;Selected
+                    </flux:badge>
+                    <flux:button size="xs" variant="ghost" x-on:click="txBulkMode = false; $wire.selectedTransactions = []">Clear</flux:button>
+                    <flux:button
+                        size="xs"
+                        icon="link"
+                        x-bind:disabled="$wire.selectedTransactions.length === 0"
+                        x-on:click="$wire.$dispatchTo('expenses.expense-create', 'linkTransactionsInBulk', { transactionIds: $wire.selectedTransactions })"
+                    >
+                        Link to project…
+                    </flux:button>
+                </div>
+            </x-slot:badge>
             <x-slot:actions>
                 @if($this->transactions->total() > 0)
                     <flux:badge size="sm" color="yellow">{{ $this->transactions->total() }} unmatched</flux:badge>
@@ -398,6 +420,9 @@
             </x-slot:toolbar>
                     <flux:table class="index-table [:where(&)]:p-0 [:where(&)]:space-y-0" wire:loading.class="opacity-50 text-opacity-50">
                         <flux:table.columns>
+                            <flux:table.column class="w-10 !px-3" x-show="txBulkMode" x-cloak>
+                                <span class="sr-only">Select</span>
+                            </flux:table.column>
                             @foreach(\App\Livewire\Expenses\ExpenseIndex::transactionColumnDefs() as $txColumn)
                                 <flux:table.column class="{{ $txColumn['width'] }}">{{ $txColumn['label'] }}</flux:table.column>
                             @endforeach
@@ -406,6 +431,9 @@
                         <flux:table.rows>
                             @foreach ($this->transactions as $transaction)
                                 <flux:table.row :key="$transaction->id" wire:transition>
+                                    <flux:table.cell class="w-10 !px-3" x-show="txBulkMode" x-cloak>
+                                        <flux:checkbox size="sm" wire:model="selectedTransactions" value="{{ $transaction->id }}" />
+                                    </flux:table.cell>
                                     <flux:table.cell
                                         wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{$transaction->id}}})"
                                         variant="strong"

@@ -165,13 +165,21 @@ class ExpenseIndex extends Component
     /** @var array<int> Selected expense IDs for bulk actions. */
     public array $selected = [];
 
+    /** @var array<int> Transactions ticked on the Transactions card, to link to a project in bulk. */
+    public array $selectedTransactions = [];
+
     /** @var array<int> Recently deleted expense IDs to hide while Meilisearch reindexes. */
     public array $recentlyDeletedExpenseIds = [];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    public function updating()
+    public function updating($property = null)
     {
+        // Ticking rows must not send either card back to page 1.
+        if (in_array($property, ['selected', 'selectedTransactions'], true)) {
+            return;
+        }
+
         $this->resetPage('expenses-page');
         $this->resetPage('transactions-page');
         $this->recentlyDeletedExpenseIds = [];
@@ -186,6 +194,21 @@ class ExpenseIndex extends Component
     {
         // Selections are scoped to the current page; clear them on page change.
         $this->selected = [];
+        $this->selectedTransactions = [];
+    }
+
+    /**
+     * The ticked transactions became expenses (ExpenseCreate::linkBulkTransactions()):
+     * drop them from the card before the search index catches up.
+     *
+     * @param  array<int, int>  $transactionIds
+     */
+    #[On('transactions-bulk-linked')]
+    public function transactionsBulkLinked(array $transactionIds = []): void
+    {
+        $this->removedTransactionIds = array_values(array_unique(array_merge($this->removedTransactionIds, array_map('intval', $transactionIds))));
+        $this->selectedTransactions = [];
+        unset($this->transactions, $this->expenses);
     }
 
     public function bulkDelete(): void

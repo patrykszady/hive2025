@@ -114,29 +114,7 @@
                         searchable
                         class="[&_[data-flux-select-trigger]]:min-h-[4rem] [&_[data-flux-select-trigger]]:py-3"
                     >
-                        @foreach($this->projects as $project)
-                            <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
-                                <div class="flex flex-col gap-0 w-full">
-                                    <div class="flex items-center w-full">
-                                        <span class="flex-1 min-w-0">{{ $project->short_address }}</span>
-
-                                        @if($project->latestStatus)
-                                            <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom" class="shrink-0 ml-2">
-                                                {{ $project->latestStatus->title }}
-                                            </flux:badge>
-                                        @endif
-                                    </div>
-
-                                    <i class="font-normal block w-full leading-tight">{{$project->project_name}}</i>
-                                </div>
-                            </flux:select.option>
-                        @endforeach
-
-                        <flux:select.option disabled>--------------</flux:select.option>
-
-                        @foreach($this->distributions as $distribution)
-                            <flux:select.option wire:key="D:{{$distribution->id}}" value="D:{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
-                        @endforeach
+                        @include('livewire.expenses.partials.project-options', ['projects' => $this->projects, 'distributions' => $this->distributions])
                     </flux:select>
 
                     @if($expense)
@@ -395,6 +373,37 @@
 
 {{-- SPLITS MODAL --}}
 <livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" :wire:key="'splits-'.($expense?->id ?? 'new').'-'.($embedded ? 'emb' : 'mod')" />
+
+{{-- LINK TRANSACTIONS IN BULK (ticked on the /expenses Transactions card) --}}
+<flux:modal name="bulk_transactions_modal" class="sm:max-w-md space-y-4">
+{{-- Only while transactions are picked: otherwise every expense-form update
+     would carry a second copy of the whole project list. --}}
+@if($hydrated && $bulkTransactionIds !== [])
+    <div>
+        <flux:heading size="lg">Link {{ count($bulkTransactionIds) }} {{ Str::plural('transaction', count($bulkTransactionIds)) }}</flux:heading>
+        <flux:text class="mt-1">Each becomes an expense for its vendor on the project or distribution you choose.</flux:text>
+    </div>
+
+    <form wire:submit="linkBulkTransactions" class="space-y-4">
+        <flux:field>
+            <flux:label>Project</flux:label>
+            <flux:select wire:model="bulkTransactionTarget" variant="listbox" placeholder="Choose project..." searchable>
+                @include('livewire.expenses.partials.project-options', ['projects' => $this->projects, 'distributions' => $this->distributions])
+            </flux:select>
+            <flux:error name="bulkTransactionTarget" />
+        </flux:field>
+
+        <div class="flex justify-end gap-2">
+            <flux:modal.close>
+                <flux:button variant="ghost">Cancel</flux:button>
+            </flux:modal.close>
+            <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="linkBulkTransactions">
+                Link {{ count($bulkTransactionIds) }}
+            </flux:button>
+        </div>
+    </form>
+@endif
+</flux:modal>
 
 {{-- UPLOAD RECEIPT MODAL --}}
 <flux:modal name="upload_receipt_modal" class="sm:max-w-md space-y-4">

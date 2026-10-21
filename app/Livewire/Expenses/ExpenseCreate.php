@@ -49,7 +49,13 @@ class ExpenseCreate extends Component
         'form_submit' => 'save',
     ];
 
-    protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits', 'openUploadReceipt'];
+    /** Transactions picked on the /expenses Transactions card to link at once. */
+    public array $bulkTransactionIds = [];
+
+    /** Where they go: a project id, or "D:{id}" for a distribution — the expense form's own encoding. */
+    public string $bulkTransactionTarget = '';
+
+    protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits', 'openUploadReceipt', 'linkTransactionsInBulk'];
 
     protected function toastExpenseSuccess(Expense $expense, string $heading, ?string $text = null): void
     {
@@ -668,6 +674,94 @@ class ExpenseCreate extends Component
         if (! $this->embedded) {
             $this->modal('expenses_form_modal')->show();
         }
+    }
+
+    /**
+     * Opens "Link transactions" for the charges ticked on the Transactions
+     * card (resources/views/livewire/expenses/index.blade.php).
+     *
+     * @param  array<int, int|string>  $transactionIds
+     */
+    public function linkTransactionsInBulk(array $transactionIds): void
+    {
+        $this->hydrated = true;
+        $this->bulkTransactionIds = array_values(array_unique(array_filter(array_map('intval', $transactionIds))));
+        $this->bulkTransactionTarget = '';
+        $this->resetValidation('bulkTransactionTarget');
+        $this->modal('bulk_transactions_modal')->show();
+    }
+
+    /**
+     * Makes each ticked card charge an expense on the chosen project or
+     * distribution (App\Services\Expenses\TransactionExpenseLinker). Charges
+     * that are gone, already matched, without a vendor, or checks and
+     * transfers (which need their check written in the single form) are
+     * skipped and counted.
+     */
+    public function linkBulkTransactions(): void
+    {
+        $this->authorize('create', Expense::class);
+
+        $this->validate(
+            ['bulkTransactionTarget' => 'required'],
+            ['bulkTransactionTarget.required' => 'Choose a project or distribution.'],
+        );
+
+        $guard = app(\App\Services\Expenses\ExpenseAccessGuard::class);
+        $linker = app(\App\Services\Expenses\TransactionExpenseLinker::class);
+        [$projectId, $distributionId] = $guard->resolveProjectSelector($this->bulkTransactionTarget);
+
+        if (! $projectId && ! $distributionId) {
+            $this->addError('bulkTransactionTarget', 'Choose a project or distribution.');
+
+            return;
+        }
+
+        try {
+            $guard->assertProjectAccessible($projectId, $distributionId);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $this->addError('bulkTransactionTarget', collect($exception->errors())->flatten()->first() ?? 'Invalid project selected.');
+
+            return;
+        }
+
+        $user = auth()->user();
+        $linked = [];
+        $skipped = 0;
+
+        foreach ($this->bulkTransactionIds as $transactionId) {
+            try {
+                $transaction = $guard->assertTransactionAccessible($transactionId, (int) $user->vendor->id);
+            } catch (\Illuminate\Validation\ValidationException) {
+                $skipped++;
+
+                continue;
+            }
+
+            if (! $linker->canLink($transaction)) {
+                $skipped++;
+
+                continue;
+            }
+
+            $linker->link($transaction, $projectId, $distributionId, $user);
+            $linked[] = $transactionId;
+        }
+
+        $this->bulkTransactionIds = [];
+        $this->bulkTransactionTarget = '';
+        $this->modal('bulk_transactions_modal')->close();
+
+        $this->dispatch('transactions-bulk-linked', transactionIds: $linked);
+
+        $count = count($linked);
+        Flux::toast(
+            $skipped > 0 ? "{$skipped} skipped: no vendor, a check or transfer, or already matched." : '',
+            $count === 1 ? '1 expense created.' : "{$count} expenses created.",
+            5000,
+            'success',
+            'top right',
+        );
     }
 
     /** Drops a receipt read by "Upload Receipt" that never got its Create. */
