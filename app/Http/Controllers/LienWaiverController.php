@@ -107,7 +107,7 @@ class LienWaiverController extends Controller
         $filename = collect([
             'draw-package',
             $estimateNumber !== '' ? \Illuminate\Support\Str::slug($estimateNumber) : null,
-            \Illuminate\Support\Str::slug((string) ($owner?->name ?? '')),
+            \Illuminate\Support\Str::slug((string) ($owner?->legal_name ?? '')),
             \Illuminate\Support\Str::slug((string) ($project->address ?? $project->project_name ?? 'project')) ?: 'project',
             'draw-' . $swornStatement->drawNumber(),
             optional($swornStatement->created_at)->format('Y-m-d') ?? now()->format('Y-m-d'),

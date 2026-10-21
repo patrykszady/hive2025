@@ -26,7 +26,7 @@ class LienWaiverPayerDefaults
         $client = $project->client;
 
         return [
-            'name' => $client?->name ?? '',
+            'name' => $client?->legal_name ?? '',
             'address' => trim((string) ($client?->address ?? $project->address ?? '')),
             'city_state_zip' => trim(sprintf(
                 '%s%s %s',

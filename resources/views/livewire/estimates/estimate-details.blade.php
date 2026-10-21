@@ -69,7 +69,7 @@
     <x-slot:details>
         <x-details.row 
             title="Client" 
-            :content="$client->name ?? $estimate->client->name"
+            :content="($nonLivewire ?? false) ? ($client->legal_name ?? $estimate->client->legal_name) : ($client->name ?? $estimate->client->name)"
             :href="($nonLivewire ?? false) ? null : route('clients.show', $client->id ?? $estimate->client->id)"
             :no-cloak="$nonLivewire ?? false"
             :navigate="!($nonLivewire ?? false)"

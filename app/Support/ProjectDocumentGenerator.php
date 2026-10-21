@@ -81,7 +81,7 @@ class ProjectDocumentGenerator
 
         // PDFs should use the vendor's timezone, not browser timezone
         $timezone = vendor_timezone();
-        $title = 'Reimbursements - ' . $project->id . ' - ' . $project->client->name . ' - ' . $project->project_name;
+        $title = 'Reimbursements - ' . $project->id . ' - ' . $project->client->legal_name . ' - ' . $project->project_name;
         $view = view('misc.print_reimbursments', compact('expenses', 'title'))->render();
 
         $browsershot = Browsershot::html($view)

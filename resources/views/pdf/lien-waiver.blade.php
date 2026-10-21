@@ -195,7 +195,7 @@
         $affidavit = $affidavit ?? ['contract_total' => 0.0, 'original_contract' => 0.0, 'extras' => 0.0, 'amount_paid' => 0.0, 'this_payment' => (float) ($waiver->amount ?? 0), 'balance_due' => 0.0];
         $isSubWaiver = $isSubWaiver ?? $waiver->isSubWaiver();
         $payerNameIl = $payerVendor?->business_name ?? ($payerOverride['name'] ?? 'the Owner / General Contractor');
-        $ownerNameIl = $project->client?->name ?? ($payerOverride['name'] ?? 'the Owner');
+        $ownerNameIl = $project->client?->legal_name ?? ($payerOverride['name'] ?? 'the Owner');
         $projectAddressIl = trim(($project->address ?? '') . ', ' . ($project->city ?? '') . ', ' . ($project->state ?? '') . ' ' . ($project->zip_code ?? ''), ', ');
         // A bare state (defaulted "IL") isn't an address — leave the line blank.
         $vendorHasAddress = trim((string) ($vendor->address ?? '')) !== '' || trim((string) ($vendor->city ?? '')) !== '' || trim((string) ($vendor->zip_code ?? '')) !== '';
@@ -475,7 +475,7 @@
         </tr>
         <tr>
             <td class="label">Owner / Customer</td>
-            <td>{{ $project->client?->name ?? '—' }}</td>
+            <td>{{ $project->client?->legal_name ?? '—' }}</td>
         </tr>
         <tr>
             <td class="label">{{ !empty($payerOverride) ? 'Property Owner' : 'Contractor (Maker of Payment)' }}</td>

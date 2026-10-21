@@ -164,7 +164,7 @@ class LienWaiverDocumentGenerator
             $waiver->id,
             $vendorSlug,
             $estimateNumber !== '' ? \Illuminate\Support\Str::slug($estimateNumber) : null,
-            \Illuminate\Support\Str::slug((string) ($owner?->name ?? '')),
+            \Illuminate\Support\Str::slug((string) ($owner?->legal_name ?? '')),
             \Illuminate\Support\Str::slug((string) ($waiver->project?->address ?? '')),
             $drawNumber ? 'draw-' . $drawNumber : null,
             $dateSlug,
@@ -243,7 +243,7 @@ class LienWaiverDocumentGenerator
         $estimateDisplay = $estimateNumber ? self::escapeHtml('Est #' . $estimateNumber) : '';
         
         // Get customer/owner name
-        $customerName = $waiver->project?->client?->name;
+        $customerName = $waiver->project?->client?->legal_name;
         $customerDisplay = $customerName ? self::escapeHtml(' | ' . $customerName) : '';
         $draftLabel = $waiver->isSigned() ? '' : '<span style="color:#b91c1c;font-weight:700;">DRAFT COPY</span> | ';
 

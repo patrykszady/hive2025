@@ -292,7 +292,7 @@ class SwornStatementGenerator
             'sworn-statement',
             Str::slug((string) ($contractor->business_name ?? '')),
             $estimateNumber !== '' ? Str::slug($estimateNumber) : null,
-            Str::slug((string) ($owner?->name ?? '')),
+            Str::slug((string) ($owner?->legal_name ?? '')),
             Str::slug((string) ($project->address ?? '')),
             $drawNumber ? 'draw-' . $drawNumber : null,
             now()->format('Y-m-d'),
@@ -302,7 +302,7 @@ class SwornStatementGenerator
             'view' => [
                 'project' => $project,
                 'contractor' => $contractor,
-                'ownerName' => (string) ($owner?->name ?? ''),
+                'ownerName' => (string) ($owner?->legal_name ?? ''),
                 'projectCounty' => LienWaiverDocumentGenerator::lookupProjectCounty($project),
                 'lines' => $lines->all(),
                 'gcLine' => $gcLine,

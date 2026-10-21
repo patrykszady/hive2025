@@ -687,7 +687,7 @@ class EstimateSign extends Component
             'today_date' => now()->setTimezone($timezone)->format('m/d/Y'),
             'vendor_name' => $vendor->business_name ?? 'Unknown Vendor',
             'short_vendor_name' => data_get($vendor->options, 'short_name') ?: ($vendor->business_name ?? 'Unknown Vendor'),
-            'client_name' => $client?->name ?? 'Unknown Client',
+            'client_name' => $client?->legal_name ?? 'Unknown Client',
             'estimate_number' => $estimate->number,
             'project_address' => $project?->full_address ?? 'No address on file',
             'start_date' => $estimate->start_date?->format('m/d/Y') ?? 'START_DATE_HERE',

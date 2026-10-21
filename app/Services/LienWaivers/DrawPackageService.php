@@ -745,7 +745,7 @@ class DrawPackageService
                 'manual' => true,
                 'source' => 'sworn_statement',
                 'payer' => [
-                    'name' => (string) ($client?->name ?? ''),
+                    'name' => (string) ($client?->legal_name ?? ''),
                     'address' => trim((string) ($client?->address ?? $project->address ?? '')),
                     'city_state_zip' => $payerCityStateZip,
                 ],

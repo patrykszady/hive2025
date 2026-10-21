@@ -213,48 +213,67 @@ class Client extends Model
     protected function name(): Attribute
     {
         return Attribute::make(
-            get: function ($value, array $attributes) {
-                if (empty($attributes['business_name'])) {
-                    $users = $this->users;
-
-                    if ($users->count() == 0) {
-                        return 'No Name';
-                    }
-
-                    // Display names prefer nicknames (e.g. "Dick" for Richard);
-                    // legal documents build names from first_name/last_name directly.
-                    $preferredName = fn ($user) => trim((string) ($user->nickname ?: $user->first_name));
-
-                    if ($users->count() == 1) {
-                        return trim($preferredName($users->first()).' '.$users->first()->last_name);
-                    } else {
-                        // Group users by last name
-                        $usersByLastName = $users->groupBy('last_name');
-
-                        $nameGroups = [];
-
-                        // Process each last name group
-                        foreach ($usersByLastName as $lastName => $lastNameGroup) {
-                            if ($lastNameGroup->count() == 1) {
-                                // Single person with this last name - use full name
-                                $nameGroups[] = $preferredName($lastNameGroup->first()) . ' ' . $lastName;
-                            } else {
-                                // Multiple people with same last name - combine first names
-                                $firstNames = $lastNameGroup->map($preferredName)->filter()->values()->toArray();
-                                $nameGroups[] = $this->oxfordJoin($firstNames) . ' ' . $lastName;
-                            }
-                        }
-
-                        // Join all name groups
-                        return $this->oxfordJoin($nameGroups);
-                    }
-                } else {
-                    // Extract first part before ',' if available
-                    $nameParts = explode(',', $attributes['business_name']);
-                    return trim($nameParts[0]);
-                }
-            }
+            // Display names prefer nicknames (e.g. "Dick" for Richard);
+            // documents use legal_name.
+            get: fn ($value, array $attributes) => $this->composeName(
+                $attributes,
+                fn ($user) => trim((string) ($user->nickname ?: $user->first_name)),
+            ),
         )->shouldCache();
+    }
+
+    /**
+     * The name for documents a client signs or keeps — estimates, contracts,
+     * change orders, invoices, lien waivers: built exactly like `name`, but
+     * from each person's legal first name, never their nickname ("Zachary
+     * Wong", not "Zach Wong"; estimate 273, 2026-10-21).
+     */
+    protected function legalName(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value, array $attributes) => $this->composeName(
+                $attributes,
+                fn ($user) => trim((string) $user->first_name),
+            ),
+        )->shouldCache();
+    }
+
+    /**
+     * A business's name before its first comma, or the people's names:
+     * "Ann Lee", "Ann & Bob Lee", "Ann Lee & Bob Kim".
+     *
+     * @param  array<string, mixed>  $attributes
+     * @param  callable(User): string  $firstName
+     */
+    private function composeName(array $attributes, callable $firstName): string
+    {
+        if (! empty($attributes['business_name'])) {
+            return trim(explode(',', $attributes['business_name'])[0]);
+        }
+
+        $users = $this->users;
+
+        if ($users->count() == 0) {
+            return 'No Name';
+        }
+
+        if ($users->count() == 1) {
+            return trim($firstName($users->first()).' '.$users->first()->last_name);
+        }
+
+        $nameGroups = [];
+
+        foreach ($users->groupBy('last_name') as $lastName => $lastNameGroup) {
+            if ($lastNameGroup->count() == 1) {
+                // Single person with this last name - use full name
+                $nameGroups[] = $firstName($lastNameGroup->first()).' '.$lastName;
+            } else {
+                // Multiple people with same last name - combine first names
+                $nameGroups[] = $this->oxfordJoin($lastNameGroup->map($firstName)->filter()->values()->toArray()).' '.$lastName;
+            }
+        }
+
+        return $this->oxfordJoin($nameGroups);
     }
 
     /**

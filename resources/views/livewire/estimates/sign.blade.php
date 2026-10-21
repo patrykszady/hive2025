@@ -25,7 +25,7 @@
                     @if($client?->name)
                         <div class="flex items-center gap-1.5">
                             <flux:icon.user class="size-4 text-zinc-400" />
-                            <span>{{ $client->name }}</span>
+                            <span>{{ $client->legal_name }}</span>
                         </div>
                     @endif
 
