@@ -114,7 +114,29 @@
                         searchable
                         class="[&_[data-flux-select-trigger]]:min-h-[4rem] [&_[data-flux-select-trigger]]:py-3"
                     >
-                        @include('livewire.expenses.partials.project-options', ['projects' => $this->projects, 'distributions' => $this->distributions])
+                        @foreach($this->projects as $project)
+                            <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
+                                <div class="flex flex-col gap-0 w-full">
+                                    <div class="flex items-center w-full">
+                                        <span class="flex-1 min-w-0">{{ $project->short_address }}</span>
+
+                                        @if($project->latestStatus)
+                                            <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom" class="shrink-0 ml-2">
+                                                {{ $project->latestStatus->title }}
+                                            </flux:badge>
+                                        @endif
+                                    </div>
+
+                                    <i class="font-normal block w-full leading-tight">{{$project->project_name}}</i>
+                                </div>
+                            </flux:select.option>
+                        @endforeach
+
+                        <flux:select.option disabled>--------------</flux:select.option>
+
+                        @foreach($this->distributions as $distribution)
+                            <flux:select.option wire:key="D:{{$distribution->id}}" value="D:{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
+                        @endforeach
                     </flux:select>
 
                     @if($expense)
@@ -385,13 +407,14 @@
     </div>
 
     <form wire:submit="linkBulkTransactions" class="space-y-4">
-        <flux:field>
-            <flux:label>Project</flux:label>
-            <flux:select wire:model="bulkTransactionTarget" variant="listbox" placeholder="Choose project..." searchable>
-                @include('livewire.expenses.partials.project-options', ['projects' => $this->projects, 'distributions' => $this->distributions])
-            </flux:select>
+        {{-- The site's own project dropdown (projects, then distributions as
+             "D:{id}"). Its options must sit inside the select itself: Flux
+             renders an @include'd flux:select.option as a bare <option>,
+             which leaves the listbox empty. --}}
+        <div>
+            <x-forms.project-select model="bulkTransactionTarget" :projects="$this->projects" :distributions="$this->distributions" />
             <flux:error name="bulkTransactionTarget" />
-        </flux:field>
+        </div>
 
         <div class="flex justify-end gap-2">
             <flux:modal.close>
