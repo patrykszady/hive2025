@@ -1203,9 +1203,11 @@ class NylasService
                 ]);
             }
             
-            // Move the original message to HIVE_RECEIPTS_FOLDER after successful forwarding
-            // Delete the sent copy from receipts grant ID's sent folder
-            $this->moveOriginalMessageToHiveFolder($sourceGrantId, $messageId, $companyEmailId, $sentMessageId, $receiptsGrantId);
+            // The original stays where it is in the source mailbox (it used to
+            // be moved to HIVE_RECEIPTS_FOLDER); the forwarder records it in
+            // forwarded_receipt_messages instead. Only the sent copy in the
+            // receipts grant's Sent folder is cleared away.
+            $this->deleteSentForwardCopy($sentMessageId, $receiptsGrantId, $companyEmailId);
             
             return [
                 'status' => $response['status'],
@@ -1225,6 +1227,41 @@ class NylasService
                 'status' => 500,
                 'error' => $e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Deletes the copy a forward leaves in the receipts grant's Sent folder.
+     */
+    public function deleteSentForwardCopy(?string $sentMessageId, ?string $receiptsGrantId, int $companyEmailId): void
+    {
+        if (! $sentMessageId || ! $receiptsGrantId) {
+            return;
+        }
+
+        try {
+            $deletedFolderId = config('nylas.receipts_deleted_folder_id');
+            $success = $this->moveOrDeleteMessage($sentMessageId, $receiptsGrantId, $companyEmailId, $deletedFolderId);
+
+            if (! $success) {
+                // Exchange often locks a just-sent item (ErrorMoveCopyFailed
+                // via a 504 the inline retry skips) — retry on a delay
+                // instead of leaving the stray copy behind.
+                \App\Jobs\RetryReceiptsSentCopyCleanup::dispatch($sentMessageId, $receiptsGrantId, $companyEmailId, $deletedFolderId)
+                    ->delay(now()->addMinutes(2));
+
+                Log::channel('nylas')->info('Sent-copy cleanup deferred to delayed retry', [
+                    'sent_message_id' => $sentMessageId,
+                    'receipts_grant_id' => $receiptsGrantId,
+                    'deleted_folder_id' => $deletedFolderId,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->error('Exception deleting the sent forward copy', ApiErrorFormatter::format($e, [
+                'company_email_id' => $companyEmailId,
+                'receipts_grant_id' => $receiptsGrantId,
+                'sent_message_id' => $sentMessageId,
+            ]));
         }
     }
 
@@ -1258,25 +1295,7 @@ class NylasService
             // Move the original message to HIVE_RECEIPTS_FOLDER using unified method
             $this->moveOrDeleteMessage($messageId, $sourceGrantId, $companyEmailId, $hiveReceiptsFolderId);
             
-            // Delete the sent copy from receipts grant's sent folder to declutter
-            if ($sentMessageId && $receiptsGrantId) {
-                $deletedFolderId = config('nylas.receipts_deleted_folder_id');
-                $success = $this->moveOrDeleteMessage($sentMessageId, $receiptsGrantId, $companyEmailId, $deletedFolderId);
-
-                if (!$success) {
-                    // Exchange often locks a just-sent item (ErrorMoveCopyFailed
-                    // via a 504 the inline retry skips) — retry on a delay
-                    // instead of leaving the stray copy behind.
-                    \App\Jobs\RetryReceiptsSentCopyCleanup::dispatch($sentMessageId, $receiptsGrantId, $companyEmailId, $deletedFolderId)
-                        ->delay(now()->addMinutes(2));
-
-                    Log::channel('nylas')->info('Sent-copy cleanup deferred to delayed retry', [
-                        'sent_message_id' => $sentMessageId,
-                        'receipts_grant_id' => $receiptsGrantId,
-                        'deleted_folder_id' => $deletedFolderId,
-                    ]);
-                }
-            }
+            $this->deleteSentForwardCopy($sentMessageId, $receiptsGrantId, $companyEmailId);
         } catch (\Throwable $e) {
             Log::channel('nylas')->error('Exception moving original message to HIVE folder', ApiErrorFormatter::format($e, [
                 'company_email_id' => $companyEmailId,

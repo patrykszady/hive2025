@@ -9,6 +9,7 @@ use App\Models\AutoReceiptEmailBatch;
 use App\Models\AutoReceiptEmailBatchItem;
 use App\Models\CompanyEmail;
 use App\Models\Expense;
+use App\Models\ForwardedReceiptMessage;
 use App\Models\ExpenseReceipts;
 use App\Models\Project;
 use App\Models\Transaction;
@@ -4231,9 +4232,17 @@ class CompanyEmailController extends Controller
             $companyEmail
         );
 
+        // The originals stay in the mailbox, so what was already forwarded is
+        // remembered here rather than by moving it out of the inbox.
+        $alreadyForwarded = ForwardedReceiptMessage::query()
+            ->where('company_email_id', $companyEmail->id)
+            ->whereIn('message_id', collect($matchingMessages)->pluck('id')->filter()->all())
+            ->pluck('message_id')
+            ->flip();
+
         // Forward each matching message (only if it would match a receipt in central processing)
         foreach ($matchingMessages as $message) {
-            if (empty($message['id'])) {
+            if (empty($message['id']) || $alreadyForwarded->has((string) $message['id'])) {
                 continue;
             }
 
@@ -4244,12 +4253,19 @@ class CompanyEmailController extends Controller
                     continue;
                 }
 
-                $this->nylasService->sendForwardCopy(
+                $result = $this->nylasService->sendForwardCopy(
                     $grantId,
                     (string) $message['id'],
                     true,
                     $companyEmail->id
                 );
+
+                if (($result['status'] ?? 500) < 300 && empty($result['error'])) {
+                    ForwardedReceiptMessage::query()->firstOrCreate(
+                        ['company_email_id' => $companyEmail->id, 'message_id' => (string) $message['id']],
+                        ['forwarded_message_id' => $result['data']['data']['id'] ?? null],
+                    );
+                }
             } catch (\Throwable $e) {
                 Log::channel('nylas')->warning('Skipping message during forwarding due to processing error', [
                     'company_email_id' => $companyEmail->id,
