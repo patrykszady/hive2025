@@ -284,6 +284,15 @@ Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::
     ->withoutOverlapping()
     ->onOneServer();
 
+// An invoice entered as its own expense folds into the expense that paid it
+// (National's invoices + payment confirmations were counting twice).
+Schedule::command('expenses:merge-paid-invoices')
+    ->hourly()
+    ->name('merge-paid-invoices')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'match_associated_expenses'))
     ->everyTenMinutes()
     ->name('match-associated-expenses')
