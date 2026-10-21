@@ -162,3 +162,67 @@ it('keeps the lines an invoice repeats when they are what adds up to the subtota
     expect($fields['items'])->toHaveCount(12);
     Http::assertNothingSent();
 });
+
+/**
+ * Climate Solutions invoice 68297 (expense 28924, 2026-10-21): "Taxable
+ * Subtotal $24,521.53", tax, $225 delivery and $420 "Misc. Charges" (the card
+ * fee) make the $27,618.69 total. The subtotal check left the misc charge out
+ * and stored no subtotal; the analyzer's PurchaseOrder was the supplier's
+ * "Order: 892117" while the paper says "Customer PO: PATRYK NEW".
+ */
+function climateSolutions68297(): array
+{
+    $content = <<<'TXT'
+CLIMATE SOLUTIONS WINDOWS
+Invoice 68297
+Terms:
+1/2 DEPOSIT/CASH ON DELIVERY
+Order:	892117
+Sales Rep:	Agnes M
+Customer PO:	PATRYK NEW
+Received:	08/05/2026
+LINE	QTY	DESCRIPTION	COLOR	FACTORY SIZE (W x H)	UNIT PRICE	SUBTOTAL
+12	1 9PD 4-Lite Custom+Transom	Black-Black Lamination	147 x 80	Price	6,325.36	6,325.36
+PAID IN FULL
+Taxable Subtotal	$24,521.53
+Tax	$2,452.16
+Nontaxable Subtotal	$0.00
+Delivery	$225.00
+Misc. Charges	$420.00
+INVOICE TOTAL	$27,618.69
+Paid Amount	$27,618.69
+AMOUNT DUE	$0.00
+TXT;
+
+    $mock = Mockery::mock(ContentUnderstandingService::class);
+    $mock->shouldReceive('analyze')->once()->andReturn(['analyzeResult' => [
+        'documents' => [[
+            'fields' => [
+                'MerchantName' => ['valueString' => 'CLIMATE SOLUTIONS WINDOWS'],
+                'Total' => ['valueNumber' => 27618.69],
+                'TotalTax' => ['valueNumber' => 2452.16],
+                'Shipping' => ['valueNumber' => 225.00],
+                'PurchaseOrder' => ['valueString' => '892117'],
+                'TransactionDate' => ['valueDate' => '2026-10-12'],
+                'Items' => ['valueArray' => [climateSolutionsLine('9PD 4-Lite Custom+Transom', 1, 6325.36, 6325.36)]],
+            ],
+        ]],
+        'content' => $content,
+        'styles' => [],
+    ]]);
+    app()->instance(ContentUnderstandingService::class, $mock);
+
+    return app(ReceiptController::class)->extractReceipt('/tmp/fake.pdf', 'pdf')['fields'];
+}
+
+it('reads the subtotal when printed misc charges sit between it and the total', function () {
+    $fields = climateSolutions68297();
+
+    expect($fields['subtotal'])->toEqualWithDelta(24521.53, 0.001)
+        ->and($fields['misc_fees'])->toEqualWithDelta(420.00, 0.001)
+        ->and($fields['shipping'])->toEqualWithDelta(225.00, 0.001);
+});
+
+it('takes the PO from a printed "Customer PO" over the supplier order number the analyzer read', function () {
+    expect(climateSolutions68297()['purchase_order'])->toBe('PATRYK NEW');
+});

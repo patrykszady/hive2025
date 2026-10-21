@@ -28,6 +28,17 @@ use Illuminate\Support\Facades\Log;
  * charge becomes a Check for that vendor, linked to its charge and to the
  * expense (check_expense, like matchChecksToExpenses()). Subcontractors are
  * left alone: their checks are written in Hive and linked from there.
+ *
+ * A deposit by card and the balance by check never add up to the invoice to
+ * the cent: Climate Solutions invoice 68297 (expense 28924, $27,618.69) was
+ * paid with a $14,420.00 card charge the bank already tags as the vendor
+ * (a $14,000 deposit plus the 3% card fee the invoice bills as "Misc.
+ * Charges") and check 2682 for $13,295.32, two days after the invoice — the
+ * balance it covers is $13,198.69. So when no set of checks adds up, the
+ * expense is paid by ONE charge tagged with its vendor (the deposit, at
+ * least DEPOSIT_SHARE of the invoice) plus ONE check clearing around the
+ * invoice date within BALANCE_TOLERANCE of what is left — and only when
+ * exactly one such pair exists.
  */
 class UnenteredCheckMatcher
 {
@@ -42,6 +53,12 @@ class UnenteredCheckMatcher
 
     /** A deposit, a progress payment and the balance. */
     public const MAX_CHECKS = 3;
+
+    /** A deposit is at least this share of the invoice. */
+    public const DEPOSIT_SHARE = 0.2;
+
+    /** The balance check may differ from what is left by this share of it (fees, rounding). */
+    public const BALANCE_TOLERANCE = 0.01;
 
     /** Expenses looked at per company each run, newest first. */
     private const EXPENSES_PER_RUN = 200;
@@ -67,12 +84,20 @@ class UnenteredCheckMatcher
                 $charges = $this->chargesFor($expense, $bankAccountIds->all());
                 $combination = $this->onlyCombination($expense, $charges);
 
-                if ($combination === null) {
+                if ($combination !== null) {
+                    $this->payWithChecks($expense, $combination);
+                    $paid++;
+
                     continue;
                 }
 
-                $this->payWithChecks($expense, $combination);
-                $paid++;
+                $pair = $this->onlyDepositAndBalance($expense, $charges, $bankAccountIds->all());
+
+                if ($pair !== null) {
+                    [$deposit, $balance] = $pair;
+                    $this->payWithDepositAndCheck($expense, $deposit, $balance);
+                    $paid++;
+                }
             }
         }
 
@@ -199,6 +224,62 @@ class UnenteredCheckMatcher
     }
 
     /**
+     * The one deposit (an unclaimed charge the bank tagged with the expense's
+     * vendor) and the one check that pays what is left, or null when there
+     * is none or more than one such pair.
+     *
+     * @param  Collection<int, Transaction>  $checkCharges  unclaimed paper-check charges (chargesFor())
+     * @param  array<int, int>  $bankAccountIds
+     * @return array{0: Transaction, 1: Transaction}|null
+     */
+    private function onlyDepositAndBalance(Expense $expense, Collection $checkCharges, array $bankAccountIds): ?array
+    {
+        $total = (int) round((float) $expense->amount * 100);
+        $date = Carbon::parse($expense->date)->startOfDay();
+        $lastFrom = $date->copy()->subDays(self::LAST_CHECK_DAYS_BEFORE);
+        $lastTo = $date->copy()->addDays(self::LAST_CHECK_DAYS_AFTER)->endOfDay();
+
+        $deposits = Transaction::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->whereIn('bank_account_id', $bankAccountIds)
+            ->where('vendor_id', $expense->vendor_id)
+            ->whereNull('check_id')
+            ->whereNull('expense_id')
+            ->where(fn ($query) => $query->whereNull('deposit')->orWhere('deposit', false))
+            ->where('amount', '>=', round($total * self::DEPOSIT_SHARE / 100, 2))
+            ->where('amount', '<', $expense->amount)
+            ->whereBetween('transaction_date', [
+                $date->copy()->subDays(self::DEPOSIT_DAYS_BEFORE)->toDateString(),
+                $lastTo->toDateTimeString(),
+            ])
+            ->whereDoesntHave('expenses')
+            ->get();
+
+        $pairs = [];
+        foreach ($deposits as $deposit) {
+            $left = $total - (int) round((float) $deposit->amount * 100);
+            $tolerance = (int) ceil($left * self::BALANCE_TOLERANCE);
+
+            foreach ($checkCharges as $check) {
+                $clears = Carbon::parse($check->transaction_date);
+                $cents = (int) round((float) $check->amount * 100);
+
+                if ($clears->lt($lastFrom) || $clears->gt($lastTo) || abs($cents - $left) > $tolerance) {
+                    continue;
+                }
+
+                $pairs[] = [$deposit, $check];
+
+                if (count($pairs) > 1) {
+                    return null;
+                }
+            }
+        }
+
+        return $pairs[0] ?? null;
+    }
+
+    /**
      * Sets of up to $size ids from $ids whose cents add up to $remaining.
      *
      * @param  list<int>  $ids
@@ -224,6 +305,23 @@ class UnenteredCheckMatcher
         }
 
         return $subsets;
+    }
+
+    private function payWithDepositAndCheck(Expense $expense, Transaction $deposit, Transaction $balance): void
+    {
+        $deposit->expense_id = $expense->id;
+        $deposit->save();
+
+        Log::channel('add_check_id_to_transactions')->info('Paid an expense with a vendor deposit and a balance check', [
+            'expense_id' => $expense->id,
+            'deposit_transaction_id' => $deposit->id,
+            'deposit' => $deposit->amount,
+            'check_number' => $balance->check_number,
+            'check' => $balance->amount,
+            'amount' => $expense->amount,
+        ]);
+
+        $this->payWithChecks($expense, [$balance]);
     }
 
     /**

@@ -7,6 +7,34 @@ use Tests\TestCase;
 
 class ExpenseReceiptsNotesAccessorTest extends TestCase
 {
+    public function test_a_purchase_order_is_the_po_alone_and_the_other_notes_are_notes(): void
+    {
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order' => 'PATRYK NEW',
+                'handwritten_notes' => ['S', 'no nailng', 'line 2 no blinds', 'line 6 no NF'],
+                'raw_content' => "Order:\t892117\nCustomer PO:\tPATRYK NEW\n",
+            ],
+        ]);
+
+        $this->assertSame('PATRYK NEW', $receipt->notes);
+        $this->assertSame('no nailng | line 2 no blinds | line 6 no NF', $receipt->extra_notes);
+    }
+
+    public function test_without_a_purchase_order_the_notes_are_the_po_and_there_are_no_extra_notes(): void
+    {
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order' => '',
+                'handwritten_notes' => ['Bates kitchen'],
+                'raw_content' => "HOME DEPOT\nTOTAL 42.10",
+            ],
+        ]);
+
+        $this->assertSame('Bates kitchen', $receipt->notes);
+        $this->assertSame('', $receipt->extra_notes);
+    }
+
     public function test_notes_falls_back_to_pro_jobname_from_raw_content_when_purchase_order_is_empty(): void
     {
         $receipt = new ExpenseReceipts([

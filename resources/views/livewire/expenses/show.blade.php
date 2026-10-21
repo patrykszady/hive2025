@@ -116,6 +116,9 @@
 
                     @if($expense->receipt && $expense->receipt->notes)
                         <x-details.row title="PO" content="{{ $expense->receipt->notes }}" />
+                        @if (filled($expense->receipt->extra_notes))
+                            <x-details.row title="Notes" content="{{ $expense->receipt->extra_notes }}" />
+                        @endif
                     @endif
                 </x-slot:details>
 

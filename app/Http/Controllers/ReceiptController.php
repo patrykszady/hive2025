@@ -884,6 +884,15 @@ class ReceiptController extends Controller
             $purchaseOrderNumber = $this->extractPurchaseOrderFromRawContent($rawContent);
         }
 
+        // A "Customer PO:" printed on the paper is the PO we gave the supplier and
+        // beats what the analyzer read: on Climate Solutions invoice 68297 it took
+        // the supplier's own "Order: 892117" while the paper says
+        // "Customer PO: PATRYK NEW".
+        $customerPurchaseOrder = $this->customerPurchaseOrderFromRawContent($rawContent);
+        if ($customerPurchaseOrder !== '' && ! $this->isPlaceholderPurchaseOrder($customerPurchaseOrder)) {
+            $purchaseOrderNumber = $customerPurchaseOrder;
+        }
+
         // Drop sentinel / placeholder PO values that contractors / store
         // clerks type when there is no real PO (e.g. "0", "0000", "NA",
         // "N/A", "none", "-"). These aren't real purchase orders and would
@@ -1675,6 +1684,19 @@ class ReceiptController extends Controller
         return in_array($normalized, ['na', 'none', 'null', 'nil', 'nopo', 'noponumber', 'tbd', 'unknown'], true);
     }
 
+    /**
+     * The value after a "Customer PO:" label (also "Customer P.O. #",
+     * "Customer PO Number"), up to the next tab or line end.
+     */
+    private function customerPurchaseOrderFromRawContent(string $rawContent): string
+    {
+        if ($rawContent === '' || ! preg_match('/Customer[ \t]*P\.?[ \t]*O\.?[ \t]*(?:#|Number|No\.?)?[ \t]*[:#][ \t]*([^\t\r\n]+)/i', $rawContent, $match)) {
+            return '';
+        }
+
+        return trim(rtrim(trim($match[1]), ':;'));
+    }
+
     private function extractPurchaseOrderFromRawContent(string $rawContent): string
     {
         if ($rawContent === '') {
@@ -2061,9 +2083,21 @@ class ReceiptController extends Controller
             $split !== [] ? round(array_sum($split), 2) : null,
         ], fn ($value) => $value !== null);
 
+        // Printed charges between the subtotal and the total ("Misc. Charges
+        // $420.00" — the card fee on Climate Solutions invoice 68297) count
+        // toward the total too; misc_fees picks them up from the gap later.
+        preg_match_all(
+            '/^[ \t]*(?:misc(?:ellaneous)?\.?[ \t]*(?:charges?|fees?)|other[ \t]+charges?|surcharges?|fuel[ \t]+surcharge)[ \t]*:?[ \t]*\$?[ \t]*([\d,]+\.\d{2})\b/im',
+            $content,
+            $chargeMatches,
+        );
+        $charges = round(array_sum(array_map(fn ($value) => (float) str_replace(',', '', $value), $chargeMatches[1] ?? [])), 2);
+
         foreach ($candidates as $candidate) {
-            if (abs(round($candidate + ($totalTax ?? 0) + ($shipping ?? 0), 2) - $amount) <= 0.02) {
-                return round($candidate, 2);
+            foreach (array_unique([0.0, $charges]) as $extra) {
+                if (abs(round($candidate + ($totalTax ?? 0) + ($shipping ?? 0) + $extra, 2) - $amount) <= 0.02) {
+                    return round($candidate, 2);
+                }
             }
         }
 

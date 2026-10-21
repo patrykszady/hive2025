@@ -651,6 +651,31 @@ class ExpenseReceipts extends Model
         return is_string($stripped) && trim($stripped) !== '' ? trim($stripped) : $trimmed;
     }
 
+    /**
+     * The receipt's notes that are not its PO, for a Notes row beside the PO
+     * row; empty when there is no PO (the notes are shown as the PO then).
+     */
+    protected function extraNotes(): Attribute
+    {
+        return Attribute::make(
+            get: function () {
+                $po = trim((string) $this->notes);
+                $purchaseOrder = collect((array) ($this->receipt_items['purchase_order'] ?? []))
+                    ->filter(fn ($value) => is_string($value) && trim($value) !== '' && trim($value) !== '0');
+
+                if ($purchaseOrder->isEmpty() && ! preg_match('/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName)\s*:/i', (string) ($this->receipt_items['raw_content'] ?? ''))) {
+                    return '';
+                }
+
+                return collect((array) ($this->receipt_items['handwritten_notes'] ?? []))
+                    ->map(fn ($note) => trim((string) $note))
+                    ->filter(fn ($note) => mb_strlen($note) > 1 && $note !== '0' && ! str_contains(mb_strtolower($po), mb_strtolower($note)))
+                    ->unique()
+                    ->implode(' | ');
+            }
+        );
+    }
+
     protected function notes(): Attribute
     {
         return Attribute::make(
@@ -684,8 +709,21 @@ class ExpenseReceipts extends Model
                     }
                 }
 
+                // A purchase order on the paper is the PO, alone: the notes beside it
+                // (on Climate Solutions invoice 68297 the printed line remarks "no
+                // nailng", "line 2 no blinds" the analyzer filed as handwritten)
+                // are shown under Notes (extraNotes). Without one, the notes are
+                // the PO — contractors write the job name on the receipt.
+                $meaningfulPurchaseOrder = array_values(array_filter($purchase_order, fn ($value) => is_string($value) && trim($value) !== '' && trim($value) !== '0'));
+
+                // A note that spells the PO out in full ("Smith" → "Smith Kitchen
+                // Remodel") stays with it; the containment dedup below keeps the
+                // fuller one.
+                $notesNamingThePo = array_filter($handwritten_notes, fn ($note) => is_string($note)
+                    && collect($meaningfulPurchaseOrder)->contains(fn ($po) => str_contains(mb_strtolower($note), mb_strtolower(trim($po)))));
+
                 // Combine, filter out empty/meaningless values, deduplicate
-                $combined = array_merge($handwritten_notes, $purchase_order);
+                $combined = $meaningfulPurchaseOrder !== [] ? array_merge($notesNamingThePo, $meaningfulPurchaseOrder) : $handwritten_notes;
                 $filtered = array_filter($combined, function ($note) {
                     if (! is_string($note)) {
                         return false;

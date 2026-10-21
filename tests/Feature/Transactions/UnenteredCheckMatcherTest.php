@@ -167,3 +167,72 @@ it('counts the bank lines of every check paying the expense in its status', func
     // https://hive.contractors/checks/3994 showed "No Transaction" (2026-10-20).
     expect($fx['expense']->fresh()->status)->toBe('Complete');
 });
+
+/**
+ * Climate Solutions invoice 68297 (expense 28924): $27,618.69, paid with a
+ * $14,420.00 card charge the bank tagged with the vendor (a $14,000 deposit +
+ * the 3% fee billed as "Misc. Charges") and check 2682 for $13,295.32 two
+ * days after the invoice — $96.63 more than the $13,198.69 left.
+ */
+function deposit_fixture(): array
+{
+    $fx = unentered_fixture();
+    $fx['expense']->forceFill(['amount' => 27618.69, 'date' => '2026-10-12', 'invoice' => '68297'])->save();
+    $card = BankAccount::create(['vendor_id' => $fx['company']->id, 'bank_id' => $fx['bank']->id, 'account_number' => '7712', 'plaid_account_id' => 'acc_card_'.uniqid(), 'type' => 'credit']);
+    $fx['deposit'] = Transaction::withoutGlobalScopes()->create([
+        'bank_account_id' => $card->id,
+        'transaction_date' => '2026-08-29',
+        'amount' => 14420.00,
+        'vendor_id' => $fx['supplier']->id,
+        'plaid_merchant_name' => 'Climate Solutions Window',
+        'plaid_merchant_description' => 'CLIMATE SOLUTIONS WINDOW',
+    ]);
+
+    return $fx;
+}
+
+it('pays an invoice with the vendor\'s card deposit and the one check that covers the balance', function () {
+    $fx = deposit_fixture();
+    unentered_charge($fx, '2642', 13000.00, '2026-08-03');
+    unentered_charge($fx, '2678', 3100.00, '2026-10-06');
+    $balance = unentered_charge($fx, '2682', 13295.32, '2026-10-14');
+
+    app(TransactionController::class)->add_check_id_to_transactions();
+
+    $expense = $fx['expense']->fresh();
+    $checks = $expense->checks()->get();
+
+    expect($fx['deposit']->fresh()->expense_id)->toBe($expense->id)
+        ->and($checks)->toHaveCount(1)
+        ->and((string) $checks[0]->check_number)->toBe('2682')
+        ->and((float) $checks[0]->amount)->toBe(13295.32)
+        ->and($checks[0]->vendor_id)->toBe($fx['supplier']->id)
+        ->and($balance->fresh()->check_id)->toBe($checks[0]->id);
+});
+
+it('does not pay it when two checks could be the balance', function () {
+    $fx = deposit_fixture();
+    unentered_charge($fx, '2682', 13295.32, '2026-10-14');
+    unentered_charge($fx, '2684', 13150.00, '2026-10-18');
+
+    expect(app(UnenteredCheckMatcher::class)->run())->toBe(0)
+        ->and($fx['deposit']->fresh()->expense_id)->toBeNull()
+        ->and(Check::withoutGlobalScopes()->count())->toBe(0);
+});
+
+it('does not pay it when the check is more than a percent off the balance', function () {
+    $fx = deposit_fixture();
+    unentered_charge($fx, '2682', 13500.00, '2026-10-14');
+
+    expect(app(UnenteredCheckMatcher::class)->run())->toBe(0)
+        ->and($fx['deposit']->fresh()->expense_id)->toBeNull();
+});
+
+it('does not take a charge the bank did not tag with the vendor as the deposit', function () {
+    $fx = deposit_fixture();
+    $fx['deposit']->forceFill(['vendor_id' => null])->save();
+    unentered_charge($fx, '2682', 13295.32, '2026-10-14');
+
+    expect(app(UnenteredCheckMatcher::class)->run())->toBe(0)
+        ->and(Check::withoutGlobalScopes()->count())->toBe(0);
+});
