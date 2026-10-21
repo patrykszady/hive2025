@@ -43,6 +43,9 @@ class CompanyEmailController extends Controller
 {
     private $nylasService;
 
+    /** @var \Illuminate\Database\Eloquent\Collection<int, Receipt>|null the Receipt configs findMatchingReceipt() matches against */
+    private ?\Illuminate\Database\Eloquent\Collection $receiptConfigs = null;
+
     public function __construct(NylasService $nylasService)
     {
         $this->nylasService = $nylasService;
@@ -674,7 +677,7 @@ class CompanyEmailController extends Controller
             $metadataFromEmail = $fromEmail;
 
             $processingStage = 'match_receipt';
-            $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject);
+            $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject, $message);
 
             // Fallback: if no match and body contains a "From:" line, try extracting the original sender.
             // This handles cases where the forwarding system captured the forwarder's address
@@ -687,7 +690,7 @@ class CompanyEmailController extends Controller
                         if ($bodyFromEmail === strtolower($fromEmail) || !filter_var($bodyFromEmail, FILTER_VALIDATE_EMAIL)) {
                             continue;
                         }
-                        $receipt = $this->findMatchingReceipt($bodyFromEmail, $cleanSubject);
+                        $receipt = $this->findMatchingReceipt($bodyFromEmail, $cleanSubject, $message);
                         if ($receipt) {
                             Log::channel('nylas')->info('Receipt matched using body-extracted from_email fallback', [
                                 'message_id' => $messageId,
@@ -851,8 +854,8 @@ class CompanyEmailController extends Controller
                 // Some receipt configs (e.g. BS&A / bsaonline.com municipal payments)
                 // do not map to a single fixed vendor — the issuing municipality differs
                 // per message. Detect the vendor from the email body and resolve it to a
-                // known Vendor by name. Clone first so the static receipt cache in
-                // findMatchingReceipt() is never mutated across messages.
+                // known Vendor by name. Clone first so the receipt configs cached by
+                // findMatchingReceipt() are never mutated across messages.
                 if (!empty($receipt->options['vendor_from_body_regex'])) {
                     $receipt = clone $receipt;
                     $detectedFromBodyVendorId = $this->detectVendorFromBody(
@@ -4276,7 +4279,7 @@ class CompanyEmailController extends Controller
         $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $subject);
         
         // First, try matching with the direct sender
-        $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject);
+        $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject, $message);
         
         if ($receipt !== null) {
             return true;
@@ -4302,7 +4305,7 @@ class CompanyEmailController extends Controller
                         continue; // Skip the direct sender we already tried
                     }
                     if (filter_var($extractedEmail, FILTER_VALIDATE_EMAIL)) {
-                        $receipt = $this->findMatchingReceipt($extractedEmail, $cleanSubject);
+                        $receipt = $this->findMatchingReceipt($extractedEmail, $cleanSubject, $message);
                         if ($receipt !== null) {
                             return true;
                         }
@@ -4351,18 +4354,36 @@ class CompanyEmailController extends Controller
      * @param string $messageSubject The subject line from the incoming message
      * @return Receipt|null The matching receipt or null if none found
      */
-    protected function findMatchingReceipt(string $messageFromEmail, string $messageSubject): ?Receipt
+    /**
+     * Subjects that announce where an order is, not what it cost: "Good news!
+     * Items for your order S2493998 - TUB/PR have arrived!" — two of those,
+     * forwarded by a client, became $0 Studio 41 expenses (28366, 28898).
+     */
+    private const ORDER_STATUS_SUBJECT = '/\b(?:ha(?:ve|s) (?:arrived|shipped)|items? for your order|out for delivery|ready for (?:pick ?up|delivery)|delivery (?:is )?scheduled|tracking (?:number|information)|shipment (?:notification|update))\b/i';
+
+    /**
+     * Matches a message to a Receipt config by sender (an address, or "@domain"
+     * for anyone there) and subject.
+     *
+     * A config with no subject — a whole domain, like Studio 41's
+     * "@studio41.com" — would otherwise take every email anyone there sends:
+     * order-status notices, a sales rep's notes, threads a client forwards.
+     * It only takes a message carrying a receipt document (a PDF or image
+     * attachment) that is not an order-status notice. Configs with subjects
+     * already name the emails they want and are left alone.
+     *
+     * @param  array<string, mixed>|null  $message  the Nylas message, when known
+     */
+    protected function findMatchingReceipt(string $messageFromEmail, string $messageSubject, ?array $message = null): ?Receipt
     {
-        // Cache receipts for the lifetime of this request/job to avoid an
-        // expensive full-table scan per candidate message.
-        static $receipts = null;
-        if ($receipts === null) {
-            $receipts = Receipt::whereNotNull('receipt_type')
-                ->where('receipt_type', '!=', 0)
-                ->whereNotNull('from_address')
-                ->where('from_address', '!=', '')
-                ->get();
-        }
+        // Cached on this controller — one per request or job — to avoid a
+        // full-table scan per candidate message. (A method-level static lived
+        // as long as the Horizon worker, so config edits waited for a restart.)
+        $receipts = $this->receiptConfigs ??= Receipt::whereNotNull('receipt_type')
+            ->where('receipt_type', '!=', 0)
+            ->whereNotNull('from_address')
+            ->where('from_address', '!=', '')
+            ->get();
 
         foreach ($receipts as $receipt) {
             $receiptFromAddress = $receipt->from_address ?? '';
@@ -4401,8 +4422,9 @@ class CompanyEmailController extends Controller
             $subjectMatches = false;
             
             if (empty($receiptFromSubjects)) {
-                // If receipt has no subject requirement, email match is sufficient
-                $subjectMatches = true;
+                // No subject requirement: the sender is enough, for a message
+                // that is a receipt at all.
+                $subjectMatches = $message === null || $this->catchAllReceiptAccepts($message, $messageSubject);
             } else {
                 // Partial match: receipt subject must be contained in message subject (case-insensitive)
                 // Example: "AT&T payment processed for account ending in" matches "AT&T payment processed for account ending in 1733"
@@ -4423,6 +4445,30 @@ class CompanyEmailController extends Controller
         
         // No matching receipt found
         return null;
+    }
+
+    /**
+     * Whether a sender-only (catch-all) Receipt config may take this message.
+     *
+     * @param  array<string, mixed>  $message
+     */
+    protected function catchAllReceiptAccepts(array $message, string $messageSubject): bool
+    {
+        if (preg_match(self::ORDER_STATUS_SUBJECT, $messageSubject)) {
+            return false;
+        }
+
+        return collect($message['attachments'] ?? [])->contains(function ($attachment): bool {
+            if (! is_array($attachment) || ($attachment['is_inline'] ?? false)) {
+                return false;
+            }
+
+            $type = strtolower((string) ($attachment['content_type'] ?? ''));
+            $name = strtolower((string) ($attachment['filename'] ?? ''));
+
+            return str_contains($type, 'pdf') || str_starts_with($type, 'image/')
+                || preg_match('/\.(pdf|jpe?g|png|heic)$/', $name) === 1;
+        });
     }
 
     /**
