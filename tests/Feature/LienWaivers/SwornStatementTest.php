@@ -147,6 +147,22 @@ it('counts a supplier\'s split expenses toward what the project paid it', functi
     $transactions = \App\Support\ProjectSupplierSpend::transactions($project->id, $supplier->id);
     expect($transactions->pluck('amount')->sort()->values()->all())->toBe([420.0, 656.18, 27198.69])
         ->and($transactions->pluck('reference')->unique()->sort()->values()->all())->toBe(['68297', '68298']);
+
+    expect(\App\Support\ProjectSupplierSpend::paidToVendor($project->id, $supplier->id))->toBe(28274.87)
+        ->and(\App\Support\ProjectSupplierSpend::paidToVendor($project->id, $supplier->id, Carbon\Carbon::parse('2026-10-11')))->toBe(0.0);
+
+    // The waiver's own affidavit swears the same amount paid — it still read
+    // $656.18 on waiver 25 after the GCSS row was fixed (2026-10-22).
+    $waiver = LienWaiver::withoutGlobalScopes()->create([
+        'belongs_to_vendor_id' => $gc->id, 'vendor_id' => $supplier->id, 'project_id' => $project->id,
+        'type' => LienWaiverType::ConditionalProgress, 'status' => LienWaiverStatus::Draft,
+        'amount' => 28274.87, 'exceptions_amount' => 0, 'through_date' => '2026-10-22',
+        'jurisdiction' => 'US-IL', 'notes' => json_encode(['kind_of_work' => 'Windows & doors']), 'created_by_user_id' => $user->id,
+    ]);
+    $affidavit = (new ReflectionMethod(\App\Support\LienWaiverDocumentGenerator::class, 'buildAffidavitContext'))->invoke(null, $waiver);
+
+    expect($affidavit['amount_paid'])->toBe(28274.87)
+        ->and($affidavit['contract_total'])->toBe(28274.87);
 });
 
 it('generates a sworn statement whose columns foot to the contract totals', function () {
@@ -733,6 +749,16 @@ it('gives retail claimants an affidavit and reserves waiver-only for material su
     $materialHtml = $render($retail, ['manual' => true, 'source' => 'sworn_statement', 'kind_of_work' => 'Lumber', 'material' => true]);
 
     expect($materialHtml)
+        ->toContain('WAIVER OF LIEN TO DATE')
+        ->not->toContain('CONTRACTOR&rsquo;S AFFIDAVIT')
+        ->not->toContain('NOTARY PUBLIC');
+
+    // A Kind of Work of "Materials" is a material supplier too, flag or not:
+    // Climate Solutions (Retail, work type Materials) still got the
+    // affidavit and notary block on waiver 25 (2026-10-22).
+    $materialsKindHtml = $render($retail, ['manual' => true, 'source' => 'sworn_statement', 'kind_of_work' => 'Materials', 'retail' => true]);
+
+    expect($materialsKindHtml)
         ->toContain('WAIVER OF LIEN TO DATE')
         ->not->toContain('CONTRACTOR&rsquo;S AFFIDAVIT')
         ->not->toContain('NOTARY PUBLIC');
@@ -1495,3 +1521,28 @@ it('sends sub signature requests immediately during business hours', function ()
     Illuminate\Support\Carbon::setTestNow();
 });
 
+
+it('asks a material supplier for a signature only, with no notary step', function () {
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+
+    $waiverFor = fn (Vendor $claimant, string $kind) => LienWaiver::withoutGlobalScopes()->create([
+        'belongs_to_vendor_id' => $gc->id, 'vendor_id' => $claimant->id, 'project_id' => $project->id,
+        'type' => LienWaiverType::ConditionalProgress, 'status' => LienWaiverStatus::Draft,
+        'amount' => 28274.87, 'exceptions_amount' => 0, 'through_date' => now()->toDateString(),
+        'jurisdiction' => 'US-IL', 'notes' => json_encode(['kind_of_work' => $kind]), 'created_by_user_id' => $user->id,
+    ]);
+
+    $materials = new \App\Mail\LienWaiverSigningRequest($waiverFor($retail, 'Materials'), 'Climate Solutions');
+    $html = $materials->render();
+
+    expect($materials->steps)->toBe(['print', 'sign', 'return'])
+        ->and($html)->toContain('No notary needed')
+        ->and($html)->toContain('your signed waiver')
+        ->and($html)->not->toContain('Notarize');
+
+    $carpentry = new \App\Mail\LienWaiverSigningRequest($waiverFor($sub, 'Carpentry'), 'PMG');
+
+    expect($carpentry->steps)->toBe(['print', 'sign', 'notarize', 'return'])
+        ->and($carpentry->render())->toContain('Notarize');
+});

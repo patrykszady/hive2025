@@ -22,8 +22,10 @@ return [
     'step_notarize_body2' => 'Linię „SIGNATURE” podpisz dopiero przy notariuszu.',
     'step_return_title' => 'Odeślij do nas',
     'step_return_body' => 'Odpowiedz na tego maila ze skanem albo dostarcz poświadczony notarialnie dokument osobiście.',
+    'step_return_body_signed' => 'Odpowiedz na tego maila ze skanem albo dostarcz podpisany dokument osobiście. Notariusz nie jest potrzebny.',
     'help' => 'Potrzebujesz pomocy? <strong>Zadzwoń do nas jak najszybciej</strong>:phone.',
     'urgency' => '<strong>Właściciel domu nie może nam zapłacić, dopóki nie otrzymamy poświadczonego notarialnie dokumentu.</strong>',
+    'urgency_signed' => '<strong>Właściciel domu nie może nam zapłacić, dopóki nie otrzymamy podpisanego dokumentu.</strong>',
     'thanks' => 'Dziękujemy,',
     'forward_notice' => 'Prosimy o przekazanie tej wiadomości właściwej osobie w firmie :vendor.',
 ];

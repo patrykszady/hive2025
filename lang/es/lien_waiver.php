@@ -22,8 +22,10 @@ return [
     'step_notarize_body2' => 'Firme la línea "SIGNATURE" frente al notario.',
     'step_return_title' => 'Envíenoslo de vuelta',
     'step_return_body' => 'Responda a este correo con un escaneo, o entréguenos la copia notarizada en persona.',
+    'step_return_body_signed' => 'Responda a este correo con un escaneo, o entréguenos la copia firmada en persona. No necesita notario.',
     'help' => '¿Necesita ayuda? <strong>Llámenos cuanto antes</strong>:phone.',
     'urgency' => '<strong>El propietario no puede pagarnos hasta recibir su waiver notarizado.</strong>',
+    'urgency_signed' => '<strong>El propietario no puede pagarnos hasta recibir su waiver firmado.</strong>',
     'thanks' => 'Gracias,',
     'forward_notice' => 'Por favor, reenvíe este correo al contacto correcto en :vendor.',
 ];

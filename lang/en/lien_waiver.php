@@ -22,8 +22,10 @@ return [
     'step_notarize_body2' => 'Sign the "SIGNATURE" line in front of the notary.',
     'step_return_title' => 'Send it back',
     'step_return_body' => 'Reply to this email with a scan, or hand us the notarized copy in person.',
+    'step_return_body_signed' => 'Reply to this email with a scan, or hand us the signed copy in person. No notary needed.',
     'help' => 'Need help? <strong>Call us ASAP</strong>:phone.',
     'urgency' => '<strong>The homeowner can\'t pay us until your notarized waiver is in.</strong>',
+    'urgency_signed' => '<strong>The homeowner can\'t pay us until your signed waiver is in.</strong>',
     'thanks' => 'Thanks,',
     'forward_notice' => 'Please forward this email to the correct contact at :vendor.',
 ];

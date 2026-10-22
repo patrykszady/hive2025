@@ -51,10 +51,10 @@
 <table align="center" width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 20px 0;">
 <tr>
 <td bgcolor="#f4f4f5" style="background-color: #f4f4f5; border-radius: 8px; padding: 22px 28px; text-align: center;">
-@foreach(['print', 'sign', 'notarize', 'return'] as $step)
+@foreach($steps as $step)
 <p style="margin: 0 {{ $loop->last ? '' : '0 18px' }}; text-align: center; font-size: 14px; color: #18181b; line-height: 1.6;">
 <img src="cid:waiver-step-{{ $step }}" width="24" height="24" alt="" style="vertical-align: middle; margin-right: 7px;"><strong style="vertical-align: middle;">{!! __("lien_waiver.step_{$step}_title") !!}</strong><br>
-{!! __("lien_waiver.step_{$step}_body") !!}
+{!! __($step === 'return' && ! $needsNotary ? 'lien_waiver.step_return_body_signed' : "lien_waiver.step_{$step}_body") !!}
 @if(\Illuminate\Support\Facades\Lang::has("lien_waiver.step_{$step}_body2"))
 <br>{!! __("lien_waiver.step_{$step}_body2") !!}
 @endif
@@ -67,7 +67,7 @@
 <div style="text-align: center;">
 <p class="text" style="text-align: center;">
 {!! __('lien_waiver.help', ['phone' => $phoneHtml]) !!}<br>
-{!! __('lien_waiver.urgency') !!}
+{!! __($needsNotary ? 'lien_waiver.urgency' : 'lien_waiver.urgency_signed') !!}
 </p>
 <p class="text" style="text-align: center;">
 {{ __('lien_waiver.thanks') }}<br>

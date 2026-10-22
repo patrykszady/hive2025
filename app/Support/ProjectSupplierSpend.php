@@ -4,6 +4,8 @@ namespace App\Support;
 
 use App\Models\Expense;
 use App\Models\ExpenseSplits;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 /**
@@ -99,6 +101,19 @@ class ProjectSupplierSpend
         ]);
 
         return $direct->concat($splits)->values();
+    }
+
+    /**
+     * What the project paid one vendor, expenses and splits together,
+     * optionally only what is dated on or before $through.
+     */
+    public static function paidToVendor(int $projectId, int $vendorId, ?CarbonInterface $through = null): float
+    {
+        return (float) self::transactions($projectId, $vendorId)
+            ->when($through, fn (Collection $rows) => $rows->filter(
+                fn ($row) => $row->date && Carbon::parse($row->date)->toDateString() <= $through->toDateString()
+            ))
+            ->sum('amount');
     }
 
     /**

@@ -387,12 +387,9 @@ HTML;
                 ? $waiver->payment?->date
                 : $waiver->through_date;
 
-            $expensesPaid = (float) \App\Models\Expense::withoutGlobalScopes()
-                ->where('project_id', $project->id)
-                ->where('vendor_id', $waiver->vendor_id)
-                ->whereNull('deleted_at')
-                ->when($cutoff, fn ($q) => $q->whereDate('date', '<=', $cutoff->toDateString()))
-                ->sum('amount');
+            // Splits of an expense allocated to the project count too, the
+            // same spend the GCSS row and the waiver amount use.
+            $expensesPaid = ProjectSupplierSpend::paidToVendor($project->id, (int) $waiver->vendor_id, $cutoff);
 
             $checkPaid = (float) \App\Models\Payment::withoutGlobalScopes()
                 ->where('project_id', $project->id)

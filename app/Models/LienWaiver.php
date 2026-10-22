@@ -124,6 +124,39 @@ class LienWaiver extends Model
             && (int) $this->vendor_id !== (int) $this->belongs_to_vendor_id;
     }
 
+    /**
+     * A material supplier's waiver: goods furnished, no contract math to
+     * swear to — it prints the waiver alone, signed without a notary. The
+     * draw marks it (notes.material), or the vendor's P&L sheets type is
+     * Materials, or its kind of work is Materials (Climate Solutions, a
+     * Retail vendor with work type Materials, still got an affidavit and a
+     * notary block — 2026-10-22).
+     */
+    public function isMaterialSupplierWaiver(): bool
+    {
+        if (! $this->isSubWaiver()) {
+            return false;
+        }
+
+        $notes = json_decode((string) $this->notes, true) ?: [];
+
+        if (! empty($notes['material'])) {
+            return true;
+        }
+
+        $vendor = $this->relationLoaded('vendor')
+            ? $this->vendor
+            : $this->vendor()->withoutGlobalScopes()->first();
+
+        if (($vendor?->sheets_type ?? null) === 'Materials') {
+            return true;
+        }
+
+        $kind = trim((string) ($notes['kind_of_work'] ?? '')) ?: trim((string) ($vendor?->workType?->name ?? ''));
+
+        return strcasecmp($kind, 'Materials') === 0;
+    }
+
     public function typeLabel(): string
     {
         return $this->type?->label() ?? '';

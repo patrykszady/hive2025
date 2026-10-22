@@ -232,9 +232,8 @@
         $isRetailClaimant = ! empty($waiverNotesArr['retail']) || ($vendor->business_type ?? null) === 'Retail';
         // Only MATERIAL suppliers sign a waiver-only document (goods furnished,
         // no contract math to swear to). Retail/rental/haulers swear the
-        // affidavit like every other party on the statement. The vendor
-        // fallback covers waivers written before the note existed.
-        $isMaterialSupplier = ! empty($waiverNotesArr['material']) || ($vendor->sheets_type ?? null) === 'Materials';
+        // affidavit like every other party on the statement.
+        $isMaterialSupplier = $waiver->isMaterialSupplierWaiver();
         // Open contract: a sub waiver that is NOT final but whose contract
         // equals the amount paid reads as "paid in full" on paper while the
         // contract is still running — mark those figures OPEN. Derived from

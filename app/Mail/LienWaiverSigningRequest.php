@@ -38,6 +38,15 @@ class LienWaiverSigningRequest extends Mailable
 
     public string $contractorPhone = '';
 
+    /**
+     * Material suppliers sign a waiver-only document with no notary block,
+     * so their email skips the Notarize step.
+     */
+    public bool $needsNotary = true;
+
+    /** @var list<string> */
+    public array $steps = ['print', 'sign', 'notarize', 'return'];
+
     public string $trackingId = '';
 
     public function __construct(
@@ -62,6 +71,8 @@ class LienWaiverSigningRequest extends Mailable
         $this->replyToEmail = trim((string) config('nylas.waivers_email'))
             ?: (trim((string) ($payer?->business_email ?? '')) ?: null);
         $this->recipientName = $recipientName;
+        $this->needsNotary = ! $waiver->isMaterialSupplierWaiver();
+        $this->steps = $this->needsNotary ? ['print', 'sign', 'notarize', 'return'] : ['print', 'sign', 'return'];
         $this->waiverTypeLabel = $waiver->typeLabel();
         $this->amountFormatted = '$' . number_format((float) $waiver->amount, 2);
         $this->throughDate = optional($waiver->through_date)->format('F j, Y') ?? '';
@@ -90,7 +101,7 @@ class LienWaiverSigningRequest extends Mailable
             // Step icons + brand mark ride inside the email as CID inline
             // attachments — mail clients can't be trusted to fetch hosted
             // images (and localhost URLs never resolve in dev).
-            foreach (['print', 'sign', 'notarize', 'return'] as $step) {
+            foreach ($this->steps as $step) {
                 $iconPath = public_path("images/email/waiver-step-{$step}.png");
                 if (is_file($iconPath)) {
                     $message->embedFromPath($iconPath, "waiver-step-{$step}", 'image/png');
