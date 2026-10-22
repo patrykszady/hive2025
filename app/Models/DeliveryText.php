@@ -37,6 +37,8 @@ class DeliveryText extends Model
         'supplier',
         'order_number',
         'delivery_date',
+        'confirmed_at',
+        'confirmation_sms_message_id',
         'extracted',
         'reason',
     ];
@@ -46,6 +48,7 @@ class DeliveryText extends Model
         return [
             'extracted' => 'array',
             'delivery_date' => 'date',
+            'confirmed_at' => 'datetime',
         ];
     }
 

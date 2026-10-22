@@ -27,7 +27,9 @@ const STUDIO41_TEXT = 'Studio 41 delivery confirmation needed! Delivery is sched
 /** @return array<string, mixed> */
 function deliveryFixture(): array
 {
-    config(['services.openai.api_key' => 'test-key', 'deliveries.sms_intake.enabled' => true]);
+    config(['services.openai.api_key' => 'test-key', 'deliveries.sms_intake.enabled' => true, 'deliveries.sms_intake.auto_confirm' => true]);
+    // The confirm reply is queued to Telnyx; it never leaves the test.
+    \Illuminate\Support\Facades\Bus::fake([\App\Jobs\SendGroupMms::class]);
 
     $company = Vendor::factory()->create(['business_name' => 'GS Construction & Remodeling, Inc']);
     $admin = new User();
@@ -73,13 +75,13 @@ function fakeDeliveryReading(array ...$readings): void
         $sequence->push(['choices' => [['message' => ['content' => json_encode(array_merge([
             'is_delivery' => true, 'confidence' => 0.97, 'supplier' => 'Studio 41', 'date' => '2026-10-28',
             'start_time' => '12:00', 'end_time' => '15:00', 'address' => '949 SOUTH ELM COURT, PALATINE',
-            'order_number' => 'S2472002', 'needs_confirmation' => true,
+            'order_number' => 'S2472002', 'needs_confirmation' => true, 'confirm_reply' => '1',
             'summary' => 'curbside/tailgate only; driver calls 30 min before', 'reason' => 'Supplier delivery window.',
         ], $overrides))]]]]);
     }
 }
 
-it('schedules a supplier\'s delivery text on the open project at its address and alerts the admins', function () {
+it('schedules a supplier\'s delivery text on the open project at its address, confirms it and alerts the admins', function () {
     $fx = deliveryFixture();
     fakeDeliveryReading();
     $message = deliveryText($fx['thread'], STUDIO41_TEXT);
@@ -95,20 +97,69 @@ it('schedules a supplier\'s delivery text on the open project at its address and
         ->and(data_get($task->options, 'time_settings.2026-10-28.start_time'))->toBe('12:00')
         ->and(data_get($task->options, 'time_settings.2026-10-28.end_time'))->toBe('15:00')
         ->and($task->notes)->toContain('Studio 41 order S2472002: delivery Wed 10/28, 12–3 pm at 949 SOUTH ELM COURT, PALATINE')
-        ->and($task->notes)->toContain('They cancel unless it is confirmed')
+        ->and($task->notes)->toContain('Confirmed by text on')
+        ->and($task->notes)->toContain('(replied "1")')
         ->and($task->notes)->toContain('Reference order# S2472002');
+
+    // "Reply 1 to CONFIRM": the keyword, and nothing else, goes back once.
+    $reply = SmsMessage::query()->where('direction', SmsMessage::DIRECTION_OUTBOUND)->sole();
+    expect($reply->text)->toBe('1')
+        ->and($reply->thread_id)->toBe($fx['thread']->id)
+        ->and($decision->fresh()->confirmed_at)->not->toBeNull()
+        ->and($decision->fresh()->confirmation_sms_message_id)->toBe($reply->id);
+    \Illuminate\Support\Facades\Bus::assertDispatched(\App\Jobs\SendGroupMms::class, fn ($job) => $job->messageId === $reply->id);
 
     $alert = AppNotification::query()->where('user_id', $fx['admin']->id)->sole();
     expect($alert->type)->toBe('delivery_scheduled')
         ->and($alert->title)->toBe('Delivery scheduled: Studio 41, Wed 10/28')
-        ->and($alert->action_url)->toBe('/messages?threadId='.$fx['thread']->id);
+        ->and($alert->body)->toContain('Confirmed: replied "1" to their text.')
+        ->and($alert->action_url)->toBe('/projects/'.$fx['kitchen']->id);
+});
 
-    // Confirming is a person's call: nothing is texted back.
+it('leaves confirming to a person when auto-confirm is off', function () {
+    $fx = deliveryFixture();
+    config(['deliveries.sms_intake.auto_confirm' => false]);
+    fakeDeliveryReading();
+
+    $decision = app(DeliveryTextIntake::class)->consider(deliveryText($fx['thread'], STUDIO41_TEXT));
+
+    expect(SmsMessage::query()->where('direction', SmsMessage::DIRECTION_OUTBOUND)->count())->toBe(0)
+        ->and(Task::withoutGlobalScopes()->find($decision->task_id)->notes)->toContain('They cancel unless it is confirmed')
+        ->and(AppNotification::query()->sole()->action_url)->toBe('/messages?threadId='.$fx['thread']->id);
+});
+
+it('only sends a confirm keyword the text itself names', function () {
+    $fx = deliveryFixture();
+    fakeDeliveryReading(['confirm_reply' => 'YES']);
+
+    app(DeliveryTextIntake::class)->consider(deliveryText($fx['thread'], STUDIO41_TEXT));
+
     expect(SmsMessage::query()->where('direction', SmsMessage::DIRECTION_OUTBOUND)->count())->toBe(0);
+});
+
+it('confirms a delivery that is already on the schedule, once per text', function () {
+    $fx = deliveryFixture();
+    config(['deliveries.sms_intake.auto_confirm' => false]);
+    fakeDeliveryReading([], []);
+    $first = app(DeliveryTextIntake::class)->consider(deliveryText($fx['thread'], STUDIO41_TEXT));
+
+    config(['deliveries.sms_intake.auto_confirm' => true]);
+    $again = deliveryText($fx['thread'], STUDIO41_TEXT, '2026-10-22 09:00:00');
+    $decision = app(DeliveryTextIntake::class)->consider($again);
+
+    expect($decision->outcome)->toBe(DeliveryText::OUTCOME_ALREADY_SCHEDULED)
+        ->and(SmsMessage::query()->where('direction', SmsMessage::DIRECTION_OUTBOUND)->pluck('text')->all())->toBe(['1'])
+        ->and(Task::withoutGlobalScopes()->find($first->task_id)->notes)->toStartWith('Confirmed by text on')
+        ->and(AppNotification::query()->where('type', 'delivery_confirmed')->count())->toBe(1);
+
+    // The same text read again (a queue retry) is not answered twice.
+    expect(app(DeliveryTextIntake::class)->consider($again)->id)->toBe($decision->id)
+        ->and(SmsMessage::query()->where('direction', SmsMessage::DIRECTION_OUTBOUND)->count())->toBe(1);
 });
 
 it('moves the task when a later text reschedules the same order', function () {
     $fx = deliveryFixture();
+    config(['deliveries.sms_intake.auto_confirm' => false]);
     fakeDeliveryReading([], ['date' => '2026-10-30', 'start_time' => '08:00', 'end_time' => '11:00', 'needs_confirmation' => false]);
     $first = app(DeliveryTextIntake::class)->consider(deliveryText($fx['thread'], STUDIO41_TEXT));
     $second = app(DeliveryTextIntake::class)->consider(deliveryText($fx['thread'], 'Studio 41: your delivery for order S2472002 has been rescheduled to Fri 10/30 8-11am.', '2026-10-22 09:00:00'));
@@ -124,6 +175,7 @@ it('moves the task when a later text reschedules the same order', function () {
 
 it('leaves a delivery that is already on the schedule alone', function () {
     $fx = deliveryFixture();
+    config(['deliveries.sms_intake.auto_confirm' => false]);
     fakeDeliveryReading([], []);
     $first = app(DeliveryTextIntake::class)->consider(deliveryText($fx['thread'], STUDIO41_TEXT));
     $repeat = app(DeliveryTextIntake::class)->consider(deliveryText($fx['thread'], STUDIO41_TEXT, '2026-10-22 09:00:00'));
@@ -172,10 +224,11 @@ it('reports without writing on a dry run', function () {
     fakeDeliveryReading();
 
     $this->artisan('deliveries:read-texts', ['message' => [deliveryText($fx['thread'], STUDIO41_TEXT)->id], '--dry-run' => true])
-        ->expectsOutputToContain('scheduled — Studio 41 2026-10-28, project '.$fx['kitchen']->id)
+        ->expectsOutputToContain('scheduled — Studio 41 2026-10-28, project '.$fx['kitchen']->id.', task - (Would reply "1" to confirm.)')
         ->assertSuccessful();
 
     expect(DeliveryText::query()->count())->toBe(0)
+        ->and(SmsMessage::query()->where('direction', SmsMessage::DIRECTION_OUTBOUND)->count())->toBe(0)
         ->and(Task::withoutGlobalScopes()->count())->toBe(0)
         ->and(AppNotification::query()->count())->toBe(0);
 });

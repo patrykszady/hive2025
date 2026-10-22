@@ -42,6 +42,9 @@ When it is a delivery:
 - order_number: the order, PO or reference number, or null.
 - needs_confirmation: true when the text asks GS to confirm or the delivery
   will be cancelled.
+- confirm_reply: the exact reply the text asks for to CONFIRM, as written
+  ("Reply 1 to CONFIRM" is "1", "reply Y to confirm" is "Y"). Null when it
+  names none.
 - summary: one short line for a crew schedule, e.g. "curbside/tailgate only;
   driver calls 30 min before". Null when there is nothing beyond the window.
 Otherwise use null (false for needs_confirmation) for all of these.
@@ -50,7 +53,7 @@ Otherwise use null (false for needs_confirmation) for all of these.
 TXT;
 
     /**
-     * @return array{is_delivery: bool, confidence: float, supplier: ?string, date: ?string, start_time: ?string, end_time: ?string, address: ?string, order_number: ?string, needs_confirmation: bool, summary: ?string, reason: ?string, model: string}|null
+     * @return array{is_delivery: bool, confidence: float, supplier: ?string, date: ?string, start_time: ?string, end_time: ?string, address: ?string, order_number: ?string, needs_confirmation: bool, confirm_reply: ?string, summary: ?string, reason: ?string, model: string}|null
      */
     public function read(string $text, Carbon $sentAt): ?array
     {
@@ -67,7 +70,7 @@ TXT;
         $schema = [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['is_delivery', 'confidence', 'supplier', 'date', 'start_time', 'end_time', 'address', 'order_number', 'needs_confirmation', 'summary', 'reason'],
+            'required' => ['is_delivery', 'confidence', 'supplier', 'date', 'start_time', 'end_time', 'address', 'order_number', 'needs_confirmation', 'confirm_reply', 'summary', 'reason'],
             'properties' => [
                 'is_delivery' => ['type' => 'boolean'],
                 'confidence' => ['type' => 'number'],
@@ -78,6 +81,7 @@ TXT;
                 'address' => $nullableString,
                 'order_number' => $nullableString,
                 'needs_confirmation' => ['type' => 'boolean'],
+                'confirm_reply' => $nullableString,
                 'summary' => $nullableString,
                 'reason' => ['type' => 'string'],
             ],
@@ -127,6 +131,7 @@ TXT;
             'address' => $this->clean($data['address'] ?? null, 160),
             'order_number' => $this->clean($data['order_number'] ?? null, 60),
             'needs_confirmation' => (bool) ($data['needs_confirmation'] ?? false),
+            'confirm_reply' => $this->clean($data['confirm_reply'] ?? null, 10),
             'summary' => $this->clean($data['summary'] ?? null, 200),
             'reason' => $this->clean($data['reason'] ?? null, 500),
             'model' => $model,

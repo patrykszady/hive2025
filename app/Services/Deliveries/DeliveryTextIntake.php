@@ -9,6 +9,7 @@ use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\GroupSmsService;
 use App\Services\Tasks\TaskWriter;
 use App\Support\AdminAlerts;
 use App\Support\StreetAddress;
@@ -29,8 +30,9 @@ use Illuminate\Support\Str;
  * text for the same order (or the same supplier's delivery that month)
  * moves the task instead of adding another. Admins are alerted either way;
  * a delivery with no open project at its address is only alerted, with a
- * link to the text. Nothing is ever texted back — confirming stays a person's
- * call.
+ * link to the text. A placed delivery that asks to be confirmed ("Reply 1 to
+ * CONFIRM … delivery will be canceled") is answered with that keyword, once
+ * — nothing else is ever texted back.
  */
 class DeliveryTextIntake
 {
@@ -114,6 +116,7 @@ class DeliveryTextIntake
         $decision->project_id = $project->id;
         $existing = $this->existingTask($project, $reading);
         $actor = $this->actorFor($tenantId);
+        $confirmReply = $this->confirmReplyFor($reading, $text);
 
         if (! $actor) {
             Log::warning('Delivery texts: no admin to act as', ['vendor_id' => $tenantId]);
@@ -123,31 +126,88 @@ class DeliveryTextIntake
 
         if ($existing && $this->sameSlot($existing, $reading)) {
             $decision->task_id = $existing->id;
+            $this->record($decision, DeliveryText::OUTCOME_ALREADY_SCHEDULED, $dryRun && $confirmReply ? 'Would reply "'.$confirmReply.'" to confirm.' : null, $dryRun);
 
-            return $this->record($decision, DeliveryText::OUTCOME_ALREADY_SCHEDULED, null, $dryRun);
+            // Already on the schedule, but this text still asks to be confirmed.
+            if ($confirmReply && ! $dryRun && $this->confirm($thread, $message, $confirmReply, $decision)) {
+                $existing->forceFill(['notes' => trim($this->confirmedLine($confirmReply)."\n\n".$existing->notes)])->saveQuietly();
+                $this->alert($tenantId, 'delivery_confirmed', 'Delivery confirmed: '.$this->headline($reading),
+                    'Replied "'.$confirmReply.'" to their text, so they will not cancel it.', '/projects/'.$project->id, $decision);
+            }
+
+            return $decision;
         }
 
         if ($dryRun) {
             $decision->task_id = $existing?->id;
 
-            return $this->record($decision, $existing ? DeliveryText::OUTCOME_RESCHEDULED : DeliveryText::OUTCOME_SCHEDULED, null, true);
+            return $this->record($decision, $existing ? DeliveryText::OUTCOME_RESCHEDULED : DeliveryText::OUTCOME_SCHEDULED, $confirmReply ? 'Would reply "'.$confirmReply.'" to confirm.' : null, true);
         }
 
         $task = $this->actingAs($actor, fn () => $existing
-            ? $this->tasks->update($existing, $this->taskData($project, $reading, $message, $thread, $existing))
-            : $this->tasks->store($this->taskData($project, $reading, $message, $thread)));
+            ? $this->tasks->update($existing, $this->taskData($project, $reading, $message, $thread, $existing, $confirmReply))
+            : $this->tasks->store($this->taskData($project, $reading, $message, $thread, null, $confirmReply)));
 
         $decision->task_id = $task->id;
         $this->record($decision, $existing ? DeliveryText::OUTCOME_RESCHEDULED : DeliveryText::OUTCOME_SCHEDULED, null, false);
 
+        $confirmed = $confirmReply && $this->confirm($thread, $message, $confirmReply, $decision);
         $title = ($existing ? 'Delivery moved: ' : 'Delivery scheduled: ').$this->headline($reading);
         $body = trim($this->windowText($reading).' at '.($project->address ?: $reading['address']).' ('.($project->project_name ?: 'project').').'
-            .($reading['needs_confirmation'] ? ' They cancel unless it is confirmed — reply to their text.' : ''));
+            .($confirmed ? ' Confirmed: replied "'.$confirmReply.'" to their text.' : ($reading['needs_confirmation'] ? ' They cancel unless it is confirmed — reply to their text.' : '')));
 
         $this->alert($tenantId, $existing ? 'delivery_rescheduled' : 'delivery_scheduled', $title, $body,
-            $reading['needs_confirmation'] ? $this->threadUrl($thread) : '/projects/'.$project->id, $decision);
+            $reading['needs_confirmation'] && ! $confirmed ? $this->threadUrl($thread) : '/projects/'.$project->id, $decision);
 
         return $decision;
+    }
+
+    /**
+     * The confirm keyword to send, when auto-confirm is on, the text asks to
+     * be confirmed, and the text itself names that reply ("Reply 1 to
+     * CONFIRM"). Only a short keyword is ever sent — never anything the
+     * model wrote.
+     */
+    protected function confirmReplyFor(array $reading, string $text): ?string
+    {
+        $reply = trim((string) ($reading['confirm_reply'] ?? ''));
+
+        if (! config('deliveries.sms_intake.auto_confirm') || ! $reading['needs_confirmation'] || preg_match('/^[A-Za-z0-9]{1,5}$/', $reply) !== 1) {
+            return null;
+        }
+
+        $quoted = preg_quote($reply, '/');
+
+        return preg_match('/\breply\s+["\']?'.$quoted.'["\']?\s+(?:to\s+)?confirm|(?<![A-Za-z0-9])'.$quoted.'["\']?\s+to\s+confirm/i', $text) === 1 ? $reply : null;
+    }
+
+    /**
+     * Send the confirm reply, once per text. Returns false when it was
+     * already answered.
+     */
+    protected function confirm(SmsGroupThread $thread, SmsMessage $message, string $reply, DeliveryText $decision): bool
+    {
+        $alreadyAnswered = SmsMessage::withoutGlobalScopes()
+            ->where('thread_id', $thread->id)
+            ->where('direction', SmsMessage::DIRECTION_OUTBOUND)
+            ->where('id', '>', $message->id)
+            ->whereRaw('TRIM(text) = ?', [$reply])
+            ->exists();
+
+        if ($alreadyAnswered) {
+            return false;
+        }
+
+        $sent = app(GroupSmsService::class)->sendToThread($thread, $reply);
+
+        $decision->forceFill(['confirmed_at' => now(), 'confirmation_sms_message_id' => $sent->id])->save();
+
+        return true;
+    }
+
+    protected function confirmedLine(string $reply): string
+    {
+        return 'Confirmed by text on '.now()->setTimezone('America/Chicago')->format('M j, Y g:i A').' (replied "'.$reply.'").';
     }
 
     /**
@@ -222,9 +282,9 @@ class DeliveryTextIntake
     }
 
     /** @return array<string, mixed> */
-    protected function taskData(Project $project, array $reading, SmsMessage $message, SmsGroupThread $thread, ?Task $existing = null): array
+    protected function taskData(Project $project, array $reading, SmsMessage $message, SmsGroupThread $thread, ?Task $existing = null, ?string $confirmReply = null): array
     {
-        $note = $this->taskNote($reading, $message, $thread);
+        $note = $this->taskNote($reading, $message, $thread, $confirmReply);
 
         return [
             'title' => $existing?->title ?: $this->taskTitle($reading),
@@ -246,7 +306,7 @@ class DeliveryTextIntake
         return Str::limit(($reading['supplier'] ?: 'Supplier').' delivery', 80, '');
     }
 
-    protected function taskNote(array $reading, SmsMessage $message, SmsGroupThread $thread): string
+    protected function taskNote(array $reading, SmsMessage $message, SmsGroupThread $thread, ?string $confirmReply = null): string
     {
         $line = trim(($reading['supplier'] ?: 'Supplier')
             .($reading['order_number'] ? ' order '.$reading['order_number'] : '')
@@ -254,7 +314,9 @@ class DeliveryTextIntake
             .($reading['address'] ? ' at '.$reading['address'] : '')
             .($reading['summary'] ? '; '.$reading['summary'] : '').'.');
 
-        if ($reading['needs_confirmation']) {
+        if ($confirmReply) {
+            $line .= ' '.$this->confirmedLine($confirmReply);
+        } elseif ($reading['needs_confirmation']) {
             $line .= ' They cancel unless it is confirmed — reply to their text (Messages, thread '.$thread->id.').';
         }
 

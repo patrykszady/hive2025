@@ -25,6 +25,11 @@ return [
 
         // Below this the reader's "is a delivery" is not trusted.
         'min_confidence' => 0.7,
+
+        // Answer "Reply 1 to CONFIRM" for a delivery placed on a project, so
+        // the supplier does not cancel it (Patryk, 2026-10-22: "click 1 and
+        // do so going forward").
+        'auto_confirm' => (bool) env('DELIVERY_TEXT_AUTO_CONFIRM', true),
     ],
 
 ];
