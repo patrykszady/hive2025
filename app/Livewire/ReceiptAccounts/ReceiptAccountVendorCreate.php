@@ -23,7 +23,7 @@ use Livewire\Component;
 class ReceiptAccountVendorCreate extends Component
 {
     use AuthorizesRequests;
-    protected $listeners = ['refreshComponent' => '$refresh', 'editReceiptVendor'];
+    protected $listeners = ['refreshComponent' => '$refresh', 'editReceiptVendor', 'matchFor'];
 
     // public BulkMatchForm $form;
     public $distributions = []; //coming from ReceiptAccountsIndex
@@ -35,6 +35,9 @@ class ReceiptAccountVendorCreate extends Component
     public array $credential_values = [];
 
     public Vendor $vendor;
+
+    /** Opened from the expense modal: saving the match closes that one too. */
+    public bool $openedFromExpenseModal = false;
 
     //$this->form->setMatch($match);
 
@@ -109,6 +112,7 @@ class ReceiptAccountVendorCreate extends Component
     public function editReceiptVendor(Vendor $vendor)
     {
         // Explicitly clear all state before loading new vendor
+        $this->openedFromExpenseModal = false;
         $this->transactions_bulk_matches = [];
         $this->vendor_transactions = [];
         $this->credential_fields = [];
@@ -185,6 +189,49 @@ class ReceiptAccountVendorCreate extends Component
         // dd($this->vendor?->receipt_account()?->exists() ?? false);
 
         $this->modal('receipt_account_vendor_form_modal')->show();
+    }
+
+    public function mount($distributions = null): void
+    {
+        // /vendor_match passes its list; /expenses lets the modal load its own.
+        $this->distributions = $distributions ?? Distribution::all();
+    }
+
+    /**
+     * Open the vendor's matches from the expense modal (ExpenseCreate::
+     * openVendorMatch()), with a new Amount Match on top already filled in
+     * from the form: "=" its amount, the bank charge's merchant name as the
+     * description, and its distribution.
+     */
+    public function matchFor(int $vendor, mixed $amount = null, ?string $description = null, ?int $distribution = null): void
+    {
+        $this->authorize('create', TransactionBulkMatch::class);
+
+        abort_unless(Vendor::query()->whereKey($vendor)->exists(), 404);
+
+        // Only one of the company's own distributions is prefilled.
+        $distribution = $distribution && Distribution::query()->whereKey($distribution)->where('vendor_id', auth()->user()->vendor->id)->exists()
+            ? $distribution
+            : null;
+
+        $this->openWithMatch($vendor, is_numeric($amount) ? (float) $amount : null, $description, $distribution);
+        $this->openedFromExpenseModal = true;
+    }
+
+    protected function openWithMatch(int $vendorId, ?float $amount, ?string $description, ?int $distributionId): void
+    {
+        $this->editReceiptVendor(Vendor::withoutGlobalScopes()->findOrFail($vendorId));
+
+        // The new match goes first, so it is the one in view when the modal
+        // opens; the vendor's existing matches follow.
+        array_unshift($this->transactions_bulk_matches, [
+            'id' => null,
+            'amount' => $amount === null ? null : number_format($amount, 2, '.', ''),
+            'distribution_id' => $distributionId,
+            'options' => ['amount_type' => $amount === null ? 'ANY' : '=', 'desc' => trim((string) $description) ?: null],
+            'split' => false,
+            'splits' => null,
+        ]);
     }
 
     public function addMatch()
@@ -331,6 +378,13 @@ class ReceiptAccountVendorCreate extends Component
 
         $this->modal('receipt_account_vendor_form_modal')->close();
         $this->dispatch('refreshComponent')->to('receipt-accounts.receipt-accounts-index');
+
+        // The rule now matches the charge or expense the expense modal was
+        // open for, so that modal is done too.
+        if ($this->openedFromExpenseModal) {
+            $this->openedFromExpenseModal = false;
+            $this->modal('expenses_form_modal')->close();
+        }
 
         Flux::toast(
             duration: 5000,

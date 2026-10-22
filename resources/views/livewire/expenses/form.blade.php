@@ -12,6 +12,12 @@
     ])
 >
     <x-slot name="headerActions">
+        {{-- The vendor's automatic matches, with this expense filled in. --}}
+        @if($hydrated && $form->vendor_id)
+            @can('create', App\Models\TransactionBulkMatch::class)
+                <flux:button icon="bolt" wire:click="openVendorMatch" data-vendor-match>Vendor match</flux:button>
+            @endcan
+        @endif
         @if(isset($expense->id))
             <flux:button wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">Show Expense</flux:button>
         @endif
@@ -459,4 +465,7 @@
     </form>
 @endif
 </flux:modal>
+@can('create', App\Models\TransactionBulkMatch::class)
+    <livewire:receipt-accounts.receipt-account-vendor-create :key="'expense-vendor-match'" />
+@endcan
 </div>

@@ -773,6 +773,34 @@ class ExpenseCreate extends Component
         }
     }
 
+    /**
+     * Open the vendor's matches (/vendor_match's modal, mounted in this
+     * view) with a new Amount Match filled in from the form: its amount,
+     * vendor and distribution, and the bank charge's merchant name.
+     */
+    public function openVendorMatch(): void
+    {
+        $this->authorize('create', \App\Models\TransactionBulkMatch::class);
+
+        if (! $this->form->vendor_id) {
+            return;
+        }
+
+        $expense = isset($this->form->expense) ? $this->form->expense : null;
+        $charge = $this->form->transaction instanceof Transaction
+            ? $this->form->transaction
+            : ($expense?->exists
+                ? Transaction::withoutGlobalScopes()->where('expense_id', $expense->id)->whereNull('deleted_at')->first()
+                : null);
+
+        $this->dispatch('matchFor',
+            vendor: (int) $this->form->vendor_id,
+            amount: $this->form->amount,
+            description: $charge?->plaid_merchant_name,
+            distribution: str_starts_with((string) $this->form->project_id, 'D:') ? (int) substr((string) $this->form->project_id, 2) : null,
+        )->to('receipt-accounts.receipt-account-vendor-create');
+    }
+
     public function render()
     {
         // $this->authorize('create', Expense::class);

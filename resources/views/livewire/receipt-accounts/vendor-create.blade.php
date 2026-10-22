@@ -1,3 +1,6 @@
+{{-- A plain root element: mounted inside the expense modal, which re-renders,
+     Livewire re-emits this child under its root tag. --}}
+<div>
 <x-form-modal name="receipt_account_vendor_form_modal">
     <x-slot:header>
         <div class="flex items-center justify-between gap-2 min-w-0">
@@ -193,3 +196,4 @@
         <flux:button type="submit" form="receipt_account_vendor_form_modal_form" variant="primary">Add</flux:button>
     </x-slot>
 </x-form-modal>
+</div>
