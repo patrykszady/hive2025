@@ -126,3 +126,19 @@ it('adds up several charges to what is still unpaid, not to the whole amount', f
     expect($first->fresh()->expense_id)->toBe($expense->id)
         ->and($second->fresh()->expense_id)->toBe($expense->id);
 });
+
+it('treats an expense paid with a card that is not the company\'s as paid', function () {
+    // Card ••1854 paid two Amazon orders and is on none of the company's
+    // accounts: the expense leaves the matcher, and a same-amount charge on
+    // a company card stays free.
+    $fx = mx_fixture();
+    $expense = Expense::query()->create(['amount' => 60.48, 'date' => now()->subDays(3)->toDateString(), 'vendor_id' => $fx['store']->id, 'belongs_to_vendor_id' => $fx['company']->id, 'created_by_user_id' => 0]);
+    ExpensePayment::create(['expense_id' => $expense->id, 'method' => ExpensePayment::CARD, 'amount' => 60.48, 'last_four' => '1854', 'source' => ExpensePayment::SOURCE_MANUAL]);
+    \App\Models\OutsideCard::create(['belongs_to_vendor_id' => $fx['company']->id, 'last_four' => '1854']);
+    $coincidence = mx_charge($fx, $fx['card'], 60.48, 'AMAZON MKTPL');
+
+    mx_match();
+
+    expect($coincidence->fresh()->expense_id)->toBeNull()
+        ->and($expense->fresh()->isPaidOutsideBank())->toBeTrue();
+});

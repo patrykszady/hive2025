@@ -1466,14 +1466,15 @@ class TransactionController extends Controller
                 ->whereDate('date', '>=', Carbon::now()->subMonths(12))
                 // Only fetch expenses not fully paid: linked charges plus what the receipt
                 // says was paid without a bank charge (store credit, gift cards and Menards
-                // certificates, rebate checks, points, cash — ExpensePayment::OFF_BANK)
-                // fall short of the amount. An expense paid entirely that way is done.
+                // certificates, rebate checks, points, cash — ExpensePayment::OFF_BANK —
+                // and cards that aren't the company's, App\Models\OutsideCard) fall
+                // short of the amount. An expense paid entirely that way is done.
                 ->whereRaw("(
                     (expenses.amount >= 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL)
-                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash')) < expenses.amount)
+                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND (expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash') OR (expense_payments.method = 'card' AND expense_payments.last_four IN (SELECT outside_cards.last_four FROM outside_cards WHERE outside_cards.belongs_to_vendor_id = expenses.belongs_to_vendor_id)))) < expenses.amount)
                     OR
                     (expenses.amount < 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL)
-                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash')) > expenses.amount)
+                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND (expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash') OR (expense_payments.method = 'card' AND expense_payments.last_four IN (SELECT outside_cards.last_four FROM outside_cards WHERE outside_cards.belongs_to_vendor_id = expenses.belongs_to_vendor_id)))) > expenses.amount)
                 )")
                 ->orderBy('date', 'DESC')
                 ->cursor();
@@ -1508,8 +1509,8 @@ class TransactionController extends Controller
                 // already linked, less what never reaches the bank. Card lines are the
                 // receipt's own word on which charges to look for.
                 $payments = ExpensePayment::query()->where('expense_id', $expense->id)->get();
-                $offBankPaid = (float) $payments->filter(fn (ExpensePayment $payment) => $payment->isOffBank())->sum('amount');
-                $cardLines = $payments->where('method', ExpensePayment::CARD)->values();
+                $offBankPaid = (float) $payments->filter(fn (ExpensePayment $payment) => $payment->setRelation('expense', $expense)->paidOutsideBank())->sum('amount');
+                $cardLines = $payments->where('method', ExpensePayment::CARD)->reject(fn (ExpensePayment $payment) => $payment->isOutsideCard())->values();
                 $this->noteChargesOnCardLines($cardLines, $expenseTransactions);
 
                 $transaction_amount_outstanding = round((float) $expense->amount - (float) $expenseTransactions->sum('amount') - $offBankPaid, 2);

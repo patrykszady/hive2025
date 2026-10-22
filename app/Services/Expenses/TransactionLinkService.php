@@ -26,20 +26,22 @@ class TransactionLinkService
     /**
      * Unlinked charges on the company's bank accounts (TransactionScope) near
      * the expense date: the expense's vendor first, then the closest amount,
-     * then the closest date. Other vendors' charges only appear when the
-     * amount is within 5% (at least $5), so the list stays short — mirrors
-     * LinkTransaction::candidates().
+     * then the closest date. The vendor's own charges show at any amount; a
+     * charge with no vendor yet only within 5% (at least $5); another
+     * vendor's charge only at the exact amount — a $63.62 Arlington Heights
+     * CDJR charge was offered for a $60.48 Amazon order (expense 26499) —
+     * mirrors LinkTransaction::candidates().
      *
      * @return Collection<int, Transaction>
      */
     public function candidates(Expense $expense): Collection
     {
-        $amount = (float) $expense->amount;
+        $amount = round((float) $expense->amount, 2);
         $date = $expense->date ?? now();
         $tolerance = max(5.0, abs($amount) * 0.05);
 
         return Transaction::query()
-            ->with('bank_account.bank')
+            ->with(['bank_account.bank', 'vendor' => fn ($query) => $query->withoutGlobalScopes()])
             ->whereNull('expense_id')
             ->whereNull('check_id')
             ->whereNull('deleted_at')
@@ -53,7 +55,8 @@ class TransactionLinkService
                     $query->where('vendor_id', $expense->vendor_id);
                 }
 
-                $query->orWhereBetween('amount', [$amount - $tolerance, $amount + $tolerance]);
+                $query->orWhere(fn ($unknown) => $unknown->whereNull('vendor_id')->whereBetween('amount', [$amount - $tolerance, $amount + $tolerance]))
+                    ->orWhere('amount', $amount);
             })
             ->limit(100)
             ->get()
@@ -94,8 +97,9 @@ class TransactionLinkService
      * Whether "Link bank transaction" should be offered for $expense at
      * all — mirrors the @if wrapping <livewire:expenses.link-transaction>
      * in resources/views/livewire/expenses/show.blade.php: no charge and no
-     * check already settled it, and off-bank payments (rebate checks, store
-     * credit, points, cash) haven't already covered the full amount.
+     * check already settled it, and payments outside the bank (rebate checks,
+     * store credit, points, cash, cards that aren't the company's) haven't
+     * already covered the full amount.
      */
     public function canOffer(Expense $expense, ExpenseAssociationService $associations): bool
     {
@@ -107,7 +111,7 @@ class TransactionLinkService
             return false;
         }
 
-        $offBankPayments = $expense->payments->filter(fn ($payment) => $payment->isOffBank());
+        $offBankPayments = $expense->payments->filter(fn ($payment) => $payment->setRelation('expense', $expense)->paidOutsideBank());
 
         if ($offBankPayments->isEmpty()) {
             return true;

@@ -308,7 +308,7 @@ class ReceiptTenders
      * @param  array<int, array<string, mixed>>  $charges
      * @return list<array{method: string, amount: float, last_four: ?string, brand: ?string, paid_at: ?string, source_ref: ?string}>
      */
-    public static function fromAmazonCharges(array $charges): array
+    public static function fromAmazonCharges(array $charges, string $timezone = 'America/Chicago'): array
     {
         $lines = [];
 
@@ -325,7 +325,11 @@ class ReceiptTenders
                 'amount' => $amount,
                 'last_four' => $lastFour,
                 'brand' => null,
-                'paid_at' => ! empty($charge['transactionDate']) ? substr((string) $charge['transactionDate'], 0, 10) : null,
+                // Amazon stamps charges in UTC: 2026-03-14T00:08Z is the evening of
+                // March 13 here, the date its invoice prints.
+                'paid_at' => ! empty($charge['transactionDate'])
+                    ? \Illuminate\Support\Carbon::parse((string) $charge['transactionDate'])->setTimezone($timezone)->toDateString()
+                    : null,
                 'source_ref' => $charge['transactionId'] ?? null,
             ];
         }
@@ -508,7 +512,10 @@ class ReceiptTenders
             $items = is_array($receipt->receipt_items) ? $receipt->receipt_items : [];
             $text = self::receiptText($receipt);
             $candidates = [
-                ExpensePayment::SOURCE_AMAZON => self::fromAmazonCharges(is_array($items['charges'] ?? null) ? $items['charges'] : []),
+                ExpensePayment::SOURCE_AMAZON => self::fromAmazonCharges(
+                    is_array($items['charges'] ?? null) ? $items['charges'] : [],
+                    \App\Models\Vendor::withoutGlobalScopes()->find($expense->belongs_to_vendor_id)?->timezone ?: 'America/Chicago',
+                ),
                 ExpensePayment::SOURCE_RECEIPT_TEXT => self::fromText($text),
                 ExpensePayment::SOURCE_RECEIPT_READER => self::fromReaderPaymentMethods(is_array($items['payment_methods'] ?? null) ? $items['payment_methods'] : [], self::authorizationOnlyAmounts($text)),
             ];

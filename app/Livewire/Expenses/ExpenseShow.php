@@ -6,6 +6,7 @@ use App\Models\Check;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Services\Expenses\ExpenseAssociationService;
+use App\Services\Expenses\OutsideCardService;
 use App\Services\Expenses\ReceiptLineItemDetail;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
@@ -97,6 +98,20 @@ class ExpenseShow extends Component
         $this->expense->refresh();
         $this->expense->load(['checks.bank_account.bank']);
         $this->dispatch('refreshComponent');
+    }
+
+    /**
+     * The card is the company's own after all: every expense it paid goes
+     * back to looking for a bank charge (App\Services\Expenses\
+     * OutsideCardService).
+     */
+    public function unmarkOutsideCard(string $lastFour): void
+    {
+        $this->authorize('update', $this->expense);
+
+        app(OutsideCardService::class)->unmark((int) $this->expense->belongs_to_vendor_id, $lastFour);
+
+        $this->redirect(route('expenses.show', $this->expense), navigate: true);
     }
     
     // Manual toggle method for checkbox selection

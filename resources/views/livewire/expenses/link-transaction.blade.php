@@ -1,6 +1,11 @@
 <div>
-    <x-island-card heading="Bank Transaction" subheading="No bank charge is linked to this expense yet. If the charge differs from the invoice, link it here; the expense keeps its own amount.">
+    <x-island-card heading="Bank Transaction">
         <x-slot:actions>
+            {{-- A card the company has never been charged on may be someone else's:
+                 marking it counts its payments as paid, on every expense it paid. --}}
+            @foreach ($this->outsideCardCandidates as $lastFour)
+                <flux:button size="sm" variant="danger" icon="no-symbol" wire:key="outside-card-candidate-{{ $lastFour }}" data-outside-card-candidate="{{ $lastFour }}" wire:click="markOutsideCard('{{ $lastFour }}')" wire:confirm="Card ••{{ $lastFour }} is not the company's? Every expense it paid counts as paid by someone else.">••{{ $lastFour }} {{ \App\Models\OutsideCard::labelFor((int) $expense->belongs_to_vendor_id) }}</flux:button>
+            @endforeach
             <flux:button size="sm" icon="link" wire:click="openPicker">Link bank transaction</flux:button>
         </x-slot:actions>
     </x-island-card>
@@ -9,7 +14,7 @@
         <div class="space-y-4">
             <div>
                 <flux:heading size="lg">Link a bank transaction</flux:heading>
-                <flux:text class="mt-1">Unlinked charges from {{ \App\Livewire\Expenses\LinkTransaction::WINDOW_DAYS }} days before to {{ \App\Livewire\Expenses\LinkTransaction::WINDOW_DAYS }} days after {{ $expense->date?->format('m/d/Y') }}, this vendor first. Expense amount: ${{ number_format((float) $expense->amount, 2) }}.</flux:text>
+                <flux:text class="mt-1">Unlinked charges from {{ \App\Livewire\Expenses\LinkTransaction::WINDOW_DAYS }} days before to {{ \App\Livewire\Expenses\LinkTransaction::WINDOW_DAYS }} days after {{ $expense->date?->format('m/d/Y') }}, this vendor's at any amount, other vendors' only at the exact amount. Expense amount: ${{ number_format((float) $expense->amount, 2) }}.</flux:text>
             </div>
 
             @if ($open)
@@ -20,6 +25,7 @@
                         <flux:table.columns>
                             <flux:table.column>Date</flux:table.column>
                             <flux:table.column>Account</flux:table.column>
+                            <flux:table.column>Vendor</flux:table.column>
                             <flux:table.column>Description</flux:table.column>
                             <flux:table.column align="end">Amount</flux:table.column>
                             <flux:table.column align="end">Difference</flux:table.column>
@@ -33,6 +39,7 @@
                                 <flux:table.row wire:key="link-candidate-{{ $transaction->id }}">
                                     <flux:table.cell>{{ $transaction->transaction_date?->format('m/d/Y') }}</flux:table.cell>
                                     <flux:table.cell>{{ $transaction->bank_account?->bank?->name }} {{ $transaction->bank_account?->account_number }}</flux:table.cell>
+                                    <flux:table.cell class="max-w-[10rem] truncate" data-candidate-vendor>{{ $transaction->vendor_id ? $transaction->vendor?->name : '—' }}</flux:table.cell>
                                     <flux:table.cell class="max-w-[16rem] truncate">{{ $transaction->plaid_merchant_name ?: $transaction->plaid_merchant_description }}</flux:table.cell>
                                     <flux:table.cell align="end">${{ number_format((float) $transaction->amount, 2) }}</flux:table.cell>
                                     <flux:table.cell align="end">

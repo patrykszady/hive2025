@@ -141,7 +141,8 @@ class Expense extends Model
             || $this->sharedTransactions()->exists()
             || $this->check()->whereHas('transactions')->exists()
             || $this->checks()->whereHas('transactions')->exists()
-            || ! is_null($this->paid_by);
+            || ! is_null($this->paid_by)
+            || $this->isPaidOutsideBank();
 
         // Rules:
         // - If project is "No Project" AND no transactions => Missing Info
@@ -342,6 +343,21 @@ class Expense extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(ExpensePayment::class);
+    }
+
+    /**
+     * Paid in full without the company's bank: store credit, gift cards,
+     * points, cash, or a card that isn't the company's (ExpensePayment::
+     * paidOutsideBank()). 83 expenses paid that way read "No Transaction"
+     * although their page said "Paid without a bank charge" (2026-10-22).
+     */
+    public function isPaidOutsideBank(): bool
+    {
+        $paid = (float) $this->payments()->get()
+            ->filter(fn (ExpensePayment $payment) => $payment->setRelation('expense', $this)->paidOutsideBank())
+            ->sum('amount');
+
+        return round($paid, 2) != 0.0 && abs(round($paid, 2)) >= abs(round((float) $this->amount, 2)) - 0.01;
     }
 
     /**

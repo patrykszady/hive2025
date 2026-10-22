@@ -118,9 +118,10 @@ class ExpenseResource extends JsonResource
             // fed by Expense::allTransactions() (own -> shared -> check).
             'transactions' => $expense->allTransactions()->map(fn (Transaction $transaction) => $this->transactionPayload($transaction))->values()->all(),
             // Payments that never reached the bank (rebate checks, store
-            // credit, gift cards, points, cash) — mirrors the web's
-            // x-transactions.list_card $payments rows (ExpensePayment::isOffBank()).
-            'payments' => $expense->payments->filter(fn (ExpensePayment $payment) => $payment->isOffBank())
+            // credit, gift cards, points, cash, cards that aren't the
+            // company's) — mirrors the web's x-transactions.list_card
+            // $payments rows (ExpensePayment::paidOutsideBank()).
+            'payments' => $expense->payments->filter(fn (ExpensePayment $payment) => $payment->setRelation('expense', $expense)->paidOutsideBank())
                 ->sortBy('id')
                 ->map(fn (ExpensePayment $payment) => $this->paymentPayload($payment, $expense))
                 ->values()->all(),

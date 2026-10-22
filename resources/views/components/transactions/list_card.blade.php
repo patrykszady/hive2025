@@ -1,9 +1,13 @@
 @props([
     'transactions' => [],
-    // Payments that never reached the bank (App\Models\ExpensePayment, off-bank
-    // methods): rebate checks, certificates, store credit, points, cash. Listed
-    // under the bank charges, each with a note saying so.
+    // Payments that never reached the bank (App\Models\ExpensePayment::
+    // paidOutsideBank()): rebate checks, certificates, store credit, points,
+    // cash, and cards that aren't the company's. Listed under the bank
+    // charges, each with a note saying so.
     'payments' => collect(),
+    // The expense page passes true: a card marked "Not {company}" gets an
+    // "It's ours" button calling ExpenseShow::unmarkOutsideCard().
+    'outsideCardActions' => false,
     'title' => 'Transactions'
 ])
 
@@ -99,13 +103,17 @@
                 @endforeach
 
                 @foreach ($payments as $payment)
+                    @php
+                        // A card that isn't the company's reads like any bank charge, with a red pill.
+                        $outsideLabel = $payment->outsideLabel();
+                    @endphp
                     <flux:table.row :key="'payment-'.$payment->id">
                         <flux:table.cell variant="strong" class="whitespace-nowrap">
                             {{ money($payment->amount) }}
                         </flux:table.cell>
                         <flux:table.cell class="whitespace-nowrap">{{ ($payment->paid_at ?? $payment->expense?->date)?->format('m/d/Y') }}</flux:table.cell>
                         <flux:table.cell class="min-w-0">
-                            <x-table-link :label="$payment->methodName()" />
+                            <x-table-link :label="$outsideLabel ? ($payment->brand ?: 'Card') : $payment->methodName()" />
                         </flux:table.cell>
                         <flux:table.cell class="min-w-0">
                             <x-table-link :label="$payment->last_four ? '••'.$payment->last_four : '—'" />
@@ -113,7 +121,17 @@
                     </flux:table.row>
                     <flux:table.row class="table-subrow">
                         <flux:table.cell :colspan="count($columns)" class="whitespace-normal break-words !border-t-0 !pt-0">
-                            <span class="block italic text-sm text-gray-500">{{ $payment->notation() }}</span>
+                            @if ($outsideLabel)
+                                <span class="flex flex-wrap items-center gap-2" data-outside-card="{{ $payment->last_four }}">
+                                    <flux:badge size="sm" color="red">{{ $outsideLabel }}</flux:badge>
+                                    <span class="italic text-sm text-gray-500">{{ $payment->sourceNote() }}</span>
+                                    @if ($outsideCardActions)
+                                        <flux:button size="xs" variant="ghost" class="ms-auto" wire:click="unmarkOutsideCard('{{ $payment->last_four }}')" wire:confirm="Card ••{{ $payment->last_four }} is the company's own? Every expense it paid goes back to looking for a bank charge.">It's ours</flux:button>
+                                    @endif
+                                </span>
+                            @else
+                                <span class="block italic text-sm text-gray-500">{{ $payment->notation() }}</span>
+                            @endif
                         </flux:table.cell>
                     </flux:table.row>
                 @endforeach

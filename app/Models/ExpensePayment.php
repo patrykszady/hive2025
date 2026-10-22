@@ -44,6 +44,9 @@ class ExpensePayment extends Model
 
     public const SOURCE_MANUAL = 'manual';
 
+    /** isOutsideCard() asked once per line. */
+    protected ?bool $outsideCardMemo = null;
+
     protected $fillable = [
         'expense_id',
         'expense_receipt_id',
@@ -85,6 +88,29 @@ class ExpensePayment extends Model
         return in_array($this->method, self::OFF_BANK, true);
     }
 
+    /** A card line on a card that is not the company's own (App\Models\OutsideCard). */
+    public function isOutsideCard(): bool
+    {
+        if ($this->method !== self::CARD || ! $this->last_four) {
+            return false;
+        }
+
+        return $this->outsideCardMemo ??= OutsideCard::isOutside($this->tenantId(), $this->last_four);
+    }
+
+    /** Never reaches the company's bank: an off-bank tender, or someone else's card. */
+    public function paidOutsideBank(): bool
+    {
+        return $this->isOffBank() || $this->isOutsideCard();
+    }
+
+    protected function tenantId(): int
+    {
+        return (int) ($this->relationLoaded('expense')
+            ? $this->expense?->belongs_to_vendor_id
+            : Expense::withoutGlobalScopes()->whereKey($this->expense_id)->value('belongs_to_vendor_id'));
+    }
+
     /** What paid it, in a word or two: "Rebate check", "Certificate", "Store credit", "Cash"… */
     public function methodName(): string
     {
@@ -101,16 +127,30 @@ class ExpensePayment extends Model
         };
     }
 
-    /** The note under its row on the expense page. */
-    public function notation(): string
+    /** Where the line was read: "from the Amazon order", "from the receipt"… */
+    public function sourceNote(): string
     {
-        $from = match ($this->source) {
+        return match ($this->source) {
             self::SOURCE_AMAZON => 'from the Amazon order',
             self::SOURCE_MANUAL => 'entered by hand',
             default => 'from the receipt',
         };
+    }
 
-        return ($this->isOffBank() ? 'Paid without a bank charge · ' : '').$this->methodName().($this->last_four ? ' ••'.$this->last_four : '').' · '.$from;
+    /** "Not GS Construction" when the card isn't the company's, else null. */
+    public function outsideLabel(): ?string
+    {
+        return $this->isOutsideCard() ? OutsideCard::labelFor($this->tenantId()) : null;
+    }
+
+    /** The note under its row on the expense page. */
+    public function notation(): string
+    {
+        if ($this->isOutsideCard()) {
+            return $this->outsideLabel().' · '.$this->methodName().' ••'.$this->last_four.' · '.$this->sourceNote();
+        }
+
+        return ($this->isOffBank() ? 'Paid without a bank charge · ' : '').$this->methodName().($this->last_four ? ' ••'.$this->last_four : '').' · '.$this->sourceNote();
     }
 
     /** "Card ••4849 (VISA)", "Store credit", "Pro Xtra Dollars"… */

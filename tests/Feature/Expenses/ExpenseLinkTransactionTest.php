@@ -66,22 +66,29 @@ function linkTxn_fixture(int $roleId = 1): array
         'alreadyLinked' => $txn(['amount' => 120.00, 'transaction_date' => '2026-09-10', 'vendor_id' => $supplier->id, 'expense_id' => 999999]),
         'tooOld' => $txn(['amount' => 498.03, 'transaction_date' => '2026-06-01', 'vendor_id' => $supplier->id]),
         'unrelated' => $txn(['amount' => 50.00, 'transaction_date' => '2026-09-22', 'vendor_id' => $otherSupplier->id, 'plaid_merchant_name' => 'Other Supplier']),
+        // Expense 26499: a $63.62 car-dealer charge was offered for a $60.48 Amazon order.
+        'closeOtherVendor' => $txn(['amount' => 501.17, 'transaction_date' => '2026-09-21', 'vendor_id' => $otherSupplier->id, 'plaid_merchant_name' => 'Arlington Heights Cdjr']),
+        'closeNoVendor' => $txn(['amount' => 499.00, 'transaction_date' => '2026-09-23', 'vendor_id' => null, 'plaid_merchant_name' => 'POS PURCHASE 0616']),
         'otherCompany' => $txn(['amount' => 497.23, 'transaction_date' => '2026-08-19', 'vendor_id' => $supplier->id, 'bank_account_id' => $strangerAccount->id]),
     ];
 }
 
-it('lists the vendor\'s charge first even when the amount differs, then close amounts from others', function () {
+it('lists the vendor\'s charge first at any amount, then another vendor\'s only at the exact amount', function () {
     $fx = linkTxn_fixture();
 
     $component = Livewire::actingAs($fx['user'])
         ->test(LinkTransaction::class, ['expense' => $fx['expense']])
         ->call('openPicker')
         ->assertSee('Link a bank transaction')
+        ->assertSeeInOrder(['Account', 'Vendor', 'Description'])
+        ->assertSee('Other Supplier')
         ->assertSee('−$0.80')
-        ->assertSee('Exact');
+        ->assertSee('Exact')
+        ->assertDontSee('Arlington Heights Cdjr');
 
+    // A charge with no vendor yet still shows when the amount is close.
     expect($component->instance()->candidates->pluck('id')->all())
-        ->toBe([$fx['charge']->id, $fx['exactOtherVendor']->id]);
+        ->toBe([$fx['charge']->id, $fx['exactOtherVendor']->id, $fx['closeNoVendor']->id]);
 });
 
 it('links the charge and keeps the expense amount', function () {

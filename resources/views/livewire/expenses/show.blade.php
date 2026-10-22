@@ -141,11 +141,12 @@
             @endif
 
             {{-- TRANSACTIONS (uses allTransactions() fallback: own -> check), then what
-                 paid it without a bank charge: rebate checks, certificates, store credit,
-                 points, cash (App\Models\ExpensePayment) --}}
+                 paid it without the company's bank: rebate checks, certificates, store
+                 credit, points, cash, and cards that aren't the company's
+                 (App\Models\ExpensePayment::paidOutsideBank()) --}}
             @php
                 $all_transactions = $expense->allTransactions();
-                $off_bank_payments = $expense->payments->filter(fn ($payment) => $payment->isOffBank())->sortBy('id')->values();
+                $off_bank_payments = $expense->payments->filter(fn ($payment) => $payment->setRelation('expense', $expense)->paidOutsideBank())->sortBy('id')->values();
                 $transaction_word = ($all_transactions->count() + $off_bank_payments->count()) === 1 ? 'Transaction' : 'Transactions';
             @endphp
             @if($all_transactions->isNotEmpty() || $off_bank_payments->isNotEmpty())
@@ -153,6 +154,7 @@
                     :transactions="$all_transactions"
                     :payments="$off_bank_payments"
                     :title="$expense->transactions()->exists() || $all_transactions->isEmpty() ? $transaction_word : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check ' . $transaction_word : $transaction_word)"
+                    :outside-card-actions="auth()->user()?->can('update', $expense) ?? false"
                 />
             @endif
 

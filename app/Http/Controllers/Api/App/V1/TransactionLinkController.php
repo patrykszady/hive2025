@@ -57,6 +57,7 @@ class TransactionLinkController extends Controller
             'date' => $transaction->transaction_date?->format('Y-m-d'),
             'amount' => (float) $transaction->amount,
             'bank' => trim(($transaction->bank_account?->bank?->name ?? '').' '.($transaction->bank_account?->account_number ?? '')) ?: null,
+            'vendor' => $transaction->vendor_id ? $transaction->vendor?->name : null,
             'description' => $transaction->plaid_merchant_name ?: $transaction->plaid_merchant_description,
         ];
     }

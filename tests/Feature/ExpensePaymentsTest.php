@@ -82,6 +82,10 @@ it('reads Amazon charges: a charge with no card is a gift card or points, $0.00 
     expect($lines)->toHaveCount(2)
         ->and($lines[0])->toMatchArray(['method' => 'card', 'last_four' => '4849', 'amount' => 14.29, 'paid_at' => '2026-03-03', 'source_ref' => 'abc'])
         ->and($lines[1])->toMatchArray(['method' => 'gift_card_or_points', 'last_four' => null, 'amount' => 5.0]);
+
+    // Expense 26499: Amazon's invoice says March 13; the charge is stamped 00:08 UTC on the 14th.
+    expect(ReceiptTenders::fromAmazonCharges([['transactionDate' => '2026-03-14T00:08:31.872Z', 'transactionId' => '3Tyingx5efLULBR2HK9z', 'amount' => '60.48', 'paymentInstrumentLast4Digits' => '1854']])[0]['paid_at'])
+        ->toBe('2026-03-13');
 });
 
 it('normalizes the receipt reader\'s payment types', function () {
