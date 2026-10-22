@@ -9,7 +9,6 @@ use App\Http\Requests\Api\App\StoreLienWaiverRequest;
 use App\Http\Resources\Api\App\LienWaiverResource;
 use App\Jobs\SendLienWaiverSigningRequestJob;
 use App\Models\Check;
-use App\Models\Expense;
 use App\Models\LienWaiver;
 use App\Models\Payment;
 use App\Models\Project;
@@ -287,10 +286,7 @@ class LienWaiverController extends Controller
             ->distinct('vendor_id')
             ->pluck('vendor_id');
 
-        $expenseVendorIds = Expense::withoutGlobalScopes()
-            ->where('project_id', $projectId)
-            ->distinct('vendor_id')
-            ->pluck('vendor_id');
+        $expenseVendorIds = \App\Support\ProjectSupplierSpend::vendorIds($projectId);
 
         $ids = $paymentVendorIds->merge($checkVendorIds)
             ->merge($expenseVendorIds)

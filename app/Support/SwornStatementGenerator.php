@@ -4,7 +4,6 @@ namespace App\Support;
 
 use App\Models\Bid;
 use App\Models\Check;
-use App\Models\Expense;
 use App\Models\Payment;
 use App\Models\Project;
 use App\Models\Vendor;
@@ -41,14 +40,9 @@ class SwornStatementGenerator
         $projectId = (int) $project->id;
         $gcId = (int) ($contractor?->id ?? 0);
 
-        // Paid to date per vendor: expenses…
-        $expensePaid = Expense::withoutGlobalScopes()
-            ->where('project_id', $projectId)
-            ->whereNull('deleted_at')
-            ->selectRaw('vendor_id, SUM(amount) AS total')
-            ->whereNotNull('vendor_id')
-            ->groupBy('vendor_id')
-            ->pluck('total', 'vendor_id');
+        // Paid to date per vendor: expenses on the project and the splits of
+        // expenses allocated to it…
+        $expensePaid = ProjectSupplierSpend::paidByVendor($projectId);
 
         // …plus payment rows written against a vendor's check.
         $checkVendorByCheckId = Check::withoutGlobalScopes()

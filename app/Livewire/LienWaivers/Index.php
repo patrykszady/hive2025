@@ -222,11 +222,8 @@ class Index extends Component
             ->distinct('vendor_id')
             ->pluck('vendor_id');
 
-        // Vendors with expenses on this project
-        $expenseVendorIds = \App\Models\Expense::withoutGlobalScopes()
-            ->where('project_id', $projectId)
-            ->distinct('vendor_id')
-            ->pluck('vendor_id');
+        // Vendors with expenses on this project, or splits of expenses allocated to it
+        $expenseVendorIds = \App\Support\ProjectSupplierSpend::vendorIds($projectId);
 
         $ids = $paymentVendorIds->merge($checkVendorIds)
             ->merge($expenseVendorIds)
@@ -405,18 +402,8 @@ class Index extends Component
         $vendorId = (int) $this->newClaimantVendorId;
         $projectId = (int) $this->project->id;
 
-        $expenses = \App\Models\Expense::withoutGlobalScope(\App\Scopes\ExpenseScope::class)
-            ->with(['check' => fn ($q) => $q->withoutGlobalScopes()])
-            ->where('project_id', $projectId)
-            ->where('vendor_id', $vendorId)
-            ->get()
-            ->map(fn ($e) => (object) [
-                'amount' => (float) $e->amount,
-                'date' => $e->date,
-                'reference' => $e->check
-                    ? trim(($e->check->check_type ?? 'Check') . ($e->check->check_number ? ' #' . $e->check->check_number : ''))
-                    : ($e->invoice ?: ($e->paid_by ?: '')),
-            ]);
+        // Expenses on the project and splits of expenses allocated to it.
+        $expenses = \App\Support\ProjectSupplierSpend::transactions($projectId, $vendorId);
 
         $checkPayments = \App\Models\Payment::withoutGlobalScope(\App\Scopes\PaymentScope::class)
             ->where('project_id', $projectId)

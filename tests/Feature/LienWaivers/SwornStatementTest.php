@@ -123,6 +123,32 @@ it('prefills sworn statement rows from project money, excluding the GC and defau
         ->and($byId[$retail->id]['paid'])->toBe(102.16);
 });
 
+it('counts a supplier\'s split expenses toward what the project paid it', function () {
+    // Project 364 (2026-10-21): Climate Solutions invoice 68297 ($27,618.69)
+    // was split $27,198.69 + $420 to the project and had no project of its
+    // own, so the Lien Waivers card showed only the $656.18 invoice filed
+    // straight on the project.
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+    $supplier = Vendor::query()->create(['business_name' => 'Climate Solutions Window', 'business_type' => 'Retail']);
+    $elsewhere = Project::query()->create(['project_name' => 'Elsewhere', 'belongs_to_vendor_id' => $gc->id, 'client_id' => $project->client_id, 'address' => '1 Other St', 'city' => 'Northbrook', 'state' => 'IL', 'zip_code' => '60062']);
+
+    Expense::withoutGlobalScopes()->create(['project_id' => $project->id, 'vendor_id' => $supplier->id, 'belongs_to_vendor_id' => $gc->id, 'amount' => 656.18, 'date' => '2026-10-12', 'invoice' => '68298', 'created_by_user_id' => $user->id]);
+    $split = Expense::withoutGlobalScopes()->create(['project_id' => null, 'vendor_id' => $supplier->id, 'belongs_to_vendor_id' => $gc->id, 'amount' => 28618.69, 'date' => '2026-10-12', 'invoice' => '68297', 'created_by_user_id' => $user->id]);
+    foreach ([[$project->id, 27198.69], [$project->id, 420.00], [$elsewhere->id, 1000.00]] as [$projectId, $amount]) {
+        \App\Models\ExpenseSplits::withoutGlobalScopes()->create(['expense_id' => $split->id, 'project_id' => $projectId, 'amount' => $amount, 'belongs_to_vendor_id' => $gc->id, 'created_by_user_id' => $user->id]);
+    }
+
+    $row = collect(SwornStatementGenerator::buildRows($project, $gc))->firstWhere('vendor_id', $supplier->id);
+    expect($row['paid'])->toBe(28274.87);
+
+    expect(\App\Support\ProjectSupplierSpend::vendorIds($project->id)->all())->toContain($supplier->id);
+
+    $transactions = \App\Support\ProjectSupplierSpend::transactions($project->id, $supplier->id);
+    expect($transactions->pluck('amount')->sort()->values()->all())->toBe([420.0, 656.18, 27198.69])
+        ->and($transactions->pluck('reference')->unique()->sort()->values()->all())->toBe(['68297', '68298']);
+});
+
 it('generates a sworn statement whose columns foot to the contract totals', function () {
     [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
     $this->actingAs($user);
