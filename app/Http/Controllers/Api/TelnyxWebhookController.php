@@ -6018,6 +6018,11 @@ class TelnyxWebhookController extends Controller
 
         SendInboundSmsBrowserNotifications::dispatch($message->id);
 
+        // A supplier texting a delivery puts it on the project's schedule.
+        if ($thread) {
+            \App\Jobs\ReadDeliveryText::dispatch($message->id);
+        }
+
         // If the sender hasn't opted in yet and we've never asked them, send the
         // START consent prompt so the conversation can continue. This covers the
         // case where a caller pressed "2" during the IVR (auto-creating a thread

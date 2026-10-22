@@ -54,6 +54,47 @@ final class StreetAddress
         return implode('', $words);
     }
 
+    /**
+     * The house and street, without direction or suffix, for comparing
+     * addresses written different ways: "949 SOUTH ELM COURT, PALATINE" and
+     * "949 S Elm Ct" both give "949 elm". Null without a house number.
+     */
+    public static function matchKey(?string $address): ?string
+    {
+        $street = strtolower(trim(explode(',', (string) $address)[0]));
+        $words = preg_split('/\s+/', trim(preg_replace('/[^a-z0-9 ]+/', ' ', $street) ?? '')) ?: [];
+
+        if (count($words) < 2 || ! ctype_digit($words[0])) {
+            return null;
+        }
+
+        $number = array_shift($words);
+        $skip = array_merge(explode('|', self::DIRECTION), explode('|', self::SUFFIX));
+        $name = array_values(array_filter($words, fn (string $word) => ! in_array($word, $skip, true)));
+
+        return $name === [] ? null : $number.' '.implode(' ', $name);
+    }
+
+    /**
+     * The same house: same number and street name, and the same town when
+     * the written address names one ("…, PALATINE") and the other side has a
+     * city to compare.
+     */
+    public static function sameHouse(?string $address, ?string $street, ?string $city = null): bool
+    {
+        $key = self::matchKey($address);
+
+        if ($key === null || $key !== self::matchKey($street)) {
+            return false;
+        }
+
+        $parts = explode(',', (string) $address);
+        $writtenTown = isset($parts[1]) ? trim(preg_replace('/[^a-z ]+|\b(il|illinois)\b/', ' ', strtolower($parts[1])) ?? '') : '';
+        $town = trim(preg_replace('/[^a-z ]+/', ' ', strtolower((string) $city)) ?? '');
+
+        return $writtenTown === '' || $town === '' || str_starts_with($writtenTown, $town) || str_starts_with($town, $writtenTown);
+    }
+
     /** A street line has a house number: "by Lake Arlington" is a landmark. */
     public static function looksLikeStreet(?string $value): bool
     {
