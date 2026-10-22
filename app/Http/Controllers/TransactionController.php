@@ -1467,14 +1467,15 @@ class TransactionController extends Controller
                 // Only fetch expenses not fully paid: linked charges plus what the receipt
                 // says was paid without a bank charge (store credit, gift cards and Menards
                 // certificates, rebate checks, points, cash — ExpensePayment::OFF_BANK —
-                // and cards that aren't the company's, App\Models\OutsideCard) fall
-                // short of the amount. An expense paid entirely that way is done.
+                // and cards a person marked as not the company's, App\Models\OutsideCard)
+                // fall short of the amount. An expense paid entirely that way is done;
+                // cards judged someone else's by OutsideCardService drop out below.
                 ->whereRaw("(
                     (expenses.amount >= 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL)
-                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND (expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash') OR (expense_payments.method = 'card' AND expense_payments.last_four IN (SELECT outside_cards.last_four FROM outside_cards WHERE outside_cards.belongs_to_vendor_id = expenses.belongs_to_vendor_id)))) < expenses.amount)
+                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND (expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash') OR (expense_payments.method = 'card' AND expense_payments.last_four IN (SELECT outside_cards.last_four FROM outside_cards WHERE outside_cards.belongs_to_vendor_id = expenses.belongs_to_vendor_id AND outside_cards.is_outside = 1)))) < expenses.amount)
                     OR
                     (expenses.amount < 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL)
-                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND (expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash') OR (expense_payments.method = 'card' AND expense_payments.last_four IN (SELECT outside_cards.last_four FROM outside_cards WHERE outside_cards.belongs_to_vendor_id = expenses.belongs_to_vendor_id)))) > expenses.amount)
+                        + (SELECT COALESCE(SUM(amount), 0) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND (expense_payments.method IN ('store_credit', 'gift_card', 'points', 'gift_card_or_points', 'cash') OR (expense_payments.method = 'card' AND expense_payments.last_four IN (SELECT outside_cards.last_four FROM outside_cards WHERE outside_cards.belongs_to_vendor_id = expenses.belongs_to_vendor_id AND outside_cards.is_outside = 1)))) > expenses.amount)
                 )")
                 ->orderBy('date', 'DESC')
                 ->cursor();

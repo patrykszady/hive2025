@@ -4,7 +4,6 @@ namespace App\Livewire\Expenses;
 
 use App\Models\Expense;
 use App\Models\Transaction;
-use App\Services\Expenses\OutsideCardService;
 use App\Services\Expenses\TransactionLinkService;
 use Flux\Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -60,40 +59,6 @@ class LinkTransaction extends Component
     public function candidates(): Collection
     {
         return app(TransactionLinkService::class)->candidates($this->expense);
-    }
-
-    /**
-     * Cards the receipt says paid this expense that may be someone else's:
-     * not marked yet, and never seen on one of the company's bank charges.
-     *
-     * @return list<string>
-     */
-    #[Computed]
-    public function outsideCardCandidates(): array
-    {
-        return app(OutsideCardService::class)->candidates($this->expense);
-    }
-
-    /**
-     * The card isn't the company's (card ••1854 paid two Amazon orders and
-     * is on none of GS Construction's accounts): its payments count as paid
-     * on every expense it paid, and the matcher stops looking for a charge.
-     */
-    public function markOutsideCard(string $lastFour): void
-    {
-        $this->authorize('update', $this->expense);
-
-        abort_unless(in_array($lastFour, $this->outsideCardCandidates, true), 404);
-
-        app(OutsideCardService::class)->mark((int) $this->expense->belongs_to_vendor_id, $lastFour, auth()->id());
-
-        Flux::toast(
-            text: 'Every expense paid with card ••'.$lastFour.' now counts as paid outside the company\'s bank.',
-            heading: \App\Models\OutsideCard::labelFor((int) $this->expense->belongs_to_vendor_id),
-            variant: 'success',
-        );
-
-        $this->redirect(route('expenses.show', $this->expense), navigate: true);
     }
 
     public function link(int $transactionId): void

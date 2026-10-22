@@ -6,10 +6,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * A card that shows on a company's receipts but is not the company's own —
- * someone else's card paid it, so no charge for it will ever reach the
- * company's bank accounts. Payments on it count as paid outside the bank
- * (ExpensePayment::paidOutsideBank()), the same way store credit does.
+ * A person's word on a card from a company's receipts: is_outside = true when
+ * it is someone else's card, false ("It's ours") when it is the company's
+ * own. Cards nobody has ruled on are judged by OutsideCardService.
  */
 class OutsideCard extends Model
 {
@@ -19,19 +18,15 @@ class OutsideCard extends Model
     protected $fillable = [
         'belongs_to_vendor_id',
         'last_four',
+        'is_outside',
         'created_by_user_id',
     ];
 
-    public static function isOutside(int $belongsToVendorId, ?string $lastFour): bool
+    protected function casts(): array
     {
-        if ($lastFour === null || $lastFour === '') {
-            return false;
-        }
-
-        return self::query()
-            ->where('belongs_to_vendor_id', $belongsToVendorId)
-            ->where('last_four', $lastFour)
-            ->exists();
+        return [
+            'is_outside' => 'boolean',
+        ];
     }
 
     /** "Not GS Construction" — the company's short name, else its business name. */

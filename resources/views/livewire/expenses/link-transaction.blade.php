@@ -3,15 +3,6 @@
         <x-slot:actions>
             <flux:button size="sm" icon="link" wire:click="openPicker">Link bank transaction</flux:button>
         </x-slot:actions>
-
-        {{-- A card the company has never been charged on may be someone else's:
-             marking it counts its payments as paid, on every expense it paid.
-             Under the header, so the heading keeps its room. --}}
-        <x-slot:subheading_actions>
-            @foreach ($this->outsideCardCandidates as $lastFour)
-                <flux:button size="sm" variant="danger" icon="no-symbol" wire:key="outside-card-candidate-{{ $lastFour }}" data-outside-card-candidate="{{ $lastFour }}" wire:click="markOutsideCard('{{ $lastFour }}')" wire:confirm="Card ••{{ $lastFour }} is not the company's? Every expense it paid counts as paid by someone else.">••{{ $lastFour }} {{ \App\Models\OutsideCard::labelFor((int) $expense->belongs_to_vendor_id) }}</flux:button>
-            @endforeach
-        </x-slot:subheading_actions>
     </x-island-card>
 
     <flux:modal name="link-transaction" class="md:w-[48rem]">

@@ -101,15 +101,15 @@ class ExpenseShow extends Component
     }
 
     /**
-     * The card is the company's own after all: every expense it paid goes
-     * back to looking for a bank charge (App\Services\Expenses\
-     * OutsideCardService).
+     * "It's ours": the card the app took for someone else's is the company's
+     * own, so every expense it paid goes back to looking for a bank charge
+     * (App\Services\Expenses\OutsideCardService).
      */
     public function unmarkOutsideCard(string $lastFour): void
     {
         $this->authorize('update', $this->expense);
 
-        app(OutsideCardService::class)->unmark((int) $this->expense->belongs_to_vendor_id, $lastFour);
+        app(OutsideCardService::class)->markCompanyCard((int) $this->expense->belongs_to_vendor_id, $lastFour, auth()->id());
 
         $this->redirect(route('expenses.show', $this->expense), navigate: true);
     }
@@ -233,6 +233,20 @@ class ExpenseShow extends Component
                 return $receipt->receipt_items && is_array($receipt->receipt_items) && !empty($receipt->receipt_items['items'] ?? []);
             })
             ->isNotEmpty();
+    }
+
+    /**
+     * Some split was made by ticking receipt line items. A split made by
+     * amount alone (expense 28924: $420 + $27,198.69, every item unticked)
+     * has nothing to highlight, so it gets no Select button.
+     */
+    #[Computed]
+    public function splitsByLineItems(): bool
+    {
+        return $this->expense->splits->contains(
+            fn ($split) => collect(is_array($split->receipt_items) ? $split->receipt_items : [])
+                ->contains(fn ($item) => ! empty($item['checkbox']))
+        );
     }
 
     #[Computed]

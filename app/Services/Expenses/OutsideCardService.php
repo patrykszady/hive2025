@@ -2,76 +2,115 @@
 
 namespace App\Services\Expenses;
 
+use App\Models\BankAccount;
 use App\Models\Expense;
 use App\Models\ExpensePayment;
 use App\Models\OutsideCard;
+use Illuminate\Support\Carbon;
 
 /**
- * Marking a card on a receipt as not the company's own (App\Models\
- * OutsideCard). Card ••1854 paid two Amazon orders in March 2026 (expenses
- * 26499 and 26525) and is on none of GS Construction's bank accounts, so
+ * Which cards on a company's receipts are not the company's own. Card ••1854
+ * paid two Amazon orders in March 2026 (expenses 26499 and 26525), is on
+ * none of GS Construction's bank accounts, and was never charged there — so
  * both sat at "No Transaction" while the matcher hunted for a charge that
- * could never come. A marked card applies to every expense paid with it.
+ * could never come. Such a payment now reads like a bank charge with a red
+ * "Not GS Construction" pill and counts as paid.
+ *
+ * A card is someone else's when a person said so (OutsideCard), or — nobody
+ * having ruled — when it is none of the company's account numbers, no
+ * expense paid with it was ever linked to one of the company's bank charges,
+ * and the payment is over UNMATCHED_DAYS old. The matcher only looks 21 days
+ * past an expense, so a younger payment may still find its charge.
+ *
+ * Bound scoped (AppServiceProvider): answers are kept for one request or job.
  */
 class OutsideCardService
 {
-    /**
-     * Cards on $expense's payment lines that may be marked: not marked yet,
-     * and never seen on one of the company's bank charges — a card whose
-     * expenses have been linked to a charge is the company's own.
-     *
-     * @return list<string>
-     */
-    public function candidates(Expense $expense): array
-    {
-        $tenantId = (int) $expense->belongs_to_vendor_id;
+    /** Days a card payment waits for its bank charge before it counts as someone else's. */
+    public const UNMATCHED_DAYS = 30;
 
-        return $expense->payments()
-            ->where('method', ExpensePayment::CARD)
-            ->whereNotNull('last_four')
-            ->pluck('last_four')
-            ->unique()
-            ->reject(fn (string $lastFour) => OutsideCard::isOutside($tenantId, $lastFour) || $this->isCompanyCard($tenantId, $lastFour))
-            ->values()
-            ->all();
+    /** @var array<int, array<string, bool>> tenant => last four => is_outside */
+    private array $overrides = [];
+
+    /** @var array<string, bool> "tenant:last four" => the company's own */
+    private array $companyCards = [];
+
+    public function isOutside(ExpensePayment $payment, Expense $expense): bool
+    {
+        if ($payment->method !== ExpensePayment::CARD || ! $payment->last_four) {
+            return false;
+        }
+
+        $tenantId = (int) $expense->belongs_to_vendor_id;
+        $override = $this->overrides($tenantId)[$payment->last_four] ?? null;
+
+        if ($override !== null) {
+            return $override;
+        }
+
+        $seen = collect([$expense->date, $payment->paid_at])->filter()->max();
+
+        if ($seen === null || Carbon::parse($seen)->gt(now()->subDays(self::UNMATCHED_DAYS))) {
+            return false;
+        }
+
+        return ! $this->isCompanyCard($tenantId, $payment->last_four);
     }
 
-    /** Some expense paid with this card is linked to one of the company's bank charges. */
+    /** One of the company's account numbers, or seen on one of its bank charges. */
     public function isCompanyCard(int $tenantId, string $lastFour): bool
     {
-        return ExpensePayment::query()
-            ->where('method', ExpensePayment::CARD)
-            ->where('last_four', $lastFour)
-            ->whereHas('expense', fn ($query) => $query->withoutGlobalScopes()
-                ->where('belongs_to_vendor_id', $tenantId)
-                ->whereNull('deleted_at'))
-            ->whereExists(fn ($query) => $query->selectRaw('1')
-                ->from('transactions')
-                ->whereColumn('transactions.expense_id', 'expense_payments.expense_id')
-                ->whereNull('transactions.deleted_at'))
-            ->exists();
+        return $this->companyCards[$tenantId.':'.$lastFour] ??= BankAccount::withoutGlobalScopes()
+            ->where('vendor_id', $tenantId)
+            ->where('account_number', $lastFour)
+            ->whereNull('deleted_at')
+            ->exists()
+            || ExpensePayment::query()
+                ->where('method', ExpensePayment::CARD)
+                ->where('last_four', $lastFour)
+                ->whereHas('expense', fn ($query) => $query->withoutGlobalScopes()
+                    ->where('belongs_to_vendor_id', $tenantId)
+                    ->whereNull('deleted_at'))
+                ->whereExists(fn ($query) => $query->selectRaw('1')
+                    ->from('transactions')
+                    ->whereColumn('transactions.expense_id', 'expense_payments.expense_id')
+                    ->whereNull('transactions.deleted_at'))
+                ->exists();
     }
 
+    /** "It's ours": the card is the company's own after all. */
+    public function markCompanyCard(int $tenantId, string $lastFour, ?int $userId): OutsideCard
+    {
+        return $this->rule($tenantId, $lastFour, false, $userId);
+    }
+
+    /** The card is someone else's, whatever the evidence says. */
     public function mark(int $tenantId, string $lastFour, ?int $userId): OutsideCard
     {
-        $card = OutsideCard::query()->firstOrCreate(
+        return $this->rule($tenantId, $lastFour, true, $userId);
+    }
+
+    protected function rule(int $tenantId, string $lastFour, bool $isOutside, ?int $userId): OutsideCard
+    {
+        $card = OutsideCard::query()->updateOrCreate(
             ['belongs_to_vendor_id' => $tenantId, 'last_four' => $lastFour],
-            ['created_by_user_id' => $userId],
+            ['is_outside' => $isOutside, 'created_by_user_id' => $userId],
         );
 
+        unset($this->overrides[$tenantId]);
         $this->reindex($tenantId, $lastFour);
 
         return $card;
     }
 
-    public function unmark(int $tenantId, string $lastFour): void
+    /** @return array<string, bool> */
+    protected function overrides(int $tenantId): array
     {
-        OutsideCard::query()
+        return $this->overrides[$tenantId] ??= OutsideCard::query()
             ->where('belongs_to_vendor_id', $tenantId)
-            ->where('last_four', $lastFour)
-            ->delete();
-
-        $this->reindex($tenantId, $lastFour);
+            ->pluck('is_outside', 'last_four')
+            ->map(fn ($isOutside) => (bool) $isOutside)
+            ->all();
     }
 
     /** Every expense paid with the card changes status, so the index follows. */

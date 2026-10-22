@@ -88,14 +88,17 @@ class ExpensePayment extends Model
         return in_array($this->method, self::OFF_BANK, true);
     }
 
-    /** A card line on a card that is not the company's own (App\Models\OutsideCard). */
+    /** A card line on a card that is not the company's own (App\Services\Expenses\OutsideCardService). */
     public function isOutsideCard(): bool
     {
         if ($this->method !== self::CARD || ! $this->last_four) {
             return false;
         }
 
-        return $this->outsideCardMemo ??= OutsideCard::isOutside($this->tenantId(), $this->last_four);
+        $expense = $this->owningExpense();
+
+        return $this->outsideCardMemo ??= $expense !== null
+            && app(\App\Services\Expenses\OutsideCardService::class)->isOutside($this, $expense);
     }
 
     /** Never reaches the company's bank: an off-bank tender, or someone else's card. */
@@ -104,11 +107,16 @@ class ExpensePayment extends Model
         return $this->isOffBank() || $this->isOutsideCard();
     }
 
+    protected function owningExpense(): ?Expense
+    {
+        return $this->relationLoaded('expense')
+            ? $this->expense
+            : Expense::withoutGlobalScopes()->find($this->expense_id);
+    }
+
     protected function tenantId(): int
     {
-        return (int) ($this->relationLoaded('expense')
-            ? $this->expense?->belongs_to_vendor_id
-            : Expense::withoutGlobalScopes()->whereKey($this->expense_id)->value('belongs_to_vendor_id'));
+        return (int) $this->owningExpense()?->belongs_to_vendor_id;
     }
 
     /** What paid it, in a word or two: "Rebate check", "Certificate", "Store credit", "Cash"… */

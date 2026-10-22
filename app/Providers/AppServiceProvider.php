@@ -146,6 +146,9 @@ class AppServiceProvider extends ServiceProvider
         // sent as zero. `signup` is a click on a marketing page's sign-up
         // call to action (links to route('registration')), fired by the
         // delegated listener in components/layouts/guest.blade.php.
+        // Card ownership answers are kept for one request or job.
+        $this->app->scoped(\App\Services\Expenses\OutsideCardService::class);
+
         $this->app->singleton(Recorder::class, fn () => new Recorder(
             storage: new DatabaseTableStorage(DB::connection()),
             events: ['page', 'call', 'email', 'jserr', 'signup'],

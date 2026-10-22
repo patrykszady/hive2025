@@ -254,7 +254,7 @@
                         <div>
                             <flux:table class="w-full">
                                 <flux:table.columns>
-                                    @if($this->hasReceiptLineItems)
+                                    @if($this->hasReceiptLineItems && $this->splitsByLineItems)
                                         <flux:table.column class="w-[20%]" title="Highlight this Split receipt items below">Items</flux:table.column>
                                         <flux:table.column class="w-[20%]">Amount</flux:table.column>
                                     @else
@@ -266,7 +266,7 @@
                                 <flux:table.rows>
                                     @foreach($expense->splits as $split)
                                         <flux:table.row :class="$selectedSplitId == $split->id ? 'bg-indigo-50 dark:bg-indigo-900/10' : ''">
-                                            @if($this->hasReceiptLineItems)
+                                            @if($this->hasReceiptLineItems && $this->splitsByLineItems)
                                                 <flux:table.cell class="!pl-5 pr-5">
                                                     <flux:button 
                                                         wire:click="toggleSplit({{ $split->id }})"

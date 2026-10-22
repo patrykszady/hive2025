@@ -1,7 +1,6 @@
 <?php
 
 use App\Livewire\Expenses\ExpenseShow;
-use App\Livewire\Expenses\LinkTransaction;
 use App\Models\Bank;
 use App\Models\BankAccount;
 use App\Models\Distribution;
@@ -77,59 +76,59 @@ function outsideCard_status(Expense $expense): string
     return (fn () => $this->calculateStatus())->call($expense->fresh());
 }
 
-it('offers to mark a card the company was never charged on, and counts it as paid on every expense it paid', function () {
+it('shows a card the company was never charged on as Not GS Construction, paid, once the matcher has had its time', function () {
     $fx = outsideCard_fixture();
 
-    expect(outsideCard_status($fx['marion']))->toBe('No Transaction');
-
-    Livewire::actingAs($fx['user'])
-        ->test(LinkTransaction::class, ['expense' => $fx['marion']])
-        ->assertSee('••1854 Not GS Construction')
-        ->call('markOutsideCard', '1854')
-        ->assertRedirect(route('expenses.show', $fx['marion']));
-
-    expect(OutsideCard::query()->where('belongs_to_vendor_id', $fx['company']->id)->pluck('last_four')->all())->toBe(['1854'])
-        ->and(outsideCard_status($fx['marion']))->toBe('Complete')
+    expect(outsideCard_status($fx['marion']))->toBe('Complete')
         ->and(outsideCard_status($fx['greg']))->toBe('Complete')
-        ->and(outsideCard_status($fx['unmatchedCompanyCard']))->toBe('No Transaction');
+        ->and(outsideCard_status($fx['unmatchedCompanyCard']))->toBe('No Transaction')
+        ->and(OutsideCard::query()->count())->toBe(0);
 
     Livewire::actingAs($fx['user'])
-        ->test(ExpenseShow::class, ['expense' => $fx['greg']->fresh()])
+        ->test(ExpenseShow::class, ['expense' => $fx['greg']])
         ->assertSeeInOrder(['$23.69', '03/15/2026', 'Card', '••1854', 'Not GS Construction', 'entered by hand'])
         ->assertSee("It's ours", false)
         ->assertDontSee('Link bank transaction');
 });
 
-it('never offers a card the company has been charged on', function () {
+it('gives a recent card payment time to find its charge', function () {
     $fx = outsideCard_fixture();
+    $fx['marion']->forceFill(['date' => now()->subDays(5)->toDateString()])->saveQuietly();
+    $fx['marion']->payments()->update(['paid_at' => now()->subDays(5)->toDateString()]);
 
-    Livewire::actingAs($fx['user'])
-        ->test(LinkTransaction::class, ['expense' => $fx['unmatchedCompanyCard']])
-        ->assertDontSee('Not GS Construction')
-        ->call('markOutsideCard', '4849')
-        ->assertNotFound();
-
-    expect(OutsideCard::query()->count())->toBe(0);
+    expect(outsideCard_status($fx['marion']))->toBe('No Transaction');
 });
 
-it('puts the card back when it turns out to be the company\'s own', function () {
+it('treats one of the company\'s account numbers as its own card', function () {
     $fx = outsideCard_fixture();
-    OutsideCard::create(['belongs_to_vendor_id' => $fx['company']->id, 'last_four' => '1854']);
+    $fx['marion']->payments()->update(['last_four' => '4060']);
+
+    expect(outsideCard_status($fx['marion']))->toBe('No Transaction');
+});
+
+it('puts the card back when someone says it\'s ours', function () {
+    $fx = outsideCard_fixture();
 
     Livewire::actingAs($fx['user'])
         ->test(ExpenseShow::class, ['expense' => $fx['marion']])
         ->call('unmarkOutsideCard', '1854')
         ->assertRedirect(route('expenses.show', $fx['marion']));
 
-    expect(OutsideCard::query()->count())->toBe(0)
-        ->and(outsideCard_status($fx['marion']))->toBe('No Transaction');
+    expect(OutsideCard::query()->where('last_four', '1854')->value('is_outside'))->toBeFalse()
+        ->and(outsideCard_status($fx['marion']))->toBe('No Transaction')
+        ->and(outsideCard_status($fx['greg']))->toBe('No Transaction');
+
+    Livewire::actingAs($fx['user'])
+        ->test(ExpenseShow::class, ['expense' => $fx['marion']->fresh()])
+        ->assertSee('Link bank transaction')
+        ->assertDontSee('Not GS Construction');
 });
 
-it('keeps one company\'s outside card from touching another company\'s expenses', function () {
+it('keeps one company\'s ruling on a card away from another company\'s expenses', function () {
     $fx = outsideCard_fixture();
-    OutsideCard::create(['belongs_to_vendor_id' => Vendor::factory()->create()->id, 'last_four' => '1854']);
+    OutsideCard::create(['belongs_to_vendor_id' => Vendor::factory()->create()->id, 'last_four' => '1854', 'is_outside' => false]);
 
-    expect(outsideCard_status($fx['marion']))->toBe('No Transaction');
+    expect(outsideCard_status($fx['marion']))->toBe('Complete');
 });
 
 it('counts an expense paid in full with store credit as complete', function () {
