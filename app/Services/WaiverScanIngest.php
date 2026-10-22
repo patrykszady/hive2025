@@ -780,7 +780,7 @@ class WaiverScanIngest
             return 'rejected_superseded';
         }
 
-        if ($this->rejectsAsUnsigned($context, ['lien_waiver_id' => $waiverId])) {
+        if ($this->rejectsAsUnsigned($context, ['lien_waiver_id' => $waiverId], $binary, waiverOnly: ($context['has_affidavit'] ?? true) === false)) {
             Log::channel(self::LOG)->warning('Waiver scan: document is not wet-signed.', ['lien_waiver_id' => $waiverId]);
 
             return 'rejected_unsigned';
@@ -1015,28 +1015,58 @@ class WaiverScanIngest
      * A notary seal is independent, deterministic evidence of wet execution:
      * the jurat means a person signed in the notary's presence, and a typed
      * name cannot be sworn to. So the flaky boolean only gets to reject when
-     * nothing corroborates it — which leaves it fully in force for the
-     * waiver-only (no affidavit, no notary) documents where it is the one
-     * signal we have.
+     * nothing corroborates it.
+     *
+     * Waiver-only documents (material suppliers) carry no seal. There the
+     * corroboration is a paper scan — an image-only PDF or photo, so nothing
+     * could have been typed onto it — with every handwritten blank filled.
+     * Climate Solutions' waiver 25 came back that way (date, address,
+     * signature and "CEO" all by hand) and was bounced on a `false` at 0.28
+     * confidence (2026-10-22). A digital PDF keeps the veto.
      *
      * @param  array{wet_signed:?bool, notary_stamp:?bool, details:array}  $context
      */
-    protected function rejectsAsUnsigned(array $context, array $logContext): bool
+    protected function rejectsAsUnsigned(array $context, array $logContext, ?string $binary = null, bool $waiverOnly = false): bool
     {
         if ($context['wet_signed'] !== false) {
             return false;
         }
 
-        if (! $this->hasNotaryStampEvidence($context)) {
+        if ($this->hasNotaryStampEvidence($context)) {
+            Log::channel(self::LOG)->info(
+                'Waiver scan: analyzer said not wet-signed, but the document is notarized — trusting the seal.',
+                $logContext + ['notary_name' => $context['details']['notary_name'] ?? null],
+            );
+
+            return false;
+        }
+
+        if ($waiverOnly && $binary !== null && $this->isPaperScan($binary) && $this->missingItems($context, requireNotary: false) === []) {
+            Log::channel(self::LOG)->info(
+                'Waiver scan: analyzer said not wet-signed, but the waiver-only form came back as a paper scan with every blank filled — trusting the scan.',
+                $logContext,
+            );
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * A paper scan or photo: an image file, or a PDF made only of images —
+     * no fonts (so no typed text) and no compressed object streams (which
+     * could hide fonts from this check).
+     */
+    protected function isPaperScan(string $binary): bool
+    {
+        if (! str_starts_with($binary, '%PDF')) {
             return true;
         }
 
-        Log::channel(self::LOG)->info(
-            'Waiver scan: analyzer said not wet-signed, but the document is notarized — trusting the seal.',
-            $logContext + ['notary_name' => $context['details']['notary_name'] ?? null],
-        );
-
-        return false;
+        return str_contains($binary, '/Image')
+            && ! str_contains($binary, '/Font')
+            && ! str_contains($binary, '/ObjStm');
     }
 
     /**

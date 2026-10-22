@@ -552,14 +552,51 @@ it('rejects a waiver-only document whose ADDRESS line is blank', function () {
 it('rejects a scan the analyzer says is not wet-signed when nothing corroborates it', function () {
     [, , , $waiver] = waiverScanFixtures();
 
-    // No affidavit and no seal: the boolean is the only signal there is, so it
-    // stays fully in force for waiver-only (retail/material) documents.
+    // No affidavit, no seal, and not a paper scan (the default fake binary):
+    // nothing corroborates the signature, so the boolean stays in force.
     fakeScanPipeline([cuContentFor('HLW-' . $waiver->id, [
         'IsWetSigned' => ['type' => 'boolean', 'valueBoolean' => false],
         'HasNotaryStamp' => ['type' => 'boolean'],
         'NotaryName' => ['type' => 'string'],
         'NotaryCommissionNumber' => ['type' => 'string'],
     ], withAffidavit: false)]);
+
+    app(WaiverScanIngest::class)->processInbox();
+
+    expect($waiver->refresh()->status)->toBe(LienWaiverStatus::Sent);
+    assertMovedTo(WSI_ERROR);
+});
+
+it('signs a waiver-only paper scan with every blank filled even when the analyzer says it is not wet-signed', function () {
+    // Climate Solutions' waiver 25 (2026-10-22): a scanner PDF of the printed
+    // waiver, date, address, signature and "CEO" all by hand — bounced on an
+    // IsWetSigned false at 0.28 confidence.
+    [, , , $waiver] = waiverScanFixtures();
+    $paperScan = "%PDF-1.3\n1 0 obj << /Type /XObject /Subtype /Image /Width 2550 /Height 3300 >> endobj\n%%EOF";
+
+    fakeScanPipeline([cuContentFor('HLW-' . $waiver->id, [
+        'IsWetSigned' => ['type' => 'boolean', 'valueBoolean' => false],
+        'HasNotaryStamp' => ['type' => 'boolean'],
+        'NotaryName' => ['type' => 'string'],
+        'NotaryCommissionNumber' => ['type' => 'string'],
+    ], withAffidavit: false)], downloadBinary: $paperScan);
+
+    app(WaiverScanIngest::class)->processInbox();
+
+    expect($waiver->refresh()->status)->toBe(LienWaiverStatus::Signed);
+    assertMovedTo(WSI_SAVED);
+});
+
+it('keeps the not-wet-signed veto on a waiver-only digital PDF that could have been typed on', function () {
+    [, , , $waiver] = waiverScanFixtures();
+    $digital = "%PDF-1.7\n1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n2 0 obj << /Subtype /Image >> endobj\n%%EOF";
+
+    fakeScanPipeline([cuContentFor('HLW-' . $waiver->id, [
+        'IsWetSigned' => ['type' => 'boolean', 'valueBoolean' => false],
+        'HasNotaryStamp' => ['type' => 'boolean'],
+        'NotaryName' => ['type' => 'string'],
+        'NotaryCommissionNumber' => ['type' => 'string'],
+    ], withAffidavit: false)], downloadBinary: $digital);
 
     app(WaiverScanIngest::class)->processInbox();
 
