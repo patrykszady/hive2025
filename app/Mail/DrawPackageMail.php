@@ -140,6 +140,11 @@ class DrawPackageMail extends Mailable
             throw new \RuntimeException('Sworn statement ' . $this->swornStatementId . ' is gone — cannot build the draw package email.');
         }
 
+        // A statement whose last re-render failed misses what changed since.
+        if (app(\App\Services\LienWaivers\DrawPackageService::class)->rerenderIfStale($statement)) {
+            $statement->refresh();
+        }
+
         $statementBinary = null;
         if ($statement->path && Storage::disk('files')->exists($statement->path)) {
             $statementBinary = Storage::disk('files')->get($statement->path);

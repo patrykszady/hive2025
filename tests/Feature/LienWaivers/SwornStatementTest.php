@@ -1546,3 +1546,42 @@ it('asks a material supplier for a signature only, with no notary step', functio
     expect($carpentry->steps)->toBe(['print', 'sign', 'notarize', 'return'])
         ->and($carpentry->render())->toContain('Notarize');
 });
+
+it('flags a statement whose re-render failed, and renders it again on the next download', function () {
+    // Draw 3 on project 364 (2026-10-22): Climate Solutions was added while
+    // Chrome could not start, and the draw kept a statement without it.
+    Illuminate\Support\Facades\Storage::fake('files');
+    [$gc, $sub, $retail, $user, $project] = swornStatementFixtures();
+    $this->actingAs($user);
+    $service = app(\App\Services\LienWaivers\DrawPackageService::class);
+
+    $statement = $service->createDraw($project, $gc, $service->newDrawRows($project, $gc), 60000.0)['statement'];
+    $firstPath = $statement->path;
+
+    expect($statement->render_failed_at)->toBeNull();
+
+    $rows = collect($service->editableDraw($statement, $project, $gc)['rows'])
+        ->map(fn (array $row) => $row['vendor_id'] === $retail->id ? ['include' => true, 'kind' => 'Materials'] + $row : $row)
+        ->all();
+
+    $_SERVER['CHROME_PATH'] = $_ENV['CHROME_PATH'] = '/nonexistent/chrome';
+    try {
+        $service->updateDraw($statement, $project, $gc, $rows, 60000.0);
+    } finally {
+        unset($_SERVER['CHROME_PATH'], $_ENV['CHROME_PATH']);
+    }
+
+    $statement->refresh();
+    expect($statement->render_failed_at)->not->toBeNull()
+        ->and($statement->path)->toBe($firstPath);
+
+    // The next download renders the draw as it stands, the new vendor on it.
+    $this->get(Illuminate\Support\Facades\URL::temporarySignedRoute('sworn-statements.download.signed', now()->addMinutes(5), ['swornStatement' => $statement]))->assertSuccessful();
+
+    $statement->refresh();
+    $context = SwornStatementGenerator::buildContext($project, $gc, $service->editableDraw($statement, $project, $gc)['rows'], 60000.0);
+
+    expect($statement->render_failed_at)->toBeNull()
+        ->and(Illuminate\Support\Facades\Storage::disk('files')->get($statement->path))->toStartWith('%PDF')
+        ->and(view('pdf.sworn-statement', $context['view'])->render())->toContain($retail->fresh()->business_name);
+});

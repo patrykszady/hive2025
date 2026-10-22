@@ -17,7 +17,7 @@ class SwornStatement extends Model
 
     protected $fillable = [
         'project_id', 'belongs_to_vendor_id', 'this_payment',
-        'status', 'sent_at', 'signed_at', 'path', 'signed_path', 'filename', 'created_by_user_id',
+        'status', 'sent_at', 'signed_at', 'path', 'signed_path', 'filename', 'render_failed_at', 'created_by_user_id',
     ];
 
     protected $casts = [
@@ -27,6 +27,9 @@ class SwornStatement extends Model
         'status' => \App\Enums\LienWaiverStatus::class,
         'sent_at' => 'datetime',
         'signed_at' => 'datetime',
+        // Set when a re-render failed and the old document was kept; the next
+        // download renders it again (DrawPackageService::rerenderIfStale()).
+        'render_failed_at' => 'datetime',
     ];
 
     /**

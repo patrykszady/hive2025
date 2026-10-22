@@ -40,6 +40,11 @@ class LienWaiverController extends Controller
         $tenantId = (int) $swornStatement->belongs_to_vendor_id;
         $project = \App\Models\Project::withoutGlobalScopes()->findOrFail($swornStatement->project_id);
 
+        // A statement whose last re-render failed misses what changed since.
+        if (app(\App\Services\LienWaivers\DrawPackageService::class)->rerenderIfStale($swornStatement)) {
+            $swornStatement->refresh();
+        }
+
         $tmpDir = storage_path('app/tmp/draw-packages');
         if (! is_dir($tmpDir)) {
             mkdir($tmpDir, 0755, true);
@@ -173,6 +178,10 @@ class LienWaiverController extends Controller
 
     protected function streamSwornStatement(\App\Models\SwornStatement $swornStatement): BinaryFileResponse
     {
+        if (app(\App\Services\LienWaivers\DrawPackageService::class)->rerenderIfStale($swornStatement)) {
+            $swornStatement->refresh();
+        }
+
         $absolute = $swornStatement->path
             ? \Storage::disk('files')->path($swornStatement->path)
             : null;

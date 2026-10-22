@@ -370,7 +370,11 @@ class DrawPackageService
 
         $relativePath = sprintf('sworn-statements/%d/%d/%s', $project->id, $statement->id, $doc['filename']);
         Storage::disk('files')->put($relativePath, $doc['binary']);
-        $statement->forceFill(['filename' => $doc['filename'], 'path' => $relativePath])->save();
+        $statement->forceFill([
+            'filename' => $doc['filename'],
+            'path' => $relativePath,
+            'render_failed_at' => str_starts_with((string) $doc['binary'], '%PDF') ? null : now(),
+        ])->save();
 
         // The immediate download bundles the GCSS with the GC's own waiver.
         $downloadBinary = $doc['binary'];
@@ -527,6 +531,7 @@ class DrawPackageService
                 'filename' => $doc['filename'],
                 'path' => $relativePath,
                 'this_payment' => $thisPayment,
+                'render_failed_at' => null,
             ])->save();
         } else {
             Log::warning('Sworn statement re-render produced HTML, not a PDF — keeping the existing document.', [
@@ -534,7 +539,9 @@ class DrawPackageService
                 'kept_path' => $statement->path,
             ]);
 
-            $statement->forceFill(['this_payment' => $thisPayment])->save();
+            // Flagged, so the next download renders it again instead of
+            // handing out a statement that misses what just changed.
+            $statement->forceFill(['this_payment' => $thisPayment, 'render_failed_at' => now()])->save();
         }
 
         return [
@@ -547,6 +554,38 @@ class DrawPackageService
             'frozen' => $frozen,
             'saved_bids' => $savedBids,
         ];
+    }
+
+    /**
+     * Render a flagged GCSS again from the draw as it stands (the rows the
+     * edit form would reopen with). True when a fresh PDF was stored; false
+     * when nothing was stale, the statement is signed, or Chrome failed again.
+     */
+    public function rerenderIfStale(SwornStatement $statement): bool
+    {
+        if ($statement->render_failed_at === null || $statement->status === LienWaiverStatus::Signed) {
+            return false;
+        }
+
+        $project = Project::withoutGlobalScopes()->find($statement->project_id);
+        $contractor = Vendor::withoutGlobalScopes()->find($statement->belongs_to_vendor_id);
+
+        if (! $project || ! $contractor) {
+            return false;
+        }
+
+        $rows = $this->editableDraw($statement, $project, $contractor)['rows'];
+        $doc = SwornStatementGenerator::generate($project, $contractor, $rows, (float) $statement->this_payment, $statement->drawNumber(), $statement->id);
+
+        if (! str_starts_with((string) $doc['binary'], '%PDF')) {
+            return false;
+        }
+
+        $relativePath = sprintf('sworn-statements/%d/%d/%s', $project->id, $statement->id, $doc['filename']);
+        Storage::disk('files')->put($relativePath, $doc['binary']);
+        $statement->forceFill(['filename' => $doc['filename'], 'path' => $relativePath, 'render_failed_at' => null])->save();
+
+        return true;
     }
 
     /**
