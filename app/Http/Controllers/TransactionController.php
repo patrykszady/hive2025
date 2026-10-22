@@ -3441,8 +3441,9 @@ class TransactionController extends Controller
     }
 
     /**
-     * Update existing unmatched expenses (project_id=0, distribution_id=null) 
-     * based on bulk match rules.
+     * Update existing unmatched expenses (project_id=0, distribution_id=null)
+     * based on bulk match rules — every expense, however old, so a rule saved
+     * today also sorts the expenses that came in before it.
      */
     protected function updateExistingExpensesWithBulkMatches(): void
     {
@@ -3467,9 +3468,18 @@ class TransactionController extends Controller
                 }
             }
 
-            // Apply description matching if set
+            // Apply description matching if set. The description is the bank
+            // charge's ("B2B Prime" in "DEBIT PURCHASE ... B2B Prime*3R64..."),
+            // so it is read off the expense's linked charges as well as its
+            // note — expense 26319, a $179 Business Prime renewal, has no note
+            // and never matched its $179 "B2B Prime" rule (2026-10-22).
             if (isset($match->options['desc']) && $match->options['desc']) {
-                $query->where('note', 'LIKE', '%' . $match->options['desc'] . '%');
+                $like = '%' . $match->options['desc'] . '%';
+                $query->where(fn ($q) => $q->where('note', 'LIKE', $like)
+                    ->orWhereHas('transactions', fn ($charges) => $charges->withoutGlobalScopes()
+                        ->whereNull('deleted_at')
+                        ->where(fn ($text) => $text->where('plaid_merchant_description', 'LIKE', $like)
+                            ->orWhere('plaid_merchant_name', 'LIKE', $like))));
             }
 
             $expenses = $query->get();

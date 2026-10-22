@@ -95,5 +95,8 @@ class BulkMatchForm extends Form
                 ],
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
             ]);
+
+        // Apply it to everything already in the books, not only what comes next.
+        \App\Jobs\TransactionVendorBulkMatchJob::dispatch();
     }
 }
