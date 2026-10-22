@@ -885,3 +885,40 @@ it('PdfPageExtractor keeps only the requested pages, in the order given', functi
         ->and(\App\Support\PdfPageExtractor::extractPages('not a pdf', [1]))->toBeNull()
         ->and(\App\Support\PdfPageExtractor::pageCount('not a pdf'))->toBeNull();
 });
+
+it('re-trims a scan stored before page trimming, keeping a backup, and leaves it alone on a dry run', function () {
+    // National Construction Rental's 2026-07-29 scan carried their invoice
+    // as page 2, and draw 3's package (reusing that scan) printed it.
+    [, , , $waiver] = waiverScanFixtures();
+    $code = 'HLW-' . $waiver->id;
+    $path = sprintf('lien-waivers/%d/%d/scan-national.pdf', $waiver->project_id, $waiver->id);
+    $original = buildMultiPagePdf(2);
+    Storage::disk('files')->put($path, $original);
+    $waiver->forceFill(['status' => LienWaiverStatus::Signed, 'signed_path' => $path])->saveQuietly();
+
+    $content = cuContentFor($code);
+    $content['paragraphs'] = [
+        ['content' => 'Email signed copy to waivers@hive.contractors', 'source' => 'D(1,0,0,0,0,0,0,0,0)'],
+        ['content' => 'INVOICE', 'source' => 'D(2,0,0,0,0,0,0,0,0)'],
+    ];
+    $this->mock(\App\Services\ContentUnderstandingService::class, fn ($mock) => $mock
+        ->shouldReceive('analyzeBinary')->andReturn(['result' => ['contents' => [$content]]]));
+
+    $this->artisan('waivers:retrim-scans', ['--dry-run' => true])
+        ->expectsOutputToContain("{$code}: would trim 2 → 1 page(s), keeping page(s) 1.")
+        ->assertSuccessful();
+
+    expect(Storage::disk('files')->get($path))->toBe($original);
+
+    $this->artisan('waivers:retrim-scans')->assertSuccessful();
+
+    $backup = dirname($path) . '/untrimmed-' . basename($path);
+    expect(\App\Support\PdfPageExtractor::pageCount(Storage::disk('files')->get($path)))->toBe(1)
+        ->and(Storage::disk('files')->get($backup))->toBe($original)
+        ->and($waiver->fresh()->signed_path)->toBe($path);
+
+    // A second run finds nothing left to cut.
+    $this->artisan('waivers:retrim-scans')
+        ->expectsOutputToContain('Trimmed 0 scan(s).')
+        ->assertSuccessful();
+});

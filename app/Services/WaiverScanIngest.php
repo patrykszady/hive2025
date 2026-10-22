@@ -491,6 +491,60 @@ class WaiverScanIngest
     }
 
     /**
+     * Re-trim a scan stored before trimToOwnPages() existed (2026-08-19): the
+     * stored file is analyzed again and every page that isn't part of $code's
+     * document is dropped. National Construction Rental's 2026-07-29 waiver
+     * scan still carried their invoice, which draw 3's package (reusing that
+     * scan) printed as an extra page. The untrimmed file stays beside it as
+     * "untrimmed-…", so this can be undone.
+     *
+     * @return array{before: int, after: int, kept: array<int, int>}|null null when there is nothing to cut
+     */
+    public function retrimStoredScan(string $code, string $relativePath, bool $dryRun = false): ?array
+    {
+        $disk = Storage::disk('files');
+        $binary = (string) $disk->get($relativePath);
+        $totalPages = PdfPageExtractor::pageCount($binary);
+
+        if ($totalPages === null || $totalPages <= 1) {
+            return null;
+        }
+
+        $raw = $this->contentUnderstanding->analyzeBinary(
+            $binary,
+            (string) config('services.azure_cu.analyzer_id_waiver'),
+            self::LOG,
+        );
+
+        $keep = $this->selectPagesToKeep($code, $raw, $totalPages);
+
+        if ($keep === null || count($keep) === $totalPages) {
+            return null;
+        }
+
+        $result = ['before' => $totalPages, 'after' => count($keep), 'kept' => $keep];
+
+        if ($dryRun) {
+            return $result;
+        }
+
+        $trimmed = PdfPageExtractor::extractPages($binary, $keep);
+
+        if ($trimmed === null) {
+            return null;
+        }
+
+        $disk->put(dirname($relativePath) . '/untrimmed-' . basename($relativePath), $binary);
+        $disk->put($relativePath, $trimmed);
+
+        Log::channel(self::LOG)->info('Waiver scan: re-trimmed a stored scan to its own pages.', [
+            'code' => $code, 'path' => $relativePath, ...$result,
+        ]);
+
+        return $result;
+    }
+
+    /**
      * Which of a document's $totalPages pages actually belong to $code, or
      * null when there isn't enough page-level evidence to decide safely.
      *
