@@ -41,7 +41,13 @@ class LeadReplyComposer
     public const CONSULT_MINUTES = 30;
 
     /** Stages a project can be at for a consult to land on it. */
-    protected const CONSULT_PROJECT_STAGES = ['Consult', 'Estimate', 'Cancelled'];
+    /**
+     * Where a consult can land: a project that has not started — Invited,
+     * Consult, Estimate, Response (an estimate out, waiting on the client:
+     * lead 129's "Kitchen") — or a Cancelled one being revived. Booking parks
+     * it in Consult, so a project in Prep or later never is.
+     */
+    protected const CONSULT_PROJECT_STAGES = ['Invited', 'Consult', 'Estimate', 'Response', 'Cancelled'];
 
     public function __construct(
         protected UrlShortener $urlShortener,

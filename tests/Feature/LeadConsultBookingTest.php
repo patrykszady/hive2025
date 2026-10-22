@@ -196,6 +196,28 @@ it('offers only projects a consult can land on: Consult, Estimate or Cancelled, 
     expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$cancelled->id]);
 });
 
+it('offers and proposes a project still waiting on its estimate (Response), and parks it in Consult', function () {
+    // Lead 129 (2026-10-21): the client's only project, "Kitchen", was at
+    // Response, so the box offered nothing and proposed nothing.
+    Queue::fake();
+    $fx = makeConsultFixture();
+    $kitchen = clientProjectWithStatus($fx, 'Kitchen', 3); // Response
+    clientProjectWithStatus($fx, 'Garage', 5);             // Scheduled: work booked, never a consult target
+
+    $component = consultComposer($fx)
+        ->call('insertAvailabilitySlot', 0)
+        ->call('selectExactTime', '14:00');
+
+    expect(collect($component->instance()->consultProjectOptions)->pluck('label')->all())->toBe(['Kitchen — Response'])
+        ->and($component->get('projectName'))->toBe('Kitchen — Response')
+        ->and($component->get('sendBlockedReason'))->toBeNull();
+
+    $component->call('send_message');
+
+    expect(Task::withoutGlobalScopes()->where('type', 'Meet')->pluck('project_id')->all())->toBe([$kitchen->id])
+        ->and($kitchen->fresh()->latestStatus->title)->toBe('Consult');
+});
+
 it('attaches the consult to whichever of the client\'s projects is chosen, or to a new one', function () {
     Queue::fake();
     $fx = makeConsultFixture();

@@ -1401,8 +1401,8 @@ class LeadCreate extends Component
     }
 
     /**
-     * The project pre-filled into the box: the client's newest project still
-     * at Consult or Estimate. A Cancelled one stays on offer in the list but
+     * The project pre-filled into the box: the client's newest project that
+     * has not started (Invited, Consult, Estimate or Response). A Cancelled one stays on offer in the list but
      * is not proposed; with nothing open the box is left for a name, which
      * is what needsProjectName() then asks for.
      */
