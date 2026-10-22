@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
@@ -496,4 +497,68 @@ it('downloads waivers under the id-bearing filename', function () {
         ->toContain('3154-violet-ln')
         ->toContain('-' . now()->format('Y-m-d') . '.pdf')
         ->not->toContain('thru-');
+});
+
+function makeDownloadableLienWaiver(): LienWaiver
+{
+    $vendor = Vendor::query()->create([
+        'business_name' => 'GS Construction',
+        'business_type' => 'Sub',
+        'business_email' => 'accounts@example.test',
+        'address' => '123 Main St', 'city' => 'Chicago', 'state' => 'IL', 'zip_code' => '60601',
+    ]);
+    $user = makeLienWaiverIndexUser($vendor);
+    $user->vendors()->attach($vendor->id, ['role_id' => 1, 'is_employed' => true]);
+    $user->forceFill(['registration' => ['registered' => true]])->saveQuietly();
+    $vendor->forceFill(['registration' => ['registered' => true]])->saveQuietly();
+    test()->actingAs($user);
+
+    $project = Project::query()->create([
+        'project_name' => 'Download Job',
+        'client_id' => Client::query()->create([
+            'business_name' => 'Mark & Gail Brodson', 'address' => '3154 Violet Ln', 'city' => 'Northbrook', 'state' => 'IL', 'zip_code' => '60062',
+        ])->id,
+        'address' => '3154 Violet Ln', 'city' => 'Northbrook', 'state' => 'IL', 'zip_code' => '60062',
+    ]);
+
+    return LienWaiver::withoutGlobalScopes()->create([
+        'belongs_to_vendor_id' => $vendor->id,
+        'vendor_id' => $vendor->id,
+        'project_id' => $project->id,
+        'type' => LienWaiverType::ConditionalProgress,
+        'status' => LienWaiverStatus::Draft,
+        'amount' => 1000,
+        'exceptions_amount' => 0,
+        'through_date' => now()->toDateString(),
+        'jurisdiction' => 'US-IL',
+        'created_by_user_id' => $user->id,
+    ]);
+}
+
+it('re-renders a stored draft that was saved as HTML instead of serving it as a PDF', function () {
+    Storage::fake('files');
+    $waiver = makeDownloadableLienWaiver();
+    Storage::disk('files')->put('lien-waivers/1/1/draft.pdf', '<!DOCTYPE html><html><body>waiver</body></html>');
+    $waiver->forceFill(['draft_path' => 'lien-waivers/1/1/draft.pdf'])->saveQuietly();
+
+    $response = $this->get(route('lien-waivers.download', $waiver));
+
+    $response->assertSuccessful();
+    expect($response->getContent())->toStartWith('%PDF');
+});
+
+it('refuses to hand out the HTML fallback as a PDF when Chrome cannot render', function () {
+    Storage::fake('files');
+    $waiver = makeDownloadableLienWaiver();
+    $_SERVER['CHROME_PATH'] = $_ENV['CHROME_PATH'] = '/nonexistent/chrome';
+
+    try {
+        $response = $this->get(route('lien-waivers.download', $waiver));
+    } finally {
+        unset($_SERVER['CHROME_PATH'], $_ENV['CHROME_PATH']);
+    }
+
+    $response->assertServiceUnavailable();
+    expect($response->headers->get('content-type'))->not->toContain('application/pdf')
+        ->and((string) $response->headers->get('content-disposition'))->not->toContain('.pdf');
 });

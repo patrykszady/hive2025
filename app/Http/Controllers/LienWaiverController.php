@@ -54,7 +54,8 @@ class LienWaiverController extends Controller
             ? $swornStatement->signed_path
             : $swornStatement->path;
 
-        if ($statementPath && \Storage::disk('files')->exists($statementPath)) {
+        if ($statementPath && \Storage::disk('files')->exists($statementPath)
+            && str_starts_with((string) \Storage::disk('files')->get($statementPath), '%PDF')) {
             $parts[] = \Storage::disk('files')->path($statementPath);
         }
 
@@ -177,6 +178,7 @@ class LienWaiverController extends Controller
             : null;
 
         abort_unless($absolute && is_file($absolute), 404);
+        abort_unless(self::isPdf($absolute), 503, 'This sworn statement was saved without a PDF. Re-generate it and download again.');
 
         return response()->download(
             $absolute,
@@ -196,7 +198,9 @@ class LienWaiverController extends Controller
         if ($path) {
             $absolute = \Storage::disk('files')->path($path);
 
-            if (is_file($absolute)) {
+            // A stored file that isn't a PDF (a render that fell back to
+            // HTML) is re-rendered below rather than handed out as a .pdf.
+            if (is_file($absolute) && self::isPdf($absolute)) {
                 return \App\Support\DownloadCookie::attach(
                     response()->download(
                         $absolute,
@@ -217,9 +221,18 @@ class LienWaiverController extends Controller
             throw new NotFoundHttpException('Unable to render lien waiver PDF.');
         }
 
+        // renderPdf() falls back to the waiver's HTML when Chrome can't start;
+        // served as application/pdf that downloads as a file no reader opens.
+        abort_unless(str_starts_with($doc['binary'], '%PDF'), 503, 'The lien waiver PDF could not be rendered. Try again in a minute.');
+
         return \App\Support\DownloadCookie::attach(response($doc['binary'], 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="' . $doc['filename'] . '"',
         ]), request());
+    }
+
+    protected static function isPdf(string $absolutePath): bool
+    {
+        return (string) file_get_contents($absolutePath, false, null, 0, 4) === '%PDF';
     }
 }

@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\LienWaiver;
 use App\Services\GeoapifyService;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Spatie\Browsershot\Browsershot;
@@ -193,9 +194,14 @@ class LienWaiverDocumentGenerator
     protected static function renderPdf(string $html, ?string $headerHtml = null, ?string $footerHtml = null, bool $compact = false): string
     {
         try {
+            // No Chrome sandbox, like every other generator here: since PHP
+            // 8.3.36 php-fpm runs under systemd's RestrictNamespaces=true, so
+            // a sandboxed Chrome can't start from a web request and every
+            // waiver downloaded from the browser came back as HTML (2026-10-21).
             $shot = Browsershot::html($html)
                 ->format('Letter')
-                ->showBackground();
+                ->showBackground()
+                ->addChromiumArguments(['no-sandbox', 'disable-setuid-sandbox']);
 
             // Same as the estimate/project/sheet generators: honour an explicit
             // browser path. Without it these two were the only documents left
@@ -228,6 +234,8 @@ class LienWaiverDocumentGenerator
             return PdfAcroFormOverlay::apply($shot->pdf(), self::FILLABLE_FIELDS);
         } catch (Throwable $e) {
             // Fall back to HTML payload so storage/path tracking still works.
+            Log::warning('Lien waiver PDF render failed, falling back to HTML.', ['error' => $e->getMessage()]);
+
             return $html;
         }
     }

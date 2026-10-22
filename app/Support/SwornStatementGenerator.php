@@ -7,6 +7,7 @@ use App\Models\Check;
 use App\Models\Payment;
 use App\Models\Project;
 use App\Models\Vendor;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Spatie\Browsershot\Browsershot;
 use Throwable;
@@ -318,6 +319,7 @@ class SwornStatementGenerator
             $shot = Browsershot::html($html)
                 ->format('Letter')
                 ->showBackground()
+                ->addChromiumArguments(['no-sandbox', 'disable-setuid-sandbox'])
                 ->margins(9, 12, 21, 12)
                 ->showBrowserHeaderAndFooter()
                 ->headerHtml('<span></span>')
@@ -329,6 +331,8 @@ class SwornStatementGenerator
 
             return $shot->pdf();
         } catch (Throwable $e) {
+            Log::warning('Sworn statement PDF render failed, falling back to HTML.', ['error' => $e->getMessage()]);
+
             return $html;
         }
     }
