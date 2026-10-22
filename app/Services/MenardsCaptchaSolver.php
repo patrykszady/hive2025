@@ -43,6 +43,21 @@ class MenardsCaptchaSolver
     /** How long one NoneCap request blocks for its answer (their maximum). */
     protected const NONECAP_WAIT_SECONDS = 90;
 
+    /**
+     * All attempts must finish inside the extension's request: php-fpm kills
+     * a request at 60 s (request_terminate_timeout).
+     */
+    protected const NONECAP_BUDGET_SECONDS = 50;
+
+    /** A failed solve is free; wait this long and try again while the budget lasts. */
+    protected const NONECAP_RETRY_PAUSE_SECONDS = 10;
+
+    /** Too little budget left for a solve (they take 12–37 s). */
+    protected const NONECAP_MIN_SOLVE_SECONDS = 15;
+
+    /** However the clock reads: never more than this many solves per request. */
+    protected const NONECAP_MAX_ATTEMPTS = 3;
+
     public function configured(): bool
     {
         return $this->noneCapKey() !== '' || $this->apiKey() !== '';
@@ -149,20 +164,48 @@ class MenardsCaptchaSolver
             'proxy' => $proxy ? sprintf('http://%s:%s@%s:%d', rawurlencode($proxy->username), rawurlencode($proxy->password), $proxy->host, $proxy->port) : null,
         ]);
 
-        try {
-            $response = \Illuminate\Support\Facades\Http::withToken($this->noneCapKey())
-                ->acceptJson()
-                ->timeout(self::NONECAP_WAIT_SECONDS + 15)
-                ->post('https://api.nonecap.com/v1/solves?wait='.self::NONECAP_WAIT_SECONDS, $body);
-        } catch (\Throwable $e) {
-            $seconds = round(microtime(true) - $started, 1);
-            Log::channel('menards')->error('Menards captcha: NoneCap request failed', ['error' => $e->getMessage(), 'seconds' => $seconds]);
+        // A failed solve costs nothing. Both live solves on 2026-10-22 came
+        // back proxy_error within a second of the wall appearing — while the
+        // browser itself was loading the widget on the same IP — and the very
+        // same requests solved in 15-37 s minutes later. So a failure waits a
+        // little and tries again, inside the request's 60 s.
+        $attempt = 0;
 
-            return ['ok' => false, 'error' => $e->getMessage(), 'seconds' => $seconds];
-        }
+        do {
+            $attempt++;
+            $left = self::NONECAP_BUDGET_SECONDS - (microtime(true) - $started);
+            $wait = (int) max(5, min(self::NONECAP_WAIT_SECONDS, floor($left)));
+
+            try {
+                $response = \Illuminate\Support\Facades\Http::withToken($this->noneCapKey())
+                    ->acceptJson()
+                    ->timeout($wait + 5)
+                    ->post('https://api.nonecap.com/v1/solves?wait='.$wait, $body);
+            } catch (\Throwable $e) {
+                $seconds = round(microtime(true) - $started, 1);
+                Log::channel('menards')->error('Menards captcha: NoneCap request failed', ['error' => $e->getMessage(), 'attempt' => $attempt, 'seconds' => $seconds]);
+
+                return ['ok' => false, 'error' => $e->getMessage(), 'seconds' => $seconds];
+            }
+
+            $solve = (array) $response->json();
+            $failedFast = $response->successful() && ($solve['status'] ?? null) === 'failed';
+            $leftAfterPause = self::NONECAP_BUDGET_SECONDS - (microtime(true) - $started) - self::NONECAP_RETRY_PAUSE_SECONDS;
+
+            if (! $failedFast || $attempt >= self::NONECAP_MAX_ATTEMPTS || $leftAfterPause < self::NONECAP_MIN_SOLVE_SECONDS) {
+                break;
+            }
+
+            Log::channel('menards')->warning('Menards captcha: NoneCap failed, trying again shortly', [
+                'id' => $solve['id'] ?? null,
+                'attempt' => $attempt,
+                'failure' => $solve['error_code'] ?? $solve['failure_reason'] ?? null,
+            ]);
+
+            \Illuminate\Support\Sleep::sleep(self::NONECAP_RETRY_PAUSE_SECONDS);
+        } while (true);
 
         $seconds = round(microtime(true) - $started, 1);
-        $solve = (array) $response->json();
         $token = trim((string) ($solve['token'] ?? ''));
 
         // Their own words, never a summary: a refused key, an empty balance
@@ -171,6 +214,8 @@ class MenardsCaptchaSolver
             'provider' => 'nonecap',
             'http' => $response->status(),
             'status' => $solve['status'] ?? null,
+            'failure' => $solve['error_code'] ?? $solve['failure_reason'] ?? null,
+            'attempts' => $attempt,
             'id' => $solve['id'] ?? null,
             'credits' => $solve['credits_charged'] ?? null,
             'resolve_ms' => $solve['resolve_ms'] ?? null,

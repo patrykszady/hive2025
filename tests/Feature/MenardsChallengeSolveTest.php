@@ -180,7 +180,7 @@ it('buys from NoneCap through our proxy with the browser\'s user agent', functio
 
     expect($result['ok'])->toBeTrue()->and($result['token'])->toBe('P1_eyJ0eXAi');
 
-    \Illuminate\Support\Facades\Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://api.nonecap.com/v1/solves?wait=90')
+    \Illuminate\Support\Facades\Http::assertSent(fn ($request) => preg_match('#^https://api\.nonecap\.com/v1/solves\?wait=(\d+)$#', $request->url(), $m) === 1 && (int) $m[1] <= 50
         && $request->hasHeader('Authorization', 'Bearer nc_live_test')
         && $request['type'] === 'hcaptcha'
         && $request['sitekey'] === '10000000-ffff-ffff-ffff-000000000001'
@@ -212,3 +212,34 @@ it('passes the browser\'s user agent from the extension\'s request to the solver
         ->postJson('/api/menards/solve-challenge', solvePayload())
         ->assertSuccessful();
 });
+
+it('waits and tries a failed NoneCap solve again, since failures are free', function () {
+    // Both live solves on 2026-10-22 failed with proxy_error the second the
+    // wall appeared; the same requests solved minutes later.
+    noneCapConfig();
+    \Illuminate\Support\Sleep::fake();
+    \Illuminate\Support\Facades\Http::fakeSequence('api.nonecap.com/*')
+        ->push(['id' => 'solve_A', 'status' => 'failed', 'error_code' => 'proxy_error', 'token' => null, 'cost_credits' => 0])
+        ->push(['id' => 'solve_B', 'status' => 'solved', 'token' => 'P1_second', 'credits_charged' => 3]);
+
+    $result = app(MenardsCaptchaSolver::class)->solve('10000000-ffff-ffff-ffff-000000000001', 'https://www.menards.com/main/login.html', 'Chrome/151');
+
+    expect($result['ok'])->toBeTrue()->and($result['token'])->toBe('P1_second');
+    \Illuminate\Support\Sleep::assertSleptTimes(1);
+    \Illuminate\Support\Facades\Http::assertSentCount(2);
+    // The second try only asks NoneCap to wait for what is left of the request.
+    \Illuminate\Support\Facades\Http::assertSent(fn ($request) => preg_match('/wait=(\d+)$/', $request->url(), $m) === 1 && (int) $m[1] <= 50);
+});
+
+it('stops trying while the extension\'s request still has time', function () {
+    noneCapConfig();
+    \Illuminate\Support\Sleep::fake();
+    \Illuminate\Support\Facades\Http::fake(['api.nonecap.com/*' => \Illuminate\Support\Facades\Http::response(['id' => 'solve_X', 'status' => 'failed', 'error_code' => 'proxy_error', 'token' => null])]);
+
+    $result = app(MenardsCaptchaSolver::class)->solve('10000000-ffff-ffff-ffff-000000000001', 'https://www.menards.com/main/login.html');
+
+    // At most three solves in one request, however the clock reads.
+    expect($result['ok'])->toBeFalse()->and($result['error'])->toContain('failed');
+    \Illuminate\Support\Facades\Http::assertSentCount(3);
+});
+
