@@ -41,16 +41,20 @@ class TransactionBulkMatch extends Model
      * Find the best matching bulk match rule for a given vendor and amount.
      *
      * Specific amount matches are checked first, then ANY matches as fallback.
+     * Only the company's own rules count: rules have no tenant scope, and
+     * another company's Amazon rule would hand its distribution to ours.
      *
      * @return self|null The matching rule, or null if no match found.
      */
-    public static function findMatchForAmount(?int $vendorId, float $amount, ?string $description = null): ?self
+    public static function findMatchForAmount(?int $vendorId, float $amount, ?string $description = null, ?int $belongsToVendorId = null): ?self
     {
         if ($vendorId === null) {
             return null;
         }
 
-        $matches = static::where('vendor_id', $vendorId)->get();
+        $matches = static::where('vendor_id', $vendorId)
+            ->when($belongsToVendorId !== null, fn ($query) => $query->where('belongs_to_vendor_id', $belongsToVendorId))
+            ->get();
 
         // First pass: check specific amount matches (non-ANY)
         foreach ($matches as $match) {

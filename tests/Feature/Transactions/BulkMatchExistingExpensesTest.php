@@ -48,3 +48,13 @@ it('applies a rule to existing expenses whose bank charge carries its descriptio
     expect($renewal->fresh()->distribution_id)->toBe($office->id)
         ->and($sameAmountOtherOrder->fresh()->distribution_id)->toBeNull();
 });
+
+it('only finds a company\'s own rule for an amount', function () {
+    $amazon = Vendor::factory()->create(['business_name' => 'Amazon', 'business_type' => 'Retail']);
+    $ours = Vendor::factory()->create();
+    $theirs = Vendor::factory()->create();
+    $theirRule = TransactionBulkMatch::create(['vendor_id' => $amazon->id, 'amount' => 179.00, 'distribution_id' => null, 'options' => ['amount_type' => '=', 'desc' => null], 'belongs_to_vendor_id' => $theirs->id]);
+
+    expect(TransactionBulkMatch::findMatchForAmount($amazon->id, 179.00, belongsToVendorId: $ours->id))->toBeNull()
+        ->and(TransactionBulkMatch::findMatchForAmount($amazon->id, 179.00, belongsToVendorId: $theirs->id)?->id)->toBe($theirRule->id);
+});

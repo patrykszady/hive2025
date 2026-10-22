@@ -408,7 +408,7 @@ class ReceiptController extends Controller
 
                     if (! $existingExpense) {
                         //create expense
-                        $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, (float) $order['orderNetTotal']['amount']);
+                        $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, (float) $order['orderNetTotal']['amount'], belongsToVendorId: (int) $receipt_account->belongs_to_vendor_id);
                         $distributionId = $bulkMatch?->distribution_id
                             ?? $this->matchDistributionByPurchaseOrder($order['purchaseOrderNumber'] ?? '', $receipt_account->belongs_to_vendor_id);
                         $expense = Expense::create([
@@ -625,7 +625,7 @@ class ReceiptController extends Controller
                 if (! $existingRefund) {
                     //create expense Model
                     //CREATE expense
-                    $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, $refundAmount);
+                    $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, $refundAmount, belongsToVendorId: (int) $receipt_account->belongs_to_vendor_id);
 
                     // Inherit distribution from the original order expense, or match PO
                     $refundDistributionId = $bulkMatch?->distribution_id;

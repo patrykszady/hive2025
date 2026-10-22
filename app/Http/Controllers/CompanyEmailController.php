@@ -1938,7 +1938,7 @@ class CompanyEmailController extends Controller
                             ]);
 
                             // Find matching bulk match rule for this amount
-                            $bulkMatch = TransactionBulkMatch::findMatchForAmount($receipt->vendor_id, (float) $amount);
+                            $bulkMatch = TransactionBulkMatch::findMatchForAmount($receipt->vendor_id, (float) $amount, belongsToVendorId: $effectiveBelongsToVendorId);
 
                             // Create new expense with receipt
                             $expense = new Expense;
@@ -1976,7 +1976,7 @@ class CompanyEmailController extends Controller
                             }
                         } else {
                             // Find matching bulk match rule for this amount
-                            $bulkMatch = TransactionBulkMatch::findMatchForAmount($receipt->vendor_id, (float) $amount);
+                            $bulkMatch = TransactionBulkMatch::findMatchForAmount($receipt->vendor_id, (float) $amount, belongsToVendorId: $effectiveBelongsToVendorId);
 
                             // No duplicate and no partial expenses found - create new expense
                             $expense = new Expense;
