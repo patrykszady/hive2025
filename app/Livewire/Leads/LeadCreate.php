@@ -1374,7 +1374,7 @@ class LeadCreate extends Component
         // newest open project. Every project finished leaves the box empty
         // for a new name.
         if ($this->selectedExactTime !== null && trim($this->projectName) === '' && ($open = $this->openProjectForConsult())) {
-            $this->projectName = $this->consultProjectLabel($open);
+            $this->projectName = collect($this->consultProjectOptions)->firstWhere('id', $open->id)['value'] ?? $this->consultProjectLabel($open);
         }
 
         unset($this->awaitingExactTime, $this->needsProjectName, $this->sendBlockedReason, $this->consultProjectOptions);
@@ -1383,7 +1383,19 @@ class LeadCreate extends Component
 
     public function updatedProjectName(): void
     {
-        unset($this->needsProjectName, $this->sendBlockedReason);
+        unset($this->needsProjectName, $this->sendBlockedReason, $this->consultProjectPill);
+    }
+
+    /**
+     * The stage pill beside the Project box ("Kitchen" + Response), or
+     * "New project" for a name that is not one of the client's.
+     *
+     * @return array{label: string, color: string}|null
+     */
+    #[Computed]
+    public function consultProjectPill(): ?array
+    {
+        return app(LeadReplyComposer::class)->consultProjectPill($this->client, $this->projectName);
     }
 
     /** "Primary Bath — Cancelled": how a project reads in the Project box. */

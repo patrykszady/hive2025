@@ -496,19 +496,49 @@ class LeadReplyComposer
         return $project->project_name.' — '.($project->latestStatus?->title ?? 'No status');
     }
 
-    /** @return array<int, array{id: int, label: string, name: string, stage: string, color: string}> */
+    /**
+     * The client's projects a consult can land on. `value` is what the
+     * Project box holds once one is picked — the plain name, with the stage
+     * shown as a pill beside it — or the "Name — Stage" label when two of
+     * them share a name.
+     *
+     * @return array<int, array{id: int, label: string, value: string, name: string, stage: string, color: string}>
+     */
     public function consultProjectOptions(?Client $client): array
     {
-        return $this->consultProjects($client)
+        $projects = $this->consultProjects($client);
+        $names = $projects->countBy(fn (Project $project) => mb_strtolower(trim((string) $project->project_name)));
+
+        return $projects
             ->map(fn (Project $project) => [
                 'id' => $project->id,
                 'label' => $this->consultProjectLabel($project),
+                'value' => $names[mb_strtolower(trim((string) $project->project_name))] > 1 ? $this->consultProjectLabel($project) : (string) $project->project_name,
                 'name' => (string) $project->project_name,
                 'stage' => $project->latestStatus?->title ?? 'No status',
                 'color' => $project->latestStatus?->badge_color ?? 'zinc',
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * The pill beside the Project box: the stage of the project its text
+     * names, "New project" when it names none, nothing when it is empty.
+     *
+     * @return array{label: string, color: string}|null
+     */
+    public function consultProjectPill(?Client $client, string $projectName): ?array
+    {
+        if (trim($projectName) === '') {
+            return null;
+        }
+
+        $project = $this->resolvedConsultProject($client, $projectName);
+
+        return $project
+            ? ['label' => $project->latestStatus?->title ?? 'No status', 'color' => $project->latestStatus?->badge_color ?? 'zinc']
+            : ['label' => 'New project', 'color' => 'zinc'];
     }
 
     public function resolvedConsultProject(?Client $client, string $projectName): ?Project

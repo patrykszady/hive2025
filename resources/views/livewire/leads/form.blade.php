@@ -198,26 +198,36 @@
                              (a returning client's new job may well be a new project
                              while an old one is still open) or a new one. --}}
                         @if ($this->selectedExactTime !== null && $this->client)
-                            <div class="mt-3">
+                            <flux:field class="mt-3">
+                                <flux:label>Project</flux:label>
                                 {{-- One box: pick one of the client's projects from the
-                                     suggestions, or type a name and a new project is created. --}}
-                                <flux:autocomplete
-                                    wire:model.live.debounce.300ms="projectName"
-                                    label="Project"
-                                    placeholder="Pick a project or type a new name"
-                                >
-                                    {{-- Each suggestion shows the project's stage as the badge the
-                                         projects table draws for it; picking one puts the plain
-                                         "Name — Stage" text in the box (the value), which is what
-                                         resolvedConsultProject() reads back. --}}
-                                    @foreach ($this->consultProjectOptions as $option)
-                                        <flux:autocomplete.item wire:key="consult-project-{{ $option['id'] }}" value="{{ $option['label'] }}" label="{{ $option['label'] }}" class="gap-2">
-                                            <span class="truncate">{{ $option['name'] }}</span>
-                                            <flux:badge size="sm" inset="top bottom" :color="$option['color']">{{ $option['stage'] }}</flux:badge>
-                                        </flux:autocomplete.item>
-                                    @endforeach
-                                </flux:autocomplete>
-                            </div>
+                                     suggestions, or type a name and a new project is created.
+                                     The box holds the plain name ("Kitchen"); its stage sits
+                                     in the box as the pill the projects table draws for it. --}}
+                                <div class="relative">
+                                    <flux:autocomplete
+                                        wire:model.live.debounce.300ms="projectName"
+                                        placeholder="Pick a project or type a new name"
+                                        class:input="pe-32"
+                                    >
+                                        {{-- Each suggestion shows the project's stage as that badge;
+                                             picking one puts its value (the name, or "Name — Stage"
+                                             when two share a name) in the box, which is what
+                                             resolvedConsultProject() reads back. --}}
+                                        @foreach ($this->consultProjectOptions as $option)
+                                            <flux:autocomplete.item wire:key="consult-project-{{ $option['id'] }}" value="{{ $option['value'] }}" label="{{ $option['value'] }}" class="gap-2">
+                                                <span class="truncate">{{ $option['name'] }}</span>
+                                                <flux:badge size="sm" inset="top bottom" :color="$option['color']">{{ $option['stage'] }}</flux:badge>
+                                            </flux:autocomplete.item>
+                                        @endforeach
+                                    </flux:autocomplete>
+                                    @if ($pill = $this->consultProjectPill)
+                                        <div class="pointer-events-none absolute inset-y-0 right-2 flex items-center" data-consult-project-pill>
+                                            <flux:badge size="sm" :color="$pill['color']">{{ $pill['label'] }}</flux:badge>
+                                        </div>
+                                    @endif
+                                </div>
+                            </flux:field>
                         @endif
                     </flux:field>
                 @endif

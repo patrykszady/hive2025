@@ -149,7 +149,8 @@ it('puts the consult on the client\'s open project rather than a finished one', 
 
     // Proposed, not imposed: the open project is filled into the Project box.
     // The finished bathroom is not offered at all.
-    expect($component->get('projectName'))->toBe('Kitchen — Consult')
+    expect($component->get('projectName'))->toBe('Kitchen')
+        ->and($component->get('consultProjectPill'))->toBe(['label' => 'Consult', 'color' => 'purple'])
         ->and($component->get('sendBlockedReason'))->toBeNull()
         ->and(collect($component->instance()->consultProjectOptions)->pluck('label')->all())->toBe(['Kitchen — Consult']);
 
@@ -180,10 +181,12 @@ it('offers only projects a consult can land on: Consult, Estimate or Cancelled, 
         // Each carries its stage as the badge the projects table uses.
         ->and($options->map(fn ($o) => [$o['name'], $o['stage'], $o['color']])->all())
         ->toBe([['Paint', 'Consult', 'purple'], ['Deck', 'Estimate', 'blue'], ['Basement', 'Cancelled', 'red']])
-        // The newest open one is proposed; a Cancelled one is offered but never proposed.
-        ->and($component->get('projectName'))->toBe('Paint — Consult');
-    // …and the box renders them as badges, with the plain label as the pick value.
-    $component->assertSeeHtml('value="Paint — Consult"')->assertSee('Consult');
+        // The newest open one is proposed — its name in the box, its stage as the pill;
+        // a Cancelled one is offered but never proposed.
+        ->and($component->get('projectName'))->toBe('Paint')
+        ->and($component->get('consultProjectPill'))->toBe(['label' => 'Consult', 'color' => 'purple']);
+    // …and the box renders them as badges, with the plain name as the pick value.
+    $component->assertSeeHtml('value="Paint"')->assertSee('Consult');
 
     $consult->delete();
     $estimate->delete();
@@ -209,8 +212,16 @@ it('offers and proposes a project still waiting on its estimate (Response), and 
         ->call('selectExactTime', '14:00');
 
     expect(collect($component->instance()->consultProjectOptions)->pluck('label')->all())->toBe(['Kitchen — Response'])
-        ->and($component->get('projectName'))->toBe('Kitchen — Response')
+        ->and($component->get('projectName'))->toBe('Kitchen')
+        ->and($component->get('consultProjectPill'))->toBe(['label' => 'Response', 'color' => 'yellow'])
         ->and($component->get('sendBlockedReason'))->toBeNull();
+    // the pill sits inside the box, which leaves room for it on the right
+    $component->assertSeeHtml('data-consult-project-pill')->assertSeeHtml('pe-32');
+
+    // A name that is not one of the client's reads as a new project.
+    $component->set('projectName', 'Attic');
+    expect($component->get('consultProjectPill'))->toBe(['label' => 'New project', 'color' => 'zinc']);
+    $component->set('projectName', 'Kitchen');
 
     $component->call('send_message');
 
