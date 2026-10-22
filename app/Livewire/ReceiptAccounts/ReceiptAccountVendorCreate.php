@@ -39,6 +39,9 @@ class ReceiptAccountVendorCreate extends Component
     /** Opened from the expense modal: saving the match closes that one too. */
     public bool $openedFromExpenseModal = false;
 
+    /** The bank charge the expense modal was open for, if any. */
+    public ?int $openedForTransactionId = null;
+
     //$this->form->setMatch($match);
 
     protected function rules()
@@ -113,6 +116,7 @@ class ReceiptAccountVendorCreate extends Component
     {
         // Explicitly clear all state before loading new vendor
         $this->openedFromExpenseModal = false;
+        $this->openedForTransactionId = null;
         $this->transactions_bulk_matches = [];
         $this->vendor_transactions = [];
         $this->credential_fields = [];
@@ -203,7 +207,7 @@ class ReceiptAccountVendorCreate extends Component
      * from the form: "=" its amount, the bank charge's merchant name as the
      * description, and its distribution.
      */
-    public function matchFor(int $vendor, mixed $amount = null, ?string $description = null, ?int $distribution = null): void
+    public function matchFor(int $vendor, mixed $amount = null, ?string $description = null, ?int $distribution = null, ?int $transaction = null): void
     {
         $this->authorize('create', TransactionBulkMatch::class);
 
@@ -216,6 +220,7 @@ class ReceiptAccountVendorCreate extends Component
 
         $this->openWithMatch($vendor, is_numeric($amount) ? (float) $amount : null, $description, $distribution);
         $this->openedFromExpenseModal = true;
+        $this->openedForTransactionId = $transaction;
     }
 
     protected function openWithMatch(int $vendorId, ?float $amount, ?string $description, ?int $distributionId): void
@@ -379,12 +384,7 @@ class ReceiptAccountVendorCreate extends Component
         $this->modal('receipt_account_vendor_form_modal')->close();
         $this->dispatch('refreshComponent')->to('receipt-accounts.receipt-accounts-index');
 
-        // The rule now matches the charge or expense the expense modal was
-        // open for, so that modal is done too.
-        if ($this->openedFromExpenseModal) {
-            $this->openedFromExpenseModal = false;
-            $this->modal('expenses_form_modal')->close();
-        }
+
 
         Flux::toast(
             duration: 5000,
@@ -395,8 +395,27 @@ class ReceiptAccountVendorCreate extends Component
             text: '',
         );
 
-        //queue TransactionController@transaction_vendor_bulk_match
-        TransactionVendorBulkMatchJob::dispatch();
+        if (! $this->openedFromExpenseModal) {
+            //queue TransactionController@transaction_vendor_bulk_match
+            TransactionVendorBulkMatchJob::dispatch();
+
+            return;
+        }
+
+        // Saved from the expense modal: apply the rule now (about 3 seconds)
+        // so /expenses shows the result as both modals close — the charge
+        // the modal was open for leaves the card once the rule has used it.
+        TransactionVendorBulkMatchJob::dispatchSync();
+
+        $charge = $this->openedForTransactionId
+            ? Transaction::withoutGlobalScopes()->find($this->openedForTransactionId)
+            : null;
+
+        $this->dispatch('transactions-bulk-linked', transactionIds: $charge && ($charge->expense_id || $charge->check_id) ? [$charge->id] : []);
+        $this->dispatch('vendor-match-saved');
+
+        $this->openedFromExpenseModal = false;
+        $this->openedForTransactionId = null;
     }
 
     public function render()

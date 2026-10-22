@@ -55,7 +55,7 @@ class ExpenseCreate extends Component
     /** Where they go: a project id, or "D:{id}" for a distribution — the expense form's own encoding. */
     public string $bulkTransactionTarget = '';
 
-    protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits', 'openUploadReceipt', 'linkTransactionsInBulk'];
+    protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits', 'openUploadReceipt', 'linkTransactionsInBulk', 'vendor-match-saved' => 'closeAfterVendorMatch'];
 
     protected function toastExpenseSuccess(Expense $expense, string $heading, ?string $text = null): void
     {
@@ -798,7 +798,18 @@ class ExpenseCreate extends Component
             amount: $this->form->amount,
             description: $charge?->plaid_merchant_name,
             distribution: str_starts_with((string) $this->form->project_id, 'D:') ? (int) substr((string) $this->form->project_id, 2) : null,
+            transaction: $this->form->transaction instanceof Transaction ? $this->form->transaction->id : null,
         )->to('receipt-accounts.receipt-account-vendor-create');
+    }
+
+    /**
+     * The vendor match saved from this modal has already been applied, so
+     * this modal is done. Closed here, a round trip after the match modal
+     * closed — closing both in one response left this one open.
+     */
+    public function closeAfterVendorMatch(): void
+    {
+        $this->modal('expenses_form_modal')->close();
     }
 
     public function render()

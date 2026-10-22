@@ -3504,6 +3504,16 @@ class TransactionController extends Controller
 
     public function transaction_vendor_bulk_match()
     {
+        // One run at a time: the 10-minute schedule, the job a saved rule
+        // queues, and a rule saved from the expense modal (run while the
+        // person waits) would otherwise each create an expense for the same
+        // unmatched charge.
+        return Cache::lock('transaction-vendor-bulk-match', 600)
+            ->block(60, fn () => $this->runTransactionVendorBulkMatch());
+    }
+
+    protected function runTransactionVendorBulkMatch()
+    {
         // First, update existing unmatched expenses based on bulk match rules
         $this->updateExistingExpensesWithBulkMatches();
 
@@ -3534,8 +3544,13 @@ class TransactionController extends Controller
                                 ->when($match->amount != null && ($match->options['amount_type'] ?? 'ANY') !== 'ANY', function ($query) use ($match) {
                                     return $query->where('amount', $match->options['amount_type'] ?? '=', $match->amount);
                                 })
+                                // The description may be the bank's text or its merchant
+                                // name (what the expense modal's Vendor match prefills).
                                 ->when(!empty($match->options['desc']), function ($query) use ($match) {
-                                    return $query->where('plaid_merchant_description', 'LIKE', '%' . $match->options['desc'] . '%');
+                                    $like = '%' . $match->options['desc'] . '%';
+
+                                    return $query->where(fn ($text) => $text->where('plaid_merchant_description', 'LIKE', $like)
+                                        ->orWhere('plaid_merchant_name', 'LIKE', $like));
                                 })
                                 ->get();
 

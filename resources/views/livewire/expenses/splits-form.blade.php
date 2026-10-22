@@ -1,3 +1,6 @@
+{{-- A plain root element: as a child of the expense modal, which re-renders,
+     Livewire re-emits this component under its root tag. --}}
+<div>
 <x-form-modal name="expense_splits_form_modal" title="Expense Splits">
     <form id="expense_splits_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         @foreach ($expense_splits as $index => $split)
@@ -127,3 +130,4 @@
         <flux:button type="submit" form="expense_splits_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
     </x-slot>
 </x-form-modal>
+</div>

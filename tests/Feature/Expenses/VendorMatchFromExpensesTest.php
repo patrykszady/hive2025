@@ -104,8 +104,9 @@ it('opens the vendor\'s matches with a new Amount Match on top, filled in, and s
 
     $component->call('store')
         ->assertDispatched('modal-close', name: 'receipt_account_vendor_form_modal')
-        // Saved from the expense modal: that one closes too.
-        ->assertDispatched('modal-close', name: 'expenses_form_modal');
+        // Saved from the expense modal: it closes itself on this event, a
+        // round trip later (both in one response left it open).
+        ->assertDispatched('vendor-match-saved');
 
     $rule = TransactionBulkMatch::query()->where('vendor_id', $fx['amazon']->id)->where('id', '!=', $existing->id)->sole();
     expect((float) $rule->amount)->toBe(179.0)
@@ -147,6 +148,35 @@ it('leaves other modals alone when the vendor match was opened from /vendor_matc
         ->call('editReceiptVendor', $fx['amazon']->id)
         ->call('store')
         ->assertDispatched('modal-close', name: 'receipt_account_vendor_form_modal')
-        ->assertNotDispatched('modal-close', name: 'expenses_form_modal');
+        ->assertNotDispatched('vendor-match-saved');
+});
+
+it('applies a rule saved from a bank charge\'s expense modal right away and takes the charge off the card', function () {
+    // State Farm, $15.87 (2026-10-22): the rule was saved and its pass linked
+    // the charge 6 seconds later, but the modal stayed open and the charge
+    // stayed on /expenses.
+    $fx = vendorMatchFromExpenses_fixture();
+
+    Livewire::actingAs($fx['user'])
+        ->test(ReceiptAccountVendorCreate::class)
+        ->call('matchFor', vendor: $fx['amazon']->id, amount: '41.10', description: 'Amazon Mktpl', distribution: $fx['office']->id, transaction: $fx['unmatched']->id)
+        ->call('store')
+        ->assertDispatched('transactions-bulk-linked', transactionIds: [$fx['unmatched']->id])
+        ->assertDispatched('vendor-match-saved');
+
+    $expense = Expense::withoutGlobalScopes()->find($fx['unmatched']->fresh()->expense_id);
+    expect($expense)->not->toBeNull()
+        ->and($expense->distribution_id)->toBe($fx['office']->id)
+        ->and((float) $expense->amount)->toBe(41.1);
+});
+
+it('closes the expense modal once its vendor match is saved', function () {
+    $fx = vendorMatchFromExpenses_fixture();
+
+    Livewire::actingAs($fx['user'])
+        ->test(\App\Livewire\Expenses\ExpenseCreate::class)
+        ->call('editExpense', $fx['expense']->id)
+        ->dispatch('vendor-match-saved')
+        ->assertDispatched('modal-close', name: 'expenses_form_modal');
 });
 
