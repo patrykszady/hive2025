@@ -40,9 +40,12 @@ class MenardsCaptchaSolver
     /** Imperva's challenge is a normal hCaptcha widget, not enterprise-with-rqdata. */
     protected const SOFT_ID = 0;
 
+    /** How long one NoneCap request blocks for its answer (their maximum). */
+    protected const NONECAP_WAIT_SECONDS = 90;
+
     public function configured(): bool
     {
-        return $this->apiKey() !== '';
+        return $this->noneCapKey() !== '' || $this->apiKey() !== '';
     }
 
     protected function apiKey(): string
@@ -50,17 +53,27 @@ class MenardsCaptchaSolver
         return trim((string) config('services.menards.twocaptcha_key'));
     }
 
+    protected function noneCapKey(): string
+    {
+        return trim((string) config('services.menards.nonecap_key'));
+    }
+
     /**
+     * @param  string|null  $userAgent  the browser's own user agent, so the token is earned as that browser
      * @return array{ok: bool, token?: string, error?: string, seconds?: float}
      */
-    public function solve(string $siteKey, string $pageUrl): array
+    public function solve(string $siteKey, string $pageUrl, ?string $userAgent = null): array
     {
         if (! $this->configured()) {
-            return ['ok' => false, 'error' => 'TWOCAPTCHA_API_KEY is not set on this server.'];
+            return ['ok' => false, 'error' => 'Neither NONECAP_API_KEY nor TWOCAPTCHA_API_KEY is set on this server.'];
         }
 
         if ($siteKey === '' || $pageUrl === '') {
             return ['ok' => false, 'error' => 'A sitekey and a page url are both required.'];
+        }
+
+        if ($this->noneCapKey() !== '') {
+            return $this->solveWithNoneCap($siteKey, $pageUrl, $userAgent);
         }
 
         $started = microtime(true);
@@ -112,5 +125,69 @@ class MenardsCaptchaSolver
 
             return ['ok' => false, 'error' => $e->getMessage(), 'seconds' => $seconds];
         }
+    }
+
+    /**
+     * NoneCap solves through OUR proxy with OUR browser's user agent: the
+     * 2captcha tokens of September were earned on a worker's IP and Imperva
+     * refused every one ("Submit the token from the same network address the
+     * solve used" — NoneCap's own docs). Whether Imperva also wants the same
+     * browser is what this trial finds out.
+     *
+     * @return array{ok: bool, token?: string, error?: string, seconds?: float}
+     */
+    protected function solveWithNoneCap(string $siteKey, string $pageUrl, ?string $userAgent): array
+    {
+        $started = microtime(true);
+        $proxy = \App\Support\MenardsProxy::fromConfig();
+
+        $body = array_filter([
+            'type' => 'hcaptcha',
+            'sitekey' => $siteKey,
+            'url' => $pageUrl,
+            'user_agent' => $userAgent ? trim($userAgent) : null,
+            'proxy' => $proxy ? sprintf('http://%s:%s@%s:%d', rawurlencode($proxy->username), rawurlencode($proxy->password), $proxy->host, $proxy->port) : null,
+        ]);
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::withToken($this->noneCapKey())
+                ->acceptJson()
+                ->timeout(self::NONECAP_WAIT_SECONDS + 15)
+                ->post('https://api.nonecap.com/v1/solves?wait='.self::NONECAP_WAIT_SECONDS, $body);
+        } catch (\Throwable $e) {
+            $seconds = round(microtime(true) - $started, 1);
+            Log::channel('menards')->error('Menards captcha: NoneCap request failed', ['error' => $e->getMessage(), 'seconds' => $seconds]);
+
+            return ['ok' => false, 'error' => $e->getMessage(), 'seconds' => $seconds];
+        }
+
+        $seconds = round(microtime(true) - $started, 1);
+        $solve = (array) $response->json();
+        $token = trim((string) ($solve['token'] ?? ''));
+
+        // Their own words, never a summary: a refused key, an empty balance
+        // and an unsolvable widget are different problems.
+        $context = [
+            'provider' => 'nonecap',
+            'http' => $response->status(),
+            'status' => $solve['status'] ?? null,
+            'id' => $solve['id'] ?? null,
+            'credits' => $solve['credits_charged'] ?? null,
+            'resolve_ms' => $solve['resolve_ms'] ?? null,
+            'through_proxy' => $proxy?->host,
+            'user_agent_matched' => $userAgent !== null && ($solve['user_agent'] ?? null) === trim($userAgent),
+            'error' => $response->successful() ? null : mb_substr($response->body(), 0, 300),
+            'seconds' => $seconds,
+        ];
+
+        if (! $response->successful() || ($solve['status'] ?? null) !== 'solved' || $token === '') {
+            Log::channel('menards')->error('Menards captcha: NoneCap did not solve', $context);
+
+            return ['ok' => false, 'error' => 'NoneCap: '.($solve['status'] ?? 'HTTP '.$response->status()).($response->successful() ? '' : ' '.mb_substr($response->body(), 0, 200)), 'seconds' => $seconds];
+        }
+
+        Log::channel('menards')->info('Menards captcha: token purchased', $context + ['length' => strlen($token)]);
+
+        return ['ok' => true, 'token' => $token, 'seconds' => $seconds];
     }
 }

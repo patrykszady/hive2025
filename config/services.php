@@ -87,6 +87,11 @@ return [
         // that class before relying on it: the same approach already failed
         // here with a VALID token, because Imperva scores the browser.
         'twocaptcha_key' => env('TWOCAPTCHA_API_KEY'),
+        // NoneCap (nonecap.com) — the one hCaptcha solver still selling in
+        // October 2026, after 2Captcha, Anti-Captcha and CapSolver dropped
+        // hCaptcha. It solves through our own proxy with our Chrome's user
+        // agent, which the 2captcha tokens never did. Preferred when set.
+        'nonecap_key' => env('NONECAP_API_KEY'),
         // Whether the extension may ask the server to BUY a token for the
         // wall's hCaptcha. Off by default: the server clears the checkbox
         // itself (challenge_click below), and a token injected while it does

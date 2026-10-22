@@ -91,7 +91,9 @@ class MenardsSolveChallengeController extends Controller
         // stop.
         Cache::put(self::COUNTER_KEY, $spent + 1, now()->addHour());
 
-        $result = $solver->solve($validated['siteKey'], $validated['pageUrl']);
+        // The extension's own request carries the browser's user agent, so
+        // the token is earned as that browser.
+        $result = $solver->solve($validated['siteKey'], $validated['pageUrl'], (string) $request->userAgent());
 
         if (! ($result['ok'] ?? false)) {
             return response()->json([

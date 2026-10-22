@@ -149,3 +149,66 @@ it('hands the extension the auto-solve setting in defaults.json', function () {
     @unlink($dir . '/defaults.json');
     @rmdir($dir);
 });
+
+/*
+ * NoneCap (2026-10-22): the one hCaptcha solver still selling after 2Captcha,
+ * Anti-Captcha and CapSolver dropped it. Unlike September's 2captcha tokens,
+ * the solve runs through our proxy as our browser.
+ */
+function noneCapConfig(): void
+{
+    config([
+        'services.menards.nonecap_key' => 'nc_live_test',
+        'services.menards.twocaptcha_key' => null,
+        'services.menards.proxy_enabled' => true,
+        'services.menards.proxy_host' => '141.140.4.3:12323',
+        'services.menards.proxy_username' => 'gs-user',
+        'services.menards.proxy_password' => 'p@ss',
+        'services.menards.proxy_region' => '',
+        'services.menards.proxy_session' => '',
+    ]);
+}
+
+it('buys from NoneCap through our proxy with the browser\'s user agent', function () {
+    noneCapConfig();
+    $agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
+    \Illuminate\Support\Facades\Http::fake(['api.nonecap.com/*' => \Illuminate\Support\Facades\Http::response([
+        'id' => 'solve_01J', 'status' => 'solved', 'token' => 'P1_eyJ0eXAi', 'user_agent' => $agent, 'credits_charged' => 3, 'resolve_ms' => 14200,
+    ])]);
+
+    $result = app(MenardsCaptchaSolver::class)->solve('10000000-ffff-ffff-ffff-000000000001', 'https://www.menards.com/main/checkcredentials.html', $agent);
+
+    expect($result['ok'])->toBeTrue()->and($result['token'])->toBe('P1_eyJ0eXAi');
+
+    \Illuminate\Support\Facades\Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://api.nonecap.com/v1/solves?wait=90')
+        && $request->hasHeader('Authorization', 'Bearer nc_live_test')
+        && $request['type'] === 'hcaptcha'
+        && $request['sitekey'] === '10000000-ffff-ffff-ffff-000000000001'
+        && $request['url'] === 'https://www.menards.com/main/checkcredentials.html'
+        && $request['user_agent'] === $agent
+        && $request['proxy'] === 'http://gs-user:p%40ss@141.140.4.3:12323');
+});
+
+it('reports a refused NoneCap solve in NoneCap\'s own words', function () {
+    noneCapConfig();
+    \Illuminate\Support\Facades\Http::fake(['api.nonecap.com/*' => \Illuminate\Support\Facades\Http::response(['error' => 'insufficient_credits'], 402)]);
+
+    $result = app(MenardsCaptchaSolver::class)->solve('10000000-ffff-ffff-ffff-000000000001', 'https://www.menards.com/main/login.html');
+
+    expect($result['ok'])->toBeFalse()
+        ->and($result['error'])->toContain('HTTP 402')
+        ->and($result['error'])->toContain('insufficient_credits');
+});
+
+it('passes the browser\'s user agent from the extension\'s request to the solver', function () {
+    $this->mock(MenardsCaptchaSolver::class, function ($mock) {
+        $mock->shouldReceive('configured')->andReturn(true);
+        $mock->shouldReceive('solve')->once()
+            ->with('10000000-ffff-ffff-ffff-000000000001', 'https://www.menards.com/main/login.html', 'Chrome/151 test agent')
+            ->andReturn(['ok' => true, 'token' => 'P1_token', 'seconds' => 12.0]);
+    });
+
+    $this->withHeaders(['Authorization' => 'Bearer test-bridge-token', 'User-Agent' => 'Chrome/151 test agent'])
+        ->postJson('/api/menards/solve-challenge', solvePayload())
+        ->assertSuccessful();
+});

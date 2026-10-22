@@ -840,14 +840,26 @@ class MenardsRemoteBrowserService
     }
 
     /**
-     * Get past the wall. With the 2captcha Solver extension on, it solves the
-     * hCaptcha in place and Imperva then lets the page through — clicking
-     * under it resets the widget, so this only waits. Otherwise the
-     * calibrated checkbox click.
+     * Something in the browser answers the hCaptcha itself: the 2captcha
+     * Solver plugin, or the receipt extension's challenge.js with a bought
+     * token (MENARDS_AUTO_SOLVE, NoneCap). A click under either resets the
+     * widget — six tokens on 2026-09-14 got nothing in that way — so the
+     * server only waits.
+     */
+    protected function solvesInPlace(): bool
+    {
+        return (bool) config('services.menards.solver_extension') || (bool) config('services.menards.auto_solve');
+    }
+
+    /**
+     * Get past the wall. When something in the browser solves the hCaptcha
+     * (solvesInPlace()), Imperva then lets the page through — clicking under
+     * it resets the widget, so this only waits. Otherwise the calibrated
+     * checkbox click.
      */
     protected function clearChallengeWall(): bool
     {
-        if ((bool) config('services.menards.solver_extension')) {
+        if ($this->solvesInPlace()) {
             return $this->waitForSolverExtension();
         }
 
@@ -1182,7 +1194,7 @@ class MenardsRemoteBrowserService
         $clicked = false;
         $coords = trim((string) config('services.menards.challenge_click'));
 
-        if ((bool) config('services.menards.solver_extension')) {
+        if ($this->solvesInPlace()) {
             // This page is titled by its URL before and after the JSON renders,
             // so there is nothing to watch for: give the plugin a solve's worth
             // of time and let the park below prove the outcome.
