@@ -791,7 +791,9 @@ class SmsNewThread extends Component
         $this->showModal = false;
         $this->dispatch('threadCreated', threadId: $thread->id);
 
-        \Flux::toast('Consent request sent. Welcome message will be sent after all recipients reply START.');
+        \Flux::toast($thread->welcome_sent_at
+            ? 'Everyone had already replied START, so the welcome message was sent.'
+            : 'Consent request sent. Welcome message will be sent after all recipients reply START.');
     }
 
     /**

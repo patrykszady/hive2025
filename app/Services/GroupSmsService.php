@@ -163,6 +163,17 @@ class GroupSmsService
             ]);
         }
 
+        // Everyone already replied START (on another thread): asking again
+        // would greet nobody ("Hi there,"). Open the thread with the welcome
+        // instead — it greets them by name and marks the thread live, which
+        // project update texts wait for.
+        if ($thread->allParticipantsOptedIn()) {
+            $this->sendToThread($thread, $this->buildWelcomeMessage($thread), [], null);
+            $thread->update(['welcome_sent_at' => now()]);
+
+            return $thread;
+        }
+
         // Automated consent message should not be attributed to the triggering user
         $this->sendToThread($thread, $this->buildConsentMessage($thread), [], null);
         $thread->update(['opt_in_prompt_sent_at' => now()]);

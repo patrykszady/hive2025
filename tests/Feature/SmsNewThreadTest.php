@@ -390,6 +390,38 @@ it('carries prior opt-in into new group and greets only pending participants in 
         ->and($bradParticipant->opted_in_at)->toBeNull();
 });
 
+it('opens with the welcome, by name, when everyone already replied START on another thread', function (): void {
+    Queue::fake();
+
+    // Dan Fay (client 424, 2026-10-23): START on a group thread, then a thread of his own.
+    $client = \App\Models\Client::factory()->create();
+    $dan = User::query()->create([
+        'first_name' => 'Dan',
+        'last_name' => 'Fay',
+        'email' => 'dan.fay@example.com',
+        'cell_phone' => '2245557701',
+    ]);
+    $client->users()->attach($dan->id);
+
+    $groupThread = SmsGroupThread::query()->create([
+        'from_number' => '+12245550199',
+        'participants' => ['+12245557701', '+12245557702'],
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+    SmsThreadParticipant::query()->create(['thread_id' => $groupThread->id, 'phone_number' => '+12245557701', 'opted_in_at' => now()]);
+
+    $thread = app(GroupSmsService::class)->sendNewGroup(['2245557701'], 'Ignored manual text', null, $client->id);
+
+    $messages = SmsMessage::query()->where('thread_id', $thread->id)->get();
+
+    expect($messages)->toHaveCount(1)
+        ->and($messages->first()->text)->toStartWith("Hi Dan,\nGS Construction welcomes you")
+        ->and($messages->first()->text)->not->toContain(GroupSmsService::START_CONSENT_TEXT)
+        ->and($thread->fresh()->welcome_sent_at)->not->toBeNull()
+        ->and($thread->fresh()->opt_in_prompt_sent_at)->toBeNull();
+});
+
 it('sends consent and welcome messages in the recipient preferred language', function (): void {
     Queue::fake();
 
