@@ -17,7 +17,11 @@ use Illuminate\Support\Facades\Log;
  * Busy blocks come from ONE Nylas free/busy call — a grant can read its
  * org-mates' calendars, so the first admin grant queries every admin mailbox.
  * Results are cached briefly; the page renders many windows per day and the
- * calendars don't move minute to minute.
+ * calendars don't move minute to minute. An event Hive itself books, moves
+ * or cancels drops the cache at once (forget()), so a Meet task scheduled
+ * from Hive's calendar blocks its window immediately — the cached copy once
+ * kept offering Wed 1-3 PM for ten minutes after a 2 PM walkthrough was
+ * booked (2026-10-23). Events made in Outlook itself show within ten.
  *
  * Fails OPEN: no grants, an API error, or an unresolvable mailbox mean "no
  * busy data", never "everything blocked" — a lead locked out of picking any
@@ -28,6 +32,9 @@ class AdminCalendarBusy
 {
     /** Cache lifetime for one free/busy sweep. */
     private const CACHE_MINUTES = 10;
+
+    /** Bumped by forget(): part of every cache key, so a bump orphans the cached sweep. */
+    private const VERSION_KEY = 'admin_calendar_busy:version';
 
     /**
      * Breathing room around calendar events when judging windows: travel /
@@ -50,6 +57,13 @@ class AdminCalendarBusy
     public const PROVIDER_MAX_DAYS = 62;
 
     public function __construct(private readonly NylasService $nylas) {}
+
+    /** Drop the cached busy blocks: Hive just booked, moved or cancelled an event. */
+    public static function forget(): void
+    {
+        Cache::add(self::VERSION_KEY, 0);
+        Cache::increment(self::VERSION_KEY);
+    }
 
     /**
      * Is this window on this date blocked by an existing event?
@@ -181,7 +195,7 @@ class AdminCalendarBusy
         $from = Carbon::now($timezone)->startOfDay();
         $to = $from->copy()->addDays(self::HORIZON_DAYS)->endOfDay();
 
-        $cacheKey = 'admin_calendar_busy:'.md5(implode('|', array_column($accounts, 'email')).':'.$from->format('Y-m-d'));
+        $cacheKey = 'admin_calendar_busy:'.(int) Cache::get(self::VERSION_KEY, 0).':'.md5(implode('|', array_column($accounts, 'email')).':'.$from->format('Y-m-d'));
 
         return Cache::remember($cacheKey, now()->addMinutes(self::CACHE_MINUTES), function () use ($accounts, $from, $to, $timezone) {
             try {

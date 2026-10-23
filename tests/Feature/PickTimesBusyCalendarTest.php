@@ -400,3 +400,55 @@ it('says under the Send button exactly what is still missing, until nothing is',
         ->set('date', $dayTwo)->call('toggleWindow', '7-9 AM');
     expect($anytime->instance()->submitHint)->toBeNull();
 });
+
+it('shows an event Hive just booked at once, not when the cached calendars expire', function () {
+    // Wed Oct 28, 2026: a 2 PM walkthrough booked from Hive's calendar kept
+    // 1-3 PM on offer for ten minutes — the cached sweep predated it.
+    Cache::flush();
+    $vendor = Vendor::factory()->create();
+    config(['nylas.crew_leads.vendor_id' => $vendor->id]);
+    CompanyEmail::create(['vendor_id' => $vendor->id, 'email' => 'patryk@gs.test', 'grant_id' => 'grant-patryk']);
+
+    $date = busySafeDay();
+    $tz = PickTimes::timezone();
+    $sweep = fn (array $slots) => ['status' => 200, 'success' => true, 'data' => ['data' => [
+        ['email' => 'patryk@gs.test', 'object' => 'free_busy', 'time_slots' => $slots],
+    ]]];
+
+    $mock = Mockery::mock(NylasService::class);
+    $mock->shouldReceive('getFreeBusy')->twice()->andReturn($sweep([]), $sweep([[
+        'start_time' => Carbon::parse("{$date} 14:00", $tz)->timestamp,
+        'end_time' => Carbon::parse("{$date} 15:00", $tz)->timestamp,
+        'status' => 'busy',
+    ]]));
+    app()->instance(NylasService::class, $mock);
+
+    expect(app(AdminCalendarBusy::class)->windowIsBusy($date, '1-3 PM'))->toBeFalse()
+        // Still the cached sweep: the event booked since is not in it.
+        ->and(app(AdminCalendarBusy::class)->windowIsBusy($date, '1-3 PM'))->toBeFalse();
+
+    AdminCalendarBusy::forget();
+
+    expect(app(AdminCalendarBusy::class)->windowIsBusy($date, '1-3 PM'))->toBeTrue();
+});
+
+it('drops the cached calendars whenever Hive books, moves or cancels an event', function () {
+    Cache::flush();
+    Illuminate\Support\Facades\Http::fake([
+        '*/events/evt-gone*' => Illuminate\Support\Facades\Http::response(['error' => 'nope'], 500),
+        '*' => Illuminate\Support\Facades\Http::response(['data' => ['id' => 'evt-1']], 200),
+    ]);
+    $nylas = app(NylasService::class);
+    $version = fn () => (int) Cache::get('admin_calendar_busy:version', 0);
+
+    $nylas->createEvent('grant-patryk', ['calendar_id' => 'cal-1', 'title' => 'Walkthrough']);
+    expect($version())->toBe(1);
+
+    $nylas->updateEvent('grant-patryk', 'evt-1', ['calendar_id' => 'cal-1', 'title' => 'Walkthrough (moved)']);
+    $nylas->deleteEvent('grant-patryk', 'evt-1', 'cal-1');
+    expect($version())->toBe(3);
+
+    // A write Nylas refused changed nothing on the calendars.
+    $nylas->deleteEvent('grant-patryk', 'evt-gone', 'cal-1');
+    expect($version())->toBe(3);
+});

@@ -261,7 +261,7 @@ class NylasService
         $body = $payload;
         unset($body['calendar_id']);
 
-        return $this->retryWithBackoff(function () use ($grantId, $calendarId, $body) {
+        return $this->forgetCalendarBusyOnSuccess($this->retryWithBackoff(function () use ($grantId, $calendarId, $body) {
             $url = $this->baseUrl . "/grants/{$grantId}/events";
 
             try {
@@ -286,7 +286,23 @@ class NylasService
                     'error' => $e->getMessage(),
                 ];
             }
-        });
+        }));
+    }
+
+    /**
+     * An event Hive booked, moved or cancelled must show on the consult time
+     * pickers at once, not when their cached free/busy copy expires.
+     *
+     * @param  array<string, mixed>  $response
+     * @return array<string, mixed>
+     */
+    protected function forgetCalendarBusyOnSuccess(array $response): array
+    {
+        if ($response['success'] ?? false) {
+            AdminCalendarBusy::forget();
+        }
+
+        return $response;
     }
 
     /**
@@ -294,7 +310,7 @@ class NylasService
      */
     public function deleteEvent(string $grantId, string $eventId, ?string $calendarId = null): array
     {
-        return $this->retryWithBackoff(function () use ($grantId, $eventId, $calendarId) {
+        return $this->forgetCalendarBusyOnSuccess($this->retryWithBackoff(function () use ($grantId, $eventId, $calendarId) {
             $url = $this->baseUrl . "/grants/{$grantId}/events/{$eventId}";
 
             try {
@@ -323,7 +339,7 @@ class NylasService
                     'error' => $e->getMessage(),
                 ];
             }
-        });
+        }));
     }
 
     /**
@@ -355,7 +371,7 @@ class NylasService
         $body = $payload;
         unset($body['calendar_id']);
 
-        return $this->retryWithBackoff(function () use ($grantId, $eventId, $calendarId, $body) {
+        return $this->forgetCalendarBusyOnSuccess($this->retryWithBackoff(function () use ($grantId, $eventId, $calendarId, $body) {
             $url = $this->baseUrl . "/grants/{$grantId}/events/{$eventId}";
 
             try {
@@ -380,7 +396,7 @@ class NylasService
                     'error' => $e->getMessage(),
                 ];
             }
-        });
+        }));
     }
 
     /**
