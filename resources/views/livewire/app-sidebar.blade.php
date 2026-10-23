@@ -60,6 +60,9 @@
 
                 <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
                 <flux:sidebar.item wire:navigate.hover icon="calendar" href="{{ route('planner.cards') }}">Planner</flux:sidebar.item>
+                @can('estimate-project-duration')
+                    <flux:sidebar.item wire:navigate.hover icon="calendar-days" href="{{ route('project-timeline') }}">Project timeline</flux:sidebar.item>
+                @endcan
 
                 @if($canViewExpenses)
                     <flux:sidebar.group expandable heading="Finances" icon="credit-card" class="grid" :expanded="true">

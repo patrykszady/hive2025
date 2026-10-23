@@ -454,6 +454,10 @@ class AppServiceProvider extends ServiceProvider
         // session — that no individual vendor's Admin should control.
         Gate::define('platform-admin', fn (User $user): bool => $user->id === 1);
 
+        // The project timeline (estimate your project duration) is Patryk's
+        // to try out first: user 1 only until he opens it up.
+        Gate::define('estimate-project-duration', fn (User $user): bool => $user->id === 1);
+
         // The shared Menards browser is signed into one company's Menards
         // account, so it belongs to that company's admins (not to every
         // tenant's Admin, which the old viewAny-Bank check allowed).

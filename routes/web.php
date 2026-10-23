@@ -1209,6 +1209,12 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //PLANNER
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
+    Route::get('/project-timeline', \App\Livewire\Estimates\ProjectTimeline::class)
+        ->middleware('can:estimate-project-duration')
+        ->name('project-timeline');
+    Route::get('/project-timeline/settings', \App\Livewire\Estimates\ProjectTimelineSettings::class)
+        ->middleware('can:estimate-project-duration')
+        ->name('project-timeline.settings');
     
     //TEMPLATES
     Route::get('/templates', EmailTemplateIndex::class)->name('templates.index');
