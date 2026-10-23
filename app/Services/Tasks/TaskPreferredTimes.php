@@ -75,15 +75,28 @@ class TaskPreferredTimes
             ->map(fn ($group, string $date) => [
                 'date' => $date,
                 'label' => Carbon::parse($date)->format('D, M j'),
-                'times' => $group
-                    ->pluck('time')
-                    ->unique()
-                    ->values()
+                'times' => collect(self::inDayOrder($group->pluck('time')->unique()))
                     ->map(fn (string $time) => $isApplied
                         ? ['time' => $time, 'applied' => $isApplied($date, $time)]
                         : ['time' => $time])
                     ->all(),
             ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Time frames in the order of the day — Anytime first, then by start
+     * time (7-9 AM before 11-1 PM before 3-5 PM) — rather than the order the
+     * homeowner ticked them. Anything unrecognised keeps its place at the end.
+     *
+     * @param  iterable<string>  $times
+     * @return list<string>
+     */
+    public static function inDayOrder(iterable $times): array
+    {
+        return collect($times)
+            ->sortBy(fn (string $time) => $time === 'Anytime' ? '00:00' : (self::SERVICE_TIME_FRAMES[$time]['start'] ?? '99:99'))
             ->values()
             ->all();
     }

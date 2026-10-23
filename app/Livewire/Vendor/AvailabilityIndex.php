@@ -624,10 +624,7 @@ class AvailabilityIndex extends Component
             ->map(fn ($group, string $date) => [
                 'date' => $date,
                 'label' => Carbon::parse($date)->format('D, M j'),
-                'times' => $group
-                    ->pluck('time')
-                    ->unique()
-                    ->values()
+                'times' => collect(\App\Services\Tasks\TaskPreferredTimes::inDayOrder($group->pluck('time')->unique()))
                     ->map(fn (string $time) => [
                         'time' => $time,
                         'applied' => $this->preferredSlotIsApplied($date, $time),
