@@ -552,7 +552,7 @@ class ConversationPresenter
 
         $users = $client->relationLoaded('users')
             ? $client->users
-            : $client->users()->get(['users.id', 'first_name', 'last_name', 'cell_phone']);
+            : $client->users()->get(['users.id', 'first_name', 'last_name', 'nickname', 'cell_phone']);
 
         return static::filterClientUsersToThreadParticipants($users, $participantPhones);
     }
@@ -878,7 +878,7 @@ class ConversationPresenter
      * header's quick-call row computes them (conversation.blade.php's
      * $callableContacts): thread-attached client users (the primary client
      * and any extra client referenced in name_data) labelled with their
-     * first name, then any remaining participant phone not yet covered —
+     * nickname or first name, then any remaining participant phone not yet covered —
      * labelled with its resolved name only when it's a known contact, the
      * formatted number otherwise. The business number itself never appears.
      *
@@ -910,7 +910,7 @@ class ConversationPresenter
 
                 $seen[$e164] = true;
                 $contacts[] = [
-                    'name' => $user->first_name,
+                    'name' => static::preferredUserDisplayName($user, false),
                     'phone' => $e164,
                     'display' => static::formatUsNumber((string) $raw),
                 ];
@@ -929,7 +929,7 @@ class ConversationPresenter
                 ->unique();
 
             foreach ($extraClientIds as $clientId) {
-                $extraClient = Client::with('users:id,first_name,last_name,cell_phone')->find($clientId);
+                $extraClient = Client::with('users:id,first_name,last_name,nickname,cell_phone')->find($clientId);
 
                 if ($extraClient) {
                     $addClientUsers($this->threadClientUsersFor($extraClient));

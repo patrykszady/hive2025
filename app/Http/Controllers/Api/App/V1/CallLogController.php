@@ -122,9 +122,9 @@ class CallLogController extends Controller
 
         $users = User::query()
             ->whereIn('cell_phone', $digits->values()->unique()->all())
-            ->get(['id', 'first_name', 'last_name', 'cell_phone'])
+            ->get(['id', 'first_name', 'last_name', 'nickname', 'cell_phone'])
             ->keyBy(fn (User $user) => substr((string) preg_replace('/\D/', '', (string) $user->cell_phone), -10));
 
-        return $digits->map(fn (string $last10) => $users->get($last10)?->full_name)->filter()->all();
+        return $digits->map(fn (string $last10) => ($user = $users->get($last10)) ? \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($user) : null)->filter()->all();
     }
 }

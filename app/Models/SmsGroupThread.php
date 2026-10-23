@@ -301,7 +301,7 @@ class SmsGroupThread extends Model
             'project:id,address,belongs_to_vendor_id',
             'client:id,vendor_id,business_name',
             'client.vendors:id',
-            'client.users:id,first_name,last_name,cell_phone',
+            'client.users:id,first_name,last_name,nickname,cell_phone',
             'subjectVendor:id,business_name,options',
             'threadParticipants:id,thread_id,phone_number',
             'messages' => fn ($q) => $q->latest('created_at')->limit(15),
@@ -334,7 +334,7 @@ class SmsGroupThread extends Model
         }
 
         $clientUserNames = $this->client?->users
-            ? $this->client->users->map(fn ($u) => trim(($u->first_name ?? '') . ' ' . ($u->last_name ?? '')))
+            ? $this->client->users->map(fn ($u) => trim(($u->first_name ?? '') . ' ' . ($u->nickname ? $u->nickname . ' ' : '') . ($u->last_name ?? '')))
                 ->filter()
                 ->values()
                 ->all()

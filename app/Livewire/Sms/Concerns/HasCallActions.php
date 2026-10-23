@@ -118,7 +118,7 @@ trait HasCallActions
         $needles = collect($pending)->flatten()->unique()->values()->all();
 
         $usersByDigits = User::whereIn('cell_phone', $needles)
-            ->get(['id', 'first_name', 'last_name', 'cell_phone'])
+            ->get(['id', 'first_name', 'last_name', 'nickname', 'cell_phone'])
             ->keyBy(fn ($u) => preg_replace('/[^0-9]/', '', (string) $u->cell_phone));
 
         $vendorsByDigits = Vendor::whereIn('business_phone', $needles)
@@ -141,8 +141,9 @@ trait HasCallActions
 
             static::$phoneKnownCache[$phone] = (bool) ($user || $vendor);
 
-            if ($user && trim($user->first_name.' '.$user->last_name) !== '') {
-                static::$phoneDisplayCache[$phone] = trim($user->first_name.' '.$user->last_name);
+            // Nickname first (Brad, not Bradley): legal names are for estimates and other legal documents.
+            if ($user && \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($user) !== '') {
+                static::$phoneDisplayCache[$phone] = \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($user);
                 continue;
             }
 
@@ -214,8 +215,8 @@ trait HasCallActions
             ->orWhere('cell_phone', $last10)
             ->first();
 
-        if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
-            return $cache[$e164] = trim($user->first_name . ' ' . $user->last_name);
+        if ($user && \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($user) !== '') {
+            return $cache[$e164] = \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($user);
         }
 
         $vendor = Vendor::where('business_phone', $normalized)

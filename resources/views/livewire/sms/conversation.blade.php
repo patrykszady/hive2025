@@ -240,7 +240,7 @@
                                 ? '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6)
                                 : $raw;
                             $callableContacts->push([
-                                'name' => $user->first_name,
+                                'name' => \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($user, false),
                                 'e164' => $e164,
                                 'display' => $display,
                             ]);
@@ -256,7 +256,7 @@
                             ->unique();
 
                         foreach ($extraClientIds as $clientId) {
-                            $extraClient = \App\Models\Client::with('users:id,first_name,last_name,cell_phone')->find($clientId);
+                            $extraClient = \App\Models\Client::with('users:id,first_name,last_name,nickname,cell_phone')->find($clientId);
                             if (! $extraClient) continue;
                             foreach ($this->threadClientUsersFor($extraClient) as $user) {
                                 $raw = $user->getRawOriginal('cell_phone');
@@ -273,7 +273,7 @@
                                     ? '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6)
                                     : $raw;
                                 $callableContacts->push([
-                                    'name' => $user->first_name,
+                                    'name' => \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($user, false),
                                     'e164' => $e164,
                                     'display' => $display,
                                 ]);
