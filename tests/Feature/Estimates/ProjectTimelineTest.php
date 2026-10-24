@@ -150,11 +150,13 @@ it('counts working days without weekends or the crew\'s holidays', function () {
         ->and(ProjectDuration::workingDays(CarbonImmutable::parse('2026-11-09'), CarbonImmutable::parse('2026-11-13')))->toBe(5);
 });
 
-it('is only for Patryk', function () {
+it('is only for Patryk and Greg', function () {
     $someoneElse = User::factory()->create();
 
     Livewire::actingAs($someoneElse)->test(ProjectTimeline::class)->assertForbidden();
-    expect(User::find(1)->can('estimate-project-duration'))->toBeTrue();
+    expect(User::find(1)->can('estimate-project-duration'))->toBeTrue()
+        ->and(User::find(2)->can('estimate-project-duration'))->toBeTrue()
+        ->and($someoneElse->can('estimate-project-duration'))->toBeFalse();
 });
 
 it('shows the whole year inside a card, where the page column does not hide it', function () {

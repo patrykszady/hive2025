@@ -47,7 +47,7 @@ use Livewire\Component;
  * Days before today cannot be picked, nor can a start snap back onto one.
  *
  * The page opens blank — nothing preselected and nothing carried in the URL.
- * User 1 only for now (the estimate-project-duration gate).
+ * Patryk and Greg only for now (the estimate-project-duration gate).
  */
 #[Title('Project timeline')]
 class ProjectTimeline extends Component

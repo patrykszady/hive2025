@@ -455,8 +455,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('platform-admin', fn (User $user): bool => $user->id === 1);
 
         // The project timeline (estimate your project duration) is Patryk's
-        // to try out first: user 1 only until he opens it up.
-        Gate::define('estimate-project-duration', fn (User $user): bool => $user->id === 1);
+        // and Greg's to try out first (users 1 and 2) until it opens up.
+        Gate::define('estimate-project-duration', fn (User $user): bool => in_array($user->id, [1, 2], true));
 
         // The shared Menards browser is signed into one company's Menards
         // account, so it belongs to that company's admins (not to every

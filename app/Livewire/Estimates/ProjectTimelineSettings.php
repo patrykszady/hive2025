@@ -14,7 +14,7 @@ use Livewire\Component;
  * The company's project timeline rules (TimelineSettings): its demo days,
  * which US & Illinois holidays the crew works, the limited weeks, booked
  * weeks and the calendar fade. Each Hive company keeps its own, starting
- * from GS Construction's. Company admins only, behind the timeline's gate.
+ * from GS Construction's. Company admins only, behind the timeline's gate (Patryk and Greg for now).
  */
 #[Title('Project timeline settings')]
 class ProjectTimelineSettings extends Component
