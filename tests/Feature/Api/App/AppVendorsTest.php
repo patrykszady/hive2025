@@ -271,7 +271,10 @@ it('groups a vendor\'s upcoming tasks by day, with a Pending Tasks split, like V
     ]));
     $project->vendors()->attach($company->id, ['client_id' => $client->id]);
 
-    $tomorrow = now()->addDay()->format('Y-m-d');
+    // The app's days are Chicago days: a UTC "tomorrow" is two days out
+    // every evening after 7 PM there, which failed this test then.
+    $now = now(\App\Services\Dashboard\AppHomeAgenda::TIMEZONE);
+    $tomorrow = $now->copy()->addDay()->format('Y-m-d');
     Task::factory()->create([
         'project_id' => $project->id,
         'vendor_id' => $sub->id,
@@ -286,8 +289,8 @@ it('groups a vendor\'s upcoming tasks by day, with a Pending Tasks split, like V
         'start_date' => null,
         'end_date' => null,
     ]);
-    $tenDays = now()->addDays(10)->format('Y-m-d');
-    $twelveDays = now()->addDays(12)->format('Y-m-d');
+    $tenDays = $now->copy()->addDays(10)->format('Y-m-d');
+    $twelveDays = $now->copy()->addDays(12)->format('Y-m-d');
     Task::factory()->create([
         'project_id' => $project->id,
         'vendor_id' => $sub->id,
