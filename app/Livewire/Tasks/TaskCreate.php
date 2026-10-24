@@ -863,7 +863,7 @@ class TaskCreate extends Component
     public function updatedFormUserIds(): void
     {
         if ($this->form->type === 'Meet') {
-            $this->syncMeetingParticipants();
+            $this->syncMeetingParticipants(withClient: ! $this->isEditingSavedMeet());
         }
     }
 
@@ -873,8 +873,14 @@ class TaskCreate extends Component
     public function updatedFormVendorId(): void
     {
         if ($this->form->type === 'Meet') {
-            $this->syncMeetingParticipants();
+            $this->syncMeetingParticipants(withClient: ! $this->isEditingSavedMeet());
         }
+    }
+
+    /** A Meet already booked, being edited: its homeowner list was decided at booking. */
+    private function isEditingSavedMeet(): bool
+    {
+        return $this->form->task instanceof Task && $this->form->task->exists && $this->form->task->type === 'Meet';
     }
 
     /**
@@ -1129,11 +1135,36 @@ class TaskCreate extends Component
     }
 
     /**
-     * Sync meeting participants: keep any manually-added emails and merge in resolved defaults.
+     * A saved Meet opened for editing keeps exactly the attendees it was
+     * booked with. Merging the defaults back in here re-invited everyone
+     * taken off the invite when it was booked: Doug Abbey was removed from
+     * task 1209, came back the moment the Meet was opened to fix its note,
+     * and the save would have sent him the invite (2026-10-23). The team and
+     * the scheduled sub still follow their selects, the company's own office
+     * address still comes off, and a Meet with no attendees yet still gets
+     * the homeowners.
      */
-    private function syncMeetingParticipants(): void
+    private function syncSavedMeetParticipants(): void
+    {
+        $this->syncMeetingParticipants(withClient: $this->form->meeting_participants === []);
+    }
+
+    /**
+     * Sync meeting participants: keep any manually-added emails and merge in
+     * resolved defaults. $withClient false leaves the homeowner list as it
+     * is: changing the team or vendor on a booked Meet must not re-invite a
+     * client user taken off it.
+     */
+    private function syncMeetingParticipants(bool $withClient = true): void
     {
         $defaults = $this->resolveDefaultMeetingParticipants();
+
+        if (! $withClient) {
+            $clientEmails = collect($this->meetingProject()?->client?->users ?? [])
+                ->map(fn (User $user) => strtolower(trim((string) $user->email)))
+                ->all();
+            $defaults = array_values(array_filter($defaults, fn (string $email) => ! in_array(strtolower(trim($email)), $clientEmails, true)));
+        }
         $current = $this->form->meeting_participants;
         $excluded = $this->resolveExcludedMeetingParticipants();
 
@@ -1626,7 +1657,7 @@ class TaskCreate extends Component
             $this->form->setTask($existingTask);
 
             if ($this->form->type === 'Meet') {
-                $this->syncMeetingParticipants();
+                $this->syncSavedMeetParticipants();
             }
         }
 
@@ -1951,7 +1982,7 @@ class TaskCreate extends Component
         $this->previousDates = (array) $this->form->dates;
 
         if ($this->form->type === 'Meet') {
-            $this->syncMeetingParticipants();
+            $this->syncSavedMeetParticipants();
             $this->seedHomeownerSelection();
             $this->fillMissingMeetEndTimes();
         }

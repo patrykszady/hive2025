@@ -454,3 +454,51 @@ it('a Meet task saves with a participant found through the search, not just the 
     expect($task)->not->toBeNull();
     expect((array) ($task->options->meeting_participants ?? []))->toContain($outsider->email);
 });
+
+it('keeps a booked Meet\'s attendees when it is opened, re-teamed and saved: no homeowner comes back', function (): void {
+    // Task 1209 (2026-10-23): Doug Abbey was taken off the invite at booking;
+    // opening the Meet to fix its note put him back, and the save stored him.
+    \Illuminate\Support\Facades\Queue::fake();
+    $owner = Vendor::factory()->create(['business_name' => 'GS Construction', 'business_email' => 'office@gs.test']);
+    $admin = User::factory()->create(['email' => 'patryk@gs.test', 'primary_vendor_id' => $owner->id]);
+    $owner->users()->attach($admin->id, ['role_id' => 1, 'is_employed' => 1]);
+    $greg = User::factory()->create(['email' => 'greg@gs.test', 'primary_vendor_id' => $owner->id]);
+    $owner->users()->attach($greg->id, ['role_id' => 1, 'is_employed' => 1]);
+
+    $this->actingAs($admin);
+    $client = Client::factory()->create(['vendor_id' => $owner->id]);
+    $client->vendors()->syncWithoutDetaching([$owner->id]);
+    $erin = User::factory()->create(['first_name' => 'Erin', 'email' => 'erin@example.com']);
+    $doug = User::factory()->create(['first_name' => 'Doug', 'email' => 'doug@example.com']);
+    $client->users()->attach([$erin->id, $doug->id]);
+    $project = Project::factory()->create(['client_id' => $client->id, 'belongs_to_vendor_id' => $owner->id]);
+    // A project's client is reached through the company's link to it.
+    if (! $project->vendors()->where('vendors.id', $owner->id)->exists()) {
+        $project->vendors()->attach($owner->id, ['client_id' => $client->id]);
+    } else {
+        $project->vendors()->updateExistingPivot($owner->id, ['client_id' => $client->id]);
+    }
+    expect($project->fresh()->client?->users->pluck('email')->all())->toContain('doug@example.com');
+
+    $booked = ['patryk@gs.test', 'erin@example.com', 'jenn@designer.test'];
+    $task = Task::create([
+        'title' => 'Meet', 'type' => 'Meet', 'project_id' => $project->id, 'belongs_to_vendor_id' => $owner->id,
+        'start_date' => now()->addDays(3)->format('Y-m-d'), 'end_date' => now()->addDays(3)->format('Y-m-d'),
+        'user_ids' => [$admin->id], 'notes' => '12-PM = Arrival Time.',
+        'options' => ['dates' => [now()->addDays(3)->format('Y-m-d')], 'time_settings' => [], 'meeting_location_type' => 'in_person', 'meeting_participants' => $booked],
+    ]);
+
+    $page = Livewire::actingAs($admin)
+        ->test(TaskCreate::class)
+        ->call('editTask', $task->id)
+        ->assertSet('form.meeting_participants', $booked);
+
+    // Adding Greg to the team brings Greg, not the homeowner taken off.
+    $page->set('form.user_ids', [$admin->id, $greg->id]);
+    expect($page->get('form.meeting_participants'))->toContain('greg@gs.test')->not->toContain('doug@example.com');
+
+    $page->set('form.notes', '12-1PM = Arrival Time.')->call('edit');
+
+    expect(data_get(Task::find($task->id)->options, 'meeting_participants'))->not->toContain('doug@example.com')
+        ->toContain('erin@example.com', 'jenn@designer.test', 'greg@gs.test');
+});
