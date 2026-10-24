@@ -116,11 +116,28 @@ class TaskWriter
             'title' => $data['title'],
             'notes' => $data['notes'] ?? null,
             'order' => $data['order'] ?? $task->order ?? 0,
-            'options' => $this->buildOptions($data, $type, $checklist),
+            'options' => array_merge($this->storedOptions($task), $this->buildOptions($data, $type, $checklist)),
             'parent_task_id' => $data['parent_task_id'] ?? null,
         ]);
 
         return $task;
+    }
+
+    /**
+     * The task's options as stored right now — re-read, because the calendar
+     * job writes nylas_meet_event just after a Meet is saved, often while its
+     * edit form is still open. Everything the form doesn't manage (that event
+     * id above all) must survive an edit: dropping it left the invite stale
+     * ("Cannot update Meet event: missing metadata", task 1209, 2026-10-23),
+     * and the edit after that would have sent a second invite.
+     *
+     * @return array<string, mixed>
+     */
+    private function storedOptions(Task $task): array
+    {
+        $options = json_decode(json_encode($task->fresh()?->options ?? $task->options ?? []), true);
+
+        return is_array($options) ? $options : [];
     }
 
     /**
