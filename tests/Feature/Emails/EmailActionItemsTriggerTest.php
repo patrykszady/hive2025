@@ -98,6 +98,10 @@ it('runs the extractor for a planner-active project once the delay elapses', fun
         'project_id' => $world['project']->id,
         'action_items' => ['Patryk: Send the revised quote'],
         'summarized_at' => now(),
+        // The extractor reads emails sent since the day the project was
+        // created; the factory's "an hour ago" is yesterday between 00:00
+        // and 01:00 UTC, which made this fail every evening at 7 PM Chicago.
+        'sent_at' => now(),
     ]);
 
     (new ExtractProjectActionItems($world['project']->id))->handle(app(ProjectActionItemExtractor::class));
@@ -113,6 +117,10 @@ it('does nothing for a project the planner is not showing', function () {
         'project_id' => $world['project']->id,
         'action_items' => ['Patryk: Send the revised quote'],
         'summarized_at' => now(),
+        // The extractor reads emails sent since the day the project was
+        // created; the factory's "an hour ago" is yesterday between 00:00
+        // and 01:00 UTC, which made this fail every evening at 7 PM Chicago.
+        'sent_at' => now(),
     ]);
 
     (new ExtractProjectActionItems($world['project']->id))->handle(app(ProjectActionItemExtractor::class));
