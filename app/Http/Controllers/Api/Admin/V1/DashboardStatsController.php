@@ -47,7 +47,7 @@ class DashboardStatsController extends Controller
         ]);
     }
 
-    /** @return array{total: int, today: int, this_week: int, pending: int} */
+    /** @return array{total: int, today: int, this_week: int, prior_week: int, pending: int} */
     protected function leadsSummary(): array
     {
         $signups = fn () => User::query()->whereNotNull('registration');
@@ -56,6 +56,8 @@ class DashboardStatsController extends Controller
             'total' => $signups()->count(),
             'today' => $signups()->whereDate('created_at', now()->toDateString())->count(),
             'this_week' => $signups()->where('created_at', '>=', now()->subWeek())->count(),
+            // The week before, for the platform dashboard's arrow (2026-10-25).
+            'prior_week' => $signups()->whereBetween('created_at', [now()->subWeeks(2), now()->subWeek()])->count(),
             // Sign-ups are accounts: there is nothing to review or mark.
             'pending' => 0,
         ];
