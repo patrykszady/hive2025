@@ -189,6 +189,31 @@ it('still marks a private app page noindex', function () {
     $this->get('/login')->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
 });
 
+it('marks every app page noindex, including a guest\'s redirect to the login page and a 404', function () {
+    // These were added in the 'web' group, after auth and model binding, so
+    // /hub's redirect to /login and a missing page left without the header.
+    config(['app.noindex_hosts' => '']);
+
+    foreach (['/hub', '/dashboard', '/projects', '/clients'] as $path) {
+        $this->get($path)->assertRedirect()->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+    }
+
+    $this->get('/no-such-page-anywhere')->assertNotFound()->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+    $this->get('/en/welcome/no-such-page')->assertNotFound()->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+});
+
+it('lets a crawler follow the guest\'s root redirect to the welcome page, and keeps a signed-in root redirect noindex', function () {
+    config(['app.noindex_hosts' => '']);
+
+    $guest = $this->get('/');
+    $guest->assertRedirect();
+    expect(parse_url((string) $guest->headers->get('Location'), PHP_URL_PATH))->toBe('/en/welcome')
+        ->and($guest->headers->get('X-Robots-Tag'))->toBeNull();
+
+    $this->actingAs(\App\Models\User::find(1))->get('/')
+        ->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+});
+
 it('does not mark the un-prefixed legal pages noindex', function () {
     config(['app.noindex_hosts' => '']);
 

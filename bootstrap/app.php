@@ -48,8 +48,12 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->replaceInGroup('web', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, \App\Http\Middleware\VerifyCsrfToken::class);
 
-        $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexSubdomains::class);
-        $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexNonPublic::class);
+        // Global, not in the 'web' group: Laravel runs auth and route-model
+        // binding ahead of group middleware (middleware priority), so a guest's
+        // redirect from /hub to /login, or the 404 of a missing model, left
+        // without the noindex header (found 2026-10-25).
+        $middleware->append(\App\Http\Middleware\NoIndexSubdomains::class);
+        $middleware->append(\App\Http\Middleware\NoIndexNonPublic::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\LoadAuthVendor::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\LogForbiddenResponses::class);
 
