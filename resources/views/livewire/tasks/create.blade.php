@@ -106,6 +106,15 @@
             <!-- Task Details Panel -->
             <div x-show="activeTab === 'details'">
                 <div class="relative">
+                    {{-- RECORD THIS MEET — a saved Meet records its in-person meeting. --}}
+                    @can('record-meetings')
+                        @if ($this->form->task?->exists && $this->form->task->type === 'Meet')
+                            <div class="mb-4">
+                                <livewire:meetings.meeting-recorder :task-id="$this->form->task->id" wire:key="meeting-recorder-{{ $this->form->task->id }}" />
+                            </div>
+                        @endif
+                    @endcan
+
                     {{-- TYPE --}}
                     <flux:radio.group wire:model.live="form.type" label="Task Type" variant="segmented">
                         <flux:radio value="Task"><span class="{{ data_get($this->taskTypeTextClasses, 'Task') }}">Task</span></flux:radio>

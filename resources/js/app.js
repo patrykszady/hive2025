@@ -3,6 +3,7 @@ import './vendor-picker';
 import './task-arrival-times';
 import './timezone';
 import './planner-infinite-scroll';
+import './meeting-recorder';
 import Echo from 'laravel-echo';
 
 // Alpine global store for SMS page state — survives Livewire morphs and component boundaries.

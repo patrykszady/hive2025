@@ -458,6 +458,11 @@ class AppServiceProvider extends ServiceProvider
         // and Greg's to try out first (users 1 and 2) until it opens up.
         Gate::define('estimate-project-duration', fn (User $user): bool => in_array($user->id, [1, 2], true));
 
+        // Recording in-person meetings (MeetingRecorder) is Patryk's and
+        // Greg's to try first: every recording is transcribed and summarized
+        // on GS Construction's AssemblyAI account.
+        Gate::define('record-meetings', fn (User $user): bool => in_array($user->id, [1, 2], true));
+
         // The shared Menards browser is signed into one company's Menards
         // account, so it belongs to that company's admins (not to every
         // tenant's Admin, which the old viewAny-Bank check allowed).

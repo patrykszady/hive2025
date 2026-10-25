@@ -66,7 +66,7 @@ class ProjectActionItemExtractor
     public function __construct(protected EmbeddingService $embeddings, protected ProjectActionItemConsolidator $consolidator) {}
 
     /**
-     * @return array{calls: int, messages: int, emails: int, created: int, merged: int, done: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}
+     * @return array{calls: int, messages: int, emails: int, meetings: int, created: int, merged: int, done: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}
      */
     public function run(Project $project, ?CarbonInterface $since = null, bool $fresh = false, bool $review = false): array
     {
@@ -88,8 +88,9 @@ class ProjectActionItemExtractor
         [$callCandidates, $callCount, $lastCallId] = $this->callCandidates($project, $userIds, $phones, $since);
         [$textCandidates, $messageCount, $threadBookmarks] = $this->textCandidates($project, $client?->id, $since, $names);
         [$emailCandidates, $emailCount, $lastEmailId] = $this->emailCandidates($project, $since);
+        [$meetingCandidates, $meetingCount, $lastMeetingId] = $this->meetingCandidates($project, $since);
 
-        $candidates = collect([...$callCandidates, ...$textCandidates, ...$emailCandidates])
+        $candidates = collect([...$callCandidates, ...$textCandidates, ...$emailCandidates, ...$meetingCandidates])
             ->sortBy(fn (array $candidate) => $candidate['at']->getTimestamp())
             ->values()
             ->all();
@@ -112,8 +113,11 @@ class ProjectActionItemExtractor
         if ($lastEmailId > 0) {
             ProjectActionItemScan::record($project->id, ProjectActionItemScan::KIND_EMAILS, 0, $lastEmailId);
         }
+        if ($lastMeetingId > 0) {
+            ProjectActionItemScan::record($project->id, ProjectActionItemScan::KIND_MEETINGS, 0, $lastMeetingId);
+        }
 
-        return ['calls' => $callCount, 'messages' => $messageCount, 'emails' => $emailCount] + $stats;
+        return ['calls' => $callCount, 'messages' => $messageCount, 'emails' => $emailCount, 'meetings' => $meetingCount] + $stats;
     }
 
     // ── Calls ────────────────────────────────────────────────────────────
@@ -288,6 +292,60 @@ class ProjectActionItemExtractor
     }
 
     // ── Emails ───────────────────────────────────────────────────────────
+
+    /**
+     * In-person meetings recorded on this project (MeetingRecording) carry
+     * action items from their own summary, like calls and emails do. Read
+     * by project id; only finished recordings — one still transcribing has
+     * none yet and is picked up by a later run, since the bookmark only
+     * moves past what was read.
+     *
+     * @return array{0: list<array<string, mixed>>, 1: int, 2: int} candidates, meetings read, bookmark id
+     */
+    protected function meetingCandidates(Project $project, ?CarbonInterface $since): array
+    {
+        $afterId = ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_MEETINGS);
+
+        $meetings = \App\Models\MeetingRecording::query()
+            ->where('project_id', $project->id)
+            ->where('status', \App\Models\MeetingRecording::STATUS_READY)
+            ->where('id', '>', $afterId)
+            ->when($since, fn ($query) => $query->where('created_at', '>=', $since))
+            ->orderBy('id')
+            ->get(['id', 'started_at', 'created_at', 'action_items']);
+
+        $candidates = [];
+
+        foreach ($meetings as $meeting) {
+            $at = Carbon::parse($meeting->started_at ?? $meeting->created_at);
+
+            foreach ((array) ($meeting->action_items ?? []) as $item) {
+                if (! is_string($item) || trim($item) === '') {
+                    continue;
+                }
+                [$owner, $title] = $this->splitOwner($item);
+                if (self::isTransient($title)) {
+                    continue;
+                }
+                $candidates[] = [
+                    'title' => $title,
+                    'owner' => $owner,
+                    'due_on' => self::dueDateIn($title, $at),
+                    'kind' => 'todo',
+                    'at' => $at,
+                    'source' => [
+                        'kind' => 'meeting',
+                        'id' => $meeting->id,
+                        'thread_id' => null,
+                        'at' => $at->toIso8601String(),
+                        'excerpt' => Str::limit(trim($item), 180, ''),
+                    ],
+                ];
+            }
+        }
+
+        return [$candidates, $meetings->count(), (int) ($meetings->last()?->id ?? $afterId)];
+    }
 
     /**
      * Stakeholder email already carries action items from its own AI read

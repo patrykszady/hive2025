@@ -8,6 +8,7 @@
         'call' => $item['direction'] === 'inbound' ? 'phone-arrow-down-left' : 'phone-arrow-up-right',
         'sms' => 'chat-bubble-left',
         'email' => 'envelope',
+        'meeting' => 'microphone',
     };
 @endphp
 <div class="shrink-0 mt-0.5">
@@ -30,7 +31,7 @@
             @elseif ($item['kind'] === 'call' && ($item['status'] ?? null) === 'failed')
                 <flux:badge size="sm" color="rose">Failed</flux:badge>
             @endif
-            @if ($item['kind'] === 'call' && (int) ($item['duration_seconds'] ?? 0) > 0)
+            @if (in_array($item['kind'], ['call', 'meeting'], true) && (int) ($item['duration_seconds'] ?? 0) > 0)
                 <span class="text-xs text-zinc-400 whitespace-nowrap">
                     @php $dur = (int) $item['duration_seconds']; @endphp
                     {{ $dur < 60 ? $dur.'s' : floor($dur / 60).'m '.($dur % 60).'s' }}

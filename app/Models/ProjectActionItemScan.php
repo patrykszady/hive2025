@@ -7,8 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * How far ProjectActionItemExtractor has read one of a project's
  * conversations: the last call id (kind `calls`, source 0), the last
- * message id of one thread (kind `sms_thread`, source = thread id), or the
- * last email id (kind `emails`, source 0).
+ * message id of one thread (kind `sms_thread`, source = thread id), the
+ * last email id (kind `emails`, source 0), or the last in-person meeting
+ * recording id (kind `meetings`, source 0).
  */
 class ProjectActionItemScan extends Model
 {
@@ -17,6 +18,9 @@ class ProjectActionItemScan extends Model
     public const KIND_SMS_THREAD = 'sms_thread';
 
     public const KIND_EMAILS = 'emails';
+
+    /** The last meeting recording read (source 0). */
+    public const KIND_MEETINGS = 'meetings';
 
     protected $fillable = ['project_id', 'kind', 'source_id', 'last_source_id', 'scanned_at'];
 

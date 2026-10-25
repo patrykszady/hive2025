@@ -158,6 +158,17 @@
                     @endif
                 @endcan
 
+                @can('record-meetings')
+                    @can('update', $project)
+                        {{-- MEETING RECORDINGS — in-person meetings recorded
+                             from Hive, transcribed into summaries and action
+                             items (right above Communications). --}}
+                        <div class="order-5">
+                            <livewire:meetings.meeting-recorder :project-id="$project->id" />
+                        </div>
+                    @endcan
+                @endcan
+
                 @can('update', $project)
                     {{-- COMMUNICATIONS — calls, texts and emails with this
                          project's stakeholders. Ties with Email Tracking on

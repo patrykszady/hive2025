@@ -24,7 +24,11 @@ use Illuminate\Support\Str;
  */
 class ProjectCommunicationsTimeline
 {
+    /** What the Hive app's timeline shows (it doesn't know meetings yet). */
     public const KINDS = ['call', 'sms', 'email'];
+
+    /** Everything the web timeline shows: the app's kinds plus in-person meetings. */
+    public const ALL_KINDS = [...self::KINDS, 'meeting'];
 
     /**
      * @param  list<string>  $kinds
@@ -33,7 +37,7 @@ class ProjectCommunicationsTimeline
     public function forProject(Project $project, ?Carbon $before = null, int $limit = 50, array $kinds = self::KINDS): array
     {
         $limit = max(1, min($limit, 100));
-        $kinds = array_values(array_intersect($kinds, self::KINDS)) ?: self::KINDS;
+        $kinds = array_values(array_intersect($kinds, self::ALL_KINDS)) ?: self::KINDS;
         $people = $project->client_id
             ? User::withoutGlobalScopes()->whereHas('clients', fn ($query) => $query->withoutGlobalScopes()->where('clients.id', $project->client_id))->get()
             : collect();
@@ -48,6 +52,9 @@ class ProjectCommunicationsTimeline
         }
         if (in_array('email', $kinds, true)) {
             $items = $items->concat($this->emails($project, $before, $limit));
+        }
+        if (in_array('meeting', $kinds, true)) {
+            $items = $items->concat($this->meetings($project, $before, $limit));
         }
 
         $page = $items->sortByDesc(fn (array $item) => $item['at'].'|'.$item['kind'].'|'.str_pad((string) $item['id'], 12, '0', STR_PAD_LEFT))
@@ -202,5 +209,36 @@ class ProjectCommunicationsTimeline
         $user = $people->first(fn (User $person) => substr((string) preg_replace('/\D/', '', (string) $person->cell_phone), -10) === $digits);
 
         return $user ? (trim($user->first_name.' '.$user->last_name) ?: null) : null;
+    }
+
+    /**
+     * In-person meetings recorded on this project (MeetingRecording), once
+     * stopped — transcribing or done.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected function meetings(Project $project, ?Carbon $before, int $limit): Collection
+    {
+        return \App\Models\MeetingRecording::query()
+            ->with('recordedBy:id,first_name,last_name,nickname')
+            ->where('project_id', $project->id)
+            ->whereIn('status', [\App\Models\MeetingRecording::STATUS_PROCESSING, \App\Models\MeetingRecording::STATUS_READY])
+            // An uploaded file sits at the time of the meeting, not of the upload.
+            ->when($before, fn ($query) => $query->whereRaw('COALESCE(started_at, created_at) < ?', [$before]))
+            ->orderByRaw('COALESCE(started_at, created_at) DESC')
+            ->limit($limit)
+            ->get()
+            ->map(fn (\App\Models\MeetingRecording $meeting): array => [
+                'kind' => 'meeting',
+                'id' => $meeting->id,
+                'at' => Carbon::parse($meeting->started_at ?? $meeting->created_at)->toIso8601String(),
+                'direction' => 'outbound',
+                'who' => $meeting->recordedBy ? \App\Support\Sms\ConversationPresenter::preferredUserDisplayName($meeting->recordedBy) : 'Meeting',
+                'title' => $meeting->status === \App\Models\MeetingRecording::STATUS_PROCESSING ? 'In-person meeting (transcribing…)' : 'In-person meeting',
+                'preview' => (string) ($meeting->summary ?? ''),
+                'duration_seconds' => (int) $meeting->duration_seconds,
+                'status' => $meeting->status,
+                'action_items' => (array) ($meeting->action_items ?? []),
+            ]);
     }
 }

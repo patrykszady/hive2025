@@ -82,7 +82,7 @@ class ProjectActionItem extends Model
         return match ($source['kind'] ?? null) {
             'sms' => route('sms.index', ['threadId' => $source['thread_id'] ?? null]),
             'call' => route('sms.index', ['activeTab' => 'calls', 'callId' => $source['id']]),
-            'email' => $projectId ? route('projects.show', $projectId) : null,
+            'email', 'meeting' => $projectId ? route('projects.show', $projectId) : null,
             default => null,
         };
     }
@@ -94,6 +94,7 @@ class ProjectActionItem extends Model
         $noun = match ($source['kind'] ?? null) {
             'call' => 'call',
             'email' => 'email',
+            'meeting' => 'meeting',
             default => 'text',
         };
 

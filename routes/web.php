@@ -671,6 +671,11 @@ Route::middleware('auth')->group(function () {
     // The vendor list every <x-vendor-picker> filters in the browser; any signed-in user, scoped like the Vendor model.
     Route::get('/vendors/picker-options', \App\Http\Controllers\VendorPickerOptionsController::class)->name('vendors.picker-options');
     Route::get('passkey/setup', PasskeySetup::class)->name('passkey.setup');
+    // In-person meeting recordings: the browser posts the audio in pieces while it
+    // records. Only the person recording, only while it records (the controller
+    // checks) — no page-level redirects, which a background upload can't follow.
+    Route::post('/meeting-recordings/{meetingRecording}/chunks', \App\Http\Controllers\Meetings\MeetingRecordingChunkController::class)
+        ->name('meeting-recordings.chunks');
 });
 
 WebAuthnRoutes::register()->withoutMiddleware(VerifyCsrfToken::class);

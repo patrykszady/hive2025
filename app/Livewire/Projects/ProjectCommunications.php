@@ -15,7 +15,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
- * Calls, texts and emails with a project's stakeholders, newest first, in
+ * Calls, texts, emails and in-person meetings with a project's stakeholders, newest first, in
  * one card — a thin Livewire wrapper around
  * {@see ProjectCommunicationsTimeline}, which already authorizes nothing
  * itself. Same visibility as the Email Tracking card (show.blade.php wraps
@@ -43,6 +43,10 @@ class ProjectCommunications extends Component
     public ?string $nextBefore = null;
 
     public ?int $openEmailId = null;
+
+    public ?int $openMeetingId = null;
+
+    public bool $showMeetingModal = false;
 
     public bool $showEmailModal = false;
 
@@ -132,6 +136,25 @@ class ProjectCommunications extends Component
         return trim(Str::after((string) $email->body_text, $this->selectedEmailLatestPart));
     }
 
+    /** Open an in-person meeting's summary, action items and transcript — this project's only. */
+    public function selectMeeting(int $meetingRecordingId): void
+    {
+        if (! \App\Models\MeetingRecording::query()->whereKey($meetingRecordingId)->where('project_id', $this->project->id)->exists()) {
+            return;
+        }
+
+        $this->openMeetingId = $meetingRecordingId;
+        $this->showMeetingModal = true;
+    }
+
+    #[Computed]
+    public function selectedMeeting(): ?\App\Models\MeetingRecording
+    {
+        return $this->openMeetingId
+            ? \App\Models\MeetingRecording::query()->with('recordedBy')->whereKey($this->openMeetingId)->where('project_id', $this->project->id)->first()
+            : null;
+    }
+
     protected function emailQuery(): Builder
     {
         return EmailMessage::query()
@@ -142,9 +165,9 @@ class ProjectCommunications extends Component
     /** @return list<string> */
     protected function kinds(): array
     {
-        return in_array($this->kind, ProjectCommunicationsTimeline::KINDS, true)
+        return in_array($this->kind, ProjectCommunicationsTimeline::ALL_KINDS, true)
             ? [$this->kind]
-            : ProjectCommunicationsTimeline::KINDS;
+            : ProjectCommunicationsTimeline::ALL_KINDS;
     }
 
     protected function loadFirstPage(): void
