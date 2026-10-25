@@ -47,6 +47,8 @@
                 @can('update', $vendor)
                     @if(in_array($vendor->business_type, ["Sub", "DBA"]))
                         <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy />
+                        {{-- ESTIMATES & INVOICES this sub sent, compared on our estimates --}}
+                        <livewire:vendors.vendor-sub-documents :vendor="$vendor" :key="'vendor-sub-documents-'.$vendor->id" lazy />
                     @endif 
                     {{-- <livewire:vendors.vendor-finances :vendor="$vendor" /> --}}
                 @endcan

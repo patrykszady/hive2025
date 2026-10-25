@@ -394,6 +394,14 @@
                 AI Generate
             </flux:button>
 
+            <flux:button
+                wire:click="$dispatchTo('estimates.estimate-sub-document-compare', 'openSubDocumentCompare')"
+                variant="filled"
+                icon="document-arrow-up"
+                >
+                Compare Sub Invoice
+            </flux:button>
+
             @if(count($trashedSections) > 0)
                 <flux:dropdown>
                     <flux:button icon="arrow-path"></flux:button>
@@ -417,6 +425,7 @@
              its draft mid-edit. --}}
         <livewire:line-items.estimate-line-item-create :estimate="$estimate" wire:key="estimate-line-item-create-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-a-i-generator :estimate="$estimate" wire:key="estimate-ai-generator-{{ $estimate->id }}"/>
+        <livewire:estimates.estimate-sub-document-compare :estimate="$estimate" wire:key="estimate-sub-document-compare-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-email wire:key="estimate-email-{{ $estimate->id }}"/>
         @endcan
     </div>

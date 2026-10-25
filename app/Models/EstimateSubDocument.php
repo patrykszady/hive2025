@@ -1,0 +1,76 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+/**
+ * A subcontractor's updated estimate or invoice compared against one of our
+ * estimates. The AI reads its line items (document), matches them to the
+ * estimate's catalog items and proposes the change-order additions and
+ * credits (proposals); the admin ticks what to apply
+ * (App\Services\Estimates\SubDocumentChangeOrderApplier) and the created
+ * line item ids are kept in applied.
+ */
+class EstimateSubDocument extends Model
+{
+    use HasFactory;
+
+    public const STATUS_EXTRACTING = 'extracting';
+
+    public const STATUS_MATCHED = 'matched';
+
+    public const STATUS_APPLIED = 'applied';
+
+    public const STATUS_FAILED = 'failed';
+
+    protected $fillable = [
+        'estimate_id', 'project_id', 'belongs_to_vendor_id', 'sub_vendor_id', 'uploaded_by_user_id', 'status',
+        'file_disk', 'file_path', 'original_name', 'mime_type', 'document', 'proposals', 'applied', 'applied_at',
+        'model', 'failure_reason',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'document' => 'array',
+            'proposals' => 'array',
+            'applied' => 'array',
+            'applied_at' => 'datetime',
+        ];
+    }
+
+    public function estimate(): BelongsTo
+    {
+        return $this->belongsTo(Estimate::class)->withoutGlobalScopes();
+    }
+
+    public function subVendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'sub_vendor_id')->withoutGlobalScopes();
+    }
+
+    public function uploadedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'uploaded_by_user_id');
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(EstimateSubDocumentItem::class)->orderBy('index');
+    }
+
+    /** "Smartech Electric invoice #0062 (Oct 22)": how the document is referred to. */
+    public function label(): string
+    {
+        $vendor = $this->subVendor?->name ?: data_get($this->document, 'vendor_name') ?: 'Sub';
+        $type = data_get($this->document, 'document_type') ?: 'document';
+        $number = data_get($this->document, 'document_number');
+        $date = data_get($this->document, 'document_date');
+
+        return trim($vendor.' '.$type.($number ? ' #'.$number : '').($date ? ' ('.date('M j, Y', strtotime($date)).')' : ''));
+    }
+}

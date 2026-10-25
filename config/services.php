@@ -48,6 +48,8 @@ return [
         'task_extraction_model' => env('OPENAI_TASK_EXTRACTION_MODEL', 'gpt-4.1'),
         // Embeds past estimate sections and new enquiries for the AI estimate generator's retrieval.
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
+        // Reads a sub's updated estimate/invoice and matches it to our estimate (EstimateSubDocumentCompare).
+        'sub_document_model' => env('OPENAI_SUB_DOCUMENT_MODEL', 'gpt-4.1'),
         'vendor_suggestion_model' => env('OPENAI_VENDOR_SUGGESTION_MODEL', 'gpt-4o'),
         'vendor_suggestion_fallback_model' => env('OPENAI_VENDOR_SUGGESTION_FALLBACK_MODEL', 'gpt-4o'),
         // Re-reads a receipt's line items from its OCR text when Azure's items
