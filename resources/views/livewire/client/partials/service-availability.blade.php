@@ -31,6 +31,9 @@
     class="mb-6"
     x-data="{
         selected: $wire.entangle('selectedServiceSlots'),
+        // What Livewire hands over is a list; a stale page once sent an
+        // object and every getter below threw (2026-10-22).
+        get picked() { return Array.isArray(this.selected) ? this.selected : Object.values(this.selected || {}) },
         focusedDay: @js($initialFocusedDay),
         days: @js($dayMeta),
         maxDays: 90,
@@ -64,7 +67,7 @@
             this.days = [...this.days, ...added];
         },
         key(day, time) { return day + '|' + time },
-        isSelected(day, time) { return this.selected.includes(this.key(day, time)) },
+        isSelected(day, time) { return this.picked.includes(this.key(day, time)) },
         isDisabled(day) { return this.days.find(d => d.date === day)?.isWeekend ?? false },
         toggle(day, time) {
             if (this.isDisabled(day)) { return }
@@ -72,6 +75,7 @@
             const k = this.key(day, time);
             const anytimeKey = this.key(day, 'Anytime');
             const dayPrefix = day + '|';
+            if (! Array.isArray(this.selected)) { this.selected = this.picked }
             const i = this.selected.indexOf(k);
 
             if (time === 'Anytime') {
@@ -95,9 +99,9 @@
                 this.selected.splice(i, 1)
             }
         },
-        daySelectedCount(day) { return this.selected.filter(s => s.startsWith(day + '|')).length },
-        get slotCount() { return this.selected.length },
-        get dayCount() { return new Set(this.selected.map(s => s.split('|')[0])).size },
+        daySelectedCount(day) { return this.picked.filter(s => s.startsWith(day + '|')).length },
+        get slotCount() { return this.picked.length },
+        get dayCount() { return new Set(this.picked.map(s => s.split('|')[0])).size },
         get meetsMinimum() { return this.slotCount >= 3 && this.dayCount >= 3 },
         get focusedMeta() { return this.days.find(d => d.date === this.focusedDay) || this.days[0] },
         get groupedSelected() {

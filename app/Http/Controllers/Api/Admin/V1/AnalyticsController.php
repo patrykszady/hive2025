@@ -48,6 +48,7 @@ class AnalyticsController extends Controller
     /** site_events.event -> the type it maps to; 'signup' is this site's only cta_click source. */
     protected const EVENT_TYPES = [
         'call' => 'phone_click',
+        'text' => 'text_click',
         'email' => 'email_click',
         'signup' => 'cta_click',
     ];
