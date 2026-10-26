@@ -449,7 +449,7 @@ class EstimateSubDocumentCompare extends Component
 
     protected function documentQuery()
     {
-        return EstimateSubDocument::query()->where('estimate_id', $this->estimate->id);
+        return EstimateSubDocument::query()->where('estimate_id', $this->estimate->id)->where('kind', EstimateSubDocument::KIND_INVOICE);
     }
 
     public function render(): View

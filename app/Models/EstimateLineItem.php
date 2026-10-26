@@ -20,6 +20,12 @@ class EstimateLineItem extends Pivot
 
     public $incrementing = true;
 
+    /** @return array<string, string> */
+    protected function casts(): array
+    {
+        return ['window_spec' => 'array'];
+    }
+
     //via_vendor
     // public function via_vendor()
     // {

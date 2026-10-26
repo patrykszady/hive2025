@@ -149,6 +149,7 @@ class EstimateSectionWriter
                 'total' => $lineItem->total,
                 'desc' => $lineItem->desc,
                 'notes' => $lineItem->notes,
+                'window_spec' => $lineItem->window_spec,
             ]);
 
             foreach ($lineItem->allowances as $allowance) {

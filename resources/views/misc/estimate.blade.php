@@ -185,6 +185,8 @@
                                             {{-- first td --}}
 
                                             <td class="py-5 pl-4 pr-3 text-md max-w-0 sm:pl-6 align-top">
+                                                <div style="display: flex; align-items: flex-start; gap: 12px;">
+                                                <x-window-diagram :spec="$estimate_line_item->window_spec" :width="64" />
                                                 <div class="flex flex-col leading-5">
                                                     <div class="text-lg font-medium text-gray-900">
                                                         {{$estimate_line_item->name}}
@@ -203,6 +205,7 @@
                                                         <div class="text-xs italic text-gray-400">Allowance: {{ $allowance->description }}</div>
                                                     @endforeach
                                                     @endif
+                                                </div>
                                                 </div>
                                             </td>
 

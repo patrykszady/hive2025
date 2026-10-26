@@ -90,14 +90,17 @@
                                     <flux:table.row wire:key="line-item-{{$line_item->id}}" wire:transition>
                                         <flux:table.cell class="align-top !pl-6">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
                                         <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
-                                            <div class="flex flex-col min-w-0">
-                                                <div class="leading-5 flex items-center gap-x-1">
-                                                    <b class="min-w-0">{{$line_item->name}}</b>
-                                                    @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
-                                                        <flux:badge size="sm" color="orange" class="shrink-0 whitespace-nowrap">Credit on line item {{ $creditNumber }}</flux:badge>
-                                                    @endforeach
+                                            <div class="flex items-start gap-3 min-w-0">
+                                                <x-window-diagram :spec="$line_item->window_spec" :width="44" class="mt-0.5" />
+                                                <div class="flex flex-col min-w-0">
+                                                    <div class="leading-5 flex items-center gap-x-1">
+                                                        <b class="min-w-0">{{$line_item->name}}</b>
+                                                        @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
+                                                            <flux:badge size="sm" color="orange" class="shrink-0 whitespace-nowrap">Credit on line item {{ $creditNumber }}</flux:badge>
+                                                        @endforeach
+                                                    </div>
+                                                    <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
                                                 </div>
-                                                <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
                                             </div>
                                         </flux:table.cell>
                                         <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
@@ -269,22 +272,25 @@
                                                 <flux:table.row wire:sort:item="{{$line_item->id}}" wire:key="line-item-{{$line_item->id}}" wire:transition :class="$liChanged ? 'bg-yellow-50!' : ''">
                                                     <flux:table.cell wire:sort:handle class="cursor-grab active:cursor-grabbing align-top !pl-16">{{$index + 1}}.{{$activeNumber}}</flux:table.cell>
                                                         <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
-                                                            <div class="flex flex-col min-w-0">
-                                                                <div class="leading-5 flex items-center gap-x-1">
-                                                                    <a
-                                                                        class="cursor-pointer min-w-0"
-                                                                        wire:click="$dispatchTo('line-items.estimate-line-item-create', 'editOnEstimate', { estimate_line_item_id: {{$line_item->id}} })"
-                                                                        >
-                                                                        <b>{{$line_item->name}}</b>
-                                                                    </a>
-                                                                    @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
-                                                                        <flux:badge size="sm" color="orange" class="shrink-0 whitespace-nowrap">Credit on line item {{ $creditNumber }}</flux:badge>
-                                                                    @endforeach
-                                                                    @if($liChanged)
-                                                                        <flux:badge size="sm" color="amber" class="ml-1">{{ ucfirst($liChanged['event']) }}</flux:badge>
-                                                                    @endif
+                                                            <div class="flex items-start gap-3 min-w-0">
+                                                                <x-window-diagram :spec="$line_item->window_spec" :width="44" class="mt-0.5" />
+                                                                <div class="flex flex-col min-w-0">
+                                                                    <div class="leading-5 flex items-center gap-x-1">
+                                                                        <a
+                                                                            class="cursor-pointer min-w-0"
+                                                                            wire:click="$dispatchTo('line-items.estimate-line-item-create', 'editOnEstimate', { estimate_line_item_id: {{$line_item->id}} })"
+                                                                            >
+                                                                            <b>{{$line_item->name}}</b>
+                                                                        </a>
+                                                                        @foreach($this->creditBadges[$line_item->id] ?? [] as $creditNumber)
+                                                                            <flux:badge size="sm" color="orange" class="shrink-0 whitespace-nowrap">Credit on line item {{ $creditNumber }}</flux:badge>
+                                                                        @endforeach
+                                                                        @if($liChanged)
+                                                                            <flux:badge size="sm" color="amber" class="ml-1">{{ ucfirst($liChanged['event']) }}</flux:badge>
+                                                                        @endif
+                                                                    </div>
+                                                                    <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
                                                                 </div>
-                                                                <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
                                                             </div>
                                                         </flux:table.cell>
                                                         <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
@@ -402,6 +408,14 @@
                 Compare Sub Invoice
             </flux:button>
 
+            <flux:button
+                wire:click="$dispatchTo('estimates.estimate-supplier-quote', 'openSupplierQuote')"
+                variant="filled"
+                icon="window"
+                >
+                Add Supplier Quote
+            </flux:button>
+
             @if(count($trashedSections) > 0)
                 <flux:dropdown>
                     <flux:button icon="arrow-path"></flux:button>
@@ -426,6 +440,7 @@
         <livewire:line-items.estimate-line-item-create :estimate="$estimate" wire:key="estimate-line-item-create-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-a-i-generator :estimate="$estimate" wire:key="estimate-ai-generator-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-sub-document-compare :estimate="$estimate" wire:key="estimate-sub-document-compare-{{ $estimate->id }}"/>
+        <livewire:estimates.estimate-supplier-quote :estimate="$estimate" wire:key="estimate-supplier-quote-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-email wire:key="estimate-email-{{ $estimate->id }}"/>
         @endcan
     </div>
