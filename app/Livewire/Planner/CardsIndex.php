@@ -2607,11 +2607,20 @@ class CardsIndex extends Component
             ->implode("
 ");
 
+        // The project's own task when the item is one (an undated "Counter
+        // Measure" gets its day instead of a twin) — the same match a text's
+        // or an email's suggestion makes.
+        $existing = app(\App\Services\Sms\MessageTaskSuggestionBuilder::class)
+            ->matchExistingTask((int) $item->project_id, (string) $item->title, $item->due_on?->toDateString());
+
         $this->dispatch('prefillTaskFromSms', payload: [
-            'title' => $item->title,
+            'task_id' => $existing?->id,
+            'title' => $existing?->title ?? $item->title,
             'project_id' => $item->project_id,
             'client_id' => $item->project?->client_id,
             'date' => $item->due_on?->toDateString(),
+            'start_time' => $item->start_time,
+            'end_time' => $item->end_time,
             'notes' => $notes,
             'action_item_id' => $item->id,
         ])->to(TaskCreate::class);

@@ -2,7 +2,9 @@
 
 namespace App\Services\Sms;
 
+use App\Jobs\SummarizeEmailMessage;
 use App\Models\Client;
+use App\Models\EmailMessage;
 use App\Models\Project;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
@@ -19,6 +21,11 @@ use Carbon\Carbon;
  * to do inline. Shared as-is by the web component (which only wraps this in
  * its own toasts/dispatch) and the app's task-suggestion endpoint, so both
  * surfaces compute the exact same suggestion for the exact same message.
+ *
+ * Emails take the same road (suggestForEmail, 2026-10-26): the same
+ * extraction, the same match against the project's tasks, the same payload
+ * for TaskCreate::prefillTaskFromSms — from the project's email timeline
+ * and the app's email screen.
  */
 class MessageTaskSuggestionBuilder
 {
@@ -51,7 +58,8 @@ class MessageTaskSuggestionBuilder
             ? $this->fallbackExtractFromScheduleReply($message, $sentAt)
             : null;
 
-        $extracted = $extractor->extract($text, $sentAt, $this->conversationContext($message, $threadId), $this->contextSpeaker($message));
+        $thread = $threadId ? SmsGroupThread::find($threadId) : null;
+        $extracted = $extractor->extract($text, $sentAt, $this->conversationContext($message, $threadId), $this->contextSpeaker($message), $this->scheduleTitles($thread?->project_id));
 
         if ($scheduleReplyFallback && ($scheduleReplyFallback['has_task'] ?? false) && ($scheduleReplyFallback['title'] ?? '') !== '') {
             $extracted = $scheduleReplyFallback;
@@ -77,7 +85,6 @@ class MessageTaskSuggestionBuilder
 
         $smsImageUrls = $this->imagesForTaskFromMessage($message, $threadId);
 
-        $thread = $threadId ? SmsGroupThread::find($threadId) : null;
         $matchedTask = null;
         $matchedTaskId = isset($extracted['task_id']) && is_numeric($extracted['task_id'])
             ? (int) $extracted['task_id']
@@ -116,35 +123,68 @@ class MessageTaskSuggestionBuilder
         }
 
         if (! $matchedTask && $projectId) {
-            $matchedTask = Task::query()
-                ->where('project_id', $projectId)
-                ->where(function ($titleQuery) use ($extracted) {
-                    $title = strtolower(trim((string) ($extracted['title'] ?? '')));
-                    if ($title === '') {
-                        return;
-                    }
-
-                    $titleQuery->whereRaw('LOWER(TRIM(title)) = ?', [$title])
-                        ->orWhereRaw('LOWER(title) LIKE ?', ['%' . $title . '%']);
-                })
-                ->when(! empty($extracted['date']), function ($dateQuery) use ($extracted) {
-                    $date = (string) $extracted['date'];
-
-                    $dateQuery->where(function ($innerDateQuery) use ($date) {
-                        $innerDateQuery->whereDate('start_date', $date)
-                            ->orWhere(function ($rangeQuery) use ($date) {
-                                $rangeQuery->whereNotNull('start_date')
-                                    ->whereNotNull('end_date')
-                                    ->whereDate('start_date', '<=', $date)
-                                    ->whereDate('end_date', '>=', $date);
-                            });
-                    });
-                })
-                ->latest('id')
-                ->first();
+            $matchedTask = $this->matchExistingTask($projectId, (string) ($extracted['title'] ?? ''), $extracted['date'] ?? null);
         }
 
-        $payload = [
+        $payload = $this->payload($extracted, $matchedTask, $projectId, $client, $vendorId, $text, $checklistItems->all(), $smsImageUrls);
+
+        return ['ok' => true, 'reason' => null, 'heading' => null, 'text' => null, 'payload' => $payload];
+    }
+
+    /**
+     * The same suggestion for a stakeholder email on the project's timeline
+     * (or the app's email screen): its new part, the earlier emails of the
+     * conversation as context, the project's tasks as titles to reuse.
+     *
+     * @return array{ok: bool, reason: ?string, heading: ?string, text: ?string, payload: ?array<string, mixed>}
+     */
+    public function suggestForEmail(EmailMessage $email, SmsTaskExtractionService $extractor): array
+    {
+        $text = trim(SummarizeEmailMessage::latestPart((string) $email->body_text));
+
+        if ($text === '') {
+            return $this->failure('no_text', 'No Text', 'This email has no text to analyze.');
+        }
+
+        $project = $email->project_id ? Project::query()->with('client')->find($email->project_id) : null;
+
+        if (! $project) {
+            return $this->failure('no_project', 'No Project', 'Place this email on a project before creating a task.', 4500);
+        }
+
+        if (! $project->client) {
+            return $this->failure('no_client', 'No Client', 'This project has no client to attach the task to.', 4500);
+        }
+
+        $sentAt = $email->sent_at->copy()->setTimezone(vendor_timezone());
+        $message = ($email->subject ? 'Subject: '.$email->subject."\n\n" : '').$text;
+        $extracted = $extractor->extract($message, $sentAt, $this->emailContext($email), $this->emailSpeaker($email), $this->scheduleTitles($project->id));
+
+        if (! $extracted || ! $extracted['has_task'] || $extracted['title'] === '') {
+            return $this->failure('no_task', 'No Task Found', 'No schedulable task was found in this email.');
+        }
+
+        $matchedTask = $this->matchExistingTask($project->id, (string) $extracted['title'], $extracted['date'] ?? null);
+        $vendorId = $email->isInbound() ? $this->senderVendorId($email, $project) : null;
+
+        $payload = $this->payload($extracted, $matchedTask, $project->id, $project->client, $vendorId, $text, (array) ($extracted['checklist'] ?? []), [])
+            + ['email_message_id' => $email->id];
+
+        return ['ok' => true, 'reason' => null, 'heading' => null, 'text' => null, 'payload' => $payload];
+    }
+
+    /**
+     * The prefill TaskCreate::prefillTaskFromSms() reads — one shape for a
+     * text and an email.
+     *
+     * @param  array<string, mixed>  $extracted
+     * @param  list<string>  $checklist
+     * @param  list<string>  $mediaUrls
+     * @return array<string, mixed>
+     */
+    protected function payload(array $extracted, ?Task $matchedTask, int $projectId, Client $client, ?int $vendorId, string $text, array $checklist, array $mediaUrls): array
+    {
+        return [
             'task_id' => $matchedTask?->id ?? ($extracted['task_id'] ?? null),
             'title' => $extracted['title'],
             'type' => $extracted['type'],
@@ -156,14 +196,14 @@ class MessageTaskSuggestionBuilder
             'date' => $extracted['date'],
             'start_time' => $extracted['start_time'],
             'end_time' => $extracted['end_time'],
-            'user_ids' => $this->resolveAssigneeUserIds($extracted['assignee_names']),
-            'checklist' => $checklistItems
+            'user_ids' => $this->resolveAssigneeUserIds($extracted['assignee_names'] ?? []),
+            'checklist' => collect($checklist)
                 ->map(fn ($item) => trim((string) $item))
                 ->filter()
                 ->map(fn (string $text) => ['text' => $text, 'completed' => false])
                 ->values()
                 ->all(),
-            'sms_media_urls' => $smsImageUrls,
+            'sms_media_urls' => $mediaUrls,
             'additional_tasks' => collect($extracted['additional_tasks'] ?? [])
                 ->map(fn (array $task) => [
                     'title' => $task['title'],
@@ -177,8 +217,188 @@ class MessageTaskSuggestionBuilder
                 ->all(),
             'multi_time' => preg_match_all('/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i', $text) >= 2,
         ];
+    }
 
-        return ['ok' => true, 'reason' => null, 'heading' => null, 'text' => null, 'payload' => $payload];
+    /**
+     * The project's task this suggestion is about: same title (or one
+     * containing the other) on the suggested day — or not dated yet, so a
+     * suggestion with a date fills in "Counter Measure" instead of making a
+     * second one beside it (949 Elm / Abbey, 2026-10-26). Failing that, the
+     * one task there whose every word starts a word of the suggestion
+     * ("Counter Measure" for "Countertop Template Measurement").
+     * Shared with the planner's "Make task" (CardsIndex::actionItemToTask).
+     */
+    public function matchExistingTask(int $projectId, string $title, ?string $date): ?Task
+    {
+        $title = strtolower(trim($title));
+
+        if ($title === '') {
+            return null;
+        }
+
+        return $this->matchByTitle($projectId, $title, $date) ?? $this->matchByWords($projectId, $title, $date);
+    }
+
+    protected function matchByTitle(int $projectId, string $title, ?string $date): ?Task
+    {
+        return Task::query()
+            ->where('project_id', $projectId)
+            ->where(function ($titleQuery) use ($title) {
+                $titleQuery->whereRaw('LOWER(TRIM(title)) = ?', [$title])
+                    ->orWhereRaw('LOWER(title) LIKE ?', ['%'.$title.'%']);
+            })
+            ->when(! empty($date), function ($dateQuery) use ($date) {
+                $dateQuery->where(function ($innerDateQuery) use ($date) {
+                    $innerDateQuery->whereNull('start_date')
+                        ->orWhereDate('start_date', $date)
+                        ->orWhere(function ($rangeQuery) use ($date) {
+                            $rangeQuery->whereNotNull('start_date')
+                                ->whereNotNull('end_date')
+                                ->whereDate('start_date', '<=', $date)
+                                ->whereDate('end_date', '>=', $date);
+                        });
+                });
+            })
+            ->latest('id')
+            ->first();
+    }
+
+    /** The single undated (or same-day) task whose words all lead words of the suggestion. */
+    protected function matchByWords(int $projectId, string $title, ?string $date): ?Task
+    {
+        $suggested = self::titleWords($title);
+
+        if ($suggested === []) {
+            return null;
+        }
+
+        $candidates = Task::query()
+            ->where('project_id', $projectId)
+            ->where(function ($query) use ($date) {
+                $query->whereNull('start_date');
+                if ($date) {
+                    $query->orWhereDate('start_date', $date)
+                        ->orWhere(fn ($range) => $range->whereNotNull('end_date')->whereDate('start_date', '<=', $date)->whereDate('end_date', '>=', $date));
+                }
+            })
+            ->get()
+            ->filter(function (Task $task) use ($suggested) {
+                $words = self::titleWords((string) $task->title);
+
+                return $words !== [] && collect($words)->every(
+                    fn (string $word) => collect($suggested)->contains(fn (string $other) => str_starts_with($other, $word) || str_starts_with($word, $other))
+                );
+            });
+
+        return $candidates->count() === 1 ? $candidates->first() : null;
+    }
+
+    /** @return list<string> the words of a title worth comparing (4+ letters) */
+    protected static function titleWords(string $title): array
+    {
+        return array_values(array_filter(
+            explode(' ', \App\Models\ProjectActionItem::normalizedWords($title)),
+            fn (string $word) => strlen($word) >= 4,
+        ));
+    }
+
+    /**
+     * The titles of the project's tasks still ahead or undated, for the
+     * extractor to reuse.
+     *
+     * @return list<string>
+     */
+    protected function scheduleTitles(?int $projectId): array
+    {
+        if (! $projectId) {
+            return [];
+        }
+
+        return Task::withoutGlobalScopes()
+            ->where('project_id', $projectId)
+            ->whereNull('deleted_at')
+            ->where(fn ($query) => $query->whereNull('end_date')->orWhere('end_date', '>=', now()->subDays(7)->toDateString()))
+            ->orderBy('start_date')
+            ->limit(60)
+            ->pluck('title')
+            ->map(fn ($title) => trim((string) $title))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The emails before this one in the same conversation (same project,
+     * same subject once Re:/Fwd: are stripped), oldest first — "Actually,
+     * it's Thursday" only means the counter measure next to the email that
+     * set it for Tuesday.
+     *
+     * @return list<array{who: string, sent_at: \Carbon\CarbonInterface, text: string}>
+     */
+    protected function emailContext(EmailMessage $email): array
+    {
+        $subject = self::bareSubject((string) $email->subject);
+
+        return EmailMessage::query()
+            ->where('project_id', $email->project_id)
+            ->where('id', '!=', $email->id)
+            ->where('sent_at', '<=', $email->sent_at)
+            ->where('sent_at', '>=', $email->sent_at->copy()->subDays(self::TASK_CONTEXT_DAYS))
+            ->orderByDesc('sent_at')
+            ->limit(self::TASK_CONTEXT_MESSAGES * 3)
+            ->get()
+            ->filter(fn (EmailMessage $earlier) => $subject === '' || self::bareSubject((string) $earlier->subject) === $subject)
+            ->take(self::TASK_CONTEXT_MESSAGES)
+            ->reverse()
+            ->map(fn (EmailMessage $earlier) => [
+                'who' => $this->emailSpeaker($earlier),
+                'sent_at' => $earlier->sent_at->copy()->setTimezone(vendor_timezone()),
+                'text' => trim(SummarizeEmailMessage::latestPart((string) $earlier->body_text)),
+            ])
+            ->filter(fn (array $earlier) => $earlier['text'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /** "Patryk (our team)" for our side, the sender's name for theirs. */
+    protected function emailSpeaker(EmailMessage $email): string
+    {
+        if (! $email->isInbound()) {
+            $first = $email->mailbox ? User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [strtolower((string) $email->mailbox)])->value('first_name') : null;
+
+            return trim(($first ?: 'Team').' (our team)');
+        }
+
+        return trim((string) $email->from_name) ?: (string) $email->from_email;
+    }
+
+    /** The company of a sender who is a vendor's user (a sub or supplier writing in), never our own. */
+    protected function senderVendorId(EmailMessage $email, Project $project): ?int
+    {
+        $user = User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [strtolower((string) $email->from_email)])->first();
+
+        if (! $user) {
+            return null;
+        }
+
+        $vendorId = $user->vendors()->withoutGlobalScopes()
+            ->where('vendors.id', '!=', $project->belongs_to_vendor_id)
+            ->orderBy('vendors.id')
+            ->value('vendors.id');
+
+        return $vendorId ? (int) $vendorId : null;
+    }
+
+    /** "Re: Fwd: Abbey counter template" → "abbey counter template". */
+    public static function bareSubject(string $subject): string
+    {
+        $subject = trim($subject);
+        while (preg_match('/^\s*(re|aw|sv|vs|odp|fw|fwd|tr|wg|pd)\s*(\[\d+\])?\s*:\s*/i', $subject, $m)) {
+            $subject = substr($subject, strlen($m[0]));
+        }
+
+        return mb_strtolower(trim($subject));
     }
 
     /**

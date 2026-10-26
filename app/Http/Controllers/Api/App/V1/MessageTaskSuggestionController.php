@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\App\V1;
 
+use App\Http\Controllers\Api\App\V1\Concerns\ResolvesAppEmail;
 use App\Http\Controllers\Api\App\V1\Concerns\ResolvesAppThread;
 use App\Http\Controllers\Controller;
 use App\Models\SmsMessage;
@@ -16,11 +17,12 @@ use Illuminate\Http\Request;
  * exact same AI-extracted suggestion the web computes (via
  * MessageTaskSuggestionBuilder, shared with the web component); the app then
  * opens its own task create screen prefilled with it instead of the web's
- * in-page modal.
+ * in-page modal. Emails get the same suggestion (email(), the project
+ * communications timeline's "Create Task") through the same builder.
  */
 class MessageTaskSuggestionController extends Controller
 {
-    use ResolvesAppThread;
+    use ResolvesAppEmail, ResolvesAppThread;
 
     public function store(Request $request, int $thread, int $message, MessageTaskSuggestionBuilder $builder, SmsTaskExtractionService $extractor): JsonResponse
     {
@@ -29,6 +31,20 @@ class MessageTaskSuggestionController extends Controller
         $smsMessage = SmsMessage::where('thread_id', $thread)->whereKey($message)->firstOrFail();
 
         $result = $builder->suggest($smsMessage, $thread, $extractor);
+
+        if (! $result['ok']) {
+            return response()->json(['reason' => $result['reason'], 'message' => $result['text']], 422);
+        }
+
+        return response()->json(['data' => $result['payload']]);
+    }
+
+    /** "Create Task" from a stakeholder email — the same suggestion the web's email detail opens. */
+    public function email(Request $request, int $email, MessageTaskSuggestionBuilder $builder, SmsTaskExtractionService $extractor): JsonResponse
+    {
+        $found = $this->resolveAppEmail($email, $request->user());
+
+        $result = $builder->suggestForEmail($found, $extractor);
 
         if (! $result['ok']) {
             return response()->json(['reason' => $result['reason'], 'message' => $result['text']], 422);

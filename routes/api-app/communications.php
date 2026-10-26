@@ -25,3 +25,5 @@ Route::get('emails/{email}', [AppEmailController::class, 'show'])
     ->name('emails.show');
 Route::post('emails/{email}/place', [AppEmailController::class, 'place'])->whereNumber('email')->name('emails.place');
 Route::post('emails/{email}/dismiss', [AppEmailController::class, 'dismiss'])->whereNumber('email')->name('emails.dismiss');
+// "Create Task" from an email — the same suggestion texts get (threads/{thread}/messages/{message}/task-suggestion).
+Route::post('emails/{email}/task-suggestion', [\App\Http\Controllers\Api\App\V1\MessageTaskSuggestionController::class, 'email'])->whereNumber('email')->name('emails.task-suggestion');

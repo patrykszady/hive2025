@@ -3,9 +3,13 @@
 namespace App\Livewire\Projects;
 
 use App\Jobs\SummarizeEmailMessage;
+use App\Livewire\Tasks\TaskCreate;
 use App\Models\EmailMessage;
 use App\Models\Project;
 use App\Services\Communications\ProjectCommunicationsTimeline;
+use App\Services\Sms\MessageTaskSuggestionBuilder;
+use App\Services\SmsTaskExtractionService;
+use Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -112,6 +116,34 @@ class ProjectCommunications extends Component
         }
 
         return $this->emailQuery()->find($this->openEmailId);
+    }
+
+    /**
+     * "Create Task" from the open email — the same suggestion a text gets
+     * (MessageTaskSuggestionBuilder, SmsTaskExtractionService), opened in
+     * the task dialog for review: an email that sets the counter measure
+     * for Thursday 10/29, 11-1 fills in the project's "Counter Measure".
+     */
+    public function createTaskFromEmail(int $emailMessageId, SmsTaskExtractionService $extractor): void
+    {
+        $this->authorize('update', $this->project);
+
+        $email = $this->emailQuery()->find($emailMessageId);
+
+        if (! $email) {
+            return;
+        }
+
+        $result = app(MessageTaskSuggestionBuilder::class)->suggestForEmail($email, $extractor);
+
+        if (! $result['ok']) {
+            Flux::toast(variant: 'warning', heading: $result['heading'], text: $result['text'], duration: $result['duration'] ?? 4000, position: 'top right');
+
+            return;
+        }
+
+        $this->showEmailModal = false;
+        $this->dispatch('prefillTaskFromSms', payload: $result['payload'])->to(TaskCreate::class);
     }
 
     /** The new part of the open email, without the quoted history below it. */

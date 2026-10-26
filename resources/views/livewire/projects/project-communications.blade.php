@@ -130,6 +130,7 @@
             'email' => $email,
             'latestPart' => $this->selectedEmailLatestPart,
             'quotedPart' => $this->selectedEmailQuotedPart,
+            'canCreateTask' => (bool) $email->project_id,
         ])
     @endif
 </flux:modal>

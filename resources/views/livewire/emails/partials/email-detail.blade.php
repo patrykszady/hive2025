@@ -1,4 +1,5 @@
-{{-- One stakeholder email in full: header, AI summary + action items, the
+{{-- One stakeholder email in full: header, AI summary + action items, a
+     "Create Task" button where the includer passes canCreateTask, the
      new part of the body with the quoted history behind a toggle, and the
      attachments through their signed links. Shared by the project page's
      Communications card and the unplaced email inbox.
@@ -45,6 +46,17 @@
                     @endforeach
                 </ul>
             @endif
+        </div>
+    @endif
+
+    @if ($canCreateTask ?? false)
+        {{-- The same "Create Task" a text has: the AI reads this email and the
+             task dialog opens filled in (the project's own task when it is one). --}}
+        <div>
+            <flux:button size="sm" variant="filled" icon="calendar-days" wire:click="createTaskFromEmail({{ $email->id }})" wire:loading.attr="disabled" wire:target="createTaskFromEmail" data-create-task-from-email>
+                <span wire:loading.remove wire:target="createTaskFromEmail">Create Task</span>
+                <span wire:loading wire:target="createTaskFromEmail">Reading the email…</span>
+            </flux:button>
         </div>
     @endif
 

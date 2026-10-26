@@ -33,8 +33,9 @@ class SmsTaskExtractionService
      *
      * @param  list<array{who: string, sent_at: CarbonInterface, text: string}>  $context  earlier messages of the thread, oldest first
      * @param  string|null  $speaker  who sent $message ("William", "Patryk (our team)")
+     * @param  list<string>  $scheduleTitles  the project's tasks, when the project is known — a message about one of them takes its exact title, so the suggestion opens that task instead of a twin ("Counter Measure", Abbey, 2026-10-26)
      */
-    public function extract(string $message, CarbonInterface $sentAt, array $context = [], ?string $speaker = null): ?array
+    public function extract(string $message, CarbonInterface $sentAt, array $context = [], ?string $speaker = null, array $scheduleTitles = []): ?array
     {
         $message = trim($message);
 
@@ -137,7 +138,7 @@ PROMPT;
                 'model' => $model,
                 'messages' => [
                     ['role' => 'system', 'content' => $system],
-                    ['role' => 'user', 'content' => $this->userContent($message, $sentAt, $context, $speaker)],
+                    ['role' => 'user', 'content' => $this->userContent($message, $sentAt, $context, $speaker, $scheduleTitles)],
                 ],
                 'response_format' => [
                     'type' => 'json_schema',
@@ -179,8 +180,13 @@ PROMPT;
      *
      * @param  list<array{who: string, sent_at: CarbonInterface, text: string}>  $context
      */
-    protected function userContent(string $message, CarbonInterface $sentAt, array $context, ?string $speaker): string
+    protected function userContent(string $message, CarbonInterface $sentAt, array $context, ?string $speaker, array $scheduleTitles = []): string
     {
+        $titles = array_values(array_filter(array_map(fn ($title) => trim((string) $title), $scheduleTitles)));
+        $schedule = $titles === []
+            ? ''
+            : "Tasks already on this project's schedule: ".implode('; ', $titles).". When the message is about one of these, use that task's exact title.\n\n";
+
         $stamp = fn (CarbonInterface $at): string => $at->format('Y-m-d H:i (l)');
         $lines = [];
         foreach ($context as $earlier) {
@@ -192,7 +198,7 @@ PROMPT;
 
         $final = sprintf("Message%s, sent %s:\n%s", $speaker ? " from {$speaker}" : '', $stamp($sentAt), $message);
 
-        return $lines === [] ? $final : "Earlier messages (context):\n".implode("\n", $lines)."\n\n".$final;
+        return $schedule.($lines === [] ? $final : "Earlier messages (context):\n".implode("\n", $lines)."\n\n".$final);
     }
 
     /**

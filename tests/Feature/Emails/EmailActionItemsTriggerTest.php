@@ -3,8 +3,10 @@
 /**
  * SummarizeEmailMessage queues a re-read of the project's action items
  * (ExtractProjectActionItems) once an email it just read is placed on a
- * project and carries any — delayed ~10 minutes so several emails that
- * land close together are read in one pass (2026-10-19).
+ * project — delayed ~10 minutes so several emails that land close together
+ * are read in one pass (2026-10-19). Since 2026-10-26 the planner reads the
+ * email itself, like a text, so a placed email is read even when its summary
+ * lists no action item (a visit someone else set is never one).
  */
 
 use App\Jobs\ExtractProjectActionItems;
@@ -59,7 +61,7 @@ it('queues a re-read of the project\'s action items when a stakeholder email bri
     });
 });
 
-it('does not queue a re-read when the email carries no action items', function () {
+it('queues a re-read for a placed email even when its summary lists no action item', function () {
     Queue::fake();
     $world = serviceCallWorld('active');
     $email = EmailMessage::factory()->create([
@@ -67,11 +69,13 @@ it('does not queue a re-read when the email carries no action items', function (
         'client_id' => $world['client']->id,
         'candidate_project_ids' => [$world['project']->id],
     ]);
+    // "Measurement is scheduled for Thursday, 10/29 between 11-1pm": nothing
+    // for the team to do, by the summary's rules — but a visit to schedule.
     fakeEmailSummary(['action_items' => [], 'project_id' => $world['project']->id]);
 
     (new SummarizeEmailMessage($email->id))->handle();
 
-    Queue::assertNotPushed(ExtractProjectActionItems::class);
+    Queue::assertPushed(ExtractProjectActionItems::class, fn (ExtractProjectActionItems $job) => $job->projectId === $world['project']->id);
 });
 
 it('does not queue a re-read when the AI could not place the email on a project', function () {
@@ -92,10 +96,24 @@ it('does not queue a re-read when the AI could not place the email on a project'
 
 it('runs the extractor for a planner-active project once the delay elapses', function () {
     $world = serviceCallWorld('active'); // status_code 6
+    // The planner reads the email with the same pass as texts.
+    Http::fake([
+        'api.openai.com/v1/embeddings' => Http::response(['data' => []]),
+        'api.openai.com/v1/chat/completions' => function ($request) {
+            return match (data_get($request->data(), 'response_format.json_schema.name')) {
+                'thread_action_items' => Http::response(['choices' => [['message' => ['content' => json_encode(['items' => [
+                    ['title' => 'Send the revised quote', 'owner' => 'Patryk', 'due_date' => null, 'start_time' => null, 'end_time' => null, 'kind' => 'todo', 'message_ids' => []],
+                ]])]]]]),
+                'action_item_closures' => Http::response(['choices' => [['message' => ['content' => json_encode(['decisions' => []])]]]]),
+                default => Http::response(['choices' => [['message' => ['content' => json_encode(['groups' => []])]]]]),
+            };
+        },
+    ]);
     EmailMessage::factory()->create([
         'belongs_to_vendor_id' => $world['vendor']->id,
         'client_id' => $world['client']->id,
         'project_id' => $world['project']->id,
+        'body_text' => 'Patryk, please send the revised quote when you can.',
         'action_items' => ['Patryk: Send the revised quote'],
         'summarized_at' => now(),
         // The extractor reads emails sent since the day the project was

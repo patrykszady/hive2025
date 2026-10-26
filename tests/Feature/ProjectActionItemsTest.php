@@ -395,31 +395,76 @@ function summarizedEmail(?Project $project, array $items, string $sentAt, ?strin
         'project_id' => $project?->id,
         'sent_at' => $sentAt,
         'subject' => $subject,
+        'body_text' => implode("\n", $items),
         'action_items' => $items,
         'summarized_at' => now(),
     ]);
 }
 
-it('reads a project\'s stakeholder email for action items, grounding the due date on the email\'s sent date', function () {
+/**
+ * The model pass that reads a project's emails — the same one texts get
+ * (2026-10-26). $itemsFor gets the email ids on the request and returns the
+ * items the model "reads" from them; the consolidator's passes answer empty.
+ *
+ * @param  callable(list<int>, string): list<array<string, mixed>>  $itemsFor
+ * @param  list<string>  $prompts  every reading prompt, filled in as they are sent
+ */
+function fakeEmailReading(callable $itemsFor, array &$prompts = []): void
+{
+    Http::fake([
+        'api.openai.com/v1/embeddings' => Http::response(['data' => []]),
+        'api.openai.com/v1/chat/completions' => function ($request) use ($itemsFor, &$prompts) {
+            $name = data_get($request->data(), 'response_format.json_schema.name');
+            if ($name === 'action_item_closures') {
+                return Http::response(['choices' => [['message' => ['content' => json_encode(['decisions' => []])]]]]);
+            }
+            if ($name === 'action_item_merges') {
+                return Http::response(['choices' => [['message' => ['content' => json_encode(['groups' => []])]]]]);
+            }
+            $prompt = (string) data_get($request->data(), 'messages.1.content');
+            $prompts[] = $prompt;
+            preg_match_all('/^#(\d+) /m', $prompt, $ids);
+
+            return Http::response(['choices' => [['message' => ['content' => json_encode(['items' => $itemsFor(array_map('intval', $ids[1]), $prompt)])]]]]);
+        },
+    ]);
+}
+
+/** One item as the reading pass returns it. */
+function readItem(string $title, ?string $owner, array $ids, ?string $due = null, ?string $start = null, ?string $end = null, string $kind = 'todo'): array
+{
+    return ['title' => $title, 'owner' => $owner, 'due_date' => $due, 'start_time' => $start, 'end_time' => $end, 'kind' => $kind, 'message_ids' => $ids];
+}
+
+it('reads a project\'s stakeholder email with the same model pass as texts', function () {
+    config(['services.openai.api_key' => 'test-key']);
     ['project' => $project] = actionItemFixture();
     $email = summarizedEmail($project, ['Patryk: Send the window quote by Friday', 'Mark: Pick the tile color'], '2026-10-08 09:00:00', 'Window quote');
 
+    $prompts = [];
+    fakeEmailReading(fn (array $ids) => in_array($email->id, $ids, true) ? [
+        readItem('Send the window quote by Friday', 'Patryk', [$email->id], '2026-10-09'),
+        readItem('Pick the tile color', 'Mark', [$email->id]),
+    ] : [], $prompts);
+
     $stats = app(ProjectActionItemExtractor::class)->run($project);
 
-    expect($stats)->toMatchArray(['calls' => 0, 'messages' => 0, 'emails' => 1, 'created' => 2, 'merged' => 0]);
+    expect($stats)->toMatchArray(['calls' => 0, 'messages' => 0, 'emails' => 1, 'created' => 2, 'merged' => 0])
+        ->and($prompts)->toHaveCount(1)
+        ->and($prompts[0])->toContain('#'.$email->id.' [')->toContain('Subject: Window quote');
 
     $items = ProjectActionItem::where('project_id', $project->id)->orderBy('id')->get();
     expect($items)->toHaveCount(2);
 
     $quote = $items->firstWhere('title', 'Send the window quote by Friday');
     expect($quote->owner)->toBe('Patryk')
-        ->and($quote->due_on->toDateString())->toBe(Carbon::parse('2026-10-08 09:00:00')->next(Carbon::FRIDAY)->toDateString())
+        ->and($quote->due_on->toDateString())->toBe('2026-10-09')
         ->and($quote->sources)->toBe([[
             'kind' => 'email',
             'id' => $email->id,
             'thread_id' => null,
             'at' => Carbon::parse('2026-10-08 09:00:00')->toIso8601String(),
-            'excerpt' => 'Patryk: Send the window quote by Friday',
+            'excerpt' => 'Patryk: Send the window quote by Friday Mark: Pick the tile color',
             'subject' => 'Window quote',
         ]]);
 
@@ -428,34 +473,59 @@ it('reads a project\'s stakeholder email for action items, grounding the due dat
 });
 
 it('reads a project\'s email only past where it left off', function () {
+    config(['services.openai.api_key' => 'test-key']);
     ['project' => $project] = actionItemFixture();
     $first = summarizedEmail($project, ['Patryk: Send Mark the latest window invoice'], '2026-10-08 10:00:00');
+    $second = null;
+
+    $prompts = [];
+    fakeEmailReading(function (array $ids) use (&$first, &$second) {
+        $items = [];
+        if (in_array($first->id, $ids, true)) {
+            $items[] = readItem('Send Mark the latest window invoice', 'Patryk', [$first->id]);
+        }
+        if ($second && in_array($second->id, $ids, true)) {
+            $items[] = readItem('Send Mark the window invoice', 'Patryk', [$second->id]);
+        }
+
+        return $items;
+    }, $prompts);
+
     app(ProjectActionItemExtractor::class)->run($project);
 
-    // Running again with nothing new changes nothing.
+    // Running again with nothing new changes nothing, and asks nothing.
     app(ProjectActionItemExtractor::class)->run($project);
     expect(ProjectActionItem::where('project_id', $project->id)->first()->mentions)->toBe(1)
+        ->and($prompts)->toHaveCount(1)
         ->and(ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS))->toBe($first->id);
 
     $second = summarizedEmail($project, ['Patryk: Send Mark the window invoice'], '2026-10-11 10:00:00');
     $stats = app(ProjectActionItemExtractor::class)->run($project);
 
     expect($stats['emails'])->toBe(1)
+        ->and($prompts[1])->toContain('#'.$second->id.' [')->not->toContain('#'.$first->id.' [')
         ->and(ProjectActionItem::where('project_id', $project->id)->count())->toBe(1)
         ->and(ProjectActionItem::where('project_id', $project->id)->first()->mentions)->toBe(2)
         ->and(ProjectActionItemScan::lastIdFor($project->id, ProjectActionItemScan::KIND_EMAILS))->toBe($second->id);
 });
 
 it('still reads an email once it is summarized, even after a later email was already read', function () {
+    config(['services.openai.api_key' => 'test-key']);
     ['project' => $project] = actionItemFixture();
 
     // $early is placed on the project (one candidate) the moment it arrives,
-    // but its AI read (which fills action_items) has not finished yet.
+    // but its AI read has not finished yet.
     $early = EmailMessage::factory()->create([
         'project_id' => $project->id, 'sent_at' => '2026-10-08 09:00:00',
+        'body_text' => 'Patryk: Send the revised window quote',
         'action_items' => null, 'summarized_at' => null,
     ]);
     $late = summarizedEmail($project, ['Mark: Pick the tile color'], '2026-10-10 09:00:00');
+
+    fakeEmailReading(fn (array $ids) => array_values(array_filter([
+        in_array($early->id, $ids, true) ? readItem('Send the revised window quote', 'Patryk', [$early->id]) : null,
+        in_array($late->id, $ids, true) ? readItem('Pick the tile color', 'Mark', [$late->id]) : null,
+    ])));
 
     $stats = app(ProjectActionItemExtractor::class)->run($project);
 

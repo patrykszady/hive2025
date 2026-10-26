@@ -21,9 +21,14 @@ use Illuminate\Support\Str;
  * The action tasks a project's phone calls, text messages and stakeholder
  * email add up to.
  *
- * Calls and emails already carry action items (CallTranscript::action_items
- * / EmailMessage::action_items, written by SummarizeCallTranscript and
- * SummarizeEmailMessage); texts get one model pass per batch of messages.
+ * Calls already carry action items (CallTranscript::action_items, written by
+ * SummarizeCallTranscript); texts and stakeholder emails get the same model
+ * pass (readMessages) per batch of messages — emails were read through their
+ * summary's action items until 2026-10-26, which leave out what someone else
+ * scheduled (Kama's "measurement is Thursday 10/29 between 11-1pm" for the
+ * Abbey counters never reached the planner). A visit, delivery, measurement,
+ * inspection or meeting a message sets for a date is an item, with its time,
+ * and named after the project's own task when it is one.
  * Neither calls nor threads are tied to a project, only to its client, so a
  * project's conversations are its client's: the threads on the client and
  * the calls with the client's people (their user ids and phone numbers).
@@ -348,10 +353,9 @@ class ProjectActionItemExtractor
     }
 
     /**
-     * Stakeholder email already carries action items from its own AI read
-     * (EmailMessage::action_items, written by SummarizeEmailMessage) — same
-     * format as a call's ("Patryk: Send the tile quote"), so the same
-     * splitOwner/isTransient/dueDateIn apply.
+     * Stakeholder email, read by the same model pass as texts (readMessages):
+     * the new part of each email (not its quoted history), speaker and sent
+     * time on every line.
      *
      * Unlike calls and texts, email is read by project id directly, not by
      * the client: an email the AI could not confidently place on one of the
@@ -359,10 +363,10 @@ class ProjectActionItemExtractor
      * guessed onto any of them.
      *
      * The bookmark can only advance past a contiguous run of already
-     * summarized emails. SummarizeEmailMessage runs on a queue and can
-     * finish out of order, so an earlier email that was still waiting on
-     * its AI read the last time this ran must still be read once it is —
-     * however many later emails have already been read past it.
+     * summarized emails. SummarizeEmailMessage runs on a queue, places the
+     * email, and can finish out of order, so an earlier email that was still
+     * waiting on its AI read the last time this ran must still be read once
+     * it is — however many later emails have already been read past it.
      *
      * @return array{0: list<array<string, mixed>>, 1: int, 2: int} candidates, emails read, bookmark id
      */
@@ -375,9 +379,9 @@ class ProjectActionItemExtractor
             ->where('id', '>', $afterId)
             ->when($since, fn ($query) => $query->where('sent_at', '>=', $since))
             ->orderBy('id')
-            ->get(['id', 'subject', 'sent_at', 'summarized_at', 'action_items']);
+            ->get(['id', 'subject', 'sent_at', 'summarized_at', 'direction', 'mailbox', 'from_email', 'from_name', 'body_text']);
 
-        $candidates = [];
+        $lines = [];
         $count = 0;
         $lastId = $afterId;
         $blocked = false;
@@ -396,34 +400,42 @@ class ProjectActionItemExtractor
             }
             $count++;
 
-            foreach ((array) ($email->action_items ?? []) as $item) {
-                if (! is_string($item) || trim($item) === '') {
-                    continue;
-                }
-                [$owner, $title] = $this->splitOwner($item);
-                if (self::isTransient($title)) {
-                    continue;
-                }
-                $at = Carbon::parse($email->sent_at);
-                $candidates[] = [
-                    'title' => $title,
-                    'owner' => $owner,
-                    'due_on' => self::dueDateIn($title, $at),
-                    'kind' => 'todo',
-                    'at' => $at,
-                    'source' => [
-                        'kind' => 'email',
-                        'id' => $email->id,
-                        'thread_id' => null,
-                        'at' => $at->toIso8601String(),
-                        'excerpt' => Str::limit(trim($item), 180, ''),
-                        'subject' => $email->subject,
-                    ],
-                ];
+            $text = trim((string) preg_replace('/\s+/', ' ', \App\Jobs\SummarizeEmailMessage::latestPart((string) $email->body_text)));
+            if (! self::isWorthReading($text)) {
+                continue;
             }
+
+            $at = Carbon::parse($email->sent_at);
+            $lines[] = [
+                'id' => $email->id,
+                'at' => $at,
+                'speaker' => $email->isInbound() ? $this->emailSender($email) : 'GS',
+                'text' => trim(($email->subject ? 'Subject: '.$email->subject.' — ' : '').$text),
+                'source' => [
+                    'kind' => 'email',
+                    'id' => $email->id,
+                    'thread_id' => null,
+                    'at' => $at->toIso8601String(),
+                    'excerpt' => Str::limit($text, 180, '…'),
+                    'subject' => $email->subject,
+                ],
+            ];
+        }
+
+        $candidates = [];
+        foreach (array_chunk($lines, self::CHUNK) as $chunk) {
+            $candidates = [...$candidates, ...$this->readMessages($project, $chunk, 'email', ['project_id' => $project->id])];
         }
 
         return [$candidates, $count, $lastId];
+    }
+
+    /** "Kama Dabrzalska" — the sender's name as the email gives it, else the address. */
+    protected function emailSender(EmailMessage $email): string
+    {
+        $name = trim((string) $email->from_name);
+
+        return $name !== '' ? $name : (string) $email->from_email;
     }
 
     // ── Texts ────────────────────────────────────────────────────────────
@@ -465,8 +477,28 @@ class ProjectActionItemExtractor
             $count += $messages->count();
             $bookmarks[$thread->id] = (int) $messages->max('id');
 
-            foreach ($messages->chunk(self::CHUNK) as $chunk) {
-                $candidates = [...$candidates, ...$this->extractFromMessages($project, $thread, $chunk->values(), $names)];
+            $lines = $messages->map(function (SmsMessage $message) use ($names, $thread) {
+                $digits = substr((string) preg_replace('/\D/', '', (string) $message->from_number), -10);
+                $at = Carbon::parse($message->created_at);
+                $text = trim((string) preg_replace('/\s+/', ' ', (string) ($message->display_text ?? $message->text)));
+
+                return [
+                    'id' => $message->id,
+                    'at' => $at,
+                    'speaker' => $message->direction === 'outbound' ? 'GS' : ($names[$digits] ?? 'Client'),
+                    'text' => $text,
+                    'source' => [
+                        'kind' => 'sms',
+                        'id' => $message->id,
+                        'thread_id' => $thread->id,
+                        'at' => $at->toIso8601String(),
+                        'excerpt' => Str::limit($text, 180, '…'),
+                    ],
+                ];
+            })->values()->all();
+
+            foreach (array_chunk($lines, self::CHUNK) as $chunk) {
+                $candidates = [...$candidates, ...$this->readMessages($project, $chunk, 'text', ['thread_id' => $thread->id])];
             }
         }
 
@@ -474,39 +506,47 @@ class ProjectActionItemExtractor
     }
 
     /**
-     * One model pass over a run of messages: the tasks they ask for and the
+     * One model pass over a run of messages — texts or emails, the same
+     * prompt for both: the tasks they ask for, the visits they set, and the
      * tasks they report done, each tied to the messages it came from.
      *
-     * @param  Collection<int, SmsMessage>  $messages
-     * @param  array<string, string>  $names
+     * @param  list<array{id: int, at: Carbon, speaker: string, text: string, source: array<string, mixed>}>  $lines
+     * @param  'text'|'email'  $medium
+     * @param  array<string, mixed>  $logContext
      * @return list<array<string, mixed>>
      */
-    protected function extractFromMessages(Project $project, SmsGroupThread $thread, Collection $messages, array $names): array
+    protected function readMessages(Project $project, array $lines, string $medium, array $logContext = []): array
     {
         $apiKey = (string) config('services.openai.api_key');
-        if ($apiKey === '') {
+        if ($apiKey === '' || $lines === []) {
             return [];
         }
 
-        $byId = $messages->keyBy('id');
-        $lines = $messages->map(function (SmsMessage $message) use ($names) {
-            $digits = substr((string) preg_replace('/\D/', '', (string) $message->from_number), -10);
-            $speaker = $message->direction === 'outbound' ? 'GS' : ($names[$digits] ?? 'Client');
-            $text = trim((string) preg_replace('/\s+/', ' ', (string) ($message->display_text ?? $message->text)));
+        $byId = collect($lines)->keyBy('id');
+        $rendered = collect($lines)
+            ->map(fn (array $line) => sprintf('#%d [%s] %s: %s', $line['id'], $line['at']->copy()->setTimezone(vendor_timezone())->format('Y-m-d H:i D'), $line['speaker'], Str::limit($line['text'], $medium === 'email' ? 1500 : 600, '…')))
+            ->implode("\n");
 
-            return sprintf('#%d [%s] %s: %s', $message->id, Carbon::parse($message->created_at)->format('Y-m-d H:i D'), $speaker, Str::limit($text, 600, '…'));
-        })->implode("\n");
+        $client = $project->client;
+        $people = $client ? $client->users()->pluck('first_name')->filter()->unique()->implode(', ') : '';
+        $what = $medium === 'email'
+            ? 'emails between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on the project at '.$project->short_address.' — its client ('.$people.') and the designers, subcontractors and suppliers who write in'
+            : 'a text-message thread between a remodeling company ("GS", the contractor; its people sign as -PS for Patryk, -GS for Greg) and its client ('.$people.') about the project at '.$project->short_address;
 
-        $people = collect($names)->values()->filter()->unique()->implode(', ');
+        $tasks = $this->scheduleTitles($project);
+        $taskList = $tasks === [] ? '' : "\nTasks already on this project's schedule: ".implode('; ', $tasks).'. When an item is one of these, use that task\'s exact title.';
+
         $system = <<<PROMPT
-You read a text-message thread between a remodeling company ("GS", the contractor; its people sign as -PS for Patryk, -GS for Greg) and its client ({$people}) about the project at {$project->short_address}.
+You read {$what}.
 Each line is "#id [date time weekday] Speaker: text".
 
 Return two kinds of items:
 - "todo": a concrete task someone agreed or asked to do — a short, specific, verb-first instruction ("Send Mark the latest window invoice", "Clear the basement before Ramjack on Wednesday"). Set "owner" to the first name of the person responsible, or "GS" when it is the company side and no one in particular. Resolve relative dates (tomorrow, Monday, Wednesday at 11) into "due_date" as YYYY-MM-DD using that message's date; null when there is none.
+  A visit, delivery, measurement, inspection or meeting that a message SETS for a date is a todo too, even when the message only confirms it ("Measurement is scheduled for Thursday, 10/29 between 11-1pm" → title "Counter Measure" or the job it is, due_date that day, start_time 11:00, end_time 13:00; owner the company or person doing it). A later message that moves it ("Actually, it's Thursday") is the same item with the new date. Put a stated time in start_time/end_time as 24-hour HH:MM (one time → start_time only); null when none.
 - "done": a task that a message reports as finished, phrased as the task itself ("Thanks! Greg has check in hand" → "Give Greg the window check").
+{$taskList}
 
-Skip pleasantries, acknowledgements, questions already answered in these messages, confirmations that leave nothing to do, and photo announcements. Do not invent tasks that are not in the text. List for each item the message ids it comes from. Return JSON only, matching the schema.
+Skip pleasantries, acknowledgements, questions already answered in these messages, confirmations that leave nothing to do (a visit set for a date is never "nothing to do"), requests that only ask when someone is available, and photo announcements. Do not invent tasks that are not in the text. List for each item the message ids it comes from. Return JSON only, matching the schema.
 PROMPT;
 
         $schema = [
@@ -519,11 +559,13 @@ PROMPT;
                     'items' => [
                         'type' => 'object',
                         'additionalProperties' => false,
-                        'required' => ['title', 'owner', 'due_date', 'kind', 'message_ids'],
+                        'required' => ['title', 'owner', 'due_date', 'start_time', 'end_time', 'kind', 'message_ids'],
                         'properties' => [
                             'title' => ['type' => 'string'],
                             'owner' => ['type' => ['string', 'null']],
                             'due_date' => ['type' => ['string', 'null']],
+                            'start_time' => ['type' => ['string', 'null']],
+                            'end_time' => ['type' => ['string', 'null']],
                             'kind' => ['type' => 'string', 'enum' => ['todo', 'done']],
                             'message_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
                         ],
@@ -539,7 +581,7 @@ PROMPT;
                     'model' => (string) config('services.openai.task_extraction_model', 'gpt-4.1'),
                     'messages' => [
                         ['role' => 'system', 'content' => $system],
-                        ['role' => 'user', 'content' => "Messages:\n{$lines}"],
+                        ['role' => 'user', 'content' => ($medium === 'email' ? 'Emails' : 'Messages').":\n{$rendered}"],
                     ],
                     'response_format' => [
                         'type' => 'json_schema',
@@ -547,7 +589,7 @@ PROMPT;
                     ],
                 ]);
         } catch (\Throwable $e) {
-            Log::warning('ProjectActionItemExtractor: text extraction request failed', ['thread_id' => $thread->id, 'error' => $e->getMessage()]);
+            Log::warning('ProjectActionItemExtractor: '.$medium.' extraction request failed', $logContext + ['error' => $e->getMessage()]);
 
             return [];
         }
@@ -555,7 +597,7 @@ PROMPT;
         $content = $response->successful() ? data_get($response->json(), 'choices.0.message.content') : null;
         $parsed = is_string($content) ? json_decode($content, true) : null;
         if (! is_array($parsed) || ! is_array($parsed['items'] ?? null)) {
-            Log::warning('ProjectActionItemExtractor: text extraction returned nothing usable', ['thread_id' => $thread->id, 'status' => $response->status(), 'body' => Str::limit((string) $response->body(), 300)]);
+            Log::warning('ProjectActionItemExtractor: '.$medium.' extraction returned nothing usable', $logContext + ['status' => $response->status(), 'body' => Str::limit((string) $response->body(), 300)]);
 
             return [];
         }
@@ -567,7 +609,7 @@ PROMPT;
                 continue;
             }
             $ids = collect((array) ($item['message_ids'] ?? []))->map(fn ($id) => (int) $id)->filter(fn ($id) => $byId->has($id))->values();
-            $first = $ids->isNotEmpty() ? $byId->get($ids->first()) : $messages->last();
+            $line = $ids->isNotEmpty() ? $byId->get($ids->first()) : end($lines);
             $dueOn = null;
             if (is_string($item['due_date'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $item['due_date'])) {
                 $dueOn = $item['due_date'];
@@ -582,19 +624,44 @@ PROMPT;
                 'title' => $title,
                 'owner' => $owner !== '' ? $owner : null,
                 'due_on' => $dueOn,
+                'start_time' => $dueOn ? self::clockTime($item['start_time'] ?? null) : null,
+                'end_time' => $dueOn ? self::clockTime($item['end_time'] ?? null) : null,
                 'kind' => $kind,
-                'at' => Carbon::parse($first->created_at),
-                'source' => [
-                    'kind' => 'sms',
-                    'id' => $first->id,
-                    'thread_id' => $thread->id,
-                    'at' => Carbon::parse($first->created_at)->toIso8601String(),
-                    'excerpt' => Str::limit(trim((string) preg_replace('/\s+/', ' ', (string) ($first->display_text ?? $first->text))), 180, '…'),
-                ],
+                'at' => $line['at'],
+                'source' => $line['source'],
             ];
         }
 
         return $candidates;
+    }
+
+    /**
+     * The titles of the project's tasks that are still ahead or undated —
+     * what a new mention is most likely about.
+     *
+     * @return list<string>
+     */
+    protected function scheduleTitles(Project $project): array
+    {
+        return \App\Models\Task::withoutGlobalScopes()
+            ->where('project_id', $project->id)
+            ->where(fn ($query) => $query->whereNull('end_date')->orWhere('end_date', '>=', now()->subDays(7)->toDateString()))
+            ->orderBy('start_date')
+            ->limit(60)
+            ->pluck('title')
+            ->map(fn ($title) => trim((string) $title))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** "11:00" from the model's "11:00" / "11:00:00"; null for anything else. */
+    public static function clockTime(mixed $value): ?string
+    {
+        return is_string($value) && preg_match('/^([01]?\d|2[0-3]):([0-5]\d)/', trim($value), $m)
+            ? sprintf('%02d:%s', (int) $m[1], $m[2])
+            : null;
     }
 
     // ── Grouping ─────────────────────────────────────────────────────────
@@ -652,6 +719,8 @@ PROMPT;
                 'title' => $candidate['title'],
                 'owner' => $candidate['owner'],
                 'due_on' => $candidate['due_on'],
+                'start_time' => $candidate['start_time'] ?? null,
+                'end_time' => $candidate['end_time'] ?? null,
                 'status' => ProjectActionItem::STATUS_OPEN,
                 'mentions' => 1,
                 'first_mentioned_at' => $candidate['at'],

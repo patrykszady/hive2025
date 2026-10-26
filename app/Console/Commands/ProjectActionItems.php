@@ -27,7 +27,7 @@ class ProjectActionItems extends Command
         {--review : Run the model review of the open list even when nothing new came in}
         {--all : Also list items already done, dismissed or turned into tasks}';
 
-    protected $description = 'Collect and group the action tasks a project\'s phone calls and text messages ask for.';
+    protected $description = 'Collect and group the action tasks a project\'s phone calls, text messages and emails ask for or schedule.';
 
     public function handle(ProjectActionItemExtractor $extractor): int
     {

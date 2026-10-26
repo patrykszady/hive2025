@@ -109,10 +109,12 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
             'summarized_at' => now(),
         ])->save();
 
-        // New action items on a placed email: re-read the project's action
-        // list soon (ProjectActionItemExtractor), batching several emails
-        // that land close together into one pass.
-        if ($projectId && $actionItems !== []) {
+        // A placed email: re-read the project's action list soon
+        // (ProjectActionItemExtractor reads the email itself, like a text —
+        // a visit it sets is an item even when the summary lists no action
+        // item, Abbey 2026-10-26), batching several emails that land close
+        // together into one pass.
+        if ($projectId) {
             ExtractProjectActionItems::dispatch($projectId)->delay(now()->addMinutes(10));
         }
     }

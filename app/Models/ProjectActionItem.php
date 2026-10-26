@@ -34,6 +34,8 @@ class ProjectActionItem extends Model
         'title',
         'owner',
         'due_on',
+        'start_time',
+        'end_time',
         'status',
         'task_id',
         'mentions',
@@ -158,9 +160,9 @@ class ProjectActionItem extends Model
 
     /**
      * One more mention of this item: another source, a later last-mention,
-     * and an owner or due date it did not have yet.
+     * an owner it did not have yet, and the newest mention's date and time.
      *
-     * @param  array{owner: ?string, due_on: ?string, at: Carbon, source: array<string, mixed>}  $candidate
+     * @param  array{owner: ?string, due_on: ?string, start_time?: ?string, end_time?: ?string, at: Carbon, source: array<string, mixed>}  $candidate
      */
     public function absorb(array $candidate): void
     {
@@ -174,10 +176,20 @@ class ProjectActionItem extends Model
 
         $this->sources = $sources->push($source)->values()->all();
         $this->mentions = count($this->sources);
+        $this->owner = $this->owner ?: ($candidate['owner'] ?? null);
+
+        // The newest mention's date wins: "Measurement is Tuesday 11/3" then
+        // "Actually, it's Thursday 10/29 between 11-1" is one item on 10/29
+        // (Abbey counters, 2026-10-26). An older mention only fills a gap.
+        $newest = $this->last_mentioned_at === null || $candidate['at'] >= $this->last_mentioned_at;
+        if (! empty($candidate['due_on']) && ($newest || ! $this->due_on)) {
+            $this->due_on = $candidate['due_on'];
+            $this->start_time = $candidate['start_time'] ?? null;
+            $this->end_time = $candidate['end_time'] ?? null;
+        }
+
         $this->first_mentioned_at = min($this->first_mentioned_at ?? $candidate['at'], $candidate['at']);
         $this->last_mentioned_at = max($this->last_mentioned_at ?? $candidate['at'], $candidate['at']);
-        $this->owner = $this->owner ?: ($candidate['owner'] ?? null);
-        $this->due_on = $this->due_on ?: ($candidate['due_on'] ?? null);
         $this->save();
     }
 }

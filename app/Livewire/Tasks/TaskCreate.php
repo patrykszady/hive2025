@@ -1951,8 +1951,11 @@ class TaskCreate extends Component
                     );
             })
             ->when(! empty($date), function ($query) use ($date) {
+                // An undated task of that name is the same one, waiting for
+                // its day ("Counter Measure" when the email sets 10/29).
                 $query->where(function ($inner) use ($date) {
-                    $inner->whereDate('start_date', $date)
+                    $inner->whereNull('start_date')
+                        ->orWhereDate('start_date', $date)
                         ->orWhere(function ($range) use ($date) {
                             $range->whereNotNull('start_date')
                                 ->whereNotNull('end_date')

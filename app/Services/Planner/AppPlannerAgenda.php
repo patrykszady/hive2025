@@ -641,7 +641,7 @@ class AppPlannerAgenda
     }
 
     /**
-     * @return array{id: int, title: string, owner: ?string, due_on: ?string, mentions: int, last_mentioned_at: ?string, sources: list<array{kind: ?string, label: string, excerpt: string, url: ?string}>}
+     * @return array{id: int, title: string, owner: ?string, due_on: ?string, start_time: ?string, end_time: ?string, mentions: int, last_mentioned_at: ?string, sources: list<array{kind: ?string, label: string, excerpt: string, url: ?string}>}
      */
     private function actionItemPayload(ProjectActionItem $item): array
     {
@@ -650,6 +650,9 @@ class AppPlannerAgenda
             'title' => $item->title,
             'owner' => $item->owner,
             'due_on' => $item->due_on?->toDateString(),
+            // The visit's time ("11:00"–"13:00"), for the task it becomes.
+            'start_time' => $item->start_time,
+            'end_time' => $item->end_time,
             'mentions' => (int) $item->mentions,
             'last_mentioned_at' => $item->last_mentioned_at?->toIso8601String(),
             // 'kind' rides alongside the human label so the app can pick an
