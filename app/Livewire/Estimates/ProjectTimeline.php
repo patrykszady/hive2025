@@ -366,28 +366,10 @@ class ProjectTimeline extends Component
     public function bookedDays(): array
     {
         $settings = $this->settings;
-
-        if (! $settings->bookedWeeks || $settings->bookedStatuses === []) {
-            return [];
-        }
-
-        $projects = Project::query()
-            ->whereHas('latestStatus', fn ($query) => $query->whereIn('status_code', $settings->bookedStatuses))
-            ->with(['estimates', 'statuses' => fn ($query) => $query->where('status_code', 6)])
-            ->get();
-
         $booked = [];
 
-        foreach ($projects as $project) {
-            $start = $project->estimates->map(fn (Estimate $estimate) => $estimate->start_date)->filter()->sort()->first()
-                ?? $project->statuses->pluck('start_date')->filter()->sort()->first();
-
-            if (! $start) {
-                continue;
-            }
-
-            $start = CarbonImmutable::parse($start)->startOfDay();
-            $label = 'Booked: '.$project->name.($project->short_address ? ' ('.$project->short_address.')' : '').' starts '.$start->format('D M j');
+        foreach ($this->bookedJobStarts() as [$start, $name]) {
+            $label = 'Booked: '.$name.' starts '.$start->format('D M j');
 
             for ($offset = 0; $offset < $settings->bookedDays; $offset++) {
                 $date = $start->addDays($offset)->toDateString();
@@ -398,6 +380,62 @@ class ProjectTimeline extends Component
         ksort($booked);
 
         return $booked;
+    }
+
+    /**
+     * The day each booked GS job actually starts, inside its greyed week
+     * (Patryk, 2026-10-26: the start dates get a green dotted border).
+     *
+     * @return array<string, string> Y-m-d => "Kitchen (917 Marion)"
+     */
+    #[Computed]
+    public function bookedStarts(): array
+    {
+        $starts = [];
+
+        foreach ($this->bookedJobStarts() as [$start, $name]) {
+            $date = $start->toDateString();
+            $starts[$date] = isset($starts[$date]) ? $starts[$date].' · '.$name : $name;
+        }
+
+        ksort($starts);
+
+        return $starts;
+    }
+
+    /**
+     * Every GS job in a booked status with the day it starts: the earliest
+     * estimate start date, else the first day it went Active.
+     *
+     * @return list<array{0: CarbonImmutable, 1: string}>
+     */
+    protected function bookedJobStarts(): array
+    {
+        $settings = $this->settings;
+
+        if (! $settings->bookedWeeks || $settings->bookedStatuses === []) {
+            return [];
+        }
+
+        $projects = Project::query()
+            ->whereHas('latestStatus', fn ($query) => $query->whereIn('status_code', $settings->bookedStatuses))
+            ->with(['estimates', 'statuses' => fn ($query) => $query->where('status_code', 6)])
+            ->get();
+
+        $jobs = [];
+
+        foreach ($projects as $project) {
+            $start = $project->estimates->map(fn (Estimate $estimate) => $estimate->start_date)->filter()->sort()->first()
+                ?? $project->statuses->pluck('start_date')->filter()->sort()->first();
+
+            if (! $start) {
+                continue;
+            }
+
+            $jobs[] = [CarbonImmutable::parse($start)->startOfDay(), $project->name.($project->short_address ? ' ('.$project->short_address.')' : '')];
+        }
+
+        return $jobs;
     }
 
     #[Computed]
@@ -502,6 +540,7 @@ class ProjectTimeline extends Component
         $cabinetsUntil = $cabinets ? CarbonImmutable::parse($cabinets)->addDays(4)->toDateString() : null;
         $startDay = $start ? CarbonImmutable::parse($start) : null;
         $booked = $this->bookedDays;
+        $bookedStarts = $this->bookedStarts;
         $best = array_flip($this->bestStartDays);
         $finishDay = $this->finish;
         ['from' => $windowFrom, 'to' => $windowTo] = $this->window;
@@ -551,6 +590,7 @@ class ProjectTimeline extends Component
                     'fade' => in_array($tone, ['day', 'weekend'], true) ? ProjectDuration::fade($day, $startDay, $finishDay, $settings->fadeBeforeDays, $settings->fadeAfterDays) : null,
                     'limited' => isset($limited[$date]),
                     'booked' => $booked[$date] ?? null,
+                    'booked_start' => isset($bookedStarts[$date]),
                     'title' => implode(' · ', array_filter([
                         $booked[$date] ?? null,
                         $holiday ? $holiday->pluck('name')->implode(', ').match (true) {

@@ -421,6 +421,21 @@ it('greys out the week each GS job starts, and will not start a project there', 
     // Election Day (Nov 3) keeps its red tile but is just as booked.
     expect(timelineCell($html, '2026-11-03')['tone'])->toBe('holiday_on');
 
+    // The day each job actually starts wears a green dotted border inside its grey week (Patryk, 2026-10-26).
+    $startsOn = function (string $date) use ($html): bool {
+        $dom = new DOMDocument;
+        @$dom->loadHTML($html);
+
+        return (new DOMXPath($dom))->query('//button[@data-date="'.$date.'"]')->item(0)->hasAttribute('data-booked-start');
+    };
+    expect($startsOn('2026-11-02'))->toBeTrue()
+        ->and($startsOn('2026-11-03'))->toBeFalse()
+        ->and($startsOn('2026-06-29'))->toBeTrue('the estimate start, not the status date')
+        ->and($startsOn('2026-09-14'))->toBeFalse()
+        ->and($startsOn('2026-06-01'))->toBeFalse('a complete job holds nothing')
+        ->and($page->instance()->bookedStarts['2026-11-02'])->toContain('(123 Main)');
+    $page->assertSeeHtml('data-booked-start')->assertSeeHtml('border-dotted border-emerald-500')->assertSee("The GS job's start day", false);
+
     $page->assertSeeHtml('wire:dblclick="pickDate(\'2026-11-04\', true)"')
         ->call('pickDate', '2026-11-03')
         ->assertSet('start', null)

@@ -374,6 +374,7 @@
                                                 data-date="{{ $cell['date'] }}"
                                                 data-tone="{{ $cell['tone'] }}"
                                                 @if ($cell['limited']) data-limited @endif
+                                                @if ($cell['booked_start']) data-booked-start @endif
                                                 @if ($cell['fade']) data-fade="{{ $cell['fade'] }}" style="--fade-bg: color-mix(in oklab, var(--color-yellow-300) {{ round(40 * $cell['fade']) }}%, transparent)" @endif
                                                 @if ($cell['title']) title="{{ $cell['title'] }}" @endif
                                                 @class([
@@ -394,7 +395,8 @@
                                                     'text-zinc-400 dark:text-zinc-500' => $cell['tone'] === 'weekend',
                                                     'text-zinc-800 dark:text-zinc-200' => $cell['tone'] === 'day',
                                                     'bg-(--fade-bg)' => $cell['fade'],
-                                                    'border-2 border-dotted border-yellow-400 dark:border-yellow-500' => $cell['limited'],
+                                                    'border-2 border-dotted border-yellow-400 dark:border-yellow-500' => $cell['limited'] && ! $cell['booked_start'],
+                                                    'border-2 border-dotted border-emerald-500 dark:border-emerald-400' => $cell['booked_start'],
                                                     'opacity-50' => $cell['past'] && $cell['limited'],
                                                     'ring-1 ring-zinc-900 dark:ring-white' => $cell['today'],
                                                 ])
@@ -429,6 +431,7 @@
                     <span class="inline-flex items-center gap-1.5"><span class="{{ $swatch }} bg-indigo-500"></span><span class="{{ $swatch }} bg-indigo-100 dark:bg-indigo-500/25"></span> Faith holiday: off / we work</span>
                     <span class="inline-flex items-center gap-1.5"><span class="{{ $swatch }} border-2 border-dotted border-yellow-400 dark:border-yellow-500"></span> Limited days</span>
                     <span class="inline-flex items-center gap-1.5"><span class="{{ $swatch }} bg-zinc-200 opacity-70 dark:bg-white/10"></span> Booked (double-click to start anyway)</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="{{ $swatch }} bg-zinc-200 opacity-70 border-2 border-dotted border-emerald-500 dark:bg-white/10 dark:border-emerald-400"></span> The GS job's start day</span>
                     <span class="inline-flex items-center gap-1.5"><span class="{{ $swatch }} ring-1 ring-zinc-900 dark:ring-white"></span> Today</span>
                 </div>
             </div>
