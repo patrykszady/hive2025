@@ -75,6 +75,105 @@ it('provisions a contact for a complete email enquiry without asking the model a
     Queue::assertNotPushed(SendLeadReplyJob::class);
 });
 
+/*
+ * Bliss Hansen, 2026-10-16: a client since 2020, mid-addition, forwarded her
+ * HVAC thread with crew@ from a second Gmail address, CC'ing her husband — the
+ * site's classifier called it a new enquiry and she was emailed for "the
+ * project address". The ask is for a stranger's first message only.
+ */
+function blissPayload(array $overrides = []): array
+{
+    return emailLeadPayload(array_replace_recursive([
+        'external_id' => sha1('<bliss-fwd@mail.gmail.com>'),
+        'name' => 'Bliss Hansen', 'email' => '1118nhighlandave@gmail.com', 'phone' => null, 'address' => '200 square', 'city' => null, 'zip' => null, 'state' => null,
+        'subject' => 'Fwd: HVAC - Hot water baseboard heat and high velocity SpacePak air conditioning',
+        'message' => "Hi Patryk, here is everything I put together for the HVAC guy. Our house is about 2,200 square feet.\n\n---------- Forwarded message ---------\nFrom: Bliss Hansen <1118nhighlandave@gmail.com>\nTo: GS Construction Crew <crew@gs.construction>\nCc: Trip Finnegan <trip.finnegan@gmail.com>\n\nWe have hot water baseboard heating in our house.",
+        'attachments' => [],
+        'submitted_at' => now()->toIso8601String(),
+        'extracted' => ['cc_emails' => ['trip.finnegan@gmail.com'], 'project_type' => 'HVAC installation', 'scope_summary' => 'Baseboard heat and supply lines for the addition.'],
+        'in_reply_to' => '<bliss-fwd@mail.gmail.com>',
+    ], $overrides));
+}
+
+function blissLead(): Lead
+{
+    return Lead::withoutGlobalScopes()->where('external_source', 'crew-email')->latest('id')->firstOrFail();
+}
+
+it('does not ask a household we know: a client contact is on copy', function () {
+    $fx = emailIntakeFixture();
+    Queue::fake();
+    Http::fake(['*' => Http::response([], 200)]);
+    $this->partialMock(CrewLeadEmailService::class, fn ($mock) => $mock->shouldNotReceive('classify'));
+
+    $trip = User::query()->create(['first_name' => 'Trip', 'last_name' => 'Finnegan', 'email' => 'trip.finnegan@gmail.com', 'cell_phone' => '2245550101']);
+    $client = \App\Models\Client::factory()->create(['address' => '1118 N Highland Ave', 'city' => 'Arlington Heights', 'state' => 'IL', 'zip_code' => '60004']);
+    $client->users()->attach($trip->id);
+    $client->vendors()->attach($fx['vendor']->id);
+
+    // A plain fresh message, so only the household rule can stop the ask.
+    $this->postJson('/api/v1/leads', blissPayload(['subject' => 'HVAC notes', 'message' => 'Hi Patryk, here are my HVAC notes for the addition. Our house is about 2,200 square feet and we are adding 900 more.']))->assertCreated();
+
+    $data = (array) blissLead()->lead_data;
+    expect($data['missing_info_requested_at'] ?? null)->toBeNull()
+        ->and($data['missing_info_skipped'])->toBe('known sender (household)');
+    Queue::assertNotPushed(SendLeadReplyJob::class);
+});
+
+it('does not ask an address already placed in the project email timeline', function () {
+    $fx = emailIntakeFixture();
+    Queue::fake();
+    Http::fake(['*' => Http::response([], 200)]);
+
+    $client = \App\Models\Client::factory()->create(['address' => '1118 N Highland Ave', 'city' => 'Arlington Heights', 'state' => 'IL', 'zip_code' => '60004']);
+    \App\Models\EmailMessage::factory()->outbound()->create(['belongs_to_vendor_id' => $fx['vendor']->id, 'from_email' => 'patryk@gs.construction', 'to' => ['1118nhighlandave@gmail.com'], 'client_id' => $client->id, 'sent_at' => now()->subDays(40)]);
+
+    $this->postJson('/api/v1/leads', blissPayload(['subject' => 'HVAC notes', 'message' => 'Hi Patryk, here are my HVAC notes for the addition. Our house is about 2,200 square feet and we are adding 900 more.', 'extracted' => ['cc_emails' => []]]))->assertCreated();
+
+    $data = (array) blissLead()->lead_data;
+    expect($data['missing_info_skipped'])->toBe('known sender (timeline)');
+    Queue::assertNotPushed(SendLeadReplyJob::class);
+});
+
+it('does not ask on a forward of a thread that already included crew@', function () {
+    emailIntakeFixture();
+    Queue::fake();
+    Http::fake(['*' => Http::response([], 200)]);
+
+    $this->postJson('/api/v1/leads', blissPayload(['extracted' => ['cc_emails' => []]]))->assertCreated();
+
+    $data = (array) blissLead()->lead_data;
+    expect($data['missing_info_skipped'])->toBe('the email quotes a conversation with us');
+    Queue::assertNotPushed(SendLeadReplyJob::class);
+});
+
+it('does not ask an address the mailbox has heard from before', function () {
+    $fx = emailIntakeFixture();
+    Queue::fake();
+    Http::fake(['*' => Http::response([], 200)]);
+
+    CrewEmailIngest::create(['nylas_message_id' => 'ny-earlier', 'grant_id' => 'grant-crew', 'mailbox' => 'crew@gs.construction', 'from_email' => '1118nhighlandave@gmail.com', 'subject' => 'Checking In', 'status' => 'skipped', 'skip_reason' => 'not_a_lead', 'message_at' => now()->subDays(7)]);
+
+    $this->postJson('/api/v1/leads', blissPayload(['subject' => 'HVAC notes', 'message' => 'Hi Patryk, here are my HVAC notes for the addition. Our house is about 2,200 square feet and we are adding 900 more.', 'extracted' => ['cc_emails' => []]]))->assertCreated();
+
+    $data = (array) blissLead()->lead_data;
+    expect($data['missing_info_skipped'])->toBe('the mailbox has heard from this address before');
+    Queue::assertNotPushed(SendLeadReplyJob::class);
+});
+
+it('still asks a stranger whose first message is short on details', function () {
+    emailIntakeFixture();
+    Queue::fake();
+    Http::fake(['*' => Http::response([], 200)]);
+
+    $this->postJson('/api/v1/leads', blissPayload(['name' => 'Dana Kowalski', 'email' => 'dana.kowalski@example.test', 'subject' => 'HVAC notes', 'message' => 'Hi, we would like to add baseboard heat to our addition. Our house is about 2,200 square feet and we are adding 900 more.', 'extracted' => ['cc_emails' => []]]))->assertCreated();
+
+    $data = (array) blissLead()->lead_data;
+    expect($data['missing_info_requested_at'] ?? null)->not->toBeNull()
+        ->and($data['missing_info_skipped'] ?? null)->toBeNull();
+    Queue::assertPushed(SendLeadReplyJob::class, 1);
+});
+
 it('only fetches files from the site it takes leads from', function () {
     emailIntakeFixture();
     Storage::fake('files');

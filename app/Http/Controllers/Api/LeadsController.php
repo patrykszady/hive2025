@@ -214,9 +214,8 @@ class LeadsController extends Controller
         // is that contact: link the lead to them so the modal shows who they
         // are and provisioning does not mint a twin.
         $email = mb_strtolower(trim((string) ($leadData['email'] ?? '')));
-        $knownUser = $email !== ''
-            ? \App\Models\User::withoutGlobalScopes()->whereRaw('LOWER(email) = ?', [$email])->first()
-            : null;
+        $known = app(\App\Services\LeadSenderRecogniser::class)->recognise($email, (array) ($extracted['cc_emails'] ?? []));
+        $knownUser = $known['user'];
 
         $lead = Lead::create([
             'date' => $date,
@@ -270,7 +269,7 @@ class LeadsController extends Controller
         $hinted = ($extracted['is_lead'] ?? null) === true;
 
         $verdict = match (true) {
-            $knownUser !== null, str_word_count($message) < 12 => ['is_lead' => null, 'confidence' => 0.0, 'reason' => null],
+            $known['known'], str_word_count($message) < 12 => ['is_lead' => null, 'confidence' => 0.0, 'reason' => null],
             $hinted => ['is_lead' => true, 'confidence' => (float) ($extracted['confidence'] ?? 1), 'reason' => $extracted['reason'] ?? null],
             default => app(CrewLeadEmailService::class)->classify($subject, $message, (string) ($leadData['email'] ?? '')),
         };
@@ -292,7 +291,10 @@ class LeadsController extends Controller
         // strength of nothing. A website enquiry only when it came in as a
         // first name alone that nothing could complete (the form already
         // collects the rest, and the site has thanked them) — and never when
-        // it looks like a solicitation.
+        // it looks like a solicitation. The ask itself declines — and records
+        // why on the lead — someone we already know (LeadSenderRecogniser), a
+        // forward of a thread with us, or an address the mailbox has heard
+        // from before (Bliss Hansen, 2026-10-16).
         $solicitation = $verdict['is_lead'] === false && $verdict['confidence'] >= 0.8;
         $firstNameOnly = count(\App\Support\SenderName::nameWords((string) ($leadData['name'] ?? ''))) < 2;
 

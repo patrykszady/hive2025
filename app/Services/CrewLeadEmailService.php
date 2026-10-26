@@ -931,9 +931,10 @@ TXT;
         // A sender already on file — a past client, a sub writing about
         // their own home — is that contact; link the lead to them so the
         // modal shows who they are and provisioning does not mint a twin.
-        $knownUser = \App\Models\User::withoutGlobalScopes()
-            ->whereRaw('LOWER(email) = ?', [mb_strtolower((string) $base['from_email'])])
-            ->first();
+        $knownUser = app(LeadSenderRecogniser::class)->recognise(
+            (string) $base['from_email'],
+            array_merge((array) data_get($base, 'recipients.to', []), (array) data_get($base, 'recipients.cc', [])),
+        )['user'];
 
         $lead = Lead::create([
             'date' => $date,
@@ -1325,6 +1326,54 @@ TXT;
      * worker can never re-ask.
      */
     /**
+     * Why the sender must NOT be emailed for missing details, or null when the
+     * ask is fair. Bliss Hansen (2026-10-16) was asked for "the project
+     * address" on a forward of her own HVAC thread with crew@, CC'ing her
+     * husband, eight emails into a job we were building — the ask is for a
+     * stranger's first message only:
+     *
+     *  - someone we know (LeadSenderRecogniser: account, household, timeline);
+     *  - an email quoting our own mailbox — a forward or a reply of a
+     *    conversation with us, so the conversation already exists;
+     *  - an address this mailbox has heard from before this message.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  array{subject?: ?string, rfc_message_id?: ?string, recipients?: array{to?: list<string>, cc?: list<string>}}  $base
+     */
+    protected function whyNotToAsk(Lead $lead, array $data, string $email, array $base): ?string
+    {
+        $others = array_merge((array) ($data['cc_emails'] ?? []), (array) data_get($base, 'recipients.to', []), (array) data_get($base, 'recipients.cc', []));
+        $known = app(LeadSenderRecogniser::class)->recognise($email, $others);
+
+        if ($known['known']) {
+            return 'known sender ('.$known['via'].')';
+        }
+
+        $ourAddresses = array_merge(
+            [(string) config('nylas.crew_leads.mailbox')],
+            CompanyEmail::withoutGlobalScopes()->where('vendor_id', $lead->belongs_to_vendor_id)->pluck('email')->all(),
+        );
+        $domains = array_map(fn ($address) => (string) substr(strrchr(mb_strtolower((string) $address), '@') ?: '', 1), $ourAddresses);
+        $domains = array_values(array_unique(array_filter(array_merge($domains, array_map('strtolower', (array) config('nylas.crew_leads.internal_domains', []))))));
+
+        if ($domains !== [] && preg_match('/[A-Z0-9._%+-]+@(?:'.implode('|', array_map('preg_quote', $domains)).')\b/i', (string) ($data['message'] ?? ''))) {
+            return 'the email quotes a conversation with us';
+        }
+
+        $before = \Carbon\CarbonImmutable::parse($lead->date ?? $lead->created_at ?? now())->subMinute();
+        $address = mb_strtolower($email);
+
+        $heardFrom = CrewEmailIngest::query()->whereRaw('LOWER(from_email) = ?', [$address])->where('message_at', '<', $before)->exists()
+            || \App\Models\EmailMessage::query()->whereRaw('LOWER(from_email) = ?', [$address])->where('sent_at', '<', $before)->exists();
+
+        if ($heardFrom) {
+            return 'the mailbox has heard from this address before';
+        }
+
+        return null;
+    }
+
+    /**
      * Public so the leads API can ask the same question of an email enquiry
      * that gs.construction read and pushed here.
      *
@@ -1337,7 +1386,17 @@ TXT;
 
             $email = trim((string) ($data['email'] ?? ''));
 
-            if ($email === '' || isset($data['missing_info_requested_at'])) {
+            if ($email === '' || isset($data['missing_info_requested_at']) || isset($data['missing_info_skipped'])) {
+                return;
+            }
+
+            if ($reason = $this->whyNotToAsk($lead, $data, $email, $base)) {
+                $data['missing_info_skipped'] = $reason;
+                $lead->lead_data = $data;
+                $lead->saveQuietly();
+
+                Log::channel('nylas')->info('Crew leads: missing-info ask skipped', ['lead_id' => $lead->id, 'reason' => $reason]);
+
                 return;
             }
 

@@ -27,12 +27,16 @@ use Illuminate\Support\Str;
  *                     are stripped ("Re: Your quote" ↔ "Your quote").
  *  4. recipient     — weakest: the latest sent row addressed to the replier
  *                     within a short window. Only consulted when the message
- *                     actually looks like a reply, and labelled so a wrong
- *                     badge can be traced to the guess that produced it.
+ *                     actually looks like a reply AND names no thread of its
+ *                     own, and labelled so a wrong badge can be traced to the
+ *                     guess that produced it.
  *
  * Layers 3 and 4 are gated on looksLikeReply(): thread and RFC matches are
  * reply-proof by construction, but recipient matching alone would badge a
  * client's unrelated NEW email as an answer to whatever we sent them last.
+ * Neither heuristic layer accepts a message older than the send it would
+ * answer, and layer 4 stands down when the reply's threading headers point
+ * at a thread we never sent (2026-10-26).
  */
 class EmailReplyDetector
 {
@@ -143,6 +147,12 @@ class EmailReplyDetector
             return [null, null];
         }
 
+        // A message cannot answer an email sent after it: the enquiry that
+        // TRIGGERED our auto-reply was badged as a reply to it when the sweep
+        // saw it eleven seconds after the send (Bliss Hansen, 2026-10-16).
+        $messageAt = $reply['message_at'] ?? null;
+        $answersInTime = fn (EmailTracking $row): bool => $messageAt === null || $row->event_at === null || $row->event_at->lte($messageAt);
+
         // Layer 3 — same recipient, same conversation subject. Prefix
         // stripping has to happen in PHP, so bound the candidate set: the
         // newest 50 sends to this address in half a year is generous for a
@@ -155,7 +165,7 @@ class EmailReplyDetector
                 ->latest('event_at')
                 ->limit(50)
                 ->get()
-                ->first(fn (EmailTracking $row) => $this->bareSubject(
+                ->first(fn (EmailTracking $row) => $answersInTime($row) && $this->bareSubject(
                     (string) (($row->metadata['subject'] ?? ''))
                 ) === $bareSubject);
 
@@ -164,10 +174,20 @@ class EmailReplyDetector
             }
         }
 
+        // Threading headers that name a message we never sent: the reply is
+        // to someone else's thread (Bliss Hansen, 2026-10-26: four emails to
+        // her architect badged as replies to our one email). The subject
+        // layer above still catches a reply to a Mailtrap send, whose
+        // Message-ID we do not hold; the guess below may not.
+        if ($referencedIds !== []) {
+            return [null, null];
+        }
+
         // Layer 4 — latest recent send to this address. A guess, and says so.
         $sent = $this->sentQuery()
             ->whereJsonContains('recipient_emails', $fromEmail)
             ->where('event_at', '>=', now()->subDays(self::RECIPIENT_MATCH_WINDOW_DAYS))
+            ->when($messageAt !== null, fn ($q) => $q->where('event_at', '<=', $messageAt))
             ->latest('event_at')
             ->first();
 

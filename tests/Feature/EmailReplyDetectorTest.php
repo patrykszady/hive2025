@@ -106,6 +106,33 @@ it('refuses the recipient guess outside the window', function () {
     expect(detect(['subject' => 'Re: whatever']))->toBeNull();
 });
 
+it('does not guess when the reply\'s threading headers point at a thread we never sent', function () {
+    sentRow(['metadata' => ['rfc_message_id' => 'rfc-abc@hive', 'subject' => 'Your project enquiry']]);
+
+    // Bliss Hansen, 2026-10-26: a reply in her architect's thread, from an address we emailed ten days earlier.
+    expect(detect(['subject' => 'Re: Electrical Notes', 'in_reply_to' => '<architect-thread@mail.gmail.com>', 'references' => '<architect-thread@mail.gmail.com>']))->toBeNull()
+        ->and(detect(['subject' => 'Need to add outdoor electrical plug and new water spigot to plan', 'references' => '<another@mail.gmail.com>']))->toBeNull();
+});
+
+it('still matches a reply to a send whose Message-ID we never held, by its subject', function () {
+    $sent = sentRow(['metadata' => ['subject' => 'Your project enquiry']]);
+
+    $event = detect(['subject' => 'Re: Your project enquiry', 'in_reply_to' => '<mailtrap-generated@smtp.mailtrap.io>', 'references' => '<mailtrap-generated@smtp.mailtrap.io>']);
+
+    expect($event)->not->toBeNull()
+        ->and($event->metadata['matched_via'])->toBe('subject')
+        ->and($event->metadata['sent_event_id'])->toBe($sent->id);
+});
+
+it('never files a message older than the send as its reply', function () {
+    // The enquiry that triggered our auto-reply, seen by the sweep after the send went out.
+    sentRow(['event_at' => now()->subMinutes(2), 'metadata' => ['subject' => 'Re: HVAC notes']]);
+
+    expect(detect(['subject' => 'Fwd: HVAC notes', 'message_at' => now()->subMinutes(4)]))->toBeNull()
+        ->and(detect(['subject' => 'Re: whatever', 'message_at' => now()->subMinutes(4)]))->toBeNull()
+        ->and(detect(['subject' => 'Re: HVAC notes', 'message_at' => now()->subMinute()]))->not->toBeNull();
+});
+
 it('does not badge fresh mail that only happens to come from a known recipient', function () {
     sentRow();
 
