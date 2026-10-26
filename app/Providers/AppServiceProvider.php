@@ -36,6 +36,7 @@ use App\Models\OAuthToken;
 use App\Services\NylasService;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\BingWriter;
+use App\Support\Seo\ClaritySettings;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
 use App\Support\Seo\Reports\ClaritySettingsMetricsReader;
 use App\Support\Seo\Reports\ConfigSiteIdentity;
@@ -114,6 +115,13 @@ use SsSystems\Platform\Seo\SearchConsoleSyncClient;
 use SsSystems\Platform\Seo\SearchConsoleWriter as KitSearchConsoleWriter;
 use SsSystems\Platform\Social\Adapters\PlatformSettingCredentialStore;
 use SsSystems\Platform\Social\Contracts\MetaCredentialStore;
+use SsSystems\Platform\Traffic\Collectors\AccessLogCollector;
+use SsSystems\Platform\Traffic\Collectors\BingTotalsCollector;
+use SsSystems\Platform\Traffic\Collectors\ClarityCollector;
+use SsSystems\Platform\Traffic\Collectors\PulseEventsCollector;
+use SsSystems\Platform\Traffic\Collectors\SearchConsoleCollector;
+use SsSystems\Platform\Traffic\TrafficCollectors;
+use SsSystems\Platform\Traffic\TrafficDays;
 
 use Laravel\Scout\Builder;
 
@@ -351,6 +359,46 @@ class AppServiceProvider extends ServiceProvider
         // a report's markdown lands — App\Support\Seo\Reports\
         // ReportPathStorage just forwards to the existing SeoStorage::path().
         $this->app->bind(ReportStorage::class, ReportPathStorage::class);
+
+        $this->registerTraffic();
+    }
+
+    /**
+     * Where visitors come from (kit 0.17): every provider's per-source
+     * numbers into traffic_source_days. This app is single-tenant (see
+     * site_events'/traffic_source_days' own migrations), so TrafficDays and
+     * every collector below gets no tenant column/resolver — matching the
+     * Recorder/SnapshotBuilder bindings above.
+     *
+     * Wired: PulseEventsCollector (this app's own `/pulse` beacon — the only
+     * event types it records are 'call' and 'email', so those are the only
+     * two mapped to metrics; there is no 'form' or 'text' event here, see
+     * AnalyticsController's docblock), ClarityCollector (App\Support\Seo\
+     * ClaritySettings' admin-saved-or-env token), SearchConsoleCollector
+     * (the service-account ServiceAccountSearchConsoleClient already bound
+     * to SearchConsoleSyncClient above — it already has searchTypeTotals(),
+     * so no extra site class is needed), and BingTotalsCollector (this
+     * app's own bing_daily_totals table, filled by seo:bing-sync).
+     *
+     * Skipped: TrackedEventsCollector (no /track tracked_events table — this
+     * site's older click tracking was replaced by the Pulse beacon),
+     * LeadsCollector (no contact_submissions table — this app's `leads`
+     * table stores referrer/UTM inside a JSON blob, not the plain columns
+     * the collector reads, and leads here arrive mostly via partner-site
+     * APIs rather than a visit on this site), BusinessProfileCollector (no
+     * gbp_daily_metrics table/sync on this app).
+     */
+    protected function registerTraffic(): void
+    {
+        $this->app->bind(TrafficDays::class, fn () => new TrafficDays(DB::connection(), 'traffic_source_days'));
+
+        $this->app->bind(TrafficCollectors::class, fn ($app) => new TrafficCollectors($app->make(TrafficDays::class), [
+            new PulseEventsCollector(DB::connection(), 'site_events', ['call' => 'calls', 'email' => 'emails']),
+            new ClarityCollector(fn () => $app->make(ClaritySettings::class)->apiToken(), ownHosts: ['hive.contractors']),
+            new SearchConsoleCollector(fn (string $type, string $date) => $app->make(ServiceAccountSearchConsoleClient::class)->searchTypeTotals($date, $type)),
+            new BingTotalsCollector(DB::connection(), 'bing_daily_totals'),
+            new AccessLogCollector((array) config('services.traffic.access_logs', []), ['hive.contractors']),
+        ]));
     }
 
     /**

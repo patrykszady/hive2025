@@ -93,8 +93,11 @@ if [ "$DRY_RUN" = "1" ]; then
     exit 0
 fi
 
-BACKUP="$ENV_FILE.backup-$(date +%Y%m%d-%H%M%S)"
+# Backups live in .env-backups/ (kept out of git on this machine); start-dev.sh
+# deletes the ones older than 30 days.
+mkdir -p "$LOCAL_ROOT/.env-backups"
+BACKUP="$LOCAL_ROOT/.env-backups/.env.backup-$(date +%Y%m%d-%H%M%S)"
 cp "$ENV_FILE" "$BACKUP"
 cp "$MERGED" "$ENV_FILE"
-echo; echo "✓ .env updated. Previous file kept at $(basename "$BACKUP")."
+echo; echo "✓ .env updated. Previous file kept at .env-backups/$(basename "$BACKUP")."
 echo "  Run 'php artisan config:clear', and restart this app's dev server (artisan serve keeps its start-time .env)."

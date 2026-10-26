@@ -484,4 +484,13 @@ return [
         'app_id' => env('META_APP_ID'),
         'app_secret' => env('META_APP_SECRET'),
     ],
+
+    /*
+    | Where visitors come from (kit 0.17): the nginx access logs the traffic
+    | collector reads for outside landings and crawls. Missing on dev — the
+    | collector then skips.
+    */
+    'traffic' => [
+        'access_logs' => array_values(array_filter(explode(',', (string) env('TRAFFIC_ACCESS_LOGS', '/var/log/nginx/hive.contractors-access.log')))),
+    ],
 ];

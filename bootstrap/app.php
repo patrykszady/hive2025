@@ -9,6 +9,13 @@ use Illuminate\Mail\Events\MessageSent;
 use App\Listeners\StoreEmailTracking;
 
 return Application::configure(basePath: dirname(__DIR__))
+    ->withCommands([
+        // Where visitors come from (kit 0.17): traffic:collect, scheduled in
+        // routes/console.php. The default app/Console/Commands directory is
+        // already registered by Application::configure()'s own withCommands()
+        // call above, so this adds only the kit's command class.
+        \SsSystems\Platform\Traffic\Console\CollectTrafficCommand::class,
+    ])
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',

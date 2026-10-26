@@ -5,6 +5,7 @@ use App\Jobs\PruneFailedJobsJob;
 use App\Jobs\PurgeOldCallRecordings;
 use App\Jobs\RunScheduledTask;
 use Illuminate\Support\Facades\Schedule;
+use Illuminate\Support\Facades\Artisan;
 
 Schedule::timezone('America/Chicago');
 
@@ -521,7 +522,9 @@ Schedule::command('seo:bing-sync')
     ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer()
-    ->appendOutputTo(storage_path('logs/seo-bing-sync.log'));
+    ->appendOutputTo(storage_path('logs/seo-bing-sync.log'))
+    // New numbers landed: refresh where visitors come from for these days.
+    ->then(fn () => Artisan::call('traffic:collect', ['--days' => 5, '--provider' => ['bing']]));
 
 Schedule::command('seo:gsc-sync')
     ->dailyAt('03:30')
@@ -529,7 +532,9 @@ Schedule::command('seo:gsc-sync')
     ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer()
-    ->appendOutputTo(storage_path('logs/seo-gsc-sync.log'));
+    ->appendOutputTo(storage_path('logs/seo-gsc-sync.log'))
+    // New numbers landed: refresh where visitors come from for these days.
+    ->then(fn () => Artisan::call('traffic:collect', ['--days' => 5, '--provider' => ['search_console']]));
 
 // The admin's "Pages Google Is Having Trouble With" card otherwise reads
 // zeros/"never checked" forever, since nothing else calls URL Inspection.
@@ -558,6 +563,19 @@ Schedule::command('seo:psi-sync')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-psi-sync.log'));
+
+// Where visitors come from (kit 0.17): every provider's per-source numbers
+// into traffic_source_days for the SEO screen. After the Bing/GSC/PSI syncs
+// above; the last five days are re-read as Search Console fills in late.
+// Production only, same as this block's other live-API syncs — Clarity's
+// quota (10 requests/day) is shared with every tenant.
+Schedule::command('traffic:collect --days=5')
+    ->dailyAt('07:30')
+    ->name('traffic-collect')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/traffic-collect.log'));
 
 /*
 |--------------------------------------------------------------------------
@@ -675,3 +693,9 @@ Schedule::command('project:action-items --active')
     ->onOneServer()
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/action-items.log'));
+
+// Our own visitors and contacts refresh every hour, today included; the
+// platforms' numbers refresh right after each of their syncs above.
+Schedule::command('traffic:collect --date=today --provider=beacon')
+    ->hourly()->environments(['production'])
+    ->withoutOverlapping();
