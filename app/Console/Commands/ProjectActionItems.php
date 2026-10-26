@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Project;
 use App\Livewire\Planner\CardsIndex;
 use App\Models\ProjectActionItem;
+use App\Models\ProjectActionItemScan;
 use App\Services\ActionItems\ProjectActionItemExtractor;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -23,6 +24,7 @@ class ProjectActionItems extends Command
         {--active : Every project in a planner status instead of one id (the nightly run)}
         {--since= : Only calls and texts on or after this date (default: the project\'s creation)}
         {--fresh : Forget earlier runs for this project and read everything again}
+        {--reread-emails : Forget only where the emails were read up to, and read them again (keeps the list)}
         {--dry-run : Read and group, show the list, save nothing}
         {--review : Run the model review of the open list even when nothing new came in}
         {--all : Also list items already done, dismissed or turned into tasks}';
@@ -47,10 +49,13 @@ class ProjectActionItems extends Command
             : Carbon::parse($project->created_at)->startOfDay();
         $dryRun = (bool) $this->option('dry-run');
 
-        $this->info(sprintf('Project #%d %s — calls and texts since %s%s', $project->id, $project->short_address, $since->toDateString(), $dryRun ? ' (dry run)' : ''));
+        $this->info(sprintf('Project #%d %s — calls, texts and emails since %s%s', $project->id, $project->short_address, $since->toDateString(), $dryRun ? ' (dry run)' : ''));
 
         DB::beginTransaction();
         try {
+            if ($this->option('reread-emails')) {
+                ProjectActionItemScan::where('project_id', $project->id)->where('kind', ProjectActionItemScan::KIND_EMAILS)->delete();
+            }
             $stats = $extractor->run($project, $since, (bool) $this->option('fresh'), (bool) $this->option('review'));
             $this->line($this->summary($stats));
             $this->table(...$this->rows($project));
@@ -125,8 +130,8 @@ class ProjectActionItems extends Command
         $c = $stats['consolidated'];
 
         return sprintf(
-            'Read %d calls, %d messages and %d emails: %d new items, %d folded into existing ones, %d closed by texts, %d lapsed; review merged %d, closed %d, dropped %d.',
-            $stats['calls'], $stats['messages'], $stats['emails'], $stats['created'], $stats['merged'], $stats['done'], $stats['lapsed'], $c['merged'], $c['done'], $c['dropped'],
+            'Read %d calls, %d messages and %d emails: %d new items, %d folded into existing ones, %d closed by texts, %d visits put on their tasks, %d lapsed; review merged %d, closed %d, dropped %d.',
+            $stats['calls'], $stats['messages'], $stats['emails'], $stats['created'], $stats['merged'], $stats['done'], $stats['scheduled'] ?? 0, $stats['lapsed'], $c['merged'], $c['done'], $c['dropped'],
         );
     }
 }

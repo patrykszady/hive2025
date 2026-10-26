@@ -68,10 +68,10 @@ class ProjectActionItemExtractor
 
     private const STOPWORDS = ['the', 'and', 'for', 'with', 'from', 'that', 'this', 'about', 'before', 'after', 'will', 'should', 'into', 'onto', 'then', 'than', 'them', 'they', 'their', 'our', 'your', 'his', 'her', 'its', 'are', 'was', 'were', 'been', 'have', 'has', 'had', 'per', 'via', 'out', 'off'];
 
-    public function __construct(protected EmbeddingService $embeddings, protected ProjectActionItemConsolidator $consolidator) {}
+    public function __construct(protected EmbeddingService $embeddings, protected ProjectActionItemConsolidator $consolidator, protected ScheduledVisitApplier $visits) {}
 
     /**
-     * @return array{calls: int, messages: int, emails: int, meetings: int, created: int, merged: int, done: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}
+     * @return array{calls: int, messages: int, emails: int, meetings: int, created: int, merged: int, done: int, scheduled: int, lapsed: int, consolidated: array{merged: int, done: int, dropped: int}}
      */
     public function run(Project $project, ?CarbonInterface $since = null, bool $fresh = false, bool $review = false): array
     {
@@ -524,7 +524,7 @@ class ProjectActionItemExtractor
 
         $byId = collect($lines)->keyBy('id');
         $rendered = collect($lines)
-            ->map(fn (array $line) => sprintf('#%d [%s] %s: %s', $line['id'], $line['at']->copy()->setTimezone(vendor_timezone())->format('Y-m-d H:i D'), $line['speaker'], Str::limit($line['text'], $medium === 'email' ? 1500 : 600, '…')))
+            ->map(fn (array $line) => sprintf('#%d [%s] %s: %s', $line['id'], $line['at']->copy()->setTimezone($this->timezone($project))->format('Y-m-d H:i D'), $line['speaker'], Str::limit($line['text'], $medium === 'email' ? 1500 : 600, '…')))
             ->implode("\n");
 
         $client = $project->client;
@@ -540,13 +540,14 @@ class ProjectActionItemExtractor
 You read {$what}.
 Each line is "#id [date time weekday] Speaker: text".
 
-Return two kinds of items:
+Return three kinds of items:
 - "todo": a concrete task someone agreed or asked to do — a short, specific, verb-first instruction ("Send Mark the latest window invoice", "Clear the basement before Ramjack on Wednesday"). Set "owner" to the first name of the person responsible, or "GS" when it is the company side and no one in particular. Resolve relative dates (tomorrow, Monday, Wednesday at 11) into "due_date" as YYYY-MM-DD using that message's date; null when there is none.
-  A visit, delivery, measurement, inspection or meeting that a message SETS for a date is a todo too, even when the message only confirms it ("Measurement is scheduled for Thursday, 10/29 between 11-1pm" → title "Counter Measure" or the job it is, due_date that day, start_time 11:00, end_time 13:00; owner the company or person doing it). A later message that moves it ("Actually, it's Thursday") is the same item with the new date. Put a stated time in start_time/end_time as 24-hour HH:MM (one time → start_time only); null when none.
+- "visit": a visit, delivery, measurement, inspection or meeting at the job that a message SETS for a date, even when it only confirms it ("Measurement is scheduled for Thursday, 10/29 between 11-1pm" → title the job it is, e.g. "Counter Measure"; due_date that day; start_time 11:00, end_time 13:00; owner the company or person coming). A later message that moves it ("Actually, it's Thursday") is the same visit with the new date. Only a date that is decided — not a request ("can you come Monday?") or availability ("as early as Thursday").
 - "done": a task that a message reports as finished, phrased as the task itself ("Thanks! Greg has check in hand" → "Give Greg the window check").
+Put a stated time in start_time/end_time as 24-hour HH:MM (one time → start_time only); null when none.
 {$taskList}
 
-Skip pleasantries, acknowledgements, questions already answered in these messages, confirmations that leave nothing to do (a visit set for a date is never "nothing to do"), requests that only ask when someone is available, and photo announcements. Do not invent tasks that are not in the text. List for each item the message ids it comes from. Return JSON only, matching the schema.
+Skip pleasantries, acknowledgements, questions already answered in these messages, confirmations that leave nothing to do (a visit set for a date is a "visit", never nothing), requests that only ask when someone is available, and photo announcements. Do not invent tasks that are not in the text. List for each item the message ids it comes from. Return JSON only, matching the schema.
 PROMPT;
 
         $schema = [
@@ -566,7 +567,7 @@ PROMPT;
                             'due_date' => ['type' => ['string', 'null']],
                             'start_time' => ['type' => ['string', 'null']],
                             'end_time' => ['type' => ['string', 'null']],
-                            'kind' => ['type' => 'string', 'enum' => ['todo', 'done']],
+                            'kind' => ['type' => 'string', 'enum' => ['todo', 'visit', 'done']],
                             'message_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
                         ],
                     ],
@@ -615,8 +616,11 @@ PROMPT;
                 $dueOn = $item['due_date'];
             }
             $owner = trim((string) ($item['owner'] ?? ''));
-            $kind = ($item['kind'] ?? 'todo') === 'done' ? 'done' : 'todo';
-            if ($kind === 'todo' && self::isTransient($title)) {
+            $kind = in_array($item['kind'] ?? 'todo', ['todo', 'visit', 'done'], true) ? $item['kind'] : 'todo';
+            if ($kind === 'visit' && $dueOn === null) {
+                $kind = 'todo';
+            }
+            if ($kind !== 'done' && self::isTransient($title)) {
                 continue;
             }
 
@@ -628,7 +632,7 @@ PROMPT;
                 'end_time' => $dueOn ? self::clockTime($item['end_time'] ?? null) : null,
                 'kind' => $kind,
                 'at' => $line['at'],
-                'source' => $line['source'],
+                'source' => $kind === 'visit' ? $line['source'] + ['visit' => true] : $line['source'],
             ];
         }
 
@@ -656,6 +660,14 @@ PROMPT;
             ->all();
     }
 
+    /** The company's time zone (Chicago), so "tomorrow" in a 9 pm text is the right day. */
+    protected function timezone(Project $project): string
+    {
+        $zone = \App\Models\Vendor::withoutGlobalScopes()->whereKey($project->belongs_to_vendor_id)->value('timezone');
+
+        return is_string($zone) && $zone !== '' ? $zone : 'America/Chicago';
+    }
+
     /** "11:00" from the model's "11:00" / "11:00:00"; null for anything else. */
     public static function clockTime(mixed $value): ?string
     {
@@ -671,11 +683,11 @@ PROMPT;
      * open items that a "done" candidate reports finished.
      *
      * @param  list<array<string, mixed>>  $candidates  oldest first
-     * @return array{created: int, merged: int, done: int}
+     * @return array{created: int, merged: int, done: int, scheduled: int}
      */
     protected function merge(Project $project, array $candidates): array
     {
-        $stats = ['created' => 0, 'merged' => 0, 'done' => 0];
+        $stats = ['created' => 0, 'merged' => 0, 'done' => 0, 'scheduled' => 0];
         if ($candidates === []) {
             return $stats;
         }
@@ -710,6 +722,9 @@ PROMPT;
             if ($match) {
                 $match->absorb($candidate);
                 $stats['merged']++;
+                if ($candidate['kind'] === 'visit' && $this->visits->apply($match, $candidate)) {
+                    $stats['scheduled'] = ($stats['scheduled'] ?? 0) + 1;
+                }
 
                 continue;
             }
@@ -731,6 +746,9 @@ PROMPT;
             ]);
             $open->push($item);
             $stats['created']++;
+            if ($candidate['kind'] === 'visit' && $this->visits->apply($item, $candidate)) {
+                $stats['scheduled'] = ($stats['scheduled'] ?? 0) + 1;
+            }
         }
 
         return $stats;

@@ -97,11 +97,12 @@ class ProjectActionItemConsolidator
     protected function decideClosures(Project $project, Collection $items, string $log, string $apiKey): ?array
     {
         $itemLines = $items->map(fn (ProjectActionItem $item) => sprintf(
-            '#%d | %s | %s | due %s | mentioned %s..%s (%d×)',
+            '#%d | %s | %s | %s %s | mentioned %s..%s (%d×)',
             $item->id,
             $item->owner ?: '-',
             Str::limit($item->title, 200, '…'),
-            $item->due_on?->toDateString() ?? '-',
+            collect($item->sources ?? [])->contains(fn ($source) => ! empty($source['visit'])) ? 'VISIT on' : 'due',
+            trim(($item->due_on?->toDateString() ?? '-').($item->start_time ? ' '.$item->start_time.($item->end_time ? '-'.$item->end_time : '') : '')),
             $item->first_mentioned_at?->format('Y-m-d') ?? '-',
             $item->last_mentioned_at?->format('Y-m-d') ?? '-',
             $item->mentions,
@@ -114,6 +115,7 @@ Decide for EVERY item id, using only the conversation log (call summaries, texts
 - "done": a log entry explicitly says the task was completed, delivered, paid, ordered, scheduled, decided, or that its event has passed or the plan changed so it no longer applies. In reason, quote the log line (date and words) that shows it. Do not infer completion from related activity.
 - "drop": not something a person has to do — a statement, the crew's normal scheduled construction work, or a reminder of something already decided. Give the reason.
 - "keep": everything else, including anything you are not sure about.
+A VISIT item is a measurement, delivery, inspection or appointment on its date: being scheduled or confirmed is what made it a visit, so it is never "done" for that — only when the log says it took place, or it was cancelled. Never "drop" a visit.
 Return JSON only, matching the schema, with exactly one decision per item id.
 PROMPT;
 

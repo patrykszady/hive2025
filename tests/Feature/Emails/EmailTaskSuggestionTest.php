@@ -292,3 +292,169 @@ it('opens the planner item as the project\'s own Counter Measure, with its day a
     ]);
 });
 
+
+/*
+ * Patryk, 2026-10-26: the Kama email "should have added times and date to
+ * the Counter Measure task already on the project". A visit the planner's
+ * reading pass finds (kind "visit") dates the project's own task.
+ */
+
+/**
+ * The reading pass answers $items for the emails on the request; the review
+ * pass answers $closures (default: try to close every item it is shown, the
+ * way it closed Kama's measure as "scheduled").
+ *
+ * @param  callable(list<int>): list<array<string, mixed>>  $items
+ */
+function fakeVisitReading(callable $items, ?callable $closures = null, array &$reviews = []): void
+{
+    Http::fake([
+        'api.openai.com/v1/embeddings' => Http::response(['data' => []]),
+        'api.openai.com/v1/chat/completions' => function ($request) use ($items, $closures, &$reviews) {
+            $name = data_get($request->data(), 'response_format.json_schema.name');
+            $user = (string) data_get($request->data(), 'messages.1.content');
+            if ($name === 'action_item_closures') {
+                $reviews[] = ['system' => (string) data_get($request->data(), 'messages.0.content'), 'user' => $user];
+                preg_match_all('/^#(\d+) \|/m', $user, $ids);
+                $decisions = $closures ? $closures(array_map('intval', $ids[1])) : array_map(fn ($id) => ['id' => (int) $id, 'action' => 'done', 'reason' => '[email 2026-10-26] measurement is scheduled'], $ids[1]);
+
+                return Http::response(['choices' => [['message' => ['content' => json_encode(['decisions' => $decisions])]]]]);
+            }
+            if ($name === 'action_item_merges') {
+                return Http::response(['choices' => [['message' => ['content' => json_encode(['groups' => []])]]]]);
+            }
+            preg_match_all('/^#(\d+) /m', $user, $ids);
+
+            return Http::response(['choices' => [['message' => ['content' => json_encode(['items' => $items(array_map('intval', $ids[1]))])]]]]);
+        },
+    ]);
+}
+
+function visitItem(string $title, string $date, ?string $start, ?string $end, array $ids): array
+{
+    return ['title' => $title, 'owner' => 'Ultimate Stone', 'due_date' => $date, 'start_time' => $start, 'end_time' => $end, 'kind' => 'visit', 'message_ids' => $ids];
+}
+
+it('puts Kama\'s measurement straight onto the undated Counter Measure, with its time, and texts nobody', function () {
+    $w = abbeyThread();
+    \Illuminate\Support\Facades\Queue::fake();
+    fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
+        ? [visitItem('Counter Measure', '2026-10-29', '11:00', '13:00', [$w['thursday']->id])]
+        : []);
+
+    $stats = app(ProjectActionItemExtractor::class)->run($w['project']);
+
+    $task = $w['measure']->fresh();
+    expect($stats['scheduled'])->toBe(1)
+        ->and($task->start_date->toDateString())->toBe('2026-10-29')
+        ->and($task->end_date->toDateString())->toBe('2026-10-29')
+        ->and((array) $task->options->dates)->toBe(['2026-10-29'])
+        ->and((array) $task->options->time_settings->{'2026-10-29'})->toBe(['use_time' => true, 'start_time' => '11:00', 'end_time' => '13:00'])
+        ->and($task->options->scheduled_from->kind)->toBe('email')
+        ->and($task->options->scheduled_from->id)->toBe($w['thursday']->id)
+        ->and($task->getArrivalTimeLabel('2026-10-29'))->not->toBeNull();
+
+    // The item became that task, so the review pass never sees it to close it as "scheduled".
+    $item = ProjectActionItem::where('project_id', $w['project']->id)->sole();
+    expect($item->status)->toBe(ProjectActionItem::STATUS_TASK)
+        ->and($item->task_id)->toBe($w['measure']->id)
+        ->and(Task::where('project_id', $w['project']->id)->count())->toBe(2, 'no second Counter Measure');
+
+    // No vendor availability text, no service-call text to the homeowner; the change is in the task's history.
+    \Illuminate\Support\Facades\Queue::assertNothingPushed();
+    expect(\Spatie\Activitylog\Models\Activity::where('subject_type', Task::class)->where('subject_id', $w['measure']->id)->latest('id')->value('description'))->toBe('Scheduled from an email');
+});
+
+it('moves the Counter Measure when Kama corrects the day, from Tuesday to Thursday 11 to 1', function () {
+    $w = abbeyThread();
+    $w['thursday']->forceFill(['summarized_at' => null])->save();
+    fakeVisitReading(fn (array $ids) => array_values(array_filter([
+        in_array($w['tuesday']->id, $ids, true) ? visitItem('Counter Measure', '2026-11-03', null, null, [$w['tuesday']->id]) : null,
+        in_array($w['thursday']->id, $ids, true) ? visitItem('Counter Measure', '2026-10-29', '11:00', '13:00', [$w['thursday']->id]) : null,
+    ])));
+
+    app(ProjectActionItemExtractor::class)->run($w['project']);
+    expect($w['measure']->fresh()->start_date->toDateString())->toBe('2026-11-03')
+        ->and((array) $w['measure']->fresh()->options->time_settings->{'2026-11-03'})->toMatchArray(['use_time' => false]);
+
+    $w['thursday']->forceFill(['summarized_at' => now()])->save();
+    $stats = app(ProjectActionItemExtractor::class)->run($w['project']);
+
+    $task = $w['measure']->fresh();
+    expect($stats['scheduled'])->toBe(1)
+        ->and($task->start_date->toDateString())->toBe('2026-10-29')
+        ->and((array) $task->options->dates)->toBe(['2026-10-29'])
+        ->and((array) $task->options->time_settings)->toHaveKey('2026-10-29')
+        ->and((array) $task->options->time_settings)->not->toHaveKey('2026-11-03')
+        ->and($task->options->scheduled_from->id)->toBe($w['thursday']->id)
+        ->and(ProjectActionItem::where('project_id', $w['project']->id)->count())->toBe(1);
+});
+
+it('never moves a day the team set by hand, and leaves the visit on the planner instead', function () {
+    $w = abbeyThread();
+    $w['measure']->forceFill(['start_date' => '2026-10-30', 'end_date' => '2026-10-30', 'options' => ['dates' => ['2026-10-30'], 'time_settings' => ['2026-10-30' => ['use_time' => true, 'start_time' => '08:00', 'end_time' => '09:00']]]])->saveQuietly();
+    fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
+        ? [visitItem('Counter Measure', '2026-10-29', '11:00', '13:00', [$w['thursday']->id])]
+        : [], fn (array $ids) => array_map(fn ($id) => ['id' => $id, 'action' => 'keep', 'reason' => ''], $ids));
+
+    $stats = app(ProjectActionItemExtractor::class)->run($w['project']);
+
+    expect($stats['scheduled'])->toBe(0)
+        ->and($w['measure']->fresh()->start_date->toDateString())->toBe('2026-10-30')
+        ->and(ProjectActionItem::where('project_id', $w['project']->id)->sole()->status)->toBe(ProjectActionItem::STATUS_OPEN);
+});
+
+it('fills in the time on a task the team already put on that day, without touching a time they set', function () {
+    $w = abbeyThread();
+    $w['measure']->forceFill(['start_date' => '2026-10-29', 'end_date' => '2026-10-29', 'options' => ['dates' => ['2026-10-29'], 'time_settings' => []]])->saveQuietly();
+    fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
+        ? [visitItem('Counter Measure', '2026-10-29', '11:00', '13:00', [$w['thursday']->id])]
+        : []);
+
+    app(ProjectActionItemExtractor::class)->run($w['project']);
+
+    expect((array) $w['measure']->fresh()->options->time_settings->{'2026-10-29'})->toBe(['use_time' => true, 'start_time' => '11:00', 'end_time' => '13:00']);
+});
+
+it('leaves a visit on a day already past alone', function () {
+    $w = abbeyThread();
+    $this->travelTo(Carbon::parse('2026-10-30 15:00:00'));
+    fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
+        ? [visitItem('Counter Measure', '2026-10-29', '11:00', '13:00', [$w['thursday']->id])]
+        : [], fn (array $ids) => array_map(fn ($id) => ['id' => $id, 'action' => 'keep', 'reason' => ''], $ids));
+
+    app(ProjectActionItemExtractor::class)->run($w['project']);
+
+    expect($w['measure']->fresh()->start_date)->toBeNull();
+});
+
+it('shows the review pass a visit as a visit, so being scheduled never closes it', function () {
+    $w = abbeyThread();
+    $reviews = [];
+    fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
+        ? [visitItem('Backsplash Template', '2026-10-29', '11:00', '13:00', [$w['thursday']->id])]
+        : [], fn (array $ids) => array_map(fn ($id) => ['id' => $id, 'action' => 'keep', 'reason' => ''], $ids), $reviews);
+
+    app(ProjectActionItemExtractor::class)->run($w['project']);
+
+    expect($reviews)->not->toBeEmpty()
+        ->and($reviews[0]['user'])->toContain('| Backsplash Template | VISIT on 2026-10-29 11:00-13:00 |')
+        ->and($reviews[0]['system'])->toContain('A VISIT item is a measurement, delivery, inspection or appointment on its date')
+        ->and(ProjectActionItem::where('project_id', $w['project']->id)->sole()->status)->toBe(ProjectActionItem::STATUS_OPEN);
+});
+
+it('re-reads a project\'s emails from the console without losing its list', function () {
+    $w = abbeyThread();
+    \App\Models\ProjectActionItemScan::record($w['project']->id, \App\Models\ProjectActionItemScan::KIND_EMAILS, 0, $w['thursday']->id);
+    fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
+        ? [visitItem('Counter Measure', '2026-10-29', '11:00', '13:00', [$w['thursday']->id])]
+        : []);
+
+    $this->artisan('project:action-items', ['project' => $w['project']->id])->assertSuccessful();
+    expect($w['measure']->fresh()->start_date)->toBeNull('nothing new past the bookmark');
+
+    $this->artisan('project:action-items', ['project' => $w['project']->id, '--reread-emails' => true])
+        ->expectsOutputToContain('1 visits put on their tasks')
+        ->assertSuccessful();
+    expect($w['measure']->fresh()->start_date->toDateString())->toBe('2026-10-29');
+});

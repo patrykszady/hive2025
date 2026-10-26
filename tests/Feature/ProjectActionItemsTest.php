@@ -180,10 +180,12 @@ it('turns a text thread into items with one model pass, groups them with the cal
 
     expect($stats)->toMatchArray(['calls' => 1, 'messages' => 3, 'created' => 3, 'merged' => 1, 'done' => 1]);
 
-    // One pass for the thread, every message on its own dated line.
+    // One pass for the thread, every message on its own dated line — in
+    // the company's time (Chicago), not the server's UTC, so "tomorrow" in
+    // a 9 pm text is the right day.
     expect($prompts)->toHaveCount(1)
-        ->and($prompts[0])->toContain('#'.$ask->id.' [2026-10-12 12:42 Mon] GS: Windows will be there')
-        ->and($prompts[0])->toContain('#'.$clear->id.' [2026-10-12 12:47 Mon] Mark: Is Arturo coming');
+        ->and($prompts[0])->toContain('#'.$ask->id.' [2026-10-12 07:42 Mon] GS: Windows will be there')
+        ->and($prompts[0])->toContain('#'.$clear->id.' [2026-10-12 07:47 Mon] Mark: Is Arturo coming');
 
     $items = ProjectActionItem::where('project_id', $project->id)->get();
     expect($items)->toHaveCount(3);
