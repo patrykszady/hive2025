@@ -1,7 +1,7 @@
 <div>
 <x-form-modal 
     name="task_create_form_modal" 
-    class="!mt-8 w-full max-w-sm" 
+    class="!mt-8 w-full max-w-md" 
     x-on:modal-show.window="$dispatch('reset-tabs'); window.dispatchEvent(new CustomEvent('task-modal-opened'))"
 >
     <x-slot name="header">
@@ -37,8 +37,10 @@
             });
         "
     >
-        <div class="border-b border-gray-200 mb-4 overflow-x-auto overflow-y-hidden">
-            <nav class="-mb-px flex min-w-max whitespace-nowrap space-x-8">
+        {{-- The tabs share the width and wrap on a narrow screen — never a
+             sideways scrollbar (Patryk, 2026-10-26). --}}
+        <div class="border-b border-gray-200 mb-4">
+            <nav class="-mb-px flex flex-wrap justify-between gap-x-3 gap-y-1 whitespace-nowrap">
                 <button
                     type="button"
                     @click="activeTab = 'details'"
@@ -102,7 +104,10 @@
             </nav>
         </div>
 
-        <form id="task_create_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="grid space-y-4">
+        {{-- grid-cols-1 = one minmax(0, 1fr) column: the panels shrink to the
+             dialog instead of widening it to their widest row (the Meeting
+             recordings buttons, the Task Type buttons). --}}
+        <form id="task_create_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="grid grid-cols-1 min-w-0 space-y-4 [&>*]:min-w-0">
             <!-- Task Details Panel -->
             <div x-show="activeTab === 'details'">
                 <div class="relative">

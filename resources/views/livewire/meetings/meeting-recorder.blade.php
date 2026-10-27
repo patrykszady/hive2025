@@ -3,14 +3,15 @@
      x-data stays static so a re-render never resets a running recording. --}}
 <div x-data="meetingRecorder" x-on:visibilitychange.document="onVisibility()" data-meeting-recorder>
     <x-island-card heading="Meeting recordings" subheading="Record an in-person meeting — Hive writes the summary and adds the action items to the planner.">
-        <x-slot:actions>
-            <div x-show="phase === 'idle'" class="flex items-center gap-2">
-                <flux:button size="sm" variant="ghost" icon="arrow-up-tray" x-on:click="openUpload()">Upload</flux:button>
+        <div class="space-y-3 pb-3 min-w-0">
+            {{-- Under the description, not beside the title: in the task dialog
+                 (and a narrow project column) title + buttons in one row
+                 widened the whole dialog into a sideways scroll (2026-10-26). --}}
+            <div x-show="phase === 'idle'" class="flex flex-wrap items-center gap-2" data-meeting-recorder-actions>
                 <flux:button size="sm" variant="primary" icon="microphone" x-on:click="openConsent()">Record</flux:button>
+                <flux:button size="sm" variant="ghost" icon="arrow-up-tray" x-on:click="openUpload()">Upload</flux:button>
             </div>
-        </x-slot:actions>
 
-        <div class="space-y-3 pb-3">
             {{-- Before recording: which microphone, and everyone's consent. --}}
             <div x-show="phase === 'consent' || phase === 'starting'" x-cloak class="space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-white/10">
                 <div>
