@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\App\V1\ThreadMessageController as AppThreadMessageC
 use App\Http\Controllers\Api\App\V1\ThreadToolsController as AppThreadToolsController;
 use App\Http\Controllers\Api\App\V1\VoiceController as AppVoiceController;
 use App\Http\Controllers\Api\App\V1\WebSessionController as AppWebSessionController;
+use App\Http\Controllers\Api\BuildingCodesController;
 use App\Http\Controllers\Api\LeadsController;
 use App\Http\Controllers\Api\MailboxesController;
 use App\Http\Controllers\Api\ProjectZipCountsController;
@@ -43,6 +44,11 @@ Route::middleware(['auth:sanctum', 'throttle:api'])
         // a client's service request opens a service call here instead.
         Route::post('service-calls/from-email', ServiceCallEmailController::class)
             ->name('api.v1.service-calls.from-email');
+        // A served town's adopted building codes, for the site's town pages
+        // (BuildingCodesController). An unknown town starts a lookup.
+        Route::get('building-codes', BuildingCodesController::class)
+            ->middleware('throttle:120,1')
+            ->name('api.v1.building-codes');
     });
 
 /*

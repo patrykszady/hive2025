@@ -22,7 +22,10 @@ class FindVillageCodes implements ShouldQueue
 
     public function __construct(public string $town, public string $state = 'IL')
     {
-        $this->onQueue('default');
+        // The low-priority queue: gs.construction's first sync asks for ~66
+        // towns at once, and each lookup is a web search plus a model read —
+        // on 'default' they would hold up outgoing texts.
+        $this->onQueue('background');
     }
 
     public function handle(VillageCodeFinder $finder): void
