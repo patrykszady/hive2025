@@ -302,7 +302,7 @@ class ImportGoogleVoiceSms extends Command
         }
 
         if ($this->option('clean')) {
-            $deleted = SmsMessage::where('provider', 'google-voice-import')->delete();
+            $deleted = SmsMessage::withTrashed()->where('provider', 'google-voice-import')->forceDelete();
             $this->info("Cleaned {$deleted} existing GV import messages.");
         }
 

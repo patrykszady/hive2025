@@ -3,12 +3,13 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Laravel\Scout\Searchable;
 
 class SmsMessage extends Model
 {
-    use Searchable;
+    use Searchable, SoftDeletes;
 
     public const DIRECTION_INBOUND = 'inbound';
 
@@ -27,6 +28,8 @@ class SmsMessage extends Model
         'status',
         'sent_by_user_id',
         'scheduled_at',
+        'deleted_by_user_id',
+        'deleted_with_message_id',
     ];
 
     protected function casts(): array
@@ -53,6 +56,9 @@ class SmsMessage extends Model
 
         static::saved($touch);
         static::deleted($touch);
+
+        // A reaction or edit notice for a text already deleted in Hive goes too, as it lands.
+        static::created(fn (self $message) => app(\App\Support\Sms\MessageQuoteMatcher::class)->dropIfAboutDeleted($message));
     }
 
     /**

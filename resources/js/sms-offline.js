@@ -445,6 +445,11 @@ function wireEvents() {
     window.addEventListener('sms-incoming', (event) => {
         if (event.detail?.threadId) rewarmThread(event.detail.threadId);
     });
+    // A thread changed without a new message (a text deleted): re-warm its
+    // cached fragment so it never paints the old one — no tab flash or sound.
+    window.addEventListener('sms-thread-changed', (event) => {
+        if (event.detail?.threadId) rewarmThread(event.detail.threadId);
+    });
     try {
         window.Echo?.private('sms.notifications')
             .listen('SmsMessageReceived', (payload) => {

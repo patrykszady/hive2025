@@ -469,6 +469,12 @@
                                 x-on:click="mmOpen = false; navigator.clipboard.writeText(mm.text); $flux.toast({ text: 'Message copied', variant: 'success' })">
                                 <flux:icon.clipboard variant="mini" class="size-4 text-zinc-400 dark:text-zinc-300" /> Copy Text
                             </button>
+                            <div class="my-1 h-px bg-zinc-100 dark:bg-zinc-600"></div>
+                            <button type="button" data-delete-message
+                                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                                x-on:click="mmOpen = false; $wire.confirmDeleteMessage(mm.id)">
+                                <flux:icon.trash variant="mini" class="size-4" /> Delete
+                            </button>
                         </div>
                     </template>
                 </div>
@@ -1144,6 +1150,25 @@
                 </div>
             </div>
         @endif
+        </flux:modal>
+
+        {{-- Delete one message (⋮ → Delete) --}}
+        <flux:modal wire:model.self="showDeleteMessageConfirm" class="min-w-[22rem]">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Delete this message?</flux:heading>
+                    <flux:text class="mt-2">
+                        It is removed from this conversation in Hive. The people it went to still have it — a text can't be unsent.
+                    </flux:text>
+                </div>
+                <div class="flex gap-2">
+                    <flux:spacer />
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Cancel</flux:button>
+                    </flux:modal.close>
+                    <flux:button variant="danger" wire:click="deleteMessage" data-confirm-delete-message>Delete</flux:button>
+                </div>
+            </div>
         </flux:modal>
 
         {{-- Delete Thread Confirmation --}}

@@ -256,32 +256,19 @@ class ConversationPresenter
             }
 
             // Original candidates: same sender & direction, sent before the edit,
-            // not itself an edit notification. Pick the most similar text.
-            $matched = $allMessages
-                ->filter(fn ($candidate) => $candidate->id !== $msg->id
-                    && ! $editIds->contains($candidate->id)
-                    && $candidate->direction === $msg->direction
-                    && $candidate->from_number === $msg->from_number
-                    && ($candidate->created_at === null || $msg->created_at === null || $candidate->created_at->lte($msg->created_at))
-                    && trim((string) $candidate->display_text) !== ''
-                    && $candidate->parseRemoteEdit() === null)
-                ->map(function ($candidate) use ($editedNormalized) {
-                    similar_text($this->normalizeTapbackMatchText((string) $candidate->display_text), $editedNormalized, $percent);
-
-                    return ['message' => $candidate, 'percent' => $percent];
-                })
-                ->sortByDesc('percent')
-                ->first();
+            // not itself an edit notification — the most similar text
+            // (MessageQuoteMatcher, shared with deleting a text and with a
+            // follow-up that arrives after its text was deleted).
+            $original = app(MessageQuoteMatcher::class)->editTarget($msg, $editedText, $allMessages, $editIds);
 
             // Only merge when we're confident which message was edited —
             // otherwise leave the notification visible rather than lose it.
-            if (! $matched || $matched['percent'] < 40) {
+            if (! $original) {
                 continue;
             }
 
             $editIds->push($msg->id);
 
-            $original = $matched['message'];
             // In-memory only: display_text derives from text, so downstream
             // rendering/translation picks up the edited body. Never persisted.
             $original->text = $editedText;
@@ -296,28 +283,7 @@ class ConversationPresenter
                 continue;
             }
 
-            $quotedNormalized = $this->normalizeTapbackMatchText((string) ($tapback['quoted'] ?? ''));
-            $quotedLen = mb_strlen($quotedNormalized);
-            $matched = $allMessages
-                ->filter(function ($candidate) use ($quotedNormalized, $msg) {
-                    if ($candidate->id === $msg->id) {
-                        return false;
-                    }
-                    $candidateText = $candidate->display_text;
-                    if (! $candidateText) {
-                        return false;
-                    }
-                    $candidateNormalized = $this->normalizeTapbackMatchText((string) $candidateText);
-
-                    if ($candidateNormalized === '' || $quotedNormalized === '') {
-                        return false;
-                    }
-
-                    return str_contains($candidateNormalized, $quotedNormalized)
-                        || str_contains($quotedNormalized, $candidateNormalized);
-                })
-                ->sortBy(fn ($c) => abs(mb_strlen($this->normalizeTapbackMatchText((string) $c->display_text)) - $quotedLen))
-                ->first();
+            $matched = app(MessageQuoteMatcher::class)->tapbackTarget($msg, $tapback, $allMessages);
 
             // Generic (strict) tapbacks are only processed when the quoted text
             // actually matches a message in the thread — avoids hiding normal messages.
@@ -1247,71 +1213,8 @@ class ConversationPresenter
 
     /* ─── Tapback text normalization ──────────────────────────────── */
 
-    /**
-     * Normalize text used when matching tapback quoted text to actual thread messages.
-     */
     private function normalizeTapbackMatchText(string $text): string
     {
-        $text = trim($text);
-        if ($text === '') {
-            return '';
-        }
-
-        $text = $this->repairMojibakeForTapbackMatch($text);
-        $text = Str::of($text)
-            ->lower()
-            ->ascii()
-            ->replaceMatches('/[^a-z0-9\s]/u', ' ')
-            ->replaceMatches('/\s+/u', ' ')
-            ->trim()
-            ->value();
-
-        return $text;
-    }
-
-    /**
-     * Lightweight mojibake repair for quote/body mismatches during tapback matching.
-     */
-    private function repairMojibakeForTapbackMatch(string $text): string
-    {
-        if (! preg_match('/[ÃÂâðÄÅ]/u', $text)) {
-            return $text;
-        }
-
-        $candidates = [
-            $text,
-            @mb_convert_encoding($text, 'Windows-1252', 'UTF-8'),
-            @mb_convert_encoding($text, 'ISO-8859-1', 'UTF-8'),
-        ];
-
-        $score = static function (string $value): int {
-            $penalty = preg_match_all('/[ÃÂâðÄÅ]/u', $value, $m);
-            $signal = preg_match_all('/["“”„óęąśłżźćń]/u', $value, $m2);
-
-            return (int) $signal - ((int) $penalty * 2);
-        };
-
-        $best = $text;
-        $bestScore = $score($text);
-
-        foreach ($candidates as $candidate) {
-            if (! is_string($candidate) || $candidate === '') {
-                continue;
-            }
-
-            if (! mb_check_encoding($candidate, 'UTF-8')) {
-                continue;
-            }
-
-            $candidateScore = $score($candidate);
-            if ($candidateScore > $bestScore) {
-                $best = $candidate;
-                $bestScore = $candidateScore;
-            }
-        }
-
-        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $best);
-
-        return is_string($clean) && $clean !== '' ? $clean : $best;
+        return app(MessageQuoteMatcher::class)->normalize($text);
     }
 }

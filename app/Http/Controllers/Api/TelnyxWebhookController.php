@@ -5986,15 +5986,19 @@ class TelnyxWebhookController extends Controller
                 ]);
             }
 
-            $thread->update(['last_activity_at' => now()]);
+            // A reaction to a text already deleted in Hive was dropped as it was
+            // saved (MessageQuoteMatcher): it neither lifts the thread nor rings.
+            if (! $message->trashed()) {
+                $thread->update(['last_activity_at' => now()]);
 
-            try {
-                \App\Events\SmsMessageReceived::dispatch($thread->id);
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('SMS broadcast failed', [
-                    'thread_id' => $thread->id,
-                    'error' => $e->getMessage(),
-                ]);
+                try {
+                    \App\Events\SmsMessageReceived::dispatch($thread->id);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('SMS broadcast failed', [
+                        'thread_id' => $thread->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
         } else {
             // Auto-create a new thread for this inbound message

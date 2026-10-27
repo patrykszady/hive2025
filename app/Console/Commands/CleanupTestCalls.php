@@ -111,7 +111,7 @@ class CleanupTestCalls extends Command
         }
 
         // ── Delete in correct order (foreign keys) ──
-        $deletedMessages = SmsMessage::whereIn('thread_id', $threadIds)->delete();
+        $deletedMessages = SmsMessage::withTrashed()->whereIn('thread_id', $threadIds)->forceDelete();
         $orphanMessages->each->delete();
         SmsThreadRead::whereIn('thread_id', $threadIds)->delete();
         SmsThreadParticipant::whereIn('thread_id', $threadIds)->delete();

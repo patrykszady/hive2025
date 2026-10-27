@@ -74,6 +74,11 @@ class SmsConversation extends Component
 
     public bool $showDeleteConfirm = false;
 
+    /** The text the ⋮ menu's Delete asked about, waiting for the confirm. */
+    public ?int $deletingMessageId = null;
+
+    public bool $showDeleteMessageConfirm = false;
+
     public bool $showAssignClientModal = false;
 
     /** 'client' or 'vendor' */
@@ -646,6 +651,55 @@ class SmsConversation extends Component
         $this->threadId = null;
 
         $this->dispatch('threadDeleted')->to(SmsIndex::class);
+    }
+
+    /** ⋮ → Delete: ask first (only a message of this thread, only the team). */
+    public function confirmDeleteMessage(int $messageId): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        if (! $this->threadId || ! SmsMessage::where('thread_id', $this->threadId)->whereKey($messageId)->exists()) {
+            return;
+        }
+
+        $this->deletingMessageId = $messageId;
+        $this->showDeleteMessageConfirm = true;
+    }
+
+    /**
+     * Remove the text from the conversation in Hive (ThreadAdminActions,
+     * shared with the app). The people it went to still have it.
+     */
+    public function deleteMessage(\App\Services\Sms\ThreadAdminActions $adminActions): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $message = $this->threadId && $this->deletingMessageId
+            ? SmsMessage::where('thread_id', $this->threadId)->find($this->deletingMessageId)
+            : null;
+
+        $this->showDeleteMessageConfirm = false;
+        $this->deletingMessageId = null;
+
+        if (! $message) {
+            return;
+        }
+
+        $adminActions->deleteMessage($message, auth()->user());
+
+        unset($this->presenter, $this->smsMessages, $this->processedMessages);
+        // The bubbles live in their own island: repaint it alongside the render that closes the dialog.
+        if (collect($this->getIslands())->contains('name', 'sms-bubbles')) {
+            $this->renderIsland('sms-bubbles');
+        }
+        $this->dispatch('sms-refresh-threads')->to(SmsThreadList::class);
+        $this->js("window.dispatchEvent(new CustomEvent('sms-thread-changed', { detail: { threadId: ".json_encode((int) $this->threadId).' } }))');
+
+        Flux::toast(variant: 'success', text: 'Message deleted from Hive.');
     }
 
     public function updatingThreadId(): void
