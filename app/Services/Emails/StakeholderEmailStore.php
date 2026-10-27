@@ -71,8 +71,9 @@ class StakeholderEmailStore
         $outbound = $this->mail->isOurAddress($fromEmail);
         $subject = (string) ($message['subject'] ?? '');
         $threadId = $message['thread_id'] ?? null;
+        $body = $this->mail->plainBody($message);
 
-        $placement = $this->placementFor($fromEmail, $to, $cc, $subject, $threadId, $vendorId);
+        $placement = $this->placementFor($fromEmail, $to, $cc, $subject, $threadId, $vendorId, $body);
 
         if (! $placement) {
             return null;
@@ -81,7 +82,6 @@ class StakeholderEmailStore
         $match = $placement['match'];
         $projectId = $placement['project_id'];
         $candidateIds = $placement['candidate_ids'];
-        $body = $this->mail->plainBody($message);
 
         try {
             $row = EmailMessage::create([
@@ -127,14 +127,17 @@ class StakeholderEmailStore
     /**
      * Who an email is with and which projects it could be about: everyone
      * outside the company on it, a client the subject names ("Abbey-plumbing
-     * delivery"), and the project the rest of its thread is already on.
+     * delivery"), a project whose street address it names ("3154 VIOLET LN
+     * - PB26-0157", from a village nobody on the job is), and the project the
+     * rest of its thread is already on. An email naming exactly one
+     * project's address goes on that project, whoever sent it.
      * Shared by storing new mail and `emails:rematch-unplaced`.
      *
      * @param  list<string>  $to
      * @param  list<string>  $cc
      * @return array{match: array{user: ?\App\Models\User, client_id: ?int, vendor_id: ?int, projects: \Illuminate\Support\Collection<int, \App\Models\Project>}, project_id: ?int, candidate_ids: list<int>}|null
      */
-    public function placementFor(string $fromEmail, array $to, array $cc, string $subject, ?string $threadId, int $vendorId): ?array
+    public function placementFor(string $fromEmail, array $to, array $cc, string $subject, ?string $threadId, int $vendorId, ?string $body = null): ?array
     {
         $fromEmail = mb_strtolower(trim($fromEmail));
         $outbound = $this->mail->isOurAddress($fromEmail);
@@ -148,12 +151,25 @@ class StakeholderEmailStore
 
         $match = $external === [] ? null : $this->stakeholders->resolve($external, $vendorId);
 
-        if (! $match) {
-            return null;
+        // The house the email is about: its subject first, then the new part of its body.
+        $addressed = $this->stakeholders->namedByAddress($subject, $vendorId);
+        if ($addressed->isEmpty() && $body !== null && $body !== '') {
+            $addressed = $this->stakeholders->namedByAddress(mb_substr(SummarizeEmailMessage::latestPart($body), 0, 6000), $vendorId);
         }
 
-        // A client the subject names is a candidate too, ahead of the rest.
-        $projects = $this->stakeholders->namedInSubject($subject, $vendorId)
+        if (! $match) {
+            // Nobody on it is a stakeholder: kept only when it names one project's address.
+            if ($addressed->count() !== 1) {
+                return null;
+            }
+
+            $project = $addressed->first();
+            $match = ['user' => null, 'client_id' => $project->client_id ? (int) $project->client_id : null, 'vendor_id' => null, 'projects' => $addressed];
+        }
+
+        // A project the address names, then a client the subject names, ahead of the rest.
+        $projects = $addressed
+            ->concat($this->stakeholders->namedInSubject($subject, $vendorId))
             ->concat($match['projects'])
             ->unique('id')
             ->take(EmailStakeholders::MAX_CANDIDATES)
@@ -169,7 +185,11 @@ class StakeholderEmailStore
 
         return [
             'match' => $match,
-            'project_id' => $projects->count() === 1 ? (int) $projects->first()->id : $threadProjectId,
+            'project_id' => match (true) {
+                $addressed->count() === 1 => (int) $addressed->first()->id,
+                $projects->count() === 1 => (int) $projects->first()->id,
+                default => $threadProjectId,
+            },
             'candidate_ids' => $candidateIds,
         ];
     }

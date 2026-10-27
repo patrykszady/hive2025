@@ -39,6 +39,7 @@ class RematchUnplacedEmails extends Command
                 (string) $email->subject,
                 $email->thread_id,
                 (int) $email->belongs_to_vendor_id,
+                (string) $email->body_text,
             );
 
             if (! $placement) {

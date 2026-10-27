@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Who on the other side of an email is a stakeholder of the company's
@@ -61,6 +62,82 @@ class EmailStakeholders
         return $this->open(Project::withoutGlobalScopes()
             ->whereIn('client_id', $clientIds)
             ->where('belongs_to_vendor_id', $companyVendorId));
+    }
+
+    /** Street-type words that may follow a street's name, or stand for it. */
+    private const STREET_SUFFIXES = [
+        'ln', 'lane', 'dr', 'drive', 'st', 'street', 'ave', 'av', 'avenue', 'ct', 'court', 'rd', 'road',
+        'blvd', 'boulevard', 'cir', 'circle', 'pl', 'place', 'ter', 'terr', 'terrace', 'trl', 'trail',
+        'pkwy', 'parkway', 'way', 'hwy', 'highway', 'sq', 'square', 'pt', 'point', 'xing', 'crossing',
+    ];
+
+    private const DIRECTIONS = ['n', 's', 'e', 'w', 'north', 'south', 'east', 'west', 'ne', 'nw', 'se', 'sw'];
+
+    /**
+     * The company's projects whose street address the text names — house
+     * number and street ("3154 VIOLET LN", "3154 Violet Lane", "3154
+     * Violet"). A building department, a title company or a supplier writes
+     * about the house, not the people: the Village of Northbrook's
+     * inspection notices for 3154 Violet Ln (PB26-0157) came from
+     * NOREPLY@northbrook.il.us, a stranger to every project, and were never
+     * kept (Patryk, 2026-10-27). Open projects first; cancelled ones never.
+     *
+     * @return Collection<int, Project>
+     */
+    public function namedByAddress(?string $text, int $companyVendorId): Collection
+    {
+        $text = mb_strtolower(Str::squish(strip_tags((string) $text)));
+
+        if (! preg_match_all('/\b(\d{1,6})\s+[a-z]/u', $text, $numbers) || $numbers[1] === []) {
+            return collect();
+        }
+
+        $houseNumbers = array_values(array_unique($numbers[1]));
+
+        $projects = Project::withoutGlobalScopes()
+            ->where('belongs_to_vendor_id', $companyVendorId)
+            ->where(function ($query) use ($houseNumbers): void {
+                foreach ($houseNumbers as $number) {
+                    $query->orWhere('address', 'like', $number.' %');
+                }
+            })
+            ->with(['latestStatus' => fn ($status) => $status->withoutGlobalScopes()])
+            ->orderByDesc('id')
+            ->get()
+            ->reject(fn (Project $project) => in_array((int) $project->latestStatus?->status_code, self::CLOSED_STATUS_CODES, true))
+            ->filter(fn (Project $project) => ($pattern = self::addressPattern((string) $project->address)) && preg_match($pattern, $text))
+            ->values();
+
+        return $projects;
+    }
+
+    /**
+     * "3154 Violet Ln" → /\b3154\s+(?:n\.?\s+)?violet\b/: the house number,
+     * an optional direction, and the street's first word — the suffix and
+     * any unit are left out, since every sender writes those differently.
+     */
+    public static function addressPattern(string $address): ?string
+    {
+        $street = mb_strtolower(trim(preg_split('/[,#]|\b(?:unit|apt|suite|ste)\b/i', $address)[0] ?? ''));
+
+        if (! preg_match('/^(\d{1,6})\s+(.+)$/u', $street, $parts)) {
+            return null;
+        }
+
+        $words = preg_split('/\s+/', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $parts[2])) ?: [];
+        $words = array_values(array_filter($words, fn ($word) => $word !== ''));
+        while ($words !== [] && in_array($words[0], self::DIRECTIONS, true)) {
+            array_shift($words);
+        }
+
+        $name = $words[0] ?? null;
+        if (! $name || in_array($name, self::STREET_SUFFIXES, true) || mb_strlen($name) < 3) {
+            return null;
+        }
+
+        $directions = implode('|', self::DIRECTIONS);
+
+        return '/\b'.preg_quote($parts[1], '/').'\s+(?:(?:'.$directions.')\.?\s+)?'.preg_quote($name, '/').'\b/u';
     }
 
     /**
