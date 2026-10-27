@@ -48,9 +48,11 @@
                                 </div>
                             </flux:autocomplete.item>
                         @empty
-                            <flux:autocomplete.item value="" disabled>
-                                {{ mb_strlen(trim($search)) < 2 ? 'Type a name or a phone number…' : 'No matches — type the full phone number' }}
-                            </flux:autocomplete.item>
+                            {{-- Nothing before two characters are typed (the placeholder
+                                 already says what to type; Flux hides an empty panel). --}}
+                            @if (mb_strlen(trim($search)) >= 2)
+                                <flux:autocomplete.item value="" disabled>No matches — type the full phone number</flux:autocomplete.item>
+                            @endif
                         @endforelse
                     </flux:autocomplete>
                     @error('newNumber')

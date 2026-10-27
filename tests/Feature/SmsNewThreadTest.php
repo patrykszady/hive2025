@@ -616,7 +616,19 @@ it('texts one person of a household, filed under that household', function (): v
         ->assertSet('recipients', [['number' => '+18475550102', 'display' => '(847) 555-0102', 'label' => 'Andzelina Szady']])
         ->assertSet('message', "Hi Andzelina,\n".GroupSmsService::START_CONSENT_TEXT)
         ->assertSee('Name or Number')
-        ->assertDontSee('(optional)');
+        ->assertDontSee('(optional)')
+        ->assertDontSee('Type a name or a phone number');
+});
+
+it('shows no hint before anything is typed, and says when a search finds nobody', function (): void {
+    newMessageWorld();
+
+    Livewire::test(SmsNewThread::class)
+        ->call('open')
+        ->assertDontSee('Type a name or a phone number')
+        ->assertDontSee('No matches')
+        ->set('search', 'zzqq')
+        ->assertSee('No matches — type the full phone number');
 });
 
 it('adds people one by one, and a typed number, into one group', function (): void {
