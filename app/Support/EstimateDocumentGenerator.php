@@ -376,7 +376,7 @@ class EstimateDocumentGenerator
         ];
     }
 
-    protected static function vendorLogoDataUrl(Vendor $vendor): ?string
+    public static function vendorLogoDataUrl(Vendor $vendor): ?string
     {
         $vendorLogoPath = data_get($vendor, 'options.logo');
 

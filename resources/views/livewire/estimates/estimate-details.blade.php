@@ -12,6 +12,9 @@
     @unless($nonLivewire ?? false)
         <livewire:estimates.estimate-accept :estimate="$estimate"/>
         <livewire:estimates.estimate-duplicate />
+        @can('update', $estimate)
+            <livewire:estimates.estimate-permit-packet :estimate="$estimate"/>
+        @endcan
     @endunless
 
     @unless($nonLivewire ?? false)
@@ -178,6 +181,31 @@
                     @endif
                 </x-details.row>
             @endif
+
+            {{-- PERMIT PACKET: cover letter + this contract + the plans, one PDF
+                 for the building department. Lives under Signature (Patryk,
+                 2026-10-26: "belongs under Signatures in the estimate details"). --}}
+            @can('update', $estimate)
+                @php
+                    $permitPacket = $estimate->project_id
+                        ? \App\Models\PermitPacket::query()->where('project_id', $estimate->project_id)->latest('id')->first()
+                        : null;
+                @endphp
+                <x-details.row title="Permit Packet" :no-cloak="false">
+                    <button
+                        type="button"
+                        wire:click="$dispatchTo('estimates.estimate-permit-packet', 'openPermitPacket')"
+                        class="font-bold hover:text-indigo-600 dark:hover:text-indigo-400"
+                        data-permit-packet-row
+                    >
+                        @if ($permitPacket?->generated_at)
+                            Built {{ $permitPacket->generated_at->timezone('America/Chicago')->format('M j, Y') }}
+                        @else
+                            Build packet
+                        @endif
+                    </button>
+                </x-details.row>
+            @endcan
         @endunless
     </x-slot:details>
 

@@ -16,6 +16,18 @@ Schedule::job(new PurgeOldCallRecordings())
     ->withoutOverlapping()
     ->onOneServer();
 
+// Each village's adopted building codes (permit cover letters) are re-read
+// from the village's own page on the first of the month, and towns with no
+// page on file are looked up again. Code cycles change every few years and
+// are announced on that page months ahead (Rolling Meadows: 1/1/2026).
+Schedule::command('permits:refresh-village-codes --find')
+    ->monthlyOn(1, '05:30')
+    ->timezone('America/Chicago')
+    ->name('refresh-village-codes')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('calls:process-recordings --retry-failed')
     ->everyFiveMinutes()
     ->name('process-call-recordings')

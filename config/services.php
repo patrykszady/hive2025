@@ -43,6 +43,11 @@ return [
         'estimate_model' => env('ANTHROPIC_ESTIMATE_MODEL', 'claude-opus-5'),
     ],
 
+    // Merges the permit packet's PDFs (App\Support\Permits\PdfMerger).
+    'ghostscript' => [
+        'binary' => env('GHOSTSCRIPT_BINARY', 'gs'),
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'task_extraction_model' => env('OPENAI_TASK_EXTRACTION_MODEL', 'gpt-4.1'),
@@ -56,6 +61,13 @@ return [
         // don't add up to the printed subtotal (App\Services\Receipts\ReceiptLineItemRecovery).
         'receipt_item_recovery' => (bool) env('OPENAI_RECEIPT_ITEM_RECOVERY', true),
         'receipt_item_recovery_model' => env('OPENAI_RECEIPT_ITEM_RECOVERY_MODEL', 'gpt-4.1'),
+        // Finds a village's building-codes page (web search) and reads the adopted codes off it (App\Services\Permits\VillageCodeFinder).
+        'village_codes_model' => env('OPENAI_VILLAGE_CODES_MODEL', 'gpt-4.1'),
+    ],
+
+    // Headless Chrome for Browsershot renders (App\Support\Permits\Chrome); unset = Puppeteer's own.
+    'chrome' => [
+        'path' => env('CHROME_PATH'),
     ],
 
     'assemblyai' => [
