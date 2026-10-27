@@ -458,3 +458,60 @@ it('re-reads a project\'s emails from the console without losing its list', func
         ->assertSuccessful();
     expect($w['measure']->fresh()->start_date->toDateString())->toBe('2026-10-29');
 });
+
+it('never reads Hive\'s own meeting invitation back as a new item', function () {
+    $w = abbeyThread();
+    // MeetTaskCalendarService's invitation, as it lands in the mailbox it went out of (949 Elm, email 166).
+    $invite = EmailMessage::factory()->outbound()->create([
+        'belongs_to_vendor_id' => $w['vendor']->id, 'project_id' => $w['project']->id, 'client_id' => $w['client']->id, 'mailbox' => $w['mailbox'],
+        'from_email' => $w['mailbox'], 'from_name' => 'Patryk Szady', 'subject' => 'Meet', 'sent_at' => '2026-10-24 00:45:44', 'summarized_at' => now(),
+        'body_text' => "GS Construction (ONSITE) Meeting\nProject: Kitchen\nClient: Erin & Doug Abbey\nNotes: 12-PM = Arrival Time. Not length of Meet.\nAttendees:\nPatryk Szady (patryk@gs.construction)",
+    ]);
+    $prompts = [];
+    Http::fake([
+        'api.openai.com/v1/embeddings' => Http::response(['data' => []]),
+        'api.openai.com/v1/chat/completions' => function ($request) use (&$prompts) {
+            $name = data_get($request->data(), 'response_format.json_schema.name');
+            if ($name === 'thread_action_items') {
+                $prompts[] = (string) data_get($request->data(), 'messages.1.content');
+            }
+
+            return Http::response(['choices' => [['message' => ['content' => json_encode($name === 'thread_action_items' ? ['items' => []] : ($name === 'action_item_closures' ? ['decisions' => []] : ['groups' => []]))]]]]);
+        },
+    ]);
+
+    app(ProjectActionItemExtractor::class)->run($w['project']);
+
+    expect(implode("\n", $prompts))->not->toContain('#'.$invite->id.' [')->toContain('#'.$w['thursday']->id.' [')
+        ->and(ProjectActionItemExtractor::isOurInvitation('GS Construction (PHONE CALL) Meeting Project: Kitchen Attendees: Patryk'))->toBeTrue()
+        ->and(ProjectActionItemExtractor::isOurInvitation('Can we have a meeting about the kitchen? Attendees: me and Doug'))->toBeFalse();
+});
+
+it('keeps deleted tasks out of the planner\'s Pending tasks and its count', function () {
+    $w = abbeyThread();
+    $glass = Task::withoutEvents(fn () => Task::create(['title' => 'Glass Install', 'project_id' => $w['project']->id, 'type' => 'Task', 'order' => 4,
+        'belongs_to_vendor_id' => $w['vendor']->id, 'created_by_user_id' => $w['admin']->id, 'options' => ['dates' => [], 'time_settings' => []]]));
+    Task::withoutEvents(fn () => $glass->delete());
+
+    // The planner loads its projects' tasks with the deleted ones, for the struck-through cards on the schedule.
+    $project = $w['project']->fresh()->load(['tasks' => fn ($query) => $query->withTrashed()]);
+    expect($project->tasks->pluck('title')->all())->toContain('Glass Install');
+
+    $planner = new class extends \App\Livewire\Planner\CardsIndex
+    {
+        public $stubProjects;
+
+        #[\Livewire\Attributes\Computed]
+        public function activeProjects()
+        {
+            return $this->stubProjects;
+        }
+    };
+    $planner->stubProjects = collect([$project]);
+
+    $pending = $planner->undatedTasksByProject();
+    expect($pending[$w['project']->id]['tasks']->pluck('title')->all())->toBe(['Counter Measure'])
+        ->and(\App\Livewire\Planner\CardsIndex::isPendingTask($glass->fresh()))->toBeFalse()
+        ->and(\App\Livewire\Planner\CardsIndex::isPendingTask($w['measure']))->toBeTrue()
+        ->and(\App\Livewire\Planner\CardsIndex::isPendingTask($w['install']))->toBeFalse();
+});

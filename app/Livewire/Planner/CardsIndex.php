@@ -913,11 +913,21 @@ class CardsIndex extends Component
     /** Tasks of a project with no date at all (still to schedule). */
     protected function undatedTaskCount(Project $project): int
     {
-        return $project->tasks->filter(function ($task) {
-            $selectedDates = $task->options->dates ?? [];
+        return $project->tasks->filter(fn ($task) => self::isPendingTask($task))->count();
+    }
 
-            return empty($selectedDates) && ! $task->start_date && ! $task->end_date;
-        })->count();
+    /**
+     * A task still to schedule: no date at all, and not deleted. The planner
+     * loads its projects' tasks withTrashed() so the schedule can show a
+     * removed task struck through; a deleted task waiting for nothing does
+     * not belong in "Pending tasks" or its count (104 North Plum Grove's
+     * deleted Glass Install, Plumbing and Electrical, 2026-10-26).
+     */
+    public static function isPendingTask($task): bool
+    {
+        $selectedDates = $task->options->dates ?? [];
+
+        return ! $task->trashed() && empty($selectedDates) && ! $task->start_date && ! $task->end_date;
     }
 
     /**
@@ -2478,11 +2488,7 @@ class CardsIndex extends Component
         $map = [];
 
         foreach ($this->activeProjects as $project) {
-            $tasks = $project->tasks->filter(function ($task) {
-                $selectedDates = $task->options->dates ?? [];
-
-                return empty($selectedDates) && !$task->start_date && !$task->end_date;
-            })->values();
+            $tasks = $project->tasks->filter(fn ($task) => self::isPendingTask($task))->values();
 
             if ($tasks->isEmpty()) {
                 continue;

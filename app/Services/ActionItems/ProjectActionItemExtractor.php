@@ -277,6 +277,19 @@ class ProjectActionItemExtractor
     }
 
     /**
+     * Hive's own calendar invitation for a Meet task (MeetTaskCalendarService:
+     * "GS Construction (ONSITE) Meeting · Project: … · Attendees: …"), read
+     * back from the mailbox it went out of. It restates a task already on the
+     * schedule, the way our schedule texts do, so it is never a new item
+     * (949 Elm's "Meet" from email 166, 2026-10-26).
+     */
+    public static function isOurInvitation(string $text): bool
+    {
+        return (bool) preg_match('/\((ONSITE|VIRTUAL|PHONE CALL)\)\s+Meeting\b/', $text)
+            && str_contains($text, 'Attendees:');
+    }
+
+    /**
      * Open items whose day has passed, or that nobody mentioned for
      * config action_items.stale_days, leave the list as lapsed.
      */
@@ -401,7 +414,7 @@ class ProjectActionItemExtractor
             $count++;
 
             $text = trim((string) preg_replace('/\s+/', ' ', \App\Jobs\SummarizeEmailMessage::latestPart((string) $email->body_text)));
-            if (! self::isWorthReading($text)) {
+            if (! self::isWorthReading($text) || self::isOurInvitation($text)) {
                 continue;
             }
 
