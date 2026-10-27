@@ -159,10 +159,10 @@ class Project extends Model
         
         $client = $this->relationLoaded('client')
             ? $this->client
-            : $this->client()->with('users:id,first_name,last_name')->first();
+            : $this->client()->with('users:id,first_name,last_name,nickname')->first();
 
         $clientUsers = $client
-            ? ($client->relationLoaded('users') ? $client->users : $client->users()->select('first_name', 'last_name')->get())
+            ? ($client->relationLoaded('users') ? $client->users : $client->users()->select('users.id', 'first_name', 'last_name', 'nickname')->get())
             : collect();
 
         $clientId = $client?->id;
@@ -177,11 +177,21 @@ class Project extends Model
             ->filter()
             ->values()
             ->all();
+
+        // Nicknames search too ("Dick" finds Richard Egger's projects), alone and with the last name.
+        $clientUserNicknames = $clientUsers->pluck('nickname')->filter()->map(fn ($n) => trim((string) $n))->filter()->values()->all();
+        $clientUserNicknameFullNames = $clientUsers
+            ->filter(fn ($user) => trim((string) ($user->nickname ?? '')) !== '')
+            ->map(fn ($user) => trim((string) $user->nickname.' '.(string) ($user->last_name ?? '')))
+            ->values()
+            ->all();
         $clientSearch = trim(implode(' ', array_filter(array_merge(
             [$clientName, $clientBusinessName, $clientFirstNames, $clientLastNames],
             $clientUserFullNames,
             $clientUserFirstNames,
-            $clientUserLastNames
+            $clientUserLastNames,
+            $clientUserNicknames,
+            $clientUserNicknameFullNames
         ))));
 
         $vendorBusinessName = $this->relationLoaded('createdByVendor')
@@ -204,6 +214,8 @@ class Project extends Model
             'client_user_first_names' => $clientUserFirstNames,
             'client_user_last_names' => $clientUserLastNames,
             'client_user_full_names' => $clientUserFullNames,
+            'client_user_nicknames' => $clientUserNicknames,
+            'client_user_nickname_full_names' => $clientUserNicknameFullNames,
             'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
             'vendor_ids' => $this->relationLoaded('vendors')
                 ? $this->vendors->pluck('id')->map(fn ($id) => (int) $id)->all()
@@ -244,7 +256,7 @@ class Project extends Model
     protected function makeAllSearchableUsing(Builder $query): Builder
     {
         return $query->with([
-            'client.users:id,first_name,last_name',
+            'client.users:id,first_name,last_name,nickname',
             'createdByVendor:id,business_name',
             'latestStatus:project_status.id,project_status.project_id,project_status.status_code,project_status.start_date',
             'vendors:id',

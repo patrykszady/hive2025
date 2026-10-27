@@ -37,7 +37,7 @@ class Client extends Model
     {
         $users = $this->relationLoaded('users')
             ? $this->users
-            : $this->users()->select('first_name', 'last_name')->get();
+            : $this->users()->select('users.id', 'first_name', 'last_name', 'nickname')->get();
 
         $vendors = $this->relationLoaded('vendors')
             ? $this->vendors
@@ -51,6 +51,15 @@ class Client extends Model
             ->values()
             ->all();
 
+        // Nicknames search too: "Dick" finds Richard Egger (Patryk, 2026-10-27),
+        // alone and with the last name, the way people say it.
+        $clientUserNicknames = $users->pluck('nickname')->filter()->map(fn ($n) => trim((string) $n))->filter()->values()->all();
+        $clientUserNicknameFullNames = $users
+            ->filter(fn ($user) => trim((string) ($user->nickname ?? '')) !== '')
+            ->map(fn ($user) => trim((string) $user->nickname.' '.(string) ($user->last_name ?? '')))
+            ->values()
+            ->all();
+
         $vendorIds = $vendors->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
         $vendorBusinessNames = $vendors->pluck('business_name')->filter()->values()->all();
 
@@ -58,7 +67,9 @@ class Client extends Model
             [$this->name, $this->business_name, $this->first_names, $this->last_names],
             $clientUserFullNames,
             $clientUserFirstNames,
-            $clientUserLastNames
+            $clientUserLastNames,
+            $clientUserNicknames,
+            $clientUserNicknameFullNames
         ))));
 
         $fullAddress = trim(implode(' ', array_filter([
@@ -84,6 +95,8 @@ class Client extends Model
             'client_user_first_names' => $clientUserFirstNames,
             'client_user_last_names' => $clientUserLastNames,
             'client_user_full_names' => $clientUserFullNames,
+            'client_user_nicknames' => $clientUserNicknames,
+            'client_user_nickname_full_names' => $clientUserNicknameFullNames,
             'vendor_ids' => $vendorIds,
             'vendor_business_names' => $vendorBusinessNames,
             'created_at' => $this->created_at?->timestamp ?? 0,
@@ -93,7 +106,7 @@ class Client extends Model
     protected function makeAllSearchableUsing(Builder $query): Builder
     {
         return $query->with([
-            'users:id,first_name,last_name',
+            'users:id,first_name,last_name,nickname',
             'vendors:id,business_name',
         ]);
     }

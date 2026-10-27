@@ -201,6 +201,7 @@ return [
                     'address', 'city', 'state', 'zip_code', 'full_address',
                     'client_search',
                     'client_user_first_names', 'client_user_last_names', 'client_user_full_names',
+                    'client_user_nicknames', 'client_user_nickname_full_names',
                     'vendor_business_names'
                 ],
                 'typoTolerance' => ['enabled' => true],
@@ -217,6 +218,7 @@ return [
                     'client_name', 'client_business_name', 'client_first_names', 'client_last_names',
                     'client_search',
                     'client_user_first_names', 'client_user_last_names', 'client_user_full_names',
+                    'client_user_nicknames', 'client_user_nickname_full_names',
                     'vendor_business_name'
                 ],
                 'typoTolerance' => ['enabled' => true],
