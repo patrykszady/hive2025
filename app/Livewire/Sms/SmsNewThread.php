@@ -8,6 +8,7 @@ use App\Models\SmsThreadParticipant;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
+use App\Services\Sms\TextRecipientSearch;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -36,6 +37,9 @@ class SmsNewThread extends Component
 
     public string $newNumber = '';
 
+    /** The one "Name or Number" box: a person, a household (or company), or a typed number. */
+    public string $search = '';
+
     protected $listeners = [
         'openNewThread' => 'open',
         'openNewThreadWithPhone' => 'openWithPhone',
@@ -43,13 +47,13 @@ class SmsNewThread extends Component
 
     public function open(): void
     {
-        $this->reset(['recipientType', 'clientId', 'vendorId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
+        $this->reset(['recipientType', 'clientId', 'vendorId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber', 'search']);
         $this->showModal = true;
     }
 
     public function openWithPhone(string $phone): void
     {
-        $this->reset(['recipientType', 'clientId', 'vendorId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
+        $this->reset(['recipientType', 'clientId', 'vendorId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber', 'search']);
         $this->newNumber = $phone;
         $this->addNumber();
         $this->showModal = true;
@@ -57,7 +61,7 @@ class SmsNewThread extends Component
 
     public function updatedRecipientType(): void
     {
-        $this->reset(['clientId', 'vendorId', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'message']);
+        $this->reset(['clientId', 'vendorId', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'message', 'search']);
         $this->resetValidation();
     }
 
@@ -658,12 +662,103 @@ class SmsNewThread extends Component
     }
 
     /**
+     * The "Name or Number" matches: each person (with their household or
+     * company and number), the whole household or company, and a typed
+     * number — at most TextRecipientSearch::SEARCH_LIMIT, searched on the
+     * server, so the picker never renders every contact.
+     *
+     * @return list<array{key: string, name: string, detail: string, kind: string, phone: ?string}>
+     */
+    #[Computed]
+    public function searchResults(): array
+    {
+        return app(TextRecipientSearch::class)->search(auth()->user(), $this->recipientType, $this->search);
+    }
+
+    /** One match chosen: a person joins the message, a household or company brings its conversations, a number is added. */
+    public function pick(string $key, TextRecipientSearch $search): void
+    {
+        $picked = $search->resolve(auth()->user(), $this->recipientType, $key);
+        $this->search = '';
+        $this->resetErrorBag('newNumber');
+
+        if (! $picked) {
+            return;
+        }
+
+        if ($picked['kind'] === 'client') {
+            $this->clientId = $picked['id'];
+            $this->updatedClientId();
+
+            return;
+        }
+
+        if ($picked['kind'] === 'vendor') {
+            $this->vendorId = $picked['id'];
+            $this->updatedVendorId();
+
+            return;
+        }
+
+        if ($picked['kind'] === 'number') {
+            $this->newNumber = $picked['phone'];
+            $this->addNumber();
+            $this->afterRecipientsChanged();
+
+            return;
+        }
+
+        $entry = $this->buildRecipientEntryFromUser($picked['user']);
+        if (! $entry || collect($this->recipients)->contains('number', $entry['number'])) {
+            return;
+        }
+
+        $this->recipients[] = $entry;
+        // The thread belongs to that person's household (or company) unless one is chosen already.
+        if ($this->recipientType === 'client' && ! $this->clientId) {
+            $this->clientId = $picked['client_id'];
+        }
+        if ($this->recipientType === 'vendor' && ! $this->vendorId) {
+            $this->vendorId = $picked['vendor_id'];
+        }
+        // A hand-picked set is its own conversation, not one of the presets.
+        $this->recipientPreset = null;
+        $this->recipientPresetOptions = [];
+        $this->afterRecipientsChanged();
+    }
+
+    /** The thread these exact people already have, and a greeting that names them. */
+    private function afterRecipientsChanged(): void
+    {
+        $phones = collect($this->recipients)->pluck('number')->map(fn (string $phone) => GroupSmsService::formatE164($phone))->unique()->values();
+
+        $this->existingThreadId = null;
+        if ($phones->isNotEmpty()) {
+            $existing = SmsGroupThread::query()->accessibleTo(auth()->user());
+            foreach ($phones as $phone) {
+                $existing->whereJsonContains('participants', $phone);
+            }
+            $this->existingThreadId = $existing->whereJsonLength('participants', $phones->count())->value('id');
+        }
+
+        $isDefault = $this->message === '' || (str_starts_with($this->message, 'Hi') && str_ends_with($this->message, GroupSmsService::START_CONSENT_TEXT));
+        if ($isDefault && $phones->isNotEmpty()) {
+            $optedIn = $this->alreadyOptedInPhones($phones->all());
+            $firstNames = fn ($recipients) => collect($recipients)->pluck('label')->map(fn ($name) => explode(' ', trim((string) $name))[0])->filter()->unique()->join(', ', ' & ');
+            $pending = $firstNames(collect($this->recipients)->reject(fn (array $recipient) => in_array(GroupSmsService::formatE164($recipient['number']), $optedIn, true)));
+            $names = $pending !== '' ? $pending : $firstNames($this->recipients);
+            $this->message = 'Hi'.($names !== '' ? ' '.$names : '').",\n".GroupSmsService::START_CONSENT_TEXT;
+        }
+    }
+
+    /**
      * Remove a recipient by index.
      */
     public function removeRecipient(int $index): void
     {
         unset($this->recipients[$index]);
         $this->recipients = array_values($this->recipients);
+        $this->afterRecipientsChanged();
     }
 
     #[Computed]

@@ -546,3 +546,130 @@ it('excludes the office line from the vendor group preset but keeps it as a solo
         ->and($solo->pluck('recipients.0.number')->all())
         ->toContain('+13125557777');
 });
+
+// =========================================================================
+// One "Name or Number" box (Patryk, 2026-10-26: "we need to see individual
+// users we can text, not just a client group … just have 1 input 'Name or
+// Number' for both client name and number (same for vendor)"). The search
+// is TextRecipientSearch, sharing the Add-to-Call search's scoping.
+// =========================================================================
+
+function newMessageWorld(): array
+{
+    config(['scout.driver' => null]);
+    \Illuminate\Support\Facades\Cache::flush();
+    $company = Vendor::withoutGlobalScopes()->find(1) ?? Vendor::query()->forceCreate(['id' => 1, 'business_name' => 'GS Construction']);
+    $patryk = User::factory()->create(['first_name' => 'Patryk', 'last_name' => 'Owner', 'cell_phone' => '2249990001', 'primary_vendor_id' => 1]);
+    $company->users()->attach($patryk->id, ['role_id' => 1, 'is_employed' => 1]);
+
+    $szady = \App\Models\Client::factory()->create();
+    $szady->vendors()->attach(1);
+    $greg = User::factory()->create(['first_name' => 'Greg', 'last_name' => 'Szady', 'cell_phone' => '8475550101']);
+    $andzelina = User::factory()->create(['first_name' => 'Andzelina', 'last_name' => 'Szady', 'cell_phone' => '8475550102']);
+    $szady->users()->attach([$greg->id, $andzelina->id]);
+
+    $glass = Vendor::withoutSyncingToSearch(fn () => Vendor::factory()->create(['business_name' => 'Phd Glass', 'business_phone' => '8475550200']));
+    $company->vendors()->attach($glass->id);
+    $glazier = User::factory()->create(['first_name' => 'Pavel', 'last_name' => 'Glazier', 'cell_phone' => '8475550201']);
+    $glass->users()->attach($glazier->id, ['role_id' => 1, 'is_employed' => 1]);
+
+    $otherCompany = Vendor::withoutSyncingToSearch(fn () => Vendor::factory()->create(['business_name' => 'Other GC']));
+    $strangers = \App\Models\Client::factory()->create();
+    $strangers->vendors()->attach($otherCompany->id);
+    $stranger = User::factory()->create(['first_name' => 'Greta', 'last_name' => 'Szady', 'cell_phone' => '8475550199']);
+    $strangers->users()->attach($stranger->id);
+
+    test()->actingAs($patryk);
+
+    return compact('company', 'patryk', 'szady', 'greg', 'andzelina', 'glass', 'glazier', 'stranger');
+}
+
+it('lists each person of a household, then the household, and never another company\'s people', function (): void {
+    $w = newMessageWorld();
+
+    $results = collect(Livewire::test(SmsNewThread::class)->call('open')->set('search', 'szady')->instance()->searchResults);
+
+    expect($results->pluck('key')->all())->toBe(["user:{$w['andzelina']->id}", "user:{$w['greg']->id}", "client:{$w['szady']->id}"])
+        ->and($results->firstWhere('key', "user:{$w['greg']->id}"))->toMatchArray(['name' => 'Greg Szady', 'detail' => (string) $w['szady']->fresh()->name, 'phone' => '8475550101'])
+        ->and($results->firstWhere('key', "client:{$w['szady']->id}")['detail'])->toBe('Household · 2 people')
+        ->and($results->pluck('name')->all())->not->toContain('Greta Szady');
+});
+
+it('finds a person by part of their number, and offers a typed number nobody has', function (): void {
+    $w = newMessageWorld();
+    $component = Livewire::test(SmsNewThread::class)->call('open');
+
+    expect(collect($component->set('search', '555-0102')->instance()->searchResults)->pluck('key')->all())->toBe(["user:{$w['andzelina']->id}"])
+        ->and(collect($component->set('search', '(847) 555-0177')->instance()->searchResults)->pluck('key')->all())->toBe(['number:+18475550177'])
+        ->and($component->set('search', 's')->instance()->searchResults)->toBe([]);
+});
+
+it('texts one person of a household, filed under that household', function (): void {
+    $w = newMessageWorld();
+
+    Livewire::test(SmsNewThread::class)
+        ->call('open')
+        ->set('search', 'andz')
+        ->call('pick', "user:{$w['andzelina']->id}")
+        ->assertSet('search', '')
+        ->assertSet('clientId', $w['szady']->id)
+        ->assertSet('recipients', [['number' => '+18475550102', 'display' => '(847) 555-0102', 'label' => 'Andzelina Szady']])
+        ->assertSet('message', "Hi Andzelina,\n".GroupSmsService::START_CONSENT_TEXT)
+        ->assertSee('Name or Number')
+        ->assertDontSee('(optional)');
+});
+
+it('adds people one by one, and a typed number, into one group', function (): void {
+    $w = newMessageWorld();
+
+    $component = Livewire::test(SmsNewThread::class)
+        ->call('open')
+        ->call('pick', "user:{$w['greg']->id}")
+        ->call('pick', "user:{$w['andzelina']->id}")
+        ->call('pick', 'number:+18475550177')
+        ->call('pick', "user:{$w['greg']->id}");
+
+    expect(collect($component->get('recipients'))->pluck('number')->all())->toBe(['+18475550101', '+18475550102', '+18475550177'])
+        ->and($component->get('message'))->toStartWith('Hi Greg & Andzelina,');
+});
+
+it('picks the whole household into its usual conversations', function (): void {
+    $w = newMessageWorld();
+
+    $component = Livewire::test(SmsNewThread::class)->call('open')->call('pick', "client:{$w['szady']->id}");
+
+    expect($component->get('clientId'))->toBe($w['szady']->id)
+        ->and(collect($component->get('recipients'))->pluck('number')->sort()->values()->all())->toBe(['+18475550101', '+18475550102'])
+        ->and($component->get('recipientPresetOptions'))->not->toBeEmpty();
+});
+
+it('says when the chosen people already have a thread, and leaves the rest of the form for more people', function (): void {
+    $w = newMessageWorld();
+    $thread = SmsGroupThread::query()->create(['name' => 'Andzelina', 'from_number' => '+12247354200', 'participants' => ['+18475550102'], 'client_id' => $w['szady']->id, 'belongs_to_vendor_id' => 1, 'last_activity_at' => now()]);
+
+    Livewire::test(SmsNewThread::class)
+        ->call('open')
+        ->call('pick', "user:{$w['andzelina']->id}")
+        ->assertSet('existingThreadId', $thread->id)
+        ->assertSee('Thread already exists')
+        ->assertSee('Name or Number')
+        ->call('pick', "user:{$w['greg']->id}")
+        ->assertSet('existingThreadId', null);
+});
+
+it('lists a vendor\'s people and the company on the Vendor side, and never a key it would not offer', function (): void {
+    $w = newMessageWorld();
+    $component = Livewire::test(SmsNewThread::class)->call('open')->set('recipientType', 'vendor');
+
+    expect(collect($component->set('search', 'phd')->instance()->searchResults)->pluck('key')->all())->toBe(["vendor:{$w['glass']->id}"])
+        ->and(collect($component->set('search', 'pavel')->instance()->searchResults)->pluck('key')->all())->toBe(["user:{$w['glazier']->id}"]);
+
+    $component->call('pick', "user:{$w['glazier']->id}")
+        ->assertSet('vendorId', $w['glass']->id)
+        ->assertSet('recipients', [['number' => '+18475550201', 'display' => '(847) 555-0201', 'label' => 'Pavel Glazier']]);
+
+    // A crafted key for another company's homeowner, or a client on the Vendor side, does nothing.
+    $component->call('pick', "user:{$w['stranger']->id}")->call('pick', "client:{$w['szady']->id}");
+    expect($component->get('recipients'))->toHaveCount(1)
+        ->and($component->get('clientId'))->toBeNull();
+});
