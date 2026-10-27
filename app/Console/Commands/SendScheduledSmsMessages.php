@@ -40,6 +40,8 @@ class SendScheduledSmsMessages extends Command
             $delaySeconds = $threadOffsets[$threadId] ?? 0;
             $threadOffsets[$threadId] = $delaySeconds + 10;
 
+            // created_at stays the moment it was typed; the thread shows and
+            // orders the text by scheduled_at (SmsMessage::shown_at).
             $message->update(['status' => 'sending']);
 
             $job = SendGroupMms::dispatch($message->id);

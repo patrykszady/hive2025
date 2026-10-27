@@ -101,10 +101,13 @@ class SendGroupMms implements ShouldQueue
                 $result = $this->sendSms($apiKey, $messagingProfileId, $message->from_number, $participants[0], $text);
             }
 
+            // Telnyx's answer joins the composer's own keys (original_text,
+            // sender/recipient language, source…) instead of replacing them:
+            // replacing lost the English a translated text was typed in.
             $message->update([
                 'provider_message_id' => $result['id'] ?? null,
                 'status' => 'sent',
-                'raw_payload' => $result,
+                'raw_payload' => array_merge(is_array($message->raw_payload) ? $message->raw_payload : [], is_array($result) ? $result : []),
             ]);
         } catch (\Exception $e) {
             Log::channel('telnyx')->error('Failed to send group message', [

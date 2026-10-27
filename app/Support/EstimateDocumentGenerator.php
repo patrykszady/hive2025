@@ -27,6 +27,110 @@ class EstimateDocumentGenerator
      */
     public static function generate(Estimate $estimate, string $type = 'Estimate', bool $store = false, ?string $timezone = null, bool $showChanges = false, bool $showAllowances = true): array
     {
+        ['html' => $view, 'title' => $title, 'timezone' => $timezone] = static::renderHtml($estimate, $type, $timezone, $showChanges, $showAllowances);
+
+        // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
+        // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),
+        // Livewire/Flux may inject script/link tags referencing APP_URL which triggers
+        // these checks. Writing to a temp file and using htmlFromFilePath() bypasses
+        // setHtml() entirely — Chrome loads the file directly. We still sanitize
+        // unnecessary localhost resources to avoid Chrome trying to fetch them.
+        $view = static::sanitizeHtmlForPdf($view);
+
+        $tempHtmlPath = storage_path('app/temp/' . Str::uuid() . '.html');
+        if (! is_dir(dirname($tempHtmlPath))) {
+            mkdir(dirname($tempHtmlPath), 0755, true);
+        }
+        file_put_contents($tempHtmlPath, $view);
+
+        try {
+        $browsershot = Browsershot::htmlFromFilePath($tempHtmlPath)
+            ->newHeadless()
+            ->timeout(180)
+            ->waitUntilNetworkIdle()
+            ->addChromiumArguments([
+                'no-sandbox',
+                'disable-setuid-sandbox',
+                'disable-dev-shm-usage',
+                'disable-gpu',
+                'disable-software-rasterizer',
+                'allow-file-access-from-files',
+                'disable-extensions',
+                'disable-background-networking',
+                'disable-sync',
+                'disable-translate',
+                'no-first-run',
+                'safebrowsing-disable-auto-update',
+                'disable-features=VizDisplayCompositor',
+            ])
+            ->scale(0.8)
+            ->showBrowserHeaderAndFooter()
+            ->showBackground()
+            ->headerHtml('<div style="font-size: 10px; width: 100%; padding: 0; margin: 0 5mm 0 10mm; display: flex; justify-content: space-between;"><span>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</span><span>' . now()->setTimezone($timezone)->format('m/d/Y g:i A') . '</span></div>')
+            ->footerHtml('<div style="font-size: 10px; text-align: right; width: 100%; padding: 0; margin: 0 5mm 0 10mm;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>')
+            ->margins(10, 5, 10, 5);
+
+        // Set node binary path for NVM environments
+        if ($nodeBinary = env('NODE_PATH')) {
+            $browsershot->setNodeBinary($nodeBinary);
+            
+            // Also set the node modules path for Puppeteer
+            $nodeDir = dirname($nodeBinary);
+            $nodeModulesPath = dirname(dirname($nodeDir)) . '/lib/node_modules';
+            if (is_dir($nodeModulesPath)) {
+                $browsershot->setNodeModulePath($nodeModulesPath);
+            }
+            
+            // Ensure Chrome path is in PATH for web server context
+            $browsershot->setEnvironmentOptions([
+                'DISPLAY' => ':0',
+            ]);
+        }
+
+        if ($chromePath = env('CHROME_PATH')) {
+            $browsershot->setChromePath($chromePath);
+        }
+
+        // Write HTML to temp file to avoid process argument length limits
+        $browsershot->writeOptionsToFile();
+
+        // Set process timeout to match browsershot timeout
+        $browsershot->setProcessTimeout(180);
+
+        $binary = $browsershot->pdf();
+
+        } finally {
+            // Clean up the temp HTML file
+            if (file_exists($tempHtmlPath)) {
+                @unlink($tempHtmlPath);
+            }
+        }
+
+        $result = [
+            'binary' => $binary,
+            'filename' => $title . '.pdf',
+            'title' => $title,
+        ];
+
+        if ($store) {
+            $relativePath = 'temp/' . Str::uuid() . '.pdf';
+            Storage::disk('local')->put($relativePath, $binary);
+
+            $result['relative_path'] = $relativePath;
+            $result['path'] = Storage::disk('local')->path($relativePath);
+        }
+
+        return $result;
+    }
+
+    /**
+     * The document as HTML, before Chrome: what generate() prints, and what a
+     * test can read without a browser (page breaks, the totals block).
+     *
+     * @return array{html: string, title: string, timezone: string}
+     */
+    public static function renderHtml(Estimate $estimate, string $type = 'Estimate', ?string $timezone = null, bool $showChanges = false, bool $showAllowances = true): array
+    {
         // PDFs should use the vendor's timezone, not browser timezone.
         // Don't rely on vendor_timezone() which needs an authenticated vendor user;
         // instead resolve from the estimate's vendor after loading.
@@ -135,98 +239,7 @@ class EstimateDocumentGenerator
 
         $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures', 'recentChanges', 'showAllowances', 'reimbursementsUrl'))->render();
 
-        // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
-        // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),
-        // Livewire/Flux may inject script/link tags referencing APP_URL which triggers
-        // these checks. Writing to a temp file and using htmlFromFilePath() bypasses
-        // setHtml() entirely — Chrome loads the file directly. We still sanitize
-        // unnecessary localhost resources to avoid Chrome trying to fetch them.
-        $view = static::sanitizeHtmlForPdf($view);
-
-        $tempHtmlPath = storage_path('app/temp/' . Str::uuid() . '.html');
-        if (! is_dir(dirname($tempHtmlPath))) {
-            mkdir(dirname($tempHtmlPath), 0755, true);
-        }
-        file_put_contents($tempHtmlPath, $view);
-
-        try {
-        $browsershot = Browsershot::htmlFromFilePath($tempHtmlPath)
-            ->newHeadless()
-            ->timeout(180)
-            ->waitUntilNetworkIdle()
-            ->addChromiumArguments([
-                'no-sandbox',
-                'disable-setuid-sandbox',
-                'disable-dev-shm-usage',
-                'disable-gpu',
-                'disable-software-rasterizer',
-                'allow-file-access-from-files',
-                'disable-extensions',
-                'disable-background-networking',
-                'disable-sync',
-                'disable-translate',
-                'no-first-run',
-                'safebrowsing-disable-auto-update',
-                'disable-features=VizDisplayCompositor',
-            ])
-            ->scale(0.8)
-            ->showBrowserHeaderAndFooter()
-            ->showBackground()
-            ->headerHtml('<div style="font-size: 10px; width: 100%; padding: 0; margin: 0 5mm 0 10mm; display: flex; justify-content: space-between;"><span>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</span><span>' . now()->setTimezone($timezone)->format('m/d/Y g:i A') . '</span></div>')
-            ->footerHtml('<div style="font-size: 10px; text-align: right; width: 100%; padding: 0; margin: 0 5mm 0 10mm;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>')
-            ->margins(10, 5, 10, 5);
-
-        // Set node binary path for NVM environments
-        if ($nodeBinary = env('NODE_PATH')) {
-            $browsershot->setNodeBinary($nodeBinary);
-            
-            // Also set the node modules path for Puppeteer
-            $nodeDir = dirname($nodeBinary);
-            $nodeModulesPath = dirname(dirname($nodeDir)) . '/lib/node_modules';
-            if (is_dir($nodeModulesPath)) {
-                $browsershot->setNodeModulePath($nodeModulesPath);
-            }
-            
-            // Ensure Chrome path is in PATH for web server context
-            $browsershot->setEnvironmentOptions([
-                'DISPLAY' => ':0',
-            ]);
-        }
-
-        if ($chromePath = env('CHROME_PATH')) {
-            $browsershot->setChromePath($chromePath);
-        }
-
-        // Write HTML to temp file to avoid process argument length limits
-        $browsershot->writeOptionsToFile();
-
-        // Set process timeout to match browsershot timeout
-        $browsershot->setProcessTimeout(180);
-
-        $binary = $browsershot->pdf();
-
-        } finally {
-            // Clean up the temp HTML file
-            if (file_exists($tempHtmlPath)) {
-                @unlink($tempHtmlPath);
-            }
-        }
-
-        $result = [
-            'binary' => $binary,
-            'filename' => $title . '.pdf',
-            'title' => $title,
-        ];
-
-        if ($store) {
-            $relativePath = 'temp/' . Str::uuid() . '.pdf';
-            Storage::disk('local')->put($relativePath, $binary);
-
-            $result['relative_path'] = $relativePath;
-            $result['path'] = Storage::disk('local')->path($relativePath);
-        }
-
-        return $result;
+        return ['html' => $view, 'title' => $title, 'timezone' => $timezone];
     }
 
     /**
@@ -557,6 +570,15 @@ class EstimateDocumentGenerator
                 $value = trim(strip_tags((string) $value)) === ''
                     ? static::paymentScheduleFallbackHtml()
                     : $value;
+            } elseif ($key === 'project_address') {
+                // The address keeps its line break (street / city line):
+                // each line is escaped on its own and the lines are joined
+                // with a real <br>. Escaping the whole string printed the tag
+                // as text — "123 Villa Circle Drive<br>Palatine, IL 60067".
+                $value = implode('<br>', array_map(
+                    fn (string $line): string => e(trim($line)),
+                    preg_split('/<br\s*\/?>/i', (string) $value) ?: [],
+                ));
             } else {
                 // Every other placeholder is plain text a vendor or client
                 // user ultimately controls (a name, address, date, amount) —

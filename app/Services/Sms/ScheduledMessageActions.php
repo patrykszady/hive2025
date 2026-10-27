@@ -26,9 +26,10 @@ class ScheduledMessageActions
     /**
      * Edit a scheduled message's text before it sends — the web composer's
      * only scheduled-edit: the send time itself is never editable here, only
-     * the body. Re-translates when sender/recipient languages differ (reusing
-     * the languages the message was originally scheduled with when known)
-     * and re-appends the crew signature line the original text carried.
+     * the body. The new text goes out as typed (sms.translate_outbound is off:
+     * texts leave in English), re-translated only when that switch is on and
+     * the languages differ, and the crew signature line the original text
+     * carried is re-appended.
      */
     public function edit(SmsMessage $message, string $newText, SmsTranslationService $translator): SmsMessage
     {
@@ -43,7 +44,7 @@ class ScheduledMessageActions
         ));
 
         $outboundText = $newOriginalText;
-        if ($newOriginalText !== '' && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
+        if ($newOriginalText !== '' && config('sms.translate_outbound') && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
             $outboundText = $translator->translate($newOriginalText, $recipientLanguage, $senderLanguage);
         }
 
@@ -117,7 +118,11 @@ class ScheduledMessageActions
                 ]);
         }
 
-        $updates = ['status' => 'sending', 'scheduled_at' => null];
+        // scheduled_at becomes the moment it actually goes out: created_at
+        // stays when it was typed, and the thread shows and orders the text
+        // by scheduled_at (SmsMessage::shown_at) — Patryk, 2026-10-27: a text
+        // scheduled at night for 8 am shows at 8 am, "created_at should remain".
+        $updates = ['status' => 'sending', 'scheduled_at' => now()];
 
         $newSignature = SmsNewThread::getSignature($actorId);
         $existingSignature = $this->extractSignatureLine((string) ($message->text ?? ''));

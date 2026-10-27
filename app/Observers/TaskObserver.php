@@ -85,6 +85,8 @@ class TaskObserver
      */
     public function updated(Task $task): void
     {
+        $this->cancelMeetEventIfUnscheduled($task);
+
         // Get the original (before update) and current (after update) values
         $originalUserIds = $task->getOriginal('user_ids') ?? [];
         $newUserIds = $task->user_ids ?? [];
@@ -204,6 +206,48 @@ class TaskObserver
     {
         // Queue realtime notifications for affected users
         $this->queueNotificationIfNeeded($task, $task->user_ids ?? [], []);
+    }
+
+    /**
+     * A Meet that loses its date, or stops being a Meet, loses its calendar
+     * invite too — from whichever screen made the change. Every save path
+     * only created or updated the event while the task still had a date, so
+     * taking the date off left the invite standing: the 10 am Connelly/GS
+     * Consult (task 1216) was unscheduled on 2026-10-26 and Carla's calendar
+     * still said 10 am the next morning. The event metadata is cleared so a
+     * later re-scheduling sends a fresh invite instead of updating a
+     * cancelled one.
+     */
+    private function cancelMeetEventIfUnscheduled(Task $task): void
+    {
+        $eventMeta = (array) data_get($task->options, 'nylas_meet_event', []);
+        if (empty($eventMeta['event_id']) || empty($eventMeta['grant_id'])) {
+            return;
+        }
+
+        $stillBooked = $task->type === 'Meet' && $task->start_date;
+        if ($stillBooked) {
+            return;
+        }
+
+        $wasBooked = $task->getOriginal('type') === 'Meet' && $task->getOriginal('start_date');
+        if (! $wasBooked && $task->type === 'Meet') {
+            return;
+        }
+
+        DeleteMeetTaskCalendarEvent::dispatch($task->id, $eventMeta);
+
+        $options = (array) json_decode(json_encode($task->options), true);
+        unset($options['nylas_meet_event']);
+        $task->updateQuietly(['options' => $options]);
+        $task->refresh();
+
+        Log::channel('nylas')->info('Meet unscheduled: calendar event cancellation dispatched', [
+            'task_id' => $task->id,
+            'event_id' => $eventMeta['event_id'],
+            'type' => $task->type,
+            'changed_by_user_id' => auth()->id(),
+        ]);
     }
 
     private function dispatchMeetEventDeletion(Task $task): void

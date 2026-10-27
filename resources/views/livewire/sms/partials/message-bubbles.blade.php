@@ -142,7 +142,7 @@
         </div>
     @endif
     @php
-        $msgLocal = $msg->created_at->copy()->setTimezone($tz);
+        $msgLocal = $msg->shown_at->copy()->setTimezone($tz);
         $msgDate = $msgLocal->toDateString();
         if ($msgDate === $todayDate) {
             $timeLabel = $msgLocal->format('g:i A');

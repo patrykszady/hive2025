@@ -51,7 +51,7 @@
         <x-details.row title="Name" :content="$vendor->business_name" :no-cloak="$disableCloak" />
         {{-- The accessor falls back to the full name — only show a REAL stored short name. --}}
         @php($storedShortName = data_get($vendor->options, 'short_name'))
-        @if(is_string($storedShortName) && $storedShortName !== '')
+        @if(is_string($storedShortName) && $storedShortName !== '' && ! in_array('short_name', $hide ?? []))
             <x-details.row title="Short Name" :content="$storedShortName" :no-cloak="$disableCloak" />
         @endif
         @unless(in_array('type', $hide ?? []))

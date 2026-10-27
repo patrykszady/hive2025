@@ -1094,11 +1094,7 @@ class SmsConversation extends Component
 
         $senderLanguage = $this->preferredLanguageForUser(auth()->user());
         $recipientLanguage = $this->threadRecipientLanguage($thread);
-        $outboundText = $text;
-
-        if ($text !== '' && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
-            $outboundText = $translator->translate($text, $recipientLanguage, $senderLanguage);
-        }
+        $outboundText = $this->outboundText($text, $translator, $recipientLanguage, $senderLanguage);
 
         $messageWithSig = $outboundText !== ''
             ? $outboundText . "\n" . SmsNewThread::getSignature()
@@ -1165,11 +1161,7 @@ class SmsConversation extends Component
 
         $senderLanguage = $this->preferredLanguageForUser(auth()->user());
         $recipientLanguage = $this->threadRecipientLanguage($thread);
-        $outboundText = $text;
-
-        if ($text !== '' && strcasecmp($senderLanguage, $recipientLanguage) !== 0) {
-            $outboundText = $translator->translate($text, $recipientLanguage, $senderLanguage);
-        }
+        $outboundText = $this->outboundText($text, $translator, $recipientLanguage, $senderLanguage);
 
         $messageWithSig = $outboundText !== ''
             ? $outboundText . "\n" . SmsNewThread::getSignature()
@@ -1600,6 +1592,22 @@ class SmsConversation extends Component
     public function processedMessages(): array
     {
         return $this->presenter->processedMessages();
+    }
+
+    /**
+     * What goes out for what was typed. Texts leave as typed — in English —
+     * unless sms.translate_outbound is on (off since 2026-10-27, "we got
+     * rid of translating messages for now"); the schedule blast modal
+     * already sends as drafted. Reading is untouched: foreign inbound text
+     * still shows in English, and one message can be translated on demand.
+     */
+    protected function outboundText(string $text, SmsTranslationService $translator, string $recipientLanguage, string $senderLanguage): string
+    {
+        if ($text === '' || ! config('sms.translate_outbound') || strcasecmp($senderLanguage, $recipientLanguage) === 0) {
+            return $text;
+        }
+
+        return $translator->translate($text, $recipientLanguage, $senderLanguage);
     }
 
     protected function preferredLanguageForUser(?User $user): string

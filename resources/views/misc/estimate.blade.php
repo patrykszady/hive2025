@@ -7,19 +7,22 @@
     <body style="margin: 0; padding: 0;">
         <flux:main style="padding-bottom: 0; margin-bottom: 0;">
             <div class="space-y-4" style="margin-bottom: 0; padding-bottom: 0;">
-                <div class="grid grid-cols-5 gap-4 items-start">
-                    <div class="col-span-2 space-y-4">
+                {{-- Two equal columns: the contractor card was 2/5 wide and
+                     truncated its own rows (Patryk, 2026-10-27). No Short Name
+                     on a printout — the legal business name is the one that counts. --}}
+                <div class="grid grid-cols-2 gap-4 items-start">
+                    <div class="space-y-4">
                         {{-- VENDOR DETAILS --}}
                         @include('livewire.vendors.vendor-details', [
                             'vendor' => $vendor,
                             'vendorLogoDataUrl' => $vendorLogoDataUrl,
                             'nonLivewire' => true,
                             'titleOverride' => 'Contractor Details',
-                            'hide' => ['type'],
+                            'hide' => ['type', 'short_name'],
                         ])
                     </div>
 
-                    <div class="col-span-3 space-y-4">
+                    <div class="space-y-4">
                         {{-- DOCUMENT DETAILS --}}
                         @include('livewire.estimates.estimate-details', [
                             'estimate' => $estimate,
@@ -37,23 +40,26 @@
                                 <flux:heading size="lg" class="mb-0 truncate">Contact Details</flux:heading>
                                 <flux:separator variant="subtle" />
 
+                                {{-- Two columns, phone over email: three columns clipped the
+                                     email once the card became half the page wide. --}}
                                 <flux:table class="whitespace-normal">
                                     <flux:table.columns>
                                         <flux:table.column>Name</flux:table.column>
-                                        <flux:table.column>Phone</flux:table.column>
-                                        <flux:table.column>Email</flux:table.column>
+                                        <flux:table.column>Phone &amp; Email</flux:table.column>
                                     </flux:table.columns>
 
                                     <flux:table.rows>
                                         @foreach($clientContacts as $contact)
                                             <flux:table.row>
-                                                <flux:table.cell variant="strong">{{ $contact->full_name }}</flux:table.cell>
-                                                <flux:table.cell>
+                                                <flux:table.cell variant="strong" class="align-top">{{ $contact->full_name }}</flux:table.cell>
+                                                <flux:table.cell class="whitespace-normal break-all">
                                                     @if($contact->cell_phone)
-                                                        {{ preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $contact->cell_phone) }}
+                                                        <div class="whitespace-nowrap">{{ preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $contact->cell_phone) }}</div>
+                                                    @endif
+                                                    @if($contact->email)
+                                                        <div>{{ $contact->email }}</div>
                                                     @endif
                                                 </flux:table.cell>
-                                                <flux:table.cell>{{ $contact->email }}</flux:table.cell>
                                             </flux:table.row>
                                         @endforeach
                                     </flux:table.rows>
@@ -281,35 +287,37 @@
                                 ->flatMap(fn ($s) => $s->estimate_line_items)
                                 ->sum(fn ($li) => $li->allowances->sum('amount'));
                         @endphp
-                        <div class="flex justify-between">
-                            <div></div>
-                            <x-lists.ul>
-                                <x-lists.search_li
-                                    :basic=true
-                                    :bold="TRUE"
-                                    :line_title="'TOTAL ESTIMATE'"
-                                    :line_data="money($estimate_total + ($reimbursements ?? 0))"
-                                    >
-                                </x-lists.search_li>
-                                @if(($showAllowances ?? true) && $pdfEstimateAllowanceTotal > 0)
-                                    <x-lists.search_li
-                                        :basic=true
-                                        :line_title="'ALLOWANCES'"
-                                        :line_data="money($pdfEstimateAllowanceTotal)"
-                                        >
-                                    </x-lists.search_li>
-                                    <x-lists.search_li
-                                        :basic=true
-                                        :bold="TRUE"
-                                        :line_title="'TOTAL + ALLOWANCES'"
-                                        :line_data="money($estimate_total + ($reimbursements ?? 0) + $pdfEstimateAllowanceTotal)"
-                                        >
-                                    </x-lists.search_li>
-                                @endif
-                            </x-lists.ul>
+                        {{-- Flush with the right edge, like the section totals above it;
+                             kept on one page as a block. --}}
+                        <div class="flex justify-end" data-estimate-totals>
+                            <table class="text-sm" style="break-inside: avoid; min-width: 18rem;">
+                                <tbody class="divide-y divide-gray-200">
+                                    <tr>
+                                        <td class="py-2 pr-8 font-bold text-gray-500 uppercase">Total Estimate</td>
+                                        <td class="py-2 text-right font-bold text-gray-900 whitespace-nowrap">{{ money($estimate_total + ($reimbursements ?? 0)) }}</td>
+                                    </tr>
+                                    @if(($showAllowances ?? true) && $pdfEstimateAllowanceTotal > 0)
+                                        <tr>
+                                            <td class="py-2 pr-8 font-medium text-gray-500 uppercase">Allowances</td>
+                                            <td class="py-2 text-right text-gray-900 whitespace-nowrap">{{ money($pdfEstimateAllowanceTotal) }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="py-2 pr-8 font-bold text-gray-500 uppercase">Total + Allowances</td>
+                                            <td class="py-2 text-right font-bold text-gray-900 whitespace-nowrap">{{ money($estimate_total + ($reimbursements ?? 0) + $pdfEstimateAllowanceTotal) }}</td>
+                                        </tr>
+                                    @endif
+                                </tbody>
+                            </table>
                         </div>
                     @endif
 
+                    {{-- PAYMENTS / FINANCES get a page of their own — only when there is
+                         something to put on it. A forced break before an empty grid
+                         printed a blank page on every estimate that had no payments yet. --}}
+                    @php
+                        $pdfShowsFinances = $projectStatusTitle && in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call']);
+                    @endphp
+                    @if($payments->isNotEmpty() || $pdfShowsFinances)
                     <div style="page-break-before: always;"></div>
                     <div class="grid grid-cols-4 gap-4">
                         {{-- PROJECT PAYMENTS --}}
@@ -349,11 +357,12 @@
 
                         {{-- PROJECT FINANCES --}}
                         <div class="col-span-2">
-                            @if($projectStatusTitle && in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call']))
+                            @if($pdfShowsFinances)
                                 <x-client-finances :project="$project" :finances="$projectFinances" :title="$type . ' Finances'" :reimbursement-download-url="$reimbursementsUrl ?? null" />
                             @endif
                         </div>
                     </div>
+                    @endif
                 @endif
 
                 @if($type == 'Estimate' && !empty($contractBody))

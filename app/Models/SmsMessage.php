@@ -93,6 +93,21 @@ class SmsMessage extends Model
         ];
     }
 
+    /** SQL for the time a text belongs to in a thread — see shown_at. */
+    public const SHOWN_AT_SQL = 'COALESCE(scheduled_at, created_at)';
+
+    /**
+     * The time a text belongs to in a thread: when it went out, for one that
+     * was scheduled (created_at stays the night it was typed — Patryk,
+     * 2026-10-27: "it shouldn't be created_at, that should remain, but show
+     * 8 AM"), else when it was written or received. Everything that orders
+     * or labels messages by time reads this.
+     */
+    public function getShownAtAttribute(): ?\Illuminate\Support\Carbon
+    {
+        return $this->scheduled_at ?? $this->created_at;
+    }
+
     /**
      * The user who sent this outbound message.
      */

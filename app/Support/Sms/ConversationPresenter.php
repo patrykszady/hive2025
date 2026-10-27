@@ -145,7 +145,9 @@ class ConversationPresenter
         return $this->messages = SmsMessage::where('thread_id', $this->thread->id)
             ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'raw_payload', 'status', 'scheduled_at', 'created_at', 'sent_by_user_id'])
             ->with('sentByUser:id,first_name,last_name,nickname')
-            ->orderByDesc('created_at')
+            // A scheduled text sits where it went out, not where it was typed.
+            ->orderByRaw(SmsMessage::SHOWN_AT_SQL.' DESC')
+            ->orderByDesc('id')
             ->limit($this->messageLimit)
             ->get()
             ->reverse()
@@ -978,11 +980,11 @@ class ConversationPresenter
             return $translator->translate($originalText, 'English', $senderLanguage !== '' ? $senderLanguage : null);
         }
 
-        // Your own outbound message, composed in English and sent translated:
-        // show what you actually typed rather than a round-trip back.
+        // An outbound message composed in English and sent translated: show
+        // what was actually typed rather than a round-trip back — to every
+        // reader, since the thread reads English for everyone.
         if (
             $message->isOutbound()
-            && (int) ($message->sent_by_user_id ?? 0) === (int) $this->viewer?->id
             && $originalText !== ''
             && $senderLanguage !== ''
             && strcasecmp($senderLanguage, 'English') === 0

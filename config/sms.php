@@ -30,6 +30,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Outbound Translation
+    |--------------------------------------------------------------------------
+    |
+    | Whether a text typed in Hive is translated into the recipient's
+    | preferred language before it goes out (conversation composer, its
+    | schedule menu, edits of a scheduled text). Off since 2026-10-27:
+    | messages go out as typed, in English, the way the schedule blast modal
+    | already sends them ("we got rid of translating messages for now").
+    | Reading stays as it was — foreign inbound text is shown in English and
+    | a reader can translate one message on demand.
+    |
+    */
+
+    'translate_outbound' => (bool) env('SMS_TRANSLATE_OUTBOUND', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Day-of-Change Notifications
     |--------------------------------------------------------------------------
     |

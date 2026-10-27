@@ -48,13 +48,16 @@ class ThreadMessageController extends Controller
             ->orderByDesc('id')
             ->limit(self::PER_PAGE)
             ->get()
-            ->reverse()
+            // The page is cut by id (the cursor), then read in the order the
+            // thread shows: a scheduled text sits where it went out, not where
+            // it was typed (SmsMessage::shown_at).
+            ->sortBy(fn (SmsMessage $m) => [$m->shown_at?->getTimestamp() ?? 0, $m->id])
             ->values();
 
         return response()->json([
             'data' => MessageResource::collection($messages),
             // Pass back as ?before= to load the next (older) page.
-            'next_before' => $messages->first()?->id,
+            'next_before' => $messages->min('id'),
             'has_more' => $messages->count() === self::PER_PAGE,
         ]);
     }

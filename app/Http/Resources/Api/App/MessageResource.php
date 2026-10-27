@@ -28,7 +28,8 @@ class MessageResource extends JsonResource
                 ->values()
                 ->all(),
             'status' => $this->status,
-            'sent_at' => $this->created_at?->toIso8601String(),
+            // When it went out for a scheduled text, else when it was written (SmsMessage::shown_at).
+            'sent_at' => $this->shown_at?->toIso8601String(),
             // Waiting to go out (the composer's "Schedule send"), or saved as
             // "schedule only" until someone sends it by hand.
             'scheduled_at' => $this->scheduled_at?->toIso8601String(),

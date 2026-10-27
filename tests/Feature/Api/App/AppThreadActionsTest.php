@@ -208,7 +208,8 @@ it('sends a scheduled message right now, re-stamping the sender\'s own signature
 
     $scheduled->refresh();
     expect($scheduled->status)->toBe('sent') // SendGroupMms ran synchronously (QUEUE_CONNECTION=sync)
-        ->and($scheduled->scheduled_at)->toBeNull()
+        // scheduled_at becomes the moment it went out (the thread shows a scheduled text at its send time, created_at stays when it was typed).
+        ->and($scheduled->scheduled_at?->lte(now()))->toBeTrue()
         ->and($scheduled->sent_by_user_id)->toBe($user->id);
     expect($response->json('data.status'))->toBe('sent');
 });
