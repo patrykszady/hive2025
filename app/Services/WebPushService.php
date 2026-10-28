@@ -16,8 +16,11 @@ class WebPushService
      * @param  Collection<int, PushSubscription>  $subscriptions
      * @param  array{title: string, body: string, tag?: string, data?: array, requireInteraction?: bool}  $payload
      * @param  string  $logChannel
+     * @param  array{TTL?: int, urgency?: string, topic?: string}  $options  Push-service options: a ring's push
+     *                                                                        gets a short TTL and high urgency so a
+     *                                                                        phone that was asleep never shows it late.
      */
-    public function sendToSubscriptions(Collection $subscriptions, array $payload, string $logChannel = 'stack'): void
+    public function sendToSubscriptions(Collection $subscriptions, array $payload, string $logChannel = 'stack', array $options = []): void
     {
         if ($subscriptions->isEmpty()) {
             return;
@@ -35,6 +38,7 @@ class WebPushService
             $webPush->queueNotification(
                 $this->buildSubscription($pushSubscription),
                 $encoded,
+                $options,
             );
         }
 

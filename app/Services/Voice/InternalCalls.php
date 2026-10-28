@@ -51,6 +51,9 @@ class InternalCalls
         if ($caller->id === $callee->id || ! $this->areTeammates($caller, $callee)) {
             return $this->failed('You can only call people on your team.');
         }
+        if ($this->hasLiveCall($caller)) {
+            return $this->failed('You are already on a call — hang up first.');
+        }
 
         return $this->begin($caller, collect([$callee]), crew: false);
     }
@@ -64,6 +67,9 @@ class InternalCalls
         $callees = TeamRoster::teammatesOf($caller);
         if ($callees->isEmpty()) {
             return $this->failed('Nobody else is on the crew yet.');
+        }
+        if ($this->hasLiveCall($caller)) {
+            return $this->failed('You are already on a call — hang up first.');
         }
 
         return $this->begin($caller, $callees, crew: true);
@@ -365,6 +371,21 @@ class InternalCalls
             'data' => ['url' => $crew ? '/messages?activeTab=team' : '/messages?callBack='.$caller->id],
             'requireInteraction' => false,
         ], 'telnyx');
+    }
+
+    /**
+     * An internal call this person started that is still ringing or talking
+     * (a double tap on Call, or Call while already connected, used to start a
+     * second one and leave two legs hunting the same login).
+     */
+    public function hasLiveCall(User $caller): bool
+    {
+        return CallLog::query()
+            ->where('user_id', $caller->id)
+            ->where('metadata->type', self::TYPE)
+            ->whereIn('status', [CallLog::STATUS_INITIATED, CallLog::STATUS_ANSWERED, CallLog::STATUS_TRANSFERRED])
+            ->where('created_at', '>=', now()->subMinutes(10))
+            ->exists();
     }
 
     public function isCalleeOf(CallLog $callLog, User $user): bool

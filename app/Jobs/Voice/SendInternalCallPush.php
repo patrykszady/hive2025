@@ -69,7 +69,14 @@ class SendInternalCallPush implements ShouldQueue
                     'callerName' => $callerName,
                     'crew' => $crew,
                 ],
-            ], 'telnyx');
+            ], 'telnyx', [
+                // A ring is only worth showing while it rings: a phone that was
+                // asleep gets it now or never, never "Patryk is calling" ten
+                // minutes later. One topic per call replaces, never stacks.
+                'TTL' => InternalCalls::RING_SECONDS + 10,
+                'urgency' => 'high',
+                'topic' => 'hive-call-'.$callLog->id,
+            ]);
         }
     }
 }

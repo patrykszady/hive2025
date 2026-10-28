@@ -143,8 +143,9 @@ it('pushes the ring to the callee\'s devices only, with Answer and Decline butto
     $callLog = app(InternalCalls::class)->start($this->patryk, $this->greg)['call_log'];
 
     $this->mock(WebPushService::class, function ($mock) use ($callLog) {
-        $mock->shouldReceive('sendToSubscriptions')->once()->withArgs(function ($subs, $payload) use ($callLog) {
+        $mock->shouldReceive('sendToSubscriptions')->once()->withArgs(function ($subs, $payload, $channel, $options) use ($callLog) {
             return $subs->pluck('endpoint')->sort()->values()->all() === ['https://push.example/greg-laptop', 'https://push.example/greg-phone']
+                && $options['TTL'] === InternalCalls::RING_SECONDS + 10 && $options['urgency'] === 'high' && $options['topic'] === "hive-call-{$callLog->id}"
                 && $payload['title'] === 'Patryk is calling'
                 && $payload['requireInteraction'] === true
                 && collect($payload['actions'])->pluck('action')->all() === ['answer', 'decline']
@@ -363,4 +364,19 @@ it('ends a crew call nobody took: the caller hears so, one note lands in the cre
     expect($second->fresh()->status)->toBe(CallLog::STATUS_MISSED)->and($second->fresh()->hangup_cause)->toBe('declined');
     Http::assertSent(fn (Request $r) => str_contains($r->url(), '/actions/speak') && $r['payload'] === 'Everyone declined the call.');
     expect(SmsMessage::query()->where('text', '📞 Missed crew call from Patryk')->count())->toBe(2);
+});
+
+it('refuses a second call while one is ringing or connected', function () {
+    telnyxFake();
+    Queue::fake();
+    $first = app(InternalCalls::class)->start($this->patryk, $this->greg);
+    expect($first['ok'])->toBeTrue();
+
+    $second = app(InternalCalls::class)->start($this->patryk, $this->greg);
+    expect($second['ok'])->toBeFalse()->and($second['error'])->toContain('already on a call');
+    expect(app(InternalCalls::class)->startCrew($this->patryk)['ok'])->toBeFalse();
+
+    // Once it is over, calling again is fine.
+    $first['call_log']->update(['status' => CallLog::STATUS_COMPLETED]);
+    expect(app(InternalCalls::class)->start($this->patryk, $this->greg)['ok'])->toBeTrue();
 });

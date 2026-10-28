@@ -62,6 +62,7 @@
             outboundRequestedAt: 0,
             pendingAnswer: null, // call log id to answer as soon as the client is ready
             connecting: null,
+            placing: false,      // a Call tap in flight — a second tap within 4 s is ignored
 
             async init() {
                 this.readUrl();
@@ -117,6 +118,16 @@
                     this.notice = 'This browser cannot use a microphone here — open Hive over HTTPS in Chrome, Safari or Edge.';
                     return false;
                 }
+                // Already allowed: no extra prompt, no extra capture — the SDK opens the
+                // mic itself when the call connects. iPhone Safari cannot answer this
+                // question and prompts on every capture, so there the SDK's own prompt
+                // is the only one (a probe here meant "allow mic" twice and a "stop
+                // recording" alert after the probe's stream was closed).
+                try {
+                    if (! navigator.permissions?.query) { return true; }
+                    const state = (await navigator.permissions.query({ name: 'microphone' })).state;
+                    if (state === 'granted') { return true; }
+                } catch (e) { return true; }
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     stream.getTracks().forEach((track) => track.stop());
@@ -186,8 +197,16 @@
                 if (call.state === 'ringing' && call.direction === 'inbound') {
                     const headers = call.options?.customHeaders || [];
                     const header = (name) => headers.find((h) => h.name === name)?.value;
-                    const isOurOutbound = !! header('X-Hive-Outbound-Call') || (Date.now() - this.outboundRequestedAt < 20000);
-                    if (isOurOutbound) { this.outboundRequestedAt = 0; this.status = 'Connecting…'; call.answer(); return; }
+                    // Hive rang this login because THIS device asked (Call, Answer): answer it
+                    // here. The same login is registered on every device with Hive open, so
+                    // the ring forks to all of them — the others ignore it, or a phone in a
+                    // pocket would take the call and the desk would sit silent.
+                    const requestedHere = Date.now() - this.outboundRequestedAt < 20000;
+                    if (header('X-Hive-Outbound-Call')) {
+                        if (! requestedHere) { return; }
+                        this.outboundRequestedAt = 0; this.status = 'Connecting…'; call.answer(); return;
+                    }
+                    if (requestedHere) { this.outboundRequestedAt = 0; this.status = 'Connecting…'; call.answer(); return; }
                     const callLogId = header('X-Hive-Call-Log') ? parseInt(header('X-Hive-Call-Log'), 10) : null;
                     const name = call.options?.remoteCallerName || call.options?.remoteCallerNumber || 'Unknown caller';
                     const internal = !! callLogId && /^[A-Za-z]/.test(name) && ! /^\+?\d/.test(name) && (call.options?.remoteCallerNumber || '').replace(/\D/g, '') === '{{ preg_replace('/\D/', '', (string) config('services.telnyx.from')) }}';
@@ -198,7 +217,16 @@
                     return;
                 }
 
-                if (call.state === 'active') { this.call = call; this.incoming = null; this.dialing = null; this.status = 'Connected'; }
+                if (call.state === 'active') {
+                    this.call = call; this.incoming = null; this.dialing = null; this.status = 'Connected';
+                    // Belt and braces for the remote audio: attach the stream to our element
+                    // ourselves and start it, in case the SDK's remoteElement did not.
+                    try {
+                        const el = document.getElementById('hive-team-phone-audio');
+                        if (el && call.remoteStream && el.srcObject !== call.remoteStream) { el.srcObject = call.remoteStream; }
+                        el?.play?.().catch(() => {});
+                    } catch (e) {}
+                }
 
                 if (call.state === 'hangup' || call.state === 'destroy') {
                     if (this.call?.id === call.id) { this.call = null; this.muted = false; this.status = ''; this.notice = 'Call ended'; setTimeout(() => { if (this.notice === 'Call ended') this.notice = null; }, 4000); }
@@ -209,7 +237,9 @@
 
             async callUser(userId) {
                 if (! userId) { return; }
-                if (! await this.ensureMicrophone()) { return; }
+                if (this.call || this.dialing || this.placing) { this.notice = 'You are already on a call — hang up first.'; return; }
+                this.placing = true; setTimeout(() => { this.placing = false; }, 4000);
+                if (! await this.ensureMicrophone()) { this.placing = false; return; }
                 await this.connect();
                 this.outboundRequestedAt = Date.now();
                 this.status = 'Ringing your Hive…';
@@ -219,7 +249,9 @@
             },
 
             async callCrew() {
-                if (! await this.ensureMicrophone()) { return; }
+                if (this.call || this.dialing || this.placing) { this.notice = 'You are already on a call — hang up first.'; return; }
+                this.placing = true; setTimeout(() => { this.placing = false; }, 4000);
+                if (! await this.ensureMicrophone()) { this.placing = false; return; }
                 await this.connect();
                 this.outboundRequestedAt = Date.now();
                 this.status = 'Ringing your Hive…';

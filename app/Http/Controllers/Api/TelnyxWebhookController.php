@@ -1002,7 +1002,7 @@ class TelnyxWebhookController extends Controller
         if (! empty($clientState['internal'])) {
             if ($callLog && ! in_array($callLog->status, [CallLog::STATUS_MISSED, CallLog::STATUS_FAILED, CallLog::STATUS_COMPLETED], true)) {
                 $this->markFailedTargetAndHasRemaining($callLog, $callControlId);
-                Log::channel('telnyx')->info('Internal call: callee leg ended while waiting; the caller keeps waiting', ['call_log_id' => $callLogId, 'hangup_cause' => $hangupCause]);
+                Log::channel('telnyx')->info('Internal call: callee leg ended while waiting; the caller keeps waiting', ['call_log_id' => $callLogId, 'hangup_cause' => $hangupCause] + $this->lastHangupDetails);
             }
 
             return response()->json(['status' => 'ok']);
@@ -1908,11 +1908,21 @@ class TelnyxWebhookController extends Controller
     /**
      * Handle call.hangup - call ended. Also triggers voicemail if all admin rings failed.
      */
+    /** @var array{hangup_source: ?string, sip_hangup_cause: ?string} */
+    protected array $lastHangupDetails = ['hangup_source' => null, 'sip_hangup_cause' => null];
+
     protected function handleCallHangup(array $data): JsonResponse
     {
         $payload = $data['payload'] ?? [];
         $callControlId = $payload['call_control_id'] ?? null;
         $hangupCause = $payload['hangup_cause'] ?? null;
+        // Who ended the leg and the SIP reason — the one thing that tells a
+        // callee's Hive that refused the answer apart from a login that was
+        // never there (internal calls, 2026-10-28).
+        $this->lastHangupDetails = [
+            'hangup_source' => $payload['hangup_source'] ?? null,
+            'sip_hangup_cause' => $payload['sip_hangup_cause'] ?? null,
+        ];
         $clientStateRaw = $payload['client_state'] ?? null;
 
         $clientState = $clientStateRaw
