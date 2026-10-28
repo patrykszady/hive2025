@@ -47,6 +47,15 @@ class SmsSidebarBadge extends Component
                 return SmsGroupThread::unreadCountForUserInClients($user->id, $clientIds);
             }
 
+            // A company user who is not an admin reads team conversations alone.
+            if ($user->vendor_role !== 'Admin') {
+                return SmsGroupThread::query()
+                    ->teamThreads()
+                    ->forTeamMember((int) $user->id)
+                    ->unreadForUser((int) $user->id)
+                    ->count();
+            }
+
             return SmsGroupThread::unreadCountForUser($user->id, $user->vendor?->id);
         });
 

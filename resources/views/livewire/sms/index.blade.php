@@ -87,6 +87,7 @@
             // Strip the off-tab query param from the URL immediately so it
             // never lingers while we wait for Livewire to round-trip.
             const url = new URL(window.location.href);
+            const from = this.$store.sms.tab;
             if (name === 'calls') {
                 url.searchParams.delete('threadId');
                 // Loading overlay only when the list isn't premounted yet —
@@ -97,6 +98,14 @@
                 this.callsMounted = true;
             } else {
                 url.searchParams.delete('callId');
+            }
+            // Messages and Team share the conversation pane but list different
+            // threads: crossing between them closes the open one so a client's
+            // text never sits under Team (or a team chat under Messages).
+            if (name !== from && name !== 'calls' && from !== 'calls' && this.$store.sms.threadId) {
+                url.searchParams.delete('threadId');
+                this.$store.sms.threadId = null;
+                $wire.clearThread();
             }
             if (name === 'messages') {
                 url.searchParams.delete('activeTab');
@@ -253,14 +262,15 @@
                 $wire.autoSelectLatestForFilter();
             }
         "
-        class="w-full lg:w-80 shrink-0 min-w-0 min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:flex' : '' }}"
-        x-bind:class="(($store.sms.threadId && $store.sms.tab === 'messages') || ($store.sms.callId && $store.sms.tab === 'calls')) ? 'hidden lg:flex' : ''"
+        class="w-full lg:w-80 shrink-0 min-w-0 min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && in_array($activeTab, ['messages', 'team'], true) ? 'hidden lg:flex' : '' }}"
+        x-bind:class="(($store.sms.threadId && $store.sms.tab !== 'calls') || ($store.sms.callId && $store.sms.tab === 'calls')) ? 'hidden lg:flex' : ''"
     >
         <x-island-card class="relative flex flex-col h-full min-h-0 overflow-hidden">
             {{-- Tabs --}}
             <div class="flex items-center justify-between">
                 {{-- Alpine-driven tab switching: instant, no server roundtrip --}}
                 <div class="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
+                    @unless ($teamOnly)
                     <button type="button"
                         x-on:click="switchTab('messages')"
                         x-bind:class="$store.sms.tab === 'messages' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
@@ -273,9 +283,23 @@
                         class="px-3 py-1 text-sm font-medium rounded-md">
                         Calls
                     </button>
+                    @endunless
+                    @if ($showTeam)
+                        {{-- Team: Hive-only chats and calls with colleagues (TeamList). --}}
+                        <button type="button"
+                            x-on:click="switchTab('team')"
+                            x-bind:class="$store.sms.tab === 'team' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
+                            class="relative px-3 py-1 text-sm font-medium rounded-md"
+                            data-team-tab>
+                            Team
+                            @if ($this->teamUnreadCount() > 0)
+                                <span class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-blue-500" data-team-tab-unread></span>
+                            @endif
+                        </button>
+                    @endif
                 </div>
 
-                @if (! $isClientUser)
+                @if (! $isClientUser && ! $teamOnly)
                     <flux:button x-show="$store.sms.tab === 'messages'" size="sm" wire:click="$dispatchTo('sms.sms-new-thread', 'openNewThread')" icon="plus">
                         New
                     </flux:button>
@@ -285,6 +309,7 @@
                 @endif
             </div>
 
+            @unless ($teamOnly)
             <div x-show="$store.sms.tab === 'messages'" x-cloak class="flex flex-col flex-1 min-h-0">
                 {{-- Call Status Badge --}}
                 <div class="px-5 py-2 border-b border-zinc-200 dark:border-zinc-700">
@@ -359,7 +384,17 @@
                     </div>
                 </div>
             </div>
+            @endunless
 
+            @if ($showTeam)
+                <div x-show="$store.sms.tab === 'team'" x-cloak class="flex flex-col flex-1 min-h-0" data-team-panel>
+                    <div class="relative flex-1 min-h-0 pt-2">
+                        <livewire:sms.team-list :selected-thread-id="$threadId" wire:key="sms-team-list" />
+                    </div>
+                </div>
+            @endif
+
+            @unless ($teamOnly)
             <template x-if="callsMounted">
                 <div x-show="$store.sms.tab === 'calls'" x-cloak class="flex flex-col flex-1 min-h-0">
                     <div class="relative flex-1 min-h-0 h-full">
@@ -385,6 +420,7 @@
                     </div>
                 </div>
             </template>
+            @endunless
         </x-island-card>
     </div>
 

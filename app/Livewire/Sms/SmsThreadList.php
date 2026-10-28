@@ -108,7 +108,7 @@ class SmsThreadList extends Component
                     ->when(! $user->is_browsing_as_client, function ($query) use ($user) {
                         $vendorId = $user->vendor?->id;
                         if ($vendorId) {
-                            $query->visibleToVendor($vendorId);
+                            $query->visibleToVendor($vendorId)->textThreads();
                         }
                     })
                     ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) $user->id))
@@ -148,7 +148,7 @@ class SmsThreadList extends Component
             ->when(! $user->is_browsing_as_client, function ($query) use ($user) {
                 $vendorId = $user->vendor?->id;
                 if ($vendorId) {
-                    $query->visibleToVendor($vendorId);
+                    $query->visibleToVendor($vendorId)->textThreads();
                 }
             })
             ->when($search !== '', fn ($query) => app(ThreadSearch::class)->applyLikeFallback($query, $search))

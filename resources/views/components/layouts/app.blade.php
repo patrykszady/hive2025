@@ -111,6 +111,15 @@
             </div>
         </flux:main>
 
+        {{-- The Hive phone for GS Construction's team: signed in once, kept
+             across pages, so a teammate's (or a business) call rings on any
+             page and "Call Greg" works from anywhere (App\Livewire\TeamPhone). --}}
+        @if ((int) auth()->user()?->primary_vendor_id === 1 && ! auth()->user()->is_browsing_as_client)
+            @persist('team-phone')
+                <livewire:team-phone />
+            @endpersist
+        @endif
+
         @persist('toast')
             <flux:toast position="top end" />
         @endpersist

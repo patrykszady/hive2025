@@ -908,6 +908,12 @@ Route::post('webhooks/telnyx/messaging', [TelnyxWebhookController::class, 'handl
     ->name('webhooks.telnyx.messaging');
 
 // Telnyx voice webhooks (call control - incoming calls, transfers, hangups)
+// Decline on an internal call's push notification — signed, so it works
+// from the service worker with Hive closed (App\Services\Voice\InternalCalls::declineUrl).
+Route::get('internal-calls/{call}/decline', [\App\Http\Controllers\InternalCallController::class, 'decline'])
+    ->middleware('signed')
+    ->name('internal-calls.decline');
+
 Route::post('webhooks/telnyx/voice', [TelnyxWebhookController::class, 'handleVoice'])
     ->middleware('telnyx.signature')
     ->name('webhooks.telnyx.voice');

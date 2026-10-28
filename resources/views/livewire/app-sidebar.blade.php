@@ -47,6 +47,14 @@
                             <livewire:sms.sms-sidebar-badge />
                         </span>
                     </flux:sidebar.item>
+                @elseif($isTeamMember && $primaryVendorId === 1)
+                    {{-- Not an admin, but on the Hive team: the Team tab alone (SmsIndex::$teamOnly). --}}
+                    <flux:sidebar.item wire:navigate.hover icon="user-group" href="{{ route('sms.index', ['activeTab' => 'team']) }}" tooltip="Team" class="[&_[data-content]]:!overflow-visible" data-sidebar-team>
+                        <span class="inline-flex items-center gap-2">
+                            <span>Team</span>
+                            <livewire:sms.sms-sidebar-badge />
+                        </span>
+                    </flux:sidebar.item>
                 @endif
 
                 @if($canViewLeads)

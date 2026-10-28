@@ -165,6 +165,13 @@
                     </flux:heading>
                 @else
                     <flux:heading size="lg" class="mb-0 truncate flex-1">{{ $headerTitle }}</flux:heading>
+                    @if ($teamCallUserId = $this->teamCallUserId())
+                        {{-- Call this teammate in Hive (TeamPhone listens for team-call). --}}
+                        <flux:button size="sm" variant="primary" color="green" icon="phone" x-on:click="window.dispatchEvent(new CustomEvent('team-call', { detail: { userId: {{ $teamCallUserId }} } }))" data-team-call="{{ $teamCallUserId }}">Call</flux:button>
+                    @elseif ($this->thread->isTeam() && count($this->thread->memberIds()) > 2 && \App\Livewire\TeamPhone::enabledFor(auth()->user()))
+                        {{-- Ring everyone else on the crew into one recorded Hive call. --}}
+                        <flux:button size="sm" variant="primary" color="green" icon="phone" x-on:click="window.dispatchEvent(new CustomEvent('team-call-crew'))" data-team-call-crew>Call Crew</flux:button>
+                    @endif
                 @endif
                 @if ($this->thread->project)
                     <flux:button size="sm" variant="ghost" href="{{ route('projects.show', $this->thread->project_id) }}" wire:navigate.hover icon="arrow-top-right-on-square">
@@ -216,6 +223,38 @@
             </div>
 
             @if (! $isClientUser)
+                @if ($this->thread->isTeam())
+                    {{-- The crew thread: every other member under the title, each a Hive call
+                         (TeamPhone listens for team-call; recorded like click-to-call). A pair
+                         thread has its Call button beside the title instead. --}}
+                    @php
+                        $crewMembers = count($this->thread->memberIds()) > 2
+                            ? $this->thread->members()->reject(fn ($member) => (int) $member->id === (int) auth()->id())->values()
+                            : collect();
+                        $canTeamCall = \App\Livewire\TeamPhone::enabledFor(auth()->user());
+                    @endphp
+                    @if ($crewMembers->isNotEmpty())
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1" data-team-members>
+                            @foreach ($crewMembers as $member)
+                                @php $memberName = trim((string) ($member->nickname ?: $member->first_name)); @endphp
+                                @if ($canTeamCall)
+                                    <button
+                                        type="button"
+                                        class="inline-flex items-center gap-1 text-sm lg:text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                                        title="Call {{ $memberName }} in Hive"
+                                        x-on:click="window.dispatchEvent(new CustomEvent('team-call', { detail: { userId: {{ $member->id }} } }))"
+                                        data-team-call="{{ $member->id }}"
+                                    >
+                                        <flux:icon name="phone" class="size-3" />
+                                        {{ $memberName }}
+                                    </button>
+                                @else
+                                    <span class="inline-flex items-center gap-1 text-sm lg:text-xs text-zinc-500 dark:text-zinc-400">{{ $memberName }}</span>
+                                @endif
+                            @endforeach
+                        </div>
+                    @endif
+                @else
                 @php
                     $callableContacts = collect();
                     $seenE164 = [];
@@ -338,6 +377,7 @@
                             </flux:button>
                         @endif
                     </div>
+                @endif
                 @endif
             @endif
         </div>

@@ -85,6 +85,8 @@ class AppSidebar extends Component
         return [
             'isClientUser' => $isClientUser,
             'isAdmin' => $isAdmin,
+            // A roster member who is not an admin (Czarek) gets a Team link to /messages' Team tab.
+            'isTeamMember' => ! $isClientUser && \App\Support\Team\TeamRoster::isMember($user),
             'hasBankErrors' => $hasBankErrors,
             'clientHome' => $clientHome,
             'canViewBanks' => $user->can('viewAny', Bank::class),

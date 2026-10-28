@@ -105,6 +105,23 @@
                         </div>
                     @endif
 
+                    {{-- Hive team: the Team tab in Messages, calls and messages that stay inside Hive --}}
+                    <div data-team-roster>
+                        <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2">Team</div>
+                        <div class="text-xs text-zinc-500 mb-3">Who is on the Team tab in Messages: these people call and message each other inside Hive (recorded calls, nothing reaches a phone's text messages). Everyone ticked sees everyone else here.</div>
+                        <div class="flex flex-col gap-2">
+                            @foreach ($this->teamRows() as $teamUser)
+                                <label wire:key="team-member-{{ $teamUser->id }}" class="flex items-center gap-3 cursor-pointer min-w-0">
+                                    <flux:checkbox wire:model.live="team_member_user_ids" value="{{ $teamUser->id }}" />
+                                    <div class="min-w-0 truncate">
+                                        <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ $teamUser->nickname ?: $teamUser->first_name }} {{ $teamUser->last_name }}</span>
+                                        <span class="text-xs text-zinc-500 ml-1">{{ $teamUser->cell_phone }}</span>
+                                    </div>
+                                </label>
+                            @endforeach
+                        </div>
+                    </div>
+
                     <div class="space-y-2">
                         <div>
                             <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Welcome Message</div>

@@ -26,6 +26,15 @@ class SmsIndex extends Component
 
     public bool $isClientUser = false;
 
+    /** The Team tab (Hive-only conversations and calls with colleagues): roster members only. */
+    public bool $showTeam = false;
+
+    /**
+     * A roster member who is not an admin (Czarek): the page is the Team tab
+     * alone — no client texts, no calls — so a team message's link works.
+     */
+    public bool $teamOnly = false;
+
     protected $listeners = [
         'threadCreated' => 'selectThread',
         'threadSelected' => 'selectThread',
@@ -38,8 +47,12 @@ class SmsIndex extends Component
         $user = auth()->user();
         $this->isClientUser = (bool) $user->is_browsing_as_client;
 
-        // Client users must have a client with a thread; non-admin non-client users cannot access
-        if (! $this->isClientUser && $user->vendor_role !== 'Admin') {
+        $this->showTeam = \App\Support\Team\TeamRoster::isMember($user);
+        $this->teamOnly = ! $this->isClientUser && $user->vendor_role !== 'Admin' && $this->showTeam;
+
+        // Client users must have a client with a thread; a non-admin company
+        // user gets in only as a team member, and only to the Team tab.
+        if (! $this->isClientUser && $user->vendor_role !== 'Admin' && ! $this->teamOnly) {
             abort(403);
         }
 
@@ -47,12 +60,29 @@ class SmsIndex extends Component
         if (! request()->has('activeTab')) {
             $this->activeTab = session('sms_active_tab', 'messages');
         }
+        if ($this->activeTab === 'team' && ! $this->showTeam) {
+            $this->activeTab = 'messages';
+        }
+        if ($this->teamOnly) {
+            $this->activeTab = 'team';
+            $this->subjectFilter = 'all';
+            $this->search = '';
+        }
 
         // Strip query params that don't belong to the active tab so the URL
         // stays clean on initial load. The view's x-init also strips the
         // browser URL via replaceState.
         if ($this->activeTab === 'calls' && $this->threadId !== null) {
             $this->threadId = null;
+        }
+        // A thread link lands on the tab that lists it: a team conversation
+        // (a push, the bell) opens under Team, a text under Messages.
+        if ($this->threadId !== null && $this->activeTab !== 'calls') {
+            $this->activeTab = $this->tabForThread($this->threadId);
+            if ($this->teamOnly && $this->activeTab !== 'team') {
+                $this->threadId = null;
+                $this->activeTab = 'team';
+            }
         }
         if ($this->activeTab !== 'calls') {
             // CallList holds selectedCallId; nothing to clear here. The view
@@ -62,6 +92,11 @@ class SmsIndex extends Component
 
     public function updatedActiveTab(string $value): void
     {
+        if ($this->teamOnly && $value !== 'team') {
+            $this->activeTab = 'team';
+
+            return;
+        }
         session(['sms_active_tab' => $value]);
 
         if ($value === 'calls') {
@@ -112,10 +147,12 @@ class SmsIndex extends Component
             return;
         }
 
-        // Users may only view threads they can access (client or vendor rules).
+        // Users may only view threads they can access (client or vendor rules;
+        // a team-only member sees team conversations alone).
         if ($threadId !== null) {
             $allowed = SmsGroupThread::query()
                 ->accessibleTo(auth()->user())
+                ->when($this->teamOnly, fn ($q) => $q->teamThreads())
                 ->whereKey($threadId)
                 ->exists();
 
@@ -140,9 +177,34 @@ class SmsIndex extends Component
 
     public function switchToThread(int $threadId): void
     {
-        $this->activeTab = 'messages';
-        session(['sms_active_tab' => 'messages']);
+        if ($this->teamOnly && $this->tabForThread($threadId) !== 'team') {
+            return;
+        }
+        $this->activeTab = $this->tabForThread($threadId);
+        session(['sms_active_tab' => $this->activeTab]);
         $this->selectThread($threadId);
+    }
+
+    /** 'team' for a Hive-only team conversation, 'messages' for a text thread. */
+    protected function tabForThread(int $threadId): string
+    {
+        $isTeam = $this->showTeam && SmsGroupThread::query()->whereKey($threadId)->teamThreads()->exists();
+
+        return $isTeam ? 'team' : 'messages';
+    }
+
+    /** Team conversations with something unread, for the dot on the Team tab. */
+    public function teamUnreadCount(): int
+    {
+        if (! $this->showTeam) {
+            return 0;
+        }
+
+        return SmsGroupThread::query()
+            ->teamThreads()
+            ->forTeamMember((int) auth()->id())
+            ->unreadForUser((int) auth()->id())
+            ->count();
     }
 
     public function clearThread(): void
@@ -202,6 +264,8 @@ class SmsIndex extends Component
         // (mount() aborts non-admin, and admins always have a vendor).
         return SmsGroupThread::query()
             ->accessibleTo(auth()->user())
+            // Each tab auto-opens its own kind of thread, never the other's.
+            ->when($this->activeTab === 'team' || $this->teamOnly, fn ($q) => $q->teamThreads(), fn ($q) => $q->textThreads())
             ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
             ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'))
             ->when($this->subjectFilter === 'unread', fn ($q) => $q->unreadForUser((int) auth()->id()));

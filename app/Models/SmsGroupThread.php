@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -12,7 +13,21 @@ use Laravel\Scout\Searchable;
 class SmsGroupThread extends Model
 {
     use Searchable;
+    /** A thread of texts with people outside Hive — the default. */
+    public const KIND_SMS = 'sms';
+
+    /**
+     * A thread between GS team members that lives in Hive only: its messages
+     * are never sent as texts (Patryk, 2026-10-27: calling and texting the
+     * team "that stay within hive.contractors and don't go to their text
+     * messages"). Members are member_user_ids; participants holds their
+     * cells so names resolve like everywhere else.
+     */
+    public const KIND_TEAM = 'team';
+
     protected $fillable = [
+        'kind',
+        'member_user_ids',
         'name',
         'name_data',
         'from_number',
@@ -31,6 +46,7 @@ class SmsGroupThread extends Model
     {
         return [
             'participants' => 'array',
+            'member_user_ids' => 'array',
             'name_data' => 'array',
             'last_activity_at' => 'datetime',
             'opt_in_prompt_sent_at' => 'datetime',
@@ -123,7 +139,104 @@ class SmsGroupThread extends Model
             return $query->whereRaw('1 = 0');
         }
 
-        return $query->visibleToVendor($vendorId);
+        return $query->visibleToVendor($vendorId)->forTeamMember((int) $user->id);
+    }
+
+    /** Team threads are seen only by their members; every other thread passes. */
+    /** Only the Hive-only team conversations (the Team tab). */
+    public function scopeTeamThreads(Builder $query): Builder
+    {
+        return $query->where('kind', self::KIND_TEAM);
+    }
+
+    /** Only real text threads (the Messages tab): team conversations never mix in. */
+    public function scopeTextThreads(Builder $query): Builder
+    {
+        return $query->where('kind', '!=', self::KIND_TEAM);
+    }
+
+    public function scopeForTeamMember(Builder $query, ?int $userId): Builder
+    {
+        return $query->where(function (Builder $scope) use ($userId): void {
+            $scope->where('kind', '!=', self::KIND_TEAM);
+            if ($userId) {
+                $scope->orWhereJsonContains('member_user_ids', $userId);
+            }
+        });
+    }
+
+    public function isTeam(): bool
+    {
+        return $this->kind === self::KIND_TEAM;
+    }
+
+    /** @return list<int> */
+    public function memberIds(): array
+    {
+        return array_values(array_map('intval', (array) ($this->member_user_ids ?? [])));
+    }
+
+    public function hasMember(?int $userId): bool
+    {
+        return $userId !== null && in_array($userId, $this->memberIds(), true);
+    }
+
+    /** @return Collection<int, User> */
+    public function members(): Collection
+    {
+        $ids = $this->memberIds();
+
+        return $ids === [] ? collect() : User::withoutGlobalScopes()->whereIn('id', $ids)->get()->sortBy(fn (User $u) => array_search($u->id, $ids, true))->values();
+    }
+
+    /**
+     * The team thread for exactly these people (a pair, or the whole team),
+     * made on first use. One per set of members per company.
+     *
+     * @param  list<int>  $userIds
+     */
+    public static function teamThreadFor(array $userIds, int $vendorId, ?string $name = null): self
+    {
+        $ids = collect($userIds)->map(fn ($id) => (int) $id)->filter()->unique()->sort()->values()->all();
+
+        $existing = static::query()
+            ->where('kind', self::KIND_TEAM)
+            ->where('vendor_id', $vendorId)
+            ->get()
+            ->first(fn (self $thread) => collect($thread->memberIds())->sort()->values()->all() === $ids);
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $cells = User::withoutGlobalScopes()->whereIn('id', $ids)->pluck('cell_phone')
+            ->map(fn ($cell) => $cell ? \App\Services\GroupSmsService::formatE164((string) $cell) : null)
+            ->filter()->unique()->values()->all();
+
+        return static::create([
+            'kind' => self::KIND_TEAM,
+            'member_user_ids' => $ids,
+            'name' => $name,
+            'from_number' => (string) config('services.telnyx.from'),
+            'participants' => $cells,
+            'vendor_id' => $vendorId,
+            'last_activity_at' => now(),
+        ]);
+    }
+
+    /** "Greg" for a pair, "Greg, Cezary" for a group, or the thread's own name. */
+    public function teamTitleFor(?User $viewer): string
+    {
+        if ($this->name) {
+            return $this->name;
+        }
+
+        $others = $this->members()->reject(fn (User $u) => $viewer && $u->id === $viewer->id);
+        if ($others->isEmpty()) {
+            return 'Just you';
+        }
+
+        return $others->map(fn (User $u) => trim((string) ($u->nickname ?: $u->first_name)))->filter()->implode(', ');
     }
 
     public function messages(): HasMany
@@ -151,7 +264,8 @@ class SmsGroupThread extends Model
 
     public function hasPendingOptIn(): bool
     {
-        return ! $this->allParticipantsOptedIn();
+        // Team threads never text anyone, so there is nothing to opt in to.
+        return ! $this->isTeam() && ! $this->allParticipantsOptedIn();
     }
 
     public function allParticipantsOptedIn(): bool
@@ -175,8 +289,15 @@ class SmsGroupThread extends Model
      */
     public function scopeUnreadForUser($query, int $userId)
     {
+        // Unread = the latest message is from someone else: inbound on a text
+        // thread; on a team thread, sent by another member.
         return $query->whereHas('latestMessage', fn ($messageQuery) => $messageQuery
-            ->where('direction', SmsMessage::DIRECTION_INBOUND)
+            ->where(function ($from) use ($userId): void {
+                $from->where(fn ($sms) => $sms->where('direction', SmsMessage::DIRECTION_INBOUND)
+                        ->whereExists(fn ($t) => $t->selectRaw('1')->from('sms_group_threads as t')->whereColumn('t.id', 'sms_messages.thread_id')->where('t.kind', '!=', self::KIND_TEAM)))
+                    ->orWhere(fn ($team) => $team->where('sent_by_user_id', '!=', $userId)
+                        ->whereExists(fn ($t) => $t->selectRaw('1')->from('sms_group_threads as t')->whereColumn('t.id', 'sms_messages.thread_id')->where('t.kind', self::KIND_TEAM)));
+            })
             ->whereRaw(
                 'sms_messages.id > COALESCE((select last_read_message_id from sms_thread_reads where sms_thread_reads.thread_id = sms_messages.thread_id and sms_thread_reads.user_id = ?), 0)',
                 [$userId]
@@ -191,6 +312,7 @@ class SmsGroupThread extends Model
     {
         return static::query()
             ->when($vendorId, fn ($q) => $q->visibleToVendor($vendorId))
+            ->forTeamMember($userId)
             ->unreadForUser($userId)
             ->count();
     }

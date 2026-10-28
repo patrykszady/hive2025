@@ -190,8 +190,14 @@ class SmsConversation extends Component
             return;
         }
 
+        $user = auth()->user();
+        // Same rule as SmsIndex::$teamOnly: on the roster but not an admin.
+        $teamOnly = $user && ! $user->is_browsing_as_client && $user->vendor_role !== 'Admin' && \App\Support\Team\TeamRoster::isMember($user);
+
         $allowed = SmsGroupThread::query()
-            ->accessibleTo(auth()->user())
+            ->accessibleTo($user)
+            // A roster member who is not an admin (Czarek) reads team conversations alone.
+            ->when($teamOnly, fn ($q) => $q->teamThreads())
             ->whereKey($this->threadId)
             ->exists();
 
@@ -1096,9 +1102,9 @@ class SmsConversation extends Component
         $recipientLanguage = $this->threadRecipientLanguage($thread);
         $outboundText = $this->outboundText($text, $translator, $recipientLanguage, $senderLanguage);
 
-        $messageWithSig = $outboundText !== ''
-            ? $outboundText . "\n" . SmsNewThread::getSignature()
-            : SmsNewThread::getSignature();
+        $messageWithSig = $thread->isTeam()
+            ? $outboundText
+            : ($outboundText !== '' ? $outboundText . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature());
 
         $mediaUrls = [];
         if ($this->attachment) {
@@ -1163,9 +1169,9 @@ class SmsConversation extends Component
         $recipientLanguage = $this->threadRecipientLanguage($thread);
         $outboundText = $this->outboundText($text, $translator, $recipientLanguage, $senderLanguage);
 
-        $messageWithSig = $outboundText !== ''
-            ? $outboundText . "\n" . SmsNewThread::getSignature()
-            : SmsNewThread::getSignature();
+        $messageWithSig = $thread->isTeam()
+            ? $outboundText
+            : ($outboundText !== '' ? $outboundText . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature());
 
         $mediaUrls = [];
         if ($this->attachment) {
@@ -1603,11 +1609,24 @@ class SmsConversation extends Component
      */
     protected function outboundText(string $text, SmsTranslationService $translator, string $recipientLanguage, string $senderLanguage): string
     {
-        if ($text === '' || ! config('sms.translate_outbound') || strcasecmp($senderLanguage, $recipientLanguage) === 0) {
+        if ($text === '' || ! config('sms.translate_outbound') || strcasecmp($senderLanguage, $recipientLanguage) === 0 || $this->thread?->isTeam()) {
             return $text;
         }
 
         return $translator->translate($text, $recipientLanguage, $senderLanguage);
+    }
+
+    /** On a two-person team thread, the teammate a Call button rings in Hive. */
+    public function teamCallUserId(): ?int
+    {
+        $thread = $this->thread;
+        if (! $thread?->isTeam() || count($thread->memberIds()) !== 2 || ! \App\Livewire\TeamPhone::enabledFor(auth()->user())) {
+            return null;
+        }
+
+        $other = array_values(array_diff($thread->memberIds(), [(int) auth()->id()]));
+
+        return $other[0] ?? null;
     }
 
     protected function preferredLanguageForUser(?User $user): string

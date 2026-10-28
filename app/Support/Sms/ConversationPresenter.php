@@ -150,6 +150,14 @@ class ConversationPresenter
             ->orderByDesc('id')
             ->limit($this->messageLimit)
             ->get()
+            // On a team thread every message is Hive's own; what decides the
+            // side of the screen is who wrote it. Another member's message
+            // reads as inbound to this viewer (never saved that way).
+            ->each(function (SmsMessage $message): void {
+                if ($this->thread?->isTeam() && (int) $message->sent_by_user_id !== (int) $this->viewer?->id) {
+                    $message->setAttribute('direction', SmsMessage::DIRECTION_INBOUND);
+                }
+            })
             ->reverse()
             ->values();
     }
@@ -386,7 +394,9 @@ class ConversationPresenter
         // When set, the header renders these parts individually so only the
         // client-user portions are wrapped in the client link.
         $headerParts = null;
-        if ($thread->client) {
+        if ($thread->isTeam()) {
+            $headerTitle = $thread->teamTitleFor($this->viewer);
+        } elseif ($thread->client) {
             $clientUserByPhone = $thread->client->users
                 ->mapWithKeys(fn ($u) => [$u->routeNotificationForTelnyx() => $u])
                 ->filter(fn ($u, $phone) => is_string($phone) && $phone !== '');
@@ -1093,7 +1103,8 @@ class ConversationPresenter
     {
         $rawPayload = is_array($message->raw_payload) ? $message->raw_payload : [];
 
-        return (string) ($rawPayload['source'] ?? '') === 'send_schedule_modal';
+        // Team messages are read as written: colleagues, not clients.
+        return $this->thread?->isTeam() || (string) ($rawPayload['source'] ?? '') === 'send_schedule_modal';
     }
 
     protected function messageSourceLanguage(SmsMessage $message, string $originalText): ?string

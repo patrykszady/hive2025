@@ -623,21 +623,29 @@ class TelnyxWebhookController extends Controller
         $targetCallControlIds = [];
 
         try {
+            $internal = ! empty($clientState['internal']);
+
             foreach ($targetPhones as $targetPhone) {
+                // An internal call's target is a teammate's Hive login (a SIP
+                // address): no answering machine to detect, the caller's own
+                // name on the ring, the call log in a header for the banner,
+                // and InternalCalls::RING_SECONDS instead of the carrier wait.
+                $isHiveLogin = str_starts_with((string) $targetPhone, 'sip:');
                 $response = $this->telnyxHttp(0)
-                    ->post('https://api.telnyx.com/v2/calls', [
+                    ->post('https://api.telnyx.com/v2/calls', array_filter([
                         'connection_id' => $connectionId,
                         'to' => $targetPhone,
                         'from' => $from,
-                        'from_display_name' => 'GS Construction',
+                        'from_display_name' => $isHiveLogin ? self::telnyxDisplayName($callerFirstName) : 'GS Construction',
                         // Long enough for the carrier to divert to voicemail (see config).
-                        'timeout_secs' => (int) config('services.telnyx.click_to_call_timeout', 45),
+                        'timeout_secs' => $isHiveLogin ? \App\Services\Voice\InternalCalls::RING_SECONDS : (int) config('services.telnyx.click_to_call_timeout', 45),
                         'preferred_codecs' => config('services.telnyx.preferred_codecs'),
-                        'answering_machine_detection' => 'premium',
-                        'answering_machine_detection_config' => [
+                        'answering_machine_detection' => $isHiveLogin ? null : 'premium',
+                        'answering_machine_detection_config' => $isHiveLogin ? null : [
                             'after_greeting_silence_millis' => 800,
                             'total_analysis_time_millis' => 5000,
                         ],
+                        'custom_headers' => $isHiveLogin ? [['name' => 'X-Hive-Call-Log', 'value' => (string) $callLogId]] : null,
                         'client_state' => base64_encode(json_encode([
                             'action' => 'click_to_call_target_ring',
                             'call_log_id' => $callLogId,
@@ -645,9 +653,10 @@ class TelnyxWebhookController extends Controller
                             'target_phone' => $targetPhone,
                             'target_phones' => $targetPhones,
                             'user_call_control_id' => $callControlId,
+                            'internal' => $internal,
                         ])),
                         'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
-                    ]);
+                    ], fn ($value) => $value !== null));
 
                 if (! $response->successful()) {
                     Log::channel('telnyx')->error('Click-to-call: failed to dial target', [
@@ -757,7 +766,9 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
-            $this->speakOutboundDisclosure($callControlId, $callLogId, $userCallControlId);
+            if (empty($clientState['internal'])) {
+                $this->speakOutboundDisclosure($callControlId, $callLogId, $userCallControlId);
+            }
 
             // Dual-channel recording on the target leg captures the target and
             // the user bridged in; the spoken disclosure replaces the beep.
@@ -983,6 +994,19 @@ class TelnyxWebhookController extends Controller
             'hangup_cause' => $hangupCause,
             'call_log_id' => $callLogId,
         ]);
+
+        // An internal call: the callee's Hive may simply be closed (the ring
+        // to the login fails at once) — the push's Answer rings it again, and
+        // InternalCallTimeout ends the call if nobody takes it. Nothing to say
+        // to the caller yet; a declined or ended call was already handled.
+        if (! empty($clientState['internal'])) {
+            if ($callLog && ! in_array($callLog->status, [CallLog::STATUS_MISSED, CallLog::STATUS_FAILED, CallLog::STATUS_COMPLETED], true)) {
+                $this->markFailedTargetAndHasRemaining($callLog, $callControlId);
+                Log::channel('telnyx')->info('Internal call: callee leg ended while waiting; the caller keeps waiting', ['call_log_id' => $callLogId, 'hangup_cause' => $hangupCause]);
+            }
+
+            return response()->json(['status' => 'ok']);
+        }
 
         if ($callLog && $this->markFailedTargetAndHasRemaining($callLog, $callControlId)) {
             Log::channel('telnyx')->info('Click-to-call: waiting on remaining target legs', [
@@ -5561,7 +5585,8 @@ class TelnyxWebhookController extends Controller
         }
 
         return collect($targets)
-            ->map(fn (string $phone) => $this->normalizeDialPhone($phone))
+            // A teammate's Hive login (internal calls) is a SIP address, kept as is.
+            ->map(fn (string $phone) => str_starts_with($phone, 'sip:') ? $phone : $this->normalizeDialPhone($phone))
             ->filter(fn (?string $phone) => is_string($phone) && $phone !== '' && ! GroupSmsService::isOurNumber($phone))
             ->unique()
             ->values()

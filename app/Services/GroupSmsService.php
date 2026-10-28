@@ -63,17 +63,21 @@ class GroupSmsService
     ): SmsMessage
     {
         $participants = $thread->participants ?? [];
+        $team = $thread->isTeam();
+        $sender = $team && $sentByUserId ? \App\Models\User::withoutGlobalScopes()->find($sentByUserId) : null;
 
         $message = SmsMessage::create([
             'thread_id' => $thread->id,
-            'provider' => 'telnyx',
+            // A team message is Hive's own: no provider, the sender's cell as
+            // the from number so names resolve, and never a Telnyx send.
+            'provider' => $team ? 'hive' : 'telnyx',
             'direction' => SmsMessage::DIRECTION_OUTBOUND,
-            'from_number' => $this->from,
+            'from_number' => $team ? (self::formatE164((string) ($sender?->cell_phone ?? '')) ?: $this->from) : $this->from,
             'to_numbers' => $participants,
             'text' => $text,
             'media_urls' => $mediaUrls ?: null,
             'raw_payload' => $rawPayload,
-            'status' => ($scheduledAt || $scheduleOnly) ? 'scheduled' : 'sending',
+            'status' => ($scheduledAt || $scheduleOnly) ? 'scheduled' : ($team ? 'sent' : 'sending'),
             'sent_by_user_id' => $sentByUserId,
             'scheduled_at' => $scheduledAt,
         ]);
@@ -82,8 +86,10 @@ class GroupSmsService
             return $message;
         }
 
-        // Dispatch to queue — job handles the Telnyx API call with rate limiting
-        \App\Jobs\SendGroupMms::dispatch($message->id);
+        if (! $team) {
+            // Dispatch to queue — job handles the Telnyx API call with rate limiting
+            \App\Jobs\SendGroupMms::dispatch($message->id);
+        }
 
         $thread->update(['last_activity_at' => now()]);
 

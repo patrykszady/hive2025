@@ -108,6 +108,10 @@ class ThreadResource extends JsonResource
         /** @var \App\Models\SmsGroupThread $thread */
         $thread = $this->resource;
 
+        if ($thread->isTeam()) {
+            return $thread->teamTitleFor(request()->user());
+        }
+
         if ($thread->client_id) {
             // collect(...->all()): Eloquent\Collection::map() only downgrades
             // to a plain Collection when it SEES a non-Model item in the

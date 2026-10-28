@@ -18,9 +18,15 @@ class MessageResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        // On a team thread every row is stored as outbound (Hive's own message);
+        // the app draws it on the side of whoever is looking, like the web
+        // (ConversationPresenter): mine on the right, a teammate's on the left.
+        $viewerId = (int) ($request->user()?->id ?? 0);
+        $fromTeammate = $this->thread?->isTeam() && (int) $this->sent_by_user_id !== $viewerId;
+
         return [
             'id' => $this->id,
-            'direction' => $this->direction,
+            'direction' => $fromTeammate ? 'inbound' : $this->direction,
             'body' => $this->display_text,
             // Absolute, session-less URLs — see ConversationPresenter::publicMediaUrl().
             'media_urls' => collect($this->media_urls ?? [])
@@ -34,6 +40,7 @@ class MessageResource extends JsonResource
             // "schedule only" until someone sends it by hand.
             'scheduled_at' => $this->scheduled_at?->toIso8601String(),
             'sender_name' => $this->isOutbound() ? ConversationPresenter::outboundSenderName($this->resource) : null,
+            'from_teammate' => (bool) $fromTeammate,
         ];
     }
 }

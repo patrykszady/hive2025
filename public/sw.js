@@ -217,6 +217,12 @@ self.addEventListener('push', (event) => {
             requireInteraction: payload.requireInteraction || false,
         };
 
+        // Buttons on the notification itself (an internal call's Answer /
+        // Decline) — honoured where the platform shows them (Android, desktop).
+        if (Array.isArray(payload.actions) && payload.actions.length) {
+            options.actions = payload.actions;
+        }
+
         // Set app badge count on the home-screen icon (iOS 16.4+ PWA)
         if ('setAppBadge' in self.registration) {
             const badgeCount = payload.badgeCount;
@@ -254,7 +260,18 @@ self.addEventListener('notificationclick', (event) => {
         self.registration.clearAppBadge().catch(() => {});
     }
 
-    const path = event.notification.data?.url || '/dashboard';
+    const notificationData = event.notification.data || {};
+
+    // An internal call's Decline: tell Hive without opening it.
+    if (event.action === 'decline' && notificationData.declineUrl) {
+        event.waitUntil(fetch(notificationData.declineUrl, { credentials: 'same-origin' }).catch(() => {}));
+        return;
+    }
+
+    // Its Answer opens Hive straight into the call; a plain tap opens the Answer banner.
+    const path = (event.action === 'answer' && notificationData.answerUrl)
+        ? notificationData.answerUrl
+        : (notificationData.url || '/dashboard');
     const targetUrl = new URL(path, self.location.origin).href;
     const parsedUrl = new URL(path, self.location.origin);
     const threadId = parsedUrl.searchParams.get('threadId');

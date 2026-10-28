@@ -44,6 +44,22 @@ class SendGroupMms implements ShouldQueue
             return;
         }
 
+        // A team thread's message (scheduled, or sent by hand later) is
+        // delivered inside Hive only: mark it sent, tell the thread, no Telnyx.
+        if ($message->thread?->isTeam()) {
+            $message->update(['status' => 'sent', 'provider' => 'hive']);
+            $message->thread->update(['last_activity_at' => now()]);
+            try {
+                SmsMessageReceived::dispatch($message->thread_id);
+            } catch (\Throwable) {
+            }
+            if ($message->sent_by_user_id) {
+                SendOutboundSmsBrowserNotifications::dispatch($message->id, (int) $message->sent_by_user_id);
+            }
+
+            return;
+        }
+
         // Rate limit: 1 Group MMS per 5 seconds per thread.
         // Prevents AT&T carrier-level throttling on 10DLC.
         $lockKey = 'sms-send-thread:' . $message->thread_id;

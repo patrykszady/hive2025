@@ -34,6 +34,9 @@ class PhoneSystemOptions extends Component
     /** @var array<int> Admin user IDs rung, in this order, when a vendor or sub calls */
     public array $vendor_call_recipients = [];
 
+    /** The Hive team: who sees the Team tab and can call/message teammates inside Hive (TeamRoster). */
+    public array $team_member_user_ids = [];
+
     /** How vendors and subs ring: 'one_by_one' (the order above) or 'all' (everyone ticked at once). */
     public string $vendor_call_ring_mode = 'one_by_one';
 
@@ -126,6 +129,17 @@ class PhoneSystemOptions extends Component
         $this->recording_disclosure_message = data_get($this->vendor->options, 'recording_disclosure_message', '') ?: self::DEFAULT_RECORDING_DISCLOSURE;
 
         $this->adminUsersWithPhones = $this->vendor->getAdminUsersWithCellPhones();
+        $this->team_member_user_ids = array_map('strval', \App\Support\Team\TeamRoster::memberIds($this->vendor));
+    }
+
+    /**
+     * Everyone employed by the company, for the Team picker.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\User>
+     */
+    public function teamRows(): \Illuminate\Support\Collection
+    {
+        return $this->vendor->users()->wherePivot('is_employed', 1)->orderBy('users.first_name')->get();
     }
 
     protected function rules(): array
@@ -136,6 +150,8 @@ class PhoneSystemOptions extends Component
             'vendor_call_order_enabled' => 'boolean',
             'vendor_call_recipients' => 'array',
             'vendor_call_recipients.*' => 'integer|exists:users,id',
+            'team_member_user_ids' => 'array',
+            'team_member_user_ids.*' => 'integer|exists:users,id',
             'vendor_call_ring_mode' => 'in:one_by_one,all',
             'call_welcome_enabled' => 'boolean',
             'voicemail_enabled' => 'boolean',
@@ -307,6 +323,7 @@ class PhoneSystemOptions extends Component
         // Empty = vendors and subs ring the Call Recipients order.
         $options['vendor_call_recipients'] = $this->vendor_call_order_enabled ? $this->orderedVendorRecipientIds() : [];
         $options['vendor_call_ring_all'] = $this->vendor_call_order_enabled && $this->vendor_call_ring_mode === 'all';
+        $options[\App\Support\Team\TeamRoster::OPTION] = array_values(array_unique(array_map('intval', $this->team_member_user_ids)));
         $options['call_welcome_enabled'] = $this->call_welcome_enabled;
         $options['voicemail_enabled'] = $this->voicemail_enabled;
         $options['welcome_message'] = $this->welcome_message ?: null;
@@ -326,6 +343,8 @@ class PhoneSystemOptions extends Component
 
         $this->vendor->options = $options;
         $this->vendor->save();
+        // The whole-team thread follows the roster (same thread, new members).
+        \App\Support\Team\TeamRoster::syncGroupThread($this->vendor);
 
         Flux::toast(
             variant: 'success',

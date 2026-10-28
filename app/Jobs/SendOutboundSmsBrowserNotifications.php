@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Models\AppNotification;
+use App\Models\SmsGroupThread;
 use App\Models\PushSubscription;
 use App\Models\SmsMessage;
 use App\Models\User;
@@ -39,11 +41,19 @@ class SendOutboundSmsBrowserNotifications implements ShouldQueue
         }
 
         // Send to all subscriptions with sms_inbound_enabled, excluding the sender
+                $thread = $message->thread;
+        // Send to all subscriptions with sms_inbound_enabled, excluding the sender.
+        // A team thread's message goes to its other members only, whatever
+        // their text settings: it is their conversation, not a client's.
         $enabledSubscriptions = PushSubscription::query()
-            ->where('sms_inbound_enabled', true)
+            ->when($thread?->isTeam(), fn ($q) => $q->whereIn('user_id', array_diff($thread->memberIds(), [$this->sentByUserId])), fn ($q) => $q->where('sms_inbound_enabled', true))
             ->where('user_id', '!=', $this->sentByUserId)
             ->get();
+        if ($thread?->isTeam()) {
+            $this->notifyTeam($message, $thread, $sender, $enabledSubscriptions, $webPush);
 
+            return;
+        }
         if ($enabledSubscriptions->isEmpty()) {
             return;
         }
@@ -66,6 +76,45 @@ class SendOutboundSmsBrowserNotifications implements ShouldQueue
                     ? "/messages?threadId={$message->thread_id}"
                     : '/messages',
             ],
+            'requireInteraction' => false,
+        ], 'telnyx');
+    }
+
+    /**
+     * A team message: "Patryk: on my way" to each other member — a push on
+     * every device with Hive, and a row on /notifications.
+     *
+     * @param  \Illuminate\Support\Collection<int, PushSubscription>  $subscriptions
+     */
+    protected function notifyTeam(SmsMessage $message, SmsGroupThread $thread, User $sender, $subscriptions, WebPushService $webPush): void
+    {
+        $senderName = trim((string) ($sender->nickname ?: $sender->first_name)) ?: 'A team member';
+        $body = trim((string) ($message->display_text ?: 'Sent a message'));
+        $url = "/messages?threadId={$thread->id}&messageId={$message->id}";
+        $title = $thread->name ? "{$senderName} · {$thread->name}" : $senderName;
+
+        foreach (array_diff($thread->memberIds(), [$sender->id]) as $userId) {
+            AppNotification::create([
+                'user_id' => $userId,
+                'type' => 'team_message',
+                'title' => $title,
+                'body' => mb_substr($body, 0, 180),
+                'action_url' => $url,
+                'data' => ['sms_message_id' => $message->id, 'thread_id' => $thread->id, 'from_user_id' => $sender->id],
+            ]);
+        }
+
+        if ($subscriptions->isEmpty()) {
+            return;
+        }
+
+        $webPush->sendToSubscriptions($subscriptions, [
+            'title' => $title,
+            'body' => mb_substr($body, 0, 180),
+            'icon' => '/favicons/icon-192x192.png',
+            'badge' => '/favicons/icon-96x96.png',
+            'tag' => "team-thread-{$thread->id}-message-{$message->id}",
+            'data' => ['url' => $url],
             'requireInteraction' => false,
         ], 'telnyx');
     }

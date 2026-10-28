@@ -43,7 +43,7 @@ class ThreadMessageController extends Controller
         // time, where the web tracks them in a separate panel.
         $messages = SmsMessage::query()
             ->where('thread_id', $thread)
-            ->with('sentByUser:id,first_name,last_name,nickname')
+            ->with(['sentByUser:id,first_name,last_name,nickname', 'thread:id,kind,member_user_ids'])
             ->when(filled($before), fn ($q) => $q->where('id', '<', (int) $before))
             ->orderByDesc('id')
             ->limit(self::PER_PAGE)
@@ -77,9 +77,12 @@ class ThreadMessageController extends Controller
         }
 
         $text = trim((string) $request->input('body', ''));
-        $messageWithSig = $text !== ''
-            ? $text . "\n" . SmsNewThread::getSignature($user->id)
-            : SmsNewThread::getSignature($user->id);
+        // A team thread stays inside Hive: no crew signature, like the web composer.
+        $messageWithSig = match (true) {
+            $smsThread->isTeam() => $text,
+            $text !== '' => $text . "\n" . SmsNewThread::getSignature($user->id),
+            default => SmsNewThread::getSignature($user->id),
+        };
 
         $mediaUrls = [];
         foreach ($request->file('media', []) as $file) {
