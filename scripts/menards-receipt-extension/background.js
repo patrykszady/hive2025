@@ -333,8 +333,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
                 throw new Error(body.error || `solve endpoint returned ${res.status}`);
             }
 
-            await note('challenge: token received, injecting');
-            sendResponse({ ok: true, token: body.token });
+            // user_agent is the Chrome this token was actually solved as
+            // (NoneCap only — see MenardsCaptchaSolver::solveWithNoneCap()).
+            // null for 2captcha or when NoneCap reports none; challenge.js
+            // treats that as "nothing to match" and injects as before.
+            await note(`challenge: token received${body.user_agent ? ` (solved as ${body.user_agent})` : ''}, injecting`);
+            sendResponse({ ok: true, token: body.token, user_agent: body.user_agent || null });
         } catch (err) {
             await note(`challenge: ${err.message}`);
             sendResponse({ ok: false, error: err.message });
@@ -342,6 +346,169 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
 
     return true;
+});
+
+/**
+ * Match outgoing Imperva headers to whichever Chrome NoneCap actually solved
+ * as (trial, 2026-10-22+).
+ *
+ * NoneCap ignores the user agent we ask it to solve as — it earns the token
+ * on a random Chrome 152-154 while this browser's real Chrome is 151 — and
+ * Imperva refused all four tokens from that mismatch. NoneCap's own docs say
+ * to submit the token from the browser that matches the solve, which this
+ * browser cannot BE, but can momentarily impersonate for the one request
+ * that matters: the Incapsula resource Imperva's own callback POSTs the
+ * token to. See MenardsCaptchaSolver::solveWithNoneCap().
+ *
+ * A session rule (not a persistent one) because this only needs to outlive
+ * one page load, and declarativeNetRequest.updateSessionRules needs no
+ * extra host permission beyond what the manifest already grants menards.com.
+ */
+const UA_RULE_ID = 9001;
+const UA_RULE_URL_FILTER = 'menards.com/_Incapsula_Resource?SWCGHOEL';
+/** Chrome never fired a completion event in testing within much less than this; see armUaRuleCleanup. */
+const UA_RULE_FALLBACK_MS = 20000;
+
+let uaRuleCleanupTimer = null;
+let uaRuleRequestListenerAdded = false;
+
+/**
+ * sec-ch-ua / sec-ch-ua-full-version-list for the Chrome version embedded in
+ * a user agent string like "...Chrome/153.0.0.0 Safari/537.36". Returns null
+ * when the string does not look like Chrome's UA at all.
+ */
+function chromeHeadersForUserAgent(userAgent) {
+    const m = /Chrome\/([\d.]+)/.exec(userAgent || '');
+    if (!m) return null;
+
+    const full = m[1];
+    const major = full.split('.')[0];
+
+    return {
+        'sec-ch-ua': `"Chromium";v="${major}", "Google Chrome";v="${major}", "Not-A.Brand";v="24"`,
+        'sec-ch-ua-full-version-list': `"Chromium";v="${full}", "Google Chrome";v="${full}", "Not-A.Brand";v="24.0.0.0"`,
+    };
+}
+
+/**
+ * Add the session rule, then arm its removal — the rule must not outlive the
+ * one request it exists for, or every OTHER request this browser makes
+ * (including its own ordinary receipt sync) would carry a Chrome version
+ * that does not match the TLS/JS fingerprint Imperva also reads.
+ */
+async function addUaRule(userAgent) {
+    const headers = chromeHeadersForUserAgent(userAgent);
+
+    if (!headers) {
+        throw new Error(`could not find a Chrome version in "${userAgent}"`);
+    }
+
+    const rule = {
+        id: UA_RULE_ID,
+        priority: 1,
+        action: {
+            type: 'modifyHeaders',
+            requestHeaders: [
+                { header: 'user-agent', operation: 'set', value: userAgent },
+                { header: 'sec-ch-ua', operation: 'set', value: headers['sec-ch-ua'] },
+                { header: 'sec-ch-ua-full-version-list', operation: 'set', value: headers['sec-ch-ua-full-version-list'] },
+            ],
+        },
+        condition: {
+            urlFilter: UA_RULE_URL_FILTER,
+            resourceTypes: ['xmlhttprequest'],
+        },
+    };
+
+    // removeRuleIds alongside addRules in the same call: idempotent if a
+    // previous rule (another frame's challenge, or a cleanup that never
+    // fired) is still sitting there.
+    await chrome.declarativeNetRequest.updateSessionRules({ addRules: [rule], removeRuleIds: [UA_RULE_ID] });
+
+    await note(`challenge: session rule live — the Incapsula POST will carry "${userAgent}"`);
+
+    armUaRuleCleanup();
+}
+
+/**
+ * Remove the rule once the Incapsula POST it exists for is done, or after a
+ * flat timeout, whichever comes first.
+ *
+ * challenge.js cannot observe that POST itself — Imperva's own script fires
+ * it from the page's MAIN world, and challenge.js is an isolated-world
+ * content script, which has no view into functions the page's own script
+ * calls. webRequest, however, watches the network layer underneath both
+ * worlds, so the background CAN see it complete; that observation is on a
+ * best-effort basis alongside the timeout, not instead of it, because
+ * webRequest can also simply not fire (a request dropped by Imperva before
+ * it reaches the network stack, a frame torn down mid-request).
+ */
+function armUaRuleCleanup() {
+    clearUaRuleCleanup();
+
+    const onSettled = () => removeUaRule('observed the Incapsula request settle');
+
+    if (!uaRuleRequestListenerAdded) {
+        const filter = { urls: ['*://www.menards.com/_Incapsula_Resource*'] };
+        chrome.webRequest.onCompleted.addListener(onSettled, filter);
+        chrome.webRequest.onErrorOccurred.addListener(onSettled, filter);
+        uaRuleRequestListenerAdded = true;
+    }
+
+    uaRuleCleanupTimer = setTimeout(
+        () => removeUaRule(`${UA_RULE_FALLBACK_MS / 1000}s fallback — no completion was observed`),
+        UA_RULE_FALLBACK_MS,
+    );
+}
+
+function clearUaRuleCleanup() {
+    if (uaRuleCleanupTimer) {
+        clearTimeout(uaRuleCleanupTimer);
+        uaRuleCleanupTimer = null;
+    }
+}
+
+/** Idempotent: safe to call with no rule present, and safe to call twice. */
+async function removeUaRule(reason) {
+    clearUaRuleCleanup();
+
+    try {
+        await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [UA_RULE_ID] });
+        await note(`challenge: session rule removed (${reason})`);
+    } catch (e) {
+        await note(`challenge: removing the session rule failed: ${e.message}`);
+    }
+}
+
+/**
+ * challenge.js's two calls around injecting the token: add the rule before,
+ * remove it after. Separate from the hive-solve-challenge listener above so
+ * a pack that predates this still gets a token back from that one — this
+ * listener answering `false` for every other message type is what lets both
+ * listeners coexist.
+ */
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type === 'hive-ua-rule-add') {
+        (async () => {
+            try {
+                await addUaRule(msg.userAgent);
+                sendResponse({ ok: true });
+            } catch (err) {
+                await note(`challenge: could not add the session rule: ${err.message}`);
+                sendResponse({ ok: false, error: err.message });
+            }
+        })();
+
+        return true;
+    }
+
+    if (msg?.type === 'hive-ua-rule-remove') {
+        removeUaRule('challenge.js asked for cleanup').finally(() => sendResponse({ ok: true }));
+
+        return true;
+    }
+
+    return false;
 });
 
 chrome.action.onClicked.addListener(() => run('manual'));

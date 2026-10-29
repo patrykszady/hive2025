@@ -79,7 +79,37 @@ it('returns the token when a solve succeeds', function () {
     $this->withHeader('Authorization', 'Bearer test-bridge-token')
         ->postJson('/api/menards/solve-challenge', solvePayload())
         ->assertOk()
-        ->assertJson(['ok' => true, 'token' => 'P0_ey-token']);
+        // A solver that reports no user_agent (2captcha, or a provider that
+        // simply doesn't) must still get the key back, as null — the
+        // extension's hive-ua-rule-add path only triggers on a real value.
+        ->assertJson(['ok' => true, 'token' => 'P0_ey-token', 'user_agent' => null, 'solve_id' => null]);
+});
+
+it('passes the solve\'s own user_agent and solve_id back to the extension', function () {
+    // NoneCap's 2026-10-22 trial found it solves as a DIFFERENT Chrome than
+    // the one it was asked for — the token in the reply is earned as
+    // "Chrome/153", not the "Chrome/151 test agent" the request carried.
+    // The extension needs exactly the former to match headers against.
+    $this->mock(MenardsCaptchaSolver::class, function ($mock) {
+        $mock->shouldReceive('configured')->andReturn(true);
+        $mock->shouldReceive('solve')->once()->andReturn([
+            'ok' => true,
+            'token' => 'P1_token',
+            'user_agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+            'solve_id' => 'solve_01J',
+            'seconds' => 18.2,
+        ]);
+    });
+
+    $this->withHeader('Authorization', 'Bearer test-bridge-token')
+        ->postJson('/api/menards/solve-challenge', solvePayload())
+        ->assertOk()
+        ->assertJson([
+            'ok' => true,
+            'token' => 'P1_token',
+            'user_agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+            'solve_id' => 'solve_01J',
+        ]);
 });
 
 it('records an expired session so the server stops claiming it is signed in', function () {
@@ -178,7 +208,12 @@ it('buys from NoneCap through our proxy with the browser\'s user agent', functio
 
     $result = app(MenardsCaptchaSolver::class)->solve('10000000-ffff-ffff-ffff-000000000001', 'https://www.menards.com/main/checkcredentials.html', $agent);
 
-    expect($result['ok'])->toBeTrue()->and($result['token'])->toBe('P1_eyJ0eXAi');
+    expect($result['ok'])->toBeTrue()
+        ->and($result['token'])->toBe('P1_eyJ0eXAi')
+        // NoneCap's own report of what it solved as, not necessarily the
+        // $agent requested — that mismatch is the whole reason this exists.
+        ->and($result['user_agent'])->toBe($agent)
+        ->and($result['solve_id'])->toBe('solve_01J');
 
     \Illuminate\Support\Facades\Http::assertSent(fn ($request) => preg_match('#^https://api\.nonecap\.com/v1/solves\?wait=(\d+)$#', $request->url(), $m) === 1 && (int) $m[1] <= 50
         && $request->hasHeader('Authorization', 'Bearer nc_live_test')
@@ -187,6 +222,24 @@ it('buys from NoneCap through our proxy with the browser\'s user agent', functio
         && $request['url'] === 'https://www.menards.com/main/checkcredentials.html'
         && $request['user_agent'] === $agent
         && $request['proxy'] === 'http://gs-user:p%40ss@141.140.4.3:12323');
+});
+
+it('reports the user_agent NoneCap actually solved as, even when it ignored the one requested', function () {
+    // The 2026-10-22 trial: asked for Chrome/151 (this browser's real
+    // version), NoneCap solved as a random Chrome/153 anyway. The caller
+    // needs to know the ACTUAL one to make the Incapsula POST match it.
+    noneCapConfig();
+    $requested = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
+    $solvedAs = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
+    \Illuminate\Support\Facades\Http::fake(['api.nonecap.com/*' => \Illuminate\Support\Facades\Http::response([
+        'id' => 'solve_02K', 'status' => 'solved', 'token' => 'P1_mismatch', 'user_agent' => $solvedAs,
+    ])]);
+
+    $result = app(MenardsCaptchaSolver::class)->solve('10000000-ffff-ffff-ffff-000000000001', 'https://www.menards.com/main/login.html', $requested);
+
+    expect($result['ok'])->toBeTrue()
+        ->and($result['user_agent'])->toBe($solvedAs)
+        ->and($result['user_agent'])->not->toBe($requested);
 });
 
 it('reports a refused NoneCap solve in NoneCap\'s own words', function () {

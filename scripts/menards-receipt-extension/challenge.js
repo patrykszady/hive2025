@@ -120,6 +120,54 @@
 
     if (!isChallenge()) return;
 
+    /**
+     * How long to let the background's own cleanup (a webRequest completion,
+     * or its own 20s fallback — see background.js) run before this content
+     * script also asks for the session rule to be removed. Deliberately the
+     * same order of magnitude: this is a second, independent trigger for the
+     * same idempotent removal, not a race against the background's own.
+     */
+    const UA_RULE_CLEANUP_MS = 20000;
+
+    /**
+     * Inject the token, matching the outgoing Incapsula POST's headers to
+     * NoneCap's solve first when the server returned a user_agent for it —
+     * see MenardsCaptchaSolver::solveWithNoneCap() and background.js's
+     * hive-ua-rule-add handler. When there is no user_agent (2captcha, or a
+     * provider that does not report one) this is exactly the old behaviour:
+     * inject immediately.
+     */
+    function injectToken(token, userAgent) {
+        if (!userAgent) {
+            applyToken(token);
+            return;
+        }
+
+        log(`solve earned as "${userAgent}" — asking the background to match the Incapsula request's headers before injecting`);
+
+        chrome.runtime.sendMessage({ type: 'hive-ua-rule-add', userAgent }, (reply) => {
+            if (chrome.runtime.lastError) {
+                log(`no reply adding the header rule (${chrome.runtime.lastError.message}) — injecting anyway`);
+            } else if (!reply || !reply.ok) {
+                log(`header rule not applied (${(reply && reply.error) || 'unknown error'}) — injecting anyway`);
+            } else {
+                log('header rule live — injecting token');
+            }
+
+            applyToken(token);
+
+            // Belt-and-suspenders: the background clears this rule itself on
+            // whichever comes first, seeing the Incapsula request settle or
+            // its own fallback timer. This is a second, independent trigger
+            // so a dropped reply up there still leaves nothing behind.
+            setTimeout(() => {
+                chrome.runtime.sendMessage({ type: 'hive-ua-rule-remove' }, () => {
+                    void chrome.runtime.lastError; // best effort; nothing to act on either way
+                });
+            }, UA_RULE_CLEANUP_MS);
+        });
+    }
+
     function solve() {
         const siteKey = findSiteKey();
 
@@ -144,7 +192,7 @@
                     return;
                 }
 
-                applyToken(reply.token);
+                injectToken(reply.token, reply.user_agent || null);
             }
         );
     }

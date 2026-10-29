@@ -105,6 +105,12 @@ class MenardsSolveChallengeController extends Controller
         return response()->json([
             'ok' => true,
             'token' => $result['token'],
+            // The browser the token was solved as (NoneCap only; null for
+            // 2captcha or when NoneCap reports none). challenge.js uses this
+            // to match the one request that submits the token — see
+            // background.js's hive-ua-rule-add handler.
+            'user_agent' => $result['user_agent'] ?? null,
+            'solve_id' => $result['solve_id'] ?? null,
             'seconds' => $result['seconds'] ?? null,
         ]);
     }

@@ -75,7 +75,7 @@ class MenardsCaptchaSolver
 
     /**
      * @param  string|null  $userAgent  the browser's own user agent, so the token is earned as that browser
-     * @return array{ok: bool, token?: string, error?: string, seconds?: float}
+     * @return array{ok: bool, token?: string, user_agent?: string|null, solve_id?: string|null, error?: string, seconds?: float}
      */
     public function solve(string $siteKey, string $pageUrl, ?string $userAgent = null): array
     {
@@ -125,7 +125,10 @@ class MenardsCaptchaSolver
                 'seconds' => $seconds,
             ]);
 
-            return ['ok' => true, 'token' => $token, 'seconds' => $seconds];
+            // 2captcha neither chooses nor reports a browser to earn the
+            // token as — unlike NoneCap below, nothing here has a user agent
+            // to hand back.
+            return ['ok' => true, 'token' => $token, 'user_agent' => null, 'solve_id' => $result->captchaId ?? null, 'seconds' => $seconds];
         } catch (\Throwable $e) {
             $seconds = round(microtime(true) - $started, 1);
 
@@ -149,7 +152,7 @@ class MenardsCaptchaSolver
      * solve used" — NoneCap's own docs). Whether Imperva also wants the same
      * browser is what this trial finds out.
      *
-     * @return array{ok: bool, token?: string, error?: string, seconds?: float}
+     * @return array{ok: bool, token?: string, user_agent?: string|null, solve_id?: string|null, error?: string, seconds?: float}
      */
     protected function solveWithNoneCap(string $siteKey, string $pageUrl, ?string $userAgent): array
     {
@@ -233,6 +236,17 @@ class MenardsCaptchaSolver
 
         Log::channel('menards')->info('Menards captcha: token purchased', $context + ['length' => strlen($token)]);
 
-        return ['ok' => true, 'token' => $token, 'seconds' => $seconds];
+        // NoneCap's own report of which browser it solved as — not
+        // necessarily $userAgent: the 2026-10-22 trial found it ignores the
+        // requested one. The caller (the extension, via the controller)
+        // uses this to make the one request that submits the token look
+        // like it came from that browser instead.
+        return [
+            'ok' => true,
+            'token' => $token,
+            'user_agent' => $solve['user_agent'] ?? null,
+            'solve_id' => $solve['id'] ?? null,
+            'seconds' => $seconds,
+        ];
     }
 }
