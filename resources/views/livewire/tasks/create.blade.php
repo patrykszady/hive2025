@@ -777,7 +777,7 @@
                                                                 @if(is_array($change['old']))
                                                                     <div class="flex flex-col">
                                                                         @foreach($change['old'] as $oldItem)
-                                                                            <flux:text class="!text-xs line-through">{{ $oldItem }}</flux:text>
+                                                                            <flux:text class="!text-xs line-through">{{ is_scalar($oldItem) ? $oldItem : json_encode($oldItem) }}</flux:text>
                                                                         @endforeach
                                                                     </div>
                                                                 @else
@@ -788,7 +788,7 @@
                                                                 @if(is_array($change['new']))
                                                                     <div class="flex flex-col">
                                                                         @foreach($change['new'] as $newItem)
-                                                                            <flux:text class="!text-xs font-medium text-zinc-800 dark:text-zinc-200">{{ $newItem }}</flux:text>
+                                                                            <flux:text class="!text-xs font-medium text-zinc-800 dark:text-zinc-200">{{ is_scalar($newItem) ? $newItem : json_encode($newItem) }}</flux:text>
                                                                         @endforeach
                                                                     </div>
                                                                 @else

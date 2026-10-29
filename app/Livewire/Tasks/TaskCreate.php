@@ -511,8 +511,21 @@ class TaskCreate extends Component
         }
 
         $changes = [];
-        $new = $activity->properties['attributes'] ?? [];
-        $old = $activity->properties['old'] ?? [];
+        $new = (array) ($activity->properties['attributes'] ?? []);
+        $old = (array) ($activity->properties['old'] ?? []);
+
+        // Some writers (ScheduledVisitApplier, the planner's reschedules) log
+        // `dates` / `time_settings` as attributes of their own rather than
+        // inside `options`. They are per-day nested arrays, so they take the
+        // same date/time diff the options path uses — never the generic
+        // branch below, which would hand the view an array of arrays.
+        if (array_key_exists('dates', $new) || array_key_exists('time_settings', $new)
+            || array_key_exists('dates', $old) || array_key_exists('time_settings', $old)) {
+            $changes = array_merge($changes, $this->formatOptionsChanges(
+                ['dates' => $old['dates'] ?? [], 'time_settings' => $old['time_settings'] ?? []],
+                ['dates' => $new['dates'] ?? [], 'time_settings' => $new['time_settings'] ?? []],
+            ));
+        }
 
         $labels = [
             'title' => 'Title',
@@ -551,7 +564,7 @@ class TaskCreate extends Component
                 continue;
             }
 
-            if (in_array($field, ['start_date', 'end_date'])) {
+            if (in_array($field, ['start_date', 'end_date', 'dates', 'time_settings'])) {
                 continue;
             }
 
@@ -561,7 +574,7 @@ class TaskCreate extends Component
             }
 
             $label = $labels[$field] ?? ucfirst(str_replace('_', ' ', $field));
-            $changes[] = ['label' => $label, 'old' => $oldValue, 'new' => $newValue];
+            $changes[] = ['label' => $label, 'old' => $this->presentChangeValue($oldValue), 'new' => $this->presentChangeValue($newValue)];
         }
 
         if (empty($changes)) {
@@ -639,6 +652,41 @@ class TaskCreate extends Component
         }
 
         return $changes;
+    }
+
+    /**
+     * A logged value as the history view can print it: a string, a list of
+     * strings, or null. Scalars print as they are; a list prints one line
+     * per item; a keyed or nested array prints "key: value" lines, nested
+     * values as compact JSON. The view echoes every item, so nothing that
+     * is still an array may leave here (the 2026-10-29 Send Schedule 500).
+     *
+     * @return string|list<string>|null
+     */
+    private function presentChangeValue(mixed $value): string|array|null
+    {
+        if ($value === null || $value === '' || $value === []) {
+            return null;
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'Yes' : 'No';
+        }
+
+        if (is_scalar($value)) {
+            return (string) $value;
+        }
+
+        if (! is_array($value)) {
+            return json_encode($value) ?: null;
+        }
+
+        $scalar = fn (mixed $item): string => is_bool($item) ? ($item ? 'Yes' : 'No') : (is_scalar($item) || $item === null ? (string) $item : (json_encode($item) ?: ''));
+
+        return collect($value)
+            ->map(fn ($item, $key) => is_int($key) ? $scalar($item) : "{$key}: {$scalar($item)}")
+            ->values()
+            ->all();
     }
 
     private function formatCreatedChanges(\Spatie\Activitylog\Models\Activity $activity): array
