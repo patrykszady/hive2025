@@ -33,9 +33,12 @@ function render(state) {
 }
 
 async function refresh() {
-    const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastError', 'lastSuccessAt', 'lastMessage', 'personal', 'schedule']);
+    const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastError', 'lastSuccessAt', 'lastMessage', 'personal', 'schedule', 'menardsEmail', 'menardsPassword', 'autoSignIn']);
     $('serverUrl').value = s.serverUrl || '';
     $('token').value = s.token || '';
+    $('menardsEmail').value = s.menardsEmail || '';
+    $('menardsPassword').value = s.menardsPassword || '';
+    $('autoSignIn').checked = s.autoSignIn === true;
     $('personal').value = typeof s.personal === 'boolean' ? (s.personal ? 'personal' : 'server') : 'auto';
 
     const personal = typeof s.personal === 'boolean' ? s.personal : detectedMode() === 'Personal browser';
@@ -59,6 +62,9 @@ $('save').addEventListener('click', async () => {
     await chrome.storage.local.set({
         serverUrl: $('serverUrl').value.trim(),
         token: $('token').value.trim(),
+        menardsEmail: $('menardsEmail').value.trim(),
+        menardsPassword: $('menardsPassword').value,
+        autoSignIn: $('autoSignIn').checked && !!$('menardsEmail').value.trim() && !!$('menardsPassword').value,
     });
     $('status').className = 'muted';
     $('status').textContent = 'Saved.';

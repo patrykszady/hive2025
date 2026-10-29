@@ -221,3 +221,19 @@ test('with no browser window open the fetch gets a minimized window of its own, 
     assert.match(source, /state: 'normal', focused: true/);
 });
 
+test('automatic sign-in stops after three attempts in an hour', () => {
+    const { autoSignInAllowed } = loadBackground().sandbox.__hiveTest;
+    const t0 = Date.UTC(2026, 9, 29, 19, 0);
+    const at = (minAgo) => new Date(t0 - minAgo * 60000).toISOString();
+    assert.equal(autoSignInAllowed([], t0), true);
+    assert.equal(autoSignInAllowed([at(5), at(20)], t0), true);
+    assert.equal(autoSignInAllowed([at(5), at(20), at(40)], t0), false);
+    assert.equal(autoSignInAllowed([at(70), at(80), at(90)], t0), true);
+});
+
+test('the manifest runs signin.js on the login page only', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, '..', 'manifest.json'), 'utf8'));
+    const entry = manifest.content_scripts.find((c) => c.js.includes('signin.js'));
+    assert.deepEqual(entry.matches, ['https://www.menards.com/main/login.html*']);
+});
+

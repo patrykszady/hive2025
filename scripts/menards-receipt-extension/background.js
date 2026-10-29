@@ -309,6 +309,64 @@ async function openReceiptTab() {
     return { tab, openedWindow: win.id };
 }
 
+/**
+ * Automatic sign-in (personal browsers): signin.js on login.html asks for the
+ * saved Menards credentials. Handed over only in personal mode with "sign in
+ * for me" on, at most AUTO_SIGNIN_MAX_PER_HOUR times an hour — a wrong
+ * password or a wall must not become a loop.
+ */
+const AUTO_SIGNIN_MAX_PER_HOUR = 3;
+const SIGNIN_CHECK_ALARM = 'menards-signin-check';
+
+function autoSignInAllowed(attempts, nowMs = Date.now(), max = AUTO_SIGNIN_MAX_PER_HOUR) {
+    const recent = (attempts || []).filter((at) => nowMs - new Date(at).getTime() < 60 * 60 * 1000);
+
+    return recent.length < max;
+}
+
+async function autoSignInArmed() {
+    if (!await personalMode()) return false;
+
+    const { autoSignIn, menardsEmail, menardsPassword } = await chrome.storage.local.get(['autoSignIn', 'menardsEmail', 'menardsPassword']);
+
+    return autoSignIn === true && !!menardsEmail && !!menardsPassword;
+}
+
+async function credentialsForSignIn() {
+    if (!await autoSignInArmed()) return null;
+
+    const { autoSignInAttempts = [], menardsEmail, menardsPassword } = await chrome.storage.local.get(['autoSignInAttempts', 'menardsEmail', 'menardsPassword']);
+
+    if (!autoSignInAllowed(autoSignInAttempts)) {
+        await note(`not signing in again: ${AUTO_SIGNIN_MAX_PER_HOUR} attempts in the last hour — sign in by hand on the Menards tab`);
+
+        return null;
+    }
+
+    await chrome.storage.local.set({ autoSignInAttempts: [...autoSignInAttempts.slice(-10), new Date().toISOString()] });
+
+    return { email: menardsEmail, password: menardsPassword };
+}
+
+/**
+ * Half a minute after a signed-out tab was handed to the automatic sign-in:
+ * still on the login page, the credential check or Imperva's wall → a person
+ * is needed after all, so the window comes to the front now.
+ */
+async function checkAutoSignInOutcome() {
+    const tabId = await waitingForSignInTabId();
+    if (tabId == null) return;
+
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return;
+
+    if (looksSignedIn(tab.url)) return;
+
+    await note('automatic sign-in did not get through — bringing the Menards tab to the front');
+    await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+    await chrome.windows.update(tab.windowId, { state: 'normal', focused: true }).catch(() => {});
+}
+
 /** Guards waitForPersonalSignIn() against a second listener on the same tab. */
 /**
  * The tab a signed-out personal browser is waiting on, kept in session
@@ -379,12 +437,20 @@ async function assertOnReceiptPage(tabId) {
     if (url.includes('/main/receiptLookup.html')) return;
 
     if (await personalMode()) {
+        await waitForPersonalSignIn(tabId);
+
+        if (await autoSignInArmed()) {
+            // signin.js is filling the form on that tab right now (or is about
+            // to, when the page finishes loading); look again in half a minute.
+            await chrome.alarms.create(SIGNIN_CHECK_ALARM, { delayInMinutes: 0.5 });
+
+            throw new Error('Not signed in to menards.com — signing in automatically; the receipts follow by themselves.');
+        }
+
         await chrome.tabs.update(tabId, { active: true }).catch(() => {});
         if (current?.windowId != null) {
             await chrome.windows.update(current.windowId, { state: 'normal', focused: true }).catch(() => {});
         }
-
-        await waitForPersonalSignIn(tabId);
 
         throw new Error(
             'Not signed in to menards.com — sign in on the tab that just opened; the receipts follow by themselves.'
@@ -625,9 +691,22 @@ async function runOnce(reason) {
     }
 }
 
-chrome.runtime.onMessage.addListener(msg => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.action === 'progress') note(msg.text);
     if (msg?.action === 'run') run('options page');
+
+    if (msg?.type === 'hive-auto-signin') {
+        credentialsForSignIn().then((credentials) => {
+            if (credentials) note('Menards signed us out — signing in automatically');
+            sendResponse({ credentials });
+        }, () => sendResponse({ credentials: null }));
+
+        return true;
+    }
+
+    if (msg?.type === 'hive-auto-signin-result') {
+        note(`automatic sign-in: ${msg.ok ? msg.reason : `could not — ${msg.reason}`}`);
+    }
 });
 
 /**
@@ -918,7 +997,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`
@@ -1017,6 +1096,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.alarms.onAlarm.addListener(async a => {
+    if (a.name === SIGNIN_CHECK_ALARM) return checkAutoSignInOutcome();
     if (a.name === FIRST_RUN_ALARM) return run('installed');
     if (a.name !== ALARM) return;
 

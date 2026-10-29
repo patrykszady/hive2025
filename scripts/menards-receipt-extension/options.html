@@ -9,6 +9,9 @@
     .muted { color: #71717a; font-size: 13px; }
     #status { margin-top: 1rem; padding: .5rem .75rem; border-radius: 6px; background: #fafafa; white-space: pre-wrap; }
     #status.error { background: #fef2f2; color: #b91c1c; }
+#signin-box { border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; margin: 12px 0; }
+#signin-box legend { padding: 0 4px; font-weight: 600; }
+.check { display: flex; gap: 8px; align-items: center; }
 </style>
 
 <h1>Menards Receipt Sync</h1>
@@ -20,6 +23,14 @@
 
 <label>Hive URL <input id="serverUrl" placeholder="https://hive.contractors" autocomplete="off"></label>
 <label>Bridge token <input id="token" type="password" placeholder="MENARDS_BRIDGE_TOKEN" autocomplete="off"></label>
+
+<fieldset id="signin-box">
+    <legend>Menards sign-in (your own browser only)</legend>
+    <label>Menards email <input id="menardsEmail" type="email" autocomplete="off" placeholder="name@gs.construction"></label>
+    <label>Menards password <input id="menardsPassword" type="password" autocomplete="off"></label>
+    <label class="check"><input id="autoSignIn" type="checkbox"> Sign in for me when Menards signs me out</label>
+    <p class="muted">Kept only in this browser's extension storage. Menards drops a session after about an hour idle, so without this a sign-in tab pops up once a day.</p>
+</fieldset>
 
 <label>Where is this running?
     <select id="personal">
