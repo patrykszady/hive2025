@@ -82,4 +82,110 @@
             </flux:callout.text>
         </flux:callout>
     @endif
+
+    {{-- Receipts can also arrive from a browser YOU sign into — Imperva sees
+         an ordinary person, so there is no wall to click. The server browser
+         above stands down automatically (menards:browser sync / ensure)
+         while a batch from this browser is fresh. --}}
+    <flux:card class="space-y-4">
+        <div>
+            <flux:heading size="lg">Run the receipt extension in your own browser</flux:heading>
+            <flux:text class="mt-1">
+                Install the same extension in your own Edge or Chrome, signed in as yourself. Imperva sees a
+                person at menards.com instead of a server, so there is no security check to click. While your
+                browser has delivered recently, the server browser above stands down and leaves the fetching
+                to you.
+            </flux:text>
+        </div>
+
+        <flux:text class="text-sm">
+            Your browser last delivered:
+            @if($personalStatus)
+                <strong>{{ ($personalStatus['ok'] ?? false) ? 'OK' : 'an error' }}</strong>
+                @if(!empty($personalStatus['receipts'])) — {{ $personalStatus['receipts'] }} receipt(s) @endif
+                @if(!empty($personalStatus['browser'])) from {{ $personalStatus['browser'] }} @endif
+                @if(!empty($personalStatus['at'])) ({{ \Carbon\Carbon::parse($personalStatus['at'])->diffForHumans() }}) @endif
+            @else
+                never yet
+            @endif
+        </flux:text>
+
+        <div class="space-y-2">
+            <flux:heading size="sm">Set it up (Edge or Chrome)</flux:heading>
+            <ol class="list-decimal list-inside space-y-2 text-sm">
+                <li>
+                    Download the extension and extract the zip to a folder you keep, e.g.
+                    <span class="font-mono">Documents\hive-menards-extension</span>.
+                    <div class="mt-1">
+                        <flux:button size="sm" icon="arrow-down-tray" href="{{ route('menards.extension-source') }}">Download the extension</flux:button>
+                    </div>
+                </li>
+                <li>
+                    Open <span class="font-mono">edge://extensions</span> (or <span class="font-mono">chrome://extensions</span>),
+                    turn on <strong>Developer mode</strong> (bottom left), click <strong>Load unpacked</strong>, and choose that folder.
+                </li>
+                <li>
+                    Click the extension's <strong>Details</strong> → <strong>Extension options</strong>. Paste the Hive URL and
+                    the bridge token below, then Save.
+                    <div class="mt-2 space-y-2 max-w-md">
+                        <flux:field>
+                            <flux:label>Hive URL</flux:label>
+                            <flux:input readonly value="{{ $hiveUrl }}" />
+                        </flux:field>
+                        <flux:field>
+                            <flux:label>Bridge token</flux:label>
+                            @if($bridgeToken !== null)
+                                <div class="flex items-center gap-2">
+                                    <flux:input readonly value="{{ $bridgeToken }}" />
+                                    <flux:button size="sm" icon="clipboard" onclick="navigator.clipboard.writeText(@js($bridgeToken))">Copy</flux:button>
+                                </div>
+                            @else
+                                <flux:button size="sm" wire:click="revealBridgeToken">Reveal</flux:button>
+                            @endif
+                        </flux:field>
+                    </div>
+                </li>
+                <li>Sign in to menards.com once in that browser.</li>
+                <li>
+                    Click <strong>Sync now</strong> in the options page (or the toolbar icon) — new receipts arrive in
+                    Hive within a minute or two. From then on it fetches daily, and whenever the browser starts after
+                    a day away.
+                </li>
+            </ol>
+            <flux:text class="text-sm opacity-75">
+                When the extension changes: download it again, replace the folder's contents, then press Reload on
+                <span class="font-mono">edge://extensions</span>.
+            </flux:text>
+        </div>
+
+        <flux:accordion>
+            <flux:accordion.item heading="If your PC is in a Windows domain">
+                <flux:text class="text-sm mb-2">
+                    A domain policy can force-install the extension instead of Load unpacked — IT pushes it once and
+                    it is done for everyone. It only takes effect on a PC joined to the domain; both Edge and Chrome
+                    ignore this policy on a personal machine.
+                </flux:text>
+
+                @if($extensionId && $updateSecretConfigured)
+                    <flux:button size="sm" icon="arrow-down-tray" href="{{ route('menards.extension-policy') }}">Download the policy file (.reg)</flux:button>
+                @else
+                    <flux:button size="sm" icon="arrow-down-tray" disabled>Download the policy file (.reg)</flux:button>
+                    <flux:text class="text-sm mt-1 opacity-75">
+                        @if(!$extensionId)
+                            Not available yet — the extension is not installed in the server browser, so its id is unknown.
+                        @else
+                            Not available — no update secret is configured (<span class="font-mono">MENARDS_EXTENSION_SECRET</span>).
+                        @endif
+                    </flux:text>
+                @endif
+
+                <ol class="list-decimal list-inside space-y-1 text-sm mt-2">
+                    <li>Double-click the downloaded file and accept the UAC prompt.</li>
+                    <li>Restart Edge (or Chrome).</li>
+                    <li>Open <span class="font-mono">edge://extensions</span> and confirm "Hive — Menards Receipt Sync" is there.</li>
+                    <li>Sign in to menards.com once in that browser.</li>
+                </ol>
+            </flux:accordion.item>
+        </flux:accordion>
+    </flux:card>
 </div>

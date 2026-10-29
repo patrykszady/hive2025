@@ -53,6 +53,11 @@ class MenardsReceiptIngestController extends Controller
         $data = $request->validate([
             'since' => ['nullable', 'string', 'max:32'],
             'scrapedAt' => ['nullable', 'string', 'max:64'],
+            // The same extension, run by a person in their own Edge or
+            // Chrome instead of the server's. Imperva sees a signed-in
+            // person either way; this only changes how the batch is labelled
+            // and lets `menards:browser` know its own browser can stand down.
+            'personal' => ['nullable', 'boolean'],
             'receipts' => ['required', 'array', 'min:1', 'max:' . self::MAX_RECEIPTS],
             'receipts.*.date' => ['required', 'string', 'max:32'],
             'receipts.*.amount' => ['required', 'numeric'],
@@ -68,6 +73,15 @@ class MenardsReceiptIngestController extends Controller
 
         if (! mkdir($dir, 0775, true) && ! is_dir($dir)) {
             return response()->json(['ok' => false, 'error' => 'Could not create the import directory.'], 500);
+        }
+
+        $personal = (bool) ($data['personal'] ?? false);
+
+        // An empty marker, not a manifest field: `menards:browser` only
+        // needs to glob for its existence (personalBrowserDeliveredAt()),
+        // and a marker survives even the 422 branch below untouched.
+        if ($personal) {
+            file_put_contents($dir . '/personal', '');
         }
 
         $manifestReceipts = [];
@@ -114,7 +128,7 @@ class MenardsReceiptIngestController extends Controller
         file_put_contents($dir . '/manifest.json', json_encode([
             'scrapedAt' => $data['scrapedAt'] ?? now()->toIso8601String(),
             'since' => $data['since'] ?? null,
-            'source' => 'browser-extension',
+            'source' => $personal ? 'personal-browser' : 'browser-extension',
             'totalReceipts' => count($manifestReceipts),
             'receipts' => $manifestReceipts,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
@@ -123,6 +137,7 @@ class MenardsReceiptIngestController extends Controller
             'dir' => $dir,
             'receipts' => count($manifestReceipts),
             'rejected' => count($rejected),
+            'source' => $personal ? 'personal-browser' : 'server-browser',
         ]);
 
         // Always queued, never inline. The importer OCRs every receipt, so how

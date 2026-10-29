@@ -34,6 +34,14 @@ class MenardsSyncStatusController extends Controller
     /** Key the browser service reads. Kept a month: far longer than any gap that matters. */
     public const CACHE_KEY = 'menards:last_sync_status';
 
+    /**
+     * Same shape, a separate key: a personal browser's report never drives
+     * the server browser's own sign-in state machine (no resync dispatch, no
+     * touching NEEDS_SIGNIN or SYNC_IN_FLIGHT) — it only tells `menards:browser`
+     * whether its own browser can stand down (personalBrowserDeliveredAt()).
+     */
+    public const PERSONAL_CACHE_KEY = 'menards:last_personal_sync_status';
+
     /** Held for half an hour after a signed-out report queues a sign-in and a second sync. */
     public const RESYNC_KEY = 'menards:resync_after_signed_out';
 
@@ -55,6 +63,10 @@ class MenardsSyncStatusController extends Controller
             'ok' => 'required|boolean',
             'error' => 'nullable|string|max:500',
             'receipts' => 'nullable|integer|min:0',
+            // The same report, from a person's own Edge or Chrome rather
+            // than the server's Chromium.
+            'personal' => 'nullable|boolean',
+            'browser' => 'nullable|string|max:120',
         ]);
 
         $error = mb_strtolower((string) ($validated['error'] ?? ''));
@@ -76,6 +88,29 @@ class MenardsSyncStatusController extends Controller
             'challenge' => $sessionExpired && str_contains(mb_strtolower((string) ($validated['error'] ?? '')), 'challenge'),
             'at' => now()->toIso8601String(),
         ];
+
+        if ($validated['personal'] ?? false) {
+            $status['personal'] = true;
+            $status['browser'] = $validated['browser'] ?? null;
+
+            Cache::put(self::PERSONAL_CACHE_KEY, $status, now()->addMonth());
+
+            // A file too: a deploy's optimize:clear empties the cache, and
+            // `personalBrowserDeliveredAt()` needs this to survive one.
+            file_put_contents(
+                storage_path('app/menards-personal-sync-status.json'),
+                json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            );
+
+            Log::channel('menards')->info('Menards sync: personal browser reported', [
+                'ok' => $status['ok'],
+                'error' => $status['error'],
+                'receipts' => $status['receipts'],
+                'browser' => $status['browser'],
+            ]);
+
+            return response()->json(['ok' => true]);
+        }
 
         Cache::put(self::CACHE_KEY, $status, now()->addMonth());
         Cache::forget(\App\Services\MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY);

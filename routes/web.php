@@ -1062,6 +1062,17 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     Route::get('/menards/browser', \App\Livewire\Menards\MenardsBrowserViewer::class)->name('menards.browser');
     Route::get('/ewccv/browser', \App\Livewire\Ewccv\EwccvBrowserViewer::class)->name('ewccv.browser');
 
+    // Running the receipt extension in the OWNER's own Edge/Chrome instead of
+    // the server's Chromium. The zip is the primary install path (Load
+    // unpacked — works on any PC); the .reg policy file is the secondary
+    // path, for a PC joined to a Windows domain only.
+    Route::get('/menards/extension-source.zip', \App\Http\Controllers\MenardsExtensionSourceController::class)
+        ->name('menards.extension-source')
+        ->middleware('can:menards-browser');
+    Route::get('/menards/extension-policy.reg', \App\Http\Controllers\MenardsExtensionPolicyController::class)
+        ->name('menards.extension-policy')
+        ->middleware('can:menards-browser');
+
     //CHECKS
     Route::get('/checks', ChecksIndex::class)->name('checks.index');
     Route::get('/checks/{check}', CheckShow::class)->name('checks.show');

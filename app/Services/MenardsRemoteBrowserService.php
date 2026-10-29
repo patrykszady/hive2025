@@ -673,6 +673,52 @@ class MenardsRemoteBrowserService
     }
 
     /**
+     * Navigate the parked tab to Account Overview and confirm it arrived
+     * somewhere real, so `keepalive` can tell a park worth pinging from a
+     * navigation that landed on the sign-in page or Imperva's wall.
+     *
+     * Only ever called when `keepSessionAlive()` found no parked tab to ping
+     * (stage 'find_tab' — every Chrome restart leaves one missing until
+     * something opens it) and keepalive has already confirmed no sign-in is
+     * owed and the wall is not up. Never signs in itself.
+     */
+    public function parkOnAccountOverview(): bool
+    {
+        // "Account Overview at Menards®" is the parked page. "Sign In at
+        // Menards®" also ends in "at Menards" and means the session is gone —
+        // that is the sync's problem to solve, not a parked tab.
+        return str_contains($this->loadAndWait(self::PARK_URL, ['Account Overview']), 'Account Overview');
+    }
+
+    /**
+     * The personal browser's own last report — the same shape
+     * MenardsSyncStatusController builds, from PERSONAL_CACHE_KEY, falling
+     * back to the file a deploy's cache clear cannot touch.
+     *
+     * @return array{ok: bool, error: ?string, receipts: ?int, at: string, personal: true, browser: ?string}|null
+     */
+    public function personalStatus(): ?array
+    {
+        $status = \Illuminate\Support\Facades\Cache::get(
+            \App\Http\Controllers\MenardsSyncStatusController::PERSONAL_CACHE_KEY
+        );
+
+        if (is_array($status)) {
+            return $status;
+        }
+
+        $path = storage_path('app/menards-personal-sync-status.json');
+
+        if (! is_file($path)) {
+            return null;
+        }
+
+        $decoded = json_decode((string) file_get_contents($path), true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
      * The original sign-in: xdotool keystrokes at fixed coordinates. Kept as
      * the fallback when the Puppeteer path is off or cannot attach.
      */
@@ -788,10 +834,15 @@ class MenardsRemoteBrowserService
     /**
      * Keep the last few walls on disk: the first one calibrates the checkbox
      * coordinates for MENARDS_CHALLENGE_CLICK, later ones show layout drift.
+     *
+     * $suffix tells two screenshots of the same incident apart — a plain
+     * one taken the moment the wall is first seen, and '-after-click' taken
+     * when clicking it did not clear it, which shows whether Imperva
+     * escalated to a picture puzzle or the click simply missed.
      */
-    protected function captureChallengeScreenshot(): void
+    protected function captureChallengeScreenshot(string $suffix = ''): void
     {
-        $path = storage_path('app/menards-wall-' . now()->format('Ymd-His') . '.png');
+        $path = $this->challengeScreenshotPath($suffix);
 
         @shell_exec(sprintf(
             'env -u WAYLAND_DISPLAY DISPLAY=%s import -window root %s 2>/dev/null',
@@ -804,6 +855,15 @@ class MenardsRemoteBrowserService
         } else {
             Log::channel('menards')->warning('Menards browser: wall screenshot failed — is imagemagick installed?');
         }
+    }
+
+    /**
+     * Broken out of captureChallengeScreenshot() so the filename it is about
+     * to write can be tested without a display or imagemagick.
+     */
+    protected function challengeScreenshotPath(string $suffix = ''): string
+    {
+        return storage_path('app/menards-wall-' . now()->format('Ymd-His') . $suffix . '.png');
     }
 
     /**
@@ -835,6 +895,13 @@ class MenardsRemoteBrowserService
             'Menards browser: challenge click ' . ($cleared ? 'cleared the wall' : 'did not clear the wall'),
             ['title' => $this->windowTitle()]
         );
+
+        // The click did nothing visible — a second screenshot shows whether
+        // Imperva escalated to a picture puzzle or the click simply missed
+        // the checkbox, which the screenshot taken before the click cannot.
+        if (! $cleared) {
+            $this->captureChallengeScreenshot('-after-click');
+        }
 
         return $cleared;
     }

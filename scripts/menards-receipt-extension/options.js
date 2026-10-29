@@ -1,23 +1,45 @@
 const $ = id => document.getElementById(id);
 
+/**
+ * What personalMode() in background.js would auto-detect on this machine —
+ * duplicated here (it is one line) so the options page can show it without
+ * round-tripping through the service worker.
+ */
+function detectedMode() {
+    const platform = navigator.userAgentData?.platform || navigator.platform || '';
+    return /linux/i.test(platform) ? 'Hive server' : 'Personal browser';
+}
+
+function modeLabel(personal) {
+    if (personal === true) return 'Personal browser (set manually)';
+    if (personal === false) return 'Hive server (set manually)';
+    return `${detectedMode()} (auto-detected)`;
+}
+
 function render(state) {
     const el = $('status');
-    const bits = [];
+    const bits = [`Mode: ${modeLabel(state.personal)}`];
+    const runBits = [];
 
-    if (state.lastError) bits.push(`Last error: ${state.lastError}`);
-    if (state.lastSuccessAt) bits.push(`Last success: ${new Date(state.lastSuccessAt).toLocaleString()}`);
-    if (state.lastMessage) bits.push(state.lastMessage);
+    if (state.lastError) runBits.push(`Last error: ${state.lastError}`);
+    if (state.lastSuccessAt) runBits.push(`Last success: ${new Date(state.lastSuccessAt).toLocaleString()}`);
+    if (state.lastMessage) runBits.push(state.lastMessage);
+
+    bits.push(...(runBits.length ? runBits : ['Never run.']));
 
     el.className = state.lastError ? 'error' : 'muted';
-    el.textContent = bits.join('\n') || 'Never run.';
+    el.textContent = bits.join('\n');
 }
 
 async function refresh() {
-    const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastError', 'lastSuccessAt', 'lastMessage']);
+    const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastError', 'lastSuccessAt', 'lastMessage', 'personal']);
     $('serverUrl').value = s.serverUrl || '';
     $('token').value = s.token || '';
+    $('personal').value = typeof s.personal === 'boolean' ? (s.personal ? 'personal' : 'server') : 'auto';
     render(s);
 }
+
+$('personal-auto-option').textContent = `Auto (detected: ${detectedMode()})`;
 
 refresh();
 // The worker writes progress into storage as it goes; mirror it live.
@@ -30,6 +52,16 @@ $('save').addEventListener('click', async () => {
     });
     $('status').className = 'muted';
     $('status').textContent = 'Saved.';
+});
+
+$('personal').addEventListener('change', async () => {
+    const v = $('personal').value;
+
+    if (v === 'auto') {
+        await chrome.storage.local.remove('personal');
+    } else {
+        await chrome.storage.local.set({ personal: v === 'personal' });
+    }
 });
 
 $('sync').addEventListener('click', async () => {

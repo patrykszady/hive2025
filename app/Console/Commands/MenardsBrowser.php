@@ -94,6 +94,14 @@ class MenardsBrowser extends Command
             }
 
             $result = $browser->keepSessionAlive();
+
+            // No parked tab to ping — happens after every Chrome restart
+            // (2026-10-28: the session died 90 minutes after a restart
+            // because of exactly this, unnoticed until then). Park one and
+            // ping again, once.
+            if (is_array($result) && ($result['stage'] ?? null) === 'find_tab') {
+                $result = $this->parkAndRetryKeepAlive($browser) ?? $result;
+            }
         } finally {
             $lock->release();
         }
@@ -134,6 +142,34 @@ class MenardsBrowser extends Command
         $this->line($message);
 
         return self::SUCCESS;
+    }
+
+    /**
+     * No tab was parked to ping — every Chrome restart leaves one missing
+     * until something opens it, and on 2026-10-28 that silently killed the
+     * session 90 minutes after a restart because nothing noticed. Navigate
+     * to Account Overview once and ping again; a navigation that lands on
+     * the sign-in page or Imperva's wall is left for `sync` to repair —
+     * this never signs in.
+     *
+     * @return array{ok: bool, stage?: string, url?: string, status?: int, json?: bool, error?: string|null}|null
+     */
+    protected function parkAndRetryKeepAlive(MenardsRemoteBrowserService $browser): ?array
+    {
+        $parked = $browser->parkOnAccountOverview();
+
+        if (! $parked) {
+            \Illuminate\Support\Facades\Log::channel('menards')->warning(
+                'Menards keep-alive: parking did not land on a signed-in Menards page — leaving it to the sync',
+                ['page' => $browser->status()['page'] ?? null]
+            );
+
+            return null;
+        }
+
+        \Illuminate\Support\Facades\Log::channel('menards')->info('Menards keep-alive: parked a tab on Account Overview');
+
+        return $browser->keepSessionAlive();
     }
 
     /** Collapse the browser to a single receipt-page tab. */
@@ -279,46 +315,56 @@ class MenardsBrowser extends Command
         // attempt cleared the extension's expired-session report before it
         // met the wall, the 01:01 batch was all that was left, and Retry
         // sign-in did nothing for hours.
-        $manual = (bool) $this->option('manual');
+        // Your own browser delivering recently outranks all of the above: it
+        // proves a person is signed in somewhere Imperva is happy with, so
+        // there is nothing for THIS browser's sign-in to prove or repair.
+        $personalDeliveredAt = $this->personalBrowserDeliveredAt();
+        $personalFresh = $personalDeliveredAt !== null && $personalDeliveredAt->gt(now()->subHours(25));
 
-        if (! $manual
-            && $this->recentBatchArrived()
-            && ! $this->extensionReportsExpiredSession()
-            && ! \Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
-            $this->line('A receipt batch arrived within the last day — the session works; not touching the browser.');
-        } elseif (! $this->option('signin') && ! $manual) {
-            // Every deploy runs a plain ensure, and signing in from it put a
-            // security check in front of Imperva after each of five deploys on
-            // 2026-09-29. The 07:30 pass, the syncs and Retry sign-in sign in.
-            $this->line('The browser is up. Not signing in: a plain ensure only keeps the browser alive.');
+        if ($personalFresh) {
+            $this->line("Your own browser synced receipts {$personalDeliveredAt->diffForHumans()} — the server browser stands down.");
+        } else {
+            $manual = (bool) $this->option('manual');
 
-            return self::SUCCESS;
-        } elseif (($signin = $this->login($browser, $manual)) === self::SIGNIN_PAUSED) {
-            return self::SUCCESS;
-        } elseif ($signin !== self::SUCCESS) {
-            // Imperva asked for a human. That is not a command failure — it
-            // is the expected state this command exists to detect, and it is
-            // already surfaced twice over (the sidebar error and the
-            // attention notification). Exiting non-zero here made the
-            // scheduler log a spurious "failed with exit code 1" exception on
-            // every run for as long as the wall stood.
-            if (\Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
-                $this->notifyAttention($browser->status(), $repackFailed);
-                $this->warn('Menards wants a human at the sign-in wall — flagged in the sidebar; nothing more this run can do.');
+            if (! $manual
+                && $this->recentBatchArrived()
+                && ! $this->extensionReportsExpiredSession()
+                && ! \Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
+                $this->line('A receipt batch arrived within the last day — the session works; not touching the browser.');
+            } elseif (! $this->option('signin') && ! $manual) {
+                // Every deploy runs a plain ensure, and signing in from it put a
+                // security check in front of Imperva after each of five deploys on
+                // 2026-09-29. The 07:30 pass, the syncs and Retry sign-in sign in.
+                $this->line('The browser is up. Not signing in: a plain ensure only keeps the browser alive.');
 
                 return self::SUCCESS;
+            } elseif (($signin = $this->login($browser, $manual)) === self::SIGNIN_PAUSED) {
+                return self::SUCCESS;
+            } elseif ($signin !== self::SUCCESS) {
+                // Imperva asked for a human. That is not a command failure — it
+                // is the expected state this command exists to detect, and it is
+                // already surfaced twice over (the sidebar error and the
+                // attention notification). Exiting non-zero here made the
+                // scheduler log a spurious "failed with exit code 1" exception on
+                // every run for as long as the wall stood.
+                if (\Illuminate\Support\Facades\Cache::has(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY)) {
+                    $this->notifyAttention($browser->status(), $repackFailed);
+                    $this->warn('Menards wants a human at the sign-in wall — flagged in the sidebar; nothing more this run can do.');
+
+                    return self::SUCCESS;
+                }
+
+                return self::FAILURE;
             }
 
-            return self::FAILURE;
-        }
-
-        // A person reconnected (Retry sign-in, or the viewer saw the wall go
-        // away): fetch the receipts now, not at the next scheduled sync hours
-        // off (2026-10-16). Only for a person — the 07:30 automatic sign-in's
-        // own sync, 35 s later, met the receipt API's wall on 2026-10-14.
-        if ($manual) {
-            $this->line('Reconnected by a person — fetching new receipts now.');
-            $this->sync($browser);
+            // A person reconnected (Retry sign-in, or the viewer saw the wall go
+            // away): fetch the receipts now, not at the next scheduled sync hours
+            // off (2026-10-16). Only for a person — the 07:30 automatic sign-in's
+            // own sync, 35 s later, met the receipt API's wall on 2026-10-14.
+            if ($manual) {
+                $this->line('Reconnected by a person — fetching new receipts now.');
+                $this->sync($browser);
+            }
         }
 
         $this->warnIfNoRecentBatches();
@@ -326,8 +372,11 @@ class MenardsBrowser extends Command
         $final = $browser->status();
         $this->printStatus($final);
 
+        // Signed-in only matters here as proof a human reaches Menards
+        // through SOME browser; your own browser delivering recently is that
+        // proof just as well, so it is not held against this browser's health.
         $healthy = $final['running'] && $final['chrome'] && $final['extension']
-            && $final['configured'] && $final['signed_in'] && ! $repackFailed;
+            && $final['configured'] && ($final['signed_in'] || $personalFresh) && ! $repackFailed;
 
         // Tell someone. The sync is unattended right up until Imperva asks for a
         // human, and a wall that waits in silence is how the last outage lasted
@@ -349,6 +398,12 @@ class MenardsBrowser extends Command
      */
     protected function warnIfNoRecentBatches(): void
     {
+        // Your own browser delivering within the last two days is, itself,
+        // proof the sync is not failing silently — nothing to warn about.
+        if ($this->personalFresh(48)) {
+            return;
+        }
+
         $dirs = glob(storage_path('files/_menards_ingest/*'), GLOB_ONLYDIR) ?: [];
 
         if ($dirs === []) {
@@ -377,6 +432,16 @@ class MenardsBrowser extends Command
      */
     protected function sync(MenardsRemoteBrowserService $browser): int
     {
+        // Your own browser already delivered recently — the receipts are on
+        // the way, or already in, and there is nothing this browser needs
+        // to fetch again. Checked first, before even asking whether the
+        // server browser is up: standing down means not touching it at all.
+        if (($deliveredAt = $this->personalBrowserDeliveredAt()) && $deliveredAt->gt(now()->subHours(25))) {
+            $this->line("Your own browser synced receipts {$deliveredAt->diffForHumans()} — the server browser stands down.");
+
+            return self::SUCCESS;
+        }
+
         $status = $browser->status();
 
         if (! $status['running'] || ! $status['chrome']) {
@@ -523,6 +588,52 @@ class MenardsBrowser extends Command
     }
 
     /**
+     * When the owner's own browser last delivered — the later of a batch
+     * directory carrying the `personal` marker (MenardsReceiptIngestController)
+     * and an `ok` report at MenardsSyncStatusController::PERSONAL_CACHE_KEY
+     * (or its file fallback). Null when neither has ever happened.
+     *
+     * Reads the cache and the file directly rather than going through
+     * MenardsRemoteBrowserService::personalStatus(): every caller here
+     * (sync(), ensureLocked(), warnIfNoRecentBatches(), notifyAttention())
+     * already runs with that service mocked in its tests, and calling an
+     * unstubbed method on a strict Mockery mock fails the test outright.
+     */
+    protected function personalBrowserDeliveredAt(): ?\Carbon\CarbonInterface
+    {
+        $candidates = [];
+
+        foreach (glob(storage_path('files/_menards_ingest/*'), GLOB_ONLYDIR) ?: [] as $batch) {
+            if (is_file($batch . '/personal')) {
+                $candidates[] = \Carbon\Carbon::createFromTimestamp(filemtime($batch));
+            }
+        }
+
+        $status = \Illuminate\Support\Facades\Cache::get(
+            \App\Http\Controllers\MenardsSyncStatusController::PERSONAL_CACHE_KEY
+        );
+
+        if (! is_array($status)) {
+            $path = storage_path('app/menards-personal-sync-status.json');
+            $status = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
+        }
+
+        if (is_array($status) && ($status['ok'] ?? false) && ! empty($status['at'])) {
+            $candidates[] = \Carbon\Carbon::parse($status['at']);
+        }
+
+        return $candidates === [] ? null : max($candidates);
+    }
+
+    /** Has the owner's own browser delivered within the last $hours hours? */
+    protected function personalFresh(int $hours): bool
+    {
+        $deliveredAt = $this->personalBrowserDeliveredAt();
+
+        return $deliveredAt !== null && $deliveredAt->gt(now()->subHours($hours));
+    }
+
+    /**
      * Pick the single most useful thing to say, and say only that.
      *
      * Ordered by what blocks what: a browser that is down explains everything
@@ -557,6 +668,15 @@ class MenardsBrowser extends Command
                 'The Menards receipt browser needs a look.',
             ],
         };
+
+        // 'down' and 'extension_missing' are the server browser's own faults
+        // and still worth a look even while the owner's browser is covering;
+        // a sign-in wall or a signed-out session is not, while it is.
+        if (in_array($reason, ['wall', 'signed_out', 'attention'], true) && $this->personalFresh(48)) {
+            $this->line("Your own browser delivered recently — not paging anyone about {$reason}.");
+
+            return;
+        }
 
         NotifyMenardsBrowserNeedsAttention::dispatch($reason, $detail);
 

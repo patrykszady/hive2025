@@ -27,11 +27,26 @@ class MenardsBrowserViewer extends Component
     /** "Sync now" was pressed; one per 10 minutes. */
     public const SYNC_NOW_KEY = 'menards:viewer:sync_now';
 
+    /**
+     * Never true on first render — the bridge token only appears in the page
+     * HTML once an admin explicitly asks for it, via revealBridgeToken()
+     * below. Never logged either.
+     */
+    public bool $bridgeTokenRevealed = false;
+
     public function mount(): void
     {
         // One shared, server-side browser signed into one company's Menards
         // account: only that company's admins may view or retry it.
         $this->authorize('menards-browser');
+    }
+
+    /** The install card's "Reveal" control — the token stays out of the HTML until this runs. */
+    public function revealBridgeToken(): void
+    {
+        $this->authorize('menards-browser');
+
+        $this->bridgeTokenRevealed = true;
     }
 
     public function retrySignin(): void
@@ -115,6 +130,14 @@ class MenardsBrowserViewer extends Component
         $needsSignin = Cache::get(MenardsRemoteBrowserService::NEEDS_SIGNIN_CACHE_KEY);
         $wallShowing = $this->resumeOnceTheWallIsCleared($needsSignin, is_array($syncStatus) ? $syncStatus : null);
 
+        // A fresh instance, deliberately not app(MenardsRemoteBrowserService::class):
+        // these two calls are read-only lookups the install card needs, and
+        // going through the container would hit whatever mock this page's
+        // wall-resuming tests put there for securityCheckShowing() alone —
+        // calling anything else on a Mockery mock with no matching
+        // expectation fails the test outright.
+        $installInfo = new MenardsRemoteBrowserService();
+
         return view('livewire.menards.browser-viewer', [
             'syncStatus' => $syncStatus,
             'needsSignin' => $needsSignin,
@@ -125,6 +148,11 @@ class MenardsBrowserViewer extends Component
             // exists only on the server; dev mirrors the flags and has no
             // frame to show.
             'hasBrowserStack' => (string) config('services.menards.chromium_binary') !== '',
+            'personalStatus' => $installInfo->personalStatus(),
+            'extensionId' => $installInfo->extensionId(),
+            'updateSecretConfigured' => trim((string) config('services.menards.update_secret')) !== '',
+            'hiveUrl' => rtrim((string) config('app.url'), '/'),
+            'bridgeToken' => $this->bridgeTokenRevealed ? (string) config('services.menards.bridge_token') : null,
         ]);
     }
 }

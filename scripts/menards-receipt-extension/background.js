@@ -31,6 +31,47 @@ const DEFAULT_LOOKBACK_DAYS = 14;
  */
 const BACKFILL_SINCE = '2026-07-01';
 
+/**
+ * True when the extension looks like it is running in a person's own browser
+ * rather than the server's. The server's own Chrome is Linux under Xvfb;
+ * Windows or macOS means someone's daily browser.
+ */
+function isPersonalPlatform(platformString) {
+    return !/linux/i.test(platformString || '');
+}
+
+/**
+ * Personal vs. server mode.
+ *
+ * An explicit `personal` boolean in storage — set from the options page's
+ * "Where is this running?" select — always wins. Absent that, detect from the
+ * platform the browser itself reports.
+ */
+async function personalMode() {
+    const { personal } = await chrome.storage.local.get('personal');
+    if (typeof personal === 'boolean') return personal;
+
+    const platform = navigator.userAgentData?.platform || navigator.platform || '';
+    return isPersonalPlatform(platform);
+}
+
+/**
+ * A short label for the browser this is, for Hive's status report — e.g.
+ * "Microsoft Edge 156". Falls back to the raw user agent, capped, when
+ * userAgentData is unavailable.
+ */
+function browserDescription() {
+    const brands = navigator.userAgentData?.brands;
+
+    if (Array.isArray(brands) && brands.length) {
+        const real = brands.find(b => b.brand && !/not.*brand/i.test(b.brand) && b.brand !== 'Chromium')
+            || brands.find(b => b.brand && !/not.*brand/i.test(b.brand));
+        if (real) return `${real.brand} ${real.version}`.slice(0, 120);
+    }
+
+    return (navigator.userAgent || '').slice(0, 120);
+}
+
 async function settings() {
     const s = await chrome.storage.local.get(['serverUrl', 'token', 'lastSuccessAt', 'everSucceeded', 'solveChallenges']);
 
@@ -106,22 +147,92 @@ async function receiptTab() {
     return { tab, opened: true };
 }
 
+/** Guards waitForPersonalSignIn() against a second listener on the same tab. */
+/**
+ * The tab a signed-out personal browser is waiting on, kept in session
+ * storage rather than a module variable: MV3 stops this service worker after
+ * ~30 s idle, and a person takes longer than that to sign in. The listeners
+ * below are registered at the top level for the same reason — a listener
+ * added inside a function dies with the worker.
+ */
+const WAITING_TAB_KEY = 'waitingForSignInTab';
+
+async function waitingForSignInTabId() {
+    try {
+        const { [WAITING_TAB_KEY]: id } = await chrome.storage.session.get(WAITING_TAB_KEY);
+
+        return typeof id === 'number' ? id : null;
+    } catch {
+        return null;
+    }
+}
+
+/** A menards.com/main/ page that is not one of the pages that bounced us here. */
+function looksSignedIn(url) {
+    return /^https:\/\/www\.menards\.com\/main\//i.test(url || '')
+        && !/\/(login|checkcredentials|error)\.html(?:[?#]|$)/i.test(url);
+}
+
+/**
+ * Surface a signed-out tab to the person sitting at this browser, and wait
+ * for them to sign in, rather than asking an operator to do it over noVNC —
+ * there is no operator here, only whoever is in front of the keyboard.
+ */
+async function waitForPersonalSignIn(tabId) {
+    try {
+        await chrome.storage.session.set({ [WAITING_TAB_KEY]: tabId });
+    } catch {
+    }
+}
+
+chrome.tabs.onUpdated.addListener(async (id, _changeInfo, t) => {
+    if (id !== await waitingForSignInTabId() || !looksSignedIn(t?.url)) return;
+
+    await chrome.storage.session.remove(WAITING_TAB_KEY).catch(() => {});
+    await note('signed in on the tab that was waiting — fetching receipts');
+    setTimeout(() => run('signed in'), 3000);
+});
+
+chrome.tabs.onRemoved.addListener(async (id) => {
+    if (id !== await waitingForSignInTabId()) return;
+
+    await chrome.storage.session.remove(WAITING_TAB_KEY).catch(() => {});
+});
+
 /**
  * Menards bounces a signed-out request for the receipt page to login.html, where
  * our content script does not run — so messaging it fails with Chrome's opaque
  * "Could not establish connection. Receiving end does not exist." Checking where
  * the tab actually landed turns that into the one thing the operator can act on.
+ *
+ * In a personal browser there is no operator to reach over noVNC — there is
+ * only whoever owns the browser, and their tab is already on screen. So
+ * instead of the server-flavoured message, bring that tab to the front and
+ * wait: run() picks back up on its own once they sign in (waitForPersonalSignIn).
  */
 async function assertOnReceiptPage(tabId) {
     const current = await chrome.tabs.get(tabId).catch(() => null);
     const url = current?.url || '';
 
-    if (!url.includes('/main/receiptLookup.html')) {
+    if (url.includes('/main/receiptLookup.html')) return;
+
+    if (await personalMode()) {
+        await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+        if (current?.windowId != null) {
+            await chrome.windows.update(current.windowId, { focused: true }).catch(() => {});
+        }
+
+        await waitForPersonalSignIn(tabId);
+
         throw new Error(
-            `Not signed in to menards.com — the receipt page redirected to ${url || 'an unknown page'}. `
-            + 'Sign in once over noVNC; the profile keeps the session.'
+            'Not signed in to menards.com — sign in on the tab that just opened; the receipts follow by themselves.'
         );
     }
+
+    throw new Error(
+        `Not signed in to menards.com — the receipt page redirected to ${url || 'an unknown page'}. `
+        + 'Sign in once over noVNC; the profile keeps the session.'
+    );
 }
 
 /**
@@ -155,7 +266,9 @@ async function postToHive(payload) {
     const res = await fetch(`${serverUrl}${INGEST_PATH}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
+        // personal: so Hive knows this report came from someone's own browser
+        // rather than the server's, and can stand its own browser down.
+        body: JSON.stringify({ ...payload, personal: await personalMode() }),
     });
 
     const body = await res.json().catch(() => ({}));
@@ -186,7 +299,15 @@ async function reportStatus(ok, error, receipts) {
                 'Accept': 'application/json',
                 'Authorization': `Bearer ${token}`,
             },
-            body: JSON.stringify({ ok, error: error || null, receipts: receipts ?? null }),
+            body: JSON.stringify({
+                ok,
+                error: error || null,
+                receipts: receipts ?? null,
+                // personal/browser: which browser this is, so Hive can stand
+                // its own server browser down once a personal one is reporting.
+                personal: await personalMode(),
+                browser: browserDescription(),
+            }),
         });
     } catch (e) {
         // Swallowed on purpose — see the docblock.
@@ -278,8 +399,11 @@ async function run(reason) {
         await note(`FAILED: ${err.message}`);
         await reportStatus(false, err.message, null);
     } finally {
-        // Only close what we opened — never a tab a person left open.
-        if (opened && tab?.id) await chrome.tabs.remove(tab.id).catch(() => {});
+        // Only close what we opened — never a tab a person left open, and
+        // never a personal-browser tab we are watching for a sign-in to land.
+        if (opened && tab?.id && tab.id !== await waitingForSignInTabId()) {
+            await chrome.tabs.remove(tab.id).catch(() => {});
+        }
     }
 }
 
@@ -528,6 +652,31 @@ chrome.action.onClicked.addListener(() => run('manual'));
  * browser restart. On the server that is the intended order of authority; on a
  * dev profile with no defaults.json bundled, the options page remains the way in.
  */
+
+/**
+ * The pure merge behind seedDefaults(): defaults.json's values win over
+ * whatever is already in storage, except in personal mode, where the
+ * server's proxy credentials and its automatic-solving choice must never
+ * apply — a personal browser has no proxy, and never buys a captcha solve.
+ */
+function nextSettings(defaults, current, personal) {
+    const next = {
+        serverUrl: defaults.serverUrl || current.serverUrl || '',
+        token: defaults.token || current.token || '',
+        solveChallenges: typeof defaults.solveChallenges === 'boolean' ? defaults.solveChallenges : current.solveChallenges === true,
+        // The residential proxy's credentials (see onAuthRequired below);
+        // null when the server has no proxy configured.
+        proxy: defaults.proxy && defaults.proxy.host ? defaults.proxy : null,
+    };
+
+    if (personal) {
+        next.solveChallenges = false;
+        next.proxy = null;
+    }
+
+    return next;
+}
+
 async function seedDefaults() {
     try {
         const res = await fetch(chrome.runtime.getURL('defaults.json'));
@@ -536,25 +685,22 @@ async function seedDefaults() {
         const d = await res.json();
         if (!d.serverUrl && !d.token) return;
 
+        const personal = await personalMode();
         const current = await chrome.storage.local.get(['serverUrl', 'token', 'solveChallenges', 'proxy']);
-        const next = {
-            serverUrl: d.serverUrl || current.serverUrl || '',
-            token: d.token || current.token || '',
-            solveChallenges: typeof d.solveChallenges === 'boolean' ? d.solveChallenges : current.solveChallenges === true,
-            // The residential proxy's credentials (see onAuthRequired below);
-            // null when the server has no proxy configured.
-            proxy: d.proxy && d.proxy.host ? d.proxy : null,
-        };
+        const next = nextSettings(d, current, personal);
 
         if (next.serverUrl !== current.serverUrl || next.token !== current.token || next.solveChallenges !== current.solveChallenges
             || JSON.stringify(next.proxy) !== JSON.stringify(current.proxy || null)) {
             await chrome.storage.local.set(next);
-            await note(`applied configuration from defaults.json (posting to ${next.serverUrl}; automatic captcha solving ${next.solveChallenges ? 'on' : 'off'}; proxy ${next.proxy ? next.proxy.host : 'none'})`);
+            await note(`applied configuration from defaults.json (posting to ${next.serverUrl}; automatic captcha solving ${next.solveChallenges ? 'on' : 'off'}; proxy ${next.proxy ? next.proxy.host : 'none'}${personal ? '; personal browser' : ''})`);
         }
     } catch {
         // No defaults bundled — the options page is the other way in.
     }
 }
+
+// Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`
@@ -568,6 +714,10 @@ const answeredProxyAuth = new Set();
 
 async function proxyAuthResponse(details) {
     if (!details.isProxy) return {};
+    // A personal browser never has a proxy configured (nextSettings() keeps
+    // storage clear of one), but answering nothing here too means a stray
+    // proxy setting left over from a mode switch can never be used either.
+    if (await personalMode()) return {};
 
     const { proxy } = await chrome.storage.local.get('proxy');
     if (!proxy || !proxy.username) return {};
@@ -594,7 +744,23 @@ chrome.webRequest.onAuthRequired.addListener(
     ['asyncBlocking'],
 );
 
-chrome.runtime.onStartup.addListener(seedDefaults);
+/**
+ * A browser that was closed (a laptop shut over a weekend, the owner's Edge
+ * quit for the night) catches up on restart rather than waiting for the next
+ * scheduled trigger — the daily alarm drifts from whenever Chrome happens to
+ * start, which on a personal browser could be days after the last success.
+ */
+const STARTUP_STALE_MS = 20 * 60 * 60 * 1000;
+
+chrome.runtime.onStartup.addListener(async () => {
+    await seedDefaults();
+
+    const { lastSuccessAt } = await chrome.storage.local.get('lastSuccessAt');
+
+    if (!lastSuccessAt || Date.now() - new Date(lastSuccessAt).getTime() > STARTUP_STALE_MS) {
+        run('startup');
+    }
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
     await seedDefaults();

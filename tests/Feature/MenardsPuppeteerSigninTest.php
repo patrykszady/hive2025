@@ -174,7 +174,7 @@ function menardsCdp_fakeBrowser(array $afterSubmits, string $afterClick = 'overv
 
         protected function xdo(string $args): void {}
 
-        protected function captureChallengeScreenshot(): void {}
+        protected function captureChallengeScreenshot(string $suffix = ''): void {}
 
         protected function typeSignInFormWithXdotool(string $email, string $password): void {}
 

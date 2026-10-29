@@ -176,6 +176,8 @@ it('reports the click as not cleared when the wall stays', function () {
         return $title;
     });
     $browser->shouldReceive('waitForTitle')->once()->andReturn(false);
+    // A second screenshot, suffixed, so the two can be told apart on disk.
+    $browser->shouldReceive('captureChallengeScreenshot')->once()->with('-after-click');
 
     $method = new \ReflectionMethod(MenardsRemoteBrowserService::class, 'clickChallengeCheckbox');
     $method->setAccessible(true);

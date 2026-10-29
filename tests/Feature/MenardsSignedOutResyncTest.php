@@ -78,7 +78,7 @@ function signedOut_browser(string $title): MenardsRemoteBrowserService
 
         protected function click(int $x, int $y): void {}
 
-        protected function captureChallengeScreenshot(): void {}
+        protected function captureChallengeScreenshot(string $suffix = ''): void {}
 
         protected function typeSignInFormWithXdotool(string $email, string $password): void {}
 
