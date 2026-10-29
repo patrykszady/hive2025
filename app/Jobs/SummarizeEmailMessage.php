@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\EmailMessage;
 use App\Models\Project;
 use App\Models\User;
+use App\Services\Emails\EmailStakeholders;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -55,6 +56,7 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
         $model = (string) config('emails.stakeholder_sync.summary_model', 'gpt-4.1');
         $candidates = Project::withoutGlobalScopes()
             ->whereIn('id', (array) ($email->candidate_project_ids ?? []))
+            ->with(['latestStatus' => fn ($status) => $status->withoutGlobalScopes()])
             ->get(['id', 'project_name', 'address', 'city', 'client_id']);
 
         $response = Http::withToken($apiKey)
@@ -93,6 +95,11 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
         $picked = isset($parsed['project_id']) ? (int) $parsed['project_id'] : null;
         if (! $projectId && $picked && $candidates->contains('id', $picked)) {
             $projectId = $picked;
+        }
+
+        // The AI did not choose: the client's one job in progress is the job.
+        if (! $projectId && ($open = EmailStakeholders::soleOpenProject($candidates))) {
+            $projectId = $open->id;
         }
 
         $actionItems = $this->list($parsed['action_items'] ?? []);
@@ -158,7 +165,7 @@ Write in English, refer to people by first name, and stay factual — never inve
 - next_steps: the expected upcoming sequence of events.
 - sentiment: positive, neutral, negative or mixed.
 - intent: a few words on what the sender wants ("schedule a repair", "approve change order", "send invoice").
-- project_id: when several projects are listed, the one the email is about (match the client's name, addresses, rooms and trades — suppliers and designers often name the homeowner by last name, as in "Abbey-plumbing delivery"). Null when unclear or only one is listed.
+- project_id: when several projects are listed, the one the email is about (match the client's name, addresses, rooms and trades — suppliers and designers often name the homeowner by last name, as in "Abbey-plumbing delivery"). Null when unclear or only one is listed. When one listed project is in progress and the others are Complete, the email is about the one in progress — unless it is about the finished work itself (a warranty, a repair or a service request about what was built).
 
 Quoted history below the new message is context only: summarize the NEW message. Dates: resolve "tomorrow", "Monday" etc. against the email's sent time; never invent a month.
 PROMPT;
@@ -180,7 +187,8 @@ PROMPT;
             ->keyBy('id');
 
         $projects = $candidates->map(fn (Project $project) => "- id {$project->id}: ".trim(($project->project_name ?: 'Untitled').', '.trim(implode(', ', array_filter([$project->address, $project->city]))))
-            .(($client = $clients->get($project->client_id)) ? ' (client: '.$client->name.')' : ''))->implode("\n");
+            .(($client = $clients->get($project->client_id)) ? ' (client: '.$client->name.')' : '')
+            .($project->latestStatus ? ' — '.$project->latestStatus->title.($project->latestStatus->start_date ? ' since '.\Illuminate\Support\Carbon::parse($project->latestStatus->start_date)->format('M Y') : '') : ''))->implode("\n");
 
         return 'Direction: '.($email->isInbound() ? 'received from the stakeholder' : 'sent by the team')."\n"
             .'Mailbox: '.($email->mailbox ?? 'unknown')." ({$staff})\n"

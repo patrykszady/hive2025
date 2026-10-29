@@ -71,6 +71,29 @@ class RematchUnplacedEmails extends Command
 
             $current = array_map('intval', (array) ($email->candidate_project_ids ?? []));
             if (array_diff($placement['candidate_ids'], $current) === []) {
+                // Read before with these same candidates and still unplaced:
+                // the client's one job in progress is the job (Erin Abbey's
+                // Menards forwards, 2026-10-29). Only the sender's own client's
+                // jobs count here — another client named in passing does not.
+                $clientId = $match['client_id'] ?? $email->client_id;
+                $open = $clientId ? \App\Services\Emails\EmailStakeholders::soleOpenProject(
+                    \App\Models\Project::withoutGlobalScopes()->whereIn('id', $placement['candidate_ids'])->where('client_id', $clientId)
+                        ->with(['latestStatus' => fn ($status) => $status->withoutGlobalScopes()])->get()
+                ) : null;
+
+                if ($open) {
+                    $this->line("#{$email->id} \"{$email->subject}\" → project {$open->id} (the client's one job in progress)");
+                    $placed++;
+
+                    if (! $dryRun) {
+                        $email->forceFill($who + ['project_id' => $open->id])->save();
+
+                        if ((array) $email->action_items !== []) {
+                            $projectsWithNewItems[$open->id] = true;
+                        }
+                    }
+                }
+
                 continue;
             }
 

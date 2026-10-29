@@ -80,7 +80,8 @@ it('queues a re-read for a placed email even when its summary lists no action it
 
 it('does not queue a re-read when the AI could not place the email on a project', function () {
     Queue::fake();
-    $world = serviceCallWorld('active');
+    // A finished job only: with one job in progress the email would go there.
+    $world = serviceCallWorld();
     $email = EmailMessage::factory()->create([
         'belongs_to_vendor_id' => $world['vendor']->id,
         'client_id' => $world['client']->id,

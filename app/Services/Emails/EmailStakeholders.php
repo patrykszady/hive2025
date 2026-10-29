@@ -22,6 +22,14 @@ class EmailStakeholders
     /** Projects nothing is ever filed under. */
     public const CLOSED_STATUS_CODES = [10, 11];
 
+    /**
+     * Statuses of a job that is done: Complete, Cancelled, view-only. Still
+     * candidates (a warranty or service email is about them), but never the
+     * job an everyday email — a delivery, a schedule, a question — is about
+     * when the client has another one in progress.
+     */
+    public const FINISHED_STATUS_CODES = [7, 10, 11];
+
     /** Candidate projects offered to the AI read, newest first. */
     public const MAX_CANDIDATES = 15;
 
@@ -84,6 +92,21 @@ class EmailStakeholders
      *
      * @return Collection<int, Project>
      */
+    /**
+     * The client's one job in progress among the candidates, or null when
+     * there are none or several. Erin Abbey's Menards delivery emails named
+     * 949 S Elm Ct, where three finished jobs and the active Kitchen sit;
+     * nothing chose, so they went unplaced (2026-10-29).
+     *
+     * @param  Collection<int, Project>  $projects  with latestStatus loaded
+     */
+    public static function soleOpenProject(Collection $projects): ?Project
+    {
+        $open = $projects->reject(fn (Project $project) => in_array((int) $project->latestStatus?->status_code, self::FINISHED_STATUS_CODES, true))->values();
+
+        return $open->count() === 1 ? $open->first() : null;
+    }
+
     public function namedByAddress(?string $text, int $companyVendorId): Collection
     {
         $text = mb_strtolower(Str::squish(strip_tags((string) $text)));

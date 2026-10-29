@@ -132,3 +132,95 @@ it('merges a project\'s calls, texts and emails newest first, a page at a time',
 
     expect(collect($timeline->forProject($world['project'], kinds: ['email'])['items'])->pluck('kind')->unique()->all())->toBe(['email']);
 });
+
+/**
+ * Erin Abbey forwarded two Menards delivery emails naming 949 S Elm Ct, where
+ * three finished jobs and the active Kitchen sit. Nothing chose, so both went
+ * unplaced (2026-10-29). The AI now sees each job's status, and when it still
+ * does not choose, the client's one job in progress is the job.
+ */
+function abbeyHouse(): array
+{
+    $world = serviceCallWorld();
+    $vendor = $world['vendor'];
+    $make = function (string $name, int $code) use ($world, $vendor) {
+        $project = sec3_makeProject($vendor, $world['client'], ['project_name' => $name, 'address' => '949 S Elm Ct']);
+        ProjectStatus::create(['project_id' => $project->id, 'belongs_to_vendor_id' => $vendor->id, 'status_code' => $code, 'start_date' => today()->subMonths($code === 6 ? 1 : 20)->format('Y-m-d')]);
+
+        return $project;
+    };
+
+    return $world + ['basement' => $make('Basement', 7), 'bar' => $make('Basement Bar', 7), 'kitchen' => $make('Kitchen', 6)];
+}
+
+function menardsForward(array $house): EmailMessage
+{
+    return EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $house['vendor']->id,
+        'mailbox' => $house['mailbox'],
+        'from_email' => $house['katie']->email,
+        'client_id' => $house['client']->id,
+        'candidate_project_ids' => [$house['kitchen']->id, $house['bar']->id, $house['basement']->id],
+        'subject' => 'Fwd: Thank you for your delivery purchase',
+        'body_text' => 'Your Menards order will be delivered to 949 S Elm Ct.',
+    ]);
+}
+
+function aiAnswers(?int $projectId): void
+{
+    Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => json_encode([
+        'summary' => 'Menards delivery confirmation forwarded.',
+        'action_items' => [], 'topics' => ['delivery'], 'next_steps' => [], 'sentiment' => 'neutral',
+        'intent' => 'share delivery details', 'project_id' => $projectId,
+    ])]]]])]);
+}
+
+it('places an email the AI did not place on the client\'s one job in progress', function () {
+    $house = abbeyHouse();
+    $email = menardsForward($house);
+    aiAnswers(null);
+
+    (new SummarizeEmailMessage($email->id))->handle();
+
+    expect($email->fresh()->project_id)->toBe($house['kitchen']->id);
+});
+
+it('tells the AI which job is in progress and which are complete', function () {
+    $house = abbeyHouse();
+    $email = menardsForward($house);
+    aiAnswers($house['kitchen']->id);
+
+    (new SummarizeEmailMessage($email->id))->handle();
+
+    Http::assertSent(function (HttpRequest $request) use ($house) {
+        $prompt = $request['messages'][1]['content'];
+        $system = $request['messages'][0]['content'];
+
+        return str_contains($prompt, "id {$house['kitchen']->id}: Kitchen")
+            && str_contains($prompt, '— Active since')
+            && str_contains($prompt, '— Complete since')
+            && str_contains($system, 'the email is about the one in progress');
+    });
+});
+
+it('still lets the AI put a warranty email on the finished job', function () {
+    $house = abbeyHouse();
+    $email = menardsForward($house);
+    aiAnswers($house['basement']->id);
+
+    (new SummarizeEmailMessage($email->id))->handle();
+
+    expect($email->fresh()->project_id)->toBe($house['basement']->id);
+});
+
+it('leaves an email unplaced when the client has two jobs in progress and the AI does not choose', function () {
+    $house = abbeyHouse();
+    ProjectStatus::create(['project_id' => $house['bar']->id, 'belongs_to_vendor_id' => $house['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+    $email = menardsForward($house);
+    aiAnswers(null);
+
+    (new SummarizeEmailMessage($email->id))->handle();
+
+    expect($email->fresh()->project_id)->toBeNull();
+});
+

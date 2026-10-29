@@ -192,3 +192,16 @@ it('sorts the inbox from the app too', function () {
     $this->postJson("/api/app/v1/emails/{$vendorOnly->id}/dismiss")->assertOk()->assertJsonPath('data.dismissed', true);
     $this->getJson('/api/app/v1/emails/unplaced')->assertOk()->assertJsonCount(0, 'data');
 });
+
+it('rematch puts an email already read with the same candidates on the client\'s one job in progress', function () {
+    $world = serviceCallWorld(); // Bathrooms & Basement, Complete
+    $kitchen = sec3_makeProject($world['vendor'], $world['client'], ['project_name' => 'Kitchen', 'address' => '415 Lincoln Ave']);
+    ProjectStatus::create(['project_id' => $kitchen->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+    $email = unplacedEmail($world, ['subject' => 'Fwd: Thank you for your delivery purchase', 'thread_id' => 'thread-9', 'body_text' => 'Delivery to 415 Lincoln Ave.']);
+    $email->forceFill(['candidate_project_ids' => app(\App\Services\Emails\StakeholderEmailStore::class)->placementFor((string) $email->from_email, (array) $email->to, (array) $email->cc, (string) $email->subject, $email->thread_id, (int) $email->belongs_to_vendor_id, (string) $email->body_text)['candidate_ids']])->save();
+
+    $this->artisan('emails:rematch-unplaced')->assertSuccessful();
+
+    expect($email->fresh()->project_id)->toBe($kitchen->id);
+});
+
