@@ -101,6 +101,32 @@ async function note(text) {
 }
 
 /** A tab on the receipt page, reusing one if the browser already has it open. */
+/**
+ * Give a freshly loaded receipt tab a moment to stop moving before it is
+ * asked to work. On 2026-10-29 the first personal-browser run died with
+ * "the message channel closed before a response was received": the page
+ * navigated once more right after 'complete', taking the content script
+ * with it. So: never let the browser discard this tab (Edge sleeps
+ * background tabs), then wait until the URL and status have held still
+ * for two consecutive checks — at least the old 4 s, at most ~20 s.
+ */
+async function settleTab(tabId) {
+    await chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => {});
+
+    let previous = null;
+    let stableChecks = 0;
+
+    for (let i = 0; i < 10 && stableChecks < 2; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+
+        const t = await chrome.tabs.get(tabId).catch(() => null);
+        const now = t ? `${t.status}|${t.url}` : null;
+
+        stableChecks = now && now === previous && t.status === 'complete' ? stableChecks + 1 : 0;
+        previous = now;
+    }
+}
+
 /** Resolve once the tab reports a complete load, or after a minute regardless. */
 function waitForLoad(tabId) {
     return new Promise(resolve => {
@@ -128,7 +154,7 @@ async function receiptTab() {
         // load gets a fresh evaluation, and the bridge and content script with it.
         await chrome.tabs.reload(existing[0].id);
         await waitForLoad(existing[0].id);
-        await new Promise(r => setTimeout(r, 4000));
+        await settleTab(existing[0].id);
         await assertOnReceiptPage(existing[0].id);
 
         return { tab: existing[0], opened: false };
@@ -139,8 +165,9 @@ async function receiptTab() {
     // Wait for the content script to be live before messaging it.
     await waitForLoad(tab.id);
 
-    // The SPA still has to boot after 'complete'.
-    await new Promise(r => setTimeout(r, 4000));
+    // The SPA still has to boot after 'complete', and a personal browser's
+    // first load may bounce once more (store selection, a session refresh).
+    await settleTab(tab.id);
 
     await assertOnReceiptPage(tab.id);
 
@@ -329,7 +356,7 @@ async function reportStatus(ok, error, receipts) {
  *    a minute later fetched five receipts.
  */
 async function syncWithOneReload(tab, since) {
-    const retryable = /challenge page|showing error page|Receiving end does not exist|Could not establish connection/i;
+    const retryable = /challenge page|showing error page|Receiving end does not exist|Could not establish connection|message channel closed/i;
 
     let result;
     try {
