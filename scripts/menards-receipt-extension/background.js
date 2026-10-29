@@ -266,7 +266,7 @@ async function receiptTab() {
         return { tab: existing[0], opened: false };
     }
 
-    const tab = await chrome.tabs.create({ url: RECEIPT_URL, active: false });
+    const { tab, openedWindow } = await openReceiptTab();
 
     // Wait for the content script to be live before messaging it.
     await waitForLoad(tab.id);
@@ -277,7 +277,36 @@ async function receiptTab() {
 
     await assertOnReceiptPage(tab.id);
 
-    return { tab, opened: true };
+    return { tab, opened: true, openedWindow };
+}
+
+/**
+ * A tab for the fetch. With a window open, a background tab in it. With
+ * none — Edge kept running after its last window closed, which is how the
+ * whole first day of 2026-10-29 failed with "No current window" — a new
+ * minimized window of our own, closed again when the run ends.
+ *
+ * @returns {Promise<{tab: object, openedWindow: ?number}>}
+ */
+async function openReceiptTab() {
+    const windows = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => []);
+
+    if (windows.length) {
+        try {
+            return { tab: await chrome.tabs.create({ url: RECEIPT_URL, active: false }), openedWindow: null };
+        } catch (err) {
+            if (!/No current window/i.test(err?.message || '')) throw err;
+        }
+    }
+
+    const win = await chrome.windows.create({ url: RECEIPT_URL, type: 'normal', focused: false, state: 'minimized' });
+    const tab = win?.tabs?.[0] || (await chrome.tabs.query({ windowId: win.id }))[0];
+
+    if (!tab) throw new Error('Could not open a window for the receipt page.');
+
+    await note('no browser window was open — opened a minimized one for the fetch');
+
+    return { tab, openedWindow: win.id };
 }
 
 /** Guards waitForPersonalSignIn() against a second listener on the same tab. */
@@ -352,7 +381,7 @@ async function assertOnReceiptPage(tabId) {
     if (await personalMode()) {
         await chrome.tabs.update(tabId, { active: true }).catch(() => {});
         if (current?.windowId != null) {
-            await chrome.windows.update(current.windowId, { focused: true }).catch(() => {});
+            await chrome.windows.update(current.windowId, { state: 'normal', focused: true }).catch(() => {});
         }
 
         await waitForPersonalSignIn(tabId);
@@ -492,6 +521,17 @@ async function syncWithOneReload(tab, since, knownIds = []) {
  */
 let runInProgress = null;
 
+/** Automatic runs (startup, scheduled, signed in) at most this often; a person's click always runs. */
+const AUTO_RUN_GAP_MS = 10 * 60 * 1000;
+
+function automaticRunTooSoon(reason, lastRunStartedAt, nowMs = Date.now()) {
+    // A person's click, a fresh install and the run after they signed in never wait.
+    if (['manual', 'options page', 'installed', 'signed in'].includes(reason)) return false;
+    if (!lastRunStartedAt) return false;
+
+    return nowMs - new Date(lastRunStartedAt).getTime() < AUTO_RUN_GAP_MS;
+}
+
 async function run(reason) {
     if (runInProgress) {
         await note(`a run is already in progress (${runInProgress}) — ignoring the ${reason} request`);
@@ -499,6 +539,15 @@ async function run(reason) {
         return;
     }
 
+    const { lastRunStartedAt } = await chrome.storage.local.get('lastRunStartedAt');
+
+    if (automaticRunTooSoon(reason, lastRunStartedAt)) {
+        await note(`a run started ${Math.round((Date.now() - new Date(lastRunStartedAt).getTime()) / 60000)} min ago — skipping the ${reason} request`);
+
+        return;
+    }
+
+    await chrome.storage.local.set({ lastRunStartedAt: new Date().toISOString() });
     runInProgress = reason;
 
     try {
@@ -520,10 +569,11 @@ async function runOnce(reason) {
     await note(`run start (${reason}), since ${since}`);
 
     let opened = false;
+    let openedWindow = null;
     let tab = null;
 
     try {
-        ({ tab, opened } = await receiptTab());
+        ({ tab, opened, openedWindow = null } = await receiptTab());
 
         const result = await syncWithOneReload(tab, since, knownIds);
 
@@ -566,7 +616,11 @@ async function runOnce(reason) {
         // Only close what we opened — never a tab a person left open, and
         // never a personal-browser tab we are watching for a sign-in to land.
         if (opened && tab?.id && tab.id !== await waitingForSignInTabId()) {
-            await chrome.tabs.remove(tab.id).catch(() => {});
+            if (openedWindow != null) {
+                await chrome.windows.remove(openedWindow).catch(() => {});
+            } else {
+                await chrome.tabs.remove(tab.id).catch(() => {});
+            }
         }
     }
 }
@@ -864,7 +918,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`
@@ -939,6 +993,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.runtime.onInstalled.addListener(async () => {
     await seedDefaults();
+    await chrome.storage.local.set({ lastError: null, lastMessage: `extension ${chrome.runtime.getManifest().version} loaded` });
 
     // A once-daily BACKSTOP, not the schedule.
     //

@@ -203,3 +203,21 @@ test('the sync message carries the ids already sent, so the page downloads only 
     assert.match(source, /\{ action: 'sync', since, knownIds \}/);
     assert.match(source, /SETTINGS_PATH = '\/api\/menards\/extension-settings'/);
 });
+
+test('automatic runs keep ten minutes apart; a person\'s click never waits', () => {
+    const { automaticRunTooSoon } = loadBackground().sandbox.__hiveTest;
+    const t0 = Date.UTC(2026, 9, 29, 17, 0);
+    assert.equal(automaticRunTooSoon('startup', new Date(t0).toISOString(), t0 + 4 * 60000), true);
+    assert.equal(automaticRunTooSoon('scheduled', new Date(t0).toISOString(), t0 + 11 * 60000), false);
+    assert.equal(automaticRunTooSoon('manual', new Date(t0).toISOString(), t0 + 1000), false);
+    assert.equal(automaticRunTooSoon('signed in', new Date(t0).toISOString(), t0 + 1000), false);
+    assert.equal(automaticRunTooSoon('startup', null, t0), false);
+});
+
+test('with no browser window open the fetch gets a minimized window of its own, closed afterwards', () => {
+    const source = fs.readFileSync(path.join(dir, '..', 'background.js'), 'utf8');
+    assert.match(source, /chrome\.windows\.create\(\{ url: RECEIPT_URL, type: 'normal', focused: false, state: 'minimized' \}\)/);
+    assert.match(source, /chrome\.windows\.remove\(openedWindow\)/);
+    assert.match(source, /state: 'normal', focused: true/);
+});
+
