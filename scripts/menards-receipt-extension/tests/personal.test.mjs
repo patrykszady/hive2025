@@ -166,3 +166,40 @@ test('reportStatus() and postToHive() both post a personal field to Hive', () =>
     const postBody = source.slice(source.indexOf('async function postToHive('), source.indexOf('async function reportStatus('));
     assert.match(postBody, /personal:\s*await personalMode\(\)/, 'postToHive does not send personal');
 });
+
+test('the hourly window is 7:00–18:59 in the schedule zone, and an empty window means always', () => {
+    const { withinWindow } = loadBackground().sandbox.__hiveTest;
+    const sched = { windowStartHour: 7, windowEndHour: 19, timeZone: 'UTC' };
+    const at = (h) => new Date(Date.UTC(2026, 9, 29, h, 30));
+
+    assert.equal(withinWindow(sched, at(6)), false);
+    assert.equal(withinWindow(sched, at(7)), true);
+    assert.equal(withinWindow(sched, at(18)), true);
+    assert.equal(withinWindow(sched, at(19)), false);
+    assert.equal(withinWindow({ windowStartHour: 0, windowEndHour: 0, timeZone: 'UTC' }, at(3)), true);
+});
+
+test('the window follows the configured time zone, not the browser clock', () => {
+    const { hourIn } = loadBackground().sandbox.__hiveTest;
+    // 13:00 UTC is 08:00 in Chicago (CDT) on 2026-10-29.
+    assert.equal(hourIn('America/Chicago', new Date(Date.UTC(2026, 9, 29, 13, 0))), 8);
+});
+
+test('checks are aimed at the top of the hour', () => {
+    const { nextTopOfHour } = loadBackground().sandbox.__hiveTest;
+    const t = Date.UTC(2026, 9, 29, 14, 17, 3);
+    assert.equal(nextTopOfHour(t), Date.UTC(2026, 9, 29, 15, 0, 0));
+});
+
+test('delivered receipt ids are remembered, deduplicated and capped newest-last', () => {
+    const { mergeKnownIds } = loadBackground().sandbox.__hiveTest;
+    // Array.from: the sandbox hands back arrays from its own realm, which strict deepEqual rejects by prototype.
+    assert.deepEqual(Array.from(mergeKnownIds(['a', 'b'], ['b', 'c'])), ['a', 'b', 'c']);
+    assert.deepEqual(Array.from(mergeKnownIds(['a', 'b', 'c'], ['d'], 3)), ['b', 'c', 'd']);
+});
+
+test('the sync message carries the ids already sent, so the page downloads only new receipts', () => {
+    const source = fs.readFileSync(path.join(dir, '..', 'background.js'), 'utf8');
+    assert.match(source, /\{ action: 'sync', since, knownIds \}/);
+    assert.match(source, /SETTINGS_PATH = '\/api\/menards\/extension-settings'/);
+});

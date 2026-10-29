@@ -129,6 +129,18 @@ return [
         // Unset secret = the file:// update URL, which Chrome 151 ignores.
         'extension_home' => env('MENARDS_EXT_HOME', '/opt/menards-extension'),
         'update_secret' => env('MENARDS_EXTENSION_SECRET'),
+        /*
+         * The receipt extension in a PERSONAL browser (Patryk's Edge) asks
+         * GET /api/menards/extension-settings for this on every run, so the
+         * cadence changes here, never by reloading the extension.
+         */
+        'personal' => [
+            'interval_minutes' => (int) env('MENARDS_PERSONAL_INTERVAL_MINUTES', 60),
+            'window_start_hour' => (int) env('MENARDS_PERSONAL_WINDOW_START', 7),
+            'window_end_hour' => (int) env('MENARDS_PERSONAL_WINDOW_END', 19),
+            'timezone' => env('MENARDS_PERSONAL_TIMEZONE', 'America/Chicago'),
+            'lookback_days' => (int) env('MENARDS_PERSONAL_LOOKBACK_DAYS', 14),
+        ],
         'user_data_dir' => env('MENARDS_USER_DATA_DIR'),
         'novnc_web' => env('MENARDS_NOVNC_WEB', '/usr/share/novnc'),
         // The residential proxy the server's Chrome exits through (the 2captcha

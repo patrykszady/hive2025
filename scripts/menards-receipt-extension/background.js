@@ -32,6 +32,112 @@ const DEFAULT_LOOKBACK_DAYS = 14;
 const BACKFILL_SINCE = '2026-07-01';
 
 /**
+ * How often a PERSONAL browser checks, and when. The defaults match what
+ * Patryk asked for on 2026-10-29 (every hour, 7 AM–7 PM Central); Hive can
+ * change them without anyone reloading the extension: each run fetches
+ * /api/menards/extension-settings and keeps the answer in storage.
+ */
+const SETTINGS_PATH = '/api/menards/extension-settings';
+const FIRST_RUN_ALARM = 'menards-receipt-first-run';
+const DEFAULT_SCHEDULE = { intervalMinutes: 60, windowStartHour: 7, windowEndHour: 19, timeZone: 'America/Chicago', lookbackDays: 14 };
+
+/** Receipts already delivered to Hive — listed again every run, downloaded never. */
+const KNOWN_IDS_KEY = 'sentTransactionIds';
+const KNOWN_IDS_CAP = 1500;
+
+/** The hour of the day (0–23) in a time zone; the browser's own zone when the name is unknown. */
+function hourIn(timeZone, date = new Date()) {
+    try {
+        const part = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone }).formatToParts(date).find(p => p.type === 'hour');
+
+        return Number(part?.value) % 24;
+    } catch {
+        return date.getHours();
+    }
+}
+
+/** Inside [windowStartHour, windowEndHour) in the schedule's zone; an empty window means always. */
+function withinWindow(schedule, date = new Date()) {
+    const start = Number(schedule.windowStartHour), end = Number(schedule.windowEndHour);
+    if (!(start >= 0) || !(end >= 0) || start === end) return true;
+
+    const hour = hourIn(schedule.timeZone, date);
+
+    return start < end ? hour >= start && hour < end : hour >= start || hour < end;
+}
+
+/** The next full hour after `nowMs`, in ms — so checks land at :00 like a cron. */
+function nextTopOfHour(nowMs) {
+    const hour = 60 * 60 * 1000;
+
+    return Math.floor(nowMs / hour) * hour + hour;
+}
+
+/** Newest-last, deduplicated, capped — the set of ids we never download again. */
+function mergeKnownIds(existing, added, cap = KNOWN_IDS_CAP) {
+    const merged = [...(existing || []).filter(id => !(added || []).includes(id)), ...(added || [])];
+
+    return merged.slice(Math.max(0, merged.length - cap));
+}
+
+async function schedule() {
+    const { schedule } = await chrome.storage.local.get('schedule');
+
+    return { ...DEFAULT_SCHEDULE, ...(schedule && typeof schedule === 'object' ? schedule : {}) };
+}
+
+/**
+ * Ask Hive for the schedule (personal browsers only) and re-arm the alarm
+ * when the interval changed. Best effort: no Hive, no token or a 4xx leaves
+ * the stored schedule in place.
+ */
+async function refreshSchedule() {
+    const { serverUrl, token } = await settings();
+    if (!serverUrl || !token) return;
+
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${serverUrl}${SETTINGS_PATH}`, { headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }, signal: controller.signal });
+        clearTimeout(timer);
+        if (!res.ok) return;
+
+        const body = await res.json();
+        const next = {
+            intervalMinutes: Math.max(5, Number(body.interval_minutes) || DEFAULT_SCHEDULE.intervalMinutes),
+            windowStartHour: Number.isFinite(Number(body.window_start_hour)) ? Number(body.window_start_hour) : DEFAULT_SCHEDULE.windowStartHour,
+            windowEndHour: Number.isFinite(Number(body.window_end_hour)) ? Number(body.window_end_hour) : DEFAULT_SCHEDULE.windowEndHour,
+            timeZone: typeof body.timezone === 'string' && body.timezone ? body.timezone : DEFAULT_SCHEDULE.timeZone,
+            lookbackDays: Math.max(1, Number(body.lookback_days) || DEFAULT_SCHEDULE.lookbackDays),
+        };
+        const current = await schedule();
+
+        if (JSON.stringify(next) !== JSON.stringify(current)) {
+            await chrome.storage.local.set({ schedule: next });
+            await note(`schedule from Hive: every ${next.intervalMinutes} min, ${next.windowStartHour}:00–${next.windowEndHour}:00 ${next.timeZone}`);
+            await applyAlarm();
+        }
+    } catch {
+    }
+}
+
+/**
+ * Personal browser: a repeating alarm on the hour (the window check happens
+ * when it fires). Hive server: the once-daily backstop — Laravel's schedule
+ * drives that browser.
+ */
+async function applyAlarm() {
+    if (await personalMode()) {
+        const sched = await schedule();
+        await chrome.alarms.create(ALARM, { when: nextTopOfHour(Date.now()) + 20000, periodInMinutes: sched.intervalMinutes });
+
+        return;
+    }
+
+    await chrome.alarms.create(ALARM, { periodInMinutes: 60 * 24, delayInMinutes: 2 });
+}
+
+/**
  * True when the extension looks like it is running in a person's own browser
  * rather than the server's. The server's own Chrome is Linux under Xvfb;
  * Windows or macOS means someone's daily browser.
@@ -272,16 +378,16 @@ async function assertOnReceiptPage(tabId) {
  * tab rather than disturbing it, that stale state would otherwise persist until
  * someone navigated the tab by hand. Injecting a fresh copy fixes it in place.
  */
-async function sendSync(tabId, since) {
+async function sendSync(tabId, since, knownIds = []) {
     try {
-        return await chrome.tabs.sendMessage(tabId, { action: 'sync', since });
+        return await chrome.tabs.sendMessage(tabId, { action: 'sync', since, knownIds });
     } catch {
         // The bridge first, in the page's world, so the fresh content script
         // finds it in place (it checks a marker on <html>).
         await chrome.scripting.executeScript({ target: { tabId }, files: ['page-bridge.js'], world: 'MAIN' });
         await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
 
-        return await chrome.tabs.sendMessage(tabId, { action: 'sync', since });
+        return await chrome.tabs.sendMessage(tabId, { action: 'sync', since, knownIds });
     }
 }
 
@@ -355,12 +461,12 @@ async function reportStatus(ok, error, receipts) {
  *    through the residential proxy dropped that way on 2026-09-23; the retry
  *    a minute later fetched five receipts.
  */
-async function syncWithOneReload(tab, since) {
+async function syncWithOneReload(tab, since, knownIds = []) {
     const retryable = /challenge page|showing error page|Receiving end does not exist|Could not establish connection|message channel closed/i;
 
     let result;
     try {
-        result = await sendSync(tab.id, since);
+        result = await sendSync(tab.id, since, knownIds);
     } catch (err) {
         if (!retryable.test(err.message || '')) throw err;
         result = { ok: false, error: err.message };
@@ -375,7 +481,7 @@ async function syncWithOneReload(tab, since) {
     await new Promise(r => setTimeout(r, 4000));
     await assertOnReceiptPage(tab.id);
 
-    return sendSync(tab.id, since);
+    return sendSync(tab.id, since, knownIds);
 }
 
 /**
@@ -403,8 +509,13 @@ async function run(reason) {
 }
 
 async function runOnce(reason) {
+    const personal = await personalMode();
+    if (personal) await refreshSchedule();
+
     const { everSucceeded } = await settings();
-    const since = everSucceeded ? sinceDate(DEFAULT_LOOKBACK_DAYS) : BACKFILL_SINCE;
+    const lookback = personal ? (await schedule()).lookbackDays : DEFAULT_LOOKBACK_DAYS;
+    const since = everSucceeded ? sinceDate(lookback) : BACKFILL_SINCE;
+    const { [KNOWN_IDS_KEY]: knownIds = [] } = await chrome.storage.local.get(KNOWN_IDS_KEY);
 
     await note(`run start (${reason}), since ${since}`);
 
@@ -414,12 +525,12 @@ async function runOnce(reason) {
     try {
         ({ tab, opened } = await receiptTab());
 
-        const result = await syncWithOneReload(tab, since);
+        const result = await syncWithOneReload(tab, since, knownIds);
 
         if (!result?.ok) throw new Error(result?.error || 'content script returned no result');
 
         if (result.receipts.length === 0) {
-            await note(`no receipts on or after ${since} — nothing to send`);
+            await note(`no new receipts on or after ${since}${result.skipped ? ` (${result.skipped} already sent)` : ''} — nothing to send`);
             await chrome.storage.local.set({ lastSuccessAt: new Date().toISOString(), everSucceeded: true, lastError: null });
             await reportStatus(true, null, 0);
 
@@ -436,6 +547,7 @@ async function runOnce(reason) {
             lastSuccessAt: new Date().toISOString(),
             everSucceeded: true,
             lastError: null,
+            [KNOWN_IDS_KEY]: mergeKnownIds(knownIds, result.receipts.map(r => r.transactionId)),
         });
 
         await reportStatus(true, null, result.receipts.length);
@@ -443,7 +555,8 @@ async function runOnce(reason) {
         // Hive queues the import rather than running it in the request, so the
         // reply says "accepted", not "imported". How the import itself went is in
         // the menards log on the server; it is not known while this fetch is open.
-        await note(`sent ${result.receipts.length} receipts; Hive queued ${hive.received ?? '?'} for import`
+        await note(`sent ${result.receipts.length} new receipts; Hive queued ${hive.received ?? '?'} for import`
+            + (result.skipped ? `; ${result.skipped} already sent` : '')
             + (result.errors.length ? `; ${result.errors.length} failed to download` : ''));
     } catch (err) {
         await chrome.storage.local.set({ lastError: err.message });
@@ -751,7 +864,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`
@@ -805,12 +918,23 @@ const STARTUP_STALE_MS = 20 * 60 * 60 * 1000;
 
 chrome.runtime.onStartup.addListener(async () => {
     await seedDefaults();
+    await applyAlarm();
 
     const { lastSuccessAt } = await chrome.storage.local.get('lastSuccessAt');
+    const age = lastSuccessAt ? Date.now() - new Date(lastSuccessAt).getTime() : Infinity;
 
-    if (!lastSuccessAt || Date.now() - new Date(lastSuccessAt).getTime() > STARTUP_STALE_MS) {
-        run('startup');
+    if (await personalMode()) {
+        // Edge was closed: catch up as soon as it is back, if a check is due
+        // and the window is open — the hourly alarm takes it from there.
+        await refreshSchedule();
+        const sched = await schedule();
+
+        if (age > sched.intervalMinutes * 60 * 1000 && withinWindow(sched)) run('startup');
+
+        return;
     }
+
+    if (age > STARTUP_STALE_MS) run('startup');
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -827,9 +951,29 @@ chrome.runtime.onInstalled.addListener(async () => {
     //
     // The importer is idempotent, so an extra run costs nothing but a few
     // requests.
-    await chrome.alarms.create(ALARM, { periodInMinutes: 60 * 24, delayInMinutes: 2 });
+    await applyAlarm();
+
+    // A personal browser's first check two minutes after install, whatever
+    // the hour: the person just set it up and is waiting to see it work.
+    if (await personalMode()) {
+        await refreshSchedule();
+        await chrome.alarms.create(FIRST_RUN_ALARM, { delayInMinutes: 2 });
+    }
 });
 
-chrome.alarms.onAlarm.addListener(a => {
-    if (a.name === ALARM) run('scheduled');
+chrome.alarms.onAlarm.addListener(async a => {
+    if (a.name === FIRST_RUN_ALARM) return run('installed');
+    if (a.name !== ALARM) return;
+
+    if (await personalMode()) {
+        const sched = await schedule();
+
+        if (!withinWindow(sched)) {
+            await note(`outside the ${sched.windowStartHour}:00–${sched.windowEndHour}:00 ${sched.timeZone} window — not checking`);
+
+            return;
+        }
+    }
+
+    run('scheduled');
 });

@@ -889,6 +889,12 @@ Route::post('api/menards/sync-status', \App\Http\Controllers\MenardsSyncStatusCo
     ->middleware('throttle:60,1')
     ->name('menards.sync-status');
 
+// The personal browser's extension reads its check schedule here on every
+// run (hourly, 7–19 Central by default) — see MenardsExtensionSettingsController.
+Route::get('api/menards/extension-settings', \App\Http\Controllers\MenardsExtensionSettingsController::class)
+    ->middleware('throttle:60,1')
+    ->name('menards.extension-settings');
+
 Route::post('api/menards/receipts', \App\Http\Controllers\MenardsReceiptIngestController::class)
     ->middleware('throttle:12,1')
     ->name('menards.receipts');

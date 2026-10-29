@@ -134,3 +134,12 @@ test('the sync gives up waiting for a token refresh after the deadline and still
     assert.equal(outcome.present, true);
     assert.ok(outcome.waitedMs >= 700);
 });
+
+test('receipts Hive already has are listed but not downloaded again', () => {
+    const { ctx } = sandbox({ responder: () => ({ status: 200, text: '{}' }) });
+    const tx = (n) => ({ storeNumber: '3', workstationId: '1', sequenceNumber: String(n), transactionDate: '2026-10-29' });
+    const result = call(ctx, `__hiveTest.filterUnsent([${JSON.stringify(tx(1))}, ${JSON.stringify(tx(2))}, ${JSON.stringify(tx(3))}], ['3-1-2-2026-10-29'])`);
+
+    assert.equal(result.skipped, 1);
+    assert.deepEqual(Array.from(result.fresh, t => t.sequenceNumber), ['1', '3']);
+});

@@ -188,6 +188,22 @@ async function waitForImpervaToken(maxMs = 20000) {
 }
 
 /** The composite key download.ajx wants; the server never sends it. */
+/**
+ * Receipts Hive already has are listed every run (the listing is cheap) but
+ * never downloaded again: an hourly personal browser would otherwise pull
+ * two weeks of PDFs twelve times a day.
+ *
+ * @returns {{fresh: object[], skipped: number}}
+ */
+function filterUnsent(transactions, knownIds) {
+    const known = new Set(Array.isArray(knownIds) ? knownIds : []);
+    const fresh = transactions.filter(t => !known.has(transactionId(t)));
+
+    return { fresh, skipped: transactions.length - fresh.length };
+}
+
+globalThis.__hiveTest = Object.assign(globalThis.__hiveTest || {}, { filterUnsent });
+
 function transactionId(t) {
     return `${t.storeNumber}-${t.workstationId}-${t.sequenceNumber}-${t.transactionDate}`;
 }
@@ -270,14 +286,15 @@ async function fetchReceipt(t) {
 /**
  * Full sync. Returns the payload the Hive ingest endpoint expects.
  */
-async function sync(sinceDate, onProgress) {
+async function sync(sinceDate, onProgress, knownIds = []) {
     const token = await waitForImpervaToken();
     onProgress?.(token.refreshed
         ? `Imperva token refreshed after ${token.waitedMs}ms`
         : `Imperva token not refreshed within ${token.waitedMs}ms (${token.present ? 'present' : 'absent'}) — proceeding`);
 
-    const transactions = await collect(sinceDate, onProgress);
-    onProgress?.(`${transactions.length} transactions on or after ${sinceDate}`);
+    const listed = await collect(sinceDate, onProgress);
+    const { fresh: transactions, skipped } = filterUnsent(listed, knownIds);
+    onProgress?.(`${listed.length} transactions on or after ${sinceDate}, ${transactions.length} not yet sent`);
 
     const receipts = [];
     const errors = [];
@@ -306,7 +323,7 @@ async function sync(sinceDate, onProgress) {
         await sleep(DELAY_MS);
     }
 
-    return { receipts, errors, scrapedAt: new Date().toISOString(), since: sinceDate };
+    return { receipts, errors, skipped, scrapedAt: new Date().toISOString(), since: sinceDate };
 }
 
 // The service worker asks for a sync; the work happens here because only a
@@ -314,7 +331,7 @@ async function sync(sinceDate, onProgress) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.action !== 'sync') return;
 
-    sync(msg.since, p => chrome.runtime.sendMessage({ action: 'progress', text: p }).catch(() => {}))
+    sync(msg.since, p => chrome.runtime.sendMessage({ action: 'progress', text: p }).catch(() => {}), Array.isArray(msg.knownIds) ? msg.knownIds : [])
         .then(result => sendResponse({ ok: true, ...result }))
         .catch(err => sendResponse({ ok: false, error: err.message }));
 
