@@ -41,6 +41,7 @@ class CallTranscript extends Model
         'telnyx_transcription_id',
         'engine',
         'language',
+        'confidence',
         'text',
         'segments',
         'speaker_map',

@@ -44,6 +44,7 @@ beforeEach(function () {
             $table->string('telnyx_transcription_id')->nullable();
             $table->string('engine')->nullable();
             $table->string('language', 8)->nullable();
+            $table->decimal('confidence', 4, 3)->nullable();
             $table->longText('text')->nullable();
             $table->json('segments')->nullable();
             $table->json('speaker_map')->nullable();

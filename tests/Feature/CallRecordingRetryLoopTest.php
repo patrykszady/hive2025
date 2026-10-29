@@ -35,6 +35,7 @@ beforeEach(function () {
             $table->foreignId('call_log_id');
             $table->string('engine')->nullable();
             $table->string('language', 8)->nullable();
+            $table->decimal('confidence', 4, 3)->nullable();
             $table->longText('text')->nullable();
             $table->json('segments')->nullable();
             $table->json('speaker_map')->nullable();

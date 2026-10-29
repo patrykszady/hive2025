@@ -233,28 +233,19 @@ class TranscribeCallRecording implements ShouldQueue
             }
         }
 
-        $createResp = Http::withHeaders(['authorization' => $apiKey])
-            ->timeout(30)
-            ->post('https://api.assemblyai.com/v2/transcript', $payload);
+        [$transcriptId, $body] = $this->assemblyAITranscribe($apiKey, $payload);
 
-        if (! $createResp->successful()) {
-            throw new \RuntimeException('assemblyai_create_http_' . $createResp->status() . ': ' . $createResp->body());
+        // A call in the other language, transcribed in the pinned one, comes
+        // back as near-gibberish with a low confidence: transcribe it once
+        // more in that language and keep the result AssemblyAI is surer of.
+        $languageOverride = null;
+        $retry = $this->retryInOtherLanguage($apiKey, $payload, $body, $forcedLanguage, $callLog);
+
+        if ($retry !== null) {
+            [$transcriptId, $body, $languageOverride] = $retry;
         }
 
-        $transcriptId = (string) ($createResp->json('id') ?? '');
-        if ($transcriptId === '') {
-            throw new \RuntimeException('AssemblyAI did not return a transcript id');
-        }
-
-        $body = $this->assemblyAIPoll($apiKey, $transcriptId);
-
-        $status = (string) ($body['status'] ?? '');
-        if ($status === 'error') {
-            throw new \RuntimeException('assemblyai_error: ' . ($body['error'] ?? 'unknown'));
-        }
-        if ($status !== 'completed') {
-            throw new \RuntimeException('assemblyai_status_' . $status);
-        }
+        $confidence = isset($body['confidence']) ? round((float) $body['confidence'], 3) : null;
 
         $utterances = is_array($body['utterances'] ?? null) ? $body['utterances'] : [];
         $segments = [];
@@ -277,7 +268,7 @@ class TranscribeCallRecording implements ShouldQueue
         // known caller name from CNAM / contact records ("Grzegorz Szady").
         $segments = $this->applyKnownNameSubstitutions($callLog, $segments);
 
-        $detectedLanguage = $body['language_code'] ?? $forcedLanguage ?? null;
+        $detectedLanguage = $languageOverride ?? $body['language_code'] ?? $forcedLanguage ?? null;
         $text = $segments
             ? trim(implode("\n", array_map(fn ($s) => $s['speaker'] . ': ' . $s['text'], $segments)))
             : trim((string) ($body['text'] ?? ''));
@@ -314,6 +305,7 @@ class TranscribeCallRecording implements ShouldQueue
         $transcript->update([
             'engine' => 'assemblyai',
             'language' => $detectedLanguage,
+            'confidence' => $confidence,
             'text' => $text !== '' ? $text : null,
             'segments' => $segments ?: null,
             'speaker_map' => $speakerMap ?: null,
@@ -335,6 +327,7 @@ class TranscribeCallRecording implements ShouldQueue
             'transcript_id' => $transcript->id,
             'assemblyai_id' => $transcriptId,
             'language' => $detectedLanguage,
+            'confidence' => $confidence,
             'utterances' => count($segments),
             'chars' => strlen($text),
             'speaker_map' => $speakerMap ?: null,
@@ -1147,6 +1140,187 @@ class TranscribeCallRecording implements ShouldQueue
         );
         $val = trim((string) $out);
         return $val !== '' ? (float) $val : null;
+    }
+
+    /**
+     * Create one AssemblyAI transcript for this payload and wait for it.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{0: string, 1: array<string, mixed>} the AssemblyAI id and the completed body
+     */
+    protected function assemblyAITranscribe(string $apiKey, array $payload): array
+    {
+        $createResp = Http::withHeaders(['authorization' => $apiKey])
+            ->timeout(30)
+            ->post('https://api.assemblyai.com/v2/transcript', $payload);
+
+        if (! $createResp->successful()) {
+            throw new \RuntimeException('assemblyai_create_http_' . $createResp->status() . ': ' . $createResp->body());
+        }
+
+        $transcriptId = (string) ($createResp->json('id') ?? '');
+        if ($transcriptId === '') {
+            throw new \RuntimeException('AssemblyAI did not return a transcript id');
+        }
+
+        $body = $this->assemblyAIPoll($apiKey, $transcriptId);
+
+        $status = (string) ($body['status'] ?? '');
+        if ($status === 'error') {
+            throw new \RuntimeException('assemblyai_error: ' . ($body['error'] ?? 'unknown'));
+        }
+        if ($status !== 'completed') {
+            throw new \RuntimeException('assemblyai_status_' . $status);
+        }
+
+        return [$transcriptId, $body];
+    }
+
+    /**
+     * Does the pinned-language result look like a call in the retry language?
+     *
+     * AssemblyAI's own confidence is the judge: below the threshold the
+     * words it heard are not the words that were said. Null when nothing was
+     * pinned, the second pass is off, or the first pass is confident enough.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $body
+     * @return array{0: string, 1: array<string, mixed>, 2: string}|null id, body and language of the better second pass
+     */
+    protected function retryInOtherLanguage(string $apiKey, array $payload, array $body, ?string $forcedLanguage, CallLog $callLog): ?array
+    {
+        $retryLanguage = (string) config('call_recording.transcription.retry_language', '');
+        $threshold = (float) config('call_recording.transcription.retry_below_confidence', 0.6);
+
+        if ($retryLanguage === '' || $forcedLanguage === null || $retryLanguage === $forcedLanguage) {
+            return null;
+        }
+
+        $confidence = isset($body['confidence']) ? (float) $body['confidence'] : null;
+        $text = trim((string) ($body['text'] ?? ''));
+
+        if ($text === '') {
+            return null;
+        }
+
+        $reason = $this->whyNotThePinnedLanguage($body, $callLog, $confidence, $threshold, $retryLanguage);
+
+        if ($reason === null) {
+            return null;
+        }
+
+        Log::channel('call_ai')->info('Transcript does not look like the pinned language — transcribing again', [
+            'call_log_id' => $callLog->id,
+            'language' => $forcedLanguage,
+            'reason' => $reason,
+            'confidence' => $confidence !== null ? round($confidence, 3) : null,
+            'words_per_minute' => $this->wordsPerMinute($body, $callLog),
+            'retry_language' => $retryLanguage,
+        ]);
+
+        // Same audio and models, the other language; the English-only
+        // intelligence add-ons would make AssemblyAI reject the request.
+        $retryPayload = array_diff_key($payload, array_flip(['language_codes', 'language_detection', 'entity_detection', 'auto_highlights', 'auto_chapters', 'iab_categories', 'sentiment_analysis']));
+        $retryPayload['language_code'] = $retryLanguage;
+
+        try {
+            [$retryId, $retryBody] = $this->assemblyAITranscribe($apiKey, $retryPayload);
+        } catch (\Throwable $e) {
+            Log::channel('call_ai')->warning('Second-language transcription failed — keeping the first pass', [
+                'call_log_id' => $callLog->id,
+                'retry_language' => $retryLanguage,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $retryConfidence = isset($retryBody['confidence']) ? (float) $retryBody['confidence'] : null;
+        $firstWords = str_word_count($text);
+        $retryWords = str_word_count(trim((string) ($retryBody['text'] ?? '')));
+
+        // The other language heard MORE of the call, and is not guessing:
+        // that is the pass to keep. Hold music or silence transcribed as
+        // English stays English — the Polish pass finds no more words there.
+        if ($retryWords < $firstWords || ($retryConfidence !== null && $retryConfidence < 0.5)) {
+            Log::channel('call_ai')->info('Second-language transcription no better — keeping the first pass', [
+                'call_log_id' => $callLog->id,
+                'words' => $firstWords,
+                'retry_words' => $retryWords,
+                'confidence' => $confidence !== null ? round($confidence, 3) : null,
+                'retry_confidence' => $retryConfidence !== null ? round($retryConfidence, 3) : null,
+            ]);
+
+            return null;
+        }
+
+        Log::channel('call_ai')->info('Second-language transcription kept', [
+            'call_log_id' => $callLog->id,
+            'language' => $retryLanguage,
+            'words' => $retryWords,
+            'first_pass_words' => $firstWords,
+            'confidence' => $retryConfidence !== null ? round($retryConfidence, 3) : null,
+            'first_pass_confidence' => $confidence !== null ? round($confidence, 3) : null,
+        ]);
+
+        return [$retryId, $retryBody, $retryLanguage];
+    }
+
+    /**
+     * Why the pinned-language pass looks like a call in another language —
+     * null when it looks fine.
+     *
+     * Confidence alone misses it: call 2922 (Polish, 273 s) came back as
+     * 90 words of near-gibberish at 0.89 confidence — the English model is
+     * sure of the few words it kept and drops the rest. So the strongest
+     * signal is how little it heard: words per minute of audio far below
+     * speech. Polish marker words and a low confidence count as well.
+     *
+     * @param  array<string, mixed>  $body
+     */
+    protected function whyNotThePinnedLanguage(array $body, CallLog $callLog, ?float $confidence, float $threshold, string $retryLanguage): ?string
+    {
+        $minutes = $this->audioMinutes($body, $callLog);
+        $minWpm = (float) config('call_recording.transcription.retry_below_words_per_minute', 45);
+
+        if ($minutes !== null && $minutes >= 0.5 && $this->wordsPerMinute($body, $callLog) < $minWpm) {
+            return 'few words for the length of the call';
+        }
+
+        if ($confidence !== null && $confidence < $threshold) {
+            return 'low confidence';
+        }
+
+        if ($retryLanguage === 'pl' && $this->countPolishMarkers((string) ($body['text'] ?? '')) >= 3) {
+            return 'Polish words in the text';
+        }
+
+        return null;
+    }
+
+    /** @param  array<string, mixed>  $body */
+    protected function audioMinutes(array $body, CallLog $callLog): ?float
+    {
+        $seconds = isset($body['audio_duration']) ? (float) $body['audio_duration'] : (float) ($callLog->duration_seconds ?? 0);
+
+        return $seconds > 0 ? $seconds / 60 : null;
+    }
+
+    /** @param  array<string, mixed>  $body */
+    protected function wordsPerMinute(array $body, CallLog $callLog): ?float
+    {
+        $minutes = $this->audioMinutes($body, $callLog);
+
+        return $minutes ? round(str_word_count(trim((string) ($body['text'] ?? ''))) / $minutes, 1) : null;
+    }
+
+    /** Distinct common Polish words in the text — "dobra", "dziękuję", "proszę" survive an English pass. */
+    protected function countPolishMarkers(string $text): int
+    {
+        $markers = ['dobra', 'dobrze', 'dziękuję', 'dzięki', 'proszę', 'będzie', 'mamy', 'cześć', 'jutro', 'dzisiaj', 'trzeba', 'zrobić', 'kiedy', 'gdzie', 'jeszcze', 'wszystko', 'bardzo', 'właśnie', 'tylko', 'teraz'];
+        $words = array_unique(preg_split('/[^\p{L}]+/u', mb_strtolower($text), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+
+        return count(array_intersect($markers, $words));
     }
 
     protected function assemblyAIPoll(string $apiKey, string $transcriptId): array

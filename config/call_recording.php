@@ -92,6 +92,23 @@ return [
         */
         'language_codes' => env('CALL_TRANSCRIPTION_LANGUAGE_CODES', 'en,pl'),
 
+        /*
+        | Second pass for calls that are not in the pinned language. English
+        | is pinned above because the bilingual code-switching mode hurt
+        | English calls — but a Polish call transcribed as English comes
+        | back as gibberish ("Dobra", "Jinko") tagged en_us (call 2922,
+        | 2026-10-29) — at 0.89 confidence, so confidence alone does not catch
+        | it: what does is how little the English model heard (words per
+        | minute of audio far below speech), a low confidence, or Polish
+        | words in the text. Any of those and the recording is transcribed
+        | once more in `retry_language`; the pass that heard more is kept.
+        | Set retry_language to null to switch the second pass off.
+        */
+        'retry_language' => env('CALL_TRANSCRIPTION_RETRY_LANGUAGE', 'pl'),
+        'retry_below_confidence' => (float) env('CALL_TRANSCRIPTION_RETRY_BELOW_CONFIDENCE', 0.6),
+        // Speech runs 120–160 words a minute; the English model kept 20/min of call 2922 (Polish).
+        'retry_below_words_per_minute' => (float) env('CALL_TRANSCRIPTION_RETRY_BELOW_WPM', 45),
+
         'speaker_labels' => (bool) env('CALL_TRANSCRIPTION_SPEAKER_LABELS', true),
         // Most calls are 2-party (caller + agent). Telling AssemblyAI to
         // expect 2 speakers significantly improves diarization when both
