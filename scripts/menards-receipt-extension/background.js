@@ -378,7 +378,31 @@ async function syncWithOneReload(tab, since) {
     return sendSync(tab.id, since);
 }
 
+/**
+ * One run at a time. On 2026-10-29 a second run (Sync now while the alarm's
+ * run was still downloading) reused the first run's tab, reloaded it under
+ * the first run and then died with "No tab with id" when the first run
+ * closed it. A module variable is enough: a worker restart ends the run too.
+ */
+let runInProgress = null;
+
 async function run(reason) {
+    if (runInProgress) {
+        await note(`a run is already in progress (${runInProgress}) — ignoring the ${reason} request`);
+
+        return;
+    }
+
+    runInProgress = reason;
+
+    try {
+        await runOnce(reason);
+    } finally {
+        runInProgress = null;
+    }
+}
+
+async function runOnce(reason) {
     const { everSucceeded } = await settings();
     const since = everSucceeded ? sinceDate(DEFAULT_LOOKBACK_DAYS) : BACKFILL_SINCE;
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hive — Menards Receipt Sync",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Fetches Menards receipts on a schedule from inside a signed-in browser and posts them to Hive.",
   "permissions": [
     "alarms",
