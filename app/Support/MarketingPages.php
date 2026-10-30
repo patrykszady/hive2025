@@ -78,7 +78,10 @@ class MarketingPages
                 'route_name' => $name,
                 'params' => [],
                 'type' => self::typeFor($name),
-                'view' => $route->defaults['view'] ?? null,
+                // The welcome page is a closure route, not Route::view: its
+                // view is known all the same, so its title, description and
+                // last-modified read like every other page's (2026-10-29).
+                'view' => $route->defaults['view'] ?? ($name === 'welcome' ? 'welcome' : null),
             ];
         }
 
@@ -102,10 +105,15 @@ class MarketingPages
      * exact string its Blade view passes to @section('title', ...) (a plain
      * quoted literal or a __()-wrapped one; every welcome/legal view uses
      * one of those two forms), cheaply via a regex over the file rather
-     * than a full Blade render. welcome.feature is special-cased to match
-     * feature.blade.php's own formula exactly. A view with no @section
-     * ('title', ...) at all (the legal pages) falls back to its first
-     * <h1>'s text.
+     * than a full Blade render. Matches either the inline two-argument form
+     * (@section('title', EXPR)) or the block form every welcome/* view now
+     * uses (@section('title'){!! EXPR !!}@endsection — the inline form's
+     * own startSection() silently runs EXPR through e(), which the <title>
+     * tag in head.blade.php then escaped a second time; see welcome/*'s own
+     * commit for the double-escaping this caused on any title with a "&").
+     * welcome.feature is special-cased to match feature.blade.php's own
+     * formula exactly. A view with no @section('title', ...) at all (the
+     * legal pages) falls back to its first <h1>'s text.
      *
      * @param  array<string, string>  $params
      */
@@ -125,7 +133,8 @@ class MarketingPages
 
         $source = file_get_contents($path) ?: '';
 
-        if (preg_match('/@section\(\s*[\'"]title[\'"]\s*,\s*(.*?)\)\s*\r?\n/', $source, $m)) {
+        if (preg_match('/@section\(\s*[\'"]title[\'"]\s*,\s*(.*?)\)\s*\r?\n/', $source, $m)
+            || preg_match('/@section\(\s*[\'"]title[\'"]\s*\)\s*\{!!\s*(.*?)\s*!!\}\s*@endsection/', $source, $m)) {
             $expr = trim($m[1]);
 
             if (preg_match('/^__\(\s*\'((?:[^\'\\\\]|\\\\.)*)\'\s*\)$/', $expr, $mm)
@@ -140,6 +149,45 @@ class MarketingPages
         }
 
         return null;
+    }
+
+    /**
+     * The page's meta description, read the same way baseTitle() reads the
+     * title — from the view's own :description="…__('…')…" (the welcome
+     * page keeps its text in a $welcomeDescription line) — so llms.txt and
+     * the page never say two different things. A feature card's comes from
+     * config('marketing.areas'). Null when a page has none.
+     *
+     * @param  array<string, string>  $params
+     */
+    public static function description(string $routeName, array $params, ?string $view): ?string
+    {
+        if ($routeName === 'welcome.feature') {
+            $card = config("marketing.areas.{$params['area']}.cards.{$params['card']}", []);
+            $text = $card['description'] ?? $card['summary'] ?? $card['lead'] ?? null;
+
+            return is_string($text) && $text !== '' ? MetaDescription::from(html_entity_decode(strip_tags($text))) : null;
+        }
+
+        $path = self::viewPath($view);
+        if ($path === null || ! is_file($path)) {
+            return null;
+        }
+        $source = file_get_contents($path) ?: '';
+
+        $start = strpos($source, '$welcomeDescription =');
+        if ($start === false) {
+            $start = strpos($source, ':description=');
+        }
+        if ($start === false) {
+            return null;
+        }
+
+        if (! preg_match('/__\(\s*\'((?:[^\'\\\\]|\\\\.)*)\'\s*\)/', $source, $m, 0, $start)) {
+            return null;
+        }
+
+        return MetaDescription::from(html_entity_decode(strip_tags(__(stripcslashes($m[1])))));
     }
 
     /** The view file's own mtime — MarketingSitemap's own notion of "last modified" for a page. */

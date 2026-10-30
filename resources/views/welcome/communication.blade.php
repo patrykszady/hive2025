@@ -1,5 +1,5 @@
-@section('title', __('Communication — Hive Contractors'))
-<x-guest-layout>
+@section('title'){!! __('Communication — Hive Contractors') !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Text and call everyone on the job from a single shared thread. Calls are recorded and transcribed, messages translate across languages, and any text can turn into a scheduled task—so nothing gets lost in a group chat.'))">
     <x-marketing.nav active="communication" />
 
     <x-marketing.feature-hero

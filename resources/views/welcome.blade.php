@@ -1,5 +1,33 @@
-@section('title', __('Hive Contractors — The CRM built for small contractors'))
-<x-guest-layout>
+@section('title'){!! __('Hive Contractors — The CRM built for small contractors') !!}@endsection
+@php
+    // Reuses the exact hero lead paragraph below (same __() key, so pl/es
+    // get their own already-translated copy) rather than inventing new
+    // marketing copy for the meta description.
+    $welcomeDescription = \App\Support\MetaDescription::from(strip_tags(__('Hive Contractors brings your entire business under one roof. Automate your <strong class="font-semibold text-gray-900 dark:text-white">finances</strong>, <strong class="font-semibold text-gray-900 dark:text-white">communication</strong>, and <strong class="font-semibold text-gray-900 dark:text-white">project planning</strong>—plus vendor collaboration, homeowner updates, timesheets, COIs, receipts, and audits—so you can focus on building.')));
+
+    // Home page only — see the task brief: site-name + organization identity
+    // belongs once on the welcome page, not on every marketing subpage.
+    // config('app.marketing_url') (never app.url/the ambient host) is the
+    // public marketing domain; see marketing_url()'s own docblock.
+    $websiteSchema = [
+        '@context' => 'https://schema.org',
+        '@type' => 'WebSite',
+        'name' => 'Hive Contractors',
+        'url' => marketing_url().'/',
+    ];
+    $organizationSchema = [
+        '@context' => 'https://schema.org',
+        '@type' => 'Organization',
+        'name' => 'Hive Contractors',
+        'url' => marketing_url().'/',
+        'logo' => asset('favicons/icon-512x512.png'),
+    ];
+@endphp
+<x-guest-layout :description="$welcomeDescription">
+    @push('head-appended')
+        <script type="application/ld+json">{!! json_encode($websiteSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) !!}</script>
+        <script type="application/ld+json">{!! json_encode($organizationSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) !!}</script>
+    @endpush
     <x-marketing.nav />
 
     {{-- ============================ HERO ============================ --}}

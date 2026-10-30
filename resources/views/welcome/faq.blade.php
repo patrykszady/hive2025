@@ -1,5 +1,5 @@
-@section('title', 'FAQ — Hive Contractors')
-<x-guest-layout>
+@section('title'){!! 'FAQ — Hive Contractors' !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(html_entity_decode(__('Everything you need to know about Hive. Can&rsquo;t find your answer?')))">
     <x-marketing.nav />
 
     {{-- Hero --}}

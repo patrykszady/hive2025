@@ -1,5 +1,5 @@
-@section('title', 'Leads & Clients — Hive Contractors')
-<x-guest-layout>
+@section('title'){!! 'Leads & Clients — Hive Contractors' !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Catch every lead, follow up on time, and turn the ones that close into clients without re-typing a thing. Then give homeowners a live window into their project so they stop wondering what is happening next.'))">
     <x-marketing.nav active="clients" />
 
     <x-marketing.feature-hero

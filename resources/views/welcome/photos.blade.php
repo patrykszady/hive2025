@@ -1,5 +1,5 @@
-@section('title', __('Photos & Timelapses — Hive Contractors'))
-<x-guest-layout>
+@section('title'){!! __('Photos & Timelapses — Hive Contractors') !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Crews shoot progress from their phone straight into the job. Hive files it, lines the frames up into a timelapse, evens out the light, and blurs the faces—so you finish each project with a record worth showing.'))">
     <x-marketing.nav active="photos" />
 
     <x-marketing.feature-hero

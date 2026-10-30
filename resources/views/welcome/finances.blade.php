@@ -1,4 +1,4 @@
-@section('title', __('Contractor bookkeeping on autopilot — Hive Contractors'))
+@section('title'){!! __('Contractor bookkeeping on autopilot — Hive Contractors') !!}@endsection
 <x-guest-layout :description="__('Receipts, bank transactions, payments, checks and payroll flow into one place and reconcile themselves: clean books and accurate job costs for every project.')">
     @push('head-appended')
         @php

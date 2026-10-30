@@ -1,5 +1,5 @@
-@section('title', 'Estimates & Documents — Hive Contractors')
-<x-guest-layout>
+@section('title'){!! 'Estimates & Documents — Hive Contractors' !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Build professional estimates with AI, send a polished PDF, and collect a client signature right from the link. When they say yes, the estimate becomes an active job—no re-typing, no chasing paperwork.'))">
     <x-marketing.nav active="estimates" />
 
     <x-marketing.feature-hero

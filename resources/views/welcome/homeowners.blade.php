@@ -1,5 +1,5 @@
-@section('title', __('For Homeowners — Hive Contractors'))
-<x-guest-layout>
+@section('title'){!! __('For Homeowners — Hive Contractors') !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(html_entity_decode(__('When your contractor works in Hive, you get a private window into your whole project—what is done, what is happening today, and what is coming next. No more wondering, no more &ldquo;any update?&rdquo; texts that go unanswered.')))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero

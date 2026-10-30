@@ -106,8 +106,10 @@
             ?? ($title ?? null)
             ?? ($sectionTitle !== '' ? $sectionTitle : null);
         $appName = config('app.name');
+        // Shared by <title> and og:title below so the two never drift.
+        $finalTitle = $effectiveTitle ? (str_contains($effectiveTitle, $appName) ? $effectiveTitle : $effectiveTitle.' | '.$appName) : $appName;
     @endphp
-    <title>{{ $effectiveTitle ? (str_contains($effectiveTitle, $appName) ? $effectiveTitle : $effectiveTitle.' | '.$appName) : $appName }}</title>
+    <title>{{ $finalTitle }}</title>
     {{-- An admin override first, then a $description the page passed (the blog). --}}
     @php $effectiveDescription = $pageSeoOverride['meta_description'] ?? ($description ?? null); @endphp
     @if($effectiveDescription)
@@ -130,6 +132,16 @@
              x-default alternate is a promise to search engines, not a
              mirror of config('locales.default'). --}}
         <link rel="alternate" hreflang="x-default" href="{{ locale_alternate_url('en') }}">
+
+        {{-- Open Graph: same identity as <title>/description, never on the
+             signed-in app (this whole block is gated on the same
+             marketing-only SetLocale check as the canonical/hreflang tags
+             above it). --}}
+        <meta property="og:site_name" content="{{ $appName }}">
+        <meta property="og:title" content="{{ $finalTitle }}">
+        @if($effectiveDescription)
+            <meta property="og:description" content="{{ $effectiveDescription }}">
+        @endif
     @endif
     {{-- Favicon: ICO for legacy browsers, SVG for modern, PNG fallback --}}
     <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="48x48">

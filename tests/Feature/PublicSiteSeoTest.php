@@ -28,7 +28,9 @@ it('robots.txt allows every locale marketing page and names the sitemap', functi
     }
 
     expect($content)->toContain('Allow: /welcome/legal/')
-        ->and($content)->toContain('Sitemap: https://hive.contractors/sitemap.xml');
+        ->and($content)->toContain('Sitemap: https://hive.contractors/sitemap.xml')
+        // The catch-all Disallow below would otherwise hide llms.txt from AI crawlers (2026-10-29).
+        ->and($content)->toContain("Allow: /llms.txt\n");
 });
 
 it('robots.txt disallows the private app areas', function () {
@@ -248,4 +250,93 @@ it('gives the finances page a description, structured data and a title that fits
             ->and($html)->toContain('application/ld+json')
             ->and($html)->toContain('"@type":"WebPage"');
     }
+});
+
+/*
+|--------------------------------------------------------------------------
+| Site-name + Organization structured data — belongs once, on the welcome
+| (home) page only, never on a subpage or the signed-in app. Google shows
+| either the site's name or its bare domain next to search results, and
+| this (plus the favicon/title work above) is the signal that tips it
+| towards the name.
+|--------------------------------------------------------------------------
+*/
+
+it('gives the welcome home page WebSite and Organization JSON-LD naming Hive Contractors, in every locale', function () {
+    foreach (['en', 'pl', 'es'] as $locale) {
+        $html = $this->get("/{$locale}/welcome")->assertOk()->getContent();
+
+        preg_match_all('#<script type="application/ld\+json">(.*?)</script>#s', $html, $matches);
+
+        $nodes = collect($matches[1])->map(function (string $json) use ($locale) {
+            $decoded = json_decode($json, true);
+            expect(json_last_error())->toBe(JSON_ERROR_NONE, "invalid JSON-LD ({$locale}): {$json}");
+
+            return $decoded;
+        });
+
+        $website = $nodes->firstWhere('@type', 'WebSite');
+        $organization = $nodes->firstWhere('@type', 'Organization');
+
+        expect($website)->not->toBeNull("no WebSite JSON-LD on /{$locale}/welcome")
+            ->and($website['name'])->toBe('Hive Contractors')
+            // No alternateName: "Hive Contractors" is the one name the
+            // marketing pages use for the site everywhere.
+            ->and($website)->not->toHaveKey('alternateName');
+
+        expect($organization)->not->toBeNull("no Organization JSON-LD on /{$locale}/welcome")
+            ->and($organization['name'])->toBe('Hive Contractors')
+            ->and($organization['logo'])->toStartWith('http');
+
+        // The logo is a real square icon file, not a dead link.
+        $logoPath = ltrim((string) parse_url($organization['logo'], PHP_URL_PATH), '/');
+        expect(public_path($logoPath))->toBeFile();
+    }
+});
+
+it('does not put the WebSite/Organization structured data on a marketing subpage', function () {
+    // Site identity belongs once, on the home page — see the task brief.
+    $html = $this->get('/en/welcome/finances')->assertOk()->getContent();
+
+    preg_match_all('#<script type="application/ld\+json">(.*?)</script>#s', $html, $matches);
+    $types = collect($matches[1])->map(fn (string $json) => json_decode($json, true)['@type'] ?? null);
+
+    expect($types)->not->toContain('WebSite')->and($types)->not->toContain('Organization');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Title tag escaping — @section('title', $value)'s 2-argument shorthand
+| already calls e() on $value (Illuminate\View\Factory::startSection()),
+| and the <title> tag in head.blade.php escapes again with {{ }}. A title
+| with a literal "&" (e.g. "Estimates & Documents") used to render as
+| "Estimates &amp;amp; Documents" in the page source. Fixed by switching
+| every welcome/* @section('title') to the block form with a raw {!! !!}
+| echo, so head.blade.php's {{ }} stays the one and only escape — the same
+| way an admin's PageSeoOverride title and the blog's :title prop already
+| behaved.
+|--------------------------------------------------------------------------
+*/
+
+it('never double-escapes a marketing page title', function () {
+    $paths = [
+        'welcome', 'welcome/finances', 'welcome/estimates', 'welcome/clients',
+        'welcome/vendors', 'welcome/planning', 'welcome/team', 'welcome/communication',
+        'welcome/photos', 'welcome/automation', 'welcome/homeowners', 'welcome/faq',
+        'welcome/homeowners/documents', 'welcome/homeowners/payments',
+    ];
+
+    foreach (['en', 'pl', 'es'] as $locale) {
+        foreach ($paths as $path) {
+            $html = $this->get("/{$locale}/{$path}")->assertOk()->getContent();
+
+            expect($html)->not->toContain('&amp;amp;', "double-escaped title on /{$locale}/{$path}");
+        }
+    }
+});
+
+it('renders the Estimates page title as a single, correct ampersand', function () {
+    $html = $this->get('/en/welcome/estimates')->assertOk()->getContent();
+
+    expect($html)->toContain('<title>Estimates &amp; Documents — Hive Contractors</title>');
 });

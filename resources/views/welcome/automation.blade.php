@@ -1,5 +1,5 @@
-@section('title', __('Automation & AI — Hive Contractors'))
-<x-guest-layout>
+@section('title'){!! __('Automation & AI — Hive Contractors') !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Hive reads your receipts, matches your transactions, summarizes your calls, and turns texts into tasks—quietly, in the background. The office work that used to eat your evenings just happens.'))">
     <x-marketing.nav active="automation" />
 
     <x-marketing.feature-hero

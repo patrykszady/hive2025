@@ -18,6 +18,7 @@ Allow: /pl/blog/
 Allow: /es/blog
 Allow: /es/blog/
 Allow: /sitemap.xml
+Allow: /llms.txt
 
 # The app and the marketing pages share hive.contractors (its aliases,
 # dashboard. and hub., 301 there), so the app's own areas are blocked

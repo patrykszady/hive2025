@@ -1,5 +1,5 @@
-@section('title', __('Vendors & Compliance — Hive Contractors'))
-<x-guest-layout>
+@section('title'){!! __('Vendors & Compliance — Hive Contractors') !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(html_entity_decode(__('Manage every subcontractor and supplier in one directory, collaborate on bids and payments, and stay on top of insurance certificates and workers&rsquo; comp so you are never caught uninsured at audit time.')))">
     <x-marketing.nav active="vendors" />
 
     <x-marketing.feature-hero

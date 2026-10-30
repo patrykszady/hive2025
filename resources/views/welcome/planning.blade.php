@@ -1,5 +1,5 @@
-@section('title', __('Planning — Hive Contractors'))
-<x-guest-layout>
+@section('title'){!! __('Planning — Hive Contractors') !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Schedule every task on a drag-and-drop Gantt timeline or Kanban board, set dependencies, and share exactly what is coming up with clients and crews. When the plan changes, everyone hears about it automatically.'))">
     <x-marketing.nav active="planning" />
 
     <x-marketing.feature-hero

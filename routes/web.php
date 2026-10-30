@@ -101,6 +101,11 @@ use SsSystems\Platform\Pulse\BeaconController;
 // shadow it.
 Route::get('sitemap.xml', \App\Http\Controllers\SitemapController::class)->name('sitemap');
 
+// llms.txt is a real route too: the marketing pages for AI search, built
+// from the same registry and descriptions the sitemap and the pages use
+// (App\Http\Controllers\LlmsTxtController, 2026-10-29).
+Route::get('llms.txt', \App\Http\Controllers\LlmsTxtController::class)->name('llms');
+
 // Public signed-URL stream of an SMS media file (used in outbound SMS so recipients
 // can view full-quality video/audio/image without authentication, but the link
 // itself is HMAC-signed and time-limited via signedRoute()).

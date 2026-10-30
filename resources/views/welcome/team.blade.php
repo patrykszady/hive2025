@@ -1,5 +1,5 @@
-@section('title', __('Team & Time — Hive Contractors'))
-<x-guest-layout>
+@section('title'){!! __('Team & Time — Hive Contractors') !!}@endsection
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Crews clock time against the right job from their phone. You review, approve, and pay from the same screen—so labor cost lands on every project and your team gets paid right, on time.'))">
     <x-marketing.nav active="team" />
 
     <x-marketing.feature-hero

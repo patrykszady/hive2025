@@ -1,4 +1,4 @@
-@section('title', __('Schedule & Reminders — Hive Contractors'))
+@section('title'){!! __('Schedule & Reminders — Hive Contractors') !!}@endsection
 <x-guest-layout>
     <x-marketing.nav active="homeowners" />
 
