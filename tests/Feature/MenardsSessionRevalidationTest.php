@@ -10,6 +10,10 @@ use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
+beforeEach(function () {
+    isolateMenardsStorage();
+});
+
 const RECEIPT_TITLE = 'Receipt Lookup at Menards® - Google Chrome';
 const ACCOUNT_TITLE = 'Account Overview at Menards® - Google Chrome';
 const SIGNIN_TITLE = 'Sign In at Menards® - Google Chrome';

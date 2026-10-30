@@ -109,3 +109,18 @@ function adminApiHeaders(): array
 {
     return ['Authorization' => 'Bearer '.ADMIN_API_TEST_TOKEN];
 }
+
+/**
+ * The Menards server browser stands down for 25 hours after the personal
+ * browser delivers, and it learns that from files in the storage folder. A
+ * fresh, empty storage folder per test keeps a real delivery on this machine
+ * from silencing the syncs the Menards tests drive.
+ */
+function isolateMenardsStorage(): void
+{
+    $storage = sys_get_temp_dir().'/menards-test-storage-'.getmypid();
+    @mkdir($storage.'/app', 0777, true);
+    @mkdir($storage.'/files', 0777, true);
+    app()->useStoragePath($storage);
+    \Illuminate\Support\Facades\Cache::forget(\App\Http\Controllers\MenardsSyncStatusController::PERSONAL_CACHE_KEY);
+}

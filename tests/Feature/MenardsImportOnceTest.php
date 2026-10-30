@@ -17,6 +17,7 @@ uses(RefreshDatabase::class);
  */
 beforeEach(function () {
     Cache::forget(MenardsRemoteBrowserService::SYNC_IN_FLIGHT_KEY);
+    isolateMenardsStorage();
 });
 
 it('waits for another import instead of importing alongside it', function () {
