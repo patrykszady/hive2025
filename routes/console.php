@@ -711,3 +711,91 @@ Schedule::command('project:action-items --active')
 Schedule::command('traffic:collect --date=today --provider=beacon')
     ->hourly()->environments(['production'])
     ->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| The kit's SEO tools (0.19.1, 2026-11-01) — the cadence J. Peterson Design
+| runs
+|--------------------------------------------------------------------------
+| Every paid run carries a --budget in USD and stops with a clear message
+| when the DataForSEO balance cannot cover it. The weekly rank check posts
+| standard-queue tasks; the daily --collect sweep picks up late answers.
+| No seo:map-pack-grid/seo:map-pack-competitors lines here — this SaaS
+| marketing site has no service-area coordinates (HiveSeoProfile::
+| latitude()/longitude() are null), so there is no map-pack grid to scan;
+| both commands are still registered (bootstrap/app.php) for anyone who
+| wants to run them by hand.
+*/
+Schedule::command('seo:track-rankings')->weeklyOn(1, '04:00')
+    ->name('seo-track-rankings')
+    ->environments(['production'])
+    ->withoutOverlapping()->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-track-rankings.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:track-rankings failed (balance?)'));
+Schedule::command('seo:track-rankings --collect')->dailyAt('05:10')
+    ->name('seo-track-rankings-collect')
+    ->environments(['production'])
+    ->withoutOverlapping()->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-track-rankings.log'));
+Schedule::command('seo:keyword-research --budget=4 --ideas')->weeklyOn(0, '04:30')
+    ->name('seo-keyword-research')
+    ->environments(['production'])
+    ->withoutOverlapping()->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-keyword-research.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:keyword-research failed (balance?)'));
+Schedule::command('seo:domain-overview --budget=2')->weeklyOn(0, '05:00')
+    ->name('seo-domain-overview')
+    ->environments(['production'])
+    ->withoutOverlapping()->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-domain-overview.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:domain-overview failed (balance?)'));
+Schedule::command('seo:backlink-gap --budget=1')->monthlyOn(2, '05:15')
+    ->name('seo-backlink-gap')
+    ->environments(['production'])
+    ->withoutOverlapping()->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-backlink-gap.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:backlink-gap failed (balance?)'));
+Schedule::command('seo:ai-mentions --budget=2')->twiceMonthly(1, 15, '05:30')
+    ->name('seo-ai-mentions')
+    ->environments(['production'])
+    ->withoutOverlapping()->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-ai-mentions.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:ai-mentions failed (balance?)'));
+Schedule::command('seo:competitor-brand-track --days=28 --markdown')->dailyAt('05:50')
+    ->name('seo-competitor-brand-track')
+    ->environments(['production'])
+    ->withoutOverlapping()->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-competitor-brand.log'))
+    ->onFailure(fn () => logger()->error('Scheduled seo:competitor-brand-track failed'));
+
+// Change intel: one DataForSEO family per slot, $1 cap each, the cadence
+// gs.construction/J. Peterson Design run. The on-page crawl is posted on
+// Monday and collected by the free pickup runs until it finishes.
+foreach ([
+    ['serp', 'weeklyOn', [3, '04:00']],
+    ['trends', 'weeklyOn', [6, '05:30']],
+    ['onpage', 'weeklyOn', [1, '03:30']],
+    ['labs', 'weeklyOn', [1, '04:30']],
+    ['backlinks', 'weeklyOn', [2, '04:00']],
+    ['domain_analytics', 'monthlyOn', [4, '04:45']],
+    ['content_analysis', 'weeklyOn', [4, '04:30']],
+    ['ai_optimization', 'weeklyOn', [5, '04:30']],
+] as [$family, $method, $at]) {
+    Schedule::command("seo:intel {$family} --budget=1")->{$method}(...$at)
+        ->name("seo-intel-{$family}")
+        ->environments(['production'])
+        ->withoutOverlapping(90)->onOneServer()
+        ->appendOutputTo(storage_path('logs/seo-intel.log'))
+        ->onFailure(fn () => logger()->warning("Scheduled seo:intel {$family} failed (balance?)"));
+}
+Schedule::command('seo:intel business_data --budget=1')->weekdays()->dailyAt('06:10')
+    ->name('seo-intel-business_data')
+    ->environments(['production'])
+    ->withoutOverlapping(90)->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-intel.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:intel business_data failed (balance?)'));
+Schedule::command('seo:intel onpage --budget=1')->cron('30 5-23/2 * * 1,2')
+    ->name('seo-intel-onpage-collect')
+    ->environments(['production'])
+    ->withoutOverlapping(90)->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-intel.log'));

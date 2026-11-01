@@ -7,6 +7,17 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Mail\Events\MessageSent;
 use App\Listeners\StoreEmailTracking;
+use SsSystems\Platform\Seo\AiTraffic\TrackAiTraffic;
+use SsSystems\Platform\Seo\Intel\Console\IntelCommand;
+use SsSystems\Platform\Seo\KeywordResearch\Console\KeywordResearchCommand;
+use SsSystems\Platform\Seo\MapPack\Console\MapPackCompetitorsCommand;
+use SsSystems\Platform\Seo\MapPack\Console\MapPackGridCommand;
+use SsSystems\Platform\Seo\Rankings\Console\ShowRankingsCommand;
+use SsSystems\Platform\Seo\Rankings\Console\TrackRankingsCommand;
+use SsSystems\Platform\Seo\Visibility\Console\AiMentionsCommand;
+use SsSystems\Platform\Seo\Visibility\Console\BacklinkGapCommand;
+use SsSystems\Platform\Seo\Visibility\Console\CompetitorBrandTrackCommand;
+use SsSystems\Platform\Seo\Visibility\Console\DomainOverviewCommand;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withCommands([
@@ -15,6 +26,29 @@ return Application::configure(basePath: dirname(__DIR__))
         // already registered by Application::configure()'s own withCommands()
         // call above, so this adds only the kit's command class.
         \SsSystems\Platform\Traffic\Console\CollectTrafficCommand::class,
+        // The kit's SEO tools (0.19.1, 2026-11-01): the same commands
+        // J. Peterson Design/gs.construction run. This app keeps its own
+        // seo:rank-check (App\Console\Commands\SeoRankCheck) in place —
+        // see SeoSnapshotController's docblock — so seo:track-rankings/
+        // seo:show-rankings are additive, not a replacement of that command.
+        TrackRankingsCommand::class,
+        ShowRankingsCommand::class,
+        KeywordResearchCommand::class,
+        DomainOverviewCommand::class,
+        BacklinkGapCommand::class,
+        AiMentionsCommand::class,
+        CompetitorBrandTrackCommand::class,
+        // Registered even though this SaaS site has no service-area
+        // coordinates (HiveSeoProfile::latitude()/longitude() are null) —
+        // seo:map-pack-grid refuses cleanly with a clear message instead of
+        // being left unavailable, and seo:map-pack-competitors is harmless
+        // to register (it just reads an always-empty map_pack_competitors
+        // table here).
+        MapPackGridCommand::class,
+        MapPackCompetitorsCommand::class,
+        // Change intel (0.19.2): seo:intel, one DataForSEO family per run —
+        // see AppServiceProvider's IntelSettings/IntelRunner bindings.
+        IntelCommand::class,
     ])
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
@@ -63,6 +97,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(\App\Http\Middleware\NoIndexNonPublic::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\LoadAuthVendor::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\LogForbiddenResponses::class);
+
+        // AI assistants' referrals and AI crawlers' hits, counted per day
+        // into ai_traffic_daily for the SEO Reports "AI Assistant
+        // Visibility" card (kit 0.19.1, 2026-11-01). This app never tracked
+        // AI traffic its own way, so this is additive, not a replacement.
+        $middleware->append(TrackAiTraffic::class);
 
         $middleware->alias([
             'admin.access' => \App\Http\Middleware\AdminAccess::class,

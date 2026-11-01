@@ -2,21 +2,18 @@
 
 namespace App\Http\Controllers\Api\Admin\V1;
 
-use App\Console\Commands\SeoRankCheck;
 use SsSystems\Platform\Http\Admin\Concerns\BuildsApiResponses;
 use App\Http\Controllers\Controller;
 use App\Models\GscCoverageState;
-use App\Models\SeoSyncRun;
-use App\Support\Seo\DataForSeoSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
 use SsSystems\Platform\Reports\Console\ReportRun;
 use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
 use SsSystems\Platform\Seo\Http\Concerns\BuildsSeoSnapshot;
+use SsSystems\Platform\Seo\Http\Concerns\BuildsSeoToolBlocks;
 use SsSystems\Platform\Seo\SitemapStatus;
 
 /**
@@ -33,11 +30,23 @@ use SsSystems\Platform\Seo\SitemapStatus;
  * this site's own:
  *
  *   - `pulse`/`pulseSnapshot()` — Site Pulse, not part of dawn's shape.
- *   - `rankings`/`rankingsSnapshot()` — the "Where you rank" panel, gated
- *     on DataForSEO; dawn has no equivalent block.
  *   - `automated_actions: false` — this app is a marketing site for a SaaS
  *     product with no page-title/meta-description content for the shared
  *     autopilot to rewrite, so it must never get it.
+ *
+ * 2026-11-01: `rankings`/`keyword_research`/`dataforseo`/`ai_traffic`/
+ * `map_pack`/`intel` are now the kit's own SsSystems\Platform\Seo\Http\
+ * Concerns\BuildsSeoToolBlocks (the same blocks J. Peterson Design's/
+ * gs.construction's report pages carry — Patryk, 2026-10-31: "we should be
+ * using the same ... in the kit"). This REPLACES this class's former
+ * `rankingsSnapshot()` (the "Where you rank" panel fed from
+ * App\Console\Commands\SeoRankCheck's saved SeoSyncRun result): that
+ * command and App\Services\DataForSeoService are left in place (they still
+ * feed EloquentHealthDataReader::latestRankSnapshots() for the health
+ * score's rankings measure) but no longer feed this screen's `rankings`
+ * key — the kit's seo:track-rankings (seo_rank_snapshots table) is the new
+ * source. Both are candidates for deletion once the kit's tracker has run
+ * for a while and nothing else reads SeoRankCheck's saved result.
  *
  * 2026-09-27: `top_queries`/`top_pages`/`search_appearance`/`clarity` were
  * added — this site holds the exact same `gsc_query_metrics`/
@@ -60,7 +69,10 @@ use SsSystems\Platform\Seo\SitemapStatus;
 class SeoSnapshotController extends Controller
 {
     use BuildsApiResponses;
-    use BuildsSeoSnapshot;
+    use BuildsSeoToolBlocks;
+    use BuildsSeoSnapshot {
+        refreshSnapshot as baseRefreshSnapshot;
+    }
 
     /** Mirrors ss-systems' SeoReports Livewire component's own TREND_DAYS. */
     public const TREND_DAYS = [7, 14, 30, 60, 90, 180, 360];
@@ -78,6 +90,7 @@ class SeoSnapshotController extends Controller
         $trendDays = $this->normalizeTrendDays((int) $request->integer('trend_days', 14));
         $topDays = $this->normalizeTopDays((int) $request->integer('top_days', 28));
         $search = $this->searchSnapshot($trendDays);
+        $rankDays = max(1, min(90, (int) $request->integer('rank_days', 7)));
 
         return response()->json([
             'data' => [
@@ -94,7 +107,11 @@ class SeoSnapshotController extends Controller
                 // consumer still reading the snapshot directly.
                 'top_queries' => $this->topTenRows('query', $topDays),
                 'top_pages' => $this->topTenRows('page', $topDays),
-                'rankings' => $this->rankingsSnapshot(),
+                // The kit's SEO tools (0.19.1): rankings, keyword research,
+                // competitor visibility, AI traffic, map-pack and intel, in
+                // the shapes ss.systems' report page reads everywhere else
+                // — see this class's own docblock for what this replaces.
+                ...$this->seoToolBlocks($rankDays, fn (string $key, int $ttl, callable $build): array => Cache::remember($key, $ttl, $build)),
                 'gsc_errors' => $this->gscErrorSnapshot(),
                 'sitemaps' => SitemapStatus::snapshot((string) config('services.google.search_console_property')),
                 // How our results LOOK on Google — this site holds the same
@@ -154,35 +171,19 @@ class SeoSnapshotController extends Controller
     }
 
     /**
-     * The SEO screen's "Where you rank" panel reads this top-level
-     * `rankings` key (ss-systems' seo-reports.blade.php: `$rk['live_serp']`
-     * for the split, per-engine shape). Absent entirely — `[]` — until
-     * DataForSEO is configured (App\Support\Seo\DataForSeoSettings), which
-     * ss-systems already renders as "No data for this check yet." rather
-     * than an error; unavailable must read calmly, never crash. A failed
-     * check reads exactly the same as "not configured" here, never a
-     * fabricated zero. The check itself runs on a schedule
-     * (App\Console\Commands\SeoRankCheck, daily) and this reads its saved
-     * result — never DataForSEO live inside the request: three live queries
-     * took 21.6s, past the admin's 15s wait, so the whole SEO screen read
-     * "Couldn't reach" every half hour (2026-09-27).
+     * POST seo/snapshot/refresh must also forget every cache key the kit's
+     * SEO-tool blocks may have written (BuildsSeoToolBlocks::
+     * seoToolBlockCacheKeys()) — the trait's own refreshSnapshot() (aliased
+     * above as baseRefreshSnapshot()) only knows about this site's own
+     * search/health caches.
      */
-    protected function rankingsSnapshot(): array
+    public function refreshSnapshot(Request $request): JsonResponse
     {
-        if (! app(DataForSeoSettings::class)->isConfigured()) {
-            return [];
+        foreach (self::seoToolBlockCacheKeys() as $key) {
+            Cache::forget($key);
         }
 
-        $saved = SeoSyncRun::summary(SeoRankCheck::SYNC_KEY);
-
-        if (! is_array($saved['current'] ?? null)) {
-            return [];
-        }
-
-        return [
-            'live_serp' => ['current' => $saved['current']],
-            'as_of' => isset($saved['checked_at']) ? Carbon::parse($saved['checked_at'])->toDateString() : null,
-        ];
+        return $this->baseRefreshSnapshot($request);
     }
 
     protected function gscCoverageStateModel(): string

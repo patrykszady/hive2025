@@ -2,6 +2,8 @@
 
 namespace App\Support\Seo;
 
+use SsSystems\Platform\Seo\DataForSeo\Contracts\DataForSeoCredentials;
+
 /**
  * DataForSEO credentials — GLOBAL, not owner-facing (same design as
  * jpeterson-design's/gs.construction's identical class): this is
@@ -13,11 +15,14 @@ namespace App\Support\Seo;
  * ss.systems provisioned it — source() reports that as 'platform' rather
  * than 'admin'. The config('services.dataforseo.*') pair stays only as a
  * transition fallback for a value that predates provisioning; this site
- * never grows its own DataForSEO account. Read by
- * App\Services\DataForSeoService for the SEO screen's live "Where you
- * rank" check.
+ * never grows its own DataForSEO account. Read by this app's own
+ * App\Services\DataForSeoService (the live "Where you rank" check, kept in
+ * place but no longer feeding the SEO snapshot's `rankings` block — see
+ * SeoSnapshotController) AND, since 2026-11-01, bound as the kit's
+ * DataForSeoCredentials for ss-systems/platform-kit's own SEO tools
+ * (seo:track-rankings, seo:keyword-research, …).
  */
-class DataForSeoSettings
+class DataForSeoSettings implements DataForSeoCredentials
 {
     public const SETTING_LOGIN = 'seo.dataforseo.login';
 

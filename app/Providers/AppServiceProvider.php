@@ -37,6 +37,8 @@ use App\Services\NylasService;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\BingWriter;
 use App\Support\Seo\ClaritySettings;
+use App\Support\Seo\DataForSeoSettings;
+use App\Support\Seo\HiveSeoProfile;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
 use App\Support\Seo\Reports\ClaritySettingsMetricsReader;
 use App\Support\Seo\Reports\ConfigSiteIdentity;
@@ -48,6 +50,7 @@ use App\Support\Seo\Reports\HttpPageFetcher;
 use App\Support\Seo\Reports\MarketingSiteCatalog;
 use App\Support\Seo\Reports\ReportPathStorage;
 use App\Support\Seo\SearchConsoleWriter;
+use App\Support\Seo\SeoReportSink;
 use Carbon\Carbon;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -102,6 +105,10 @@ use SsSystems\Platform\Reports\Contracts\SiteIdentity;
 use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
 use SsSystems\Platform\Seo\Bing\BingWebmasterClient;
 use SsSystems\Platform\Seo\Bing\BingWriter as KitBingWriter;
+use SsSystems\Platform\Seo\Contracts\SeoSiteProfile;
+use SsSystems\Platform\Seo\DataForSeo\Contracts\DataForSeoApi;
+use SsSystems\Platform\Seo\DataForSeo\Contracts\DataForSeoCredentials;
+use SsSystems\Platform\Seo\DataForSeo\DataForSeoClient;
 use SsSystems\Platform\Seo\Google\ServiceAccountSearchConsoleClient;
 use SsSystems\Platform\Seo\Inspection\Contracts\CoverageStore;
 use SsSystems\Platform\Seo\Inspection\Contracts\SitemapSource;
@@ -110,9 +117,24 @@ use SsSystems\Platform\Seo\Inspection\Contracts\UrlInspector;
 use SsSystems\Platform\Seo\Inspection\EloquentCoverageStore;
 use SsSystems\Platform\Seo\Inspection\NoTrackedPaths;
 use SsSystems\Platform\Seo\Inspection\UrlInspectionQuota;
+use SsSystems\Platform\Seo\Intel\IntelRunner;
+use SsSystems\Platform\Seo\Intel\IntelSettings;
+use SsSystems\Platform\Seo\Intel\IntelStore;
+use SsSystems\Platform\Seo\Intel\Sources\AiOptimizationSource;
+use SsSystems\Platform\Seo\Intel\Sources\BacklinksSource;
+use SsSystems\Platform\Seo\Intel\Sources\BusinessDataSource;
+use SsSystems\Platform\Seo\Intel\Sources\ContentAnalysisSource;
+use SsSystems\Platform\Seo\Intel\Sources\DomainAnalyticsSource;
+use SsSystems\Platform\Seo\Intel\Sources\LabsSource;
+use SsSystems\Platform\Seo\Intel\Sources\OnPageSource;
+use SsSystems\Platform\Seo\Intel\Sources\SerpSource;
+use SsSystems\Platform\Seo\Intel\Sources\TrendsSource;
+use SsSystems\Platform\Seo\MapPack\Contracts\MapPackContext;
+use SsSystems\Platform\Seo\MapPack\NullMapPackContext;
 use SsSystems\Platform\Seo\SearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncClient;
 use SsSystems\Platform\Seo\SearchConsoleWriter as KitSearchConsoleWriter;
+use SsSystems\Platform\Seo\Visibility\Contracts\ReportSink;
 use SsSystems\Platform\Social\Adapters\PlatformSettingCredentialStore;
 use SsSystems\Platform\Social\Contracts\MetaCredentialStore;
 use SsSystems\Platform\Traffic\Collectors\AccessLogCollector;
@@ -220,6 +242,42 @@ class AppServiceProvider extends ServiceProvider
 
             return new BingWebmasterApi($settings->apiKey(), $settings->siteUrl(), $app->make(HttpFactory::class));
         });
+
+        // The kit's SEO tools (0.19.1, 2026-11-01): the DataForSEO account
+        // ss.systems pushes to this site, one shared client, and this
+        // business's profile — the same wiring J. Peterson Design got the
+        // same day (see that site's AppServiceProvider/JpetersonSeoProfile).
+        // Everything else the tools need (stores, snapshots, commands)
+        // autowires from the database connection. App\Support\Seo\
+        // DataForSeoSettings already served this app's own live rank check
+        // (App\Services\DataForSeoService) and now doubles as the kit's
+        // DataForSeoCredentials.
+        $this->app->bind(DataForSeoCredentials::class, DataForSeoSettings::class);
+        $this->app->singleton(DataForSeoApi::class, fn ($app) => new DataForSeoClient($app->make(DataForSeoCredentials::class), $app->make(HttpFactory::class)));
+        $this->app->bind(SeoSiteProfile::class, HiveSeoProfile::class);
+        $this->app->bind(ReportSink::class, SeoReportSink::class);
+        // No service-area pages/office coordinates on this SaaS marketing
+        // site (see HiveSeoProfile::latitude()/longitude()) — the null
+        // object keeps MapPackSnapshot/seo:map-pack-grid degrading cleanly
+        // rather than needing a real MapPackContext implementation.
+        $this->app->bind(MapPackContext::class, NullMapPackContext::class);
+
+        // Change intel (kit 0.19.2): the nine DataForSEO families
+        // gs.construction/J. Peterson Design run, with the kit's default
+        // per-family settings; seo:intel and the snapshot's "What Changed
+        // Since Last Check" both read this runner. This app is
+        // single-tenant, so IntelStore/every source below autowires from
+        // the database connection — no tenantColumn/tenantId closure.
+        $this->app->singleton(IntelSettings::class, fn () => new IntelSettings);
+        $this->app->singleton(IntelRunner::class, fn ($app) => new IntelRunner(
+            $app->make(DataForSeoApi::class),
+            $app->make(IntelStore::class),
+            array_map(fn (string $source) => $app->make($source), [
+                SerpSource::class, TrendsSource::class, OnPageSource::class, LabsSource::class, BacklinksSource::class,
+                DomainAnalyticsSource::class, BusinessDataSource::class, ContentAnalysisSource::class, AiOptimizationSource::class,
+            ]),
+        ));
+
         // The citation builder's remote-browser session (kit 0.11.0, ported
         // verbatim from this file's own former App\Services\Citations\
         // CitationSessionService — see the kit's Citations\
