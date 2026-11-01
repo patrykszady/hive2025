@@ -15,12 +15,12 @@ use SsSystems\Platform\Seo\DataForSeo\Contracts\DataForSeoCredentials;
  * ss.systems provisioned it — source() reports that as 'platform' rather
  * than 'admin'. The config('services.dataforseo.*') pair stays only as a
  * transition fallback for a value that predates provisioning; this site
- * never grows its own DataForSEO account. Read by this app's own
- * App\Services\DataForSeoService (the live "Where you rank" check, kept in
- * place but no longer feeding the SEO snapshot's `rankings` block — see
- * SeoSnapshotController) AND, since 2026-11-01, bound as the kit's
+ * never grows its own DataForSEO account. Bound as the kit's
  * DataForSeoCredentials for ss-systems/platform-kit's own SEO tools
- * (seo:track-rankings, seo:keyword-research, …).
+ * (seo:track-rankings, seo:keyword-research, …) — this app's own retired
+ * seo:rank-check/App\Services\DataForSeoService pair (deleted 2026-11-01)
+ * used to read it directly for the live "Where you rank" check; see
+ * EloquentHealthDataReader::latestRankSnapshots() for what replaced it.
  */
 class DataForSeoSettings implements DataForSeoCredentials
 {

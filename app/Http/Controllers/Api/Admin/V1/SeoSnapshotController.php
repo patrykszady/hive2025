@@ -40,13 +40,11 @@ use SsSystems\Platform\Seo\SitemapStatus;
  * gs.construction's report pages carry — Patryk, 2026-10-31: "we should be
  * using the same ... in the kit"). This REPLACES this class's former
  * `rankingsSnapshot()` (the "Where you rank" panel fed from
- * App\Console\Commands\SeoRankCheck's saved SeoSyncRun result): that
- * command and App\Services\DataForSeoService are left in place (they still
- * feed EloquentHealthDataReader::latestRankSnapshots() for the health
- * score's rankings measure) but no longer feed this screen's `rankings`
- * key — the kit's seo:track-rankings (seo_rank_snapshots table) is the new
- * source. Both are candidates for deletion once the kit's tracker has run
- * for a while and nothing else reads SeoRankCheck's saved result.
+ * App\Console\Commands\SeoRankCheck's saved SeoSyncRun result) — that
+ * command and App\Services\DataForSeoService are deleted: the kit's
+ * seo:track-rankings (seo_rank_snapshots table) is now the only source,
+ * for both this screen's `rankings` key and the health score's rankings
+ * measure (EloquentHealthDataReader::latestRankSnapshots()).
  *
  * 2026-09-27: `top_queries`/`top_pages`/`search_appearance`/`clarity` were
  * added — this site holds the exact same `gsc_query_metrics`/

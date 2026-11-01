@@ -11,14 +11,16 @@ use SsSystems\Platform\Reports\ReportRegistry;
  * bound — ported from dawnsellshomes' identical class. A capability not in
  * provided() is one no adapter here can answer honestly:
  *
- *   - psi_snapshots: App\Support\Seo\Reports\EloquentPsiSnapshotReader is
- *     always bound (so a direct `php artisan seo:cwv-template` resolves),
- *     but only listed here once App\Support\Seo\PsiSettings::usingOwnKey()
- *     — an owner has saved a PageSpeed key from the SEO screen's Connect
- *     Services modal. App\Console\Commands\SeoPsiSync (the only writer of
- *     psi_snapshots rows) waits for that same key before it runs, so
- *     "available" and "has real data to show" turn on together rather
- *     than the report claiming availability with an empty table under it.
+ *   - psi_snapshots: the kit's own SsSystems\Platform\Seo\PageSpeed\
+ *     PsiSnapshotStore is always bound (so a direct
+ *     `php artisan seo:cwv-template` resolves), but only listed here once
+ *     App\Support\Seo\PsiSettings::usingOwnKey() — an owner has saved a
+ *     PageSpeed key from the SEO screen's Connect Services modal. The
+ *     kit's seo:psi-sync (the only writer of psi_snapshots rows) hard-gates
+ *     on that same key before it runs at all (PageSpeedCredentials::
+ *     isConfigured()), so "available" and "has real data to show" turn on
+ *     together rather than the report claiming availability with an empty
+ *     table under it.
  *   - clarity_metrics: same shape — App\Support\Seo\Reports\
  *     ClaritySettingsMetricsReader is always bound, but only listed here
  *     once App\Support\Seo\ClaritySettings::isConfigured() (both the

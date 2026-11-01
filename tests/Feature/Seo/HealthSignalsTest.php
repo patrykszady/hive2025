@@ -1,11 +1,11 @@
 <?php
 
-use App\Console\Commands\SeoRankCheck;
 use App\Models\BingDailyTotal;
 use App\Models\SeoSyncRun;
 use App\Models\User;
 use App\Support\Seo\Reports\EloquentHealthDataReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
@@ -21,11 +21,19 @@ beforeEach(function () {
     config(['services.admin_api.token' => ADMIN_API_TEST_TOKEN]);
 });
 
-it('reads rankings from the saved daily check, one position per tracked search', function () {
-    SeoSyncRun::record(SeoRankCheck::SYNC_KEY, ['current' => [
-        'tracked' => 2, 'top3' => 0, 'top10' => 1, 'top20' => 1, 'below20' => 1,
-        'queries' => [['query' => 'a', 'position' => 7], ['query' => 'b', 'position' => null]],
-    ]]);
+it('reads rankings from the kit tracker\'s seo_rank_snapshots, one position per tracked query', function () {
+    $row = fn (string $query, ?int $position) => [
+        'engine' => 'google',
+        'query' => $query,
+        'location' => null,
+        'gsc_position' => $position,
+        'top_results' => '[]',
+        'meta' => '[]',
+        'fetched_at' => now(),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ];
+    DB::table('seo_rank_snapshots')->insert([$row('a', 7), $row('b', null)]);
 
     expect(app(EloquentHealthDataReader::class)->latestRankSnapshots())->toBe([
         ['engine' => 'google', 'position' => 7.0],

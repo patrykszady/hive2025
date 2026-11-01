@@ -1,6 +1,9 @@
 <?php
 
+use App\Models\PlatformSetting;
 use App\Support\Seo\HiveSeoProfile;
+use App\Support\Seo\PsiSettings;
+use App\Support\Seo\Reports\ReportCapabilities;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -52,7 +55,7 @@ it('registers and schedules the kit commands', function () {
     foreach ([
         'seo:track-rankings', 'seo:show-rankings', 'seo:keyword-research', 'seo:domain-overview',
         'seo:backlink-gap', 'seo:ai-mentions', 'seo:competitor-brand-track',
-        'seo:map-pack-grid', 'seo:map-pack-competitors', 'seo:intel',
+        'seo:map-pack-grid', 'seo:map-pack-competitors', 'seo:intel', 'seo:psi-sync',
     ] as $name) {
         expect($commands)->toContain($name);
     }
@@ -61,7 +64,8 @@ it('registers and schedules the kit commands', function () {
         ->expectsOutputToContain('seo:track-rankings')
         ->expectsOutputToContain('seo:keyword-research')
         ->expectsOutputToContain('seo:ai-mentions')
-        ->expectsOutputToContain('seo:intel');
+        ->expectsOutputToContain('seo:intel')
+        ->expectsOutputToContain('seo:psi-sync');
 });
 
 it('resolves the profile and the dataforseo client from the container', function () {
@@ -90,4 +94,21 @@ it('stops a paid command cleanly without credentials', function () {
     $this->artisan('seo:keyword-research --budget=1')->assertExitCode(0);
     $this->artisan('seo:track-rankings --dry-run')->assertExitCode(0);
     Http::assertNothingSent();
+});
+
+it('stops seo:psi-sync cleanly with no PageSpeed key, cwv-template unavailable', function () {
+    expect(ReportCapabilities::availability('cwv-template')['available'])->toBeFalse();
+
+    Http::fake();
+    $this->artisan('seo:psi-sync')->assertExitCode(0);
+    Http::assertNothingSent();
+});
+
+it('makes cwv-template available once a PageSpeed key is saved, replacing this site\'s retired seo:psi-sync', function () {
+    PlatformSetting::put(PsiSettings::SETTING_API_KEY, 'a-pagespeed-key');
+
+    expect(ReportCapabilities::availability('cwv-template')['available'])->toBeTrue('CWV by template is runnable once the kit sync feeds psi_snapshots');
+
+    Http::fake();
+    $this->artisan('seo:psi-sync --dry-run')->assertExitCode(0);
 });

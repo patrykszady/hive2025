@@ -2,23 +2,24 @@
 
 namespace App\Support\Seo\Reports;
 
-use App\Console\Commands\SeoRankCheck;
 use App\Models\BingDailyTotal;
 use App\Models\SeoSyncRun;
 use App\Support\SeoStorage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use SsSystems\Platform\Reports\Contracts\HealthDataReader;
+use SsSystems\Platform\Seo\Rankings\RankSnapshotStore;
 
 /**
  * HealthDataReader over this site's own signals. Ported from
  * dawnsellshomes' identical class — hive.contractors is a SaaS marketing
  * site with none of gsc's/jpeterson-design's local-SEO machinery: no
  * Google Business Profile posting pipeline, no per-image alt-text
- * authoring pipeline, no rank tracker. Every signal below that has no
- * honest source on this site answers the same "not measured" shape the
- * kit's HealthReport already expects from a tenant with nothing to show —
- * never a guessed number.
+ * authoring pipeline. Every signal below that has no honest source on this
+ * site answers the same "not measured" shape the kit's HealthReport
+ * already expects from a tenant with nothing to show — never a guessed
+ * number. Rankings ARE real (see latestRankSnapshots() below) — the kit's
+ * seo:track-rankings writes seo_rank_snapshots since 2026-11-01.
  *
  * The health-score ledger is stored the same way the other kit sites'
  * is: reports/health-history.json under SeoStorage — a date => score map,
@@ -65,19 +66,22 @@ class EloquentHealthDataReader implements HealthDataReader
     }
 
     /**
-     * The daily ranking check's saved positions (seo:rank-check), one per
-     * tracked search; a search not found in the results is a null position,
-     * which the health score counts as not ranking. Empty until the first
-     * check has run.
+     * The kit's seo:track-rankings replaces this site's own retired
+     * seo:rank-check/DataForSeoService pair: the latest row per tracked
+     * query in seo_rank_snapshots, 'google' engine only ('gsc' rows are
+     * Search Console's own impression-weighted position — a different kind
+     * of fact the health score's rankings measure never wanted mixed in
+     * with a real SERP check). RankSnapshotStore autowires with no tenant
+     * column/id, same as every other single-tenant site. Empty until the
+     * first tracked run.
      */
     public function latestRankSnapshots(): array
     {
-        $queries = SeoSyncRun::summary(SeoRankCheck::SYNC_KEY)['current']['queries'] ?? [];
-
-        return array_values(array_map(
-            fn (array $q) => ['engine' => 'google', 'position' => isset($q['position']) ? (float) $q['position'] : null],
-            is_array($queries) ? $queries : [],
-        ));
+        return collect(app(RankSnapshotStore::class)->latestRows())
+            ->where('engine', 'google')
+            ->map(fn (array $row): array => ['engine' => 'google', 'position' => $row['position'] !== null ? (float) $row['position'] : null])
+            ->values()
+            ->all();
     }
 
     /**

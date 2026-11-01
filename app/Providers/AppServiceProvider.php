@@ -40,10 +40,10 @@ use App\Support\Seo\ClaritySettings;
 use App\Support\Seo\DataForSeoSettings;
 use App\Support\Seo\HiveSeoProfile;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
+use App\Support\Seo\PsiSettings;
 use App\Support\Seo\Reports\ClaritySettingsMetricsReader;
 use App\Support\Seo\Reports\ConfigSiteIdentity;
 use App\Support\Seo\Reports\EloquentHealthDataReader;
-use App\Support\Seo\Reports\EloquentPsiSnapshotReader;
 use App\Support\Seo\Reports\EloquentQueryMetricsReader;
 use App\Support\Seo\Reports\EmptyAreaCatalog;
 use App\Support\Seo\Reports\HttpPageFetcher;
@@ -131,6 +131,10 @@ use SsSystems\Platform\Seo\Intel\Sources\SerpSource;
 use SsSystems\Platform\Seo\Intel\Sources\TrendsSource;
 use SsSystems\Platform\Seo\MapPack\Contracts\MapPackContext;
 use SsSystems\Platform\Seo\MapPack\NullMapPackContext;
+use SsSystems\Platform\Seo\PageSpeed\Contracts\PageSpeedCredentials;
+use SsSystems\Platform\Seo\PageSpeed\Contracts\PageSpeedUrlSource;
+use SsSystems\Platform\Seo\PageSpeed\PsiSnapshotStore;
+use SsSystems\Platform\Seo\PageSpeed\SitemapUrlSource;
 use SsSystems\Platform\Seo\SearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncClient;
 use SsSystems\Platform\Seo\SearchConsoleWriter as KitSearchConsoleWriter;
@@ -249,9 +253,10 @@ class AppServiceProvider extends ServiceProvider
         // same day (see that site's AppServiceProvider/JpetersonSeoProfile).
         // Everything else the tools need (stores, snapshots, commands)
         // autowires from the database connection. App\Support\Seo\
-        // DataForSeoSettings already served this app's own live rank check
-        // (App\Services\DataForSeoService) and now doubles as the kit's
-        // DataForSeoCredentials.
+        // DataForSeoSettings is bound as the kit's DataForSeoCredentials —
+        // the same account that used to feed this app's own retired
+        // seo:rank-check/DataForSeoService pair (deleted 2026-11-01; see
+        // EloquentHealthDataReader::latestRankSnapshots()).
         $this->app->bind(DataForSeoCredentials::class, DataForSeoSettings::class);
         $this->app->singleton(DataForSeoApi::class, fn ($app) => new DataForSeoClient($app->make(DataForSeoCredentials::class), $app->make(HttpFactory::class)));
         $this->app->bind(SeoSiteProfile::class, HiveSeoProfile::class);
@@ -410,7 +415,16 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PageFetcher::class, HttpPageFetcher::class);
         $this->app->bind(AreaCatalog::class, EmptyAreaCatalog::class);
         $this->app->bind(ClarityMetricsReader::class, ClaritySettingsMetricsReader::class);
-        $this->app->bind(PsiSnapshotReader::class, EloquentPsiSnapshotReader::class);
+
+        // Page speed (kit 0.19.3, 2026-11-01): seo:psi-sync measures this
+        // site's own sitemap.xml with the PageSpeed key saved from the SEO
+        // screen's Connect Services modal; the kit store is also the
+        // PsiSnapshotReader the "CWV by template" report reads. Replaces
+        // this app's own App\Console\Commands\SeoPsiSync/
+        // EloquentPsiSnapshotReader (deleted).
+        $this->app->bind(PageSpeedCredentials::class, PsiSettings::class);
+        $this->app->bind(PageSpeedUrlSource::class, fn ($app) => new SitemapUrlSource(rtrim((string) config('app.url'), '/').'/sitemap.xml', $app->make(HttpFactory::class)));
+        $this->app->bind(PsiSnapshotReader::class, PsiSnapshotStore::class);
 
         // KitReportCommand::maybeSaveMarkdown() (App\Console\Commands\Seo*'s
         // shared base, ss-platform-kit 0.12.0) resolves this to decide where

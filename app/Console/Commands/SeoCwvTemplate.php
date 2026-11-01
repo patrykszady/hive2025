@@ -8,15 +8,17 @@ use SsSystems\Platform\Reports\CwvTemplateReport;
 /**
  * Thin wrapper over the kit's CwvTemplateReport — ported verbatim from
  * dawnsellshomes' identical command. See App\Console\Commands\Seo\
- * KitReportCommand. PsiSnapshotReader is bound (App\Support\Seo\Reports\
- * EloquentPsiSnapshotReader, over the psi_snapshots table
- * App\Console\Commands\SeoPsiSync fills), so this resolves and runs
- * directly; the admin's "Run" button calls it once App\Support\Seo\
- * Reports\ReportCapabilities lists 'psi_snapshots' as provided — which
- * happens once a PageSpeed key is saved from the SEO screen's Connect
- * Services modal (the same key SeoPsiSync waits for before writing any
- * rows). Run before the table has any rows, it still generates a report —
- * just one with zero samples in every bucket.
+ * KitReportCommand. PsiSnapshotReader is bound (ss-systems/platform-kit's
+ * own SsSystems\Platform\Seo\PageSpeed\PsiSnapshotStore, over the
+ * psi_snapshots table the kit's seo:psi-sync fills — replacing this app's
+ * own retired App\Console\Commands\SeoPsiSync/EloquentPsiSnapshotReader
+ * pair, 2026-11-01), so this resolves and runs directly; the admin's "Run"
+ * button calls it once App\Support\Seo\Reports\ReportCapabilities lists
+ * 'psi_snapshots' as provided — which happens once a PageSpeed key is
+ * saved from the SEO screen's Connect Services modal (the same key
+ * seo:psi-sync waits for before writing any rows). Run before the table
+ * has any rows, it still generates a report — just one with zero samples
+ * in every bucket.
  */
 class SeoCwvTemplate extends KitReportCommand
 {

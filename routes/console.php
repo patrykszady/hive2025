@@ -560,14 +560,6 @@ Schedule::command('seo:gsc-inspect-bulk --limit=600 --markdown')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-gsc-inspect-bulk.log'));
 
-Schedule::command('seo:rank-check')
-    ->dailyAt('04:10')
-    ->name('seo-rank-check')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer()
-    ->appendOutputTo(storage_path('logs/seo-rank-check.log'));
-
 Schedule::command('seo:psi-sync')
     ->dailyAt('04:15')
     ->name('seo-psi-sync')
@@ -599,9 +591,9 @@ Schedule::command('traffic:collect --days=5')
 | this marketing site has no adapter for at all — scheduling it would only
 | ever log a refusal, so it stays out. clarity-health and cwv-template ARE
 | scheduled below (both now have real adapters — App\Support\Seo\Reports\
-| ClaritySettingsMetricsReader/EloquentPsiSnapshotReader), but each reads
-| calmly as "not configured"/no rows until its credential is saved, same
-| spirit as the syncs above.
+| ClaritySettingsMetricsReader / the kit's own PsiSnapshotStore), but each
+| reads calmly as "not configured"/no rows until its credential is saved,
+| same spirit as the syncs above.
 |
 | WEEKLY, not daily: these are deeper analyses than the daily sync/
 | inspection jobs above. Sunday night, Chicago, staggered a comfortable

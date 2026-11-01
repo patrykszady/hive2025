@@ -12,6 +12,7 @@ use SsSystems\Platform\Seo\Intel\Console\IntelCommand;
 use SsSystems\Platform\Seo\KeywordResearch\Console\KeywordResearchCommand;
 use SsSystems\Platform\Seo\MapPack\Console\MapPackCompetitorsCommand;
 use SsSystems\Platform\Seo\MapPack\Console\MapPackGridCommand;
+use SsSystems\Platform\Seo\PageSpeed\Console\PageSpeedSyncCommand;
 use SsSystems\Platform\Seo\Rankings\Console\ShowRankingsCommand;
 use SsSystems\Platform\Seo\Rankings\Console\TrackRankingsCommand;
 use SsSystems\Platform\Seo\Visibility\Console\AiMentionsCommand;
@@ -27,10 +28,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // call above, so this adds only the kit's command class.
         \SsSystems\Platform\Traffic\Console\CollectTrafficCommand::class,
         // The kit's SEO tools (0.19.1, 2026-11-01): the same commands
-        // J. Peterson Design/gs.construction run. This app keeps its own
-        // seo:rank-check (App\Console\Commands\SeoRankCheck) in place —
-        // see SeoSnapshotController's docblock — so seo:track-rankings/
-        // seo:show-rankings are additive, not a replacement of that command.
+        // J. Peterson Design/gs.construction run. seo:track-rankings
+        // replaced this app's own retired seo:rank-check (deleted
+        // 2026-11-01 — see SeoSnapshotController's docblock).
         TrackRankingsCommand::class,
         ShowRankingsCommand::class,
         KeywordResearchCommand::class,
@@ -49,6 +49,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // Change intel (0.19.2): seo:intel, one DataForSEO family per run —
         // see AppServiceProvider's IntelSettings/IntelRunner bindings.
         IntelCommand::class,
+        // Page speed (kit 0.19.3): seo:psi-sync, replacing this app's own
+        // retired App\Console\Commands\SeoPsiSync.
+        PageSpeedSyncCommand::class,
     ])
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
