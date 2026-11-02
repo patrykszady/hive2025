@@ -770,7 +770,7 @@ Schedule::command('seo:backlink-gap --budget=1')->monthlyOn(2, '05:15')
     ->withoutOverlapping()->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-backlink-gap.log'))
     ->onFailure(fn () => logger()->warning('Scheduled seo:backlink-gap failed (balance?)'));
-Schedule::command('seo:ai-mentions --budget=2')->twiceMonthly(1, 15, '05:30')
+Schedule::command('seo:ai-mentions --budget=2')->weeklyOn(1, '05:30')
     ->name('seo-ai-mentions')
     ->environments(['production'])
     ->withoutOverlapping()->onOneServer()
