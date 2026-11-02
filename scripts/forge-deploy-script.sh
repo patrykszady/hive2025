@@ -105,3 +105,9 @@ echo 'menards:browser ensure dispatched in background (see storage/logs/menards-
 # skip the refresh rather than start a parallel one.
 setsid flock -n /tmp/hive-scout-refresh.lock $FORGE_PHP artisan scout:refresh --no-interaction >> storage/logs/scout-refresh.log 2>&1 < /dev/null &
 echo 'scout:refresh dispatched in background (see storage/logs/scout-refresh.log)'
+
+# IndexNow — after a deploy, re-announce every page to Bing through the kit's
+# seo:indexnow (2026-11-02); detached so a slow sitemap crawl never holds the
+# deploy. The hourly seo:indexnow covers changed pages between deploys.
+setsid $FORGE_PHP artisan seo:indexnow --all >> storage/logs/seo-indexnow.log 2>&1 < /dev/null &
+echo 'seo:indexnow --all dispatched in background (see storage/logs/seo-indexnow.log)'
