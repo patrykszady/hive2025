@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "1dcd31f4b98d1689c72ae2631f5ea52c",
+    "content-hash": "57875dbee5c853d49c726bde853a673d",
     "packages": [
         {
             "name": "2captcha/2captcha",
@@ -11694,11 +11694,11 @@
         },
         {
             "name": "ss-systems/platform-kit",
-            "version": "0.19.6",
+            "version": "0.19.7",
             "dist": {
                 "type": "zip",
-                "url": "packages/ss-systems-platform-kit-0.19.6.zip",
-                "shasum": "bd7bfacca01d4df58fdf8623b9319ec518e836aa"
+                "url": "packages/ss-systems-platform-kit-0.19.7.zip",
+                "shasum": "b04e6acb4c578f13554d9a754285b06948df04ef"
             },
             "require": {
                 "illuminate/bus": "^12.0|^13.0",
