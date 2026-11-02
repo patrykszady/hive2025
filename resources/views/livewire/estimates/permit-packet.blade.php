@@ -10,17 +10,28 @@
 
         <flux:field>
             <flux:label>Plans</flux:label>
+            <flux:description>One PDF or several — the architect's set, the lighting plan, the survey — merged in this order.</flux:description>
+            @if ($this->packet?->hasPlans())
+                <ul class="divide-y divide-zinc-100 rounded-lg border border-zinc-200 text-sm dark:divide-white/10 dark:border-white/10" data-permit-plans>
+                    @foreach ($this->packet->planFiles() as $index => $plan)
+                        <li class="flex items-center gap-2 px-3 py-1.5" wire:key="permit-plan-{{ md5($plan['path']) }}">
+                            <span class="w-5 shrink-0 text-xs text-zinc-400">{{ $index + 1 }}.</span>
+                            <span class="min-w-0 flex-1 truncate">{{ $plan['name'] }}</span>
+                            <flux:button size="xs" variant="ghost" wire:click="removePlan({{ $index }})">Remove</flux:button>
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
             <input
                 type="file"
                 wire:model="plansUpload"
                 accept=".pdf"
+                multiple
                 class="block w-full text-sm text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-100 file:text-zinc-700 hover:file:bg-zinc-200 dark:text-zinc-400 dark:file:bg-white/10 dark:file:text-zinc-200"
             />
             <flux:text wire:loading wire:target="plansUpload" size="sm" class="mt-1">Uploading…</flux:text>
-            @if ($this->packet?->plans_name)
-                <flux:text size="sm" class="mt-1" data-permit-plans>{{ $this->packet->plans_name }}</flux:text>
-            @endif
             <flux:error name="plansUpload" />
+            <flux:error name="plansUpload.*" />
         </flux:field>
 
         <div class="grid items-end gap-4 {{ $pickingTown ? 'sm:grid-cols-2' : '' }}">

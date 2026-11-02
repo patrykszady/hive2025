@@ -135,8 +135,14 @@ class PermitPacketBuilder
      */
     public function build(PermitPacket $packet, ?int $byUserId = null): PermitPacket
     {
-        if (! $packet->plans_path || ! Storage::disk(self::DISK)->exists($packet->plans_path)) {
+        if (! $packet->hasPlans()) {
             throw new RuntimeException('Upload the plans before generating the packet.');
+        }
+
+        foreach ($packet->planFiles() as $plan) {
+            if (! Storage::disk(self::DISK)->exists($plan['path'])) {
+                throw new RuntimeException(sprintf('The plan "%s" is missing from storage; upload it again.', $plan['name']));
+            }
         }
 
         $workDir = storage_path('app/temp/permit-'.Str::uuid());
@@ -158,7 +164,9 @@ class PermitPacketBuilder
                 }
             }
 
-            $parts[] = Storage::disk(self::DISK)->path($packet->plans_path);
+            foreach ($packet->planFiles() as $plan) {
+                $parts[] = Storage::disk(self::DISK)->path($plan['path']);
+            }
 
             if ($packet->notes_path && Storage::disk(self::DISK)->exists($packet->notes_path)) {
                 $parts[] = Storage::disk(self::DISK)->path($packet->notes_path);

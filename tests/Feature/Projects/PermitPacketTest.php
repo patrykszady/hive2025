@@ -112,7 +112,7 @@ it('suggests the town that issues the permit from the job\'s address, not its ma
 
 it('writes the cover letter the way the Word template reads: letterhead, title, prepared for, contents, codes, the detector note', function () {
     $w = permitWorld();
-    $packet = new PermitPacket(['project_id' => $w['project']->id, 'belongs_to_vendor_id' => $w['gs']->id, 'estimate_id' => $w['estimate']->id, 'title' => 'BASEMENT REMODEL', 'jurisdiction' => 'Rolling Meadows', 'codes' => BuildingCodes::for('Rolling Meadows'), 'include_contract' => true, 'plans_path' => 'permit-packets/x/plans.pdf']);
+    $packet = new PermitPacket(['project_id' => $w['project']->id, 'belongs_to_vendor_id' => $w['gs']->id, 'estimate_id' => $w['estimate']->id, 'title' => 'BASEMENT REMODEL', 'jurisdiction' => 'Rolling Meadows', 'codes' => BuildingCodes::for('Rolling Meadows'), 'include_contract' => true, 'plans' => [['path' => 'permit-packets/x/plans.pdf', 'name' => 'plans.pdf']]]);
     $packet->setRelation('project', $w['project']);
 
     $html = app(PermitPacketBuilder::class)->coverLetterHtml($packet);
@@ -256,12 +256,12 @@ it('uploads the plans, builds the packet — cover, scope & contract, plans — 
 
     $card = Livewire::test(EstimatePermitPacket::class, ['estimate' => $w['estimate']])
         ->call('openModal')
-        ->set('plansUpload', $plans)
+        ->set('plansUpload', [$plans])
         ->assertHasNoErrors()
         ->assertSee('123 villa 1.pdf');
 
     $packet = PermitPacket::where('project_id', $w['project']->id)->sole();
-    Storage::disk('local')->assertExists($packet->plans_path);
+    Storage::disk('local')->assertExists($packet->planFiles()[0]['path']);
 
     // Generating hands the browser the file at once — no "ready" box to click through (Patryk, 2026-10-26).
     $card->call('generate')->assertHasNoErrors()->assertSet('error', null)->assertFileDownloaded('Permit Packet - 123 Villa Circle Drive - Basement.pdf');
@@ -286,6 +286,70 @@ it('uploads the plans, builds the packet — cover, scope & contract, plans — 
         ->and(pdfPages(Storage::disk('local')->path($packet->packet_path)))->toBe(4);
     Storage::disk('local')->assertMissing($first);
 })->skip(fn () => trim((string) shell_exec('which gs')) === '', 'Ghostscript is not installed here');
+
+it('takes several plan PDFs — in one pick or a few — merges them in the order added, and drops the one removed', function () {
+    $w = permitWorld();
+    Storage::fake('local');
+    fakeHtmlToPdf();
+    $this->mock(GeoapifyService::class)->shouldReceive('geocodeAddress')->andReturn(['city' => 'Rolling Meadows']);
+    $builder = Mockery::mock(PermitPacketBuilder::class, [app(HtmlToPdf::class), app(PdfMerger::class)])->makePartial()->shouldAllowMockingProtectedMethods();
+    $builder->shouldReceive('estimatePdf')->andReturn(tinyPdf('ESTIMATE'));
+    app()->instance(PermitPacketBuilder::class, $builder);
+
+    $card = Livewire::test(EstimatePermitPacket::class, ['estimate' => $w['estimate']])
+        ->call('openModal')
+        ->set('plansUpload', [
+            UploadedFile::fake()->createWithContent('A-1 floor plan.pdf', tinyPdf('FLOOR PLAN')),
+            UploadedFile::fake()->createWithContent('E-1 lighting.pdf', tinyPdf('LIGHTING')),
+        ])
+        ->assertHasNoErrors()
+        ->set('plansUpload', [UploadedFile::fake()->createWithContent('survey.pdf', tinyPdf('SURVEY'))])
+        ->assertHasNoErrors()
+        ->assertSet('plansUpload', [])
+        ->assertSeeInOrder(['1.', 'A-1 floor plan.pdf', '2.', 'E-1 lighting.pdf', '3.', 'survey.pdf']);
+
+    $packet = PermitPacket::where('project_id', $w['project']->id)->sole();
+    expect(array_column($packet->planFiles(), 'name'))->toBe(['A-1 floor plan.pdf', 'E-1 lighting.pdf', 'survey.pdf'])
+        ->and($packet->contents())->toBe(['Cover Letter', 'Scope of Work & Contract', 'Plans']);
+    foreach ($packet->planFiles() as $plan) {
+        Storage::disk('local')->assertExists($plan['path']);
+    }
+
+    $card->call('generate')->assertHasNoErrors()->assertSet('error', null);
+    $packet->refresh();
+    expect(pdfPages(Storage::disk('local')->path($packet->packet_path)))->toBe(5, 'cover + scope & contract + three plans');
+
+    // Taking the lighting plan out keeps the other two in order and frees its file.
+    $lighting = $packet->planFiles()[1]['path'];
+    $card->call('removePlan', 1)->assertHasNoErrors()->assertDontSee('E-1 lighting.pdf')->assertSeeInOrder(['A-1 floor plan.pdf', 'survey.pdf']);
+    Storage::disk('local')->assertMissing($lighting);
+    $packet->refresh();
+    expect(array_column($packet->planFiles(), 'name'))->toBe(['A-1 floor plan.pdf', 'survey.pdf']);
+
+    $card->call('generate')->assertHasNoErrors();
+    $packet->refresh();
+    expect(pdfPages(Storage::disk('local')->path($packet->packet_path)))->toBe(4);
+
+    // With every plan removed the packet is back to asking for them.
+    $card->call('removePlan', 1)->call('removePlan', 0)->call('generate')->assertSet('error', 'Upload the plans first.');
+    expect(PermitPacket::where('project_id', $w['project']->id)->sole()->hasPlans())->toBeFalse();
+})->skip(fn () => trim((string) shell_exec('which gs')) === '', 'Ghostscript is not installed here');
+
+it('only takes PDFs as plans', function () {
+    $w = permitWorld();
+    Storage::fake('local');
+    $this->mock(GeoapifyService::class)->shouldReceive('geocodeAddress')->andReturn(null);
+
+    Livewire::test(EstimatePermitPacket::class, ['estimate' => $w['estimate']])
+        ->call('openModal')
+        ->set('plansUpload', [
+            UploadedFile::fake()->createWithContent('plan.pdf', tinyPdf('PLAN')),
+            UploadedFile::fake()->image('photo.jpg'),
+        ])
+        ->assertHasErrors(['plansUpload.1' => 'mimes']);
+
+    expect(PermitPacket::where('project_id', $w['project']->id)->first()?->hasPlans() ?? false)->toBeFalse();
+});
 
 it('will not generate without plans, and keeps the words saved for the next person', function () {
     $w = permitWorld();

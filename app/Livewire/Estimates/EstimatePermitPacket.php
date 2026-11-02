@@ -25,7 +25,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * (PermitPacketBuilder). The permit town is suggested from the job's
  * address — not its mailing city — and brings the codes its building
  * department has adopted (BuildingCodes); the codes stay editable behind a
- * link. One packet per project, rebuilt in place.
+ * link. The plans are any number of PDFs — the architect's set, the
+ * lighting plan, the survey — merged in the order they were added
+ * (2026-11-02). One packet per project, rebuilt in place.
  */
 class EstimatePermitPacket extends Component
 {
@@ -69,8 +71,12 @@ class EstimatePermitPacket extends Component
 
     public bool $withNotes = false;
 
-    /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
-    public $plansUpload = null;
+    /**
+     * The plan PDFs just picked; each lands on the end of the packet's list.
+     *
+     * @var list<\Livewire\Features\SupportFileUploads\TemporaryUploadedFile>
+     */
+    public array $plansUpload = [];
 
     /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
     public $notesUpload = null;
@@ -89,7 +95,8 @@ class EstimatePermitPacket extends Component
             'title' => 'required|string|max:120',
             'town' => 'nullable|string|max:120',
             'codesText' => 'nullable|string|max:4000',
-            'plansUpload' => 'nullable|file|mimes:pdf|max:61440',
+            'plansUpload' => 'nullable|array|max:20',
+            'plansUpload.*' => 'file|mimes:pdf|max:61440',
             'notesUpload' => 'nullable|file|mimes:pdf|max:61440',
         ];
     }
@@ -191,15 +198,35 @@ class EstimatePermitPacket extends Component
     public function updatedPlansUpload(): void
     {
         $this->authorize('update', $this->estimate);
-        $this->validateOnly('plansUpload');
-        $this->storeUpload('plans');
+        $this->validate([
+            'plansUpload' => $this->rules()['plansUpload'],
+            'plansUpload.*' => $this->rules()['plansUpload.*'],
+        ]);
+        $this->storePlans();
+    }
+
+    /** Takes one plan off the list and out of storage; the others keep their order. */
+    public function removePlan(int $index): void
+    {
+        $this->authorize('update', $this->estimate);
+
+        $packet = $this->packet;
+        $plans = $packet?->planFiles() ?? [];
+        if (! $packet || ! isset($plans[$index])) {
+            return;
+        }
+
+        Storage::disk(PermitPacketBuilder::DISK)->delete($plans[$index]['path']);
+        unset($plans[$index]);
+        $packet->update(['plans' => array_values($plans)]);
+        unset($this->packet);
     }
 
     public function updatedNotesUpload(): void
     {
         $this->authorize('update', $this->estimate);
         $this->validateOnly('notesUpload');
-        $this->storeUpload('notes');
+        $this->storeNotes();
     }
 
     public function removeNotes(): void
@@ -242,7 +269,7 @@ class EstimatePermitPacket extends Component
         $packet = $this->persist();
         $this->error = null;
 
-        if (! $packet->plans_path) {
+        if (! $packet->hasPlans()) {
             $this->error = 'Upload the plans first.';
 
             return null;
@@ -345,23 +372,46 @@ class EstimatePermitPacket extends Component
         return $packet;
     }
 
-    /** @param  'plans'|'notes'  $kind */
-    protected function storeUpload(string $kind): void
+    /** Every plan just picked goes onto the end of the list, in the order picked. */
+    protected function storePlans(): void
     {
-        $upload = $kind === 'plans' ? $this->plansUpload : $this->notesUpload;
+        if ($this->plansUpload === []) {
+            return;
+        }
+
+        $packet = $this->persist();
+        $plans = $packet->planFiles();
+
+        foreach ($this->plansUpload as $upload) {
+            $plans[] = [
+                'path' => $upload->storeAs('permit-packets/'.$packet->project_id, 'plans-'.Str::uuid().'.pdf', PermitPacketBuilder::DISK),
+                'name' => mb_substr($upload->getClientOriginalName(), 0, 200),
+            ];
+        }
+
+        $packet->update(['plans' => $plans]);
+        $this->plansUpload = [];
+        $this->error = null;
+        unset($this->packet);
+    }
+
+    /** One notes file; a new one replaces the last. */
+    protected function storeNotes(): void
+    {
+        $upload = $this->notesUpload;
         if (! $upload) {
             return;
         }
 
         $packet = $this->persist();
-        $path = $upload->storeAs('permit-packets/'.$packet->project_id, $kind.'-'.Str::uuid().'.pdf', PermitPacketBuilder::DISK);
+        $path = $upload->storeAs('permit-packets/'.$packet->project_id, 'notes-'.Str::uuid().'.pdf', PermitPacketBuilder::DISK);
 
-        if ($packet->{$kind.'_path'}) {
-            Storage::disk(PermitPacketBuilder::DISK)->delete($packet->{$kind.'_path'});
+        if ($packet->notes_path) {
+            Storage::disk(PermitPacketBuilder::DISK)->delete($packet->notes_path);
         }
 
-        $packet->update([$kind.'_path' => $path, $kind.'_name' => mb_substr($upload->getClientOriginalName(), 0, 200)]);
-        $this->{$kind.'Upload'} = null;
+        $packet->update(['notes_path' => $path, 'notes_name' => mb_substr($upload->getClientOriginalName(), 0, 200)]);
+        $this->notesUpload = null;
         $this->error = null;
         unset($this->packet);
     }
