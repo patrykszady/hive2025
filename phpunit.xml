@@ -32,6 +32,7 @@
     <env name="GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN" value="" force="true"/>
     <env name="GSC_CREDENTIALS" value="" force="true"/>
     <env name="BING_WMT_KEY" value="" force="true"/>
+    <env name="INDEXNOW_KEY" value="" force="true"/>
     <env name="CLARITY_PROJECT_ID" value="" force="true"/>
     <env name="CLARITY_API_TOKEN" value="" force="true"/>
     <env name="PAGESPEED_API_KEY" value="" force="true"/>

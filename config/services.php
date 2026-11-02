@@ -463,6 +463,14 @@ return [
         'site_url' => env('BING_WMT_SITE_URL', env('MARKETING_URL', 'https://hive.contractors')),
     ],
 
+    // IndexNow (Bing/Yandex/Seznam/Naver) — App\Support\Seo\IndexNowSiteKey
+    // uses this key when it is set; otherwise it generates and stores one
+    // in platform_settings the first time anything asks for a key, so
+    // `seo:indexnow`/the key-file route always work with no manual step.
+    'indexnow' => [
+        'key' => env('INDEXNOW_KEY'),
+    ],
+
     // Microsoft Clarity — heatmaps/session recordings of the marketing
     // pages. Admin-writable (App\Support\Seo\ClaritySettings/
     // PlatformSettingCredential); these two stay only as the env fallback

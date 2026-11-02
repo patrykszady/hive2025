@@ -568,6 +568,29 @@ Schedule::command('seo:psi-sync')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-psi-sync.log'));
 
+// Bing gets every sitemap this site's own robots.txt lists, submitting only
+// the ones it does not hold yet (kit 0.19.4) — idempotent, so a daily run is
+// cheap even once every map is already there.
+Schedule::command('seo:bing-submit-sitemaps')
+    ->dailyAt('01:50')
+    ->name('seo-bing-submit-sitemaps')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-bing-submit-sitemaps.log'));
+
+// IndexNow (Bing/Yandex/Seznam/Naver): tells them which pages are new or
+// changed since the last tick, via App\Support\Seo\IndexNowSiteKey (kit
+// 0.19.4) — no-ops cleanly until a key exists, though IndexNowSiteKey
+// generates one on first use, so this is never actually unconfigured.
+Schedule::command('seo:indexnow')
+    ->hourlyAt(40)
+    ->name('seo-indexnow')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-indexnow.log'));
+
 // Where visitors come from (kit 0.17): every provider's per-source numbers
 // into traffic_source_days for the SEO screen. After the Bing/GSC/PSI syncs
 // above; the last five days are re-read as Search Console fills in late.

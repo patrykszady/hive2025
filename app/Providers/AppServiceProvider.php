@@ -39,6 +39,7 @@ use App\Support\Seo\BingWriter;
 use App\Support\Seo\ClaritySettings;
 use App\Support\Seo\DataForSeoSettings;
 use App\Support\Seo\HiveSeoProfile;
+use App\Support\Seo\IndexNowSiteKey;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
 use App\Support\Seo\PsiSettings;
 use App\Support\Seo\Reports\ClaritySettingsMetricsReader;
@@ -117,6 +118,7 @@ use SsSystems\Platform\Seo\Inspection\Contracts\UrlInspector;
 use SsSystems\Platform\Seo\Inspection\EloquentCoverageStore;
 use SsSystems\Platform\Seo\Inspection\NoTrackedPaths;
 use SsSystems\Platform\Seo\Inspection\UrlInspectionQuota;
+use SsSystems\Platform\Seo\IndexNow\Contracts\IndexNowKey;
 use SsSystems\Platform\Seo\Intel\IntelRunner;
 use SsSystems\Platform\Seo\Intel\IntelSettings;
 use SsSystems\Platform\Seo\Intel\IntelStore;
@@ -241,11 +243,25 @@ class AppServiceProvider extends ServiceProvider
         // client built from the admin-writable/env-fallback BING_WMT_KEY
         // (App\Support\Seo\BingSettings).
         $this->app->bind(KitBingWriter::class, BingWriter::class);
-        $this->app->bind(BingWebmasterClient::class, function ($app) {
+        $bingWebmasterApi = function ($app) {
             $settings = $app->make(BingSettings::class);
 
             return new BingWebmasterApi($settings->apiKey(), $settings->siteUrl(), $app->make(HttpFactory::class));
-        });
+        };
+        $this->app->bind(BingWebmasterClient::class, $bingWebmasterApi);
+        // The concrete class too (kit 0.19.4's seo:bing-submit-sitemaps
+        // type-hints BingWebmasterApi itself, not the BingWebmasterClient
+        // interface, in its handle() method signature).
+        $this->app->bind(BingWebmasterApi::class, $bingWebmasterApi);
+
+        // IndexNow (kit 0.19.4): App\Support\Seo\IndexNowSiteKey is the only
+        // site-specific piece seo:indexnow/IndexNowKeyController need —
+        // IndexNowClient, IndexNowLedger and SitemapCrawler all autowire
+        // (Illuminate\Database\ConnectionInterface resolves to this app's
+        // one connection via the framework's own 'db.connection' alias, and
+        // this app is single-tenant, so IndexNowLedger takes no tenant
+        // column/closure, same as TrafficDays above).
+        $this->app->bind(IndexNowKey::class, IndexNowSiteKey::class);
 
         // The kit's SEO tools (0.19.1, 2026-11-01): the DataForSEO account
         // ss.systems pushes to this site, one shared client, and this

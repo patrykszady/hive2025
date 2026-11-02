@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Mail\Events\MessageSent;
 use App\Listeners\StoreEmailTracking;
 use SsSystems\Platform\Seo\AiTraffic\TrackAiTraffic;
+use SsSystems\Platform\Seo\Bing\Console\BingSubmitSitemapsCommand;
+use SsSystems\Platform\Seo\IndexNow\Console\IndexNowCommand;
 use SsSystems\Platform\Seo\Intel\Console\IntelCommand;
 use SsSystems\Platform\Seo\KeywordResearch\Console\KeywordResearchCommand;
 use SsSystems\Platform\Seo\MapPack\Console\MapPackCompetitorsCommand;
@@ -52,6 +54,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // Page speed (kit 0.19.3): seo:psi-sync, replacing this app's own
         // retired App\Console\Commands\SeoPsiSync.
         PageSpeedSyncCommand::class,
+        // Bing sitemaps + IndexNow (kit 0.19.4, 2026-11-01): seo:bing-submit-sitemaps
+        // reads this site's own robots.txt and submits whatever Bing is
+        // missing; seo:indexnow tells Bing/Yandex/Seznam/Naver which pages
+        // are new or changed. See AppServiceProvider's BingWebmasterApi/
+        // IndexNowKey bindings and routes/web.php's key-file route.
+        BingSubmitSitemapsCommand::class,
+        IndexNowCommand::class,
     ])
     ->withRouting(
         web: __DIR__.'/../routes/web.php',

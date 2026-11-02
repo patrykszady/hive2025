@@ -106,6 +106,17 @@ Route::get('sitemap.xml', \App\Http\Controllers\SitemapController::class)->name(
 // (App\Http\Controllers\LlmsTxtController, 2026-10-29).
 Route::get('llms.txt', \App\Http\Controllers\LlmsTxtController::class)->name('llms');
 
+// IndexNow (Bing/Yandex/Seznam/Naver) key-file verification (kit 0.19.4):
+// GET /<key>.txt must answer the site's own key as plain text before a
+// submission signed with it is accepted — App\Support\Seo\IndexNowSiteKey
+// is the key (admin/env, or generated on first use). Registered at the top
+// level, above every wildcard/catch-all route below, though the regex
+// alone (32 lowercase hex) already keeps it from ever matching 'robots',
+// 'llms' or 'llms-full'.
+Route::get('{key}.txt', \SsSystems\Platform\Seo\IndexNow\Http\IndexNowKeyController::class)
+    ->where('key', '[a-f0-9]{32}')
+    ->name('indexnow.key');
+
 // Public signed-URL stream of an SMS media file (used in outbound SMS so recipients
 // can view full-quality video/audio/image without authentication, but the link
 // itself is HMAC-signed and time-limited via signedRoute()).
