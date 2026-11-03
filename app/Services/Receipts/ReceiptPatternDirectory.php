@@ -3,6 +3,7 @@
 namespace App\Services\Receipts;
 
 use App\Models\Receipt;
+use App\Models\ReceiptAccount;
 use App\Models\Vendor;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -66,7 +67,10 @@ class ReceiptPatternDirectory
      */
     public function create(array $data): Receipt
     {
-        return Receipt::create($this->attributesFromForm($data));
+        $receipt = Receipt::create($this->attributesFromForm($data));
+        $this->linkVendorToCompany((int) $receipt->vendor_id);
+
+        return $receipt;
     }
 
     /**
@@ -78,8 +82,29 @@ class ReceiptPatternDirectory
         // options; a query-builder update() skips casts and fails on them
         // (ReceiptsIndex::store() hit this before — see its own history).
         $receipt->update($this->attributesFromForm($data));
+        $this->linkVendorToCompany((int) $receipt->vendor_id);
 
         return $receipt;
+    }
+
+    /**
+     * A rule only reaches a mailbox through the company's receipt account for
+     * its vendor (CompanyEmail::receipts() goes through receipt_accounts), and
+     * nothing created that account: a rule saved here for a new vendor was
+     * silently never forwarded (2026-11-02, City of Rolling Meadows). Saving
+     * a rule now links its vendor to the signed-in company, once.
+     */
+    private function linkVendorToCompany(int $vendorId): void
+    {
+        $companyVendorId = auth()->user()?->vendor?->id;
+        if (! $companyVendorId || ! $vendorId) {
+            return;
+        }
+
+        ReceiptAccount::withoutGlobalScopes()->firstOrCreate([
+            'vendor_id' => $vendorId,
+            'belongs_to_vendor_id' => $companyVendorId,
+        ]);
     }
 
     public function delete(Receipt $receipt): void
