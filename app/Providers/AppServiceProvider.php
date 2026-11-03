@@ -42,7 +42,6 @@ use App\Support\Seo\HiveSeoProfile;
 use App\Support\Seo\IndexNowSiteKey;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
 use App\Support\Seo\PsiSettings;
-use App\Support\Seo\Reports\ClaritySettingsMetricsReader;
 use App\Support\Seo\Reports\ConfigSiteIdentity;
 use App\Support\Seo\Reports\EloquentHealthDataReader;
 use App\Support\Seo\Reports\EloquentQueryMetricsReader;
@@ -106,6 +105,10 @@ use SsSystems\Platform\Reports\Contracts\SiteIdentity;
 use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
 use SsSystems\Platform\Seo\Bing\BingWebmasterClient;
 use SsSystems\Platform\Seo\Bing\BingWriter as KitBingWriter;
+use SsSystems\Platform\Seo\Clarity\ClarityClient;
+use SsSystems\Platform\Seo\Clarity\ClarityMetricsStore;
+use SsSystems\Platform\Seo\Clarity\Contracts\ClarityCredentials;
+use SsSystems\Platform\Seo\Clarity\StoreClarityMetricsReader;
 use SsSystems\Platform\Seo\Contracts\SeoSiteProfile;
 use SsSystems\Platform\Seo\DataForSeo\Contracts\DataForSeoApi;
 use SsSystems\Platform\Seo\DataForSeo\Contracts\DataForSeoCredentials;
@@ -430,7 +433,30 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(HealthDataReader::class, EloquentHealthDataReader::class);
         $this->app->bind(PageFetcher::class, HttpPageFetcher::class);
         $this->app->bind(AreaCatalog::class, EmptyAreaCatalog::class);
-        $this->app->bind(ClarityMetricsReader::class, ClaritySettingsMetricsReader::class);
+
+        // Microsoft Clarity (kit 0.20.0, 2026-11-02): the kit's own
+        // Seo\Clarity module replaces this app's former App\Services\
+        // MicrosoftClarityService/App\Support\Seo\Reports\
+        // ClaritySettingsMetricsReader (both deleted) — those always
+        // reported zeros/nulls for the "stored rows" half, since this site
+        // never had a clarity_daily_metrics table or a sync that wrote one.
+        // App\Support\Seo\ClaritySettings already has exactly the three
+        // methods Clarity\Contracts\ClarityCredentials asks for, so it
+        // implements that contract directly. ClarityMetricsStore (the
+        // store half of StoreClarityMetricsReader) autowires on the
+        // default database connection — this app is single-tenant and has
+        // no clarity_page_metrics/beacon table, so it takes no tenant
+        // column and the reader gets no $beaconErrorCount closure.
+        $this->app->bind(ClarityCredentials::class, ClaritySettings::class);
+        $this->app->bind(ClarityClient::class, fn ($app) => new ClarityClient(
+            $app->make(ClarityCredentials::class),
+            $app->make(HttpFactory::class),
+        ));
+        $this->app->bind(ClarityMetricsReader::class, fn ($app) => new StoreClarityMetricsReader(
+            $app->make(ClarityClient::class),
+            $app->make(ClarityMetricsStore::class),
+            $app->make(ClarityCredentials::class),
+        ));
 
         // Page speed (kit 0.19.3, 2026-11-01): seo:psi-sync measures this
         // site's own sitemap.xml with the PageSpeed key saved from the SEO

@@ -54,11 +54,14 @@ use SsSystems\Platform\Seo\SitemapStatus;
  * Experience" read the snapshot directly) sat empty for no reason but a
  * missing method call — all four are now the kit's own
  * `BuildsSeoSnapshot::topTenRows()`/`searchAppearanceSnapshot()`/
- * `claritySnapshot()`, no site-only logic needed. `clarity` reads honestly
- * `available: false` (this site has never synced Microsoft Clarity into a
- * database table — see `App\Support\Seo\Reports\ClaritySettingsMetricsReader`'s
- * own docblock, which is a DIFFERENT reader for the seo:clarity-health
- * REPORT, not this snapshot card).
+ * `claritySnapshot()`, no site-only logic needed. `clarity` reads
+ * `available: false` honestly until `seo:clarity-sync` (kit 0.20.0,
+ * 2026-11-02 — see routes/console.php) has written at least one
+ * `clarity_daily_metrics` row; `claritySnapshot()`'s own `clarityMetricsQuery()`
+ * default reads that bare table name directly, no site-only override
+ * needed here either. A DIFFERENT reader (the kit's
+ * `Seo\Clarity\StoreClarityMetricsReader`) feeds the seo:clarity-health
+ * REPORT, not this snapshot card.
  *
  * The four BuildsSeoSnapshot hooks below (gscCoverageStateModel/
  * seoReportControllerClass/dispatchChannelSync/formatDuration) exist so the
@@ -118,11 +121,11 @@ class SeoSnapshotController extends Controller
                 'search_appearance' => $this->searchAppearanceSnapshot(
                     $this->normalizeTopDays((int) $request->integer('appearance_days', 28))
                 ),
-                // Honestly `available: false` — this site has never synced
-                // Microsoft Clarity into a database table (see
-                // ClaritySettingsMetricsReader's own docblock); the "Website
-                // Experience" card already reads that as "no visitor-behavior
-                // data synced yet" rather than an error.
+                // Honestly `available: false` until seo:clarity-sync has
+                // written a clarity_daily_metrics row (see this class's own
+                // docblock); the "Website Experience" card already reads
+                // that as "no visitor-behavior data synced yet" rather than
+                // an error.
                 'clarity' => $this->claritySnapshot(
                     $this->normalizeWindowDays((int) $request->integer('clarity_days', 7))
                 ),

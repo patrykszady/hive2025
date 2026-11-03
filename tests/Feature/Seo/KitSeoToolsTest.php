@@ -8,6 +8,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use SsSystems\Platform\Reports\Contracts\ClarityMetricsReader;
+use SsSystems\Platform\Seo\Clarity\ClarityClient;
+use SsSystems\Platform\Seo\Clarity\StoreClarityMetricsReader;
 use SsSystems\Platform\Seo\Contracts\SeoSiteProfile;
 use SsSystems\Platform\Seo\DataForSeo\Contracts\DataForSeoApi;
 
@@ -55,7 +58,7 @@ it('registers and schedules the kit commands', function () {
     foreach ([
         'seo:track-rankings', 'seo:show-rankings', 'seo:keyword-research', 'seo:domain-overview',
         'seo:backlink-gap', 'seo:ai-mentions', 'seo:competitor-brand-track',
-        'seo:map-pack-grid', 'seo:map-pack-competitors', 'seo:intel', 'seo:psi-sync',
+        'seo:map-pack-grid', 'seo:map-pack-competitors', 'seo:intel', 'seo:psi-sync', 'seo:clarity-sync',
     ] as $name) {
         expect($commands)->toContain($name);
     }
@@ -65,7 +68,8 @@ it('registers and schedules the kit commands', function () {
         ->expectsOutputToContain('seo:keyword-research')
         ->expectsOutputToContain('seo:ai-mentions')
         ->expectsOutputToContain('seo:intel')
-        ->expectsOutputToContain('seo:psi-sync');
+        ->expectsOutputToContain('seo:psi-sync')
+        ->expectsOutputToContain('seo:clarity-sync');
 });
 
 it('resolves the profile and the dataforseo client from the container', function () {
@@ -111,4 +115,83 @@ it('makes cwv-template available once a PageSpeed key is saved, replacing this s
 
     Http::fake();
     $this->artisan('seo:psi-sync --dry-run')->assertExitCode(0);
+});
+
+/**
+ * Microsoft Clarity (kit 0.20.0, 2026-11-02): seo:clarity-sync over the
+ * kit's own Seo\Clarity module (App\Providers\AppServiceProvider's
+ * ClarityCredentials/ClarityClient/ClarityMetricsReader bindings),
+ * replacing this app's retired App\Services\MicrosoftClarityService and
+ * App\Support\Seo\Reports\ClaritySettingsMetricsReader — which always
+ * reported zeros/nulls because this site had no clarity_daily_metrics
+ * table or sync. Credentials are set through config() directly
+ * (App\Support\Seo\ClaritySettings falls back to
+ * services.microsoft.clarity.* when nothing is saved in the admin), same
+ * as every other credential-gated kit sync test in this file.
+ */
+it('stops seo:clarity-sync cleanly with no Clarity credentials, clarity-health unavailable', function () {
+    expect(ReportCapabilities::availability('clarity-health')['available'])->toBeFalse();
+
+    Http::fake();
+    $this->artisan('seo:clarity-sync')->assertExitCode(0);
+    Http::assertNothingSent();
+    expect(DB::table('clarity_daily_metrics')->count())->toBe(0);
+});
+
+it('writes one clarity_daily_metrics row for the configured project, and a same-day rerun keeps one row', function () {
+    config([
+        'services.microsoft.clarity.project_id' => 'proj-test',
+        'services.microsoft.clarity.api_token' => 'tok-test',
+    ]);
+    expect(ReportCapabilities::availability('clarity-health')['available'])->toBeTrue();
+
+    // A trimmed project-live-insights payload (OS dimension), the same
+    // shape gs.construction's production project returns — 50 sessions
+    // (40 Windows + 10 iOS) and 7 script errors.
+    Http::fake([
+        ClarityClient::ENDPOINT.'*' => Http::response([
+            ['metricName' => 'Traffic', 'information' => [
+                ['OS' => 'Windows', 'totalSessionCount' => 40, 'totalBotSessionCount' => 3, 'distinctUserCount' => 30, 'pagesPerSessionPercentage' => 1.5],
+                ['OS' => 'iOS', 'totalSessionCount' => 10, 'totalBotSessionCount' => 0, 'distinctUserCount' => 9, 'pagesPerSessionPercentage' => 2],
+            ]],
+            ['metricName' => 'ScriptErrorCount', 'information' => [['OS' => 'Windows', 'subTotal' => 7]]],
+        ]),
+    ]);
+
+    $this->artisan('seo:clarity-sync')->assertExitCode(0);
+
+    expect(DB::table('clarity_daily_metrics')->count())->toBe(1);
+    $row = DB::table('clarity_daily_metrics')->first();
+    expect($row->project_id)->toBe('proj-test');
+    expect((int) $row->sessions)->toBe(50);
+    expect((int) $row->script_errors)->toBe(7);
+
+    // Re-running the same day overwrites the existing row, never inserts
+    // a second one (ClarityMetricsStore::recordDay()'s upsert).
+    $this->artisan('seo:clarity-sync')->assertExitCode(0);
+    expect(DB::table('clarity_daily_metrics')->count())->toBe(1);
+});
+
+it('binds ClarityMetricsReader to the kit\'s StoreClarityMetricsReader, reading the synced row back', function () {
+    config([
+        'services.microsoft.clarity.project_id' => 'proj-test',
+        'services.microsoft.clarity.api_token' => 'tok-test',
+    ]);
+
+    Http::fake([
+        ClarityClient::ENDPOINT.'*' => Http::response([
+            ['metricName' => 'Traffic', 'information' => [
+                ['OS' => 'Windows', 'totalSessionCount' => 12, 'totalBotSessionCount' => 0, 'distinctUserCount' => 10, 'pagesPerSessionPercentage' => 1.0],
+            ]],
+        ]),
+    ]);
+
+    $this->artisan('seo:clarity-sync')->assertExitCode(0);
+
+    $reader = app(ClarityMetricsReader::class);
+    expect($reader)->toBeInstanceOf(StoreClarityMetricsReader::class);
+    expect($reader->isConfigured())->toBeTrue();
+    expect($reader->projectId())->toBe('proj-test');
+    expect($reader->storedRowCount())->toBe(1);
+    expect($reader->latestStoredMetric()['sessions'])->toBe(12);
 });

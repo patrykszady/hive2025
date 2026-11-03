@@ -211,8 +211,8 @@ it('flips clarity-health to available once both Clarity fields are saved, and ba
 });
 
 it('runs clarity-health directly, refusing (capability missing) unconfigured and running for real once configured', function () {
-    // Unconfigured: ClaritySettingsMetricsReader::isConfigured() is false,
-    // so the kit report itself returns STATUS_UNAVAILABLE with
+    // Unconfigured: StoreClarityMetricsReader::isConfigured() is false, so
+    // the kit report itself returns STATUS_UNAVAILABLE with
     // missing=['clarity_metrics'] — KitReportCommand::respond() exits
     // FAILURE for a missing capability, same as any other report.
     $exitCode = Artisan::call('seo:clarity-health --markdown');
@@ -220,12 +220,13 @@ it('runs clarity-health directly, refusing (capability missing) unconfigured and
     expect(Artisan::output())->toContain('Clarity is not configured.');
 
     // Configured: the report runs for real against the live Data Export
-    // API call this adapter makes — proving ClaritySettingsMetricsReader
-    // actually feeds it real data, not just unblocking the capability
-    // gate. (It still reports a non-zero exit in steady state — this site
-    // has no clarity_daily_metrics table, so "stored data" reads as
-    // permanently stale, same as every other kit site without a metrics
-    // sync — the console output below is what this test pins.)
+    // API call this adapter makes — proving the kit's Seo\Clarity\
+    // StoreClarityMetricsReader actually feeds it real data, not just
+    // unblocking the capability gate. (It still reports a non-zero exit in
+    // steady state — no seo:clarity-sync has ever run in this test, so
+    // clarity_daily_metrics holds no row for this project and "stored
+    // data" reads as permanently stale — the console output below is what
+    // this test pins.)
     PlatformSetting::put(ClaritySettings::SETTING_PROJECT_ID, 'proj123');
     PlatformSetting::put(ClaritySettings::SETTING_API_TOKEN, 'tok123');
     Http::fake(['*' => Http::response([], 200)]);

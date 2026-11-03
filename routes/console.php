@@ -526,7 +526,9 @@ Schedule::command('horizon:snapshot')
 | GSC_CREDENTIALS + GSC_PROPERTY are both set AND the service account has
 | been added as a user on the property, seo:psi-sync until a PageSpeed key
 | is saved from the SEO screen's Connect Services modal (see that
-| command's own docblock for why it waits rather than running keyless).
+| command's own docblock for why it waits rather than running keyless),
+| seo:clarity-sync until a Clarity project id + API token are saved
+| (App\Support\Seo\ClaritySettings).
 */
 Schedule::command('seo:bing-sync')
     ->dailyAt('03:00')
@@ -568,6 +570,19 @@ Schedule::command('seo:psi-sync')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-psi-sync.log'));
 
+// Microsoft Clarity (kit 0.20.0, 2026-11-02): writes today's site-wide
+// clarity_daily_metrics row (App\Support\Seo\ClaritySettings' admin-saved-
+// or-env project id/API token) for the weekly seo:clarity-health report
+// below to read. No clarity_page_metrics table on this site, so the sync
+// spends one of Clarity's ten daily API requests, not two.
+Schedule::command('seo:clarity-sync --days=3')
+    ->dailyAt('04:20')
+    ->name('seo-clarity-sync')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-clarity-sync.log'));
+
 // Bing gets every sitemap this site's own robots.txt lists, submitting only
 // the ones it does not hold yet (kit 0.19.4) — idempotent, so a daily run is
 // cheap even once every map is already there.
@@ -592,10 +607,12 @@ Schedule::command('seo:indexnow')
     ->appendOutputTo(storage_path('logs/seo-indexnow.log'));
 
 // Where visitors come from (kit 0.17): every provider's per-source numbers
-// into traffic_source_days for the SEO screen. After the Bing/GSC/PSI syncs
-// above; the last five days are re-read as Search Console fills in late.
-// Production only, same as this block's other live-API syncs — Clarity's
-// quota (10 requests/day) is shared with every tenant.
+// into traffic_source_days for the SEO screen. After the Bing/GSC/PSI/
+// Clarity syncs above; the last five days are re-read as Search Console
+// fills in late. Production only, same as this block's other live-API
+// syncs — Clarity's quota (10 requests/day) is shared with every tenant,
+// and this collector spends one of its own (ClarityCollector, Source
+// dimension) on top of seo:clarity-sync's (OS dimension) above.
 Schedule::command('traffic:collect --days=5')
     ->dailyAt('07:30')
     ->name('traffic-collect')
@@ -613,8 +630,8 @@ Schedule::command('traffic:collect --days=5')
 | available here. area-pages-audit alone needs a capability (area_catalog)
 | this marketing site has no adapter for at all — scheduling it would only
 | ever log a refusal, so it stays out. clarity-health and cwv-template ARE
-| scheduled below (both now have real adapters — App\Support\Seo\Reports\
-| ClaritySettingsMetricsReader / the kit's own PsiSnapshotStore), but each
+| scheduled below (both now have real adapters — the kit's own
+| Seo\Clarity\StoreClarityMetricsReader / PsiSnapshotStore), but each
 | reads calmly as "not configured"/no rows until its credential is saved,
 | same spirit as the syncs above.
 |

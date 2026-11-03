@@ -2,6 +2,8 @@
 
 namespace App\Support\Seo;
 
+use SsSystems\Platform\Seo\Clarity\Contracts\ClarityCredentials;
+
 /**
  * Microsoft Clarity credentials for this site — same shape as
  * App\Support\Seo\BingSettings. An encrypted platform_settings row
@@ -9,12 +11,14 @@ namespace App\Support\Seo;
  * ('services.microsoft.clarity.*', CLARITY_PROJECT_ID/CLARITY_API_TOKEN),
  * which stays only as a transition fallback for a project not yet moved
  * into the admin. Read by the marketing layout's Clarity tag
- * (resources/views/components/layouts/guest.blade.php, via projectId()) and
- * by App\Support\Seo\Reports\ClaritySettingsMetricsReader for the
- * clarity-health report. ss.systems' Connect Services modal reads
- * 'admin' | 'env' | null from source() exactly like it does for Bing.
+ * (resources/views/components/layouts/guest.blade.php, via projectId()) and,
+ * as the kit's Clarity\Contracts\ClarityCredentials (App\Providers\
+ * AppServiceProvider), by its ClarityClient/StoreClarityMetricsReader for
+ * seo:clarity-sync and the clarity-health report. ss.systems' Connect
+ * Services modal reads 'admin' | 'env' | null from source() exactly like it
+ * does for Bing.
  */
-class ClaritySettings
+class ClaritySettings implements ClarityCredentials
 {
     public const SETTING_PROJECT_ID = 'seo.clarity.project_id';
 

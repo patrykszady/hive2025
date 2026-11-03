@@ -21,10 +21,14 @@ use SsSystems\Platform\Reports\ReportRegistry;
  *     isConfigured()), so "available" and "has real data to show" turn on
  *     together rather than the report claiming availability with an empty
  *     table under it.
- *   - clarity_metrics: same shape — App\Support\Seo\Reports\
- *     ClaritySettingsMetricsReader is always bound, but only listed here
- *     once App\Support\Seo\ClaritySettings::isConfigured() (both the
- *     project id and the API token are saved).
+ *   - clarity_metrics: same shape — the kit's own Seo\Clarity\
+ *     StoreClarityMetricsReader is always bound (App\Providers\
+ *     AppServiceProvider), but only listed here once App\Support\Seo\
+ *     ClaritySettings::isConfigured() (both the project id and the API
+ *     token are saved). The kit's seo:clarity-sync (the only writer of
+ *     clarity_daily_metrics rows) is gated the same way via its own
+ *     ClarityCredentials::isConfigured() check, so "available" and "has
+ *     real data to show" turn on together, same as psi_snapshots below.
  *   - area_catalog: hive.contractors has no per-city/per-area landing
  *     pages at all (see App\Support\Seo\Reports\EmptyAreaCatalog's
  *     docblock) — inventing a "content_complete" heuristic for a page

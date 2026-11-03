@@ -9,6 +9,7 @@ use Illuminate\Mail\Events\MessageSent;
 use App\Listeners\StoreEmailTracking;
 use SsSystems\Platform\Seo\AiTraffic\TrackAiTraffic;
 use SsSystems\Platform\Seo\Bing\Console\BingSubmitSitemapsCommand;
+use SsSystems\Platform\Seo\Clarity\Console\ClaritySyncCommand;
 use SsSystems\Platform\Seo\IndexNow\Console\IndexNowCommand;
 use SsSystems\Platform\Seo\Intel\Console\IntelCommand;
 use SsSystems\Platform\Seo\KeywordResearch\Console\KeywordResearchCommand;
@@ -54,6 +55,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // Page speed (kit 0.19.3): seo:psi-sync, replacing this app's own
         // retired App\Console\Commands\SeoPsiSync.
         PageSpeedSyncCommand::class,
+        // Microsoft Clarity (kit 0.20.0, 2026-11-02): seo:clarity-sync,
+        // writing the clarity_daily_metrics rows the clarity-health report
+        // reads — see AppServiceProvider's ClarityClient/ClarityMetricsReader
+        // bindings, replacing this app's own retired App\Services\
+        // MicrosoftClarityService/ClaritySettingsMetricsReader.
+        ClaritySyncCommand::class,
         // Bing sitemaps + IndexNow (kit 0.19.4, 2026-11-01): seo:bing-submit-sitemaps
         // reads this site's own robots.txt and submits whatever Bing is
         // missing; seo:indexnow tells Bing/Yandex/Seznam/Naver which pages

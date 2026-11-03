@@ -63,9 +63,10 @@ it('answers the full snapshot shape with automated_actions off and empty tables 
         'available' => false, 'days' => 28, 'rows' => [], 'total_impressions' => 0, 'total_clicks' => 0,
     ]);
 
-    // clarity: this site has never synced Microsoft Clarity into a
-    // database table (see ClaritySettingsMetricsReader's own docblock) —
-    // the honest "not synced" shape, never a fabricated zero week.
+    // clarity: the clarity_daily_metrics table exists (kit 0.20.0's
+    // migration) but holds no rows in this test — seo:clarity-sync never
+    // ran — so this reads the honest "not synced" shape, never a
+    // fabricated zero week.
     expect($data['clarity'])->toBe([
         'available' => false, 'latest' => null, 'week' => [], 'prior' => [], 'scroll' => null, 'days' => 7, 'pages' => [],
     ]);
