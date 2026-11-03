@@ -45,6 +45,16 @@ class VendorPaymentCreate extends Component
     /** Selection state keyed by expense id (same idiom as timesheet payments). */
     public array $selectedVendorReimbursementExpenses = [];
 
+    /**
+     * Unsettled expenses this vendor paid out of pocket for the company
+     * (paid_by_vendor_id) — selectable additions to the payment, mirroring
+     * the timesheet payment's "paid for expenses" card.
+     */
+    public $vendor_paid_expenses = [];
+
+    /** Selection state keyed by expense id. */
+    public array $selectedVendorPaidExpenses = [];
+
     public $payment_projects_count = 0;
 
     public $saved_expenses = [];
@@ -79,10 +89,12 @@ class VendorPaymentCreate extends Component
                 'projects.*.balance' => 'nullable',
                 'projects.*.amount' => 'nullable|numeric|min:0.01|regex:/^-?\d+(\.\d{1,2})?$/',
                 'selectedVendorReimbursementExpenses.*' => 'nullable|boolean',
-                // Validate that at least one project has a positive amount, and the total is > 0
+                'selectedVendorPaidExpenses.*' => 'nullable|boolean',
+                // Validate that the payment pays something — a project amount
+                // or an expense the vendor paid for — and the total is > 0
                 'check_total_min' => [function (string $attribute, $value, \Closure $fail): void {
                     if ($this->getVendorCheckSumProperty() <= 0) {
-                        $fail('Check total needs to be greater than $0 and include at least 1 project.');
+                        $fail('Check total needs to be greater than $0: add a project amount or select an expense '.$this->vendor->name.' paid for.');
                     }
                 }],
             ]
@@ -138,6 +150,15 @@ class VendorPaymentCreate extends Component
         if ($this->vendor_reimbursement_expenses->isEmpty()) {
             $this->vendor_reimbursement_expenses = collect();
         }
+
+        // What this vendor paid out of pocket for the company — added to the
+        // payment when selected. Default unselected, like the timesheet
+        // payment's paid-for expenses.
+        $this->vendor_paid_expenses = $options->paidExpensesFor($this->vendor);
+        $this->selectedVendorPaidExpenses = $this->vendor_paid_expenses
+            ->pluck('id')
+            ->mapWithKeys(fn ($id) => [$id => false])
+            ->toArray();
     }
 
     #[Computed]
@@ -176,15 +197,18 @@ class VendorPaymentCreate extends Component
                 $this->validateOnly('check_total_min');
             }
 
-            // Reimbursement selections change the check total too
-            if (str_starts_with($field, 'selectedVendorReimbursementExpenses.')) {
-                // Deductions settle only through a check — clear a Paid By
-                // chosen BEFORE the reimbursement was ticked (the select's
-                // options are only disabled going forward).
+            // Reimbursement and paid-for selections change the check total too
+            if (str_starts_with($field, 'selectedVendorReimbursementExpenses.') || str_starts_with($field, 'selectedVendorPaidExpenses.')) {
+                // Deductions and paid-for expenses settle only through a check
+                // — clear a Paid By chosen BEFORE the row was ticked (the
+                // select's options are only disabled going forward).
                 if ($value && $this->form->paid_by) {
                     $this->form->paid_by = null;
                     $this->form->invoice = null;
                 }
+                // Unticking the last paid-for expense can leave nothing to
+                // deduct reimbursements from.
+                $this->clearReimbursementSelectionsWhenUnpayable();
                 $this->validateOnly('check_total_min');
             }
 
@@ -250,14 +274,24 @@ class VendorPaymentCreate extends Component
 
     /**
      * Whether the payment actually pays something — at least one project with
-     * an amount > 0. Reimbursement deductions are only selectable alongside a
-     * real project payment (a $0 payment leaves nothing to deduct from).
+     * an amount > 0, or an expense the vendor paid for the company.
+     * Reimbursement deductions are only selectable alongside a real payment
+     * (a $0 payment leaves nothing to deduct from).
      */
     public function getHasPaymentProjectsProperty(): bool
     {
-        return collect($this->projects)
+        $fundsAProject = collect($this->projects)
             ->where('show', true)
             ->contains(fn ($p) => is_numeric($p['amount'] ?? null) && $p['amount'] > 0);
+
+        return $fundsAProject || $this->selectedPaidExpenses()->isNotEmpty();
+    }
+
+    /** The vendor's paid-for expenses ticked on this payment. */
+    protected function selectedPaidExpenses(): \Illuminate\Support\Collection
+    {
+        return collect($this->vendor_paid_expenses)
+            ->filter(fn ($e) => $this->selectedVendorPaidExpenses[$e->id] ?? false);
     }
 
     /** Uncheck all reimbursements when the payment no longer supports them. */
@@ -279,6 +313,9 @@ class VendorPaymentCreate extends Component
             ->filter(fn($p) => ($p['amount'] ?? 0) > 0)
             ->sum('amount');
 
+        // Selected expenses the vendor paid for the company add to the payment
+        $total += $this->selectedPaidExpenses()->sum('amount');
+
         // Selected vendor reimbursements reduce the payment
         $total -= $this->vendor_reimbursement_expenses
             ->filter(fn ($e) => $this->selectedVendorReimbursementExpenses[$e->id] ?? false)
@@ -288,15 +325,16 @@ class VendorPaymentCreate extends Component
     }
 
     /**
-     * Reimbursement deductions can only settle through a check, so paying via
-     * an employee (Paid By) is disabled while any reimbursement is selected —
-     * same rule as timesheet payments.
+     * Reimbursement deductions and paid-for expenses can only settle through
+     * a check, so paying via an employee (Paid By) is disabled while any is
+     * selected — same rule as timesheet payments.
      */
     public function getDisablePaidByProperty(): bool
     {
         return $this->vendor_reimbursement_expenses
             ->filter(fn ($e) => $this->selectedVendorReimbursementExpenses[$e->id] ?? false)
-            ->isNotEmpty();
+            ->isNotEmpty()
+            || $this->selectedPaidExpenses()->isNotEmpty();
     }
 
     /**

@@ -161,7 +161,8 @@ class ExpenseForm extends Form
         $this->reimbursment = $expense->getRawOriginal('reimbursment');
         $this->invoice = $expense->invoice;
         $this->note = $expense->note;
-        $this->paid_by = $expense->paid_by;
+        // A user id, 'V:{vendor_id}' for a sub that paid out of pocket, or null.
+        $this->paid_by = $expense->paidBySelectValue();
 
         // Convenience flag used by the UI to indicate if transactions match the amount
         $transactionsSum = $this->expense->transactions->sum('amount');
@@ -334,6 +335,7 @@ class ExpenseForm extends Form
 
         $hubVendorId = auth()->user()->vendor->id;
         $ownerVendorId = $this->resolveOwnerVendorId($hubVendorId);
+        $this->assertPayerIsNotOwed();
 
         $this->expense->update([
             'amount' => $this->amount,
@@ -343,7 +345,7 @@ class ExpenseForm extends Form
             'project_id' => $expense_details['project_id'],
             'distribution_id' => $expense_details['distribution_id'],
             'vendor_id' => $this->vendor_id,
-            'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
+            ...Expense::paidByColumns($this->paid_by),
             'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
             'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => auth()->user()->id,
@@ -351,6 +353,14 @@ class ExpenseForm extends Form
 
         // Handle existing check
         $check = $this->expense->check;
+
+        // An employee's or a sub's out-of-pocket expense that a payment check
+        // already paid back stays on that check: the check fields are
+        // disabled while Paid By is set, so an edit here never means
+        // "take it off the check".
+        if ($check && $this->isSettlementCheck($check)) {
+            $check = null;
+        }
         
         // Only create or update check when bank_account_id is set (required for a check).
         // bank_account_id is a client-supplied id — scoped exists() keeps a
@@ -454,9 +464,11 @@ class ExpenseForm extends Form
         // Resolved up front (before any Check is created below) so a tampered
         // belongs_to_vendor_id fails clean rather than leaving an orphaned check.
         $ownerVendorId = $this->resolveOwnerVendorId(auth()->user()->vendor->id);
+        $this->assertPayerIsNotOwed();
 
         // Determine if we should create/reuse a check
-        // Skip check creation if attaching to an existing check
+        // Skip check creation if attaching to an existing check, or when an
+        // employee or a sub paid out of pocket (nothing left the company yet).
         $shouldCreateCheck = empty($this->paid_by) && !$existing_check_id;
         
         // Prefer component-level fields set by the component; fallback to transaction
@@ -545,7 +557,7 @@ class ExpenseForm extends Form
             'distribution_id' => $expense_details['distribution_id'],
             'vendor_id' => $this->vendor_id,
             'check_id' => ! isset($check) ? null : $check->id,
-            'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
+            ...Expense::paidByColumns($this->paid_by),
             'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
             'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => auth()->user()->id,
@@ -609,6 +621,31 @@ class ExpenseForm extends Form
         $this->attachCrossVendorRelationships($expense);
 
         return $expense;
+    }
+
+    /**
+     * The payment check that paid an out-of-pocket expense back to its payer:
+     * the employee's own check (paid_by) or the sub's own check
+     * (paid_by_vendor_id).
+     */
+    protected function isSettlementCheck(Check $check): bool
+    {
+        $payer = Expense::paidByColumns($this->paid_by);
+
+        return ($payer['paid_by'] && (int) $check->user_id === $payer['paid_by'])
+            || ($payer['paid_by_vendor_id'] && (int) $check->vendor_id === $payer['paid_by_vendor_id']);
+    }
+
+    /** A sub cannot both have paid an expense and owe the company for it. */
+    protected function assertPayerIsNotOwed(): void
+    {
+        $vendorId = Expense::paidByColumns($this->paid_by)['paid_by_vendor_id'];
+
+        if ($vendorId && $this->reimbursment === 'V:'.$vendorId) {
+            throw ValidationException::withMessages([
+                'form.paid_by' => 'This vendor paid for the expense, so it cannot also owe the company for it — change Paid By or Reimbursment.',
+            ]);
+        }
     }
 
     public function upload_receipt_file($expense_amount, $expense_id)

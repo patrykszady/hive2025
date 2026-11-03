@@ -184,6 +184,7 @@ class PaidInvoiceMerger
             ->where('belongs_to_vendor_id', $payment->belongs_to_vendor_id)
             ->whereKeyNot($payment->id)
             ->whereNull('paid_by')
+            ->whereNull('paid_by_vendor_id')
             ->whereNull('check_id')
             ->whereDoesntHave('transactions')
             ->whereDoesntHave('sharedTransactions')

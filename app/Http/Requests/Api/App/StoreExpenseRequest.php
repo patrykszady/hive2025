@@ -111,6 +111,10 @@ class StoreExpenseRequest extends FormRequest
             // "Paid By" select (ExpenseCreate::employees()), not just any
             // user id.
             'paid_by' => ['nullable', 'integer', $this->paidByRule()],
+            // A Sub/1099 vendor that paid out of pocket — the web's "Paid By"
+            // select's "V:{id}" options (ExpenseCreate::reimbursment_vendors()).
+            // Never together with paid_by: one payer.
+            'paid_by_vendor_id' => ['nullable', 'integer', $this->paidByVendorRule()],
             // 'Client', an employed teammate's user id, or 'V:{vendor_id}'
             // for a Sub/1099 vendor — mirrors the web's "Reimbursment"
             // select exactly (expenses/form.blade.php:294-312).
@@ -179,6 +183,32 @@ class StoreExpenseRequest extends FormRequest
 
             if (! $vendor || ! $vendor->users()->employed()->whereKey((int) $value)->exists()) {
                 $fail('Invalid Paid By selection.');
+            }
+        };
+    }
+
+    /**
+     * A vendor the web's "Paid By" select would offer under Subs (Sub/1099,
+     * visible to this tenant), and not the one this expense says owes the
+     * company for it — a sub cannot both have paid and be owed.
+     */
+    private function paidByVendorRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            if ($this->filled('paid_by')) {
+                $fail('An expense has one payer: an employee (paid_by) or a sub (paid_by_vendor_id), not both.');
+
+                return;
+            }
+
+            if (! Vendor::whereKey((int) $value)->whereIn('business_type', ['Sub', '1099'])->exists()) {
+                $fail('Invalid Paid By vendor.');
+
+                return;
+            }
+
+            if ((string) $this->input('reimbursement') === 'V:'.(int) $value) {
+                $fail('This vendor paid for the expense, so it cannot also owe the company for it.');
             }
         };
     }

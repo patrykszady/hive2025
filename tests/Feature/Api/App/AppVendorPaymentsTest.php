@@ -364,3 +364,135 @@ it('writes the exact same Check and Expense rows whether a vendor is paid from t
     expect($response->json('data.check.id'))->toBe($appCheck->id);
     Queue::assertPushed(SendVendorPaymentEmailJob::class, 2);
 });
+
+// --- expenses the vendor paid for the company (paid_by_vendor_id) -----------
+
+it('lists the expenses the vendor paid for, and pays them back on the check with a project payment', function () {
+    ['vendor' => $company, 'admin' => $admin] = appVendorPaymentsAdmin();
+    $this->actingAs($admin);
+    ['account' => $account] = appVendorPaymentsBankAccount($company);
+    $sub = appVendorPaymentsSub($company, ['business_name' => 'Stan Test Construction']);
+    $merchant = Vendor::factory()->create(['business_name' => 'Climate Test Window']);
+    $company->vendors()->attach($merchant->id);
+    $project = appVendorPaymentsProject($company, $sub, 1000.00);
+    $windows = Expense::forceCreate([
+        'date' => '2026-11-02', 'amount' => 1022.90, 'vendor_id' => $merchant->id, 'project_id' => $project->id,
+        'paid_by_vendor_id' => $sub->id, 'reimbursment' => 'Client', 'note' => 'basement windows',
+        'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $show = $this->getJson("/api/app/v1/vendors/{$sub->id}/payment")->assertOk();
+    expect($show->json('data.paid_expenses'))->toHaveCount(1)
+        ->and($show->json('data.paid_expenses.0.id'))->toBe($windows->id)
+        ->and((float) $show->json('data.paid_expenses.0.amount'))->toBe(1022.90)
+        ->and($show->json('data.paid_expenses.0.vendor'))->toBe('Climate Test Window')
+        ->and($show->json('data.paid_expenses.0.selected'))->toBeFalse();
+
+    $response = $this->postJson("/api/app/v1/vendors/{$sub->id}/payment", [
+        'date' => '2026-11-03',
+        'bank_account_id' => $account->id,
+        'check_type' => 'Cash',
+        'projects' => [['id' => $project->id, 'amount' => 500]],
+        'paid_expense_ids' => [$windows->id],
+    ])->assertCreated();
+
+    $check = Check::withoutGlobalScopes()->find($response->json('data.check.id'));
+    expect((float) $check->amount)->toBe(1522.90);
+
+    $windows->refresh();
+    expect($windows->check_id)->toBe($check->id)
+        ->and($windows->getRawOriginal('reimbursment'))->toBe('Client');
+
+    // Paid back: gone from the next pay screen
+    expect($this->getJson("/api/app/v1/vendors/{$sub->id}/payment")->json('data.paid_expenses'))->toBe([]);
+});
+
+it('pays a vendor back with no project on the check at all', function () {
+    ['vendor' => $company, 'admin' => $admin] = appVendorPaymentsAdmin();
+    $this->actingAs($admin);
+    ['account' => $account] = appVendorPaymentsBankAccount($company);
+    $sub = appVendorPaymentsSub($company);
+    $windows = Expense::forceCreate([
+        'date' => '2026-11-02', 'amount' => 1022.90, 'vendor_id' => Vendor::factory()->create()->id,
+        'paid_by_vendor_id' => $sub->id, 'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson("/api/app/v1/vendors/{$sub->id}/payment", [
+        'date' => '2026-11-03',
+        'bank_account_id' => $account->id,
+        'check_type' => 'Cash',
+        'projects' => [],
+        'paid_expense_ids' => [$windows->id],
+    ]);
+
+    // `projects` is required by the request; an empty list still 422s —
+    // the app sends the eligible projects with no amounts, like the web.
+    $response->assertStatus(422);
+
+    $response = $this->postJson("/api/app/v1/vendors/{$sub->id}/payment", [
+        'date' => '2026-11-03',
+        'bank_account_id' => $account->id,
+        'check_type' => 'Cash',
+        'projects' => [['id' => 0, 'amount' => null]],
+        'paid_expense_ids' => [$windows->id],
+    ])->assertCreated();
+
+    $check = Check::withoutGlobalScopes()->find($response->json('data.check.id'));
+    expect((float) $check->amount)->toBe(1022.90)
+        ->and($windows->fresh()->check_id)->toBe($check->id);
+});
+
+it('422s pairing paid_by with an expense the vendor paid for — it only settles through a check', function () {
+    ['vendor' => $company, 'admin' => $admin] = appVendorPaymentsAdmin();
+    $this->actingAs($admin);
+    $sub = appVendorPaymentsSub($company);
+    $payer = appVendorPaymentsMember($company);
+    $project = appVendorPaymentsProject($company, $sub, 1000.00);
+    $windows = Expense::forceCreate([
+        'date' => '2026-11-02', 'amount' => 1022.90, 'vendor_id' => Vendor::factory()->create()->id,
+        'paid_by_vendor_id' => $sub->id, 'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson("/api/app/v1/vendors/{$sub->id}/payment", [
+        'date' => '2026-11-03',
+        'paid_by' => $payer->id,
+        'invoice' => 'INV-2',
+        'projects' => [['id' => $project->id, 'amount' => 500]],
+        'paid_expense_ids' => [$windows->id],
+    ])->assertStatus(422)->assertJsonValidationErrors('paid_by');
+
+    expect(Check::withoutGlobalScopes()->where('vendor_id', $sub->id)->exists())->toBeFalse()
+        ->and($windows->fresh()->check_id)->toBeNull();
+});
+
+it('ignores a paid_expense_id that is not this vendor\'s unsettled expense', function () {
+    ['vendor' => $company, 'admin' => $admin] = appVendorPaymentsAdmin();
+    $this->actingAs($admin);
+    ['account' => $account] = appVendorPaymentsBankAccount($company);
+    $sub = appVendorPaymentsSub($company);
+    $otherSub = appVendorPaymentsSub($company, ['business_name' => 'Other Sub']);
+    $project = appVendorPaymentsProject($company, $sub, 1000.00);
+    $othersExpense = Expense::forceCreate([
+        'date' => '2026-11-02', 'amount' => 300.00, 'vendor_id' => Vendor::factory()->create()->id,
+        'paid_by_vendor_id' => $otherSub->id, 'belongs_to_vendor_id' => $company->id, 'created_by_user_id' => $admin->id,
+    ]);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson("/api/app/v1/vendors/{$sub->id}/payment", [
+        'date' => '2026-11-03',
+        'bank_account_id' => $account->id,
+        'check_type' => 'Cash',
+        'projects' => [['id' => $project->id, 'amount' => 500]],
+        'paid_expense_ids' => [$othersExpense->id],
+    ])->assertCreated();
+
+    expect((float) Check::withoutGlobalScopes()->find($response->json('data.check.id'))->amount)->toBe(500.0)
+        ->and($othersExpense->fresh()->check_id)->toBeNull();
+});

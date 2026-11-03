@@ -58,6 +58,9 @@ class StoreVendorPaymentRequest extends FormRequest
             'projects.*.amount' => ['nullable', 'numeric', 'regex:/^-?\d+(\.\d{1,2})?$/'],
             'reimbursement_expense_ids' => ['array'],
             'reimbursement_expense_ids.*' => ['integer'],
+            // Expenses the vendor paid for the company, paid back on this check
+            'paid_expense_ids' => ['array'],
+            'paid_expense_ids.*' => ['integer'],
         ];
     }
 

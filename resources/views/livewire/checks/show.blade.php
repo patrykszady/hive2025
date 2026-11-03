@@ -120,6 +120,35 @@
             </x-index-table>
         @endif
 
+        {{-- EXPENSES THE PAYEE VENDOR PAID FOR THE COMPANY, paid back on this check --}}
+        @if($vendor_paid_expenses->isNotEmpty())
+            <x-index-table heading="{{ $check->vendor?->name }} paid for these Expenses">
+                <x-slot:badge>
+                    <flux:badge color="zinc" size="sm" inset="top bottom">{{ money($vendor_paid_expenses->sum('amount')) }}</flux:badge>
+                </x-slot:badge>
+
+                <x-index-table.table :columns="\App\Livewire\Checks\CheckShow::expenseColumnDefs()">
+                    @foreach($vendor_paid_expenses as $expense)
+                        <flux:table.row :key="'paid-'.$expense->id">
+                            <flux:table.cell variant="strong" class="whitespace-nowrap">
+                                <x-table-link :href="route('expenses.show', $expense->id)" :label="money($expense->amount)" />
+                            </flux:table.cell>
+                            <flux:table.cell class="whitespace-nowrap">{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                <x-table-link :href="$expense->vendor ? route('vendors.show', $expense->vendor->id) : null" :label="$expense->vendor?->name ?? '—'" />
+                            </flux:table.cell>
+                            <flux:table.cell class="min-w-0">
+                                <x-table-link
+                                    :href="$expense->project_id ? route('projects.show', $expense->project_id) : null"
+                                    :label="$expense->project?->name ?? '—'"
+                                />
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @endforeach
+                </x-index-table.table>
+            </x-index-table>
+        @endif
+
         {{-- THIS CHECK USER PAID EXPENSES --}}
         @if($user_paid_expenses->isNotEmpty())
             <x-index-table heading="Paid Expenses">

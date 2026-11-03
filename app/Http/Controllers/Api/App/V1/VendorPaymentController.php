@@ -46,6 +46,18 @@ class VendorPaymentController extends Controller
                         'note' => $e->note,
                         'selected' => false,
                     ])->values()->all(),
+                // What the vendor paid out of pocket for the company — added
+                // to the check when selected (the web's "paid for Expenses" card).
+                'paid_expenses' => $options->paidExpensesFor($target)
+                    ->map(fn (Expense $e) => [
+                        'id' => $e->id,
+                        'date' => $e->date?->format('Y-m-d'),
+                        'amount' => (float) $e->amount,
+                        'note' => $e->note,
+                        'vendor' => $e->vendor?->name,
+                        'project' => $e->project?->name,
+                        'selected' => false,
+                    ])->values()->all(),
                 'employees' => $options->employeesFor($request->user())
                     ->map(fn (User $u) => ['id' => $u->id, 'name' => trim($u->first_name.' '.$u->last_name)])
                     ->values()->all(),
@@ -85,14 +97,21 @@ class VendorPaymentController extends Controller
             ->intersect(collect((array) $request->validated('reimbursement_expense_ids', []))->map(fn ($id) => (int) $id))
             ->values()->all();
 
+        // Paid-for ids likewise: only what this vendor genuinely paid and
+        // has not been paid back for.
+        $offeredPaidIds = $options->paidExpensesFor($target)->pluck('id');
+        $paidExpenseIds = $offeredPaidIds
+            ->intersect(collect((array) $request->validated('paid_expense_ids', []))->map(fn ($id) => (int) $id))
+            ->values()->all();
+
         $total = collect($projects)->sum(fn (array $p) => is_numeric($p['amount'] ?? null) && $p['amount'] > 0 ? (float) $p['amount'] : 0.0)
+            + Expense::whereIn('id', $paidExpenseIds)->sum('amount')
             - Expense::whereIn('id', $reimbursementIds)->sum('amount');
 
         if ($total <= 0) {
-            return response()->json([
-                'message' => 'Check total needs to be greater than $0 and include at least 1 project.',
-                'errors' => ['check_total' => ['Check total needs to be greater than $0 and include at least 1 project.']],
-            ], 422);
+            $message = 'Check total needs to be greater than $0: add a project amount or select an expense the vendor paid for.';
+
+            return response()->json(['message' => $message, 'errors' => ['check_total' => [$message]]], 422);
         }
 
         try {
@@ -107,6 +126,7 @@ class VendorPaymentController extends Controller
                 $request->validated('invoice'),
                 $projects,
                 $reimbursementIds,
+                $paidExpenseIds,
             );
         } catch (ValidationException $e) {
             $firstMessage = collect($e->errors())->flatten()->first() ?? 'Could not save this payment.';

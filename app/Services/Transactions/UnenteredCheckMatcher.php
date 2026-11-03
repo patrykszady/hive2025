@@ -118,6 +118,7 @@ class UnenteredCheckMatcher
             ->whereNotNull('vendor_id')
             ->where('vendor_id', '!=', $company->id)
             ->whereNull('paid_by')
+            ->whereNull('paid_by_vendor_id')
             ->whereNull('check_id')
             ->where('amount', '>', 0)
             ->whereDate('date', '>=', now()->subMonths(6))

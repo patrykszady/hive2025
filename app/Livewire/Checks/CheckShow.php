@@ -192,7 +192,8 @@ class CheckShow extends Component
         // breakdown (App\Services\Checks\AppCheckBreakdown).
         $allExpenseIds = $this->check->linkedExpenseIds();
 
-        // EXPENSES
+        // EXPENSES — what this check pays for. Expenses the payee vendor paid
+        // out of pocket are paid BACK by it; they get their own card below.
         $vendor_expenses =
             Expense::whereIn('id', $allExpenseIds)
                 ->where(function ($query) {
@@ -201,7 +202,18 @@ class CheckShow extends Component
                 })
                 ->whereNull('distribution_id')
                 ->whereNull('paid_by')
+                ->when($this->check->vendor_id, fn ($q) => $q->where(fn ($w) => $w->whereNull('paid_by_vendor_id')->orWhere('paid_by_vendor_id', '!=', $this->check->vendor_id)))
                 ->get();
+
+        // Expenses the payee vendor paid for the company, settled on this
+        // check (paid_by_vendor_id) — added to the total, unlike the
+        // reimbursements it deducts.
+        $vendor_paid_expenses = $this->check->vendor_id
+            ? Expense::whereIn('id', $allExpenseIds)
+                ->where('paid_by_vendor_id', $this->check->vendor_id)
+                ->orderBy('date', 'DESC')
+                ->get()
+            : collect();
 
         $weekly_timesheets = $this->check->user_id
             ? Timesheet::where('check_id', $this->check->id)
@@ -277,6 +289,7 @@ class CheckShow extends Component
             'check_images' => $check_images,
             'vendor_expenses' => $vendor_expenses,
             'vendor_reimbursement_expenses' => $vendor_reimbursement_expenses,
+            'vendor_paid_expenses' => $vendor_paid_expenses,
             'user_paid_expenses' => $user_paid_expenses,
             'user_reimbursement_expenses' => $user_reimbursement_expenses,
             'user_paid_by_reimbursements' => $user_paid_by_reimbursements,

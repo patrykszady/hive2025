@@ -45,6 +45,11 @@ class VendorPaymentForm extends Form
             ->pluck('id')
             ->all();
 
+        $paidExpenseIds = collect($this->component->vendor_paid_expenses)
+            ->filter(fn ($expense) => $this->component->selectedVendorPaidExpenses[$expense->id] ?? false)
+            ->pluck('id')
+            ->all();
+
         try {
             return app(VendorPaymentRecorder::class)->record(
                 auth()->user(),
@@ -57,6 +62,7 @@ class VendorPaymentForm extends Form
                 $this->invoice,
                 $projects,
                 $reimbursementIds,
+                $paidExpenseIds,
             );
         } catch (ValidationException $e) {
             // The service's keys are neutral (no component); re-prefix them

@@ -104,6 +104,15 @@
 
                     @if($expense->paid_by)
                         <x-details.row title="Paid By" content="{{ $expense->paidby->full_name }}" />
+                    @elseif($expense->paid_by_vendor_id)
+                        {{-- A sub paid out of pocket; the company pays it back on the sub's vendor payment --}}
+                        <x-details.row
+                            title="Paid By"
+                            content="{{ $expense->paidByVendor?->name }}"
+                            secondary_content="{{ $expense->check_id ? 'Paid back on their vendor payment' : 'To be paid back on their next vendor payment' }}"
+                            href="{{ $expense->check_id ? route('checks.show', $expense->check_id) : route('vendors.payment', $expense->paid_by_vendor_id) }}"
+                            navigate
+                        />
                     @endif
 
                     @if($expense->invoice)

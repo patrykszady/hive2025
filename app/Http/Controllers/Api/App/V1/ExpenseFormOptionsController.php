@@ -34,6 +34,12 @@ class ExpenseFormOptionsController extends Controller
                 'id' => $vendor->id,
                 'name' => $vendor->business_name,
             ])->values()->all(),
+            // The "Paid By" select's Subs group — a vendor that paid out of
+            // pocket (paid_by_vendor_id); the same Sub/1099 list.
+            'paid_by_vendors' => $directory->reimbursementVendors()->map(fn (Vendor $vendor) => [
+                'id' => $vendor->id,
+                'name' => $vendor->business_name,
+            ])->values()->all(),
             // The Reimbursement FILTER's "person" options on the Expenses
             // list — mirrors ExpenseIndex::via_vendor_employees() (a
             // narrower list than 'employees' above).

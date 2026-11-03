@@ -2,6 +2,7 @@
 
 use App\Models\Bank;
 use App\Models\BankAccount;
+use App\Models\Check;
 use App\Models\Client;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
@@ -960,4 +961,94 @@ it('lists vendor options for the expense form\'s vendor picker', function () {
 
     expect($response->json('data'))->not->toBeEmpty()
         ->and($response->json('data.0'))->toHaveKeys(['id', 'name', 'legal', 'city', 'state', 'type']);
+});
+
+// --- a sub paid out of pocket (paid_by_vendor_id) ---------------------------
+
+it('creates an expense a sub paid for: no check, the sub is owed, the client still reimburses', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create(['business_name' => 'Climate Test Window']);
+    $sub = Vendor::factory()->create(['business_type' => 'Sub', 'business_name' => 'Stan Test Construction']);
+    $vendor->vendors()->attach($sub->id);
+    ['account' => $account] = appExpensesBankAccount($vendor);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->postJson('/api/app/v1/expenses', [
+        'amount' => '1022.90', 'date' => '2026-11-02', 'vendor_id' => $merchant->id, 'project_id' => $project->id,
+        'note' => 'basement windows', 'reimbursement' => 'Client', 'paid_by_vendor_id' => $sub->id,
+        // Bank fields are ignored when a sub paid: nothing left the company
+        'bank_account_id' => $account->id, 'check_type' => 'Cash',
+    ])->assertCreated();
+
+    $expense = Expense::findOrFail($response->json('data.id'));
+    expect($expense->paid_by_vendor_id)->toBe($sub->id)
+        ->and($expense->paid_by)->toBeNull()
+        ->and($expense->check_id)->toBeNull()
+        ->and($expense->getRawOriginal('reimbursment'))->toBe('Client')
+        ->and(Check::withoutGlobalScopes()->count())->toBe(0);
+
+    $detail = $this->getJson('/api/app/v1/expenses/'.$expense->id)->assertOk();
+    expect($detail->json('data.paid_by_vendor'))->toBe(['id' => $sub->id, 'name' => 'Stan Test Construction', 'settled' => false])
+        ->and($detail->json('data.paid_by'))->toBeNull();
+});
+
+it('refuses a sub payer together with an employee payer, a non-sub vendor, or a sub that also owes', function () {
+    ['vendor' => $vendor, 'admin' => $admin, 'member' => $member] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $merchant = Vendor::factory()->create();
+    $sub = Vendor::factory()->create(['business_type' => 'Sub']);
+    $vendor->vendors()->attach($sub->id);
+    $retail = Vendor::factory()->create(['business_type' => 'Retail']);
+    $vendor->vendors()->attach($retail->id);
+    $base = ['amount' => '50.00', 'date' => '2026-11-02', 'vendor_id' => $merchant->id, 'project_id' => $project->id];
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses', $base + ['paid_by' => $member->id, 'paid_by_vendor_id' => $sub->id])
+        ->assertStatus(422)->assertJsonValidationErrors('paid_by_vendor_id');
+    $this->postJson('/api/app/v1/expenses', $base + ['paid_by_vendor_id' => $retail->id])
+        ->assertStatus(422)->assertJsonValidationErrors('paid_by_vendor_id');
+    $this->postJson('/api/app/v1/expenses', $base + ['paid_by_vendor_id' => $sub->id, 'reimbursement' => 'V:'.$sub->id])
+        ->assertStatus(422)->assertJsonValidationErrors('paid_by_vendor_id');
+
+    expect(Expense::withoutGlobalScopes()->count())->toBe(0);
+});
+
+it('lists the Paid By subs on the form-options endpoint', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $sub = Vendor::factory()->create(['business_type' => 'Sub', 'business_name' => 'Stan Test Construction']);
+    $vendor->vendors()->attach($sub->id);
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $response = $this->getJson('/api/app/v1/expenses/form-options')->assertOk();
+    expect(collect($response->json('data.paid_by_vendors'))->pluck('id'))->toContain($sub->id);
+});
+
+it('keeps a paid-back expense on the sub\'s check when edited from the app', function () {
+    ['vendor' => $vendor, 'admin' => $admin] = appExpensesTeam();
+    $project = appExpensesProject($vendor);
+    $sub = Vendor::factory()->create(['business_type' => 'Sub']);
+    $vendor->vendors()->attach($sub->id);
+    ['account' => $account] = appExpensesBankAccount($vendor);
+    $check = Check::forceCreate([
+        'check_type' => 'Cash', 'date' => '2026-11-03', 'bank_account_id' => $account->id,
+        'vendor_id' => $sub->id, 'belongs_to_vendor_id' => $vendor->id, 'created_by_user_id' => $admin->id,
+    ]);
+    $expense = appExpensesExpense($vendor, ['project_id' => $project->id, 'paid_by_vendor_id' => $sub->id, 'check_id' => $check->id, 'amount' => 1022.90]);
+    $check->recalculateAmount();
+
+    Sanctum::actingAs($admin, ['app']);
+
+    $this->postJson('/api/app/v1/expenses/'.$expense->id, [
+        'amount' => '1022.90', 'date' => '2026-11-02', 'vendor_id' => $expense->vendor_id, 'project_id' => $project->id,
+        'note' => 'basement windows', 'paid_by_vendor_id' => $sub->id,
+    ])->assertOk();
+
+    $expense->refresh();
+    expect($expense->note)->toBe('basement windows')
+        ->and($expense->check_id)->toBe($check->id)
+        ->and((float) $check->fresh()->amount)->toBe(1022.90);
 });

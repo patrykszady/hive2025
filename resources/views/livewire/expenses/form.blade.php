@@ -187,12 +187,37 @@
             x-show="splits && split || open"
             x-transition
             >
-            <flux:select label="Paid By" wire:model.live="form.paid_by" placeholder="Choose who paid...">
-                <flux:select.option value="">{{auth()->user()->vendor->name}}</flux:select.option>
-                @foreach($this->employees as $employee)
-                    <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
-                @endforeach
-            </flux:select>
+            {{-- Who paid out of pocket: an employee (paid_by), or a sub (paid_by_vendor_id,
+                 value "V:{id}") the company pays back on their next vendor payment.
+                 Cleared (x) = the company paid. Each row carries the same Flux avatar
+                 the person or vendor has everywhere on the site (color seeded by id). --}}
+            <flux:field>
+                <flux:label>Paid By</flux:label>
+                <flux:select wire:model.live="form.paid_by" variant="listbox" searchable clearable placeholder="{{ auth()->user()->vendor->name }}">
+                    @foreach($this->employees as $employee)
+                        <flux:select.option wire:key="paid-by-user-{{ $employee->id }}" value="{{ $employee->id }}" label="{{ $employee->first_name }}">
+                            <div class="flex items-center gap-2 whitespace-nowrap">
+                                <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}" />
+                                {{ $employee->first_name }}
+                            </div>
+                        </flux:select.option>
+                    @endforeach
+
+                    @if($this->reimbursment_vendors->isNotEmpty())
+                        <flux:separator class="my-1" />
+
+                        @foreach($this->reimbursment_vendors as $paidByVendor)
+                            <flux:select.option wire:key="paid-by-vendor-{{ $paidByVendor->id }}" value="V:{{ $paidByVendor->id }}" label="{{ $paidByVendor->name }}">
+                                <div class="flex items-center gap-2 whitespace-nowrap">
+                                    <flux:avatar size="xs" name="{{ $paidByVendor->name }}" color="auto" color:seed="{{ $paidByVendor->id }}" />
+                                    {{ $paidByVendor->name }}
+                                </div>
+                            </flux:select.option>
+                        @endforeach
+                    @endif
+                </flux:select>
+                <flux:error name="form.paid_by" />
+            </flux:field>
         </div>
 
         {{-- ATTACH TO EXISTING CHECK (Optional) --}}

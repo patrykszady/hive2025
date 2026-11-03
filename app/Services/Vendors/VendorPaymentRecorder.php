@@ -12,8 +12,10 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Pays a vendor: one Expense per funded project (a Check or an employee's
- * `paid_by` covers them), optionally netted against selected reimbursements
- * the company already paid on the vendor's behalf. Extracted from
+ * `paid_by` covers them), plus any selected expenses the vendor paid out of
+ * pocket for the company (paid_by_vendor_id, added to the check), optionally
+ * netted against selected reimbursements the company already paid on the
+ * vendor's behalf. Extracted from
  * App\Livewire\Forms\VendorPaymentForm::store() (which now calls here) so
  * the Hive Contractors app's pay screen
  * (App\Http\Controllers\Api\App\V1\VendorPaymentController::store()) writes
@@ -32,6 +34,7 @@ class VendorPaymentRecorder
     /**
      * @param  list<array{id: mixed, amount: mixed}>  $projectAmounts
      * @param  list<int>  $reimbursementExpenseIds
+     * @param  list<int>  $paidExpenseIds  expenses the vendor paid for the company, settled by this check
      */
     public function record(
         User $actingUser,
@@ -44,13 +47,14 @@ class VendorPaymentRecorder
         ?string $invoice,
         array $projectAmounts,
         array $reimbursementExpenseIds,
+        array $paidExpenseIds = [],
     ): ?Check {
-        // Deductions can only settle through a check — mirrors
-        // VendorPaymentForm::store()'s own guard exactly, including the
-        // error key the web's form.paid_by field surfaces it under.
-        if (! empty($paidBy) && ! empty($reimbursementExpenseIds)) {
+        // Deductions and paid-for expenses can only settle through a check —
+        // mirrors VendorPaymentForm::store()'s own guard exactly, including
+        // the error key the web's form.paid_by field surfaces it under.
+        if (! empty($paidBy) && (! empty($reimbursementExpenseIds) || ! empty($paidExpenseIds))) {
             throw ValidationException::withMessages([
-                'paid_by' => 'Reimbursement deductions can only be settled by a check — clear Paid By or unselect the reimbursements.',
+                'paid_by' => 'Reimbursements and expenses the vendor paid for can only be settled by a check — clear Paid By or unselect them.',
             ]);
         }
 
@@ -97,8 +101,20 @@ class VendorPaymentRecorder
                     $expense->save();
                 });
 
-            // Check total = project expenses − attached vendor
-            // reimbursements (centralized in Check::recalculateAmount).
+            // What the vendor paid for the company is paid back on this
+            // check: the expense keeps its own merchant and project, it is
+            // only settled here.
+            Expense::whereIn('id', $paidExpenseIds)
+                ->where('paid_by_vendor_id', $vendor->id)
+                ->whereNull('check_id')
+                ->get()
+                ->each(function (Expense $expense) use ($check): void {
+                    $expense->check_id = $check->id;
+                    $expense->save();
+                });
+
+            // Check total = project expenses + paid-for expenses − attached
+            // vendor reimbursements (centralized in Check::recalculateAmount).
             $check->recalculateAmount();
 
             $this->queuePaymentEmail($actingUser, $vendor, $check);

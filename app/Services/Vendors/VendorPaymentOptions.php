@@ -78,6 +78,22 @@ class VendorPaymentOptions
             ->orderByDesc('date')->get();
     }
 
+    /**
+     * Unsettled expenses $vendor paid out of pocket for the company
+     * (paid_by_vendor_id) — added to the payment when selected, the way an
+     * employee's paid-for expenses are added to a timesheet payment. All
+     * default UNSELECTED, same as the reimbursements above.
+     *
+     * @return Collection<int, Expense>
+     */
+    public function paidExpensesFor(Vendor $vendor): Collection
+    {
+        return Expense::where('paid_by_vendor_id', $vendor->id)
+            ->whereNull('check_id')
+            ->with('vendor')
+            ->orderByDesc('date')->get();
+    }
+
     /** @return Collection<int, User> */
     public function employeesFor(User $actingUser): Collection
     {

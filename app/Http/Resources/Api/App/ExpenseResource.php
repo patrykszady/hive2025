@@ -93,6 +93,11 @@ class ExpenseResource extends JsonResource
 
         return $row + [
             'paid_by' => $this->userPayload($expense->paid_by),
+            // A sub that paid out of pocket (paid_by_vendor_id) — paid back on
+            // its next vendor payment; the web's "Paid By" row links there.
+            'paid_by_vendor' => $expense->paid_by_vendor_id
+                ? ['id' => (int) $expense->paid_by_vendor_id, 'name' => (string) $expense->paidByVendor?->name, 'settled' => $expense->check_id !== null]
+                : null,
             'created_by' => $this->userPayload($expense->created_by_user_id),
             // Raw select value ('Client', a user id, or 'V:{vendor_id}') so
             // the app's edit form can preselect the right option — `reimbursement`

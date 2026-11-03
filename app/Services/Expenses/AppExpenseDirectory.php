@@ -489,7 +489,7 @@ class AppExpenseDirectory
      * (ExpenseAccessGuard), same cross-vendor attach, same optional receipt
      * OCR.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, distribution_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, transaction_id?: ?int, splits?: list<array{amount: float|string, project_id?: ?int, distribution_id?: ?int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, distribution_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, paid_by_vendor_id?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, existing_check_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, transaction_id?: ?int, splits?: list<array{amount: float|string, project_id?: ?int, distribution_id?: ?int, note?: ?string, reimbursement?: ?string}>}  $data
      */
     public function create(User $user, array $data, ?UploadedFile $receipt): ExpenseSaveResult
     {
@@ -528,7 +528,7 @@ class AppExpenseDirectory
         // Recording a brand-new check — mirrors ExpenseForm::store()'s
         // $shouldCreateCheck branch: only when neither an existing check nor
         // "paid by an employee" already settled it.
-        if (! $check && empty($data['paid_by'])) {
+        if (! $check && empty($data['paid_by']) && empty($data['paid_by_vendor_id'])) {
             $check = $this->createCheckForNewExpense($data, (int) $data['vendor_id'], $hubVendorId, (int) $user->id, $distributionId);
         }
 
@@ -542,6 +542,7 @@ class AppExpenseDirectory
             'vendor_id' => $data['vendor_id'],
             'check_id' => $check?->id,
             'paid_by' => $data['paid_by'] ?? null,
+            'paid_by_vendor_id' => $data['paid_by_vendor_id'] ?? null,
             'reimbursment' => $data['reimbursement'] ?? null,
             'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => $user->id,
@@ -665,7 +666,7 @@ class AppExpenseDirectory
      * that looks surprising: created_by_user_id is overwritten to the
      * editing user on every save, not preserved from the original creator.
      *
-     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, distribution_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, splits?: list<array{amount: float|string, project_id?: ?int, distribution_id?: ?int, note?: ?string, reimbursement?: ?string}>}  $data
+     * @param  array{amount: float|string, date: string, vendor_id: int, project_id?: ?int, distribution_id?: ?int, note?: ?string, invoice?: ?string, paid_by?: ?int, paid_by_vendor_id?: ?int, reimbursement?: ?string, is_material_order?: bool, belongs_to_vendor_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int, splits?: list<array{amount: float|string, project_id?: ?int, distribution_id?: ?int, note?: ?string, reimbursement?: ?string}>}  $data
      */
     public function update(User $user, Expense $expense, array $data, ?UploadedFile $receipt): ExpenseSaveResult
     {
@@ -691,6 +692,7 @@ class AppExpenseDirectory
             'distribution_id' => $distributionId,
             'vendor_id' => $data['vendor_id'],
             'paid_by' => $data['paid_by'] ?? null,
+            'paid_by_vendor_id' => $data['paid_by_vendor_id'] ?? null,
             'reimbursment' => $data['reimbursement'] ?? null,
             'belongs_to_vendor_id' => $ownerVendorId,
             'created_by_user_id' => $user->id,
@@ -782,7 +784,7 @@ class AppExpenseDirectory
      * the OLD check first if it's being swapped out); otherwise, if the
      * expense had a check and the bank/check fields were cleared, detach it.
      *
-     * @param  array{date: string, amount: float|string, paid_by?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int}  $data
+     * @param  array{date: string, amount: float|string, paid_by?: ?int, paid_by_vendor_id?: ?int, bank_account_id?: ?int, check_type?: ?string, check_number?: ?int}  $data
      */
     private function resolveCheckOnUpdate(Expense $expense, array $data, int $vendorId, int $actingVendorId, int $actingUserId, ?int $distributionId = null): void
     {
@@ -791,7 +793,16 @@ class AppExpenseDirectory
         $checkType = $data['check_type'] ?? null;
         $checkNumber = isset($data['check_number']) && $data['check_number'] !== null ? (int) $data['check_number'] : null;
 
-        if (empty($data['paid_by']) && $bankAccountId && $checkType && BankAccount::whereKey($bankAccountId)->exists()) {
+        // An out-of-pocket expense a payment check already paid back to its
+        // payer (the employee's or the sub's own check) stays on that check —
+        // mirrors ExpenseForm::update()'s isSettlementCheck() guard.
+        $paidBy = (int) ($data['paid_by'] ?? 0);
+        $paidByVendorId = (int) ($data['paid_by_vendor_id'] ?? 0);
+        if ($check && (($paidBy && (int) $check->user_id === $paidBy) || ($paidByVendorId && (int) $check->vendor_id === $paidByVendorId))) {
+            return;
+        }
+
+        if (empty($data['paid_by']) && empty($data['paid_by_vendor_id']) && $bankAccountId && $checkType && BankAccount::whereKey($bankAccountId)->exists()) {
             $existing = null;
             if ($checkType === 'Check' && $checkNumber !== null) {
                 $existing = Check::whereNull('deleted_at')

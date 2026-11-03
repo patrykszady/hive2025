@@ -25,7 +25,7 @@ class Expense extends Model
     // silently no-ops (Model::update() -> fill() drops any key outside
     // $fillable) — a pre-existing bug fixed here so "Uncategorized
     // Expenses" categorization actually persists, on the web and the app.
-    protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'parent_expense_id', 'reimbursment', 'belongs_to_vendor_id', 'belongs_to_client_id', 'created_by_user_id', 'paid_by', 'category_id', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'parent_expense_id', 'reimbursment', 'belongs_to_vendor_id', 'belongs_to_client_id', 'created_by_user_id', 'paid_by', 'paid_by_vendor_id', 'category_id', 'created_at', 'updated_at', 'deleted_at'];
 
     protected function casts(): array
     {
@@ -308,6 +308,47 @@ class Expense extends Model
     public function paidby(): BelongsTo
     {
         return $this->belongsTo(User::class, 'paid_by');
+    }
+
+    /**
+     * The sub that paid this expense out of pocket (paid_by_vendor_id) — the
+     * company owes it back and settles it on the vendor's next payment
+     * check, the way `paid_by` works for an employee. Unscoped: a vendor
+     * stays nameable on its expenses whoever is looking.
+     */
+    public function paidByVendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'paid_by_vendor_id')->withoutGlobalScopes();
+    }
+
+    /** The "Paid By" select's value: a user id, 'V:{vendor_id}', or null for the company itself. */
+    public function paidBySelectValue(): ?string
+    {
+        if ($this->paid_by_vendor_id) {
+            return 'V:'.$this->paid_by_vendor_id;
+        }
+
+        return $this->paid_by ? (string) $this->paid_by : null;
+    }
+
+    /**
+     * Splits a "Paid By" select value into its two columns.
+     *
+     * @return array{paid_by: ?int, paid_by_vendor_id: ?int}
+     */
+    public static function paidByColumns(mixed $value): array
+    {
+        if ($value === null || $value === '' || $value === 'NULL') {
+            return ['paid_by' => null, 'paid_by_vendor_id' => null];
+        }
+
+        if (is_string($value) && str_starts_with($value, 'V:')) {
+            $vendorId = substr($value, 2);
+
+            return ['paid_by' => null, 'paid_by_vendor_id' => ctype_digit($vendorId) ? (int) $vendorId : null];
+        }
+
+        return ['paid_by' => (int) $value, 'paid_by_vendor_id' => null];
     }
 
     public function splits(): HasMany

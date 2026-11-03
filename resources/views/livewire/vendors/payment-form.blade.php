@@ -132,6 +132,60 @@
                     </x-island-card>
                 @endforeach
 
+                {{-- EXPENSES THE VENDOR PAID FOR (the company owes the vendor) — selected rows are added to the check --}}
+                @if(!$vendor_paid_expenses->isEmpty())
+                    @php
+                        $selectedPaidSum = $vendor_paid_expenses
+                            ->filter(fn($e) => ($selectedVendorPaidExpenses[$e->id] ?? false))
+                            ->sum('amount');
+                    @endphp
+                    <x-island-card heading="{{ $vendor->name }} paid for Expenses" subheading="Paid out of pocket for the company; selected ones are paid back on this check.">
+                        <x-slot:actions>
+                            <flux:button disabled>{{ money($selectedPaidSum) }}</flux:button>
+                        </x-slot:actions>
+
+                        <div class="card-flush-bottom">
+                        <flux:table>
+                            <flux:table.columns>
+                                <flux:table.column></flux:table.column>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Vendor</flux:table.column>
+                                <flux:table.column>Project</flux:table.column>
+                            </flux:table.columns>
+
+                            <flux:table.rows>
+                                @foreach($vendor_paid_expenses as $expense)
+                                    <flux:table.row :key="'paid-'.$expense->id">
+                                        <flux:table.cell>
+                                            <flux:checkbox wire:model.live="selectedVendorPaidExpenses.{{$expense->id}}" />
+                                        </flux:table.cell>
+                                        <flux:table.cell variant="strong">
+                                            <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>
+                                            @if($expense->vendor)
+                                                <a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{ Str::limit($expense->vendor->name, 25) }}</a>
+                                            @else
+                                                —
+                                            @endif
+                                        </flux:table.cell>
+                                        <flux:table.cell>
+                                            @if($expense->project_id)
+                                                <a wire:navigate.hover href="{{route('projects.show', $expense->project_id)}}">{{ Str::limit($expense->project?->name, 25) }}</a>
+                                            @else
+                                                —
+                                            @endif
+                                        </flux:table.cell>
+                                    </flux:table.row>
+                                @endforeach
+                            </flux:table.rows>
+                        </flux:table>
+                        </div>
+                    </x-island-card>
+                @endif
+
                 {{-- VENDOR REIMBURSEMENTS (vendor owes the company) — selected rows are deducted from the check --}}
                 @if(!$vendor_reimbursement_expenses->isEmpty())
                     @php
