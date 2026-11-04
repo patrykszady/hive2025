@@ -155,6 +155,12 @@
                                                     <flux:menu.separator />
                                                     <flux:menu.item icon="document-duplicate" wire:click="sectionDuplicate({{$index}})">Duplicate Section</flux:menu.item>
                                                     <flux:menu.item icon="arrow-up-on-square" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section['id']}} })">Duplicate to Estimate</flux:menu.item>
+                                                    @unless($estimate->isSigned())
+                                                        <flux:menu.item icon="receipt-percent" wire:click="$dispatchTo('estimates.estimate-markup', 'openEstimateMarkup', { section: {{$section['id']}} })">Mark Up Line Items</flux:menu.item>
+                                                        @if(collect($estimate->options['markups'] ?? [])->contains(fn ($markup) => is_array($markup) && filled($markup['id'] ?? null) && empty($markup['reverted_at'])))
+                                                            <flux:menu.item icon="arrow-uturn-left" wire:click="$dispatchTo('estimates.estimate-markup', 'openEstimateMarkup', { section: {{$section['id']}} })">Revert Last Markup</flux:menu.item>
+                                                        @endif
+                                                    @endunless
                                                     <flux:menu.separator />
                                                     <flux:menu.item icon="trash" wire:click="sectionDelete({{$index}})" variant="danger">Disable Section</flux:menu.item>
                                                 </flux:menu>
@@ -416,6 +422,7 @@
                 Add Supplier Quote
             </flux:button>
 
+
             @if(count($trashedSections) > 0)
                 <flux:dropdown>
                     <flux:button icon="arrow-path"></flux:button>
@@ -441,6 +448,7 @@
         <livewire:estimates.estimate-a-i-generator :estimate="$estimate" wire:key="estimate-ai-generator-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-sub-document-compare :estimate="$estimate" wire:key="estimate-sub-document-compare-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-supplier-quote :estimate="$estimate" wire:key="estimate-supplier-quote-{{ $estimate->id }}"/>
+        <livewire:estimates.estimate-markup :estimate="$estimate" wire:key="estimate-markup-{{ $estimate->id }}"/>
         <livewire:estimates.estimate-email wire:key="estimate-email-{{ $estimate->id }}"/>
         @endcan
     </div>
