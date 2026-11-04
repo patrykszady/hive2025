@@ -76,6 +76,76 @@ it('summarizes an email like a call and places it on the project it is about', f
     });
 });
 
+it('keeps an email that is not about any job out of the unplaced inbox and off the projects', function () {
+    $world = serviceCallWorld();
+    $kitchen = sec3_makeProject($world['vendor'], $world['client'], ['project_name' => 'Kitchen', 'address' => '415 Lincoln Ave']);
+    ProjectStatus::create(['project_id' => $kitchen->id, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+
+    // Patryk forwards a meetup invitation to a client who has one job in
+    // progress — which would otherwise put it on that job.
+    $email = EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id,
+        'mailbox' => $world['mailbox'],
+        'from_email' => 'patryk.szady@live.com',
+        'client_id' => $world['client']->id,
+        'candidate_project_ids' => [$kitchen->id],
+        'subject' => 'Fw: Reminder: Real Estate Meetup – November 4th!',
+        'body_text' => 'Join us Tuesday — Patryk speaks on contractor pitfalls for new investors.',
+    ]);
+
+    Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => json_encode([
+        'summary' => 'Patryk forwarded an invitation to a real estate meetup where he is the featured speaker.',
+        'action_items' => [],
+        'topics' => ['real estate meetup'],
+        'next_steps' => [],
+        'sentiment' => 'positive',
+        'intent' => 'share event information',
+        'about_a_project' => false,
+        'project_id' => null,
+    ])]]]])]);
+
+    (new SummarizeEmailMessage($email->id))->handle();
+
+    $email->refresh();
+    expect($email->project_id)->toBeNull()
+        ->and($email->unplaced_dismissed_at)->not->toBeNull()
+        ->and($email->isUnplaced())->toBeFalse()
+        ->and(EmailMessage::query()->unplaced()->whereKey($email->id)->exists())->toBeFalse()
+        ->and($email->summary)->toContain('real estate meetup');
+
+    Http::assertSent(fn (HttpRequest $request) => isset($request['response_format']['json_schema']['schema']['properties']['about_a_project'])
+        && str_contains($request['messages'][0]['content'], 'about_a_project'));
+});
+
+it('still waits in the unplaced inbox when it is about a job but the job is unclear', function () {
+    $world = serviceCallWorld();
+    $kitchen = sec3_makeProject($world['vendor'], $world['client'], ['project_name' => 'Kitchen', 'address' => '415 Lincoln Ave']);
+    // Two jobs in progress, so no single one is the obvious answer.
+    foreach ([$kitchen->id, $world['project']->id] as $projectId) {
+        ProjectStatus::create(['project_id' => $projectId, 'belongs_to_vendor_id' => $world['vendor']->id, 'status_code' => 6, 'start_date' => today()->format('Y-m-d')]);
+    }
+
+    $email = EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id,
+        'mailbox' => $world['mailbox'],
+        'from_email' => $world['katie']->email,
+        'client_id' => $world['client']->id,
+        'candidate_project_ids' => [$kitchen->id, $world['project']->id],
+        'subject' => 'Question about the invoice',
+        'body_text' => 'Which invoice is this one for?',
+    ]);
+
+    Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => json_encode([
+        'summary' => 'Katie asks which job an invoice is for.',
+        'action_items' => [], 'topics' => ['invoice'], 'next_steps' => [], 'sentiment' => 'neutral',
+        'intent' => 'clarify invoice', 'about_a_project' => true, 'project_id' => null,
+    ])]]]])]);
+
+    (new SummarizeEmailMessage($email->id))->handle();
+
+    expect($email->fresh()->isUnplaced())->toBeTrue();
+});
+
 it('marks an email read when the model answers junk, so the schedule does not pay for it again', function () {
     $email = EmailMessage::factory()->create();
     Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'not json']]]])]);

@@ -91,14 +91,20 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        // Not about a job at all — an event invitation, a newsletter, a
+        // personal note forwarded to a stakeholder (Patryk's "Fw: Reminder:
+        // Real Estate Meetup", email 305, 2026-11-02): never placed on a
+        // project and never waiting in the unplaced inbox.
+        $aboutAProject = ($parsed['about_a_project'] ?? true) !== false;
+
         $projectId = $email->project_id;
         $picked = isset($parsed['project_id']) ? (int) $parsed['project_id'] : null;
-        if (! $projectId && $picked && $candidates->contains('id', $picked)) {
+        if (! $projectId && $aboutAProject && $picked && $candidates->contains('id', $picked)) {
             $projectId = $picked;
         }
 
         // The AI did not choose: the client's one job in progress is the job.
-        if (! $projectId && ($open = EmailStakeholders::soleOpenProject($candidates))) {
+        if (! $projectId && $aboutAProject && ($open = EmailStakeholders::soleOpenProject($candidates))) {
             $projectId = $open->id;
         }
 
@@ -113,6 +119,7 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
             'sentiment' => $this->text($parsed['sentiment'] ?? null, 16),
             'intent' => $this->text($parsed['intent'] ?? null, 255),
             'project_id' => $projectId,
+            'unplaced_dismissed_at' => ! $projectId && ! $aboutAProject ? now() : $email->unplaced_dismissed_at,
             'summarized_at' => now(),
         ])->save();
 
@@ -165,7 +172,8 @@ Write in English, refer to people by first name, and stay factual — never inve
 - next_steps: the expected upcoming sequence of events.
 - sentiment: positive, neutral, negative or mixed.
 - intent: a few words on what the sender wants ("schedule a repair", "approve change order", "send invoice").
-- project_id: when several projects are listed, the one the email is about (match the client's name, addresses, rooms and trades — suppliers and designers often name the homeowner by last name, as in "Abbey-plumbing delivery"). Null when unclear or only one is listed. When one listed project is in progress and the others are Complete, the email is about the one in progress — unless it is about the finished work itself (a warranty, a repair or a service request about what was built).
+- about_a_project: true when the email is about a construction job — its work, schedule, money, materials, selections, permits, inspections, documents or a problem with what was built. False for anything else: event invitations, newsletters, marketing, personal notes, general business news, even when sent to or by a stakeholder.
+- project_id: null when about_a_project is false. Otherwise, when several projects are listed, the one the email is about (match the client's name, addresses, rooms and trades — suppliers and designers often name the homeowner by last name, as in "Abbey-plumbing delivery"). Null when unclear or only one is listed. When one listed project is in progress and the others are Complete, the email is about the one in progress — unless it is about the finished work itself (a warranty, a repair or a service request about what was built).
 
 Quoted history below the new message is context only: summarize the NEW message. Dates: resolve "tomorrow", "Monday" etc. against the email's sent time; never invent a month.
 PROMPT;
@@ -211,7 +219,7 @@ PROMPT;
         return [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['summary', 'action_items', 'topics', 'next_steps', 'sentiment', 'intent', 'project_id'],
+            'required' => ['summary', 'action_items', 'topics', 'next_steps', 'sentiment', 'intent', 'about_a_project', 'project_id'],
             'properties' => [
                 'summary' => ['type' => 'string'],
                 'action_items' => $list,
@@ -219,6 +227,7 @@ PROMPT;
                 'next_steps' => $list,
                 'sentiment' => ['type' => 'string', 'enum' => ['positive', 'neutral', 'negative', 'mixed']],
                 'intent' => ['type' => 'string'],
+                'about_a_project' => ['type' => 'boolean'],
                 'project_id' => ['type' => ['integer', 'null']],
             ],
         ];
