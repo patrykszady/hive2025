@@ -146,6 +146,43 @@ it('still waits in the unplaced inbox when it is about a job but the job is uncl
     expect($email->fresh()->isUnplaced())->toBeTrue();
 });
 
+it('reads the unplaced inbox again on request, so an email read before the rule leaves it', function () {
+    $world = serviceCallWorld();
+    $email = EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id,
+        'mailbox' => $world['mailbox'],
+        'client_id' => $world['client']->id,
+        'subject' => 'Fw: Reminder: Real Estate Meetup – November 4th!',
+        'summary' => 'Patryk forwarded an invitation to a real estate meetup.',
+        'summarized_at' => now()->subDay(),
+    ]);
+    $placed = EmailMessage::factory()->create([
+        'belongs_to_vendor_id' => $world['vendor']->id,
+        'project_id' => $world['project']->id,
+        'summarized_at' => now()->subDay(),
+    ]);
+    expect($email->fresh()->isUnplaced())->toBeTrue();
+
+    Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => json_encode([
+        'summary' => 'Patryk forwarded an invitation to a real estate meetup.', 'action_items' => [], 'topics' => ['meetup'],
+        'next_steps' => [], 'sentiment' => 'positive', 'intent' => 'share event information', 'about_a_project' => false, 'project_id' => null,
+    ])]]]])]);
+
+    // An already-read email is skipped by a plain re-dispatch…
+    (new SummarizeEmailMessage($email->id))->handle();
+    expect($email->fresh()->isUnplaced())->toBeTrue();
+
+    // …and read again by the command's --unplaced, which leaves placed email alone.
+    Queue::fake();
+    $this->artisan('emails:summarize', ['--unplaced' => true])->expectsOutputToContain('Queued 1 email(s)')->assertSuccessful();
+    Queue::assertPushed(SummarizeEmailMessage::class, fn ($job) => $job->emailMessageId === $email->id && $job->reread);
+    Queue::assertNotPushed(SummarizeEmailMessage::class, fn ($job) => $job->emailMessageId === $placed->id);
+
+    (new SummarizeEmailMessage($email->id, true))->handle();
+    expect($email->fresh()->isUnplaced())->toBeFalse()
+        ->and($email->fresh()->unplaced_dismissed_at)->not->toBeNull();
+});
+
 it('marks an email read when the model answers junk, so the schedule does not pay for it again', function () {
     $email = EmailMessage::factory()->create();
     Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'not json']]]])]);

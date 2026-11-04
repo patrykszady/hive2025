@@ -30,7 +30,11 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
     /** @var array<int, int> */
     public array $backoff = [60, 300];
 
-    public function __construct(public int $emailMessageId)
+    /**
+     * $reread: read it again even though it was read before — the unplaced
+     * inbox re-checked under a newer rule (`emails:summarize --unplaced`).
+     */
+    public function __construct(public int $emailMessageId, public bool $reread = false)
     {
     }
 
@@ -43,7 +47,7 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
     {
         $email = EmailMessage::query()->find($this->emailMessageId);
 
-        if (! $email || $email->summarized_at) {
+        if (! $email || ($email->summarized_at && ! $this->reread)) {
             return;
         }
 

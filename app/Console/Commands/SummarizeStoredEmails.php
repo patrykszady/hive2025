@@ -16,6 +16,7 @@ class SummarizeStoredEmails extends Command
 {
     protected $signature = 'emails:summarize
         {--missing : Only emails never summarized}
+        {--unplaced : Read again the emails waiting in the unplaced inbox (an email not about any job leaves it)}
         {--since= : Only email sent on or after this date (YYYY-MM-DD)}
         {--limit= : At most this many emails}';
 
@@ -27,6 +28,11 @@ class SummarizeStoredEmails extends Command
 
         if ($this->option('missing')) {
             $query->whereNull('summarized_at');
+        }
+
+        $reread = (bool) $this->option('unplaced');
+        if ($reread) {
+            $query->unplaced();
         }
 
         if ($since = $this->option('since')) {
@@ -42,7 +48,7 @@ class SummarizeStoredEmails extends Command
         $ids = $query->pluck('id');
 
         foreach ($ids as $id) {
-            SummarizeEmailMessage::dispatch($id);
+            SummarizeEmailMessage::dispatch($id, $reread);
         }
 
         $this->info(sprintf('Queued %d email(s) for summarization.', $ids->count()));
