@@ -67,7 +67,13 @@ class ScheduledVisitApplier
         // is made. A visit the company's own people set stays on the planner
         // for a person to put on the schedule.
         if (! $task && (self::isInspection((string) $item->title) || self::isDelivery((string) $item->title) || $this->setByOutsider($item))) {
-            return $this->createInspection($item, $candidate, $date);
+            // Not when the team already has that task on another day they
+            // set by hand: that day is theirs, and a second "Counter Measure"
+            // beside it would be worse than the planner item. (A matching
+            // undated or same-day task was dated above instead.)
+            return $this->matcher->matchExistingTask((int) $item->project_id, (string) $item->title, null)
+                ? null
+                : $this->createInspection($item, $candidate, $date);
         }
 
         if (! $task || (int) $task->project_id !== (int) $item->project_id) {

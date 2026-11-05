@@ -330,9 +330,9 @@ function fakeVisitReading(callable $items, ?callable $closures = null, array &$r
     ]);
 }
 
-function visitItem(string $title, string $date, ?string $start, ?string $end, array $ids): array
+function visitItem(string $title, string $date, ?string $start, ?string $end, array $ids, string $owner = 'Ultimate Stone'): array
 {
-    return ['title' => $title, 'owner' => 'Ultimate Stone', 'due_date' => $date, 'start_time' => $start, 'end_time' => $end, 'kind' => 'visit', 'message_ids' => $ids];
+    return ['title' => $title, 'owner' => $owner, 'due_date' => $date, 'start_time' => $start, 'end_time' => $end, 'kind' => 'visit', 'message_ids' => $ids];
 }
 
 it('puts Kama\'s measurement straight onto the undated Counter Measure, with its time, and texts nobody', function () {
@@ -431,8 +431,10 @@ it('leaves a visit on a day already past alone', function () {
 it('shows the review pass a visit as a visit, so being scheduled never closes it', function () {
     $w = abbeyThread();
     $reviews = [];
+    // A visit the company's own people set stays on the planner (a day an
+    // outsider sets becomes a task on first read since 2026-11-05).
     fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
-        ? [visitItem('Backsplash Template', '2026-10-29', '11:00', '13:00', [$w['thursday']->id])]
+        ? [visitItem('Backsplash Template', '2026-10-29', '11:00', '13:00', [$w['thursday']->id], owner: 'GS')]
         : [], fn (array $ids) => array_map(fn ($id) => ['id' => $id, 'action' => 'keep', 'reason' => ''], $ids), $reviews);
 
     app(ProjectActionItemExtractor::class)->run($w['project']);
