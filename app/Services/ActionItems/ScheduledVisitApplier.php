@@ -58,7 +58,12 @@ class ScheduledVisitApplier
 
         $task = $this->linkedTask($item) ?? $this->matcher->matchExistingTask((int) $item->project_id, (string) $item->title, $date);
 
-        if (! $task && self::isInspection((string) $item->title)) {
+        // An inspection the building department set, or a delivery a
+        // supplier's carrier set ("our driver will be arriving next Tuesday
+        // the 10th in the afternoon" — Porch Windows Direct order 807,
+        // 2026-11-05): the day is decided by someone else, so the task is
+        // made rather than suggested.
+        if (! $task && (self::isInspection((string) $item->title) || self::isDelivery((string) $item->title))) {
             return $this->createInspection($item, $candidate, $date);
         }
 
@@ -121,6 +126,11 @@ class ScheduledVisitApplier
     public static function isInspection(string $title): bool
     {
         return (bool) preg_match('/\binspect(ion|ions|ed)?\b/i', $title);
+    }
+
+    public static function isDelivery(string $title): bool
+    {
+        return (bool) preg_match('/\bdeliver(y|ies|ed)?\b/i', $title);
     }
 
     /**

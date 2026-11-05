@@ -150,9 +150,24 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
             '/^\s*_{10,}\s*$/m',
         ];
 
+        // A forward IS the new message. Mark's "FYI" over Thru Traffic Haul's
+        // "our driver will be arriving next Tuesday the 10th" (2026-11-05)
+        // read as a two-word note with history under it: the forwarded
+        // header's From:/Date: lines matched the reply markers, the planner
+        // never saw the delivery, and no task was made. The cut now starts
+        // after the forwarded header, at the first reply quoted inside it.
+        $from = 0;
+        if (preg_match('/^\s*(-{3,}\s*Forwarded message\s*-{3,}|Begin forwarded message:)\s*$/mi', $body, $forward, PREG_OFFSET_CAPTURE)
+            && str_word_count(strip_tags(substr($body, 0, $forward[0][1]))) < 40) {
+            $header = substr($body, $forward[0][1]);
+            $from = preg_match('/^\s*(To|Cc|Subject):\s.+$(?:\R(?!\s*(From|Date|Sent|To|Cc|Subject):).*)?/mi', $header, $end, PREG_OFFSET_CAPTURE)
+                ? $forward[0][1] + $end[0][1] + strlen($end[0][0])
+                : $forward[0][1] + strlen($forward[0][0]);
+        }
+
         $cut = strlen($body);
         foreach ($markers as $marker) {
-            if (preg_match($marker, $body, $match, PREG_OFFSET_CAPTURE) && $match[0][1] > 0) {
+            if (preg_match($marker, $body, $match, PREG_OFFSET_CAPTURE, $from) && $match[0][1] > $from) {
                 $cut = min($cut, $match[0][1]);
             }
         }

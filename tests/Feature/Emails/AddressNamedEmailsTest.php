@@ -165,6 +165,26 @@ it('makes the inspection the village set into a task with its day and afternoon 
         ->and(Task::query()->where('project_id', $w['violet']->id)->count())->toBe(2);
 });
 
+it('makes a delivery the supplier\'s carrier set into a task with its day and afternoon window', function () {
+    // Mark's forward of Thru Traffic Haul's "our driver will be arriving next
+    // Tuesday the 10th in the afternoon" (Porch Windows Direct order 807,
+    // 2026-11-05) made no task: only inspections did. A delivery's day is
+    // the carrier's to set, so it is a task, not a suggestion.
+    $w = violetWorld();
+    $date = now('America/Chicago')->next('Tuesday')->toDateString();
+    $item = ProjectActionItem::create(['fingerprint' => md5('Porch Windows Direct Delivery'), 'project_id' => $w['violet']->id, 'title' => 'Porch Windows Direct Delivery', 'owner' => 'Porch Windows Direct', 'due_on' => $date, 'start_time' => '12:00', 'end_time' => '17:00', 'status' => ProjectActionItem::STATUS_OPEN, 'first_mentioned_at' => now(), 'last_mentioned_at' => now()]);
+
+    $task = app(ScheduledVisitApplier::class)->apply($item, ['at' => Carbon::now(), 'source' => ['kind' => 'email', 'id' => 323, 'excerpt' => 'Our driver will be arriving next Tuesday the 10th in the afternoon.']]);
+
+    expect($task)->not->toBeNull()
+        ->and($task->title)->toBe('Porch Windows Direct Delivery')
+        ->and($task->start_date->toDateString())->toBe($date)
+        ->and((array) data_get($task->options, "time_settings.$date"))->toBe(['use_time' => true, 'start_time' => '12:00', 'end_time' => '17:00'])
+        ->and(data_get($task->options, 'scheduled_from.id'))->toBe(323)
+        ->and($item->fresh()->status)->toBe(ProjectActionItem::STATUS_TASK)
+        ->and(Task::query()->where('project_id', $w['violet']->id)->count())->toBe(1);
+});
+
 it('dates an undated inspection task the team already made instead of adding one, and leaves other visits for a person', function () {
     $w = violetWorld();
     $date = now('America/Chicago')->addDays(2)->toDateString();
@@ -173,7 +193,9 @@ it('dates an undated inspection task the team already made instead of adding one
     $inspection = ProjectActionItem::create(['fingerprint' => md5('Water Service Inspection'), 'project_id' => $w['violet']->id, 'title' => 'Water Service Inspection', 'due_on' => $date, 'start_time' => '13:00', 'end_time' => '16:00', 'status' => ProjectActionItem::STATUS_OPEN, 'first_mentioned_at' => now(), 'last_mentioned_at' => now()]);
     expect(app(ScheduledVisitApplier::class)->apply($inspection, ['at' => Carbon::now(), 'source' => ['kind' => 'email', 'id' => 7]])?->id)->toBe($planned->id);
 
-    $delivery = ProjectActionItem::create(['fingerprint' => md5('Dumpster Delivery'), 'project_id' => $w['violet']->id, 'title' => 'Dumpster Delivery', 'due_on' => $date, 'status' => ProjectActionItem::STATUS_OPEN, 'first_mentioned_at' => now(), 'last_mentioned_at' => now()]);
-    expect(app(ScheduledVisitApplier::class)->apply($delivery, ['at' => Carbon::now(), 'source' => ['kind' => 'email', 'id' => 8]]))->toBeNull()
+    // A visit that is neither an inspection nor a delivery — a designer's
+    // walkthrough — still waits on the planner for a person to decide.
+    $walkthrough = ProjectActionItem::create(['fingerprint' => md5('Designer Walkthrough'), 'project_id' => $w['violet']->id, 'title' => 'Designer Walkthrough', 'due_on' => $date, 'status' => ProjectActionItem::STATUS_OPEN, 'first_mentioned_at' => now(), 'last_mentioned_at' => now()]);
+    expect(app(ScheduledVisitApplier::class)->apply($walkthrough, ['at' => Carbon::now(), 'source' => ['kind' => 'email', 'id' => 8]]))->toBeNull()
         ->and(Task::query()->where('project_id', $w['violet']->id)->count())->toBe(1);
 });

@@ -198,6 +198,25 @@ it('cuts the quoted history off an email', function () {
         ->and(SummarizeEmailMessage::latestPart("Approved.\n\n-----Original Message-----\nFrom: Patryk"))->toBe('Approved.');
 });
 
+it('keeps a forwarded message as the new message, cutting only the reply quoted inside it', function () {
+    // Mark's "FYI" over the carrier's delivery notice (2026-11-05): the
+    // forwarded header's From:/Date: lines read as quoted history, leaving
+    // two words for the planner to read — and no delivery task.
+    $forward = "FYI\n\n---------- Forwarded message ---------\nFrom: Thru Traffic Haul <haul@example.test>\nDate: Thu, Nov 5, 2026 at 9:18 AM\nSubject: Re: Porch Windows Direct Order 807\nTo: Eric Kube <eric@example.test>\nCC: Mark Brodson <mark@example.test>\n\nGood afternoon,\nOur driver will be arriving next Tuesday the 10th in the afternoon.\n\nOn Nov 3, 2026, at 7:15 PM, Eric Kube wrote:\n> Could you give Mark an update";
+
+    $latest = SummarizeEmailMessage::latestPart($forward);
+
+    expect($latest)->toContain('Our driver will be arriving next Tuesday the 10th in the afternoon.')
+        ->toContain('Porch Windows Direct Order 807')
+        ->not->toContain('Could you give Mark an update')
+        ->not->toContain('Eric Kube wrote');
+
+    // A real note over the forward is still the lead; "Begin forwarded message:" is a forward too.
+    expect(SummarizeEmailMessage::latestPart("See the delivery date below — can someone be there?\n\nBegin forwarded message:\n\nFrom: Carrier <c@example.test>\nDate: November 5, 2026\nTo: Mark\nSubject: Order 807\n\nArriving Tuesday afternoon."))
+        ->toContain('can someone be there?')
+        ->toContain('Arriving Tuesday afternoon.');
+});
+
 it('merges a project\'s calls, texts and emails newest first, a page at a time', function () {
     $world = serviceCallWorld();
     $digits = substr(preg_replace('/\D/', '', $world['katie']->cell_phone), -10);
