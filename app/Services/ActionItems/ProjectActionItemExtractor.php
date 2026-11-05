@@ -188,20 +188,9 @@ class ProjectActionItemExtractor
         // the to-dos come from the summary's own action items above.
         $lines = [];
         foreach ($calls as $call) {
-            $summary = trim((string) ($call->transcript?->summary ?? ''));
-            if ($summary === '') {
-                continue;
+            if ($line = $this->callLine($call)) {
+                $lines[] = $line;
             }
-            $nextSteps = collect((array) ($call->transcript?->next_steps ?? []))->filter(fn ($step) => is_string($step) && trim($step) !== '')->implode('; ');
-            $topics = collect((array) ($call->transcript?->topics ?? []))->filter(fn ($topic) => is_string($topic) && trim($topic) !== '')->implode('; ');
-            $at = Carbon::parse($call->created_at);
-            $lines[] = [
-                'id' => $call->id,
-                'at' => $at,
-                'speaker' => 'Call summary',
-                'text' => trim($summary.($nextSteps !== '' ? " Next steps: {$nextSteps}." : '').($topics !== '' ? " Topics: {$topics}." : '')),
-                'source' => ['kind' => 'call', 'id' => $call->id, 'thread_id' => null, 'at' => $at->toIso8601String(), 'excerpt' => Str::limit($summary, 180, '…')],
-            ];
         }
         foreach (array_chunk($lines, self::CHUNK) as $chunk) {
             foreach ($this->readMessages($project, $chunk, 'call', ['project_id' => $project->id]) as $candidate) {
@@ -558,27 +547,34 @@ class ProjectActionItemExtractor
      * @param  array<string, mixed>  $logContext
      * @return list<array<string, mixed>>
      */
-    protected function readMessages(Project $project, array $lines, string $medium, array $logContext = []): array
+    protected function readMessages(?Project $project, array $lines, string $medium, array $logContext = [], ?int $vendorId = null): array
     {
         $apiKey = (string) config('services.openai.api_key');
         if ($apiKey === '' || $lines === []) {
             return [];
         }
 
+        $timezone = $project ? $this->timezone($project) : $this->timezoneOf($vendorId);
         $byId = collect($lines)->keyBy('id');
         $rendered = collect($lines)
-            ->map(fn (array $line) => sprintf('#%d [%s] %s: %s', $line['id'], $line['at']->copy()->setTimezone($this->timezone($project))->format('Y-m-d H:i D'), $line['speaker'], Str::limit($line['text'], $medium === 'text' ? 600 : 1500, '…')))
+            ->map(fn (array $line) => sprintf('#%d [%s] %s: %s', $line['id'], $line['at']->copy()->setTimezone($timezone)->format('Y-m-d H:i D'), $line['speaker'], Str::limit($line['text'], $medium === 'text' ? 600 : 1500, '…')))
             ->implode("\n");
 
-        $client = $project->client;
+        // No project: the message could not be placed on a job (a designer
+        // calling about a client the model did not recognise); the items
+        // still get read, and wait in the planner for a person to place.
+        $client = $project?->client;
         $people = $client ? $client->users()->pluck('first_name')->filter()->unique()->implode(', ') : '';
+        $where = $project
+            ? 'the project at '.$project->short_address.' — its client ('.$people.')'
+            : 'one of the company\'s jobs (which one is not yet known) — its client';
         $what = match ($medium) {
-            'email' => 'emails between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on the project at '.$project->short_address.' — its client ('.$people.') and the designers, subcontractors and suppliers who write in',
-            'call' => 'summaries of phone calls (summary, next steps, topics) between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on the project at '.$project->short_address.' — its client ('.$people.') and the designers, subcontractors and suppliers who call',
-            default => 'a text-message thread between a remodeling company ("GS", the contractor; its people sign as -PS for Patryk, -GS for Greg) and its client ('.$people.') about the project at '.$project->short_address,
+            'email' => 'emails between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on '.$where.' and the designers, subcontractors and suppliers who write in',
+            'call' => 'summaries of phone calls (summary, next steps, topics) between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on '.$where.' and the designers, subcontractors and suppliers who call',
+            default => 'a text-message thread between a remodeling company ("GS", the contractor; its people sign as -PS for Patryk, -GS for Greg) and its client ('.$people.') about '.($project ? 'the project at '.$project->short_address : 'one of its jobs (which one is not yet known)'),
         };
 
-        $tasks = $this->scheduleTitles($project);
+        $tasks = $project ? $this->scheduleTitles($project) : [];
         $taskList = $tasks === [] ? '' : "\nTasks already on this project's schedule: ".implode('; ', $tasks).'. When an item is one of these, use that task\'s exact title.';
 
         $system = <<<PROMPT
@@ -708,9 +704,97 @@ PROMPT;
     /** The company's time zone (Chicago), so "tomorrow" in a 9 pm text is the right day. */
     protected function timezone(Project $project): string
     {
-        $zone = \App\Models\Vendor::withoutGlobalScopes()->whereKey($project->belongs_to_vendor_id)->value('timezone');
+        return $this->timezoneOf((int) $project->belongs_to_vendor_id);
+    }
+
+    protected function timezoneOf(?int $vendorId): string
+    {
+        $zone = $vendorId ? \App\Models\Vendor::withoutGlobalScopes()->whereKey($vendorId)->value('timezone') : null;
 
         return is_string($zone) && $zone !== '' ? $zone : 'America/Chicago';
+    }
+
+    // ── Unplaced: a call or email about a job the model could not name ───
+
+    /**
+     * The line a call's summary makes for the reading pass, or null when it
+     * has no summary yet. Shared by the project pass and the unplaced one.
+     *
+     * @return array{id: int, at: Carbon, speaker: string, text: string, source: array<string, mixed>}|null
+     */
+    public function callLine(CallLog $call): ?array
+    {
+        $summary = trim((string) ($call->transcript?->summary ?? ''));
+        if ($summary === '') {
+            return null;
+        }
+        $nextSteps = collect((array) ($call->transcript?->next_steps ?? []))->filter(fn ($step) => is_string($step) && trim($step) !== '')->implode('; ');
+        $topics = collect((array) ($call->transcript?->topics ?? []))->filter(fn ($topic) => is_string($topic) && trim($topic) !== '')->implode('; ');
+        $at = Carbon::parse($call->created_at);
+
+        return [
+            'id' => $call->id,
+            'at' => $at,
+            'speaker' => 'Call summary',
+            'text' => trim($summary.($nextSteps !== '' ? " Next steps: {$nextSteps}." : '').($topics !== '' ? " Topics: {$topics}." : '')),
+            'source' => ['kind' => 'call', 'id' => $call->id, 'thread_id' => null, 'at' => $at->toIso8601String(), 'excerpt' => Str::limit($summary, 180, '…')],
+        ];
+    }
+
+    /** @return array{id: int, at: Carbon, speaker: string, text: string, source: array<string, mixed>}|null */
+    public function emailLine(EmailMessage $email): ?array
+    {
+        $text = trim((string) preg_replace('/\s+/', ' ', \App\Jobs\SummarizeEmailMessage::latestPart((string) $email->body_text)));
+        if (! self::isWorthReading($text) || self::isOurInvitation($text)) {
+            return null;
+        }
+        $at = Carbon::parse($email->sent_at);
+
+        return [
+            'id' => $email->id,
+            'at' => $at,
+            'speaker' => $email->isInbound() ? $this->emailSender($email) : 'GS',
+            'text' => trim(($email->subject ? 'Subject: '.$email->subject.' — ' : '').$text),
+            'source' => ['kind' => 'email', 'id' => $email->id, 'thread_id' => null, 'at' => $at->toIso8601String(), 'excerpt' => Str::limit($text, 180, '…'), 'subject' => $email->subject],
+        ];
+    }
+
+    /**
+     * Read one unplaced call or email and keep what it asks for as items
+     * with no project, in the company's planner under "Needs a project"
+     * (Patryk, 2026-11-05: a task without a project beats a task nobody
+     * made). Visits keep their day and time so placing the item can make
+     * the task at once. Re-reading the same message updates, never doubles.
+     *
+     * @param  array{id: int, at: Carbon, speaker: string, text: string, source: array<string, mixed>}  $line
+     * @return list<ProjectActionItem>
+     */
+    public function readUnplaced(array $line, string $medium, int $vendorId): array
+    {
+        $items = [];
+        foreach ($this->readMessages(null, [$line], $medium, ['unplaced' => $line['source']], $vendorId) as $candidate) {
+            if ($candidate['kind'] === 'done') {
+                continue;
+            }
+            $source = $candidate['source'];
+            $items[] = ProjectActionItem::updateOrCreate(
+                ['project_id' => null, 'belongs_to_vendor_id' => $vendorId, 'fingerprint' => ProjectActionItem::fingerprintFor($candidate['title'])],
+                [
+                    'title' => $candidate['title'],
+                    'owner' => $candidate['owner'],
+                    'due_on' => $candidate['due_on'],
+                    'start_time' => $candidate['start_time'] ?? null,
+                    'end_time' => $candidate['end_time'] ?? null,
+                    'status' => ProjectActionItem::STATUS_OPEN,
+                    'mentions' => 1,
+                    'first_mentioned_at' => $candidate['at'],
+                    'last_mentioned_at' => $candidate['at'],
+                    'sources' => [$source],
+                ],
+            );
+        }
+
+        return $items;
     }
 
     /** "11:00" from the model's "11:00" / "11:00:00"; null for anything else. */

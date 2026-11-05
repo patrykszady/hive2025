@@ -144,6 +144,8 @@ it('still waits in the unplaced inbox when it is about a job but the job is uncl
     (new SummarizeEmailMessage($email->id))->handle();
 
     expect($email->fresh()->isUnplaced())->toBeTrue();
+    Queue::assertNotPushed(\App\Jobs\ExtractProjectActionItems::class);
+    Queue::assertPushed(\App\Jobs\ExtractUnplacedActionItems::class, fn ($job) => $job->kind === 'email' && $job->id === $email->id);
 });
 
 it('reads the unplaced inbox again on request, so an email read before the rule leaves it', function () {

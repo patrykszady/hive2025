@@ -57,6 +57,26 @@ it('places a call on the project it is about, and queues the planner read', func
     \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ExtractProjectActionItems::class, fn ($job) => $job->projectId === $w['project']->id);
 });
 
+it('queues the unplaced read when the call is about a job the model could not name', function () {
+    config()->set('call_recording.summarization.driver', 'openai');
+    config()->set('services.openai.api_key', 'test-key');
+    \Illuminate\Support\Facades\Queue::fake();
+    $w = serviceCallWorld('active');
+
+    $callLog = CallLog::create(['call_control_id' => 'cc-unclear', 'direction' => 'incoming', 'from_number' => '+18475550002', 'to_number' => '+12247354200', 'status' => 'completed', 'vendor_id' => $w['vendor']->id]);
+    $transcript = CallTranscript::create(['call_log_id' => $callLog->id, 'engine' => 'assemblyai', 'language' => 'en', 'status' => CallTranscript::STATUS_READY, 'text' => 'Speaker A: The ABS delivery for the kitchen is Monday the 16th.']);
+    Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => json_encode([
+        'summary' => 'The ABS delivery moved to Monday the 16th.', 'action_items' => [], 'topics' => ['ABS delivery'], 'next_steps' => ['ABS delivery arrives Monday the 16th'], 'sentiment' => 'neutral', 'caller_intent' => 'status update',
+        'recording_has_no_message' => false, 'about_a_project' => true, 'project_id' => null,
+    ])]]]])]);
+
+    (new SummarizeCallTranscript($transcript->id))->handle();
+
+    expect($callLog->fresh()->project_id)->toBeNull();
+    \Illuminate\Support\Facades\Queue::assertNotPushed(\App\Jobs\ExtractProjectActionItems::class);
+    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ExtractUnplacedActionItems::class, fn ($job) => $job->kind === 'call' && $job->id === $callLog->id);
+});
+
 it('leaves a call that is not about a job on no project', function () {
     config()->set('call_recording.summarization.driver', 'openai');
     config()->set('services.openai.api_key', 'test-key');
@@ -74,4 +94,5 @@ it('leaves a call that is not about a job on no project', function () {
 
     expect($callLog->fresh()->project_id)->toBeNull();
     \Illuminate\Support\Facades\Queue::assertNotPushed(\App\Jobs\ExtractProjectActionItems::class);
+    \Illuminate\Support\Facades\Queue::assertNotPushed(\App\Jobs\ExtractUnplacedActionItems::class);
 });

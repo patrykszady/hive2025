@@ -11,6 +11,8 @@ use App\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
+require_once __DIR__.'/../../Support/planner-action-fixtures.php';
+
 uses(RefreshDatabase::class);
 
 // =========================================================================
@@ -19,62 +21,6 @@ uses(RefreshDatabase::class);
 // chip on the project column in every view and a modal to act on them: make
 // a task (the task dialog, prefilled), done, or dismiss.
 // =========================================================================
-
-/**
- * @return array{user: User, vendor: Vendor, project: Project}
- */
-function actionPlannerFixture(): array
-{
-    $vendor = Vendor::factory()->create(['business_type' => 'GC']);
-    $user = User::query()->create([
-        'first_name' => 'Planner', 'last_name' => 'Admin',
-        'email' => 'planner-items-'.uniqid().'@example.test',
-        'cell_phone' => '224'.rand(1000000, 9999999),
-        'primary_vendor_id' => $vendor->id,
-    ]);
-    $user->vendors()->attach($vendor->id, ['role_id' => 1]);
-    test()->actingAs($user);
-
-    $client = Client::factory()->create();
-    $client->vendors()->attach($vendor->id);
-    $project = Project::factory()->create(['address' => '3154 Violet', 'project_name' => 'Home Renovation', 'client_id' => $client->id]);
-    $project->vendors()->attach($vendor->id, ['client_id' => $client->id]);
-
-    return ['user' => $user, 'vendor' => $vendor, 'project' => $project];
-}
-
-function actionItemRow(Project $project, string $title, array $extra = []): ProjectActionItem
-{
-    return ProjectActionItem::create(array_merge([
-        'project_id' => $project->id,
-        'title' => $title,
-        'owner' => 'Patryk',
-        'status' => ProjectActionItem::STATUS_OPEN,
-        'mentions' => 1,
-        'first_mentioned_at' => now()->subDay(),
-        'last_mentioned_at' => now()->subDay(),
-        'sources' => [['kind' => 'call', 'id' => 7, 'thread_id' => null, 'at' => now()->subDay()->toIso8601String(), 'excerpt' => 'Patryk: '.$title]],
-        'fingerprint' => ProjectActionItem::fingerprintFor($title),
-    ], $extra));
-}
-
-/** CardsIndex with activeProjects stubbed: the real query needs MySQL's JSON_OVERLAPS. */
-function plannerWithProjects(array $projects): CardsIndex
-{
-    $component = new class extends CardsIndex
-    {
-        public $stubProjects;
-
-        #[\Livewire\Attributes\Computed]
-        public function activeProjects()
-        {
-            return $this->stubProjects;
-        }
-    };
-    $component->stubProjects = collect($projects);
-
-    return $component;
-}
 
 it('counts and lists the open items per active project, newest mention first', function () {
     ['project' => $project] = actionPlannerFixture();

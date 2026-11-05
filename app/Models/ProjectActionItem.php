@@ -31,6 +31,7 @@ class ProjectActionItem extends Model
 
     protected $fillable = [
         'project_id',
+        'belongs_to_vendor_id',
         'title',
         'owner',
         'due_on',
@@ -130,6 +131,18 @@ class ProjectActionItem extends Model
     }
 
     /** Still to be acted on: not done, not dismissed, not yet a Task. */
+    /** Items the AI could not place on a job — the planner's "Needs a project" group. */
+    public function scopeUnplaced(Builder $query, int $vendorId): Builder
+    {
+        return $query->whereNull('project_id')->where('belongs_to_vendor_id', $vendorId);
+    }
+
+    /** A visit (a dated appointment, delivery, inspection) rather than a to-do. */
+    public function isVisit(): bool
+    {
+        return collect($this->sources ?? [])->contains(fn ($source) => ! empty($source['visit']));
+    }
+
     public function scopeOpen(Builder $query): Builder
     {
         return $query->where('status', self::STATUS_OPEN);

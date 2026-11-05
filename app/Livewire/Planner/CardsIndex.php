@@ -2584,7 +2584,88 @@ class CardsIndex extends Component
             ];
         }
 
+        // Key 0: what the AI read from calls and emails it could not place —
+        // "Needs a project", never parked as older, always worth a look.
+        $unplaced = $this->unplacedActionItems;
+        if ($unplaced->isNotEmpty()) {
+            $map[0] = [
+                'title' => 'Needs a project',
+                'recent' => $unplaced->count(),
+                'older' => 0,
+                'groups' => $unplaced
+                    ->sortBy(fn (ProjectActionItem $item) => $rank($item->owner).'|'.Str::lower((string) $item->owner).'|'.sprintf('%020d', PHP_INT_MAX - ($item->last_mentioned_at?->getTimestamp() ?? 0)))
+                    ->groupBy(fn (ProjectActionItem $item) => $item->owner ?: 'Unassigned')
+                    ->map(fn (Collection $rows) => $rows->values())
+                    ->all(),
+            ];
+        }
+
         return $map;
+    }
+
+    /**
+     * Items the AI read from a call or email it could not place on a job
+     * (ExtractUnplacedActionItems) — the planner's "Needs a project" group,
+     * key 0 in the modal, each with a project to pick (Patryk, 2026-11-05).
+     *
+     * @return Collection<int, ProjectActionItem>
+     */
+    #[Computed]
+    public function unplacedActionItems(): Collection
+    {
+        $vendorId = $this->plannerVendorId();
+        if (! $vendorId) {
+            return collect();
+        }
+
+        return ProjectActionItem::query()->open()->unplaced($vendorId)->orderByDesc('last_mentioned_at')->get();
+    }
+
+    /**
+     * Put an unplaced item on the job it is about. The call or email it came
+     * from takes the project too (so what it says next is read there), and a
+     * dated visit becomes the project's task at once when the day is
+     * someone else's to set (ScheduledVisitApplier), or dates the matching
+     * task the team already has.
+     */
+    public function placeActionItem(int $itemId, int $projectId): void
+    {
+        $item = $this->visibleActionItem($itemId);
+        $projects = collect($this->activeProjects)->keyBy('id');
+        if (! $item || $item->project_id || ! $projects->has($projectId)) {
+            return;
+        }
+
+        $item->update(['project_id' => $projectId]);
+
+        foreach ((array) ($item->sources ?? []) as $source) {
+            $model = match ($source['kind'] ?? null) {
+                'call' => \App\Models\CallLog::withoutGlobalScopes()->find($source['id'] ?? 0),
+                'email' => \App\Models\EmailMessage::withoutGlobalScopes()->find($source['id'] ?? 0),
+                default => null,
+            };
+            if ($model && ! $model->project_id) {
+                $model->forceFill(['project_id' => $projectId])->saveQuietly();
+            }
+        }
+
+        $last = collect($item->sources ?? [])->last();
+        if ($item->isVisit() && $item->due_on && is_array($last)) {
+            app(\App\Services\ActionItems\ScheduledVisitApplier::class)->apply(
+                $item->fresh(),
+                ['at' => \Illuminate\Support\Carbon::parse($last['at'] ?? now()), 'source' => $last],
+            );
+        }
+
+        $this->forgetActionItemCaches();
+    }
+
+    /** The signed-in person's company — whose unplaced items the planner shows. */
+    protected function plannerVendorId(): int
+    {
+        $user = auth()->user();
+
+        return (int) ($user?->vendor?->id ?? $user?->primary_vendor_id ?? 0);
     }
 
     public function actionItemDone(int $itemId): void
@@ -2656,12 +2737,17 @@ class CardsIndex extends Component
     /** An item on a project this user can see (Project carries the tenant scope). */
     protected function visibleActionItem(int $itemId): ?ProjectActionItem
     {
-        return ProjectActionItem::query()->whereKey($itemId)->whereHas('project')->first();
+        $vendorId = $this->plannerVendorId();
+
+        return ProjectActionItem::query()
+            ->whereKey($itemId)
+            ->where(fn ($query) => $query->whereHas('project')->orWhere(fn ($unplaced) => $unplaced->whereNull('project_id')->where('belongs_to_vendor_id', $vendorId ?: -1)))
+            ->first();
     }
 
     protected function forgetActionItemCaches(): void
     {
-        unset($this->actionItemCounts, $this->actionItemsByProject);
+        unset($this->actionItemCounts, $this->actionItemsByProject, $this->unplacedActionItems);
     }
 
     public function render()

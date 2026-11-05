@@ -996,6 +996,19 @@
         </flux:modal>
     </div>
 
+    {{-- Items the AI read from a call or email it could not place on a job:
+         a pill that opens the same modal on its "Needs a project" group. --}}
+    @if ($this->unplacedActionItems->isNotEmpty())
+        <div class="fixed bottom-4 right-4 z-30">
+            <flux:button
+                variant="primary"
+                size="sm"
+                icon="question-mark-circle"
+                x-on:click="window.dispatchEvent(new CustomEvent('open-action-items', { detail: { projectId: 0 } }))"
+            >{{ $this->unplacedActionItems->count() }} {{ \Illuminate\Support\Str::plural('item', $this->unplacedActionItems->count()) }} need a project</flux:button>
+        </div>
+    @endif
+
     {{-- From calls, texts & email: the open action items a project's calls,
          texts and email asked for (ProjectActionItem), to book, tick off or
          dismiss. --}}
@@ -1060,6 +1073,18 @@
                                             @endforeach
                                         </div>
                                     </div>
+                                    @if ((int) $projectId === 0)
+                                        {{-- Which job: picking one places the item (and the call or
+                                             email it came from), and makes the task for a dated visit. --}}
+                                        <div class="w-44 shrink-0">
+                                            <flux:select size="xs" wire:change="placeActionItem({{ (int) $item->id }}, $event.target.value)" aria-label="Which project is this about?">
+                                                <option value="">Which project?</option>
+                                                @foreach ($this->activeProjects as $candidate)
+                                                    <option value="{{ (int) $candidate->id }}">{{ $candidate->short_address }}</option>
+                                                @endforeach
+                                            </flux:select>
+                                        </div>
+                                    @endif
                                     <div class="flex shrink-0 items-center gap-0.5">
                                         <flux:button size="xs" variant="subtle" icon="plus" x-on:click="toTask({{ (int) $item->id }})" title="Make it a task" aria-label="Make it a task" />
                                         <flux:button size="xs" variant="subtle" icon="check" wire:click="actionItemDone({{ (int) $item->id }})" title="Done" aria-label="Done" />

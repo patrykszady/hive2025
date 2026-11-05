@@ -134,6 +134,10 @@ class SummarizeEmailMessage implements ShouldBeUnique, ShouldQueue
         // together into one pass.
         if ($projectId) {
             ExtractProjectActionItems::dispatch($projectId)->delay(now()->addMinutes(10));
+        } elseif ($aboutAProject) {
+            // About a job the model could not name: its items wait in the
+            // planner's "Needs a project" group rather than being lost.
+            ExtractUnplacedActionItems::dispatch('email', $email->id);
         }
     }
 

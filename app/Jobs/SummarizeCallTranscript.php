@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Jobs\ExtractProjectActionItems;
+use App\Jobs\ExtractUnplacedActionItems;
 use App\Livewire\Planner\CardsIndex;
 use App\Models\CallTranscript;
 use App\Models\Client;
@@ -188,6 +189,10 @@ PROMPT;
         }
         if ($callLog?->project_id && ! ($parsed['recording_has_no_message'] ?? false)) {
             ExtractProjectActionItems::dispatch((int) $callLog->project_id)->delay(now()->addMinutes(10));
+        } elseif ($callLog && ($parsed['about_a_project'] ?? true) !== false && ! ($parsed['recording_has_no_message'] ?? false)) {
+            // About a job, but which one the model could not say: the items
+            // still get read, into the planner's "Needs a project" group.
+            ExtractUnplacedActionItems::dispatch('call', (int) $callLog->id);
         }
 
         Log::channel('call_ai')->info('Summarization complete', [
