@@ -15,6 +15,7 @@ use App\Models\SmsGroupThread;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Support\Leads\MissedYouTemplate;
 use App\Jobs\SendLeadReplyJob;
 use App\Livewire\Leads\PickTimes;
 use App\Services\AdminCalendarBusy;
@@ -614,7 +615,12 @@ class LeadReplyComposer
     }
 
     /**
-     * @return array{label: string, virtual: bool, task_id: int, past: bool}|null
+     * `past` is by day (the modal's "that date has passed" callout);
+     * `started` is by the clock — the consult's start time (or its day, when
+     * it has none) is behind us in the company timezone, which is what
+     * "sorry we missed you" needs the same morning.
+     *
+     * @return array{label: string, virtual: bool, task_id: int, past: bool, started: bool}|null
      */
     public function bookedConsult(?Client $client, ?Lead $lead, string $fullName): ?array
     {
@@ -645,12 +651,20 @@ class LeadReplyComposer
         }
 
         $tz = PickTimes::timezone();
+        // From the date string, in the company timezone: start_date is a UTC
+        // midnight once cast, and parsing that instance keeps UTC, so "15:00"
+        // became 9:00 Chicago and a consult still hours away read as started.
+        $startTime = ($settings['use_time'] ?? false) && ! empty($settings['start_time'])
+            ? (string) $settings['start_time']
+            : '00:00';
+        $start = Carbon::createFromFormat('Y-m-d H:i', $date.' '.$startTime, $tz);
 
         return [
             'label' => $label,
             'virtual' => data_get($task->options, 'meeting_location_type') === 'virtual',
             'task_id' => $task->id,
             'past' => Carbon::parse($task->start_date, $tz)->startOfDay()->lt(Carbon::now($tz)->startOfDay()),
+            'started' => $start->lte(Carbon::now($tz)),
         ];
     }
 
@@ -757,6 +771,21 @@ class LeadReplyComposer
                 .'</a> that suit you and we&rsquo;ll confirm ASAP.';
         }
 
+        // "Sorry we missed you" (the Missed You template): the consult the
+        // office marked missed, or — while previewing before the mark — the
+        // booked consult that has started. The line ends without a full
+        // stop so the template can carry on ("…, we left our business card
+        // at your door."); the link is its own placeholder so the ask around
+        // it is the template's to word.
+        $missedLabel = $lead->missedConsult()['label']
+            ?? ($booked !== null && ($booked['started'] ?? false) ? $booked['label'] : null);
+        $missedLine = $missedLabel !== null
+            ? 'Sorry we missed you &mdash; we had your consultation with '.e($vendorName).' scheduled for '
+                .'<strong>'.e($missedLabel).'</strong> and weren&rsquo;t able to connect'
+            : 'Sorry we weren&rsquo;t able to connect for your consultation with '.e($vendorName);
+        $pickTimesLink = '<a href="'.e($lead->availabilityUrl()).'">pick new consultation times</a>';
+        $missedBlock = $missedLine.'. Let&rsquo;s find a new time: please '.$pickTimesLink.' that suit you and we&rsquo;ll confirm ASAP.';
+
         return str_replace(
             [
                 '{{client_name}}',
@@ -769,6 +798,9 @@ class LeadReplyComposer
                 '{{lead_availability}}',
                 '{{lead_intro}}',
                 '{{lead_time_block}}',
+                '{{missed_consult_block}}',
+                '{{missed_consult_line}}',
+                '{{pick_times_link}}',
                 '{{vendor_name}}',
                 '{{short_vendor_name}}',
                 '{{sender_first_name}}',
@@ -786,6 +818,9 @@ class LeadReplyComposer
                 $availabilityList,
                 $intro,
                 $timeBlock,
+                $missedBlock,
+                $missedLine,
+                $pickTimesLink,
                 $vendorName,
                 $shortVendorName,
                 $senderFirstName,
@@ -901,6 +936,7 @@ class LeadReplyComposer
                 : CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
 
             $this->parkProjectInConsult($project, $task);
+            $lead->clearMissedConsult();
 
             return true;
         }
@@ -934,6 +970,7 @@ class LeadReplyComposer
         CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
 
         $this->parkProjectInConsult($project, $task);
+        $lead->clearMissedConsult();
 
         return true;
     }
@@ -964,7 +1001,7 @@ class LeadReplyComposer
 
     // ---- The companion text (mirrors textAlongsideEmail()/textForEmail()) ----
 
-    public function textAlongsideEmail(bool $booked, ?Client $client, Lead $lead, string $subject, string $emailBody, string $fullName): ?string
+    public function textAlongsideEmail(bool $booked, ?Client $client, Lead $lead, string $subject, string $emailBody, string $fullName, string $variant = ''): ?string
     {
         $numbers = $this->clientTextNumbers($client, $lead);
         if ($numbers === []) {
@@ -991,7 +1028,7 @@ class LeadReplyComposer
                 return 'Not texted — they have not replied START yet.';
             }
 
-            $this->sms->sendToThread($thread, $this->textForEmail($booked, $thread, $client, $lead, $subject, $emailBody, $fullName), [], auth()->id());
+            $this->sms->sendToThread($thread, $this->textForEmail($booked, $thread, $client, $lead, $subject, $emailBody, $fullName, $variant), [], auth()->id());
         } catch (\Throwable $e) {
             Log::warning('Lead email: companion text failed', ['lead_id' => $lead->id, 'thread_id' => $thread?->id, 'error' => $e->getMessage()]);
 
@@ -1057,7 +1094,7 @@ class LeadReplyComposer
         return $query->latest('last_activity_at')->first();
     }
 
-    public function textForEmail(bool $booked, SmsGroupThread $thread, ?Client $client, Lead $lead, string $subject, string $emailBody, string $fullName): string
+    public function textForEmail(bool $booked, SmsGroupThread $thread, ?Client $client, Lead $lead, string $subject, string $emailBody, string $fullName, string $variant = ''): string
     {
         $vendor = Vendor::find($lead->belongs_to_vendor_id);
         $contractor = trim((string) (data_get($vendor?->options, 'short_name') ?: $vendor?->name)) ?: config('app.name');
@@ -1078,6 +1115,14 @@ class LeadReplyComposer
             return $greeting
                 ."Your consultation with {$contractor} is confirmed for {$consult['label']}{$place}. "
                 ."If this time no longer works for you, you can pick new consultation times here: ".$this->scheduleLink($lead).' and we’ll confirm the new one ASAP.';
+        }
+
+        if ($variant === 'missed') {
+            $missed = $lead->missedConsult();
+
+            return $greeting
+                .'Sorry we missed you'.($missed ? " for your consultation with {$contractor} on {$missed['label']}" : '').'. '
+                .'Pick a new consultation time here: '.$this->scheduleLink($lead).' and we’ll confirm ASAP.';
         }
 
         if (str_contains($emailBody, '/lead/times/')) {
@@ -1180,6 +1225,26 @@ class LeadReplyComposer
             $templateName = $template?->name;
         }
 
+        // "Sorry we missed you" (the Missed You template, picked above the
+        // message and read before sending): the consult on the books must
+        // have started; it is marked missed on the lead, the companion text
+        // says so, and the lead goes back to Replied below. Nothing is
+        // booked unless a slot was picked too — then it is a rebook.
+        $missedYou = $templateName === MissedYouTemplate::NAME;
+        if ($missedYou) {
+            $consult = $this->bookedConsult($client, $lead, $fullName);
+
+            if (! $consult) {
+                return $this->errorResult('No consultation is booked for this lead, so there is nothing to have missed.');
+            }
+
+            if (! $consult['started']) {
+                return $this->errorResult('The consultation ('.$consult['label'].') has not started yet.');
+            }
+
+            $lead->markConsultMissed($consult);
+        }
+
         SendLeadReplyJob::dispatch(
             leadId: $lead->id,
             companyEmailId: $companyEmail->id,
@@ -1226,7 +1291,7 @@ class LeadReplyComposer
             && ($consult = $this->bookedConsult($client, $lead, $fullName)) !== null
             && ! ($consult['past'] ?? true));
 
-        $texted = $this->textAlongsideEmail($confirmed, $client, $lead, (string) $input['subject'], (string) $input['body'], $fullName);
+        $texted = $this->textAlongsideEmail($confirmed, $client, $lead, (string) $input['subject'], (string) $input['body'], $fullName, $missedYou && ! $confirmed ? 'missed' : '');
 
         $unbooked = ! $booked && ($selectedAvailability[0] ?? null) !== null && ! $client;
 
@@ -1234,6 +1299,12 @@ class LeadReplyComposer
             $lead->setStatus('Won');
             $lead->unsetRelation('last_status');
             $newStatus = 'Won';
+        } elseif ($missedYou && in_array($lead->last_status?->title ?? 'New', ['New', 'Won'], true)) {
+            // The ball is with them: a Won lead (its consult was booked)
+            // steps back to waiting, the same as a fresh reply.
+            $lead->setStatus('Replied');
+            $lead->unsetRelation('last_status');
+            $newStatus = 'Replied';
         }
 
         if ($unbooked) {
@@ -1289,6 +1360,60 @@ class LeadReplyComposer
             'body' => $body,
             'selected_template_id' => $template->id,
         ]);
+    }
+
+    /**
+     * The Missed You template, rendered for this lead and sent through
+     * send() — which marks the consult missed, texts "sorry we missed you"
+     * and hands the lead back to Replied. The modal applies the template
+     * above the message instead (LeadCreate::useMissedYouTemplate()) so the
+     * office reads it first; this is the one-call form for the app.
+     *
+     * @param  array{to: list<string>, from: string, consult_meeting_type?: string, nylas_message_id?: ?string, nylas_references?: list<string>, sender_ip?: ?string}  $input
+     * @return array{ok: bool, error: ?string, booked: bool, confirmed: bool, texted: ?string, unbooked: bool, new_status: ?string, recipient_count: int}
+     */
+    public function sendMissedYou(Lead $lead, ?Client $client, User $sender, string $fullName, array $input): array
+    {
+        $template = $this->missedYouTemplate();
+
+        if (! $template) {
+            return $this->errorResult('No email template named "'.MissedYouTemplate::NAME.'" exists.');
+        }
+
+        $placeholderArgs = [
+            $lead, $client, $fullName,
+            $lead->origin, $lead->lead_data['message'] ?? null, $lead->lead_data['address'] ?? null,
+            $input['from'],
+        ];
+        $consultMeetingType = (string) ($input['consult_meeting_type'] ?? 'in_person');
+
+        $subject = $this->replacePlaceholders((string) $template->subject, ...$placeholderArgs, availability: [], selectedAvailability: [], selectedExactTime: null, consultMeetingType: $consultMeetingType);
+        $body = $this->replacePlaceholders((string) $template->body, ...$placeholderArgs, availability: [], selectedAvailability: [], selectedExactTime: null, consultMeetingType: $consultMeetingType);
+
+        return $this->send($lead, $client, $sender, $fullName, [
+            'to' => $input['to'],
+            'from' => $input['from'],
+            'subject' => $subject,
+            'body' => $body,
+            'selected_template_id' => $template->id,
+            'availability' => [],
+            'selected_availability' => [],
+            'selected_exact_time' => null,
+            'project_name' => '',
+            'consult_meeting_type' => $consultMeetingType,
+            'nylas_message_id' => $input['nylas_message_id'] ?? null,
+            'nylas_references' => $input['nylas_references'] ?? [],
+            'sender_ip' => $input['sender_ip'] ?? null,
+        ]);
+    }
+
+    /** The vendor's "Missed You" lead template (scoped like the modal's picker), if it has one. */
+    public function missedYouTemplate(): ?EmailTemplate
+    {
+        return EmailTemplate::query()
+            ->where('type', 'lead')
+            ->where('name', MissedYouTemplate::NAME)
+            ->first();
     }
 
     /**

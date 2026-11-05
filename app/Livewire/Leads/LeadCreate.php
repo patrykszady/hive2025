@@ -996,6 +996,49 @@ class LeadCreate extends Component
      * App\Services\Leads\LeadReplyComposer::sendConsultInvite(), the same
      * service the Hive Contractors app's LeadController calls.
      */
+    /**
+     * "Sorry we missed you" — the booked consult has started and nobody
+     * met. Switches the message to the Missed You template so the office
+     * reads (and can edit) it before Send Email; the send itself marks the
+     * consult missed and hands the lead back to Replied
+     * (LeadReplyComposer::send()).
+     */
+    public function useMissedYouTemplate(): void
+    {
+        $template = app(LeadReplyComposer::class)->missedYouTemplate();
+
+        if (! $template) {
+            Flux::toast(
+                duration: 7000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'No template',
+                text: 'No email template named "Missed You" exists.',
+            );
+
+            return;
+        }
+
+        $this->selectedTemplateId = $template->id;
+        $this->rerenderTemplate();
+    }
+
+    /** Is the Missed You template the one filling the message right now? */
+    #[Computed]
+    public function missedYouTemplateSelected(): bool
+    {
+        return $this->selectedTemplateId !== null
+            && (int) $this->selectedTemplateId === (int) app(LeadReplyComposer::class)->missedYouTemplate()?->id;
+    }
+
+    /** The Missed You template can be offered: the booked consult has started and the template exists. */
+    #[Computed]
+    public function canUseMissedYouTemplate(): bool
+    {
+        return (bool) ($this->bookedConsult['started'] ?? false)
+            && app(LeadReplyComposer::class)->missedYouTemplate() !== null;
+    }
+
     public function sendConsultInvite(): void
     {
         // Same scoping as the modal's template picker (vendor global scope

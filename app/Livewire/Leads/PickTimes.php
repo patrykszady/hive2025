@@ -173,7 +173,11 @@ class PickTimes extends Component
      */
     public static function isRescheduling(?Lead $lead = null): bool
     {
-        return (bool) ($lead?->hasRescheduled() || $lead?->hasBookedConsult());
+        // A missed consult counts too: once it has passed it is no longer
+        // "on the books" (bookedConsultTasks() looks from today on), and the
+        // homeowner we just emailed "sorry we missed you" must not be held
+        // to a first contact's three-day notice.
+        return (bool) ($lead?->hasRescheduled() || $lead?->hasBookedConsult() || $lead?->hasMissedConsult());
     }
 
     /**

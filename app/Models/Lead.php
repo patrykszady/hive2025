@@ -378,6 +378,52 @@ class Lead extends Model
     }
 
     /**
+     * The consult the office said "sorry we missed you" about — set by
+     * LeadReplyComposer::sendMissedYou() when a booked consult had started
+     * and nobody met (Veera, Glenview, 2026-11-05: 11:00 came and went),
+     * cleared the moment a consult is (re)booked. While set, the public
+     * picker treats the homeowner as rescheduling, not as a first contact.
+     *
+     * @return array{at: string, task_id: int, label: string}|null
+     */
+    public function missedConsult(): ?array
+    {
+        $missed = $this->lead_data['consult_missed'] ?? null;
+
+        return is_array($missed) && filled($missed['at'] ?? null) ? $missed : null;
+    }
+
+    public function hasMissedConsult(): bool
+    {
+        return $this->missedConsult() !== null;
+    }
+
+    /** @param  array{task_id: int, label: string}  $consult */
+    public function markConsultMissed(array $consult): void
+    {
+        $data = $this->lead_data;
+        $data['consult_missed'] = [
+            'at' => now()->toDateTimeString(),
+            'task_id' => (int) $consult['task_id'],
+            'label' => (string) $consult['label'],
+        ];
+        $this->lead_data = $data;
+        $this->save();
+    }
+
+    public function clearMissedConsult(): void
+    {
+        if (! $this->hasMissedConsult()) {
+            return;
+        }
+
+        $data = $this->lead_data;
+        unset($data['consult_missed']);
+        $this->lead_data = $data;
+        $this->save();
+    }
+
+    /**
      * Notice required before this lead's homeowner may book a consult on the
      * public picker, in hours. Normally the standard
      * PickTimes::MIN_LEAD_HOURS; an office toggle on a hot lead (the "Consult

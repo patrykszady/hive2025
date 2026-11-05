@@ -65,6 +65,14 @@
                         @endforeach
                     </flux:select>
 
+                    {{-- The booked consult has started: one click switches the
+                         message to the Missed You template (read it, then Send
+                         Email). Not in the callout — Patryk, 2026-11-05. --}}
+                    @if ($this->canUseMissedYouTemplate)
+                        <flux:button wire:click="useMissedYouTemplate" icon="arrow-uturn-left"
+                            wire:loading.attr="disabled" wire:target="useMissedYouTemplate"
+                            :disabled="$this->missedYouTemplateSelected">Sorry we missed you</flux:button>
+                    @endif
                     <flux:button href="{{ route('templates.index') }}" target="_blank" icon="plus">Add</flux:button>
                 </flux:input.group>
 
@@ -77,12 +85,15 @@
                 {{-- Booked consult: what's on the calendar right now, and that
                      picking any slot/time below and sending MOVES it. --}}
                 @if ($this->bookedConsult)
-                    <flux:callout :color="$this->bookedConsult['past'] ? 'amber' : null" icon="calendar-days">
+                    <flux:callout :color="$this->bookedConsult['started'] ? 'amber' : null" icon="calendar-days">
                         <flux:callout.text>
-                            @if ($this->bookedConsult['past'])
+                            @if ($lead?->hasMissedConsult())
+                                Marked missed: <strong>{{ $lead->missedConsult()['label'] }}</strong> — they were emailed
+                                "sorry we missed you" and can pick new times from the link. Propose a day below and send to rebook.
+                            @elseif ($this->bookedConsult['started'])
                                 Consult was scheduled for <strong>{{ $this->bookedConsult['label'] }}</strong>
-                                ({{ $this->bookedConsult['virtual'] ? 'video call' : 'in person' }}) — that date has passed.
-                                Propose a new day below and send to rebook.
+                                ({{ $this->bookedConsult['virtual'] ? 'video call' : 'in person' }}) — that {{ $this->bookedConsult['past'] ? 'date' : 'time' }} has passed.
+                                Propose a new day below and send to rebook{{ $this->missedYouTemplateSelected ? ' — or read the "Sorry we missed you" message below and Send Email' : '' }}.
                             @else
                                 Consult booked: <strong>{{ $this->bookedConsult['label'] }}</strong>
                                 ({{ $this->bookedConsult['virtual'] ? 'video call' : 'in person' }}).
