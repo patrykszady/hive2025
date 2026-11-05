@@ -25,7 +25,7 @@ class ExtractUnplacedActionItems implements ShouldBeUnique, ShouldQueue
 
     public function __construct(public string $kind, public int $id)
     {
-        $this->onQueue('default');
+        $this->onQueue('background');
     }
 
     public function uniqueId(): string

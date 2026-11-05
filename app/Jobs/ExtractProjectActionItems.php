@@ -32,9 +32,15 @@ class ExtractProjectActionItems implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 600; // 10 minutes — matches the dispatch delay
 
+    /**
+     * A read is several model calls (one per thread, embeddings, the
+     * consolidation pass): a busy project runs past the default queue's
+     * 60 s (project 387 timed out there, 2026-11-05), so it runs with the
+     * other slow AI work.
+     */
     public function __construct(public int $projectId)
     {
-        $this->onQueue('default');
+        $this->onQueue('background');
     }
 
     public function uniqueId(): string

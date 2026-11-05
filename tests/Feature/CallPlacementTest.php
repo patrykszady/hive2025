@@ -54,7 +54,7 @@ it('places a call on the project it is about, and queues the planner read', func
         ->toContain('- id '.$w['project']->id.': ')
         ->toContain('- id '.$brodson->id.': Home Renovation, 3154 Violet Ln, Northbrook')
         ->and($callLog->fresh()->project_id)->toBe($w['project']->id);
-    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ExtractProjectActionItems::class, fn ($job) => $job->projectId === $w['project']->id);
+    \Illuminate\Support\Facades\Queue::assertPushedOn('background', \App\Jobs\ExtractProjectActionItems::class, fn ($job) => $job->projectId === $w['project']->id);
 });
 
 it('queues the unplaced read when the call is about a job the model could not name', function () {
@@ -74,7 +74,7 @@ it('queues the unplaced read when the call is about a job the model could not na
 
     expect($callLog->fresh()->project_id)->toBeNull();
     \Illuminate\Support\Facades\Queue::assertNotPushed(\App\Jobs\ExtractProjectActionItems::class);
-    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ExtractUnplacedActionItems::class, fn ($job) => $job->kind === 'call' && $job->id === $callLog->id);
+    \Illuminate\Support\Facades\Queue::assertPushedOn('background', \App\Jobs\ExtractUnplacedActionItems::class, fn ($job) => $job->kind === 'call' && $job->id === $callLog->id);
 });
 
 it('leaves a call that is not about a job on no project', function () {
