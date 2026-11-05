@@ -58,12 +58,15 @@ class ScheduledVisitApplier
 
         $task = $this->linkedTask($item) ?? $this->matcher->matchExistingTask((int) $item->project_id, (string) $item->title, $date);
 
-        // An inspection the building department set, or a delivery a
-        // supplier's carrier set ("our driver will be arriving next Tuesday
-        // the 10th in the afternoon" — Porch Windows Direct order 807,
-        // 2026-11-05): the day is decided by someone else, so the task is
-        // made rather than suggested.
-        if (! $task && (self::isInspection((string) $item->title) || self::isDelivery((string) $item->title))) {
+        // A day decided by someone outside the company is a fact, not a
+        // suggestion: an inspection the building department set, a delivery
+        // a supplier's carrier set ("our driver will be arriving next Tuesday
+        // the 10th in the afternoon" — Porch Windows Direct order 807), an
+        // install the fabricator set ("the Abbey counter install is Tuesday
+        // the 10th, 2-4pm" — Kama, Ultimate Stone; both 2026-11-05). The task
+        // is made. A visit the company's own people set stays on the planner
+        // for a person to put on the schedule.
+        if (! $task && (self::isInspection((string) $item->title) || self::isDelivery((string) $item->title) || $this->setByOutsider($item))) {
             return $this->createInspection($item, $candidate, $date);
         }
 
@@ -131,6 +134,34 @@ class ScheduledVisitApplier
     public static function isDelivery(string $title): bool
     {
         return (bool) preg_match('/\bdeliver(y|ies|ed)?\b/i', $title);
+    }
+
+    /**
+     * Is the visit's owner someone other than the company — a supplier,
+     * fabricator, sub, village, designer? The reading pass names the owner
+     * ("Kama", "Ultimate Stone", "Village of Northbrook") or "GS" for the
+     * company side; the company's own name, short name and its people's
+     * first names are the company too.
+     */
+    protected function setByOutsider(ProjectActionItem $item): bool
+    {
+        $owner = mb_strtolower(trim((string) $item->owner));
+        if ($owner === '' || in_array($owner, ['gs', 'us', 'we', 'team', 'the team', 'company', 'the company'], true)) {
+            return false;
+        }
+
+        $vendorId = $item->project?->belongs_to_vendor_id;
+        $vendor = $vendorId ? Vendor::withoutGlobalScopes()->find($vendorId) : null;
+        $ours = collect([
+            $vendor?->business_name,
+            $vendor?->short_name,
+        ])
+            ->merge($vendor ? $vendor->users()->withoutGlobalScopes()->pluck('users.first_name') : [])
+            ->filter()
+            ->map(fn ($name) => mb_strtolower(trim((string) $name)))
+            ->filter(fn (string $name) => $name !== '');
+
+        return ! $ours->contains(fn (string $name) => $name === $owner || str_contains($owner, $name));
     }
 
     /**
