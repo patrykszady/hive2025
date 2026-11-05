@@ -601,3 +601,47 @@ it('shows the model recent email as evidence too, and can close an item on what 
     $item = ProjectActionItem::where('project_id', $project->id)->where('title', 'Pick up the water heater')->first();
     expect($item->status)->toBe(ProjectActionItem::STATUS_DONE);
 });
+
+it('reads a call\'s summary for the days it sets, and a delivery a supplier set becomes a task', function () {
+    // Jenn's 2026-11-05 call: "ABS delivery is now rescheduled for Monday
+    // the 16th" was a next step, not an action item, so the planner — which
+    // read only a call's action items — never saw it.
+    config(['services.openai.api_key' => 'test-key']);
+    $this->travelTo(Carbon::parse('2026-11-05 15:00:00', 'America/Chicago'));
+    ['project' => $project] = actionItemFixture();
+    $call = transcribedCall('+17732513666', [], '2026-11-05 11:48:00');
+    $call->transcript->update(['summary' => 'Jennifer and Patryk discussed the Abby kitchen.', 'next_steps' => ['ABS delivery arrives Monday the 16th', 'Countertop installed by end of next week'], 'topics' => ['ABS delivery rescheduled to Monday the 16th']]);
+
+    $prompts = [];
+    Http::fake([
+        'api.openai.com/v1/embeddings' => fn ($request) => Http::response(['data' => collect((array) $request['input'])->map(fn ($t, $i) => ['index' => $i, 'embedding' => array_map(fn ($n) => ($n + crc32((string) $t)) % 7 / 7, range(0, 63))])->values()->all()]),
+        'api.openai.com/v1/chat/completions' => function ($request) use (&$prompts, $call) {
+            $name = data_get($request->data(), 'response_format.json_schema.name');
+            if ($name !== 'thread_action_items') {
+                return Http::response(['choices' => [['message' => ['content' => json_encode($name === 'action_item_closures' ? ['decisions' => []] : ['groups' => []])]]]]);
+            }
+            $prompts[] = ['system' => (string) data_get($request->data(), 'messages.0.content'), 'user' => (string) data_get($request->data(), 'messages.1.content')];
+
+            return Http::response(['choices' => [['message' => ['content' => json_encode(['items' => [
+                ['title' => 'ABS Delivery', 'owner' => 'ABS', 'due_date' => '2026-11-16', 'start_time' => null, 'end_time' => null, 'kind' => 'visit', 'message_ids' => [$call->id]],
+                ['title' => 'Email Jennifer the Furniture Medics contact', 'owner' => 'Patryk', 'due_date' => null, 'start_time' => null, 'end_time' => null, 'kind' => 'todo', 'message_ids' => [$call->id]],
+            ]])]]]]);
+        },
+    ]);
+
+    app(ProjectActionItemExtractor::class)->run($project);
+
+    expect($prompts)->toHaveCount(1)
+        ->and($prompts[0]['user'])->toStartWith("Call summaries:\n")
+        ->toContain('#'.$call->id.' [2026-11-05 ')
+        ->toContain(' Call summary: Jennifer and Patryk discussed the Abby kitchen. Next steps: ABS delivery arrives Monday the 16th; Countertop installed by end of next week. Topics: ABS delivery rescheduled to Monday the 16th.')
+        ->and($prompts[0]['system'])->toContain('summaries of phone calls');
+
+    $task = \App\Models\Task::query()->where('project_id', $project->id)->where('title', 'ABS Delivery')->first();
+    expect($task)->not->toBeNull()
+        ->and($task->start_date->toDateString())->toBe('2026-11-16')
+        ->and(data_get($task->options, 'scheduled_from.kind'))->toBe('call')
+        ->and(ProjectActionItem::where('project_id', $project->id)->where('title', 'ABS Delivery')->value('status'))->toBe(ProjectActionItem::STATUS_TASK)
+        // Only the visits come from this pass; the call's own action items are the to-dos.
+        ->and(ProjectActionItem::where('project_id', $project->id)->where('title', 'like', '%Furniture Medics%')->exists())->toBeFalse();
+});

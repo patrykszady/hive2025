@@ -2,7 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Jobs\ExtractProjectActionItems;
+use App\Livewire\Planner\CardsIndex;
 use App\Models\CallTranscript;
+use App\Models\Client;
+use App\Models\Project;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -58,6 +62,22 @@ class SummarizeCallTranscript implements ShouldQueue
             $participantsList = "- {$agentLine}\n- {$otherLine}\n";
         }
 
+        // Which job the call is about, the way an email is placed. Jenn
+        // (J. Peterson Design) called about "the Abby project" on 2026-11-05;
+        // she is no client, so the call sat on no project and the planner —
+        // which reads a project's own calls — never saw "ABS delivery is
+        // Monday the 16th". The company's jobs in a planner status plus the
+        // other party's own are listed; the model picks, or says it is not
+        // about a job.
+        try {
+            $candidates = $callLog && ! $callLog->project_id ? $this->candidateProjects($callLog, $agentUser, $otherUser) : collect();
+            $projectsList = $this->projectsList($candidates);
+        } catch (\Throwable $e) {
+            Log::channel('call_ai')->warning('Call placement skipped: could not list projects', ['call_log_id' => $callLog?->id, 'error' => $e->getMessage()]);
+            $candidates = collect();
+            $projectsList = '';
+        }
+
         $system = <<<PROMPT
 You are an assistant that summarizes phone calls for a construction-management platform.
 Always write the summary, action items, topics, and next steps in {$outputLang}, even if the call was in another language.
@@ -78,6 +98,9 @@ Next steps are the expected upcoming sequence of events (which may overlap with 
 
 Set "recording_has_no_message" to true when the transcript contains NO substantive message and NO meaningful two-way human conversation. This includes: (a) the entire transcript is an automated voicemail/IVR greeting and/or system prompts (e.g. "You've reached my voicemail", "Please record your message after the tone", "I couldn't hear you, please try again"); OR (b) the recording is effectively empty, silent, just background noise, or only a stray word or two / unintelligible fragments with no discernible purpose or request (e.g. a single word like "Ram" or "Hello?" with nothing else). Set it to false whenever a participant actually left a coherent message or a real back-and-forth conversation occurred — even a short one — that conveys any request, information, or intent.
 
+about_a_project: true when the call is about a construction job — its work, schedule, money, materials, selections, permits, inspections, deliveries or a problem with what was built. False for anything else (a sales call, a wrong number, a personal call).
+project_id: null when about_a_project is false or no projects are listed. Otherwise the listed project the call is about — match the client's name (callers often say the homeowner's name, as in "the Abby project" for a client named Abbey), the address, the rooms and the trades. Null when unclear.
+
 Do not invent information that is not in the transcript. Return JSON only, matching the provided schema.
 PROMPT;
 
@@ -89,12 +112,13 @@ PROMPT;
             . "- Other party: {$otherLine}\n"
             . "- Detected language: " . ($transcript->language ?? 'unknown') . "\n\n"
             . "Participants:\n" . $participantsList . "\n"
+            . ($projectsList !== '' ? "Projects:\n{$projectsList}\n" : '')
             . "Transcript:\n" . $labeledText;
 
         $schema = [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['summary', 'action_items', 'topics', 'next_steps', 'sentiment', 'caller_intent', 'recording_has_no_message'],
+            'required' => ['summary', 'action_items', 'topics', 'next_steps', 'sentiment', 'caller_intent', 'recording_has_no_message', 'about_a_project', 'project_id'],
             'properties' => [
                 'summary' => ['type' => 'string'],
                 'action_items' => ['type' => 'array', 'items' => ['type' => 'string']],
@@ -103,6 +127,8 @@ PROMPT;
                 'sentiment' => ['type' => 'string', 'enum' => ['positive', 'neutral', 'negative', 'mixed']],
                 'caller_intent' => ['type' => 'string'],
                 'recording_has_no_message' => ['type' => 'boolean'],
+                'about_a_project' => ['type' => 'boolean'],
+                'project_id' => ['type' => ['integer', 'null']],
             ],
         ];
 
@@ -153,6 +179,17 @@ PROMPT;
             'summarized_at' => now(),
         ]);
 
+        // Placed on the job it is about, and the planner reads it soon —
+        // the same step an email takes once it is placed.
+        $picked = isset($parsed['project_id']) ? (int) $parsed['project_id'] : 0;
+        if ($callLog && ! $callLog->project_id && ($parsed['about_a_project'] ?? true) !== false && $picked && $candidates->contains('id', $picked)) {
+            $callLog->forceFill(['project_id' => $picked])->saveQuietly();
+            Log::channel('call_ai')->info('Call placed on a project from its transcript', ['call_log_id' => $callLog->id, 'project_id' => $picked]);
+        }
+        if ($callLog?->project_id && ! ($parsed['recording_has_no_message'] ?? false)) {
+            ExtractProjectActionItems::dispatch((int) $callLog->project_id)->delay(now()->addMinutes(10));
+        }
+
         Log::channel('call_ai')->info('Summarization complete', [
             'transcript_id' => $transcript->id,
             'call_log_id' => $callLog?->id,
@@ -177,6 +214,53 @@ PROMPT;
 
             $callLog->purgeRecording();
         }
+    }
+
+    /**
+     * The jobs a call could be about: the company's projects in a planner
+     * status (Prep, Scheduled, Active, Service Call — 17 on 2026-11-05),
+     * and the other party's own projects whatever their status (a client
+     * calling about a finished job). Unscoped: a queued job has no session.
+     *
+     * @return \Illuminate\Support\Collection<int, Project>
+     */
+    protected function candidateProjects($callLog, $agentUser, $otherUser): \Illuminate\Support\Collection
+    {
+        $vendorId = (int) ($callLog->vendor_id ?: ($agentUser?->primary_vendor_id ?? 0));
+        $query = Project::withoutGlobalScopes()
+            ->with(['latestStatus' => fn ($status) => $status->withoutGlobalScopes()])
+            ->where(function ($query) use ($vendorId, $otherUser) {
+                $query->where(function ($company) use ($vendorId) {
+                    $company->whereHas('latestStatus', fn ($status) => $status->withoutGlobalScopes()->whereIn('status_code', CardsIndex::PLANNER_PROJECT_STATUS_CODES));
+                    if ($vendorId) {
+                        $company->whereHas('vendors', fn ($vendor) => $vendor->where('vendors.id', $vendorId));
+                    }
+                });
+                if ($otherUser) {
+                    $query->orWhereIn('client_id', $otherUser->clients()->withoutGlobalScopes()->pluck('clients.id'));
+                }
+            })
+            ->orderBy('project_name');
+
+        return $query->get(['id', 'project_name', 'address', 'city', 'client_id']);
+    }
+
+    /** @param  \Illuminate\Support\Collection<int, Project>  $candidates */
+    protected function projectsList(\Illuminate\Support\Collection $candidates): string
+    {
+        if ($candidates->isEmpty()) {
+            return '';
+        }
+
+        $clients = Client::withoutGlobalScopes()
+            ->with(['users' => fn ($users) => $users->withoutGlobalScopes()])
+            ->whereIn('id', $candidates->pluck('client_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
+
+        return $candidates->map(fn (Project $project) => "- id {$project->id}: ".trim(($project->project_name ?: 'Untitled').', '.trim(implode(', ', array_filter([$project->address, $project->city]))))
+            .(($client = $clients->get($project->client_id)) ? ' (client: '.$client->name.')' : '')
+            .($project->latestStatus ? ' — '.$project->latestStatus->title.($project->latestStatus->start_date ? ' since '.Carbon::parse($project->latestStatus->start_date)->format('M Y') : '') : ''))->implode("\n")."\n";
     }
 
     /**

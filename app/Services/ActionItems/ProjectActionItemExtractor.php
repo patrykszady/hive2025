@@ -181,6 +181,36 @@ class ProjectActionItemExtractor
             }
         }
 
+        // The summary and next steps through the same visit-aware pass as
+        // texts and emails: "ABS delivery arrives Monday the 16th" was a next
+        // step, not an action item, on Jenn's 2026-11-05 call — a date a
+        // supplier set, and a task. Only the visits are kept from this pass;
+        // the to-dos come from the summary's own action items above.
+        $lines = [];
+        foreach ($calls as $call) {
+            $summary = trim((string) ($call->transcript?->summary ?? ''));
+            if ($summary === '') {
+                continue;
+            }
+            $nextSteps = collect((array) ($call->transcript?->next_steps ?? []))->filter(fn ($step) => is_string($step) && trim($step) !== '')->implode('; ');
+            $topics = collect((array) ($call->transcript?->topics ?? []))->filter(fn ($topic) => is_string($topic) && trim($topic) !== '')->implode('; ');
+            $at = Carbon::parse($call->created_at);
+            $lines[] = [
+                'id' => $call->id,
+                'at' => $at,
+                'speaker' => 'Call summary',
+                'text' => trim($summary.($nextSteps !== '' ? " Next steps: {$nextSteps}." : '').($topics !== '' ? " Topics: {$topics}." : '')),
+                'source' => ['kind' => 'call', 'id' => $call->id, 'thread_id' => null, 'at' => $at->toIso8601String(), 'excerpt' => Str::limit($summary, 180, '…')],
+            ];
+        }
+        foreach (array_chunk($lines, self::CHUNK) as $chunk) {
+            foreach ($this->readMessages($project, $chunk, 'call', ['project_id' => $project->id]) as $candidate) {
+                if ($candidate['kind'] === 'visit') {
+                    $candidates[] = $candidate;
+                }
+            }
+        }
+
         return [$candidates, $calls->count(), (int) ($calls->max('id') ?? 0)];
     }
 
@@ -524,7 +554,7 @@ class ProjectActionItemExtractor
      * tasks they report done, each tied to the messages it came from.
      *
      * @param  list<array{id: int, at: Carbon, speaker: string, text: string, source: array<string, mixed>}>  $lines
-     * @param  'text'|'email'  $medium
+     * @param  'text'|'email'|'call'  $medium
      * @param  array<string, mixed>  $logContext
      * @return list<array<string, mixed>>
      */
@@ -537,14 +567,16 @@ class ProjectActionItemExtractor
 
         $byId = collect($lines)->keyBy('id');
         $rendered = collect($lines)
-            ->map(fn (array $line) => sprintf('#%d [%s] %s: %s', $line['id'], $line['at']->copy()->setTimezone($this->timezone($project))->format('Y-m-d H:i D'), $line['speaker'], Str::limit($line['text'], $medium === 'email' ? 1500 : 600, '…')))
+            ->map(fn (array $line) => sprintf('#%d [%s] %s: %s', $line['id'], $line['at']->copy()->setTimezone($this->timezone($project))->format('Y-m-d H:i D'), $line['speaker'], Str::limit($line['text'], $medium === 'text' ? 600 : 1500, '…')))
             ->implode("\n");
 
         $client = $project->client;
         $people = $client ? $client->users()->pluck('first_name')->filter()->unique()->implode(', ') : '';
-        $what = $medium === 'email'
-            ? 'emails between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on the project at '.$project->short_address.' — its client ('.$people.') and the designers, subcontractors and suppliers who write in'
-            : 'a text-message thread between a remodeling company ("GS", the contractor; its people sign as -PS for Patryk, -GS for Greg) and its client ('.$people.') about the project at '.$project->short_address;
+        $what = match ($medium) {
+            'email' => 'emails between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on the project at '.$project->short_address.' — its client ('.$people.') and the designers, subcontractors and suppliers who write in',
+            'call' => 'summaries of phone calls (summary, next steps, topics) between a remodeling company ("GS", the contractor: Patryk and Greg) and the people on the project at '.$project->short_address.' — its client ('.$people.') and the designers, subcontractors and suppliers who call',
+            default => 'a text-message thread between a remodeling company ("GS", the contractor; its people sign as -PS for Patryk, -GS for Greg) and its client ('.$people.') about the project at '.$project->short_address,
+        };
 
         $tasks = $this->scheduleTitles($project);
         $taskList = $tasks === [] ? '' : "\nTasks already on this project's schedule: ".implode('; ', $tasks).'. When an item is one of these, use that task\'s exact title.';
@@ -595,7 +627,7 @@ PROMPT;
                     'model' => (string) config('services.openai.task_extraction_model', 'gpt-4.1'),
                     'messages' => [
                         ['role' => 'system', 'content' => $system],
-                        ['role' => 'user', 'content' => ($medium === 'email' ? 'Emails' : 'Messages').":\n{$rendered}"],
+                        ['role' => 'user', 'content' => match ($medium) { 'email' => 'Emails', 'call' => 'Call summaries', default => 'Messages' }.":\n{$rendered}"],
                     ],
                     'response_format' => [
                         'type' => 'json_schema',
