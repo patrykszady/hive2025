@@ -1,12 +1,12 @@
 @section('title'){!! 'Notifications — Hive Contractors' !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Hive tells you when something needs your attention or a date moves—by text or email, whichever you prefer. Timely alerts, never noise, so you stay in the loop without lifting a finger.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero
         icon="bell-alert"
         eyebrow="Your homeowner portal"
-        title="Get a nudge exactly when you need one"
-        body="Hive tells you when something needs your attention or a date moves—by text or email, whichever you prefer. Timely alerts, never noise, so you stay in the loop without lifting a finger."
+        title="{{ __('Get a nudge exactly when you need one') }}"
+        body="{{ __('Hive tells you when something needs your attention or a date moves—by text or email, whichever you prefer. Timely alerts, never noise, so you stay in the loop without lifting a finger.') }}"
     />
 
     {{-- DEEP ROWS --}}

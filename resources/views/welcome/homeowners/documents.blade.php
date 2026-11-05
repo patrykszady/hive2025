@@ -1,5 +1,5 @@
 @section('title'){!! __('Estimates & E-Sign — Hive Contractors') !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Estimates and change orders come to you as clean, easy-to-read documents. Read every line, ask questions, and approve with a tap. No printing, scanning, or driving anywhere.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero

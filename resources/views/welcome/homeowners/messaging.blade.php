@@ -1,5 +1,5 @@
 @section('title'){!! __('Direct Messaging — Hive Contractors') !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('No more scattered texts, emails, and voicemails. Every message, question, and photo lives in one clean thread you can find any time—so nothing about your project gets lost.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero

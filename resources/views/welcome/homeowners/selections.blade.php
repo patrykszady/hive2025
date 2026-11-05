@@ -1,12 +1,12 @@
 @section('title'){!! 'Selections & Allowances — Hive Contractors' !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Every finish you pick—tile, fixtures, countertops—lives in one place, right next to its allowance. See what you have chosen and exactly where each budget stands, with no surprises at the end.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero
         icon="swatch"
         eyebrow="Your homeowner portal"
-        title="Track your choices and stay on budget"
-        body="Every finish you pick—tile, fixtures, countertops—lives in one place, right next to its allowance. See what you have chosen and exactly where each budget stands, with no surprises at the end."
+        title="{{ __('Track your choices and stay on budget') }}"
+        body="{{ __('Every finish you pick—tile, fixtures, countertops—lives in one place, right next to its allowance. See what you have chosen and exactly where each budget stands, with no surprises at the end.') }}"
     />
 
     {{-- DEEP ROWS --}}

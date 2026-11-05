@@ -42,6 +42,14 @@ class PageSeo
             return null;
         }
 
+        // The hub's Pages screen edits each page once, in English. Applied to
+        // every locale, that English title sat on /pl/… and /es/… pages too
+        // (Bing listed 49 cross-locale duplicate titles, 2026-11-05); the
+        // translated pages keep their own translated titles and descriptions.
+        if ($isLocalized && app()->getLocale() !== config('locales.default', 'en')) {
+            return null;
+        }
+
         // parameterNames() is the URI's OWN wildcard segments (['locale'] for
         // a plain welcome.* route, ['locale', 'area', 'card'] for
         // welcome.feature) — parameters() itself is not enough: Route::view()

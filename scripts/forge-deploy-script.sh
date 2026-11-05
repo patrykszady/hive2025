@@ -108,6 +108,9 @@ echo 'scout:refresh dispatched in background (see storage/logs/scout-refresh.log
 
 # IndexNow — after a deploy, re-announce every page to Bing through the kit's
 # seo:indexnow (2026-11-02); detached so a slow sitemap crawl never holds the
-# deploy. The hourly seo:indexnow covers changed pages between deploys.
-setsid $FORGE_PHP artisan seo:indexnow --all >> storage/logs/seo-indexnow.log 2>&1 < /dev/null &
-echo 'seo:indexnow --all dispatched in background (see storage/logs/seo-indexnow.log)'
+# deploy. Only pages changed since the last submission (the ledger): Bing's
+# IndexNow insights flagged the former --all as "batch mode" (2026-11-05) —
+# every sitemap URL in one POST on every deploy. The hourly run streams the
+# rest; `seo:indexnow --all` by hand is for a genuinely site-wide change.
+setsid $FORGE_PHP artisan seo:indexnow >> storage/logs/seo-indexnow.log 2>&1 < /dev/null &
+echo 'seo:indexnow dispatched in background (see storage/logs/seo-indexnow.log)'

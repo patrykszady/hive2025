@@ -125,10 +125,12 @@ it('an update overrides the title and meta description, and shows on the site im
     expect($after->getContent())->toContain('<title>Custom SEO Title | Hive Contractors</title>');
     expect($after->getContent())->toContain('<meta name="description" content="Custom description text.">');
 
-    // Every locale shares the one override row — each locale's own cached
-    // copy must have been forgotten too.
+    // Every locale shares the one override row, and each locale's cached
+    // copy is forgotten too — but the override is English and applies to the
+    // English page only (2026-11-05): the Polish page keeps its own title.
     $pl = $this->get('/pl/welcome/finances')->assertOk();
-    expect($pl->getContent())->toContain('<title>Custom SEO Title | Hive Contractors</title>');
+    expect($pl->getContent())->not->toContain('Custom SEO Title')
+        ->not->toContain('Custom description text.');
 });
 
 it('a meta_title override wins over a title override in the rendered <title>', function () {
@@ -141,6 +143,23 @@ it('a meta_title override wins over a title override in the rendered <title>', f
 
     $response = $this->get('/en/welcome/faq')->assertOk();
     expect($response->getContent())->toContain('<title>Meta Title Override | Hive Contractors</title>');
+});
+
+it('applies an override to the English page only — the translated pages keep their own titles', function () {
+    // The hub edits a page once, in English; applied to every locale it put
+    // that English title on /pl/… and /es/… too (49 cross-locale duplicate
+    // titles in Bing's SEO report, 2026-11-05).
+    $override = PageSeoOverride::findOrCreateFor('welcome.faq', []);
+    $override->forceFill(['meta_title' => 'Meta Title Override', 'meta_description' => 'An English description written in the hub.'])->save();
+
+    expect($this->get('/en/welcome/faq')->assertOk()->getContent())
+        ->toContain('<title>Meta Title Override | Hive Contractors</title>')
+        ->toContain('content="An English description written in the hub."');
+
+    $polish = $this->get('/pl/welcome/faq')->assertOk()->getContent();
+    expect($polish)->not->toContain('Meta Title Override')
+        ->not->toContain('An English description written in the hub.')
+        ->toContain('<title>');
 });
 
 it('refuses to create a page — a message and no field errors, so the screen shows a calm notice', function () {

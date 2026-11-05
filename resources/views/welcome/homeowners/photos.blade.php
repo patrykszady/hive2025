@@ -1,5 +1,5 @@
 @section('title'){!! 'Photos & Progress — Hive Contractors' !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Even when you cannot be there, you can see it. Job-site photos give you a front-row seat to the work—organized, time-stamped, and yours to keep forever.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero

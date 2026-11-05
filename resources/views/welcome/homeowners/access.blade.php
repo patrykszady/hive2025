@@ -1,12 +1,12 @@
 @section('title'){!! 'Secure, Easy Access — Hive Contractors' !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Your project opens with a private link your contractor sends you. There is nothing to download and no password to remember—just secure, instant access to everything about your job.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero
         icon="finger-print"
         eyebrow="Your homeowner portal"
-        title="Get in safely—no app, no password"
-        body="Your project opens with a private link your contractor sends you. There is nothing to download and no password to remember—just secure, instant access to everything about your job."
+        title="{{ __('Get in safely—no app, no password') }}"
+        body="{{ __('Your project opens with a private link your contractor sends you. There is nothing to download and no password to remember—just secure, instant access to everything about your job.') }}"
     />
 
     {{-- DEEP ROWS --}}

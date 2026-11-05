@@ -1,5 +1,5 @@
 @section('title'){!! __('Schedule & Reminders — Hive Contractors') !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('See your upcoming visits and milestones, get a live schedule link on your phone, and receive a text the moment anything moves. No more wondering whether today is a work day.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero

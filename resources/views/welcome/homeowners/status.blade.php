@@ -1,5 +1,5 @@
 @section('title'){!! __('Live Project Status — Hive Contractors') !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('No more guessing or waiting for a callback. Open Hive and instantly see what is finished, what the crew is doing today, and what is coming next—updated live as your contractor works.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero

@@ -1,12 +1,12 @@
 @section('title'){!! 'Invoices & Payments — Hive Contractors' !!}@endsection
-<x-guest-layout>
+<x-guest-layout :description="\App\Support\MetaDescription::from(__('Clear, itemized invoices and a running total in one place. See exactly where your money has gone, what is left, and when payments are due—no spreadsheets or guesswork.'))">
     <x-marketing.nav active="homeowners" />
 
     <x-marketing.feature-hero
         icon="banknotes"
         eyebrow="Your homeowner portal"
-        title="Always know what you owe and what you've paid"
-        body="Clear, itemized invoices and a running total in one place. See exactly where your money has gone, what is left, and when payments are due—no spreadsheets or guesswork."
+        title="{{ __('Always know what you owe and what you\'ve paid') }}"
+        body="{{ __('Clear, itemized invoices and a running total in one place. See exactly where your money has gone, what is left, and when payments are due—no spreadsheets or guesswork.') }}"
     />
 
     {{-- DEEP ROWS --}}

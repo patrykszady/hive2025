@@ -4,7 +4,7 @@
     $cta = $card['cta'] ?? [];
 @endphp
 
-<x-guest-layout :title="$card['title'] . ' — Hive Contractors'">
+<x-guest-layout :title="$card['title'] . ' — Hive Contractors'" :description="\App\Support\MetaDescription::from($card['lead'])">
     <x-marketing.nav :active="$areaKey" />
 
     <x-marketing.feature-hero
