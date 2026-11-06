@@ -3,6 +3,7 @@
 namespace App\Services\Tasks;
 
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use App\Models\Task;
 use Illuminate\Validation\ValidationException;
 
@@ -64,6 +65,8 @@ class TaskWriter
         if ($recentDuplicate) {
             return $recentDuplicate;
         }
+
+        $this->putCompleteProjectInServiceCall((int) $data['project_id']);
 
         return Task::create([
             'start_date' => $startDate,
@@ -133,6 +136,36 @@ class TaskWriter
      *
      * @return array<string, mixed>
      */
+    /** Complete, and Service Call — the one a new task on a Complete job opens. */
+    private const COMPLETE_STATUS_CODE = 7;
+
+    private const SERVICE_CALL_STATUS_CODE = 8;
+
+    /**
+     * A new task on a Complete job is a service call in practice: the
+     * homeowner asked for something after the work was done (901 Isabella's
+     * garbage cabinet, by text, 2026-11-06). The job's status says so from
+     * the moment the task exists — the way the service-call email intake
+     * already did it — instead of waiting for someone to change it by hand.
+     * Any other status (Active, Scheduled, already Service Call) is left
+     * alone.
+     */
+    protected function putCompleteProjectInServiceCall(int $projectId): void
+    {
+        $project = Project::withoutGlobalScopes()->with('latestStatus')->find($projectId);
+
+        if (! $project || (int) $project->latestStatus?->status_code !== self::COMPLETE_STATUS_CODE) {
+            return;
+        }
+
+        ProjectStatus::create([
+            'project_id' => $project->id,
+            'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
+            'status_code' => self::SERVICE_CALL_STATUS_CODE,
+            'start_date' => today()->format('Y-m-d'),
+        ]);
+    }
+
     private function storedOptions(Task $task): array
     {
         $options = json_decode(json_encode($task->fresh()?->options ?? $task->options ?? []), true);
