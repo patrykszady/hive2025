@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Projects\ProjectsIndex;
+use App\Livewire\Projects\ProjectsTable;
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\ProjectStatus;
@@ -173,4 +174,49 @@ it('reads the Status filter as a list, and an old single-status link as a list o
         ->assertSet('project_status_title', [6])
         ->set('project_status_title', ['2', '9'])
         ->assertSet('project_status_title', [2, 9]);
+});
+
+it('dispatches project-status-updated when a row moves to a new status', function () {
+    $user = statusCardsUser();
+    $project = projectWithStatuses($user->vendor, ['2026-10-01' => 5]);
+    // ProjectScope (the Status column's Project::findOrFail) only sees
+    // projects the vendor is attached to via the project_vendor pivot, not
+    // merely belongs_to_vendor_id.
+    $project->vendors()->attach($user->vendor->id, ['client_id' => $project->client_id]);
+
+    Livewire::actingAs($user)
+        ->test(ProjectsTable::class)
+        ->call('updateProjectStatus', $project->id, 6)
+        ->assertDispatched('project-status-updated');
+
+    expect($project->fresh()->latestStatus->status_code)->toBe(6);
+});
+
+it('rebuilds the status cards with the new counts the moment the table reports a status change', function () {
+    $user = statusCardsUser();
+    $this->travelTo('2026-10-15 09:00:00');
+
+    $toActivate = projectWithStatuses($user->vendor, ['2026-09-01' => 5]);
+    projectWithStatuses($user->vendor, ['2026-09-01' => 5]);
+
+    $component = Livewire::actingAs($user)->test(ProjectsIndex::class);
+
+    $before = collect($component->instance()->statusCards)->keyBy('label');
+    expect($before['Scheduled']['count'])->toBe(2)
+        ->and($before->has('Active'))->toBeFalse();
+
+    // Same row-level write ProjectsTable::updateProjectStatus() performs,
+    // followed by the event it dispatches — the index never reloads.
+    ProjectStatus::create([
+        'project_id' => $toActivate->id,
+        'belongs_to_vendor_id' => $user->vendor->id,
+        'status_code' => 6,
+        'start_date' => today()->format('Y-m-d'),
+    ]);
+
+    $component->dispatch('project-status-updated');
+
+    $after = collect($component->instance()->statusCards)->keyBy('label');
+    expect($after['Scheduled']['count'])->toBe(1)
+        ->and($after['Active']['count'])->toBe(1);
 });

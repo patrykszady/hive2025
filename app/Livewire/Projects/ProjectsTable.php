@@ -238,6 +238,11 @@ class ProjectsTable extends Component
         unset($this->projects);
 
         Flux::toast('Status updated.');
+
+        // Plain dispatch (page-wide), like lead-status-updated: the parent
+        // ProjectsIndex's status cards are a separate computed property this
+        // child can't reach directly — it listens for this event instead.
+        $this->dispatch('project-status-updated');
     }
 
     public function render()

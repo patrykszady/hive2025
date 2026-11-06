@@ -9,6 +9,7 @@ use App\Models\ProjectStatus;
 use App\Services\ProjectStatusTrends;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -252,6 +253,19 @@ class ProjectsIndex extends Component
             'count' => 'bg-orange-400/10 text-orange-700/80 dark:bg-orange-400/15 dark:text-orange-200/80',
         ],
     ];
+
+    /**
+     * ProjectsTable dispatches this the moment a row's status changes
+     * (updateProjectStatus()) — the table refreshes its own rows on write,
+     * but this card's counts and deltas come from a separate computed
+     * property, so they need their own nudge. Forgetting it is enough: the
+     * render that follows recomputes it with the new counts.
+     */
+    #[On('project-status-updated')]
+    public function refreshStatusCards(): void
+    {
+        unset($this->statusCards);
+    }
 
     /**
      * The status cards under the filters (Flux dashboard stats), in
