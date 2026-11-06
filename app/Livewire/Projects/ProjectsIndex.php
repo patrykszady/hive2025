@@ -336,6 +336,19 @@ class ProjectsIndex extends Component
         return $this->view ? [] : ['project_name_search', 'client_id', 'project_status_title'];
     }
 
+    /**
+     * What a cleared page shows — the same default mount() picks: Active
+     * while any job is active, else every status.
+     *
+     * @return array<string, mixed>
+     */
+    protected function defaultFilters(): array
+    {
+        $hasActiveProjects = ProjectStatus::where('status_code', 6)->whereHas('project')->exists();
+
+        return ['project_status_title' => $hasActiveProjects ? [6] : []];
+    }
+
     #[Title('Projects')]
     public function render()
     {

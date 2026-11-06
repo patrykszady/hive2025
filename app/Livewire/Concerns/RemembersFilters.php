@@ -3,6 +3,7 @@
 namespace App\Livewire\Concerns;
 
 use Illuminate\Support\Facades\Cache;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Livewire;
 use ReflectionProperty;
@@ -70,6 +71,38 @@ trait RemembersFilters
         }
 
         Cache::put($this->rememberedFiltersKey(), $values, now()->addMinutes(self::REMEMBERED_FILTERS_MINUTES));
+    }
+
+    /**
+     * The sidebar link of the page you are already on clears it (Patryk,
+     * 2026-11-06: a bare /projects kept coming back as it was left, and on
+     * production — where the cache outlives a browser tab — that read as the
+     * status cards not working). app.js turns that click into this event
+     * instead of a navigation; the page forgets what it remembered and goes
+     * back to its defaults: the component's defaultFilters() when it has
+     * them, else each property's declared default.
+     */
+    #[On('index-filters-clear')]
+    public function clearRememberedFilters(): void
+    {
+        $filters = $this->rememberedFilters();
+        if ($filters === []) {
+            return;
+        }
+
+        $defaults = method_exists($this, 'defaultFilters') ? $this->defaultFilters() : [];
+        foreach ($filters as $property) {
+            $this->{$property} = array_key_exists($property, $defaults)
+                ? $defaults[$property]
+                : (new ReflectionProperty($this, $property))->getDefaultValue();
+        }
+
+        if (auth()->check()) {
+            Cache::forget($this->rememberedFiltersKey());
+        }
+        if (method_exists($this, 'resetPage')) {
+            $this->resetPage();
+        }
     }
 
     protected function rememberedFiltersKey(): string

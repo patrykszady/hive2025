@@ -234,6 +234,22 @@ document.addEventListener('DOMContentLoaded', () => {
 	}, 200);
 });
 
+// The sidebar link of the page you are already on clears that page's
+// filters instead of reloading it as it was left (RemembersFilters keeps
+// them for 15 minutes; on production that cache outlives a tab, and a bare
+// /projects coming back filtered read as broken — Patryk, 2026-11-06). A
+// link to any other page navigates as usual.
+document.addEventListener('click', (event) => {
+	const link = event.target.closest('[data-flux-sidebar] a[href]');
+	if (! link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+	let target;
+	try { target = new URL(link.href, location.href); } catch { return; }
+	if (target.origin !== location.origin || target.pathname !== location.pathname || ! window.Livewire) return;
+	event.preventDefault();
+	window.Livewire.dispatch('index-filters-clear');
+	if (location.search) history.replaceState(history.state, '', location.pathname);
+});
+
 // Preserve the sidebar's scroll position across wire:navigate page loads —
 // the nav re-renders on each navigation and would otherwise jump to the top.
 let sidebarScrollTop = 0;
