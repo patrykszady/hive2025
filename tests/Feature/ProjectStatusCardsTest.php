@@ -220,3 +220,22 @@ it('rebuilds the status cards with the new counts the moment the table reports a
     expect($after['Scheduled']['count'])->toBe(1)
         ->and($after['Active']['count'])->toBe(1);
 });
+
+it('shows a row in the status it was just moved to, even before the search index knows', function () {
+    // The rows come from Meilisearch (the null driver here: nothing comes
+    // back, like an index that has not caught up). A job moved to Service
+    // Call must be on the Service Call list anyway, and off the Active one.
+    $user = statusCardsUser();
+    $project = projectWithStatuses($user->vendor, ['2026-10-01' => 6]);
+    $project->vendors()->attach($user->vendor->id, ['client_id' => $project->client_id]);
+
+    $serviceCalls = Livewire::actingAs($user)->test(ProjectsTable::class, ['projectStatusTitle' => [3]]);
+    expect($serviceCalls->instance()->projects->getCollection()->pluck('id')->all())->toBe([]);
+
+    $serviceCalls->call('updateProjectStatus', $project->id, 3);
+    expect($serviceCalls->instance()->projects->getCollection()->pluck('id')->all())->toBe([$project->id]);
+
+    $active = Livewire::actingAs($user)->test(ProjectsTable::class, ['projectStatusTitle' => [6]]);
+    $active->call('updateProjectStatus', $project->id, 3);
+    expect($active->instance()->projects->getCollection()->pluck('id')->all())->toBe([]);
+});

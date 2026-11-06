@@ -26,6 +26,14 @@ class ProjectsTable extends Component
     #[Reactive]
     public $view = null;
 
+    /**
+     * Rows whose status was changed here, project id => new status code.
+     * The rows come from Meilisearch, which indexes on the queue, so for a
+     * while after a change the index still says the old status; these
+     * rows are placed by what the database says instead.
+     *
+     * @var array<int, int>
+     */
     public array $statusChangedProjectIds = [];
 
     /**
@@ -194,12 +202,27 @@ class ProjectsTable extends Component
         // row's history in one query rather than two queries per row.
         Project::primeLatestVendorStatuses($results->getCollection());
 
-        // Filter out projects whose status just changed (Meilisearch may not have indexed yet)
-        if (! empty($this->statusChangedProjectIds) && ! empty($statusCodes)) {
-            $removed = $this->statusChangedProjectIds;
-            $results->setCollection(
-                $results->getCollection()->reject(fn ($p) => in_array($p->id, $removed))
-            );
+        // A row whose status was just changed is placed by the database, not
+        // the index (which may still say the old status): out of the list
+        // when its new status is not filtered for, into the list when it is
+        // and the index has not caught up — so moving a job to Service Call
+        // and clicking the Service Call card shows it (Patryk, 2026-11-05).
+        if ($this->statusChangedProjectIds !== [] && $codes !== []) {
+            $changed = array_map('intval', $this->statusChangedProjectIds);
+            $outOfFilter = array_keys(array_filter($changed, fn (int $code) => ! in_array($code, $codes, true)));
+            $inFilter = array_keys(array_filter($changed, fn (int $code) => in_array($code, $codes, true)));
+
+            $rows = $results->getCollection()->reject(fn ($p) => in_array((int) $p->id, $outOfFilter, true));
+
+            $missing = array_values(array_diff($inFilter, $rows->pluck('id')->map(fn ($id) => (int) $id)->all()));
+            $plainStatusList = $projectSearch === '' && $selectedClientId === null && $clientIds === [];
+            if ($missing !== [] && $plainStatusList && $results->currentPage() === 1) {
+                $late = Project::query()->whereIn('id', $missing)->with(['client.users', 'createdByVendor'])->get();
+                Project::primeLatestVendorStatuses($late);
+                $rows = $late->concat($rows);
+            }
+
+            $results->setCollection($rows->values());
         }
 
         return $results;
@@ -234,7 +257,7 @@ class ProjectsTable extends Component
 
         $project->searchable();
 
-        $this->statusChangedProjectIds[] = $projectId;
+        $this->statusChangedProjectIds[$projectId] = $statusCode;
         unset($this->projects);
 
         Flux::toast('Status updated.');
