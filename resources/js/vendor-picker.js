@@ -21,11 +21,11 @@ function escapeHtml(text) {
         .replaceAll("'", '&#039;');
 }
 
-// Flux's avatar, worked out the way its Blade component does
-// (vendor/livewire/flux/stubs/resources/views/flux/avatar/index.blade.php):
-// initials from the name, and a color picked by crc32(seed) — the vendor id —
-// from the same 17 colors in the same order, so a vendor's avatar here matches
-// the one it has everywhere else on the site.
+// The vendor's avatar: initials from the name (this site's own rule, below),
+// and a color picked by crc32(seed) — the vendor id — from the same 17
+// colors Flux's avatar component uses, in the same order
+// (vendor/livewire/flux/stubs/resources/views/flux/avatar/index.blade.php),
+// so a vendor's avatar here matches the one it has everywhere else on the site.
 const AVATAR_COLORS = ['red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'];
 
 const CRC_TABLE = (() => {
@@ -45,14 +45,39 @@ function crc32(text) {
     return (crc ^ 0xffffffff) >>> 0;
 }
 
+// This site's own initials rule — kept in sync by hand with the PHP
+// original (App\Support\VendorInitials) since this runs in the browser:
+// the first letter of the name's first two significant words, skipping
+// connecting words ("of", "the", "&", …) and tokens that are pure
+// punctuation, falling back to every token when that leaves nothing. A name
+// with only one significant word takes that word's own first two letters.
+// "Village of Palatine" → "VP"; "A&A Maintenance" → "AM"; "Walmart" → "WA".
+const INITIALS_STOP_WORDS = ['of', 'the', 'and', '&', 'a', 'an', 'for', 'de', 'di', 'da', 'del', 'la', 'le', 'van', 'von', 'y'];
+
+// A token trimmed of leading/trailing punctuation and lowercased, for
+// comparing against the stop-word list — "Of," matches "of", but "A-1"
+// (punctuation in the middle, not the edges) is left alone.
+function stopWordKey(token) {
+    return token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase();
+}
+
+// The word's first letter or digit, ignoring any leading punctuation.
+function firstChar(word) {
+    const match = word.match(/[\p{L}\p{N}]/u);
+    return match ? match[0] : (Array.from(word)[0] ?? '');
+}
+
+function significantWords(name) {
+    const tokens = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+    const words = tokens.filter((token) => /[\p{L}\p{N}]/u.test(token) && !INITIALS_STOP_WORDS.includes(stopWordKey(token)));
+    return words.length ? words : tokens;
+}
+
 function avatarInitials(name) {
-    const parts = String(name ?? '').trim().split(' ').filter(Boolean);
-    if (parts.length > 1) return (Array.from(parts[0])[0] + Array.from(parts[1])[0]).toUpperCase();
-    if (parts.length === 1) {
-        const chars = Array.from(parts[0]);
-        return chars[0].toUpperCase() + (chars[1] ?? '').toLowerCase();
-    }
-    return '';
+    const words = significantWords(name);
+    if (words.length === 0) return '';
+    if (words.length === 1) return Array.from(words[0]).slice(0, 2).join('').toUpperCase();
+    return (firstChar(words[0]) + firstChar(words[1])).toUpperCase();
 }
 
 function avatarColor(seed) {

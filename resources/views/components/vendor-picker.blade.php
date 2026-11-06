@@ -20,7 +20,15 @@
                    (before any search) instead of A–Z
      - avatars:    each vendor row carries its Flux avatar (initials, color
                    seeded by the vendor id — the same avatar the vendor has
-                   everywhere on the site); on by default --}}
+                   everywhere on the site); on by default
+
+     The panel (options:class) grows past the trigger's own width to fit the
+     longest name, from 16rem up to 28rem, and never past the viewport on a
+     phone (Patryk, 2026-11-05: "extend to the right more so all vendor
+     names are always visible"). Never min-w-full here: the panel is a
+     top-layer popover, so "full" is the viewport, and min-width beats
+     max-width — it went edge to edge. The trigger itself keeps whatever
+     width its caller gave it. --}}
 @props([
     'label' => null,
     'placeholder' => 'Choose vendor...',
@@ -82,8 +90,8 @@
     if ($selected) {
         $printedSelected = $avatars && is_numeric($selected['value']) && ! collect($extra)->contains('value', $selected['value'])
             ? \Illuminate\Support\Facades\Blade::render(
-                '<flux:select.option variant="listbox" :value="$value" :label="$label"><div class="flex items-center gap-2 whitespace-nowrap"><flux:avatar size="xs" :name="$name" color="auto" :color:seed="$value" />{{ $label }}</div></flux:select.option>',
-                ['value' => $selected['value'], 'label' => $selected['label'], 'name' => $selected['name'] ?? $selected['label']],
+                '<flux:select.option variant="listbox" :value="$value" :label="$label"><div class="flex items-center gap-2 whitespace-nowrap"><flux:avatar size="xs" :initials="$initials" color="auto" :color:seed="$value" />{{ $label }}</div></flux:select.option>',
+                ['value' => $selected['value'], 'label' => $selected['label'], 'initials' => \App\Support\VendorInitials::for($selected['name'] ?? $selected['label'])],
             )
             : str_replace(['__VP_VALUE__', '__VP_LABEL__'], [e($selected['value']), e($selected['label'])], $optionTemplate);
     }
@@ -109,6 +117,7 @@
         :size="$size"
         :invalid="$invalid"
         :error:name="$name"
+        options:class="w-max min-w-64 max-w-[min(28rem,calc(100vw-2rem))]"
     >
         <x-slot name="search">
             <flux:select.search x-model="query" placeholder="Search vendors..." />

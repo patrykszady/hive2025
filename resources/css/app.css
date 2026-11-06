@@ -423,8 +423,12 @@ input[type="number"] {
     }
 }
 
-/* Prevent extra padding when auto-loading is hidden */
-[data-flux-input] input[wire\:target] {
+/* Prevent extra padding when auto-loading is hidden — only on inputs whose
+   end holds nothing but that hidden spinner. An input with a clear button,
+   a kbd hint or a trailing button (the Receipt Items barcode button) keeps
+   the padding Flux gives it for them; this rule used to flatten those to
+   0.75rem and the placeholder ran under the button (2026-11-05). */
+[data-flux-input]:not(:has(.end-0 > :not([wire\:loading]))) input[wire\:target] {
   padding-inline-end: 0.75rem !important;
 }
 

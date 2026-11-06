@@ -9,7 +9,7 @@
         </div>
 
         <div class="flex-1 min-w-0 w-full">
-            <x-vendor-picker wire:model.live="expense_vendor" label="Vendor" placeholder="Choose Vendor..." clearable :extra="[['value' => '0', 'label' => 'NO VENDOR']]" :project-id="$view === 'projects.show' ? $project_id : null" />
+            <x-vendor-picker wire:model.live="expense_vendor" label="Vendor" placeholder="Choose Vendor..." clearable :project-id="$view === 'projects.show' ? $project_id : null" />
         </div>
 
         <div class="flex-1 min-w-0 w-full">
@@ -36,6 +36,25 @@
             </flux:select>
         </div>
 
+    </div>
+
+    {{-- Second row on desktop: status, what you are looking for, who paid,
+         when (Patryk, 2026-11-05). The first row is the where: amount,
+         vendor, project. --}}
+    <div class="flex flex-col sm:flex-row items-end gap-4 mt-4">
+        <div class="flex-[2] min-w-0 w-full">
+            <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Items, SKU, barcode" clearable label="Receipt Items">
+                <x-slot name="iconTrailing">
+                    <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" tooltip="Scan barcode" />
+                </x-slot>
+            </flux:input>
+            @if($upcProductName)
+                <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    <flux:icon.scan-barcode variant="micro" class="inline size-3" /> UPC resolved to: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $upcProductName }}</span>
+                </p>
+            @endif
+        </div>
+
         <div class="flex-1 min-w-0 w-full">
             <flux:select variant="listbox" label="Status" multiple clearable placeholder="Choose status..." wire:model.live="expense_statuses">
                 <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
@@ -48,7 +67,7 @@
             </flux:select>
         </div>
 
-        <div class="flex-1 min-w-0 w-full">
+        <div class="flex-1 min-w-0 w-full sm:max-w-44">
             <flux:select wire:model.live="reimbursement_filter" label="Reimbursement" variant="listbox" clearable placeholder="All...">
                 <flux:select.option value="Client">Client</flux:select.option>
                 @foreach ($this->via_vendor_employees as $employee)
@@ -69,21 +88,6 @@
             />
         </div>
     </div>
-
-    <div class="flex flex-col sm:flex-row items-end gap-4 mt-4">
-        <div class="flex-1 min-w-0 w-full sm:max-w-xs">
-            <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
-                <x-slot name="iconTrailing">
-                    <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" tooltip="Scan barcode" />
-                </x-slot>
-            </flux:input>
-            @if($upcProductName)
-                <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    <flux:icon.scan-barcode variant="micro" class="inline size-3" /> UPC resolved to: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $upcProductName }}</span>
-                </p>
-            @endif
-        </div>
-    </div>
 @else
     <div class="flex flex-col gap-4">
         <div class="min-w-0 w-full">
@@ -91,7 +95,7 @@
         </div>
         @if($view !== 'vendors.show')
             <div class="min-w-0 w-full">
-                <x-vendor-picker wire:model.live="expense_vendor" label="Vendor" placeholder="Choose Vendor..." clearable :extra="$view !== 'projects.show' ? [['value' => '0', 'label' => 'NO VENDOR']] : []" :project-id="$view === 'projects.show' ? $project_id : null" />
+                <x-vendor-picker wire:model.live="expense_vendor" label="Vendor" placeholder="Choose Vendor..." clearable :project-id="$view === 'projects.show' ? $project_id : null" />
             </div>
         @endif
         @if($view === 'projects.show')
@@ -146,7 +150,7 @@
             />
         </div>
         <div class="min-w-0 w-full">
-            <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
+            <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Items, SKU, barcode" clearable label="Receipt Items">
                 <x-slot name="iconTrailing">
                     <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" tooltip="Scan barcode" />
                 </x-slot>
