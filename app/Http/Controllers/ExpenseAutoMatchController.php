@@ -915,7 +915,46 @@ class ExpenseAutoMatchController extends Controller
             }
         }
 
+        // A village's permit receipt names no address, only the permit
+        // ("Permit: BLDR-026546-2026 | Invoice: INV-00044895" — Palatine,
+        // 2026-11-05): the village's own portal says which house it is for.
+        foreach ($this->permitAddresses($expense, $receipts) as $address) {
+            $pushCandidate($address);
+        }
+
         return $candidates;
+    }
+
+    /**
+     * The houses the permit numbers on a village's receipts were issued for,
+     * from the village's permit portal (App\Services\Permits). Nothing is
+     * asked for a vendor that is not a village hive knows how to ask.
+     *
+     * @param  \Illuminate\Support\Collection<int, \App\Models\ExpenseReceipts>  $receipts
+     * @return list<string>
+     */
+    protected function permitAddresses(Expense $expense, $receipts): array
+    {
+        $vendorName = $expense->vendor_id
+            ? Vendor::withoutGlobalScopes()->whereKey($expense->vendor_id)->value('business_name')
+            : null;
+        if (! \App\Services\Permits\PermitAddressResolver::portalForVendor($vendorName)) {
+            return [];
+        }
+
+        $resolver = app(\App\Services\Permits\PermitAddressResolver::class);
+        $addresses = [];
+        foreach ($receipts as $receipt) {
+            $content = (string) ($receipt->receipt_items['raw_content'] ?? $receipt->receipt_html ?? '');
+            foreach (\App\Services\Permits\PermitAddressResolver::permitNumbers($content) as $permitNumber) {
+                $lookup = $resolver->resolve($vendorName, $permitNumber);
+                if ($lookup?->found && $lookup->address) {
+                    $addresses[] = $lookup->address;
+                }
+            }
+        }
+
+        return array_values(array_unique($addresses));
     }
 
     /**
