@@ -239,6 +239,36 @@ class MessageTaskSuggestionBuilder
         return $this->matchByTitle($projectId, $title, $date) ?? $this->matchByWords($projectId, $title, $date);
     }
 
+    /**
+     * Would matchExistingTask() call these two titles the same thing — the
+     * judgment matchByTitle then matchByWords already apply to a suggested
+     * title against an existing Task row, applied here to two titles with
+     * no database query (ScheduledVisitApplier folding a twin action item —
+     * "Countertop Install" beside "Ultimate Stone Countertop Installation"
+     * for the same Abbey visit, Patryk 2026-11-06 — into the task the other
+     * one became).
+     */
+    public function titlesMatch(string $title, string $taskTitle): bool
+    {
+        $title = strtolower(trim($title));
+        $taskTitle = strtolower(trim($taskTitle));
+
+        if ($title === '' || $taskTitle === '') {
+            return false;
+        }
+
+        if ($title === $taskTitle || str_contains($taskTitle, $title) || str_contains($title, $taskTitle)) {
+            return true;
+        }
+
+        $titleWords = self::titleWords($title);
+        $taskWords = self::titleWords($taskTitle);
+
+        return $taskWords !== [] && collect($taskWords)->every(
+            fn (string $word) => collect($titleWords)->contains(fn (string $other) => str_starts_with($other, $word) || str_starts_with($word, $other))
+        );
+    }
+
     protected function matchByTitle(int $projectId, string $title, ?string $date): ?Task
     {
         return Task::query()

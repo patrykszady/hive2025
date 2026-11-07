@@ -390,7 +390,7 @@ it('moves the Counter Measure when Kama corrects the day, from Tuesday to Thursd
         ->and(ProjectActionItem::where('project_id', $w['project']->id)->count())->toBe(1);
 });
 
-it('never moves a day the team set by hand, and leaves the visit on the planner instead', function () {
+it('never moves a day the team set by hand, but still folds the visit onto their task instead of leaving it open forever', function () {
     $w = abbeyThread();
     $w['measure']->forceFill(['start_date' => '2026-10-30', 'end_date' => '2026-10-30', 'options' => ['dates' => ['2026-10-30'], 'time_settings' => ['2026-10-30' => ['use_time' => true, 'start_time' => '08:00', 'end_time' => '09:00']]]])->saveQuietly();
     fakeVisitReading(fn (array $ids) => in_array($w['thursday']->id, $ids, true)
@@ -399,9 +399,12 @@ it('never moves a day the team set by hand, and leaves the visit on the planner 
 
     $stats = app(ProjectActionItemExtractor::class)->run($w['project']);
 
+    $item = ProjectActionItem::where('project_id', $w['project']->id)->sole();
     expect($stats['scheduled'])->toBe(0)
         ->and($w['measure']->fresh()->start_date->toDateString())->toBe('2026-10-30')
-        ->and(ProjectActionItem::where('project_id', $w['project']->id)->sole()->status)->toBe(ProjectActionItem::STATUS_OPEN);
+        ->and((array) $w['measure']->fresh()->options->time_settings->{'2026-10-30'})->toBe(['use_time' => true, 'start_time' => '08:00', 'end_time' => '09:00'])
+        ->and($item->status)->toBe(ProjectActionItem::STATUS_TASK)
+        ->and($item->task_id)->toBe($w['measure']->id);
 });
 
 it('fills in the time on a task the team already put on that day, without touching a time they set', function () {

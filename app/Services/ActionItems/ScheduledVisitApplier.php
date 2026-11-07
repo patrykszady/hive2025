@@ -70,10 +70,20 @@ class ScheduledVisitApplier
             // Not when the team already has that task on another day they
             // set by hand: that day is theirs, and a second "Counter Measure"
             // beside it would be worse than the planner item. (A matching
-            // undated or same-day task was dated above instead.)
-            return $this->matcher->matchExistingTask((int) $item->project_id, (string) $item->title, null)
-                ? null
-                : $this->createInspection($item, $candidate, $date);
+            // undated or same-day task was dated above instead.) The item
+            // still means that visit, so it folds onto the team's task too —
+            // otherwise it lingered on the planner forever (Patryk,
+            // 2026-11-06, 381 Abbey).
+            $theirs = $this->matcher->matchExistingTask((int) $item->project_id, (string) $item->title, null);
+
+            if ($theirs) {
+                $item->update(['status' => ProjectActionItem::STATUS_TASK, 'task_id' => $theirs->id]);
+                $this->foldTwins((int) $item->project_id, $theirs, $item);
+
+                return null;
+            }
+
+            return $this->createInspection($item, $candidate, $date);
         }
 
         if (! $task || (int) $task->project_id !== (int) $item->project_id) {
@@ -128,6 +138,7 @@ class ScheduledVisitApplier
             ->log('Scheduled from '.($source['kind'] === 'email' ? 'an email' : ($source['kind'] === 'sms' ? 'a text' : 'a call')));
 
         $item->update(['status' => ProjectActionItem::STATUS_TASK, 'task_id' => $task->id]);
+        $this->foldTwins((int) $item->project_id, $task, $item);
 
         return $task;
     }
@@ -224,6 +235,7 @@ class ScheduledVisitApplier
             ->log('Created from '.(($source['kind'] ?? null) === 'email' ? 'an email' : (($source['kind'] ?? null) === 'sms' ? 'a text' : 'a call')));
 
         $item->update(['status' => ProjectActionItem::STATUS_TASK, 'task_id' => $task->id]);
+        $this->foldTwins((int) $item->project_id, $task, $item);
 
         return $task;
     }
@@ -238,6 +250,42 @@ class ScheduledVisitApplier
             ->value('user_id');
 
         return $id ? (int) $id : null;
+    }
+
+    /**
+     * The project's other open items that mean this same visit — another
+     * source naming a different owner for the install, inspection or
+     * appointment this one just became a task for ("Countertop Install"
+     * (GS) beside "Ultimate Stone Countertop Installation" (Ultimate
+     * Stone), both Nov 10 at 381 Abbey, Patryk 2026-11-06) — fold into that
+     * task too (status, task_id), rather than linger on the planner for
+     * someone to dismiss by hand. Same project, still open, due the same
+     * day as this visit (or not dated at all), and a title the matcher
+     * already calls this task's own title. Mentions and sources are left
+     * alone; this is a status change, not a merge.
+     */
+    protected function foldTwins(int $projectId, Task $task, ProjectActionItem $applied): void
+    {
+        $dueOn = $applied->due_on?->toDateString();
+
+        ProjectActionItem::query()
+            ->where('project_id', $projectId)
+            ->where('status', ProjectActionItem::STATUS_OPEN)
+            ->where('id', '!=', $applied->id)
+            ->get()
+            ->each(function (ProjectActionItem $twin) use ($task, $dueOn) {
+                $twinDate = $twin->due_on?->toDateString();
+
+                if ($twinDate !== null && $twinDate !== $dueOn) {
+                    return;
+                }
+
+                if (! $this->matcher->titlesMatch((string) $twin->title, (string) $task->title)) {
+                    return;
+                }
+
+                $twin->update(['status' => ProjectActionItem::STATUS_TASK, 'task_id' => $task->id]);
+            });
     }
 
     /** The task this item already became, if it still exists on the project. */
