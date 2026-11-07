@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Project;
 use App\Models\ProjectActionItem;
 use App\Models\ProjectStatus;
+use App\Services\ActionItems\ActionItemPlacer;
 use App\Livewire\Tasks\TaskCreate;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -2636,26 +2637,7 @@ class CardsIndex extends Component
             return;
         }
 
-        $item->update(['project_id' => $projectId]);
-
-        foreach ((array) ($item->sources ?? []) as $source) {
-            $model = match ($source['kind'] ?? null) {
-                'call' => \App\Models\CallLog::withoutGlobalScopes()->find($source['id'] ?? 0),
-                'email' => \App\Models\EmailMessage::withoutGlobalScopes()->find($source['id'] ?? 0),
-                default => null,
-            };
-            if ($model && ! $model->project_id) {
-                $model->forceFill(['project_id' => $projectId])->saveQuietly();
-            }
-        }
-
-        $last = collect($item->sources ?? [])->last();
-        if ($item->isVisit() && $item->due_on && is_array($last)) {
-            app(\App\Services\ActionItems\ScheduledVisitApplier::class)->apply(
-                $item->fresh(),
-                ['at' => \Illuminate\Support\Carbon::parse($last['at'] ?? now()), 'source' => $last],
-            );
-        }
+        app(ActionItemPlacer::class)->place($item, $projects->get($projectId));
 
         $this->forgetActionItemCaches();
     }

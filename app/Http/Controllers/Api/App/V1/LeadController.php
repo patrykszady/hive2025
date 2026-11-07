@@ -528,6 +528,11 @@ class LeadController extends Controller
             'slot_problems' => $composer->slotProblems($availability),
             'has_usable_availability' => $composer->hasUsableAvailability($availability),
             'booked_consult' => $composer->bookedConsult($client, $found, $fullName),
+            // The consult the office already said "sorry we missed you"
+            // about (App\Models\Lead::missedConsult()) — null once a
+            // (re)booking clears it. The web's callout and its "Sorry we
+            // missed you" button read both this and booked_consult.started.
+            'missed_consult' => $found->missedConsult(),
             'consult_project_options' => $composer->consultProjectOptions($client),
             'consult_meeting_type' => $this->leadMeetingPreference($found),
             'consult_within_the_hour' => $found->allowsConsultWithinTheHour(),

@@ -7,6 +7,7 @@ use App\Models\EmailTemplate;
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
+use App\Models\EstimateSignature;
 use App\Models\LineItem;
 use App\Models\Project;
 use App\Models\User;
@@ -1584,4 +1585,138 @@ it('refuses more than 5 floorplan images on an AI draft', function () {
         'inquiry' => 'Demo the hall bathroom before retiling.',
         'floorplans' => $files,
     ])->assertStatus(422);
+});
+
+// --- "Mark Up Line Items" / "Revert Last Markup" (App\Services\Estimates\EstimateMarkupApplier) ---
+
+it('needs a token for the markup preview, apply and revert, and for the last-markup lookup', function () {
+    $this->getJson('/api/app/v1/estimates/1/markup/preview?percent=10')->assertUnauthorized();
+    $this->getJson('/api/app/v1/estimates/1/markup/last')->assertUnauthorized();
+    $this->postJson('/api/app/v1/estimates/1/markup', ['percent' => 10])->assertUnauthorized();
+    $this->postJson('/api/app/v1/estimates/1/markup/revert')->assertUnauthorized();
+});
+
+it('refuses a Member marking up or reverting, like the web', function () {
+    ['vendor' => $vendor, 'user' => $member] = appEstimatesTeamUser(role: 2);
+    Sanctum::actingAs($member, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+
+    $this->getJson("/api/app/v1/estimates/{$estimate->id}/markup/preview?percent=10")->assertForbidden();
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup", ['percent' => 10])->assertForbidden();
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup/revert")->assertForbidden();
+});
+
+it('previews a markup on one section without saving anything', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $kitchen = appEstimatesSection($estimate, ['name' => 'Kitchen']);
+    $bath = appEstimatesSection($estimate, ['name' => 'Bath', 'order' => 1]);
+    $catalog = appEstimatesCatalogItem(['cost' => 100]);
+    // A whole-dollar line (stays whole) in Kitchen, and another section's
+    // line that a Kitchen-only preview must leave out of its total.
+    $line = appEstimatesLineItemRow($estimate, $kitchen, $catalog, ['quantity' => 1, 'cost' => 100, 'total' => 100]);
+    appEstimatesLineItemRow($estimate, $bath, $catalog, ['quantity' => 1, 'cost' => 50, 'total' => 50]);
+
+    $response = $this->getJson("/api/app/v1/estimates/{$estimate->id}/markup/preview?percent=10&section_id={$kitchen->id}")->assertOk();
+
+    expect((float) $response->json('data.before'))->toBe(100.0)
+        ->and((float) $response->json('data.after'))->toBe(110.0)
+        ->and($response->json('data.lines'))->toBe(1)
+        ->and((float) $line->fresh()->cost)->toBe(100.0);
+});
+
+it('applies a markup, rounding a whole-dollar price to the nearest whole and any other price to the nearest quarter', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalog = appEstimatesCatalogItem(['cost' => 100]);
+    // Whole-dollar: 2150 × 1.10 = 2365 exactly. Cents: 333.33 × 1.10 =
+    // 366.663 → the nearest quarter is 366.75 — same figures as the web's
+    // own EstimateMarkupTest scenario.
+    $whole = appEstimatesLineItemRow($estimate, $section, $catalog, ['name' => 'Demo', 'quantity' => 1, 'cost' => 2150.00, 'total' => 2150.00]);
+    $cents = appEstimatesLineItemRow($estimate, $section, $catalog, ['name' => 'Tile', 'quantity' => 3, 'cost' => 333.33, 'total' => 999.99]);
+
+    $response = $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup", ['percent' => 10, 'section_id' => $section->id])->assertOk();
+
+    expect($response->json('data'))->toBe(['before' => 3149.99, 'after' => 3465.25, 'lines' => 2])
+        ->and((float) $whole->fresh()->cost)->toBe(2365.0)
+        ->and((float) $whole->fresh()->total)->toBe(2365.0)
+        ->and((float) $cents->fresh()->cost)->toBe(366.75)
+        ->and((float) $cents->fresh()->total)->toBe(1100.25)
+        ->and((float) $section->fresh()->total)->toBe(3465.25);
+});
+
+it('422s a zero or out-of-range percent, and refuses a signed estimate', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate);
+    $catalog = appEstimatesCatalogItem(['cost' => 100]);
+    appEstimatesLineItemRow($estimate, $section, $catalog);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup", ['percent' => 0])->assertStatus(422);
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup", ['percent' => 250])->assertStatus(422);
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup", ['percent' => -60])->assertStatus(422);
+
+    EstimateSignature::query()->create([
+        'estimate_id' => $estimate->id, 'user_id' => $admin->id, 'signer_name' => 'Vendor Admin', 'signer_email' => $admin->email,
+        'signer_phone' => '+12243334440', 'signature_data' => 'sig', 'signature_type' => 'draw', 'ip_address' => '127.0.0.1',
+        'user_agent' => 'PHPUnit', 'document_hash' => 'hash', 'signed_at' => now(),
+    ]);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup", ['percent' => 10])->assertStatus(422);
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup/revert")->assertStatus(422);
+});
+
+it('reports the newest revertible markup, then reverts it, restoring prices and leaving an edited line alone', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appEstimatesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    $client = appEstimatesClient($vendor);
+    $project = appEstimatesProject($vendor, $client);
+    $estimate = appEstimatesRow($vendor, $project);
+    $section = appEstimatesSection($estimate, ['name' => 'Kitchen']);
+    $catalog = appEstimatesCatalogItem(['cost' => 100]);
+    $kept = appEstimatesLineItemRow($estimate, $section, $catalog, ['quantity' => 1, 'cost' => 100, 'total' => 100]);
+    $editedAfter = appEstimatesLineItemRow($estimate, $section, $catalog, ['quantity' => 1, 'cost' => 50, 'total' => 50]);
+
+    $this->getJson("/api/app/v1/estimates/{$estimate->id}/markup/last")->assertOk()->assertExactJson(['data' => null]);
+
+    $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup", ['percent' => 10, 'section_id' => $section->id])->assertOk();
+
+    $last = $this->getJson("/api/app/v1/estimates/{$estimate->id}/markup/last")->assertOk();
+    expect((float) $last->json('data.percent'))->toBe(10.0)
+        ->and($last->json('data.section_id'))->toBe($section->id)
+        ->and($last->json('data.section_name'))->toBe('Kitchen')
+        ->and((float) $last->json('data.before'))->toBe(150.0)
+        ->and((float) $last->json('data.after'))->toBe(165.0);
+
+    // Someone edits one of the marked-up lines by hand before the revert —
+    // mirrors EstimateMarkupApplier::revert()'s "a line edited since keeps
+    // its edit" rule: only $kept (still at its marked-up price) goes back.
+    $editedAfter->update(['cost' => 999, 'total' => 999]);
+
+    $response = $this->postJson("/api/app/v1/estimates/{$estimate->id}/markup/revert")->assertOk();
+
+    expect($response->json('data.restored'))->toBe(1)
+        ->and($response->json('data.skipped'))->toBe(1)
+        ->and((float) $response->json('data.percent'))->toBe(10.0)
+        ->and((float) $kept->fresh()->cost)->toBe(100.0)
+        ->and((float) $editedAfter->fresh()->cost)->toBe(999.0);
+
+    $this->getJson("/api/app/v1/estimates/{$estimate->id}/markup/last")->assertOk()->assertExactJson(['data' => null]);
 });

@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\App\V1\EstimateContractSettingsController;
 use App\Http\Controllers\Api\App\V1\EstimateController;
 use App\Http\Controllers\Api\App\V1\EstimateEmailController;
 use App\Http\Controllers\Api\App\V1\EstimateLineItemController;
+use App\Http\Controllers\Api\App\V1\EstimateMarkupController;
 use App\Http\Controllers\Api\App\V1\EstimatePaymentScheduleController;
 use App\Http\Controllers\Api\App\V1\EstimateSectionController;
 use Illuminate\Support\Facades\Route;
@@ -71,3 +72,11 @@ Route::post('estimates/{estimate}/line-items/{lineItem}/credit', [EstimateLineIt
 
 Route::patch('estimates/{estimate}/sections/{section}/move', [EstimateSectionController::class, 'move'])->whereNumber(['estimate', 'section'])->name('estimates.sections.move');
 Route::patch('estimates/{estimate}/line-items/{lineItem}/move', [EstimateLineItemController::class, 'move'])->whereNumber(['estimate', 'lineItem'])->name('estimates.line-items.move');
+
+// "Mark Up Line Items" / "Revert Last Markup" (a section's menu, on the
+// web) — mirrors App\Livewire\Estimates\EstimateMarkup via
+// App\Services\Estimates\EstimateMarkupApplier, the service both share.
+Route::get('estimates/{estimate}/markup/preview', [EstimateMarkupController::class, 'preview'])->whereNumber('estimate')->name('estimates.markup.preview');
+Route::get('estimates/{estimate}/markup/last', [EstimateMarkupController::class, 'last'])->whereNumber('estimate')->name('estimates.markup.last');
+Route::post('estimates/{estimate}/markup', [EstimateMarkupController::class, 'apply'])->whereNumber('estimate')->name('estimates.markup.apply');
+Route::post('estimates/{estimate}/markup/revert', [EstimateMarkupController::class, 'revert'])->whereNumber('estimate')->name('estimates.markup.revert');

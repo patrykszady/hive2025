@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\CallLog;
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\ProjectActionItem;
@@ -752,4 +753,116 @@ it('404s done/dismiss for an item on another vendor\'s project, and for a nonexi
     $this->postJson("/api/app/v1/action-items/{$foreignItem->id}/dismiss")->assertNotFound();
 
     expect($foreignItem->fresh()->status)->toBe(ProjectActionItem::STATUS_OPEN);
+});
+
+// --- "Needs a project" (2026-11-05, App\Services\ActionItems\ActionItemPlacer) ---
+
+function appUnplacedActionItem(Vendor $vendor, array $overrides = []): ProjectActionItem
+{
+    return ProjectActionItem::create(array_merge([
+        'project_id' => null,
+        'belongs_to_vendor_id' => $vendor->id,
+        'title' => 'Confirm the tile order',
+        'owner' => 'Jenn',
+        'status' => ProjectActionItem::STATUS_OPEN,
+        'mentions' => 1,
+        'first_mentioned_at' => now(),
+        'last_mentioned_at' => now(),
+        'sources' => [['kind' => 'call', 'id' => 0, 'at' => now()->toIso8601String(), 'excerpt' => 'tile']],
+        'fingerprint' => sha1(uniqid('appUnplacedActionItem', true)),
+    ], $overrides));
+}
+
+it('needs a token for the unplaced list and for placing an item', function () {
+    $this->getJson('/api/app/v1/action-items/unplaced')->assertUnauthorized();
+    $this->postJson('/api/app/v1/action-items/1/place', ['project_id' => 1])->assertUnauthorized();
+});
+
+it('lists this company\'s unplaced action items only, newest-mentioned first', function () {
+    ['vendor' => $vendor] = appPlannerTeam();
+    Sanctum::actingAs($user = User::where('primary_vendor_id', $vendor->id)->first(), ['app']);
+
+    $older = appUnplacedActionItem($vendor, ['title' => 'Older ask', 'last_mentioned_at' => now()->subDays(20)]);
+    $newer = appUnplacedActionItem($vendor, ['title' => 'ABS Delivery', 'owner' => 'ABS', 'last_mentioned_at' => now()->subHour(), 'due_on' => now()->addDays(5)->toDateString()]);
+
+    $otherVendor = Vendor::factory()->create();
+    appUnplacedActionItem($otherVendor, ['title' => 'Not yours']);
+
+    $placedAlready = Client::factory()->create();
+    $project = appPlannerProject($vendor, $placedAlready);
+    appPlannerActionItem($project, ['title' => 'Already placed']);
+
+    $response = $this->getJson('/api/app/v1/action-items/unplaced')->assertOk();
+    $titles = collect($response->json('data'))->pluck('title');
+
+    expect($titles->all())->toBe(['ABS Delivery', 'Older ask']);
+
+    $row = collect($response->json('data'))->firstWhere('id', $newer->id);
+    expect($row['owner'])->toBe('ABS')
+        ->and($row['due_on'])->toBe(now()->addDays(5)->toDateString())
+        ->and($row['sources'][0])->toMatchArray(['kind' => 'call']);
+
+    expect($older->fresh()->project_id)->toBeNull();
+});
+
+it('places an unplaced item on a project, taking its call with it', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appPlannerProject($vendor, $client, ['project_name' => 'Elm Remodel']);
+
+    $call = CallLog::create([
+        'call_control_id' => 'cc-'.uniqid(),
+        'direction' => 'incoming',
+        'from_number' => '+18475550000',
+        'to_number' => '+12247354200',
+        'status' => 'completed',
+        'vendor_id' => $vendor->id,
+    ]);
+    $item = appUnplacedActionItem($vendor, [
+        'title' => 'Confirm the tile order',
+        'sources' => [['kind' => 'call', 'id' => $call->id, 'at' => now()->toIso8601String(), 'excerpt' => 'tile']],
+    ]);
+
+    $this->postJson("/api/app/v1/action-items/{$item->id}/place", ['project_id' => $project->id])
+        ->assertOk()
+        ->assertExactJson(['data' => ['id' => $item->id, 'placed' => true]]);
+
+    expect($item->fresh()->project_id)->toBe($project->id)
+        ->and($call->fresh()->project_id)->toBe($project->id);
+});
+
+it('404s placing an item that is missing, already placed, another company\'s, or on an invisible project', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $client = Client::factory()->create();
+    $project = appPlannerProject($vendor, $client);
+
+    $this->postJson('/api/app/v1/action-items/999999999/place', ['project_id' => $project->id])->assertNotFound();
+
+    $alreadyPlaced = appPlannerActionItem($project, ['title' => 'Already placed']);
+    $this->postJson("/api/app/v1/action-items/{$alreadyPlaced->id}/place", ['project_id' => $project->id])->assertNotFound();
+
+    $otherVendor = Vendor::factory()->create();
+    $foreignItem = appUnplacedActionItem($otherVendor);
+    $this->postJson("/api/app/v1/action-items/{$foreignItem->id}/place", ['project_id' => $project->id])->assertNotFound();
+
+    $otherClient = Client::factory()->create();
+    $strangerProject = appPlannerProject($otherVendor, $otherClient);
+    $item = appUnplacedActionItem($vendor);
+    $this->postJson("/api/app/v1/action-items/{$item->id}/place", ['project_id' => $strangerProject->id])->assertNotFound();
+    expect($item->fresh()->project_id)->toBeNull();
+});
+
+it('422s placing an item with no project_id', function () {
+    ['vendor' => $vendor, 'user' => $user] = appPlannerTeam();
+    Sanctum::actingAs($user, ['app']);
+
+    $item = appUnplacedActionItem($vendor);
+
+    $this->postJson("/api/app/v1/action-items/{$item->id}/place", [])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['project_id']);
 });

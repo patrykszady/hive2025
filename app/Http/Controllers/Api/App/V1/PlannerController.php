@@ -72,6 +72,23 @@ class PlannerController extends Controller
         return response()->json(['data' => $agenda->actionItems($request->user())]);
     }
 
+    /** The "Needs a project" list — see AppPlannerAgenda::unplacedActionItems(). */
+    public function unplaced(Request $request, AppPlannerAgenda $agenda): JsonResponse
+    {
+        return response()->json(['data' => $agenda->unplacedActionItems($request->user())]);
+    }
+
+    /** The "Which project?" picker's pick — see AppPlannerAgenda::place(). */
+    public function place(Request $request, int $item, AppPlannerAgenda $agenda): JsonResponse
+    {
+        $projectId = (int) $request->validate(['project_id' => ['required', 'integer']])['project_id'];
+
+        $placed = $agenda->place($request->user(), $item, $projectId);
+        abort_unless($placed, 404);
+
+        return response()->json(['data' => ['id' => $item, 'placed' => true]]);
+    }
+
     public function markDone(Request $request, int $item, AppPlannerAgenda $agenda): JsonResponse
     {
         return $this->settle($request, $item, $agenda, ProjectActionItem::STATUS_DONE);

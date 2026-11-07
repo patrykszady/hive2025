@@ -603,7 +603,20 @@ it('returns reply-composer options with recipients, templates and availability, 
         ->and($response->json('data.availability'))->toHaveCount(1)
         ->and($response->json('data.slot_problems'))->toBe([null])
         ->and($response->json('data.has_usable_availability'))->toBeTrue()
-        ->and($response->json('data.client.id'))->toBe($client->id);
+        ->and($response->json('data.client.id'))->toBe($client->id)
+        ->and($response->json('data.missed_consult'))->toBeNull();
+});
+
+it('surfaces a marked-missed consult, like the web callout reads Lead::missedConsult()', function () {
+    ['vendor' => $vendor, 'user' => $admin] = appSalesTeamUser(role: 1);
+    Sanctum::actingAs($admin, ['app']);
+
+    ['lead' => $lead] = appSalesLeadWithClient($vendor);
+    $lead->markConsultMissed(['task_id' => 42, 'label' => 'Thu, Nov 5 · 11:00 AM']);
+
+    $response = $this->getJson("/api/app/v1/leads/{$lead->id}/reply-options")->assertOk();
+
+    expect($response->json('data.missed_consult'))->toMatchArray(['task_id' => 42, 'label' => 'Thu, Nov 5 · 11:00 AM']);
 });
 
 it('refuses a Member reading reply options, like the web', function () {

@@ -7,6 +7,7 @@ use App\Models\Project;
 use App\Models\ProjectActionItem;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\ActionItems\ActionItemPlacer;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Eloquent\Builder;
@@ -61,6 +62,8 @@ class AppPlannerAgenda
      * mirrors CardsIndex::MAX_DAYS_LOADED.
      */
     public const MAX_WINDOW_DAYS = 120;
+
+    public function __construct(private ActionItemPlacer $placer) {}
 
     /** "Today" for the agenda, independent of any browser-timezone cookie — the app carries no such cookie. */
     public function today(): Carbon
@@ -299,6 +302,49 @@ class AppPlannerAgenda
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * Items the AI read from a call or email it could not place on a job
+     * (ExtractUnplacedActionItems) — the app's "Needs a project" list,
+     * mirrors CardsIndex::unplacedActionItems(). Empty when $user carries no
+     * vendor.
+     *
+     * @return list<array{id: int, title: string, owner: ?string, due_on: ?string, start_time: ?string, end_time: ?string, mentions: int, last_mentioned_at: ?string, sources: list<array>}>
+     */
+    public function unplacedActionItems(User $user): array
+    {
+        $vendorId = (int) ($user->vendor?->id ?? $user->primary_vendor_id ?? 0);
+
+        if (! $vendorId) {
+            return [];
+        }
+
+        return ProjectActionItem::query()->open()->unplaced($vendorId)->orderByDesc('last_mentioned_at')->get()
+            ->map(fn (ProjectActionItem $item): array => $this->actionItemPayload($item))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Puts an unplaced item on $projectId — the app's "Which project?" picker,
+     * via the same ActionItemPlacer the web planner's placeActionItem() uses.
+     * False when the item doesn't exist, is already placed, isn't this
+     * company's, or $projectId isn't visible to $user (Project's own global
+     * scope) — the controller turns that into a 404.
+     */
+    public function place(User $user, int $itemId, int $projectId): bool
+    {
+        $vendorId = (int) ($user->vendor?->id ?? $user->primary_vendor_id ?? 0);
+
+        $item = ProjectActionItem::query()->whereKey($itemId)->open()->unplaced($vendorId ?: -1)->first();
+        $project = Project::query()->find($projectId);
+
+        if (! $item || ! $project) {
+            return false;
+        }
+
+        return $this->placer->place($item, $project);
     }
 
     /**

@@ -112,6 +112,11 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
         // (App\Livewire\Planner\CardsIndex), via AppPlannerAgenda.
         Route::get('planner', [AppPlannerController::class, 'index'])->name('planner.index');
         Route::get('action-items', [AppPlannerController::class, 'actionItems'])->name('action-items.index');
+        // The "Needs a project" list and its "Which project?" picker — ahead
+        // of the numeric {item} routes for clarity, though whereNumber()
+        // already keeps 'unplaced' from being swallowed as an id.
+        Route::get('action-items/unplaced', [AppPlannerController::class, 'unplaced'])->name('action-items.unplaced');
+        Route::post('action-items/{item}/place', [AppPlannerController::class, 'place'])->whereNumber('item')->name('action-items.place');
         Route::post('action-items/{item}/done', [AppPlannerController::class, 'markDone'])->whereNumber('item')->name('action-items.done');
         Route::post('action-items/{item}/dismiss', [AppPlannerController::class, 'dismiss'])->whereNumber('item')->name('action-items.dismiss');
 
