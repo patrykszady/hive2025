@@ -5,6 +5,9 @@ namespace App\Services\Voice;
 use App\Models\CallLog;
 use App\Models\User;
 use App\Services\GroupSmsService;
+use App\Services\Voice\Concerns\DedupesClickToCallTargets;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -14,9 +17,16 @@ use Illuminate\Support\Facades\Log;
  * webhook dials the target(s) from the business number and joins them in a
  * recorded conference (TelnyxWebhookController click-to-call handlers). One
  * implementation for "Call back", the Messages call button and the app.
+ *
+ * The (user, target) dedupe this needs — so a burst of simultaneous requests
+ * can't each create their own CallLog — is shared with DirectDialStarter via
+ * the DedupesClickToCallTargets concern; everything below this point is
+ * ClickToCall's own ring-the-user-first behaviour.
  */
 class ClickToCall
 {
+    use DedupesClickToCallTargets;
+
     public function __construct(protected AppVoiceCredentials $appVoice) {}
 
     /**
@@ -26,17 +36,37 @@ class ClickToCall
      */
     public function start(User $user, array $targetPhones, array $recipientIds = [], bool $ringApp = false): array
     {
-        $targets = collect($targetPhones)
-            ->map(fn ($phone) => self::normalize($phone))
-            ->filter()
-            ->reject(fn (string $phone) => GroupSmsService::isOurNumber($phone))
-            ->unique()
-            ->values();
+        $targets = $this->normalizedTargets($targetPhones);
 
         if ($targets->isEmpty()) {
             return $this->failed(collect($targetPhones)->filter()->isNotEmpty() && collect($targetPhones)->every(fn ($phone) => GroupSmsService::isOurNumber((string) self::normalize($phone)))
                 ? 'Cannot call the company phone number.'
                 : 'No callable number.');
+        }
+
+        $dedupeKey = self::dedupeKey($user->id, $targets);
+
+        try {
+            return $this->withDedupeLock($dedupeKey, fn () => $this->startLocked($user, $targets, $recipientIds, $ringApp, $dedupeKey));
+        } catch (LockTimeoutException) {
+            return $this->failed('Could not place the call right now — try again in a moment.');
+        }
+    }
+
+    /**
+     * The actual call placement, run while holding the per-(user, target)
+     * lock so a burst of simultaneous requests cannot each create their own
+     * CallLog: the first one through creates it and dials Telnyx, and every
+     * other one in the same burst finds it in `activeDuplicate()` and is
+     * handed it back instead.
+     *
+     * @return array{ok: bool, error: ?string, call_log: ?CallLog, targets: array<int, string>}
+     */
+    protected function startLocked(User $user, Collection $targets, array $recipientIds, bool $ringApp, string $dedupeKey): array
+    {
+        $duplicate = $this->activeDuplicate($dedupeKey);
+        if ($duplicate) {
+            return ['ok' => true, 'error' => null, 'call_log' => $duplicate, 'targets' => $targets->all()];
         }
 
         $userPhone = $user->routeNotificationForTelnyx();
@@ -79,6 +109,8 @@ class ClickToCall
             'vendor_id' => $user->vendor?->id,
             'metadata' => $metadata,
         ]);
+
+        $this->rememberCallLog($dedupeKey, $callLog);
 
         try {
             $response = Http::withToken($apiKey)->post('https://api.telnyx.com/v2/calls', array_filter([
@@ -127,27 +159,6 @@ class ClickToCall
         ]);
 
         return ['ok' => true, 'error' => null, 'call_log' => $callLog, 'targets' => $targets->all()];
-    }
-
-    /** "(224) 555-1234", "2245551234" or "+12245551234" → "+12245551234". */
-    public static function normalize(?string $phone): ?string
-    {
-        if (! is_string($phone) || trim($phone) === '') {
-            return null;
-        }
-
-        $digits = (string) preg_replace('/\D/', '', $phone);
-        if ($digits === '') {
-            return null;
-        }
-        if (strlen($digits) === 10) {
-            return '+1'.$digits;
-        }
-        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            return '+'.$digits;
-        }
-
-        return '+'.$digits;
     }
 
     /** Telnyx must reach the webhook from outside: on a local dev box, through the public tunnel. */

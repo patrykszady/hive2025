@@ -36,7 +36,17 @@ it('hands the app a calling sign-in token', function () {
 
     $this->getJson('/api/app/v1/voice/token')
         ->assertOk()
-        ->assertExactJson(['token' => 'jwt.token.value', 'sip_username' => 'gencredpatryk', 'caller_id' => '+12247354200']);
+        ->assertExactJson(['token' => 'jwt.token.value', 'sip_username' => 'gencredpatryk', 'caller_id' => '+12247354200', 'direct_dial' => false]);
+});
+
+it('tells the app direct dial is on once the flag and app connection are both configured', function () {
+    config(['services.telnyx.direct_dial_enabled' => true]);
+    Http::fake(['api.telnyx.com/v2/telephony_credentials/cred-1/token' => Http::response('jwt.token.value', 200)]);
+    Sanctum::actingAs($this->member, ['app']);
+
+    $this->getJson('/api/app/v1/voice/token')
+        ->assertOk()
+        ->assertJsonPath('direct_dial', true);
 });
 
 it('places a call that rings the app, then the number from the business line', function () {
@@ -118,4 +128,41 @@ it('tells the app what is ringing it right now, and nothing once the call is ove
 
     $call->update(['status' => CallLog::STATUS_COMPLETED]);
     $this->getJson('/api/app/v1/calls/ringing')->assertExactJson(['data' => null]);
+});
+
+// =========================================================================
+// Direct dial (2026-11-07): ring:'direct' logs the CallLog only — no
+// Telnyx call is placed from here. See DirectDialStarter and
+// TelnyxWebhookController::handleParkedDirectDialLeg() for the rest.
+// =========================================================================
+
+it('refuses ring:direct while the flag is off', function () {
+    Sanctum::actingAs($this->member, ['app']);
+
+    $this->postJson('/api/app/v1/calls', ['to' => '(847) 555-0100', 'ring' => 'direct'])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('ring');
+});
+
+it('logs a direct-dial CallLog without placing any Telnyx call', function () {
+    config(['services.telnyx.direct_dial_enabled' => true]);
+    Http::fake();
+    Sanctum::actingAs($this->member, ['app']);
+
+    $response = $this->postJson('/api/app/v1/calls', ['to' => '(847) 555-0100', 'ring' => 'direct'])
+        ->assertCreated()
+        ->assertJson(['ring' => 'direct', 'to' => '+18475550100']);
+
+    $callLog = CallLog::find($response->json('call_log_id'));
+    expect($callLog->status)->toBe(CallLog::STATUS_INITIATED)
+        ->and($callLog->direction)->toBe('outgoing')
+        ->and($callLog->from_number)->toBe('+12247354200')
+        ->and($callLog->user_id)->toBe($this->member->id)
+        ->and($callLog->metadata['type'])->toBe('direct_dial')
+        ->and($callLog->metadata['target_phones'])->toBe(['+18475550100']);
+
+    $clientState = json_decode(base64_decode($response->json('client_state')), true);
+    expect($clientState)->toBe(['action' => 'direct_dial', 'call_log_id' => $callLog->id]);
+
+    Http::assertNothingSent();
 });

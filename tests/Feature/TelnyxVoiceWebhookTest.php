@@ -2321,6 +2321,130 @@ it('keeps the recording for a completed call that had a real conversation', func
     expect($fresh->has_voicemail)->toBeFalse();
 });
 
+it('keeps a recording whose call.recording.saved raced the hangup update and left duration_seconds unset', function () {
+    \Illuminate\Support\Facades\Bus::fake();
+
+    // The target leg was already bridged (status TRANSFERRED, set at conference
+    // join time) when call.recording.saved arrives in the same second as the
+    // leg's own call.hangup. duration_seconds is only written by the hangup
+    // handler, so it is still null here — the fix must not gate on it.
+    $callLog = CallLog::create([
+        'call_control_id' => 'raced-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'duration_seconds' => null,
+    ]);
+
+    $clientState = base64_encode(json_encode([
+        'action' => 'call_recording',
+        'call_log_id' => $callLog->id,
+    ]));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.recording.saved',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'raced-cc',
+                'recording_urls' => ['mp3' => 'https://example.com/rec-52s.mp3'],
+                'client_state' => $clientState,
+                'recording_started_at' => '2026-11-07T10:00:00Z',
+                'recording_ended_at' => '2026-11-07T10:00:52Z',
+            ],
+        ],
+    ])->assertSuccessful();
+
+    \Illuminate\Support\Facades\Bus::assertDispatched(\App\Jobs\StoreCallRecording::class);
+
+    $fresh = $callLog->fresh();
+    expect($fresh->recording_url)->toBe('https://example.com/rec-52s.mp3');
+});
+
+it('skips a genuinely zero-length recording even on a connected call', function () {
+    \Illuminate\Support\Facades\Bus::fake();
+
+    // Bridged and answered, but the clip itself is zero-length (e.g. the
+    // target picked up and hung up in the same instant). The recording's own
+    // timing — not the connected status — is what must veto saving it.
+    $callLog = CallLog::create([
+        'call_control_id' => 'zero-clip-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'duration_seconds' => null,
+        'answered_at' => now(),
+    ]);
+
+    $clientState = base64_encode(json_encode([
+        'action' => 'call_recording',
+        'call_log_id' => $callLog->id,
+    ]));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.recording.saved',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'zero-clip-cc',
+                'recording_urls' => ['mp3' => 'https://example.com/rec-0s.mp3'],
+                'client_state' => $clientState,
+                'recording_started_at' => '2026-11-07T10:00:00Z',
+                'recording_ended_at' => '2026-11-07T10:00:00Z',
+            ],
+        ],
+    ])->assertSuccessful();
+
+    \Illuminate\Support\Facades\Bus::assertNotDispatched(\App\Jobs\StoreCallRecording::class);
+
+    $fresh = $callLog->fresh();
+    expect($fresh->recording_url)->toBeNull();
+    expect($fresh->recording_path)->toBeNull();
+    expect($fresh->recording_disk)->toBeNull();
+});
+
+it('never wipes an already-saved recording on a later, worse-looking event for the same call', function () {
+    \Illuminate\Support\Facades\Bus::fake();
+
+    // A prior call.recording.saved already did the real work and stored a
+    // recording. A duplicate/retried webhook for the same call_control_id,
+    // whose own payload now looks zero-length, must not null it back out.
+    $callLog = CallLog::create([
+        'call_control_id' => 'already-saved-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'duration_seconds' => null,
+        'recording_url' => 'https://example.com/already-saved.mp3',
+        'recording_path' => 'recordings/already-saved.wav',
+        'recording_disk' => 'local',
+    ]);
+
+    $clientState = base64_encode(json_encode([
+        'action' => 'call_recording',
+        'call_log_id' => $callLog->id,
+    ]));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.recording.saved',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'already-saved-cc',
+                'recording_urls' => ['mp3' => 'https://example.com/already-saved.mp3'],
+                'client_state' => $clientState,
+                'recording_started_at' => '2026-11-07T10:00:00Z',
+                'recording_ended_at' => '2026-11-07T10:00:00Z',
+            ],
+        ],
+    ])->assertSuccessful();
+
+    $fresh = $callLog->fresh();
+    expect($fresh->recording_url)->toBe('https://example.com/already-saved.mp3');
+    expect($fresh->recording_path)->toBe('recordings/already-saved.wav');
+    expect($fresh->recording_disk)->toBe('local');
+});
+
 it('CallLogObserver creates AppNotifications for admin recipients on missed status', function () {
     $admin1 = User::factory()->create(['cell_phone' => '5551001001']);
     $admin2 = User::factory()->create(['cell_phone' => '5551001002']);

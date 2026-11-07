@@ -25,6 +25,16 @@ class AppVoiceCredentials
         return filled(config('services.telnyx.api_key')) && filled(config('services.telnyx.app_connection_id'));
     }
 
+    /**
+     * Whether "direct dial" (the app's own Telnyx SDK places the call,
+     * parked at Telnyx rather than ringing the person's phone first) is
+     * configured and turned on. See config('services.telnyx.direct_dial_enabled').
+     */
+    public function directDialEnabled(): bool
+    {
+        return $this->enabled() && (bool) config('services.telnyx.direct_dial_enabled');
+    }
+
     /** The person's login, created at Telnyx the first time. */
     public function credentialFor(User $user): UserVoiceCredential
     {

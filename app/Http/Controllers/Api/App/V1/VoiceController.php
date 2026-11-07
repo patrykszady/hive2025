@@ -8,6 +8,7 @@ use App\Models\CallLog;
 use App\Services\Calls\CallHistory;
 use App\Services\Voice\AppVoiceCredentials;
 use App\Services\Voice\ClickToCall;
+use App\Services\Voice\DirectDialStarter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -34,6 +35,10 @@ class VoiceController extends Controller
             'token' => $voice->tokenFor($request->user()),
             'sip_username' => $credential->sip_username,
             'caller_id' => (string) config('services.telnyx.from'),
+            // True only once Patryk has turned the Telnyx side of direct
+            // dial on too (outbound.call_parking_enabled on this connection)
+            // — see App\Services\Voice\DirectDialStarter.
+            'direct_dial' => $voice->directDialEnabled(),
         ]);
     }
 
@@ -67,11 +72,17 @@ class VoiceController extends Controller
      * for the conversation screen's "Call All" (App\Livewire\Sms\
      * SmsConversation::initiateCallAll()).
      */
-    public function store(PlaceAppCallRequest $request, ClickToCall $clickToCall): JsonResponse
+    public function store(PlaceAppCallRequest $request, ClickToCall $clickToCall, DirectDialStarter $directDial): JsonResponse
     {
-        $ringsApp = $request->validated('ring', 'app') !== 'cell';
-        $recipientIds = array_map('intval', (array) $request->validated('recipient_ids', []));
+        $ring = $request->validated('ring', 'app');
         $targets = $request->validated('targets') ?? [$request->validated('to')];
+
+        if ($ring === 'direct') {
+            return $this->storeDirect($request, $directDial, $targets);
+        }
+
+        $ringsApp = $ring !== 'cell';
+        $recipientIds = array_map('intval', (array) $request->validated('recipient_ids', []));
         $result = $clickToCall->start($request->user(), $targets, $recipientIds, ringApp: $ringsApp);
 
         if (! $result['ok']) {
@@ -83,6 +94,32 @@ class VoiceController extends Controller
             'to' => $result['targets'][0],
             'targets' => $result['targets'],
             'ring' => $ringsApp ? 'app' : 'cell',
+        ], 201);
+    }
+
+    /**
+     * Direct dial: no Telnyx call is placed here — the app's own SDK parks
+     * its own leg at Telnyx, and TelnyxWebhookController::
+     * handleParkedDirectDialLeg() dials the target(s) once that leg is
+     * confirmed. The app must carry the returned `client_state` on its
+     * client.newCall() so that webhook can find this CallLog again.
+     *
+     * @param  array<int, string|null>  $targets
+     */
+    protected function storeDirect(PlaceAppCallRequest $request, DirectDialStarter $directDial, array $targets): JsonResponse
+    {
+        $result = $directDial->start($request->user(), $targets);
+
+        if (! $result['ok']) {
+            return response()->json(['message' => $result['error']], 422);
+        }
+
+        return response()->json([
+            'call_log_id' => $result['call_log']->id,
+            'to' => $result['targets'][0],
+            'targets' => $result['targets'],
+            'ring' => 'direct',
+            'client_state' => $result['client_state'],
         ], 201);
     }
 }

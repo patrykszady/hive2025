@@ -21,6 +21,7 @@ use App\Models\SmsLog;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadParticipant;
 use App\Models\User;
+use App\Models\UserVoiceCredential;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use App\Services\SpamFilterService;
@@ -230,6 +231,14 @@ class TelnyxWebhookController extends Controller
         $payload = $data['payload'] ?? [];
         $direction = $payload['direction'] ?? null;
         $callControlId = $payload['call_control_id'] ?? null;
+
+        // Direct dial (2026-11-07): the app's own Telnyx SDK call, parked at
+        // Telnyx instead of ringing anywhere — recognised and handled BEFORE
+        // the generic outbound early return below, since a parked leg needs
+        // Hive to dial the target from it, not just a log line.
+        if ($direction === 'outgoing' && $callControlId && $this->isParkedAppLeg($payload)) {
+            return $this->handleParkedDirectDialLeg($callControlId, $payload);
+        }
 
         // For outbound calls (click-to-call or admin ring legs), just log and return.
         if ($direction === 'outgoing') {
@@ -483,6 +492,213 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * Whether a call.initiated payload is the app's own outbound leg parked
+     * at Telnyx for direct dial (outbound.call_parking_enabled on the app
+     * credential connection) rather than a normal outbound ring leg.
+     */
+    protected function isParkedAppLeg(array $payload): bool
+    {
+        $appConnectionId = (string) config('services.telnyx.app_connection_id');
+
+        return $appConnectionId !== ''
+            && ($payload['state'] ?? null) === 'parked'
+            && (string) ($payload['connection_id'] ?? '') === $appConnectionId;
+    }
+
+    /**
+     * A parked direct-dial leg just appeared at Telnyx. Correlate it to the
+     * CallLog DirectDialStarter already created, dial the target(s) from it
+     * (the same Dial request ClickToCall's ring-back flow uses — see
+     * dialClickToCallTargets()), and let handleClickToCallTargetAnswered()/
+     * handleClickToCallTargetHangup() take it from there exactly like a
+     * ring-back call, except the parked leg is answered rather than already
+     * live when the target picks up (see handleClickToCallTargetAnswered()).
+     * A leg we can't correlate — or direct dial turned off — is hung up
+     * rather than left parked forever.
+     */
+    protected function handleParkedDirectDialLeg(string $callControlId, array $payload): JsonResponse
+    {
+        // Telnyx retries call.initiated; only the first delivery for this
+        // leg should ever dial the target.
+        if (! Cache::add("telnyx_direct_dial_parked:{$callControlId}", true, 300)) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        $enabled = (bool) config('services.telnyx.direct_dial_enabled');
+        $callLog = $enabled ? $this->correlateParkedLeg($payload) : null;
+
+        if (! $callLog) {
+            Log::channel('telnyx')->warning('Parked app leg could not be correlated to a direct-dial call — hanging up', [
+                'call_control_id' => $callControlId,
+                'from' => $payload['from'] ?? null,
+                'to' => $payload['to'] ?? null,
+                'direct_dial_enabled' => $enabled,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        $callLog->update(['call_control_id' => $callControlId]);
+
+        $targetPhones = $this->extractClickToCallTargets([], $callLog);
+
+        if (empty($targetPhones)) {
+            Log::channel('telnyx')->error('Direct dial: no target phone(s) on the correlated call log — hanging up parked leg', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLog->id,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+            $callLog->update(['status' => CallLog::STATUS_FAILED, 'hangup_cause' => 'no_target_phone']);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        $callerUser = $callLog->user_id ? User::find($callLog->user_id) : null;
+        $callerFirstName = $callerUser?->first_name ?? 'Someone';
+
+        Log::channel('telnyx')->info('Direct dial: parked app leg correlated — dialing target(s)', [
+            'call_control_id' => $callControlId,
+            'call_log_id' => $callLog->id,
+            'target_phones' => $targetPhones,
+        ]);
+
+        try {
+            $targetCallControlIds = $this->dialClickToCallTargets($targetPhones, $callLog->id, $callControlId, $callerFirstName);
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Direct dial: exception dialing target', ['error' => $e->getMessage()]);
+            $this->sendCallCommand($callControlId, 'hangup');
+            $callLog->update(['status' => CallLog::STATUS_FAILED]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        $metadata = $callLog->metadata ?? [];
+        $metadata['target_phone'] = $targetPhones[0] ?? null;
+        $metadata['target_phones'] = $targetPhones;
+        $metadata['target_call_control_id'] = $targetCallControlIds[0] ?? null;
+        $metadata['target_call_control_ids'] = $targetCallControlIds;
+        $metadata['failed_target_call_control_ids'] = [];
+
+        // No separate "user answers" event exists for direct dial (the
+        // parked leg already is the app's live call) — STATUS_ANSWERED here
+        // keeps the rest of the shared click-to-call status machine
+        // (handleClickToCallTargetAnswered/Hangup) working unchanged.
+        $callLog->update([
+            'status' => empty($targetCallControlIds) ? CallLog::STATUS_FAILED : CallLog::STATUS_ANSWERED,
+            'answered_at' => $callLog->answered_at ?? now(),
+            'forwarded_to' => $targetPhones[0] ?? null,
+            'metadata' => $metadata,
+        ]);
+
+        if (empty($targetCallControlIds)) {
+            $this->sendCallCommand($callControlId, 'hangup');
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Correlate a parked direct-dial leg to the CallLog DirectDialStarter
+     * created for it, in order of preference: the client_state the app's
+     * SDK call carried (DirectDialStarter::clientStateFor()), the
+     * X-Hive-Call-Log custom header (set the same way as an internal call's
+     * Dial — see dialClickToCallTargets()), and finally — when neither
+     * survived the round trip — the newest still-initiated direct-dial
+     * CallLog for the same target, but ONLY for the user who owns the
+     * telephony credential that placed this leg (payload.from): without
+     * that owner check two team members calling at once could each be
+     * handed the other's parked leg.
+     */
+    protected function correlateParkedLeg(array $payload): ?CallLog
+    {
+        $clientState = $this->decodeClientState($payload['client_state'] ?? null);
+        if (($clientState['action'] ?? null) === 'direct_dial' && ! empty($clientState['call_log_id'])) {
+            $callLog = $this->directDialCallLogAwaitingPark((int) $clientState['call_log_id']);
+            if ($callLog) {
+                return $callLog;
+            }
+        }
+
+        $headerCallLogId = $this->customHeaderValue($payload, 'X-Hive-Call-Log');
+        if ($headerCallLogId !== null && $headerCallLogId !== '') {
+            $callLog = $this->directDialCallLogAwaitingPark((int) $headerCallLogId);
+            if ($callLog) {
+                return $callLog;
+            }
+        }
+
+        $user = $this->userForParkedLegFrom($payload['from'] ?? null);
+        if (! $user) {
+            return null;
+        }
+
+        $targetPhone = $this->normalizeDialPhone($payload['to'] ?? null);
+
+        return CallLog::query()
+            ->where('user_id', $user->id)
+            ->where('status', CallLog::STATUS_INITIATED)
+            ->where('metadata->type', 'direct_dial')
+            ->where('created_at', '>=', now()->subSeconds(60))
+            ->when($targetPhone, fn ($query) => $query->where('to_number', $targetPhone))
+            ->latest()
+            ->first();
+    }
+
+    /** The direct-dial CallLog a parked leg can still be attached to, or null once it has already moved on (a replayed webhook, a stale id). */
+    protected function directDialCallLogAwaitingPark(int $callLogId): ?CallLog
+    {
+        $callLog = CallLog::find($callLogId);
+
+        if (! $callLog || $callLog->status !== CallLog::STATUS_INITIATED || ($callLog->metadata['type'] ?? null) !== 'direct_dial') {
+            return null;
+        }
+
+        return $callLog;
+    }
+
+    /** The team member whose Hive app calling login (UserVoiceCredential) placed this leg, from the webhook's `from`, or null. */
+    protected function userForParkedLegFrom(?string $from): ?User
+    {
+        if (! is_string($from) || trim($from) === '') {
+            return null;
+        }
+
+        $sipUsername = str_contains($from, '@') ? explode('@', str_replace('sip:', '', $from))[0] : $from;
+
+        return UserVoiceCredential::where('sip_username', $sipUsername)->first()?->user;
+    }
+
+    /** @return array<string, mixed> */
+    protected function decodeClientState(?string $raw): array
+    {
+        if (! is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode(base64_decode($raw), true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /** A custom header's value off a Telnyx webhook payload (case-insensitive name match), or null. */
+    protected function customHeaderValue(array $payload, string $name): ?string
+    {
+        $headers = $payload['custom_headers'] ?? [];
+        if (! is_array($headers)) {
+            return null;
+        }
+
+        foreach ($headers as $header) {
+            if (is_array($header) && isset($header['name']) && strcasecmp((string) $header['name'], $name) === 0) {
+                return (string) ($header['value'] ?? '');
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Handle call.answered - route based on client_state action.
      *
      * Actions:
@@ -616,68 +832,11 @@ class TelnyxWebhookController extends Controller
         ]);
 
         // Dial target phone number(s)
-        $apiKey = config('services.telnyx.api_key');
-        $connectionId = config('services.telnyx.connection_id');
-        $from = config('services.telnyx.from');
-
+        $internal = ! empty($clientState['internal']);
         $targetCallControlIds = [];
 
         try {
-            $internal = ! empty($clientState['internal']);
-
-            foreach ($targetPhones as $targetPhone) {
-                // An internal call's target is a teammate's Hive login (a SIP
-                // address): no answering machine to detect, the caller's own
-                // name on the ring, the call log in a header for the banner,
-                // and InternalCalls::RING_SECONDS instead of the carrier wait.
-                $isHiveLogin = str_starts_with((string) $targetPhone, 'sip:');
-                $response = $this->telnyxHttp(0)
-                    ->post('https://api.telnyx.com/v2/calls', array_filter([
-                        'connection_id' => $connectionId,
-                        'to' => $targetPhone,
-                        'from' => $from,
-                        'from_display_name' => $isHiveLogin ? self::telnyxDisplayName($callerFirstName) : 'GS Construction',
-                        // Long enough for the carrier to divert to voicemail (see config).
-                        'timeout_secs' => $isHiveLogin ? \App\Services\Voice\InternalCalls::RING_SECONDS : (int) config('services.telnyx.click_to_call_timeout', 45),
-                        'preferred_codecs' => config('services.telnyx.preferred_codecs'),
-                        'answering_machine_detection' => $isHiveLogin ? null : 'premium',
-                        'answering_machine_detection_config' => $isHiveLogin ? null : [
-                            'after_greeting_silence_millis' => 800,
-                            'total_analysis_time_millis' => 5000,
-                        ],
-                        'custom_headers' => $isHiveLogin ? [['name' => 'X-Hive-Call-Log', 'value' => (string) $callLogId]] : null,
-                        'client_state' => base64_encode(json_encode([
-                            'action' => 'click_to_call_target_ring',
-                            'call_log_id' => $callLogId,
-                            'caller_name' => $callerFirstName,
-                            'target_phone' => $targetPhone,
-                            'target_phones' => $targetPhones,
-                            'user_call_control_id' => $callControlId,
-                            'internal' => $internal,
-                        ])),
-                        'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
-                    ], fn ($value) => $value !== null));
-
-                if (! $response->successful()) {
-                    Log::channel('telnyx')->error('Click-to-call: failed to dial target', [
-                        'target_phone' => $targetPhone,
-                        'status' => $response->status(),
-                        'error' => $response->json(),
-                    ]);
-                    continue;
-                }
-
-                $data = $response->json('data') ?? [];
-                $targetCcId = $data['call_control_id'] ?? null;
-                if ($targetCcId) {
-                    $targetCallControlIds[] = $targetCcId;
-                }
-
-                Log::channel('telnyx')->info('Click-to-call: target dialed', [
-                    'target_phone' => $targetPhone,
-                    'target_call_control_id' => $targetCcId,
-                ]);
-            }
+            $targetCallControlIds = $this->dialClickToCallTargets($targetPhones, $callLogId, $callControlId, $callerFirstName, $internal);
 
             if ($callLog) {
                 $metadata = $callLog->metadata ?? [];
@@ -712,6 +871,83 @@ class TelnyxWebhookController extends Controller
         }
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Dial one or more click-to-call targets from the business number, each
+     * with client_state carrying `click_to_call_target_ring` so
+     * handleClickToCallTargetAnswered()/handleClickToCallTargetHangup()
+     * handle the leg the same way regardless of what the OTHER end of the
+     * call is — the user's own cell/app leg Hive rang first (ClickToCall),
+     * or a direct-dial leg already parked at Telnyx
+     * (handleParkedDirectDialLeg()). Extracted from
+     * handleClickToCallAnswered() so both callers share one place that
+     * builds this Dial request.
+     *
+     * @param  array<int, string>  $targetPhones
+     * @return array<int, string> the target call_control_ids Telnyx accepted
+     */
+    protected function dialClickToCallTargets(array $targetPhones, ?int $callLogId, string $userCallControlId, string $callerFirstName, bool $internal = false): array
+    {
+        $connectionId = config('services.telnyx.connection_id');
+        $from = config('services.telnyx.from');
+        $targetCallControlIds = [];
+
+        foreach ($targetPhones as $targetPhone) {
+            // An internal call's target is a teammate's Hive login (a SIP
+            // address): no answering machine to detect, the caller's own
+            // name on the ring, the call log in a header for the banner,
+            // and InternalCalls::RING_SECONDS instead of the carrier wait.
+            $isHiveLogin = str_starts_with((string) $targetPhone, 'sip:');
+            $response = $this->telnyxHttp(0)
+                ->post('https://api.telnyx.com/v2/calls', array_filter([
+                    'connection_id' => $connectionId,
+                    'to' => $targetPhone,
+                    'from' => $from,
+                    'from_display_name' => $isHiveLogin ? self::telnyxDisplayName($callerFirstName) : 'GS Construction',
+                    // Long enough for the carrier to divert to voicemail (see config).
+                    'timeout_secs' => $isHiveLogin ? \App\Services\Voice\InternalCalls::RING_SECONDS : (int) config('services.telnyx.click_to_call_timeout', 45),
+                    'preferred_codecs' => config('services.telnyx.preferred_codecs'),
+                    'answering_machine_detection' => $isHiveLogin ? null : 'premium',
+                    'answering_machine_detection_config' => $isHiveLogin ? null : [
+                        'after_greeting_silence_millis' => 800,
+                        'total_analysis_time_millis' => 5000,
+                    ],
+                    'custom_headers' => $isHiveLogin ? [['name' => 'X-Hive-Call-Log', 'value' => (string) $callLogId]] : null,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'click_to_call_target_ring',
+                        'call_log_id' => $callLogId,
+                        'caller_name' => $callerFirstName,
+                        'target_phone' => $targetPhone,
+                        'target_phones' => $targetPhones,
+                        'user_call_control_id' => $userCallControlId,
+                        'internal' => $internal,
+                    ])),
+                    'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
+                ], fn ($value) => $value !== null));
+
+            if (! $response->successful()) {
+                Log::channel('telnyx')->error('Click-to-call: failed to dial target', [
+                    'target_phone' => $targetPhone,
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+                continue;
+            }
+
+            $data = $response->json('data') ?? [];
+            $targetCcId = $data['call_control_id'] ?? null;
+            if ($targetCcId) {
+                $targetCallControlIds[] = $targetCcId;
+            }
+
+            Log::channel('telnyx')->info('Click-to-call: target dialed', [
+                'target_phone' => $targetPhone,
+                'target_call_control_id' => $targetCcId,
+            ]);
+        }
+
+        return $targetCallControlIds;
     }
 
     /**
@@ -764,6 +1000,18 @@ class TelnyxWebhookController extends Controller
                 ]);
                 $this->sendCallCommand($callControlId, 'hangup');
                 return response()->json(['status' => 'ok']);
+            }
+
+            // Direct dial: the "user leg" is a leg Telnyx parked rather than
+            // one Hive rang and the user already answered — it must be
+            // explicitly answered before it can speak, record or join a
+            // conference. Guarded so a second target answering (a multi-
+            // target direct dial) can't send a redundant answer command.
+            if (($callLog->metadata['type'] ?? null) === 'direct_dial'
+                && Cache::add("telnyx_direct_dial_answered:{$userCallControlId}", true, 300)) {
+                $this->sendCallCommand($userCallControlId, 'answer', [
+                    'preferred_codecs' => config('services.telnyx.preferred_codecs'),
+                ]);
             }
 
             if (empty($clientState['internal'])) {
@@ -968,6 +1216,15 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
+            // Nobody else is left on the call — end the other leg too rather
+            // than leaving it up with no one on the line (call_log 3056,
+            // 2026-11-07: the user leg stayed up 20 s after the target hung
+            // up before this fix, waiting out its own silence before
+            // Telnyx's own hangup webhook finally arrived for it).
+            if ($userCallControlId) {
+                $this->sendCallCommand($userCallControlId, 'hangup');
+            }
+
             $duration = $callLog->answered_at
                 ? abs(now()->diffInSeconds($callLog->answered_at))
                 : null;
@@ -1019,7 +1276,12 @@ class TelnyxWebhookController extends Controller
         // If we have the user's call control ID, tell them the target didn't answer.
         // Note: Telnyx Call Control v2 has no 'leave' action for calls in conferences.
         // Instead, speak the failure message directly on the user's call, then hang up.
-        if ($userCallControlId) {
+        if ($userCallControlId && ($callLog?->metadata['type'] ?? null) === 'direct_dial') {
+            // A parked leg has no media path to speak a failure message
+            // into — just end it; the app's own call screen is what tells
+            // the person their call did not connect.
+            $this->sendCallCommand($userCallControlId, 'hangup');
+        } elseif ($userCallControlId) {
             $notAnswered = match ($hangupCause) {
                 'user_busy' => 'The line is busy. Please try again later.',
                 'call_rejected' => 'The call was declined.',
@@ -1039,6 +1301,58 @@ class TelnyxWebhookController extends Controller
             'status' => CallLog::STATUS_MISSED,
             'hangup_cause' => $hangupCause,
             'ended_at' => now(),
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * The parked app leg itself hung up — either before any target answered
+     * (the person cancelled the call from the app, or the app lost its
+     * connection) or after the call was bridged (they ended an active
+     * call). Hangs up any target leg(s) still on this CallLog and resolves
+     * its status; see handleClickToCallTargetHangup()'s own "user leg hung
+     * up" handling, which this mirrors for a parked rather than ring-back
+     * leg.
+     */
+    protected function handleDirectDialLegHangup(string $callControlId, array $clientState, ?string $hangupCause): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+        if ($callLog) {
+            if (! in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED], true)) {
+                $this->hangupOutstandingClickToCallTargets($callLog);
+            }
+
+            $duration = $callLog->answered_at
+                ? abs(now()->diffInSeconds($callLog->answered_at))
+                : null;
+
+            $callLog->update(match (true) {
+                $callLog->status === CallLog::STATUS_TRANSFERRED => [
+                    'status' => CallLog::STATUS_COMPLETED,
+                    'hangup_cause' => $hangupCause,
+                    'duration_seconds' => $duration,
+                    'ended_at' => now(),
+                ],
+                $callLog->status === CallLog::STATUS_COMPLETED => [
+                    'hangup_cause' => $hangupCause,
+                    'ended_at' => now(),
+                ],
+                default => [
+                    'status' => CallLog::STATUS_MISSED,
+                    'hangup_cause' => $hangupCause,
+                    'ended_at' => now(),
+                ],
+            });
+        }
+
+        Log::channel('telnyx')->info('Direct dial: parked app leg ended', [
+            'call_control_id' => $callControlId,
+            'call_log_id' => $callLogId,
+            'status' => $callLog->status ?? null,
+            'hangup_cause' => $hangupCause,
         ]);
 
         return response()->json(['status' => 'ok']);
@@ -1939,6 +2253,16 @@ class TelnyxWebhookController extends Controller
         // ── Click-to-call target didn't answer (timeout/busy/rejected) ──
         if ($action === 'click_to_call_target_ring') {
             return $this->handleClickToCallTargetHangup($callControlId, $clientState, $hangupCause);
+        }
+
+        // ── Direct dial: the parked app leg itself hung up ──
+        // Unlike ClickToCall's own user leg (whose client_state tracks
+        // several sub-states Hive put it through — waiting, failed-tts — a
+        // parked leg's client_state never changes once Telnyx hands it to
+        // us), so there is only ever this one action to handle, and nothing
+        // upstream has already decided the CallLog's final status for us.
+        if ($action === 'direct_dial') {
+            return $this->handleDirectDialLegHangup($callControlId, $clientState, $hangupCause);
         }
 
         // ── Click-to-call user leg hung up (after failure TTS or while waiting) ──
@@ -2910,21 +3234,31 @@ class TelnyxWebhookController extends Controller
         $recordingUrl = $recordingUrls[$preferredFormat] ?? $recordingUrls[$fallbackFormat] ?? null;
 
         if ($callLog && $recordingUrl) {
-            $durationSeconds = (int) ($callLog->duration_seconds ?? 0);
-            if ($durationSeconds <= 0) {
-                Log::channel('telnyx')->info('Skipping recording save for zero-duration call', [
+            // A CallLog already holding a saved recording means an earlier
+            // call.recording.saved already did the real work (e.g. the hangup
+            // leg's own event versus a duplicate/retried webhook for the same
+            // call_control_id). Whatever this event's own signals say, that
+            // stored recording is never nulled out from under it.
+            $hasExistingRecording = ! empty($callLog->recording_url) || ! empty($callLog->recording_path);
+
+            if ($this->recordingIsNearZeroLength($payload, $callLog)) {
+                Log::channel('telnyx')->info('Skipping recording save for a near-zero-length recording', [
                     'call_log_id' => $callLog->id,
                     'call_control_id' => $callControlId,
-                    'duration_seconds' => $callLog->duration_seconds,
+                    'recording_started_at' => $payload['recording_started_at'] ?? null,
+                    'recording_ended_at' => $payload['recording_ended_at'] ?? null,
+                    'answered_at' => $callLog->answered_at,
                 ]);
 
-                $callLog->update([
-                    'recording_url' => null,
-                    'recording_disk' => null,
-                    'recording_path' => null,
-                    'recording_telnyx_id' => null,
-                    'has_voicemail' => false,
-                ]);
+                if (! $hasExistingRecording) {
+                    $callLog->update([
+                        'recording_url' => null,
+                        'recording_disk' => null,
+                        'recording_path' => null,
+                        'recording_telnyx_id' => null,
+                        'has_voicemail' => false,
+                    ]);
+                }
 
                 return response()->json(['status' => 'ok']);
             }
@@ -2937,7 +3271,10 @@ class TelnyxWebhookController extends Controller
             // the audio is just TTS + hold music with no conversation — keeping
             // it would pollute the call list and trigger pointless transcription
             // and AI analysis. Only persist a recording when it captured a real
-            // two-way conversation or a genuine voicemail.
+            // two-way conversation or a genuine voicemail. Status is set to
+            // TRANSFERRED the moment the target leg is bridged, well before the
+            // hangup/recording.saved race, so — unlike duration_seconds — it is
+            // already reliable here without a fallback.
             $wasConnected = in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED], true);
             if (! $isVoicemail && ! $wasConnected) {
                 Log::channel('telnyx')->info('Discarding recording for call with no conversation or voicemail', [
@@ -2947,13 +3284,15 @@ class TelnyxWebhookController extends Controller
                     'has_voicemail' => $callLog->has_voicemail,
                 ]);
 
-                $callLog->update([
-                    'recording_url' => null,
-                    'recording_disk' => null,
-                    'recording_path' => null,
-                    'recording_telnyx_id' => null,
-                    'has_voicemail' => false,
-                ]);
+                if (! $hasExistingRecording) {
+                    $callLog->update([
+                        'recording_url' => null,
+                        'recording_disk' => null,
+                        'recording_path' => null,
+                        'recording_telnyx_id' => null,
+                        'has_voicemail' => false,
+                    ]);
+                }
 
                 return response()->json(['status' => 'ok']);
             }
@@ -2979,6 +3318,65 @@ class TelnyxWebhookController extends Controller
         ]);
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Whether a call.recording.saved event describes a recording with
+     * (near-)zero real content, judged by the recording's own length rather
+     * than the CallLog's duration_seconds.
+     *
+     * duration_seconds is written by the hangup handler, which fires its own
+     * webhook in parallel with call.recording.saved on the same leg — so it
+     * can still be null/0 here even for a recording that captured a genuine,
+     * minutes-long conversation. A length we can actually measure — the
+     * recording's own start/end from the payload, or failing that, how long
+     * the leg has been answered — is what decides this; when neither is
+     * available, the length is unknown and treated as not zero, leaving the
+     * conversation/voicemail check below as the deciding gate.
+     */
+    protected function recordingIsNearZeroLength(array $payload, CallLog $callLog): bool
+    {
+        $seconds = $this->recordingPayloadDurationSeconds($payload)
+            ?? $this->answeredDurationSeconds($callLog);
+
+        return $seconds !== null && $seconds <= 0;
+    }
+
+    /**
+     * The saved clip's own length in seconds, from Telnyx's
+     * recording_started_at/recording_ended_at on the call.recording.saved
+     * payload. Null when either timestamp is missing or unparsable.
+     */
+    protected function recordingPayloadDurationSeconds(array $payload): ?int
+    {
+        $startedAt = $payload['recording_started_at'] ?? null;
+        $endedAt = $payload['recording_ended_at'] ?? null;
+
+        if (! $startedAt || ! $endedAt) {
+            return null;
+        }
+
+        try {
+            return (int) abs(\Illuminate\Support\Carbon::parse($endedAt)
+                ->diffInSeconds(\Illuminate\Support\Carbon::parse($startedAt)));
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * How long the leg has been answered, as a fallback length estimate for
+     * when the payload carries no recording timestamps. Null when the leg
+     * was never answered — the conversation/voicemail check already covers
+     * that case without this helper.
+     */
+    protected function answeredDurationSeconds(CallLog $callLog): ?int
+    {
+        if (! $callLog->answered_at) {
+            return null;
+        }
+
+        return (int) abs(now()->diffInSeconds($callLog->answered_at));
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\App;
 
+use App\Services\Voice\AppVoiceCredentials;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -37,9 +38,23 @@ class PlaceAppCallRequest extends FormRequest
             // target. Mutually exclusive with `to` — provide one or the other.
             'targets' => ['required_without:to', 'array', 'min:1'],
             'targets.*' => ['string', 'max:30', $phoneRule],
-            // Which of the caller's phones Hive rings first: the app (default),
-            // or their cell (Expo Go, before the app has its own calling).
-            'ring' => ['nullable', 'string', 'in:app,cell'],
+            // Which of the caller's phones Hive rings first: the app
+            // (default), their cell (Expo Go, before the app has its own
+            // calling), or "direct" — the app's own Telnyx SDK places the
+            // call itself (parked, never ringing) and Hive only dials the
+            // target once that leg is confirmed — see DirectDialStarter.
+            // "direct" is refused unless Patryk has turned it on, both at
+            // Telnyx and here (services.telnyx.direct_dial_enabled).
+            'ring' => [
+                'nullable',
+                'string',
+                'in:app,cell,direct',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if ($value === 'direct' && ! app(AppVoiceCredentials::class)->directDialEnabled()) {
+                        $fail('Direct dialing is not enabled.');
+                    }
+                },
+            ],
             // The web's multi-admin ring recipient choice (CallList's "New
             // Call" modal): other admin team members to ring in alongside
             // this call — App\Services\Voice\ClickToCall::start()'s

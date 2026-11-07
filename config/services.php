@@ -222,6 +222,13 @@ return [
         // outbound profile of its own, so every app call goes out through
         // Hive (logged, recorded, from the business number).
         'app_connection_id' => env('TELNYX_APP_CONNECTION_ID'),
+        // "Direct dial" (2026-11-07): the app's own Telnyx SDK places the
+        // call and Telnyx parks it (outbound.call_parking_enabled on the app
+        // connection, set at Telnyx — not by this app) instead of ringing
+        // the person's phone first. Off until Patryk turns the Telnyx side
+        // on too; see App\Services\Voice\DirectDialStarter and
+        // TelnyxWebhookController::handleParkedDirectDialLeg().
+        'direct_dial_enabled' => (bool) env('TELNYX_DIRECT_DIAL_ENABLED', false),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
         // How long a click-to-call target rings before we give up. Carriers
