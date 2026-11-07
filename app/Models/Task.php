@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\User;
+use App\Scopes\ProjectScope;
 use App\Traits\Sortable;
 use App\Observers\TaskObserver;
 use Carbon\Carbon;
@@ -29,6 +30,14 @@ class Task extends Model
         'created_by_user_id', 'created_at', 'updated_at', 'deleted_at', 'parent_task_id',
         'vendor_status', 'vendor_status_token'
     ];
+
+    /**
+     * Service Call project status code (mirrors
+     * ScheduleIndex::SERVICE_CALL_STATUS_CODE), used by
+     * bestServiceAvailabilityProject() to prefer a sibling project that is
+     * actively in a service call over one merely holding pending tasks.
+     */
+    private const SERVICE_CALL_PROJECT_STATUS_CODE = 8;
 
     /**
      * Set for the save that moves a Meet to match its calendar event, so the
@@ -241,6 +250,87 @@ class Task extends Model
         }
 
         return in_array((int) $this->id, $savedTaskIds, true);
+    }
+
+    /**
+     * The pending (unscheduled) task a project's submitted preferred times
+     * cover — the one the contractor must put on the planner next: the
+     * earliest created (lowest id) still-pending task named in
+     * service_availability.task_ids, or, when that list is empty (a
+     * submission saved before this gate existed, or a legacy notification
+     * with no per-task record at all), simply the project's oldest pending
+     * task. Null once nothing on the project is pending any more. Shared by
+     * ScheduleIndex (building the notification) and NotificationIndex
+     * (resolving an old one at click time) so both pick the same task.
+     */
+    public static function pendingForServiceAvailability(Project $project): ?self
+    {
+        $savedTaskIds = collect((array) data_get($project->service_availability, 'task_ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->all();
+
+        return static::query()
+            ->where('project_id', $project->id)
+            ->whereNull('start_date')
+            ->when($savedTaskIds !== [], fn ($query) => $query->whereIn('id', $savedTaskIds))
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * The SAME client's project that should receive a homeowner's submitted
+     * preferred times when $project itself currently has no pending
+     * (unscheduled) task to attach them to — the Krupa bug (Patryk,
+     * 2026-11-07): the homeowner's schedule link still worked on a
+     * long-Complete project with zero tasks, while the real pending work sat
+     * on a sibling job at the same address, so the submission and the hub
+     * notification both stranded there instead of reaching the task that
+     * actually needed scheduling.
+     *
+     * Preference order: (1) the client's OTHER project whose latest status is
+     * Service Call (status code 8) and has at least one pending task; (2)
+     * failing that, any other of the client's projects with at least one
+     * pending task, most recently active first (by updated_at, ties broken by
+     * the newer project id). Never considers another client's project, and
+     * never $project itself. Returns null when $project has no client or no
+     * sibling project currently has pending work — callers then keep today's
+     * behaviour of using $project itself.
+     *
+     * Shared by ScheduleIndex (saving a submission), NotificationIndex
+     * (resolving a notification click) and the service-availability repair
+     * command, so all three agree on the same target.
+     */
+    public static function bestServiceAvailabilityProject(Project $project): ?Project
+    {
+        if (! $project->client_id) {
+            return null;
+        }
+
+        $candidates = Project::withoutGlobalScope(ProjectScope::class)
+            ->where('client_id', $project->client_id)
+            ->where('id', '!=', $project->id)
+            ->with('latestStatus')
+            ->get()
+            ->filter(fn (Project $candidate): bool => static::query()
+                ->where('project_id', $candidate->id)
+                ->whereNull('start_date')
+                ->exists());
+
+        if ($candidates->isEmpty()) {
+            return null;
+        }
+
+        $serviceCallCandidates = $candidates->filter(
+            fn (Project $candidate): bool => (int) ($candidate->latestStatus?->status_code ?? 0) === self::SERVICE_CALL_PROJECT_STATUS_CODE
+        );
+
+        $pool = $serviceCallCandidates->isNotEmpty() ? $serviceCallCandidates : $candidates;
+
+        return $pool
+            ->sort(fn (Project $a, Project $b): int => [$b->updated_at?->timestamp ?? 0, $b->id]
+                <=> [$a->updated_at?->timestamp ?? 0, $a->id])
+            ->first();
     }
 
     /**

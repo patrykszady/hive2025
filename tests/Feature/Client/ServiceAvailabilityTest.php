@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Client\ScheduleIndex;
+use App\Models\AppNotification;
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\ProjectStatus;
@@ -26,7 +27,7 @@ afterEach(function (): void {
     Carbon\Carbon::setTestNow();
 });
 
-function makeServiceCallProject(int $statusCode = 8): Project
+function makeServiceCallProject(int $statusCode = 8, ?string $token = null): Project
 {
     $client = Client::factory()->create(['business_name' => 'Homeowner Household']);
     $vendor = Vendor::factory()->create(['business_name' => 'GS Construction']);
@@ -41,11 +42,41 @@ function makeServiceCallProject(int $statusCode = 8): Project
         'zip_code' => '60013',
     ]));
 
-    $project->forceFill(['schedule_token' => 'service-call-token'])->saveQuietly();
+    $project->forceFill(['schedule_token' => $token ?? 'service-call-token'])->saveQuietly();
 
     ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
         'project_id' => $project->id,
         'belongs_to_vendor_id' => $vendor->id,
+        'status_code' => $statusCode,
+        'start_date' => now(),
+    ]));
+
+    return $project->fresh();
+}
+
+/**
+ * A second project for the SAME client (and vendor) as $existing — the
+ * Krupa shape: two jobs at one address, one of them (the token's own
+ * project in these tests) with nothing pending, the other holding the
+ * actual pending work.
+ */
+function makeSiblingProject(Project $existing, int $statusCode, string $token): Project
+{
+    $project = Project::withoutEvents(fn () => Project::create([
+        'project_name' => 'Sibling Project',
+        'client_id' => $existing->client_id,
+        'belongs_to_vendor_id' => $existing->belongs_to_vendor_id,
+        'address' => $existing->address,
+        'city' => $existing->city,
+        'state' => $existing->state,
+        'zip_code' => $existing->zip_code,
+    ]));
+
+    $project->forceFill(['schedule_token' => $token])->saveQuietly();
+
+    ProjectStatus::withoutEvents(fn () => ProjectStatus::create([
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $existing->belongs_to_vendor_id,
         'status_code' => $statusCode,
         'start_date' => now(),
     ]));
@@ -179,6 +210,50 @@ it('adds a Hive Hub notification for GC admins when the homeowner submits times'
         'user_id' => $admin->id,
         'type' => 'service_availability_submitted',
     ]);
+});
+
+it('deep-links the Hub notification to the pending task on the planner, not the bare /planner 404', function (): void {
+    Notification::fake();
+
+    $project = makeServiceCallProject(8);
+    $vendor = $project->createdByVendor;
+
+    $admin = User::query()->create([
+        'first_name' => 'Vendor',
+        'last_name' => 'Admin',
+        'email' => 'vendor-admin-deep-link@example.test',
+        'cell_phone' => '2245550121',
+        'password' => bcrypt('password'),
+    ]);
+    $vendor->users()->attach($admin->id, ['is_employed' => true, 'role_id' => 1]);
+
+    $task = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Fix Siding',
+        'type' => 'task',
+        'order' => 1,
+        'project_id' => $project->id,
+        'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
+        'created_by_user_id' => 1,
+        'created_at' => now(),
+    ]));
+
+    $component = Livewire::test(ScheduleIndex::class, ['token' => $project->schedule_token]);
+    $days = $component->instance()->serviceDays;
+
+    $component
+        ->call('toggleServiceSlot', $days[0], '7-9 AM')
+        ->call('toggleServiceSlot', $days[1], '11-1 PM')
+        ->call('toggleServiceSlot', $days[2], 'Anytime')
+        ->call('submitServiceAvailability')
+        ->assertSet('serviceAvailabilitySubmitted', true);
+
+    $notification = AppNotification::where('user_id', $admin->id)
+        ->where('type', 'service_availability_submitted')
+        ->firstOrFail();
+
+    expect($notification->action_url)->toBe(route('planner.cards', ['task' => $task->id]))
+        ->and($notification->data['task_id'])->toBe($task->id)
+        ->and($notification->data['project_id'])->toBe($project->id);
 });
 
 it('defers the GC admin text to business hours when submitted overnight', function (): void {
@@ -593,5 +668,119 @@ it('renders pending tasks with the shared task card component', function (): voi
     Livewire::test(ScheduleIndex::class, ['token' => $project->schedule_token])
         ->assertSee('Misc Items 2')
         ->assertDontSee('border-b border-zinc-200 pb-2 dark:border-zinc-700');
+});
+
+/**
+ * The Krupa bug (Patryk, 2026-11-07): client 151 opened project 188's
+ * ("Bathrooms", Complete since 2022, zero tasks) schedule link and
+ * submitted preferred times, which saved onto project 188 and notified
+ * there — but the pending service-call task was on project 276
+ * ("Kitchen") for the same client, so nothing ever showed on it.
+ */
+it('saves a submission from a no-pending-task project onto the client\'s Service Call project with the pending task', function (): void {
+    Notification::fake();
+
+    $staleProject = makeServiceCallProject(7, 'stale-token'); // Complete, zero tasks
+    $vendor = $staleProject->createdByVendor;
+
+    $admin = User::query()->create([
+        'first_name' => 'Vendor',
+        'last_name' => 'Admin',
+        'email' => 'vendor-admin-fallback@example.test',
+        'cell_phone' => '2245550131',
+        'password' => bcrypt('password'),
+    ]);
+    $vendor->users()->attach($admin->id, ['is_employed' => true, 'role_id' => 1]);
+
+    $serviceCallProject = makeSiblingProject($staleProject, 8, 'sibling-token-1');
+
+    $pendingTask = Task::withoutEvents(fn () => Task::create([
+        'title' => 'Fix Siding',
+        'type' => 'task',
+        'order' => 1,
+        'project_id' => $serviceCallProject->id,
+        'belongs_to_vendor_id' => $serviceCallProject->belongs_to_vendor_id,
+        'created_by_user_id' => 1,
+        'created_at' => now(),
+    ]));
+
+    $component = Livewire::test(ScheduleIndex::class, ['token' => $staleProject->schedule_token]);
+    $days = $component->instance()->serviceDays;
+
+    $component
+        ->call('toggleServiceSlot', $days[0], '7-9 AM')
+        ->call('toggleServiceSlot', $days[1], '11-1 PM')
+        ->call('toggleServiceSlot', $days[2], 'Anytime')
+        ->call('submitServiceAvailability')
+        ->assertSet('serviceAvailabilitySubmitted', true);
+
+    expect($staleProject->fresh()->service_availability)->toBeNull();
+
+    $serviceCallProject->refresh();
+    expect($serviceCallProject->service_availability['slots'])->toHaveCount(3);
+    expect($serviceCallProject->service_availability['task_ids'])->toBe([$pendingTask->id]);
+
+    expect($pendingTask->fresh()->coveredByHomeownerPreferredTimes())->toBeTrue();
+
+    $notification = AppNotification::where('user_id', $admin->id)
+        ->where('type', 'service_availability_submitted')
+        ->firstOrFail();
+
+    expect($notification->data['project_id'])->toBe($serviceCallProject->id)
+        ->and($notification->data['task_id'])->toBe($pendingTask->id)
+        ->and($notification->action_url)->toBe(route('planner.cards', ['task' => $pendingTask->id]));
+});
+
+it('never chooses another client\'s project, even when it has pending work', function (): void {
+    Notification::fake();
+
+    $staleProject = makeServiceCallProject(7, 'stale-token-2'); // zero tasks, Client A
+
+    $otherClientProject = makeServiceCallProject(8, 'other-client-token'); // Client B, Service Call
+    Task::withoutEvents(fn () => Task::create([
+        'title' => 'Other Client Pending',
+        'type' => 'task',
+        'order' => 1,
+        'project_id' => $otherClientProject->id,
+        'belongs_to_vendor_id' => $otherClientProject->belongs_to_vendor_id,
+        'created_by_user_id' => 1,
+        'created_at' => now(),
+    ]));
+
+    $component = Livewire::test(ScheduleIndex::class, ['token' => $staleProject->schedule_token]);
+    $days = $component->instance()->serviceDays;
+
+    $component
+        ->call('toggleServiceSlot', $days[0], '7-9 AM')
+        ->call('toggleServiceSlot', $days[1], '11-1 PM')
+        ->call('toggleServiceSlot', $days[2], 'Anytime')
+        ->call('submitServiceAvailability')
+        ->assertSet('serviceAvailabilitySubmitted', true);
+
+    expect($otherClientProject->fresh()->service_availability)->toBeNull();
+
+    $staleProject->refresh();
+    expect($staleProject->service_availability)->not->toBeNull();
+    expect($staleProject->service_availability['task_ids'])->toBe([]);
+});
+
+it('keeps today\'s behaviour — saves on the token project — when no client project has pending tasks', function (): void {
+    Notification::fake();
+
+    $project = makeServiceCallProject(7, 'lone-project-token'); // Complete, zero tasks, no sibling projects
+
+    $component = Livewire::test(ScheduleIndex::class, ['token' => $project->schedule_token]);
+    $days = $component->instance()->serviceDays;
+
+    $component
+        ->call('toggleServiceSlot', $days[0], '7-9 AM')
+        ->call('toggleServiceSlot', $days[1], '11-1 PM')
+        ->call('toggleServiceSlot', $days[2], 'Anytime')
+        ->call('submitServiceAvailability')
+        ->assertSet('serviceAvailabilitySubmitted', true);
+
+    $project->refresh();
+    expect($project->service_availability['slots'])->toHaveCount(3);
+    expect($project->service_availability['task_ids'])->toBe([]);
 });
 

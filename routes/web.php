@@ -1253,6 +1253,10 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //PLANNER
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
+    // Old notification/push action_urls (and anything else out there) still
+    // point at the bare '/planner' — never a real page — so send them on
+    // rather than 404ing.
+    Route::permanentRedirect('/planner', '/planner/cards');
     Route::get('/project-timeline', \App\Livewire\Estimates\ProjectTimeline::class)
         ->middleware('can:estimate-project-duration')
         ->name('project-timeline');

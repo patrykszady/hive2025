@@ -104,8 +104,10 @@ class ScheduleIndex extends Component
         $this->projectId = $project->id;
         $this->clientId = $project->client_id;
 
-        if ($this->serviceAvailabilityStillApplies($project)) {
-            $saved = (array) ($project->service_availability['slots'] ?? []);
+        $availabilityProject = $this->resolveServiceAvailabilityProject($project);
+
+        if ($this->serviceAvailabilityStillApplies($availabilityProject)) {
+            $saved = (array) ($availabilityProject->service_availability['slots'] ?? []);
             $this->selectedServiceSlots = collect($saved)
                 ->filter(fn ($slot) => is_array($slot) && isset($slot['date'], $slot['time']))
                 ->map(fn ($slot) => $slot['date'] . '|' . $slot['time'])
@@ -118,6 +120,29 @@ class ScheduleIndex extends Component
 
         $this->selectedServiceSlots = [];
         $this->serviceAvailabilitySubmitted = false;
+    }
+
+    /**
+     * The project that actually owns service-availability state for this
+     * schedule link: the token's own project when it still has pending
+     * (unscheduled) service tasks of its own, otherwise the same client's
+     * project that does, per Task::bestServiceAvailabilityProject() — the
+     * Krupa bug (Patryk, 2026-11-07), where a homeowner's old schedule link
+     * for a finished job with zero tasks left a submission stranded there
+     * while the real pending work sat on a sibling project. Falls back to
+     * $project itself when no sibling project has pending work, so a client
+     * with only one open job keeps today's behaviour. Used for every read
+     * and write of service_availability on this page (the prefill in
+     * mount(), serviceAvailabilityStillApplies(), and the save in
+     * submitServiceAvailability()) so they all agree on the same project.
+     */
+    protected function resolveServiceAvailabilityProject(Project $project): Project
+    {
+        if ($this->pendingServiceTaskIds($project->id) !== []) {
+            return $project;
+        }
+
+        return Task::bestServiceAvailabilityProject($project) ?? $project;
     }
 
     /**
@@ -675,6 +700,12 @@ class ScheduleIndex extends Component
             return;
         }
 
+        // The token's own project may have nothing left pending (a finished
+        // job, or one that never had tasks) while the real work sits on a
+        // sibling project for the same client — save, notify and text there
+        // instead, so the submission lands where a contractor will find it.
+        $targetProject = $this->resolveServiceAvailabilityProject($project);
+
         $slots = collect($this->selectedServiceSlots)
             ->map(fn (string $key) => explode('|', $key, 2))
             ->filter(fn (array $parts) => count($parts) === 2)
@@ -683,18 +714,18 @@ class ScheduleIndex extends Component
             ->values()
             ->all();
 
-        $project->forceFill([
+        $targetProject->forceFill([
             'service_availability' => [
                 'slots' => $slots,
-                'task_ids' => $this->pendingServiceTaskIds($project->id),
+                'task_ids' => $this->pendingServiceTaskIds($targetProject->id),
                 'submitted_at' => now()->toIso8601String(),
             ],
         ])->save();
 
         $this->serviceAvailabilitySubmitted = true;
 
-        $this->notifyVendorOfServiceAvailability($project, $slots);
-        $this->notifyTaskVendorsOfServiceAvailability($project);
+        $this->notifyVendorOfServiceAvailability($targetProject, $slots);
+        $this->notifyTaskVendorsOfServiceAvailability($targetProject);
 
         Flux::toast(
             duration: 5000,
@@ -757,6 +788,10 @@ class ScheduleIndex extends Component
         }
 
         $clientName = trim((string) ($project->client?->name ?? 'A homeowner'));
+        $task = Task::pendingForServiceAvailability($project);
+        $actionUrl = $task
+            ? route('planner.cards', ['task' => $task->id])
+            : route('projects.show', $project);
 
         foreach ($users as $user) {
             AppNotification::create([
@@ -764,8 +799,8 @@ class ScheduleIndex extends Component
                 'type' => 'service_availability_submitted',
                 'title' => "{$clientName} shared preferred times",
                 'body' => 'Preferred service times submitted. Schedule the service call.',
-                'action_url' => '/planner',
-                'data' => ['project_id' => $project->id],
+                'action_url' => $actionUrl,
+                'data' => ['project_id' => $project->id, 'task_id' => $task?->id],
             ]);
         }
 
@@ -775,7 +810,7 @@ class ScheduleIndex extends Component
             'service_availability_submitted',
             "{$clientName} shared preferred times",
             'Preferred service times submitted. Schedule the service call.',
-            url('/planner'),
+            $actionUrl,
         );
     }
 

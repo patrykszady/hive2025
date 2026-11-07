@@ -70,6 +70,15 @@ class CardsIndex extends Component
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
+    /**
+     * Deep link from a notification: /planner/cards?task={id} opens that
+     * task's edit modal on arrival (same pattern as CallList's ?callId= and
+     * LeadsIndex's ?lead=). Left in the URL after opening, same as those —
+     * a refresh or back just reopens the same modal, which is harmless.
+     */
+    #[Url(as: 'task', except: null)]
+    public ?int $task = null;
+
     // Filter properties
     public array $filterProjectIds = [];
     public ?int $filterVendorId = null;
@@ -187,12 +196,12 @@ class CardsIndex extends Component
     public function mount()
     {
         $this->employees = auth()->user()->vendor->users()->employed()->get();
-        
+
         // Sort vendors by ytd_expense_sum (same as task modal)
         $this->vendors = Vendor::search('*')
             ->orderBy('ytd_expense_sum', 'desc')
             ->get();
-        
+
         $this->projects = Project::status(self::PLANNER_PROJECT_STATUS_CODES)
             ->with('latestStatus')
             ->get()
@@ -205,6 +214,12 @@ class CardsIndex extends Component
                     .'-'.mb_strtolower((string) ($project->short_address ?? ''));
             })
             ->values();
+
+        // An unknown or not-visible-to-this-tenant id is silently ignored —
+        // the planner just loads as usual, no error.
+        if ($this->task && Task::visibleTo($this->task)) {
+            $this->dispatch('editTask', task: $this->task)->to('tasks.task-create');
+        }
     }
 
     /**
