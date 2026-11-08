@@ -142,6 +142,23 @@ beforeEach(function () {
         });
     }
 
+    // App\Observers\AppNotificationObserver fans every app_notifications
+    // row created above out to App\Jobs\SendExpoPushForNotification, which
+    // reads push_tokens — needed even though this file never registers one,
+    // so that read doesn't fail for want of the table.
+    if (! Schema::hasTable('push_tokens')) {
+        Schema::create('push_tokens', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('user_id')->index();
+            $table->unsignedBigInteger('personal_access_token_id')->nullable();
+            $table->string('token')->unique();
+            $table->string('platform');
+            $table->string('device_name')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+        });
+    }
+
     // Vendor->ytd_expense_sum (used by Scout's toSearchableArray) reads from
     // expenses; create an empty table so saves don't blow up.
     if (! Schema::hasTable('expenses')) {

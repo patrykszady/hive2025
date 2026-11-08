@@ -366,6 +366,15 @@ return [
         'private_key' => env('VAPID_PRIVATE_KEY'),
     ],
 
+    // The Hive Contractors app's device push (App\Services\Notifications\
+    // ExpoPushClient) — the Expo push API accepts unauthenticated requests
+    // from anyone, but an access token raises the rate limit and lets Expo
+    // attribute the traffic to this project. Unset works fine; only set it
+    // if Expo support asks for one.
+    'expo' => [
+        'access_token' => env('EXPO_ACCESS_TOKEN'),
+    ],
+
     /*
     | Cloudflare — edge cache purging (see CloudflarePurgeCache).
     |

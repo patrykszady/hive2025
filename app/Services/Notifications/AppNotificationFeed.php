@@ -2,6 +2,7 @@
 
 namespace App\Services\Notifications;
 
+use App\Jobs\SendExpoBadgeUpdate;
 use App\Models\AppNotification;
 use Illuminate\Support\Collection;
 
@@ -105,12 +106,19 @@ class AppNotificationFeed
             ->update(['read_at' => now()]);
     }
 
-    /** Marks every one of $userId's unread notifications read — NotificationIndex::markAllAsRead(). */
+    /**
+     * Marks every one of $userId's unread notifications read —
+     * NotificationIndex::markAllAsRead(). A device's OS badge can lag until
+     * its next push or 60s poll, so this also sends a silent badge-0 push
+     * (App\Jobs\SendExpoBadgeUpdate) rather than waiting for either.
+     */
     public function markAllRead(int $userId): void
     {
         AppNotification::where('user_id', $userId)
             ->whereNull('read_at')
             ->update(['read_at' => now()]);
+
+        SendExpoBadgeUpdate::dispatch($userId);
     }
 
     /**

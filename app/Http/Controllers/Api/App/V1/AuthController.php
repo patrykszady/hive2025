@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\AppLoginRequest;
 use App\Http\Requests\Api\App\SendLoginCodeRequest;
 use App\Http\Resources\Api\App\UserResource;
+use App\Models\PushToken;
 use App\Models\User;
 use App\Services\Auth\OneTimeLoginCodes;
 use Illuminate\Http\JsonResponse;
@@ -83,10 +84,20 @@ class AuthController extends Controller
 
     /**
      * Revoke only the token this request authenticated with — other
-     * devices stay signed in.
+     * devices stay signed in. The push token this device registered goes
+     * with it (belt-and-suspenders with the app's own DELETE
+     * /push-tokens call), so a signed-out device never receives another push.
      */
     public function logout(Request $request): JsonResponse
     {
+        $accessToken = $request->user()->currentAccessToken();
+
+        // Only a real, persisted PersonalAccessToken row has an id worth
+        // matching — see PushTokenController::store()'s identical guard.
+        if ($accessToken?->exists) {
+            PushToken::where('personal_access_token_id', $accessToken->getKey())->delete();
+        }
+
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['logged_out' => true]);

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\AppNotification;
 use App\Models\Bid;
 use App\Models\CallLog;
 use App\Models\Client;
@@ -19,6 +20,7 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 
+use App\Observers\AppNotificationObserver;
 use App\Observers\BidObserver;
 use App\Observers\CallLogObserver;
 use App\Observers\ClientObserver;
@@ -711,6 +713,7 @@ class AppServiceProvider extends ServiceProvider
 
     public function bootEvent()
     {
+        AppNotification::observe(AppNotificationObserver::class);
         Bid::observe(BidObserver::class);
         CallLog::observe(CallLogObserver::class);
         Client::observe(ClientObserver::class);
