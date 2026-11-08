@@ -42,7 +42,7 @@ class CallLogController extends Controller
     public function show(Request $request, int $call, CallHistory $history): JsonResponse
     {
         $found = $this->visibleCall($request->user(), $call);
-        $found->load('transcript');
+        $found->load(['transcript', 'appCallingEvents']);
         $history->resolveNumbers([$found]);
 
         return response()->json(['data' => (new CallLogResource($found))->withDetail($history)->toArray($request)]);

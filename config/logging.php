@@ -162,6 +162,18 @@ return [
             'days' => 30,
         ],
 
+        // The iPhone app's on-device calling log (App\Services\Calls\
+        // AppCallingDiagnostics): calls placed while suspended, backgrounded,
+        // or driven from Recents/Siri/the locked screen run where Metro's
+        // log channel is dead, so this is the only record readable over SSH
+        // until the app's next upload.
+        'app-calling' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/app-calling.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         // Every EWCCV lookup attempt (what was searched, what EWCCV listed,
         // how it compared, the outcome), for review in /log-viewer.
         'ewccv' => [

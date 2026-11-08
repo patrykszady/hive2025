@@ -95,6 +95,15 @@ class CallLogResource extends JsonResource
                 : null,
             'notes' => $this->notes,
             'blocked_number' => $history->isBlocked($request->user(), $phone),
+            // The app's on-device calling log for this call, if any lines
+            // uploaded with this call_log_id — see AppCallingDiagnostics.
+            'device_events' => $this->resource->relationLoaded('appCallingEvents')
+                ? $this->resource->appCallingEvents->map(fn ($event) => [
+                    'at' => $event->occurred_at?->toIso8601String(),
+                    'level' => $event->level,
+                    'message' => $event->message,
+                ])->values()
+                : [],
             'transcript' => $transcript ? [
                 'status' => $transcript->status,
                 'processing' => in_array($transcript->status, [CallTranscript::STATUS_PENDING, CallTranscript::STATUS_TRANSCRIBING], true),
