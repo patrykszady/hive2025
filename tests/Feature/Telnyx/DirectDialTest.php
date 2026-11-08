@@ -313,3 +313,52 @@ it('ends the parked leg instead of speaking into it when the target does not ans
     Http::assertNotSent(fn ($request) => str_contains($request->url(), 'parked-cc-1/actions/speak'));
     expect($callLog->fresh()->status)->toBe(CallLog::STATUS_MISSED);
 });
+
+// =========================================================================
+// The app connection now reports to the voice webhook. An incoming leg on it
+// is a phone's app being rung by Hive itself — never a customer calling.
+// =========================================================================
+
+it('leaves an incoming leg on the app connection alone — no answer, no hangup, no CallLog', function () {
+    Http::fake();
+    $callLogsBefore = \App\Models\CallLog::count();
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.initiated',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'app-ring-leg-1',
+                'direction' => 'incoming',
+                'state' => 'parked',
+                'connection_id' => 'app-connection',
+                'from' => '+12247354200',
+                'to' => 'sip:gencredpatryk@sip.telnyx.com',
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertNothingSent();
+    expect(\App\Models\CallLog::count())->toBe($callLogsBefore);
+});
+
+it('still treats an incoming call on the business number connection as a customer call', function () {
+    Http::fake();
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.initiated',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'customer-leg-1',
+                'direction' => 'incoming',
+                'state' => 'parked',
+                'connection_id' => 'call-control-app',
+                'from' => '+18475550199',
+                'to' => '+12247354200',
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'customer-leg-1'));
+});

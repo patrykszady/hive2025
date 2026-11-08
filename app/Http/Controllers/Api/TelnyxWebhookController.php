@@ -253,6 +253,19 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
+        // The app connection reports to this webhook for direct dial (its
+        // parked legs, above). An "incoming" leg on it is a phone's app being
+        // rung by Hive itself (ring-back, team ring) — never a customer
+        // calling the business: leave it alone, never answer or hang it up.
+        if ($this->isAppConnectionLeg($payload)) {
+            Log::channel('telnyx')->info('Ignoring incoming leg on the app connection', [
+                'call_control_id' => $callControlId,
+                'to' => $payload['to'] ?? null,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
         // Ignore loopback legs — when click-to-call dials our own Telnyx number,
         // Telnyx creates a phantom "incoming" leg (from == our number). Also ignore
         // any incoming call that originates from our own number to prevent loops.
@@ -498,10 +511,21 @@ class TelnyxWebhookController extends Controller
      */
     protected function isParkedAppLeg(array $payload): bool
     {
+        return ($payload['state'] ?? null) === 'parked' && $this->isAppConnectionLeg($payload);
+    }
+
+    /**
+     * Whether a webhook leg belongs to the "Hive Contractors app" credential
+     * connection (services.telnyx.app_connection_id) rather than the Call
+     * Control application that owns the business number.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function isAppConnectionLeg(array $payload): bool
+    {
         $appConnectionId = (string) config('services.telnyx.app_connection_id');
 
         return $appConnectionId !== ''
-            && ($payload['state'] ?? null) === 'parked'
             && (string) ($payload['connection_id'] ?? '') === $appConnectionId;
     }
 
