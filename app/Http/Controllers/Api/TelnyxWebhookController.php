@@ -2279,6 +2279,42 @@ class TelnyxWebhookController extends Controller
             return $this->handleClickToCallTargetHangup($callControlId, $clientState, $hangupCause);
         }
 
+        // ── A bridged click-to-call/direct-dial target leg hung up ──
+        // record_start sets a NEW client_state on the target leg (action
+        // 'call_recording' — see handleClickToCallTargetAnswered()), and
+        // Telnyx replaces a leg's client_state with whatever the last
+        // command sent for it, so by the time a bridged target hangs up its
+        // client_state no longer says 'click_to_call_target_ring' and the
+        // branch above never runs. Nobody then hung up the caller's leg,
+        // which sat connected to nothing but silence until the caller gave
+        // up themselves (call_log 3056/3057, 2026-11-08: 57s of dead air).
+        // Route it to the same "last connected target left" handling,
+        // rebuilding the user_call_control_id the call_recording client_state
+        // doesn't carry from the CallLog itself — every click-to-call/
+        // direct-dial CallLog's own call_control_id column is always the
+        // caller/user leg's (see ClickToCall::startLocked(),
+        // handleParkedDirectDialLeg()), never a target's. Gated to those two
+        // types and to a call_control_id that isn't the caller's own leg, so
+        // an inbound call recorded on the customer's own leg while bridged to
+        // an admin (also tagged 'call_recording') is never touched here.
+        if ($action === 'call_recording') {
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            $type = (string) ($callLog?->metadata['type'] ?? '');
+
+            if ($callLog
+                && in_array($type, ['click_to_call', 'click_to_call_multi', 'direct_dial'], true)
+                && $callLog->call_control_id
+                && $callLog->call_control_id !== $callControlId
+            ) {
+                return $this->handleClickToCallTargetHangup($callControlId, [
+                    'call_log_id' => $callLogId,
+                    'user_call_control_id' => $callLog->call_control_id,
+                    'internal' => $clientState['internal'] ?? false,
+                ], $hangupCause);
+            }
+        }
+
         // ── Direct dial: the parked app leg itself hung up ──
         // Unlike ClickToCall's own user leg (whose client_state tracks
         // several sub-states Hive put it through — waiting, failed-tts — a
