@@ -52,6 +52,14 @@ return [
             'days' => 30,
         ],
 
+        // A transaction Plaid removed, as TransactionController deletes it.
+        'plaid_transaction_removal' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/plaid_transaction_removal.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'plaid_skips' => [
             'driver' => 'daily',
             'path' => storage_path('logs/plaid_skips.log'),
@@ -181,6 +189,15 @@ return [
             'path' => storage_path('logs/ewccv.log'),
             'level' => 'debug',
             'days' => 90,
+        ],
+
+        // Amazon SP-API client secret rotation (AmazonTokenRefreshRecovery,
+        // amazon:fetch-rotated-secret, amazon:rotate-client-secret).
+        'receipt' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/receipt.log'),
+            'level' => 'debug',
+            'days' => 30,
         ],
 
         'receipt_processing' => [
