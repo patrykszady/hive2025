@@ -1345,8 +1345,23 @@ class TelnyxWebhookController extends Controller
         $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
         if ($callLog) {
+            $keepsBridgeAliveForOtherAdmin = false;
+
             if (! in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED], true)) {
                 $this->hangupOutstandingClickToCallTargets($callLog);
+            } elseif ($callLog->status === CallLog::STATUS_TRANSFERRED) {
+                // The parked leg hung up on an already-bridged call — every
+                // target leg still in the conference would otherwise sit
+                // there talking to silence until Telnyx's own timeout
+                // (call_log 3058, 2026-11-08: 32s of dead air) — unless
+                // another admin pulled in via conference_invite is still on
+                // the line with the target, in which case their call must
+                // keep going.
+                $keepsBridgeAliveForOtherAdmin = ! $this->hangupConnectedClickToCallTargets($callLog, $callControlId);
+            }
+
+            if ($keepsBridgeAliveForOtherAdmin) {
+                return response()->json(['status' => 'ok']);
             }
 
             $duration = $callLog->answered_at
@@ -2333,8 +2348,23 @@ class TelnyxWebhookController extends Controller
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
             if ($callLog) {
+                $keepsBridgeAliveForOtherAdmin = false;
+
                 if (! in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED], true)) {
                     $this->hangupOutstandingClickToCallTargets($callLog);
+                } elseif ($callLog->status === CallLog::STATUS_TRANSFERRED) {
+                    // The user's own leg hung up on an already-bridged call —
+                    // every target leg still in the conference would otherwise
+                    // sit there talking to silence until Telnyx's own timeout
+                    // (call_log 3058, 2026-11-08: 32s of dead air) — unless
+                    // another admin pulled in via conference_invite is still
+                    // on the line with the target, in which case their call
+                    // must keep going.
+                    $keepsBridgeAliveForOtherAdmin = ! $this->hangupConnectedClickToCallTargets($callLog, $callControlId);
+                }
+
+                if ($keepsBridgeAliveForOtherAdmin) {
+                    return response()->json(['status' => 'ok']);
                 }
 
                 $duration = $callLog->answered_at
@@ -6133,6 +6163,66 @@ class TelnyxWebhookController extends Controller
 
             $this->sendCallCommand($targetLegId, 'hangup');
         }
+    }
+
+    /**
+     * Hang up every click-to-call/direct-dial target leg still joined into
+     * the conference when the user's own leg (ring-back or parked) ends an
+     * already-bridged call. Shared by handleCallHangup()'s click_to_call/
+     * click_to_call_waiting/click_to_call_failed_tts branch and
+     * handleDirectDialLegHangup(), the two places the user's own leg can end
+     * a call that already reached STATUS_TRANSFERRED.
+     *
+     * Only joined_target_call_control_ids — the legs handleClickToCallTargetAnswered()
+     * actually put in the conference — are touched. An admin pulled in via
+     * conference_invite never lands in that list, so it is left alone here.
+     *
+     * But first checks for another admin leg still on the line: a teammate
+     * pulled in via conference_invite (DTMF "press 9" / "Call all" —
+     * joinAdminToConference()) joins the SAME conference as the target and
+     * lands in admin_call_control_ids alongside the leaving leg. If one is
+     * still there once the leaving leg is excluded, the target is mid-
+     * conversation with that teammate, not sitting on dead air — leave the
+     * target(s) alone, drop only the leaving leg from the roster, and keep
+     * the CallLog TRANSFERRED. This mirrors handleClickToCallTargetHangup()'s
+     * own admin_call_control_ids > 1 check in the other direction (target
+     * leaves, admins remain).
+     *
+     * @return bool true when the target leg(s) were actually hung up (no
+     *              other admin remained), false when the conference was left
+     *              alive for a remaining admin and nothing was hung up.
+     */
+    protected function hangupConnectedClickToCallTargets(CallLog $callLog, string $leavingCallControlId): bool
+    {
+        $metadata = $callLog->metadata ?? [];
+
+        $otherAdminLegIds = collect($metadata['admin_call_control_ids'] ?? [])
+            ->filter(fn ($id) => is_string($id) && $id !== '' && $id !== $leavingCallControlId)
+            ->unique()
+            ->values();
+
+        if ($otherAdminLegIds->isNotEmpty()) {
+            $metadata['admin_call_control_ids'] = $otherAdminLegIds->all();
+            $callLog->update(['metadata' => $metadata]);
+
+            Log::channel('telnyx')->info('Click-to-call: originating leg left but another admin remains with the target — keeping conference alive', [
+                'call_log_id' => $callLog->id,
+                'leaving_call_control_id' => $leavingCallControlId,
+                'remaining_admin_call_control_ids' => $otherAdminLegIds->all(),
+            ]);
+
+            return false;
+        }
+
+        $joinedTargetLegIds = collect($metadata['joined_target_call_control_ids'] ?? [])
+            ->filter(fn ($id) => is_string($id) && $id !== '')
+            ->unique();
+
+        foreach ($joinedTargetLegIds as $targetLegId) {
+            $this->sendCallCommand($targetLegId, 'hangup');
+        }
+
+        return true;
     }
 
     protected function normalizeDialPhone(?string $phone): ?string
