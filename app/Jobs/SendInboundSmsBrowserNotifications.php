@@ -8,6 +8,7 @@ use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Services\Notifications\AppDevicePush;
 use App\Services\WebPushService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -26,7 +27,7 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(WebPushService $webPush): void
+    public function handle(WebPushService $webPush, AppDevicePush $appPush): void
     {
         $message = SmsMessage::with('thread.client.users')->find($this->messageId);
 
@@ -42,8 +43,17 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
             ->get();
 
         // ── In-app notifications (powers /notifications view) ──
-        // Notify every user who has at least one push-subscription opted in for inbound SMS.
-        $recipientUserIds = $enabledSubscriptions->pluck('user_id')->unique()->values();
+        // Notify every user who opted into text activity on at least one
+        // device: a browser subscription, or a phone with the Hive
+        // Contractors app (push_tokens.sms_inbound_enabled, set on the users
+        // page). The row is what the app's push mirrors — see
+        // SendExpoPushForNotification — so a user with the app and no
+        // browser subscription still gets the text.
+        $recipientUserIds = $enabledSubscriptions->pluck('user_id')
+            ->merge($appPush->userIdsWanting('sms_inbound_enabled'))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
         // threadId opens the conversation; messageId scrolls it to THIS text.
         $actionUrl = $message->thread_id
             ? "/messages?threadId={$message->thread_id}&messageId={$message->id}"

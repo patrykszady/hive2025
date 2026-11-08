@@ -37,6 +37,13 @@
                         <template x-if="typeBrowserError === 'realtime'">
                             <div class="text-xs text-red-500" x-text="browserError"></div>
                         </template>
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center gap-2">
+                                <flux:icon name="bell" variant="micro" class="size-3.5 text-zinc-400" />
+                                <span class="text-sm text-zinc-700 dark:text-zinc-300">App</span>
+                            </div>
+                            <flux:switch wire:model.live="app_realtime" :disabled="$appDevices === []" />
+                        </div>
                     </div>
                 </flux:accordion.content>
             </flux:accordion.item>
@@ -77,6 +84,13 @@
                         <template x-if="typeBrowserError === 'morning'">
                             <div class="text-xs text-red-500" x-text="browserError"></div>
                         </template>
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center gap-2">
+                                <flux:icon name="bell" variant="micro" class="size-3.5 text-zinc-400" />
+                                <span class="text-sm text-zinc-700 dark:text-zinc-300">App</span>
+                            </div>
+                            <flux:switch wire:model.live="app_morning" :disabled="$appDevices === []" />
+                        </div>
                     </div>
                 </flux:accordion.content>
             </flux:accordion.item>
@@ -117,6 +131,13 @@
                         <template x-if="typeBrowserError === 'evening'">
                             <div class="text-xs text-red-500" x-text="browserError"></div>
                         </template>
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center gap-2">
+                                <flux:icon name="bell" variant="micro" class="size-3.5 text-zinc-400" />
+                                <span class="text-sm text-zinc-700 dark:text-zinc-300">App</span>
+                            </div>
+                            <flux:switch wire:model.live="app_evening" :disabled="$appDevices === []" />
+                        </div>
                     </div>
                 </flux:accordion.content>
             </flux:accordion.item>
@@ -221,6 +242,51 @@
                                     'currentStatus' => 'currentSmsInboundBrowserStatus',
                                     'otherStatuses' => 'otherSmsInboundBrowserStatuses',
                                 ])
+                            </div>
+                        @endif
+                    </div>
+                </flux:accordion.content>
+            </flux:accordion.item>
+
+            {{-- Hive Contractors app — one switch per phone --}}
+            <flux:accordion.item>
+                <flux:accordion.heading>
+                    <span class="flex items-center gap-2">
+                        <flux:icon name="device-phone-mobile" variant="mini" class="size-4 text-zinc-400" />
+                        Hive Contractors App
+                    </span>
+                </flux:accordion.heading>
+                <flux:accordion.content>
+                    <div class="space-y-3">
+                        <flux:text class="text-xs">Phones signed in to the Hive Contractors app. The App switches above apply to every phone; switch a phone off here to silence it without signing out.</flux:text>
+
+                        <div class="flex flex-col gap-2">
+                            @forelse ($appDevices as $index => $device)
+                                <div class="flex items-center justify-between gap-4" wire:key="app-device-{{ $device['id'] }}">
+                                    <div>
+                                        <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ $device['label'] }}</div>
+                                        <div class="text-xs text-zinc-500">
+                                            {{ $device['platform'] === 'android' ? 'Android' : 'iOS' }}@if ($device['last_seen']) · Last seen {{ $device['last_seen'] }}@endif
+                                        </div>
+                                    </div>
+                                    <flux:switch wire:model.live="appDevices.{{ $index }}.enabled" />
+                                </div>
+                            @empty
+                                <div class="rounded-md border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300">
+                                    No phone yet. Sign in to the Hive Contractors app on your iPhone and it will appear here.
+                                </div>
+                            @endforelse
+                        </div>
+
+                        @if($user->vendor_role === 'Admin')
+                            <flux:separator variant="subtle" />
+
+                            <div class="flex items-center justify-between gap-4">
+                                <div>
+                                    <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Text activity</div>
+                                    <div class="text-xs text-zinc-500">App alerts for incoming texts and teammates' replies.</div>
+                                </div>
+                                <flux:switch wire:model.live="app_text_activity" :disabled="$appDevices === []" />
                             </div>
                         @endif
                     </div>

@@ -168,3 +168,77 @@ it('logout deletes only that device\'s push token, leaving other devices registe
     expect(PushToken::count())->toBe(1);
     expect(PushToken::first()->token)->toBe('ExponentPushToken[device-b]');
 });
+
+it('a first phone starts with text activity on for an Admin and off for a Member, the other switches on', function () {
+    $admin = appPushTokensTeamUser();
+    Vendor::find(1)->users()->attach($admin->id, ['role_id' => 1, 'is_employed' => 1]);
+    $member = User::factory()->create(['primary_vendor_id' => 1]);
+    Vendor::find(1)->users()->attach($member->id, ['role_id' => 2, 'is_employed' => 1]);
+
+    Sanctum::actingAs($admin, ['app']);
+    $this->postJson('/api/app/v1/push-tokens', ['token' => 'ExponentPushToken[admin]', 'platform' => 'ios'])->assertCreated();
+
+    auth()->forgetGuards();
+    Sanctum::actingAs($member, ['app']);
+    $this->postJson('/api/app/v1/push-tokens', ['token' => 'ExponentPushToken[member]', 'platform' => 'ios'])->assertCreated();
+
+    $adminRow = PushToken::where('token', 'ExponentPushToken[admin]')->first();
+    $memberRow = PushToken::where('token', 'ExponentPushToken[member]')->first();
+
+    expect($adminRow->enabled)->toBeTrue()
+        ->and($adminRow->only(PushToken::PREFERENCES))->toBe([
+            'realtime_enabled' => true, 'morning_enabled' => true, 'evening_enabled' => true, 'sms_inbound_enabled' => true,
+        ])
+        ->and($memberRow->only(PushToken::PREFERENCES))->toBe([
+            'realtime_enabled' => true, 'morning_enabled' => true, 'evening_enabled' => true, 'sms_inbound_enabled' => false,
+        ]);
+});
+
+it('a reinstall inherits the switches set for the user\'s other phone, and re-registering never resets them', function () {
+    $user = appPushTokensTeamUser();
+    PushToken::factory()->create([
+        'user_id' => $user->id,
+        'token' => 'ExponentPushToken[first]',
+        'enabled' => false,
+        'morning_enabled' => false,
+        'sms_inbound_enabled' => false,
+        'last_seen_at' => now()->subDay(),
+    ]);
+    Sanctum::actingAs($user, ['app']);
+
+    // A reinstall rotated the Expo token: new row, the first phone's switches.
+    $this->postJson('/api/app/v1/push-tokens', ['token' => 'ExponentPushToken[second]', 'platform' => 'ios'])->assertCreated();
+
+    $second = PushToken::where('token', 'ExponentPushToken[second]')->first();
+    expect($second->enabled)->toBeTrue()
+        ->and($second->morning_enabled)->toBeFalse()
+        ->and($second->sms_inbound_enabled)->toBeFalse()
+        ->and($second->realtime_enabled)->toBeTrue();
+
+    // The users page switches realtime off on this phone; the next app
+    // launch re-registers the same token and must leave that alone.
+    $second->update(['realtime_enabled' => false, 'enabled' => false]);
+
+    $this->postJson('/api/app/v1/push-tokens', ['token' => 'ExponentPushToken[second]', 'platform' => 'ios', 'device_name' => 'Renamed'])->assertCreated();
+
+    $second->refresh();
+    expect($second->device_name)->toBe('Renamed')
+        ->and($second->realtime_enabled)->toBeFalse()
+        ->and($second->enabled)->toBeFalse()
+        ->and(PushToken::count())->toBe(2);
+});
+
+it('a token handed to a new user starts from that user\'s own switches, not the previous owner\'s', function () {
+    $owner = appPushTokensTeamUser();
+    $newUser = User::factory()->create(['primary_vendor_id' => $owner->primary_vendor_id]);
+    PushToken::factory()->create(['user_id' => $owner->id, 'token' => 'ExponentPushToken[shared]', 'morning_enabled' => false]);
+    PushToken::factory()->create(['user_id' => $newUser->id, 'token' => 'ExponentPushToken[theirs]', 'evening_enabled' => false]);
+
+    Sanctum::actingAs($newUser, ['app']);
+    $this->postJson('/api/app/v1/push-tokens', ['token' => 'ExponentPushToken[shared]', 'platform' => 'ios'])->assertCreated();
+
+    $row = PushToken::where('token', 'ExponentPushToken[shared]')->first();
+    expect($row->user_id)->toBe($newUser->id)
+        ->and($row->morning_enabled)->toBeTrue()
+        ->and($row->evening_enabled)->toBeFalse();
+});

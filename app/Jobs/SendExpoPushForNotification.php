@@ -3,12 +3,11 @@
 namespace App\Jobs;
 
 use App\Models\AppNotification;
-use App\Models\PushToken;
 use App\Models\SmsGroupThread;
 use App\Models\User;
+use App\Services\Notifications\AppDevicePush;
 use App\Services\Notifications\AppNotificationFeed;
 use App\Services\Notifications\AppNotificationTarget;
-use App\Services\Notifications\ExpoPushClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
@@ -20,6 +19,14 @@ use Illuminate\Foundation\Queue\Queueable;
  * remember to add push. Every type pushes except menards_browser, which
  * stays in-app-only for the reason documented on
  * NotifyMenardsBrowserNeedsAttention.
+ *
+ * Which phones get it is AppDevicePush's call, from the switches the users
+ * page sets per phone: a phone that is switched off gets nothing, and a
+ * client's text (sms_received) only reaches phones with "Text activity"
+ * on — the one type a user can opt out of without silencing the phone. A
+ * team_message is addressed to this member personally and a missed call,
+ * voicemail, lead or signature request is not a text, so those honour the
+ * phone's own switch alone.
  *
  * `badge` always comes from AppNotificationFeed::unreadCount() so the OS
  * badge can never drift from the in-app count or the web sidebar's.
@@ -55,17 +62,11 @@ class SendExpoPushForNotification implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(AppNotificationFeed $feed, ExpoPushClient $expo): void
+    public function handle(AppNotificationFeed $feed, AppDevicePush $devices): void
     {
         $notification = AppNotification::find($this->notificationId);
 
         if (! $notification || $notification->type === 'menards_browser') {
-            return;
-        }
-
-        $tokens = PushToken::where('user_id', $notification->user_id)->pluck('token')->all();
-
-        if ($tokens === []) {
             return;
         }
 
@@ -88,11 +89,11 @@ class SendExpoPushForNotification implements ShouldQueue
             $message = $this->addConversationGrouping($message, $notification);
         }
 
-        $tickets = $expo->send($tokens, $message);
-
-        if ($tickets !== []) {
-            CheckExpoPushReceipts::dispatch($tickets)->delay(now()->addMinutes(15));
-        }
+        $devices->sendToUsers(
+            [(int) $notification->user_id],
+            $notification->type === 'sms_received' ? 'sms_inbound_enabled' : null,
+            $message,
+        );
     }
 
     /**

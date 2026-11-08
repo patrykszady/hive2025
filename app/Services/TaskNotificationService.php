@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\NotificationSetting;
 use App\Models\PushSubscription;
+use App\Models\PushToken;
 use App\Models\Task;
 use App\Models\User;
 use Carbon\Carbon;
@@ -147,21 +148,24 @@ class TaskNotificationService
     /**
      * Check whether a user should receive a notification on a specific channel + timing.
      *
-     * @param  string  $channel  'sms'|'email'|'browser'
+     * @param  string  $channel  'sms'|'email'|'browser'|'app'
      * @param  string  $timing   'morning'|'evening'|'realtime'
      */
     public function shouldNotify(User $user, string $channel, string $timing): bool
     {
         // Browser notifications are per-subscription, check push_subscriptions directly
         if ($channel === 'browser') {
-            $column = match ($timing) {
-                'morning' => 'morning_enabled',
-                'evening' => 'evening_enabled',
-                default => 'realtime_enabled',
-            };
-
             return PushSubscription::where('user_id', $user->id)
-                ->where($column, true)
+                ->where(self::pushPreferenceColumn($timing), true)
+                ->exists();
+        }
+
+        // The Hive Contractors app is per-phone the same way: push_tokens
+        // carries the same columns (PushToken::PREFERENCES) plus the
+        // phone's own switch, both set on the users page.
+        if ($channel === 'app') {
+            return PushToken::where('user_id', $user->id)
+                ->wanting(self::pushPreferenceColumn($timing))
                 ->exists();
         }
 
@@ -174,6 +178,16 @@ class TaskNotificationService
         $key = "{$timing}_{$channel}";
 
         return (bool) ($settings->{$key} ?? false);
+    }
+
+    /** The push_subscriptions / push_tokens column a timing reads. */
+    private static function pushPreferenceColumn(string $timing): string
+    {
+        return match ($timing) {
+            'morning' => 'morning_enabled',
+            'evening' => 'evening_enabled',
+            default => 'realtime_enabled',
+        };
     }
 
     /**

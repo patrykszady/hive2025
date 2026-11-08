@@ -7,6 +7,8 @@ use App\Models\SmsGroupThread;
 use App\Models\PushSubscription;
 use App\Models\SmsMessage;
 use App\Models\User;
+use App\Services\Notifications\AppDevicePush;
+use App\Services\Notifications\AppNotificationTarget;
 use App\Services\WebPushService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -26,7 +28,7 @@ class SendOutboundSmsBrowserNotifications implements ShouldQueue
     /**
      * Send browser push notifications to other vendor users when someone replies on a thread.
      */
-    public function handle(WebPushService $webPush): void
+    public function handle(WebPushService $webPush, AppDevicePush $appPush): void
     {
         $message = SmsMessage::with('thread.client')->find($this->messageId);
 
@@ -54,30 +56,51 @@ class SendOutboundSmsBrowserNotifications implements ShouldQueue
 
             return;
         }
-        if ($enabledSubscriptions->isEmpty()) {
-            return;
-        }
-
         $senderName = trim($sender->first_name) ?: 'A team member';
         $threadLabel = $this->resolveThreadLabel($message);
         // english_display_text: a push is a display surface like any
         // other, and Hive reads in English. It also strips the crew
         // signature, which carries nothing in a notification.
-        $body = trim($message->english_display_text ?: 'Sent a message');
+        $body = mb_substr(trim($message->english_display_text ?: 'Sent a message'), 0, 180);
+        $title = "{$senderName} replied to {$threadLabel}";
+        $url = $message->thread_id
+            ? "/messages?threadId={$message->thread_id}"
+            : '/messages';
 
-        $webPush->sendToSubscriptions($enabledSubscriptions, [
-            'title' => "{$senderName} replied to {$threadLabel}",
-            'body' => mb_substr($body, 0, 180),
-            'icon' => '/favicons/icon-192x192.png',
-            'badge' => '/favicons/icon-96x96.png',
-            'tag' => "sms-outbound-thread-{$message->thread_id}-message-{$message->id}",
-            'data' => [
-                'url' => $message->thread_id
-                    ? "/messages?threadId={$message->thread_id}"
-                    : '/messages',
-            ],
-            'requireInteraction' => false,
-        ], 'telnyx');
+        if ($enabledSubscriptions->isNotEmpty()) {
+            $webPush->sendToSubscriptions($enabledSubscriptions, [
+                'title' => $title,
+                'body' => $body,
+                'icon' => '/favicons/icon-192x192.png',
+                'badge' => '/favicons/icon-96x96.png',
+                'tag' => "sms-outbound-thread-{$message->thread_id}-message-{$message->id}",
+                'data' => ['url' => $url],
+                'requireInteraction' => false,
+            ], 'telnyx');
+        }
+
+        // The same reply to every other teammate's phone with text activity
+        // on. A teammate's reply has no AppNotification row (the web has
+        // none either — it is a heads-up, not something to act on from
+        // /notifications), so this push is the app's only copy of it.
+        $appPush->sendToUsers(
+            array_values(array_diff($appPush->userIdsWanting('sms_inbound_enabled'), [$this->sentByUserId])),
+            'sms_inbound_enabled',
+            array_filter([
+                'title' => $title,
+                'body' => $body,
+                'sound' => 'default',
+                'categoryId' => 'message',
+                'threadId' => $message->thread_id ? (string) $message->thread_id : null,
+                'data' => [
+                    'type' => 'sms_reply',
+                    'action_url' => $url,
+                    'target' => AppNotificationTarget::for($url),
+                    'thread_id' => $message->thread_id,
+                    'sms_message_id' => $message->id,
+                ],
+            ], fn ($value) => $value !== null),
+        );
     }
 
     /**

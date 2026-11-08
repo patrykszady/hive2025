@@ -6,14 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\DestroyPushTokenRequest;
 use App\Http\Requests\Api\App\StorePushTokenRequest;
 use App\Models\PushToken;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Registers and unregisters the Hive Contractors app's Expo push tokens —
  * see the push_tokens migration's docblock for why a row is keyed on
- * `token` rather than `user_id`, and App\Jobs\SendExpoPushForNotification
- * for how a registered token is used.
+ * `token` rather than `user_id`, and App\Services\Notifications\
+ * AppDevicePush for how a registered token is used.
  */
 class PushTokenController extends Controller
 {
@@ -46,22 +47,30 @@ class PushTokenController extends Controller
             ]);
 
             $existing->delete();
+            $existing = null;
         }
 
-        PushToken::updateOrCreate(
-            ['token' => $data['token']],
-            [
-                'user_id' => $request->user()->id,
-                'platform' => $data['platform'],
-                'device_name' => $data['device_name'] ?? null,
-                // Only a real, persisted PersonalAccessToken row has an id
-                // worth stamping — in a test using Sanctum::actingAs()'s
-                // mocked token, ->exists is false and ->getKey() isn't a
-                // real row, so it must stay null rather than fail the FK.
-                'personal_access_token_id' => $accessToken?->exists ? $accessToken->getKey() : null,
-                'last_seen_at' => now(),
-            ],
-        );
+        $attributes = [
+            'user_id' => $request->user()->id,
+            'platform' => $data['platform'],
+            'device_name' => $data['device_name'] ?? null,
+            // Only a real, persisted PersonalAccessToken row has an id
+            // worth stamping — in a test using Sanctum::actingAs()'s
+            // mocked token, ->exists is false and ->getKey() isn't a
+            // real row, so it must stay null rather than fail the FK.
+            'personal_access_token_id' => $accessToken?->exists ? $accessToken->getKey() : null,
+            'last_seen_at' => now(),
+        ];
+
+        // A re-registration (every app launch) must never touch the
+        // switches the user set on the users page; only a brand-new row —
+        // a first install, or a reinstall that rotated the Expo token —
+        // gets starting values.
+        if ($existing === null) {
+            $attributes += $this->preferencesForNewDevice($request->user());
+        }
+
+        PushToken::updateOrCreate(['token' => $data['token']], $attributes);
 
         return response()->json(['registered' => true], 201);
     }
@@ -78,5 +87,34 @@ class PushTokenController extends Controller
             ->delete();
 
         return response()->json(['unregistered' => true]);
+    }
+
+    /**
+     * A new phone starts from the preferences the user already set for
+     * their other phone, so a reinstall never silently resets them. With
+     * no other phone, it starts the way a new browser subscription does
+     * (PushSubscriptionController::store()) — except text activity, which
+     * starts on for an Admin, the only role the users page even shows that
+     * switch to, and off for everyone else.
+     *
+     * @return array<value-of<PushToken::PREFERENCES>, bool>
+     */
+    private function preferencesForNewDevice(User $user): array
+    {
+        $sibling = PushToken::where('user_id', $user->id)
+            ->orderByDesc('last_seen_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($sibling) {
+            return $sibling->only(PushToken::PREFERENCES);
+        }
+
+        return [
+            'realtime_enabled' => true,
+            'morning_enabled' => true,
+            'evening_enabled' => true,
+            'sms_inbound_enabled' => $user->vendor_role === 'Admin',
+        ];
     }
 }

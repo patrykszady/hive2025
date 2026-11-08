@@ -242,6 +242,12 @@ class User extends Authenticatable implements WebAuthnAuthenticatable, \Illumina
         return $this->hasOne(NotificationSetting::class);
     }
 
+    /** Phones signed in to the Hive Contractors app — one row per installed copy (see PushToken). */
+    public function pushTokens(): HasMany
+    {
+        return $this->hasMany(PushToken::class);
+    }
+
     /** Their Hive Contractors app calling login, once they have signed in to the app. */
     public function voiceCredential(): HasOne
     {

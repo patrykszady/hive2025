@@ -10,6 +10,8 @@ use App\Models\Task;
 use App\Models\User;
 use App\Notifications\TeamTaskSmsNotification;
 use App\Services\GroupSmsService;
+use App\Services\Notifications\AppDevicePush;
+use App\Services\Notifications\AppNotificationTarget;
 use App\Services\TaskNotificationService;
 use App\Services\WebPushService;
 use Carbon\Carbon;
@@ -465,7 +467,7 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
         );
     }
 
-    // ─── Browser Push ────────────────────────────────────────
+    // ─── Browser + App Push ──────────────────────────────────
 
     protected function sendPush(
         TaskNotificationService $service,
@@ -474,7 +476,14 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
         string $dateStr,
         ?string $vendorTimezone = null,
     ): void {
-        if (! $service->shouldNotify($user, 'browser', 'realtime')) {
+        // Browser and app are both per-device switches (push_subscriptions
+        // and push_tokens, set side by side on the users page); the change
+        // gate below is per user, so pick the channels first and run the
+        // gate once for both.
+        $toBrowser = $service->shouldNotify($user, 'browser', 'realtime');
+        $toApp = $service->shouldNotify($user, 'app', 'realtime');
+
+        if (! $toBrowser && ! $toApp) {
             return;
         }
 
@@ -499,21 +508,36 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        $subscriptions = PushSubscription::where('user_id', $user->id)
-            ->where('realtime_enabled', true)
-            ->get();
+        $count = $userTasks->count();
+        $title = 'Schedule Updated';
+        $body = "Your schedule for today has been updated. You have {$count} " . ($count === 1 ? 'task' : 'tasks') . '.';
 
-        if ($subscriptions->isEmpty()) {
-            return;
+        if ($toBrowser) {
+            $subscriptions = PushSubscription::where('user_id', $user->id)
+                ->where('realtime_enabled', true)
+                ->get();
+
+            if ($subscriptions->isNotEmpty()) {
+                app(WebPushService::class)->sendToSubscriptions($subscriptions, [
+                    'title' => $title,
+                    'body' => $body,
+                    'tag' => "task-update-{$dateStr}",
+                    'data' => ['url' => '/hub'],
+                ]);
+            }
         }
 
-        $count = $userTasks->count();
-
-        app(WebPushService::class)->sendToSubscriptions($subscriptions, [
-            'title' => 'Schedule Updated',
-            'body' => "Your schedule for today has been updated. You have {$count} " . ($count === 1 ? 'task' : 'tasks') . '.',
-            'tag' => "task-update-{$dateStr}",
-            'data' => ['url' => '/hub'],
-        ]);
+        if ($toApp) {
+            app(AppDevicePush::class)->sendToUsers([$user->id], 'realtime_enabled', [
+                'title' => $title,
+                'body' => $body,
+                'sound' => 'default',
+                'data' => [
+                    'type' => 'schedule_updated',
+                    'action_url' => '/hub',
+                    'target' => AppNotificationTarget::for('/hub'),
+                ],
+            ]);
+        }
     }
 }

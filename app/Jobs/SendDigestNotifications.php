@@ -4,11 +4,14 @@ namespace App\Jobs;
 
 use App\Mail\TaskNotificationDigest;
 use App\Models\PushSubscription;
+use App\Models\PushToken;
 use App\Models\SmsLog;
 use App\Models\Task;
 use App\Models\User;
 use App\Notifications\ClientScheduleSmsNotification;
 use App\Notifications\TeamTaskSmsNotification;
+use App\Services\Notifications\AppDevicePush;
+use App\Services\Notifications\AppNotificationTarget;
 use App\Services\TaskNotificationService;
 use App\Services\WebPushService;
 use App\Support\SmsChannel;
@@ -190,7 +193,7 @@ class SendDigestNotifications implements ShouldQueue
         );
     }
 
-    // ─── Browser Push ────────────────────────────────────────
+    // ─── Browser + App Push ──────────────────────────────────
 
     protected function sendPushNotifications(
         TaskNotificationService $service,
@@ -198,7 +201,7 @@ class SendDigestNotifications implements ShouldQueue
         string $dateStr,
     ): void {
         $webPushService = app(WebPushService::class);
-        $browserTiming = $this->timing === 'morning' ? 'morning' : 'evening';
+        $pushTiming = $this->timing === 'morning' ? 'morning' : 'evening';
         $pushTitle = $this->timing === 'morning' ? "Today's Tasks" : "Tomorrow's Tasks";
 
         $subscriptions = PushSubscription::with('user.notificationSetting')->get();
@@ -213,26 +216,14 @@ class SendDigestNotifications implements ShouldQueue
                 continue;
             }
 
-            if (! $service->shouldNotify($user, 'browser', $browserTiming)) {
+            if (! $service->shouldNotify($user, 'browser', $pushTiming)) {
                 continue;
             }
 
-            $userTasks = $service->getTasksForUser($user, $targetDate);
+            $body = $this->digestBody($service->getTasksForUser($user, $targetDate));
 
-            if ($userTasks->isEmpty()) {
+            if ($body === null) {
                 continue;
-            }
-
-            $count = $userTasks->count();
-            $taskWord = $count === 1 ? 'task' : 'tasks';
-            $body = "You have {$count} {$taskWord} scheduled for " . ($this->timing === 'morning' ? 'today' : 'tomorrow') . '.';
-
-            $firstTask = $userTasks->first();
-            if ($count === 1 && $firstTask) {
-                $body = $firstTask->title ?? 'Task';
-                if ($firstTask->project) {
-                    $body .= "\n" . ($firstTask->project->short_address ?? $firstTask->project->name);
-                }
             }
 
             $eligible->push([
@@ -254,5 +245,77 @@ class SendDigestNotifications implements ShouldQueue
                 $item['payload'],
             );
         }
+
+        $this->sendAppPushNotifications($service, $targetDate, $pushTiming, $pushTitle);
+    }
+
+    /**
+     * The same digest to every phone with the Hive Contractors app whose
+     * morning/evening switch is on — set on the users page next to the
+     * browser's, and stored per phone on push_tokens. One send per user,
+     * since the body counts that user's own tasks.
+     */
+    protected function sendAppPushNotifications(
+        TaskNotificationService $service,
+        Carbon $targetDate,
+        string $pushTiming,
+        string $pushTitle,
+    ): void {
+        $appPush = app(AppDevicePush::class);
+        $tokensByUser = PushToken::with('user')
+            ->wanting("{$pushTiming}_enabled")
+            ->get()
+            ->groupBy('user_id');
+
+        foreach ($tokensByUser as $tokens) {
+            $user = $tokens->first()?->user;
+
+            if (! $user) {
+                continue;
+            }
+
+            $body = $this->digestBody($service->getTasksForUser($user, $targetDate));
+
+            if ($body === null) {
+                continue;
+            }
+
+            $appPush->sendToTokens($tokens->pluck('token')->all(), [
+                'title' => $pushTitle,
+                'body' => $body,
+                'sound' => 'default',
+                'data' => [
+                    'type' => 'task_digest',
+                    'action_url' => '/hub',
+                    'target' => AppNotificationTarget::for('/hub'),
+                ],
+            ]);
+        }
+    }
+
+    /**
+     * "You have 3 tasks scheduled for today." — or, for a single task, its
+     * title and address. Null when the user has nothing that day, which is
+     * no digest at all rather than an empty one.
+     */
+    protected function digestBody(\Illuminate\Support\Collection $userTasks): ?string
+    {
+        if ($userTasks->isEmpty()) {
+            return null;
+        }
+
+        $count = $userTasks->count();
+        $taskWord = $count === 1 ? 'task' : 'tasks';
+        $body = "You have {$count} {$taskWord} scheduled for " . ($this->timing === 'morning' ? 'today' : 'tomorrow') . '.';
+
+        $firstTask = $userTasks->first();
+        if ($count === 1 && $firstTask) {
+            $body = $firstTask->title ?? 'Task';
+            if ($firstTask->project) {
+                $body .= "\n" . ($firstTask->project->short_address ?? $firstTask->project->name);
+            }
+        }
+
+        return $body;
     }
 }

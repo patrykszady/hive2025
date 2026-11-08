@@ -136,7 +136,7 @@ it('sends a team message inside Hive only: no Telnyx, no signature, a push to th
     Bus::assertDispatched(SendOutboundSmsBrowserNotifications::class, fn ($job) => $job->messageId === $message->id && $job->sentByUserId === $w['patryk']->id);
 
     // The push job writes a notification for the other member only, titled by the sender.
-    (new SendOutboundSmsBrowserNotifications($message->id, $w['patryk']->id))->handle(app(\App\Services\WebPushService::class));
+    (new SendOutboundSmsBrowserNotifications($message->id, $w['patryk']->id))->handle(app(\App\Services\WebPushService::class), app(\App\Services\Notifications\AppDevicePush::class));
     expect(AppNotification::query()->where('type', 'team_message')->pluck('user_id')->all())->toBe([$w['greg']->id])
         ->and(AppNotification::query()->where('type', 'team_message')->value('title'))->toBe('Patryk');
 });
