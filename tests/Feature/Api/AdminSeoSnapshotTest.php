@@ -20,7 +20,7 @@ it('answers the full snapshot shape with automated_actions off and empty tables 
     expect($data)->toHaveKeys([
         'generated_at', 'automated_actions', 'pulse', 'health', 'report_stats',
         'search', 'trend', 'trend_through', 'gsc_errors', 'sitemaps',
-        'top_queries', 'top_pages', 'search_appearance', 'clarity',
+        'top_queries', 'top_pages', 'search_appearance', 'clarity', 'geo',
     ]);
     expect($data['automated_actions'])->toBeFalse();
     expect(fn () => \Illuminate\Support\Carbon::parse($data['generated_at']))->not->toThrow(\Exception::class);
@@ -169,4 +169,25 @@ it('counts a signup click recorded via the pulse beacon as a feature, labelled S
     expect($signup)->not->toBeNull();
     expect($signup['label'])->toBe('Sign-up clicks');
     expect($signup['uses'])->toBe(1);
+});
+
+/**
+ * The AI-readability feeds (2026-11-10): the same `geo.feeds` shape
+ * gs.construction's snapshot carries, which the hub's SEO page lists as
+ * label/url/ok/age/stale. Every feed here is a live route (no nightly file
+ * to go stale), so each reads ok, ageless and never stale — "live".
+ */
+it('reports the four AI feeds as live routes in the geo section, rooted on the marketing host', function () {
+    config(['app.marketing_url' => 'https://hive.contractors']);
+
+    $data = $this->getJson('/api/admin/v1/seo/snapshot', adminApiHeaders())
+        ->assertOk()
+        ->json('data');
+
+    expect(array_column($data['geo']['feeds'], 'label'))->toBe(['llms.txt', 'llms-full.txt', 'ai-feed.json', 'geo/answers.json']);
+
+    foreach ($data['geo']['feeds'] as $feed) {
+        expect($feed)->toMatchArray(['ok' => true, 'age' => null, 'stale' => false]);
+        expect($feed['url'])->toBe('https://hive.contractors/'.$feed['label']);
+    }
 });

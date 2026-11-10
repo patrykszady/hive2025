@@ -8,6 +8,7 @@ use App\Models\GscCoverageState;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
 use SsSystems\Platform\Reports\Console\ReportRun;
@@ -115,6 +116,10 @@ class SeoSnapshotController extends Controller
                 ...$this->seoToolBlocks($rankDays, fn (string $key, int $ttl, callable $build): array => Cache::remember($key, $ttl, $build)),
                 'gsc_errors' => $this->gscErrorSnapshot(),
                 'sitemaps' => SitemapStatus::snapshot((string) config('services.google.search_console_property')),
+                // The AI-readability feeds (2026-11-10), in the shape
+                // gs.construction's snapshot carries — the hub's "AI
+                // readability feeds" list reads label/url/ok/age/stale.
+                'geo' => $this->geoSnapshot(),
                 // How our results LOOK on Google — this site holds the same
                 // gsc_search_appearance_metrics rows gsc/jpeterson do (see
                 // database/migrations), just never had this key wired.
@@ -185,6 +190,36 @@ class SeoSnapshotController extends Controller
         }
 
         return $this->baseRefreshSnapshot($request);
+    }
+
+    /**
+     * The four AI feeds (/llms.txt, /llms-full.txt, /ai-feed.json,
+     * /geo/answers.json), each as label/url/ok/age/stale — the shape
+     * gs.construction's snapshot carries and the hub's "AI readability
+     * feeds" list reads. On gs.construction the two llms files are written
+     * to disk nightly, so `ok`/`age`/`stale` come from the file; every feed
+     * here is a live route rendered on request (no file, no nightly job),
+     * so `ok` is "the route is registered", `age` is null and `stale` is
+     * never true — the hub shows each as "live". Rooted on the marketing
+     * host, like every public URL this app hands out.
+     *
+     * @return array{feeds: list<array{label: string, url: string, ok: bool, age: ?string, stale: bool}>}
+     */
+    protected function geoSnapshot(): array
+    {
+        $feeds = [];
+
+        foreach (['llms' => 'llms.txt', 'llms-full' => 'llms-full.txt', 'ai-feed' => 'ai-feed.json', 'geo.answers' => 'geo/answers.json'] as $route => $path) {
+            $feeds[] = [
+                'label' => $path,
+                'url' => marketing_url($path),
+                'ok' => Route::has($route),
+                'age' => null,
+                'stale' => false,
+            ];
+        }
+
+        return ['feeds' => $feeds];
     }
 
     protected function gscCoverageStateModel(): string

@@ -340,3 +340,30 @@ it('renders the Estimates page title as a single, correct ampersand', function (
 
     expect($html)->toContain('<title>Estimates &amp; Documents — Hive Contractors</title>');
 });
+
+/*
+|--------------------------------------------------------------------------
+| AI feeds (2026-11-10) — /llms-full.txt, /ai-feed.json and /geo/answers.json
+| join /llms.txt: allowed in robots.txt next to it, and never noindex, since
+| the kit's feed builders send their own "X-Robots-Tag: all" that
+| NoIndexNonPublic used to overwrite.
+|--------------------------------------------------------------------------
+*/
+
+it('robots.txt allows the AI feeds next to llms.txt', function () {
+    $content = file_get_contents(public_path('robots.txt'));
+
+    expect($content)->toContain("Allow: /llms-full.txt\n")
+        ->toContain("Allow: /ai-feed.json\n")
+        ->toContain("Allow: /geo/answers.json\n");
+});
+
+it('never marks the crawl files and the AI feeds noindex', function () {
+    config(['app.noindex_hosts' => '']);
+
+    foreach (['/sitemap.xml', '/llms.txt', '/llms-full.txt', '/ai-feed.json', '/geo/answers.json'] as $path) {
+        $response = $this->get($path)->assertOk();
+
+        expect((string) $response->headers->get('X-Robots-Tag'))->not->toContain('noindex', "noindex on {$path}");
+    }
+});

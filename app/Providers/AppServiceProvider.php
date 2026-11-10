@@ -42,6 +42,7 @@ use App\Support\Seo\BingSettings;
 use App\Support\Seo\BingWriter;
 use App\Support\Seo\ClaritySettings;
 use App\Support\Seo\DataForSeoSettings;
+use App\Support\Seo\Faq\ConfigFaqCatalog;
 use App\Support\Seo\HiveSeoProfile;
 use App\Support\Seo\IndexNowSiteKey;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
@@ -106,6 +107,7 @@ use SsSystems\Platform\Reports\Contracts\QueryMetricsReader;
 use SsSystems\Platform\Reports\Contracts\ReportStorage;
 use SsSystems\Platform\Reports\Contracts\SiteCatalog;
 use SsSystems\Platform\Reports\Contracts\SiteIdentity;
+use SsSystems\Platform\Seo\Faq\Contracts\FaqCatalog;
 use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
 use SsSystems\Platform\Seo\Bing\BingWebmasterClient;
 use SsSystems\Platform\Seo\Bing\BingWriter as KitBingWriter;
@@ -452,6 +454,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(HealthDataReader::class, EloquentHealthDataReader::class);
         $this->app->bind(PageFetcher::class, HttpPageFetcher::class);
         $this->app->bind(AreaCatalog::class, EmptyAreaCatalog::class);
+
+        // /geo/answers.json's Q&A list (kit Seo\Faq, 2026-11-10): the fixed
+        // config/geo-answers.php list alone, as on gs.construction — this
+        // site's product pages carry no FAQ sections of their own to merge.
+        $this->app->bind(FaqCatalog::class, ConfigFaqCatalog::class);
 
         // Microsoft Clarity (kit 0.20.0, 2026-11-02): the kit's own
         // Seo\Clarity module replaces this app's former App\Services\

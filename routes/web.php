@@ -106,6 +106,16 @@ Route::get('sitemap.xml', \App\Http\Controllers\SitemapController::class)->name(
 // (App\Http\Controllers\LlmsTxtController, 2026-10-29).
 Route::get('llms.txt', \App\Http\Controllers\LlmsTxtController::class)->name('llms');
 
+// The rest of the AI feeds the kit sites publish (2026-11-10, Patryk: roll
+// the AI feeds to every site): the extended profile, the structured
+// business-facts feed (kit Seo\AiFeed) and the FAQPage Q&A feed (kit
+// Seo\Faq). Live routes like llms.txt — nothing on disk to go stale —
+// linked from llms.txt, allowed in public/robots.txt and never noindex
+// (App\Http\Middleware\NoIndexNonPublic::CRAWL_FILES).
+Route::get('llms-full.txt', \App\Http\Controllers\LlmsFullTxtController::class)->name('llms-full');
+Route::get('ai-feed.json', \App\Http\Controllers\AiFeedController::class)->name('ai-feed');
+Route::get('geo/answers.json', \App\Http\Controllers\GeoAnswersController::class)->name('geo.answers');
+
 // IndexNow (Bing/Yandex/Seznam/Naver) key-file verification (kit 0.19.4):
 // GET /<key>.txt must answer the site's own key as plain text before a
 // submission signed with it is accepted — App\Support\Seo\IndexNowSiteKey

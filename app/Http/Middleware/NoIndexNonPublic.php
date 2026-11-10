@@ -14,6 +14,17 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class NoIndexNonPublic
 {
+    /**
+     * The files crawlers read by design — never noindex, whatever host
+     * served them: robots.txt and sitemap.xml, and since 2026-11-10 the AI
+     * feeds (llms.txt, llms-full.txt, ai-feed.json, geo/answers.json), whose
+     * kit builders send their own "X-Robots-Tag: all" that this middleware
+     * used to overwrite.
+     *
+     * @var list<string>
+     */
+    public const CRAWL_FILES = ['robots.txt', 'sitemap.xml', 'llms.txt', 'llms-full.txt', 'ai-feed.json', 'geo/answers.json'];
+
     public function handle(Request $request, Closure $next): Response
     {
         $response = $next($request);
@@ -27,7 +38,7 @@ class NoIndexNonPublic
         $public = $this->isPublicPage($request)
             && ($response->getStatusCode() === 200 || $this->redirectsToPublicPage($request, $response));
 
-        if (! $public && ! $request->is('robots.txt') && ! $request->is('sitemap.xml')) {
+        if (! $public && ! $request->is(...self::CRAWL_FILES)) {
             $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
         }
 

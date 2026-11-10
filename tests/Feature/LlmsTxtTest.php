@@ -42,3 +42,15 @@ it('lists published blog posts, newest first, and leaves drafts out', function (
         ->and($text)->toContain('- [Paying crews on time](https://hive.contractors/en/blog/paying-crews-on-time): How timesheets become paychecks.')
         ->and($text)->not->toContain('Unfinished thought');
 });
+
+it('points AI crawlers at the extended profile and the structured feeds next to it', function () {
+    // /llms-full.txt, /ai-feed.json and /geo/answers.json (2026-11-10) are
+    // linked from llms.txt the way gs.construction's are, on the marketing host.
+    $text = $this->get('/llms.txt')->assertOk()->getContent();
+
+    expect($text)->toContain("## Machine-readable\n")
+        ->toContain('- [llms-full.txt](https://hive.contractors/llms-full.txt)')
+        ->toContain('- [ai-feed.json](https://hive.contractors/ai-feed.json)')
+        ->toContain('- [geo/answers.json](https://hive.contractors/geo/answers.json)')
+        ->toContain('- [sitemap.xml](https://hive.contractors/sitemap.xml)');
+});
