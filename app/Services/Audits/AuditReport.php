@@ -15,6 +15,9 @@ use Illuminate\Support\Str;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
+use OpenSpout\Common\Entity\Style\BorderName;
+use OpenSpout\Common\Entity\Style\BorderWidth;
+use OpenSpout\Common\Entity\Style\BorderStyle;
 use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\XLSX\Writer as XLSXWriter;
@@ -492,11 +495,11 @@ class AuditReport
         $authVendorId = $this->companyVendorId;
         $tmp = tempnam(sys_get_temp_dir(), 'audit-xlsx-');
 
-        $underlineBorder = new Border(new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID));
-        $vendorHeaderStyle = (new Style)->setBorder($underlineBorder)->setFontBold();
-        $coverageGreen = (new Style)->setFontColor(Color::GREEN);
-        $coverageOrange = (new Style)->setFontColor('C05621');
-        $coverageRed = (new Style)->setFontColor(Color::RED);
+        $underlineBorder = new Border(new BorderPart(BorderName::BOTTOM, Color::BLACK, BorderWidth::THICK, BorderStyle::SOLID));
+        $vendorHeaderStyle = (new Style)->withBorder($underlineBorder)->withFontBold(true);
+        $coverageGreen = (new Style)->withFontColor(Color::GREEN);
+        $coverageOrange = (new Style)->withFontColor('C05621');
+        $coverageRed = (new Style)->withFontColor(Color::RED);
         $styleFor = fn (string $coverage) => match ($coverage) {
             'Covered' => $coverageGreen,
             'Not Applicable' => $coverageOrange,
@@ -511,7 +514,7 @@ class AuditReport
         $allChecks = [];
         foreach ($this->groups() as $group) {
             $vendor = $group['vendor'];
-            $writer->addRow(Row::fromValues([$vendor->business_name, null, null, null, null], $vendorHeaderStyle));
+            $writer->addRow(Row::fromValuesWithStyle([$vendor->business_name, null, null, null, null], $vendorHeaderStyle));
 
             $isUser = (bool) ($group['is_user'] ?? false);
             if ($isUser) {
@@ -528,7 +531,7 @@ class AuditReport
                 foreach ($group['applicable_docs'] as $doc) {
                     $cell = self::auditVerificationCell($doc);
                     $style = str_starts_with($cell, 'WC verified') ? $coverageGreen : (str_starts_with($cell, 'Not found') ? $coverageRed : $coverageOrange);
-                    $writer->addRow(Row::fromValuesWithStyles([$doc->number.' ('.$doc->effective_date->format('m/d/Y').'–'.$doc->expiration_date->format('m/d/Y').')', null, null, null, $cell], null, [4 => $style]));
+                    $writer->addRow(Row::fromValuesWithStyles([$doc->number.' ('.$doc->effective_date->format('m/d/Y').'–'.$doc->expiration_date->format('m/d/Y').')', null, null, null, $cell], [4 => $style]));
                 }
                 $writer->addRow(Row::fromValues(['', '', '', '', '']));
             }
@@ -542,7 +545,7 @@ class AuditReport
                         ? 'Covered'
                         : ((isset($group['professional_doc']) || ($vendor->business_type ?? null) === 'Retail' || ! empty($vendor->category_id)) ? 'Not Applicable' : 'Not Covered');
                 }
-                $writer->addRow(Row::fromValuesWithStyles([null, $check->date->format('m/d/Y'), $check->payment_label.' '.$check->check_number, money($check->amount), $coverage], null, [4 => $styleFor($coverage)]));
+                $writer->addRow(Row::fromValuesWithStyles([null, $check->date->format('m/d/Y'), $check->payment_label.' '.$check->check_number, money($check->amount), $coverage], [4 => $styleFor($coverage)]));
                 $allChecks[] = [
                     'type' => (string) $check->check_type,
                     'number' => (string) $check->check_number,
@@ -564,7 +567,7 @@ class AuditReport
         $writer->addNewSheetAndMakeItCurrent()->setName('All Checks');
         $writer->addRow(Row::fromValues(['Date', 'Vendor', 'Payment', 'Amount', 'Coverage']));
         foreach ($allChecks as $row) {
-            $writer->addRow(Row::fromValuesWithStyles([$row['date'], $row['vendor'], $row['payment'], $row['amount'], $row['coverage']], null, [4 => $styleFor($row['coverage'])]));
+            $writer->addRow(Row::fromValuesWithStyles([$row['date'], $row['vendor'], $row['payment'], $row['amount'], $row['coverage']], [4 => $styleFor($row['coverage'])]));
         }
 
         $writer->addNewSheetAndMakeItCurrent()->setName('Missing Expenses');

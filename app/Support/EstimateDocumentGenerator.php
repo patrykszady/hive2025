@@ -12,6 +12,9 @@ use Illuminate\Support\Number;
 use Illuminate\Support\Str;
 use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
+use OpenSpout\Common\Entity\Style\BorderName;
+use OpenSpout\Common\Entity\Style\BorderWidth;
+use OpenSpout\Common\Entity\Style\BorderStyle;
 use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
 use RuntimeException;
@@ -273,7 +276,7 @@ class EstimateDocumentGenerator
         $tempPath = storage_path('app/temp/' . Str::uuid() . '.xlsx');
 
         $border = new Border(
-            new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
+            new BorderPart(BorderName::BOTTOM, Color::BLACK, BorderWidth::THICK, BorderStyle::SOLID)
         );
 
         $writer = SimpleExcelWriter::create($tempPath)
@@ -300,7 +303,7 @@ class EstimateDocumentGenerator
                 'unit' => null,
                 'cost' => null,
                 'total' => $section->total,
-            ], (new Style)->setFontBold()->setBorder($border));
+            ], (new Style)->withFontBold(true)->withBorder($border));
 
             foreach ($section->estimate_line_items as $lineItem) {
                 $hideUnitFields = $lineItem->unit_type === 'no_unit';
@@ -330,7 +333,7 @@ class EstimateDocumentGenerator
                         'unit' => null,
                         'cost' => null,
                         'total' => $allowance->amount,
-                    ], (new Style)->setFontItalic());
+                    ], (new Style)->withFontItalic(true));
                 }
 
                 if ($showAllowances && $lineItem->allowances->isNotEmpty()) {
@@ -343,7 +346,7 @@ class EstimateDocumentGenerator
                         'unit' => null,
                         'cost' => null,
                         'total' => $lineItem->total + $lineItem->allowances->sum('amount'),
-                    ], (new Style)->setFontBold());
+                    ], (new Style)->withFontBold(true));
                 }
             }
 
@@ -360,7 +363,7 @@ class EstimateDocumentGenerator
                     'unit' => null,
                     'cost' => null,
                     'total' => $sectionAllowanceTotal,
-                ], (new Style)->setFontItalic());
+                ], (new Style)->withFontItalic(true));
 
                 $writer->addRow([
                     '' => '',
@@ -371,7 +374,7 @@ class EstimateDocumentGenerator
                     'unit' => null,
                     'cost' => null,
                     'total' => $section->total + $sectionAllowanceTotal,
-                ], (new Style)->setFontBold()->setBorder($border));
+                ], (new Style)->withFontBold(true)->withBorder($border));
             }
 
             $writer->addRow([]);

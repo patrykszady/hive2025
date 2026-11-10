@@ -6,6 +6,9 @@ use OpenSpout\Common\Entity\Cell;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
+use OpenSpout\Common\Entity\Style\BorderName;
+use OpenSpout\Common\Entity\Style\BorderWidth;
+use OpenSpout\Common\Entity\Style\BorderStyle;
 use OpenSpout\Common\Entity\Style\CellAlignment;
 use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
@@ -30,14 +33,14 @@ class ProfitAndLossExporter
         $isZero = fn ($amount) => round((float) $amount, 2) == 0.0;
         $indent = fn (string $label, int $depth = 0): string => str_repeat('    ', $depth).$label;
 
-        $border = new Border(new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_SOLID));
-        $doubleBorder = new Border(new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_DOUBLE));
-        $topBorder = new Border(new BorderPart(Border::TOP, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_SOLID));
-        $boldStyle = (new Style())->setFontBold();
-        $subheaderStyle = (new Style())->setFontBold()->setFontItalic();
-        $totalStyle = (new Style())->setFontBold()->setBorder($border);
-        $categoryTotalStyle = (new Style())->setFontBold()->setBorder($topBorder);
-        $grandTotalStyle = (new Style())->setFontBold()->setBorder($doubleBorder);
+        $border = new Border(new BorderPart(BorderName::BOTTOM, Color::BLACK, BorderWidth::THIN, BorderStyle::SOLID));
+        $doubleBorder = new Border(new BorderPart(BorderName::BOTTOM, Color::BLACK, BorderWidth::THIN, BorderStyle::DOUBLE));
+        $topBorder = new Border(new BorderPart(BorderName::TOP, Color::BLACK, BorderWidth::THIN, BorderStyle::SOLID));
+        $boldStyle = (new Style())->withFontBold(true);
+        $subheaderStyle = (new Style())->withFontBold(true)->withFontItalic(true);
+        $totalStyle = (new Style())->withFontBold(true)->withBorder($border);
+        $categoryTotalStyle = (new Style())->withFontBold(true)->withBorder($topBorder);
+        $grandTotalStyle = (new Style())->withFontBold(true)->withBorder($doubleBorder);
         $emptyRow = Row::fromValues(['']);
 
         $tempPath = tempnam(sys_get_temp_dir(), 'pl-xlsx-');
@@ -49,32 +52,32 @@ class ProfitAndLossExporter
         $sheet->setColumnWidth(50, 1);
         $sheet->setColumnWidth(18, 2);
 
-        $headerStyle = (new Style())->setFontBold()->setFontSize(11);
-        $writer->addRow(Row::fromValues([$companyName], $headerStyle));
-        $writer->addRow(Row::fromValues(['Profit and Loss'], $boldStyle));
+        $headerStyle = (new Style())->withFontBold(true)->withFontSize(11);
+        $writer->addRow(Row::fromValuesWithStyle([$companyName], $headerStyle));
+        $writer->addRow(Row::fromValuesWithStyle(['Profit and Loss'], $boldStyle));
         $writer->addRow(Row::fromValues([
             date('F j', strtotime($startDate)).' - '.date('F j, Y', strtotime($endDate)),
         ]));
         $writer->addRow(Row::fromValues([$basis === 'cash' ? 'Cash Basis' : 'Accrual Basis']));
         $writer->addRow(Row::fromValues(['']));
 
-        $colHeaderLeftStyle = (new Style())->setFontBold()->setBorder($border);
-        $colHeaderRightStyle = (new Style())->setFontBold()->setBorder($border)->setCellAlignment(CellAlignment::RIGHT);
+        $colHeaderLeftStyle = (new Style())->withFontBold(true)->withBorder($border);
+        $colHeaderRightStyle = (new Style())->withFontBold(true)->withBorder($border)->withCellAlignment(CellAlignment::RIGHT);
         $writer->addRow(new Row([
             Cell::fromValue('', $colHeaderLeftStyle),
             Cell::fromValue('Total', $colHeaderRightStyle),
         ]));
 
         // ── INCOME ──
-        $writer->addRow(Row::fromValues(['Income'], $boldStyle));
+        $writer->addRow(Row::fromValuesWithStyle(['Income'], $boldStyle));
         $writer->addRow(Row::fromValues([$indent('Revenue', 1), $fmt($figures->revenue())]));
-        $writer->addRow(Row::fromValues([$indent('Total Income', 0), $fmt($figures->revenue())], $totalStyle));
+        $writer->addRow(Row::fromValuesWithStyle([$indent('Total Income', 0), $fmt($figures->revenue())], $totalStyle));
         $writer->addRow($emptyRow);
 
         // ── COST OF GOODS SOLD ──
-        $writer->addRow(Row::fromValues(['Cost of Goods Sold'], $boldStyle));
+        $writer->addRow(Row::fromValuesWithStyle(['Cost of Goods Sold'], $boldStyle));
 
-        $writer->addRow(Row::fromValues([$indent('Cost of Materials', 1)], $subheaderStyle));
+        $writer->addRow(Row::fromValuesWithStyle([$indent('Cost of Materials', 1)], $subheaderStyle));
         foreach ($figures->costOfMaterialsVendors() as $vendorName => $costOfMaterialsVendor) {
             $vendorSum = (float) $costOfMaterialsVendor->sum('amount');
             if ($isZero($vendorSum)) {
@@ -82,10 +85,10 @@ class ProfitAndLossExporter
             }
             $writer->addRow(Row::fromValues([$indent($vendorName, 2), $fmt($vendorSum)]));
         }
-        $writer->addRow(Row::fromValues([$indent('Total Cost of Materials', 1), $fmt($figures->costOfMaterialsSum())], $categoryTotalStyle));
+        $writer->addRow(Row::fromValuesWithStyle([$indent('Total Cost of Materials', 1), $fmt($figures->costOfMaterialsSum())], $categoryTotalStyle));
         $writer->addRow($emptyRow);
 
-        $writer->addRow(Row::fromValues([$indent('Cost of Labor', 1)], $subheaderStyle));
+        $writer->addRow(Row::fromValuesWithStyle([$indent('Cost of Labor', 1)], $subheaderStyle));
         foreach ($figures->costOfLaborVendors() as $vendorName => $costOfLaborVendor) {
             $vendorSum = (float) $costOfLaborVendor->sum('amount');
             if ($isZero($vendorSum)) {
@@ -93,20 +96,20 @@ class ProfitAndLossExporter
             }
             $writer->addRow(Row::fromValues([$indent($vendorName, 2), $fmt($vendorSum)]));
         }
-        $writer->addRow(Row::fromValues([$indent('Total Cost of Labor', 1), $fmt($figures->costOfLaborSum())], $categoryTotalStyle));
+        $writer->addRow(Row::fromValuesWithStyle([$indent('Total Cost of Labor', 1), $fmt($figures->costOfLaborSum())], $categoryTotalStyle));
         $writer->addRow($emptyRow);
 
         $cogsTotal = $figures->costOfMaterialsSum() + $figures->costOfLaborSum();
-        $writer->addRow(Row::fromValues([$indent('Total Cost of Goods Sold', 0), $fmt($cogsTotal)], $grandTotalStyle));
+        $writer->addRow(Row::fromValuesWithStyle([$indent('Total Cost of Goods Sold', 0), $fmt($cogsTotal)], $grandTotalStyle));
         $writer->addRow($emptyRow);
 
         // ── GROSS PROFIT ──
         $grossProfit = $figures->revenue() - $cogsTotal;
-        $writer->addRow(Row::fromValues(['Gross Profit', $fmt($grossProfit)], $grandTotalStyle));
+        $writer->addRow(Row::fromValuesWithStyle(['Gross Profit', $fmt($grossProfit)], $grandTotalStyle));
         $writer->addRow(Row::fromValues(['']));
 
         // ── EXPENSES ──
-        $writer->addRow(Row::fromValues(['Expenses'], $boldStyle));
+        $writer->addRow(Row::fromValuesWithStyle(['Expenses'], $boldStyle));
 
         foreach ($figures->sortedExpenseCategories() as $categoryName => $categoryData) {
             $categorySum = (float) $categoryData['sum'];
@@ -114,7 +117,7 @@ class ProfitAndLossExporter
                 continue;
             }
 
-            $writer->addRow(Row::fromValues([$indent($categoryName, 1)], $boldStyle));
+            $writer->addRow(Row::fromValuesWithStyle([$indent($categoryName, 1)], $boldStyle));
 
             foreach ($categoryData['subcategories'] as $subcategory) {
                 $subSum = (float) $subcategory['sum'];
@@ -126,7 +129,7 @@ class ProfitAndLossExporter
                 if (count($nonZeroVendors) === 1) {
                     $writer->addRow(Row::fromValues([$indent($subcategory['name'], 2), $fmt($subSum)]));
                 } else {
-                    $writer->addRow(Row::fromValues([$indent($subcategory['name'], 2)], $subheaderStyle));
+                    $writer->addRow(Row::fromValuesWithStyle([$indent($subcategory['name'], 2)], $subheaderStyle));
 
                     foreach ($subcategory['vendors'] as $vendor) {
                         $vendSum = (float) $vendor['sum'];
@@ -136,18 +139,18 @@ class ProfitAndLossExporter
                         $writer->addRow(Row::fromValues([$indent($vendor['name'], 3), $fmt($vendSum)]));
                     }
 
-                    $writer->addRow(Row::fromValues([$indent('Total '.$subcategory['name'], 2), $fmt($subSum)], $totalStyle));
+                    $writer->addRow(Row::fromValuesWithStyle([$indent('Total '.$subcategory['name'], 2), $fmt($subSum)], $totalStyle));
                     $writer->addRow($emptyRow);
                 }
             }
 
-            $writer->addRow(Row::fromValues([$indent('Total '.$categoryName, 1), $fmt($categorySum)], $categoryTotalStyle));
+            $writer->addRow(Row::fromValuesWithStyle([$indent('Total '.$categoryName, 1), $fmt($categorySum)], $categoryTotalStyle));
             $writer->addRow($emptyRow);
         }
 
         $uncatSum = $figures->uncategorizedTransactionsSum();
         if (! $isZero($uncatSum)) {
-            $writer->addRow(Row::fromValues([$indent('Uncategorized', 1)], $boldStyle));
+            $writer->addRow(Row::fromValuesWithStyle([$indent('Uncategorized', 1)], $boldStyle));
             foreach ($figures->transactionsNoAssociations() as $txn) {
                 $txnAmount = (float) $txn->amount;
                 if ($isZero($txnAmount)) {
@@ -160,21 +163,21 @@ class ProfitAndLossExporter
                     $fmt($txnAmount),
                 ]));
             }
-            $writer->addRow(Row::fromValues([$indent('Total Uncategorized', 1), $fmt($uncatSum)], $categoryTotalStyle));
+            $writer->addRow(Row::fromValuesWithStyle([$indent('Total Uncategorized', 1), $fmt($uncatSum)], $categoryTotalStyle));
             $writer->addRow($emptyRow);
         } else {
             $uncatSum = 0.0;
         }
 
         $totalExpenses = $figures->generalExpenses() + $uncatSum;
-        $writer->addRow(Row::fromValues([$indent('Total Expenses', 0), $fmt($totalExpenses)], $grandTotalStyle));
+        $writer->addRow(Row::fromValuesWithStyle([$indent('Total Expenses', 0), $fmt($totalExpenses)], $grandTotalStyle));
         $writer->addRow($emptyRow);
 
         $netOperatingIncome = $grossProfit - $totalExpenses;
-        $writer->addRow(Row::fromValues(['Net Operating Income', $fmt($netOperatingIncome)], $grandTotalStyle));
+        $writer->addRow(Row::fromValuesWithStyle(['Net Operating Income', $fmt($netOperatingIncome)], $grandTotalStyle));
         $writer->addRow(Row::fromValues(['']));
 
-        $writer->addRow(Row::fromValues(['Net Income', $fmt($netOperatingIncome)], $grandTotalStyle));
+        $writer->addRow(Row::fromValuesWithStyle(['Net Income', $fmt($netOperatingIncome)], $grandTotalStyle));
 
         $writer->close();
 
