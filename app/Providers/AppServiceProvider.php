@@ -36,6 +36,8 @@ use App\Observers\VendorObserver;
 use App\Mail\Transport\NylasTransport;
 use App\Models\OAuthToken;
 use App\Services\NylasService;
+use App\Support\Seo\BingCoverageUrls;
+use App\Support\Seo\BingCoverageWriter;
 use App\Support\Seo\BingSettings;
 use App\Support\Seo\BingWriter;
 use App\Support\Seo\ClaritySettings;
@@ -107,6 +109,9 @@ use SsSystems\Platform\Reports\Contracts\SiteIdentity;
 use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
 use SsSystems\Platform\Seo\Bing\BingWebmasterClient;
 use SsSystems\Platform\Seo\Bing\BingWriter as KitBingWriter;
+use SsSystems\Platform\Seo\Bing\Contracts\BingCoverageClient;
+use SsSystems\Platform\Seo\Bing\Contracts\BingCoverageUrls as KitBingCoverageUrls;
+use SsSystems\Platform\Seo\Bing\Contracts\BingCoverageWriter as KitBingCoverageWriter;
 use SsSystems\Platform\Seo\Clarity\ClarityClient;
 use SsSystems\Platform\Seo\Clarity\ClarityMetricsStore;
 use SsSystems\Platform\Seo\Clarity\Contracts\ClarityCredentials;
@@ -258,6 +263,18 @@ class AppServiceProvider extends ServiceProvider
         // type-hints BingWebmasterApi itself, not the BingWebmasterClient
         // interface, in its handle() method signature).
         $this->app->bind(BingWebmasterApi::class, $bingWebmasterApi);
+
+        // Bing coverage (kit 0.22.0, 2026-11-10): what Bing's index holds of
+        // the site, for the hub's Bing card (App\Http\Controllers\Api\
+        // Admin\V1\BingCoverageController). BingWebmasterApi already
+        // implements BingCoverageClient itself, so the SAME factory above
+        // satisfies it too — same key, same site URL, no second client.
+        // BingCoverageWriter/BingCoverageUrls are this site's own, over the
+        // two new plain models (single-tenant: no BelongsToSite/site_id,
+        // same as BingWriter above).
+        $this->app->bind(BingCoverageClient::class, $bingWebmasterApi);
+        $this->app->bind(KitBingCoverageWriter::class, BingCoverageWriter::class);
+        $this->app->bind(KitBingCoverageUrls::class, BingCoverageUrls::class);
 
         // IndexNow (kit 0.19.4): App\Support\Seo\IndexNowSiteKey is the only
         // site-specific piece seo:indexnow/IndexNowKeyController need —

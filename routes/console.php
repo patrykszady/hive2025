@@ -540,6 +540,18 @@ Schedule::command('seo:bing-sync')
     // New numbers landed: refresh where visitors come from for these days.
     ->then(fn () => Artisan::call('traffic:collect', ['--days' => 5, '--provider' => ['bing']]));
 
+// What Bing holds of the site (kit 0.22.0, 2026-11-10): crawl stats, page
+// stats and per-URL fetch info for the hub's Bing card (App\Http\
+// Controllers\Api\Admin\V1\BingCoverageController). 40 minutes after the
+// sync above so both finish well before the admin's morning check.
+Schedule::command('seo:bing-coverage --limit=300')
+    ->dailyAt('03:40')
+    ->name('seo-bing-coverage')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-bing-coverage.log'));
+
 Schedule::command('seo:gsc-sync')
     ->dailyAt('03:30')
     ->name('seo-gsc-sync')

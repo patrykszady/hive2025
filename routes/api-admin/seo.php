@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\V1\BingCoverageController;
 use App\Http\Controllers\Api\Admin\V1\GscErrorController;
 use App\Http\Controllers\Api\Admin\V1\SeoReportController;
 use App\Http\Controllers\Api\Admin\V1\SeoSnapshotController;
@@ -25,3 +26,8 @@ Route::get('seo/gsc-errors', [GscErrorController::class, 'index'])->name('seo.gs
 Route::post('seo/gsc-errors/refresh', [GscErrorController::class, 'refresh'])->name('seo.gsc-errors.refresh');
 Route::post('seo/gsc-errors/prune-retired', [GscErrorController::class, 'pruneRetired'])->name('seo.gsc-errors.prune-retired');
 Route::get('seo/gsc-errors/export', [GscErrorController::class, 'export'])->name('seo.gsc-errors.export');
+
+// What Bing's index holds of the site (kit 0.22.0, 2026-11-10) — the Bing
+// counterpart to the GSC Errors screen above, same admin token/middleware.
+Route::get('seo/bing-coverage', [BingCoverageController::class, 'index'])->name('seo.bing-coverage.index');
+Route::post('seo/bing-coverage/refresh', [BingCoverageController::class, 'refresh'])->name('seo.bing-coverage.refresh');

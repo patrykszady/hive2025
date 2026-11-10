@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Mail\Events\MessageSent;
 use App\Listeners\StoreEmailTracking;
 use SsSystems\Platform\Seo\AiTraffic\TrackAiTraffic;
+use SsSystems\Platform\Seo\Bing\Console\BingCoverageCommand;
 use SsSystems\Platform\Seo\Bing\Console\BingSubmitSitemapsCommand;
 use SsSystems\Platform\Seo\Clarity\Console\ClaritySyncCommand;
 use SsSystems\Platform\Seo\IndexNow\Console\IndexNowCommand;
@@ -68,6 +69,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // IndexNowKey bindings and routes/web.php's key-file route.
         BingSubmitSitemapsCommand::class,
         IndexNowCommand::class,
+        // Bing coverage (kit 0.22.0, 2026-11-10): seo:bing-coverage, what
+        // Bing's index holds of the site — see AppServiceProvider's
+        // BingCoverageClient/BingCoverageWriter/BingCoverageUrls bindings.
+        BingCoverageCommand::class,
     ])
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
