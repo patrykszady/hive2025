@@ -129,11 +129,13 @@ it('fills the four shared tiles from sign-ups, Site Pulse clicks and published r
     User::factory()->create(['registration' => null, 'created_at' => (clone $now)->subDays(1)]);
 
     // Calls and emails recorded by Site Pulse: three this week, one the week
-    // before; a plain page view never counts as a contact.
+    // before, each from its own visitor (one visitor repeating the same tap
+    // the same day is one contact, kit 0.24.0); a plain page view never
+    // counts as a contact.
     $recorder = app(Recorder::class);
     $browser = 'Mozilla/5.0 (X11; Linux x86_64) Chrome/140 Safari/537.36';
-    foreach (['email', 'call', 'email', 'call', 'page'] as $event) {
-        $recorder->track($event, [], '/en/welcome', '203.0.113.5', $browser, config('app.key'));
+    foreach (['email', 'call', 'email', 'call', 'page'] as $visitor => $event) {
+        $recorder->track($event, [], '/en/welcome', '203.0.113.'.(5 + $visitor), $browser, config('app.key'));
     }
     DB::table('site_events')->where('event', 'email')->orderBy('id')->limit(1)->update(['created_at' => (clone $now)->subDays(10)]);
 

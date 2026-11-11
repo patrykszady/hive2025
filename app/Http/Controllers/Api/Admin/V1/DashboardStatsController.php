@@ -86,17 +86,19 @@ class DashboardStatsController extends Controller
         ];
     }
 
-    /** Calls and emails: Site Pulse's call/email click events (this site has no form). */
+    /**
+     * Calls and emails: Site Pulse's call/email click events (this site has
+     * no form), counted the way the Analytics screen counts them,
+     * duplicates folded (kit 0.24.0).
+     */
     protected function contactsTile(): array
     {
         $now = now();
-        $events = fn () => DB::table('site_events')->whereIn('event', ['call', 'email']);
+        $analytics = app(AnalyticsController::class);
+        $types = ['phone_click', 'email_click'];
 
-        $current = $events()->where('created_at', '>=', (clone $now)->subDays(7))->count();
-        $prior = $events()
-            ->where('created_at', '>=', (clone $now)->subDays(14))
-            ->where('created_at', '<', (clone $now)->subDays(7))
-            ->count();
+        $current = $analytics->analyticsFoldedCount((clone $now)->subDays(7), null, $types);
+        $prior = $analytics->analyticsFoldedCount((clone $now)->subDays(14), (clone $now)->subDays(7), $types);
 
         return [
             'key' => 'contacts',
