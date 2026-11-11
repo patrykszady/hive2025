@@ -344,3 +344,22 @@ it('keeps a paid-back expense on the sub\'s check when the expense is edited', f
         ->and($expense->paid_by_vendor_id)->toBe($sub->id)
         ->and((float) $check->fresh()->amount)->toEqual(1022.90);
 });
+
+it('shows Reimbursment right above Paid By, and the company name in Paid By without a doubled &amp;', function () {
+    [$company, $admin] = paidForSetup();
+    $company->forceFill(['business_name' => 'GS Test & Remodeling', 'business_type' => 'LLC'])->save();
+    $this->actingAs($admin);
+
+    $html = Livewire::actingAs($admin)->test(ExpenseCreate::class, ['embedded' => true])->html();
+
+    $labelAt = fn (string $text) => preg_match('/<ui-label[^>]*>\s*'.preg_quote($text, '/').'\s*</', $html, $match, PREG_OFFSET_CAPTURE) ? $match[0][1] : false;
+    $reimbursment = $labelAt('Reimbursment');
+    $paidBy = $labelAt('Paid By');
+
+    expect($reimbursment)->not->toBeFalse()
+        ->and($paidBy)->not->toBeFalse()
+        ->and($reimbursment)->toBeLessThan($paidBy)
+        ->and($labelAt('Project'))->toBeLessThan($reimbursment)
+        ->and($html)->not->toContain('&amp;amp;')
+        ->and($html)->toContain(e($admin->fresh()->vendor->name));
+});

@@ -181,6 +181,34 @@
             <flux:error name="no_splits" />
         </div>
 
+        {{-- REIMBURSEMNT --}}
+        {{-- Always visible, right under Project and above Paid By:
+             user/vendor reimbursements don't need a project (e.g. a permit
+             fee paid on a sub's behalf). Clear (x) = none. --}}
+        <div>
+            <flux:field>
+                <flux:label>Reimbursment</flux:label>
+
+                <flux:select wire:model.live="form.reimbursment" variant="listbox" searchable clearable placeholder="Choose reimbursment...">
+                    <flux:select.option wire:key="reimbursment-client" value="Client">Client</flux:select.option>
+
+                    <flux:separator class="my-1" />
+
+                    @foreach ($this->employees as $employee)
+                        <flux:select.option wire:key="reimbursment-user-{{ $employee->id }}" value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
+                    @endforeach
+
+                    <flux:separator class="my-1" />
+
+                    @foreach ($this->reimbursment_vendors as $reimbursmentVendor)
+                        <flux:select.option wire:key="reimbursment-vendor-{{ $reimbursmentVendor->id }}" value="V:{{$reimbursmentVendor->id}}">{{$reimbursmentVendor->business_name}}</flux:select.option>
+                    @endforeach
+                </flux:select>
+
+                <flux:error name="form.reimbursment" />
+            </flux:field>
+        </div>
+
         {{-- PAID BY --}}
         <div
             x-data="{ open: @entangle('form.project_id'), splits: @entangle('splits'), split: @entangle('split') }"
@@ -193,7 +221,7 @@
                  the person or vendor has everywhere on the site (color seeded by id). --}}
             <flux:field>
                 <flux:label>Paid By</flux:label>
-                <flux:select wire:model.live="form.paid_by" variant="listbox" searchable clearable placeholder="{{ auth()->user()->vendor->name }}">
+                <flux:select wire:model.live="form.paid_by" variant="listbox" searchable clearable :placeholder="auth()->user()->vendor->name">
                     @foreach($this->employees as $employee)
                         <flux:select.option wire:key="paid-by-user-{{ $employee->id }}" value="{{ $employee->id }}" label="{{ $employee->first_name }}">
                             <div class="flex items-center gap-2 whitespace-nowrap">
@@ -316,33 +344,6 @@
             <div x-data="{ isMaterialOrder: @entangle('form.is_material_order') }" x-show="isMaterialOrder" x-transition class="mt-2">
                 <x-vendor-picker wire:model="form.belongs_to_vendor_id" label="Belongs To Vendor" placeholder="Belongs to vendor..." />
             </div>
-        </div>
-
-        {{-- REIMBURSEMNT --}}
-        {{-- Always visible: user/vendor reimbursements don't need a project
-             (e.g. a permit fee paid on a sub's behalf). Clear (x) = none. --}}
-        <div>
-            <flux:field>
-                <flux:label>Reimbursment</flux:label>
-
-                <flux:select wire:model.live="form.reimbursment" variant="listbox" searchable clearable placeholder="Choose reimbursment...">
-                    <flux:select.option value="Client">Client</flux:select.option>
-
-                    <flux:separator class="my-1" />
-
-                    @foreach ($this->employees as $employee)
-                        <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
-                    @endforeach
-
-                    <flux:separator class="my-1" />
-
-                    @foreach ($this->reimbursment_vendors as $reimbursmentVendor)
-                        <flux:select.option value="V:{{$reimbursmentVendor->id}}">{{$reimbursmentVendor->business_name}}</flux:select.option>
-                    @endforeach
-                </flux:select>
-
-                <flux:error name="form.reimbursment" />
-            </flux:field>
         </div>
 
         {{-- PO/INVOICE --}}
