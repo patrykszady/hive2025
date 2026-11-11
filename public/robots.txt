@@ -102,17 +102,19 @@ Disallow: /webhooks
 
 Sitemap: https://hive.contractors/sitemap.xml
 
-# AI crawlers (2026-11-10). Search engines, and AI assistants that fetch a
+# AI crawlers (2026-11-11). Search engines, and AI assistants that fetch a
 # page to answer a person and cite it (OAI-SearchBot, ChatGPT-User,
 # Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, DuckAssistBot,
 # and Amazonbot for Alexa answers), follow the rules for every crawler above.
 # So do OpenAI's GPTBot, Anthropic's ClaudeBot and Google-Extended, the token
-# that lets Gemini learn from this site and ground its answers on it: the
-# site wants to be known by the models people ask. Bulk scrapers that only
-# feed training sets, and nothing a person asks, are still asked to stay out.
+# that lets Gemini learn from this site and ground its answers on it; CCBot,
+# which builds Common Crawl, the open corpus most models are trained on; and
+# Applebot-Extended, not a crawler but Apple's opt-out token, left unblocked
+# so Apple Intelligence may learn from the pages Applebot already fetches.
+# The site wants to be known by the models people ask. The scrapers below
+# only collect pages for their own training sets or data products, and
+# nothing a person asks, so they are still asked to stay out.
 # Nothing enforces this list at the edge; this file asks.
-User-agent: Applebot-Extended
-User-agent: CCBot
 User-agent: Bytespider
 User-agent: meta-externalagent
 User-agent: FacebookBot

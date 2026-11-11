@@ -11,6 +11,11 @@
  * Google-Extended are let in — the site wants to be known by the AI models
  * people ask, and Google-Extended also decides whether Gemini grounds its
  * answers on the site. Only bulk training scrapers stay out.
+ *
+ * Changed 2026-11-11: CCBot (Common Crawl, the open corpus most models are
+ * trained on) and Applebot-Extended (Apple's opt-out token for Apple
+ * Intelligence, not a crawler) are let in too. The rest of the group stays
+ * out.
  */
 
 /** @return array<string, list<string>> lowercase user-agent => its rules, every group naming it combined */
@@ -49,12 +54,12 @@ function aiCrawlerRobotsGroups(string $robots): array
 it('keeps AI training crawlers out and lets search and answering crawlers in', function () {
     $groups = aiCrawlerRobotsGroups((string) file_get_contents(public_path('robots.txt')));
 
-    foreach (['Applebot-Extended', 'CCBot', 'Bytespider', 'meta-externalagent', 'cohere-ai'] as $agent) {
+    foreach (['Bytespider', 'meta-externalagent', 'FacebookBot', 'cohere-ai', 'cohere-training-data-crawler', 'Diffbot', 'omgili', 'omgilibot', 'Timpibot', 'ImagesiftBot'] as $agent) {
         $rules = $groups[strtolower($agent)] ?? $groups['*'] ?? [];
         expect($rules)->toContain('disallow: /')->not->toContain('allow: /');
     }
 
-    foreach (['OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'Googlebot', 'Bingbot', 'Amazonbot', 'GPTBot', 'ClaudeBot', 'anthropic-ai', 'Google-Extended'] as $agent) {
+    foreach (['OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'Googlebot', 'Bingbot', 'Amazonbot', 'GPTBot', 'ClaudeBot', 'anthropic-ai', 'Google-Extended', 'CCBot', 'Applebot-Extended'] as $agent) {
         $rules = $groups[strtolower($agent)] ?? $groups['*'] ?? [];
         expect($rules)->not->toContain('disallow: /')->toContain('allow: /en/welcome');
     }
