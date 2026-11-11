@@ -10,6 +10,40 @@
     'clickable' => false,
 ])
 
+@if(\App\Support\Ui\CardsV2::active())
+{{-- Cards v2 (config/ui.php): Flux 2.21's own header part — heading,
+     subheading and actions line up the way every Flux card does; the badge
+     rides beside the heading, subheading actions beside the subheading. --}}
+{{-- Bound attributes, not @if inside the tag: Blade directives don't compile
+     inside a component tag, and the attribute bag drops null values. --}}
+<flux:card.header :x-on:click="$clickable ? 'open = !open' : null" :role="$clickable ? 'button' : null" :class="$clickable ? 'cursor-pointer select-none' : ''">
+    <flux:card.heading class="flex items-center gap-2 min-w-0">
+        @if($href)
+            <span @if($clickable) @click.stop @endif class="truncate">
+                @if($navigate)
+                    <flux:link href="{{ $href }}" wire:navigate.hover variant="ghost" :accent="false" class="no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400">{{ html_entity_decode((string) $heading, ENT_QUOTES, 'UTF-8') }}</flux:link>
+                @else
+                    <flux:link href="{{ $href }}" external variant="ghost" :accent="false" class="no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400">{{ html_entity_decode((string) $heading, ENT_QUOTES, 'UTF-8') }}</flux:link>
+                @endif
+            </span>
+        @else
+            <span class="truncate">{{ $heading }}</span>
+        @endif
+        {{ $badge ?? '' }}
+    </flux:card.heading>
+    @if($subheading || isset($subheading_actions))
+        <flux:card.subheading class="flex items-center justify-between gap-2">
+            <span>{{ $subheading }}</span>
+            @if(isset($subheading_actions))
+                <span class="ml-auto flex items-center gap-1">{{ $subheading_actions }}</span>
+            @endif
+        </flux:card.subheading>
+    @endif
+    @if(isset($actions) && trim(preg_replace('/<!--.*?-->/s', '', (string) $actions)) !== '')
+        <flux:card.actions>{{ $actions }}</flux:card.actions>
+    @endif
+</flux:card.header>
+@else
 <div>
     <div class="flex justify-between items-center gap-4">
         {{-- Collapsible cards: the whole heading row toggles, not just the chevron. --}}
@@ -67,4 +101,6 @@
 
 @if($separator)
     <flux:separator variant="subtle" />
+@endif
+
 @endif

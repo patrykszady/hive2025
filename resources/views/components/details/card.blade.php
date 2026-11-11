@@ -33,6 +33,62 @@
      with "Snapshot missing" (Add Member on /clients/* never opened). --}}
 {!! $useInlineToggle ? '<div x-data="{ open: '.\Illuminate\Support\Js::from($expanded)->toHtml().' }">' : '' !!}
 
+{{-- Raw PHP, not @if: a Livewire component rooted on this card would
+     otherwise start with Livewire's <!--[if BLOCK]> marker instead of the
+     card element, and the morph then nests the loaded card inside its own
+     placeholder (the Projects table skeleton stayed under the loaded table,
+     2026-11-06). --}}
+<?php if (\App\Support\Ui\CardsV2::active()): ?>
+{{-- Cards v2 (config/ui.php): the same header, body and footer on Flux
+     2.21's card parts; the divider between header and details is the
+     card's own, so the manual separators below are not drawn here. --}}
+<flux:card size="sm" :body="$separator ? 'divided' : 'seamless'" divider="inset" wire:transition.opacity.duration.200ms>
+    <x-island-card.header :heading="html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8')" :href="$title_href" :subheading="$subheading" :clickable="$useInlineToggle">
+        <x-slot:badge>
+            {{ $title_extras ?? '' }}
+        </x-slot:badge>
+        <x-slot:actions>
+            @if($canEdit === null || $canEdit)
+                {{ $header_buttons ?? '' }}
+            @endif
+            @if($useInlineToggle)
+                <x-card-collapse-toggle />
+            @endif
+        </x-slot:actions>
+    </x-island-card.header>
+    <flux:card.body>
+        {{ $slot }}
+        @if(isset($details))
+            @if($accordion === false)
+                <div class="{{ isset($footer) ? 'pb-2' : 'card-flush-bottom' }}">
+                    {{ $details }}
+                </div>
+            @elseif($details_text === false)
+                <div x-show="open" x-collapse @unless($expanded) x-cloak @endunless>
+                    <div class="{{ isset($footer) ? '' : 'card-flush-bottom' }}">
+                        {{ $details }}
+                    </div>
+                </div>
+            @else
+                <div x-data="{ open: @js($expanded) }">
+                    <button type="button" @click="open = !open" class="flex w-full items-center justify-between py-2">
+                        <div class="font-medium text-gray-700 dark:text-gray-300">{{ $details_text }}</div>
+                        <flux:icon.chevron-down class="size-4 text-gray-400 transition-transform duration-200" ::class="open && 'rotate-180'" />
+                    </button>
+                    <div x-show="open" x-collapse @unless($expanded) x-cloak @endunless>
+                        {{ $details }}
+                    </div>
+                </div>
+            @endif
+        @endif
+    </flux:card.body>
+    @if(isset($footer) && trim(preg_replace('/<!--.*?-->/s', '', (string) $footer)) !== '')
+        <flux:card.footer>
+            <flux:card.actions>{{ $footer }}</flux:card.actions>
+        </flux:card.footer>
+    @endif
+</flux:card>
+<?php else: ?>
 {{-- wire:transition — cards that appear/disappear from server renders fade smoothly --}}
 <flux:card wire:transition.opacity.duration.200ms class="!px-5 !py-2" style="--flux-card-px: calc(var(--spacing) * 5);">
     {{-- HEADER - Uses shared island-card.header component --}}
@@ -107,5 +163,6 @@
         </div>
     @endif
 </flux:card>
+<?php endif; ?>
 
 {!! $useInlineToggle ? '</div>' : '' !!}

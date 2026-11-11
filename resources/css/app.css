@@ -91,8 +91,10 @@
   /* Flux tables inside Flux cards: bleed the table out past the card's
      horizontal padding so row hover backgrounds reach the card edges.
      Cards expose their inline padding via --flux-card-px (defaults to 1.5rem
-     to match Flux's `p-6`; overridden by island-card to 1.25rem for `px-5`). */
-  [data-flux-card] {
+     to match Flux's `p-6`; overridden by island-card to 1.25rem for `px-5`).
+     A sized card (cards v2, Flux 2.21's parts) keeps Flux's own value for its
+     size — this rule outranked Flux's :where() and padded sm cards 24px. */
+  [data-flux-card]:not([data-flux-card-size]) {
     --flux-card-px: 1.5rem;
   }
   [data-flux-card] ui-table-scroll-area {
