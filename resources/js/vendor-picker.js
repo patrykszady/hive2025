@@ -1,10 +1,13 @@
-// Vendor picker (<x-vendor-picker>): Flux's own searchable select, fed in the
-// browser. The whole vendor list is fetched once per page from
-// /vendors/picker-options; only the best matches (60 at most) are rendered as
-// Flux <ui-option>s, built from a server-rendered Flux option, so a page with
-// twenty pickers costs one fetch and a few dozen options, never 851 per
-// picker. Flux keeps the selected value in the select itself, so rebuilding
-// the options while typing never drops the selection.
+// Vendor picker (<x-vendor-picker>) and client picker (<x-client-picker>):
+// Flux's own searchable select, fed in the browser. The whole list is fetched
+// once per page from /vendors/picker-options or /clients/picker-options; only
+// the best matches (60 at most) are rendered as Flux <ui-option>s, built from
+// a server-rendered Flux option, so a page with twenty pickers costs one fetch
+// and a few dozen options, never 851 vendors (or 335 clients, twice — the
+// /projects filter weighed 1 MB a render before, 2026-11-06) per picker. Flux
+// keeps the selected value in the select itself, so rebuilding the options
+// while typing never drops the selection. Both pickers are the same Alpine
+// component (picker() below) with a different list and noun.
 
 const lists = new Map(); // url -> Promise<vendor[]>
 
@@ -91,7 +94,7 @@ function loadVendors(url) {
                 if (!response.ok) throw new Error(`vendor list: HTTP ${response.status}`);
                 return response.json();
             })
-            .then((body) => (body.vendors || []).map((vendor) => ({
+            .then((body) => (body.items || body.vendors || []).map((vendor) => ({
                 ...vendor,
                 haystack: normalize([vendor.name, vendor.legal, vendor.city, vendor.state].filter(Boolean).join(' ')),
             })))
@@ -104,17 +107,19 @@ function loadVendors(url) {
     return lists.get(url);
 }
 
-// A vendor saved in another tab or a long-lived page: ask for the list again.
+// A vendor or client saved in another tab or a long-lived page: ask for the
+// list again.
 window.hiveVendorPicker = { forget: () => lists.clear() };
 document.addEventListener('vendor-picker:reload', () => lists.clear());
+document.addEventListener('client-picker:reload', () => lists.clear());
 
-document.addEventListener('alpine:init', () => {
-    window.Alpine.data('vendorPicker', (config) => ({
+const picker = (config) => ({
         value: '',            // the Livewire property (x-modelable) and the Flux select (x-model)
         query: '',            // the Flux search box (x-model)
         open: false,          // Flux's open / close events: the list renders only while open
         extra: config.extra || [],
         details: !!config.details,
+        noun: config.noun || 'vendor',
         url: config.url,
         template: config.template || '',
         avatarTemplate: config.avatarTemplate || '',
@@ -129,7 +134,7 @@ document.addEventListener('alpine:init', () => {
         init() {
             // The server prints the chosen option so the button has its label
             // before the list arrives; read it before render() replaces it.
-            const printed = this.$root.querySelector('[data-vendor-picker-options] ui-option');
+            const printed = this.$root.querySelector('[data-vendor-picker-options] ui-option, [data-client-picker-options] ui-option');
             if (printed) this.initial = { value: printed.getAttribute('value'), label: printed.getAttribute('label') };
             // One cached fetch per page serves every picker on it.
             this.load();
@@ -185,7 +190,7 @@ document.addEventListener('alpine:init', () => {
             const vendor = this.vendors.find((candidate) => String(candidate.id) === value);
             if (vendor) return { value, label: this.optionLabel(vendor) };
             if (this.initial && String(this.initial.value) === value) return this.initial;
-            return { value, label: this.loaded ? `Vendor #${value}` : '…' };
+            return { value, label: this.loaded ? `${this.noun[0].toUpperCase()}${this.noun.slice(1)} #${value}` : '…' };
         },
 
         get terms() {
@@ -276,8 +281,8 @@ document.addEventListener('alpine:init', () => {
             }
             listed.forEach(([value, label, avatarName]) => add(value, label, false, avatarName));
 
-            if (this.failed) rows.push(this.note('Could not load the vendor list. Reload the page to try again.'));
-            else if (!this.loaded) rows.push(this.note('Loading vendors…'));
+            if (this.failed) rows.push(this.note(`Could not load the ${this.noun} list. Reload the page to try again.`));
+            else if (!this.loaded) rows.push(this.note(`Loading ${this.noun}s…`));
 
             requestAnimationFrame(() => this.highlight());
 
@@ -313,5 +318,9 @@ document.addEventListener('alpine:init', () => {
             select.value = '';
             select.value = current;
         },
-    }));
+});
+
+document.addEventListener('alpine:init', () => {
+    window.Alpine.data('vendorPicker', (config) => picker({ noun: 'vendor', ...config }));
+    window.Alpine.data('clientPicker', (config) => picker({ noun: 'client', ...config }));
 });

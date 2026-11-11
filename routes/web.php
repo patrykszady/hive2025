@@ -696,6 +696,8 @@ Route::get('l/{code}', ShortLinkController::class)->name('short-links.redirect')
 Route::middleware('auth')->group(function () {
     // The vendor list every <x-vendor-picker> filters in the browser; any signed-in user, scoped like the Vendor model.
     Route::get('/vendors/picker-options', \App\Http\Controllers\VendorPickerOptionsController::class)->name('vendors.picker-options');
+    // The client list every <x-client-picker> filters in the browser; scoped like the Client model (ClientScope).
+    Route::get('/clients/picker-options', \App\Http\Controllers\ClientPickerOptionsController::class)->name('clients.picker-options');
     Route::get('passkey/setup', PasskeySetup::class)->name('passkey.setup');
     // In-person meeting recordings: the browser posts the audio in pieces while it
     // records. Only the person recording, only while it records (the controller

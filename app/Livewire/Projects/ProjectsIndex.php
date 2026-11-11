@@ -354,7 +354,6 @@ class ProjectsIndex extends Component
     {
         $this->authorize('viewAny', Project::class);
         return view('livewire.projects.index', [
-            'clients' => $this->clients,
         ]);
     }
 }

@@ -15,14 +15,10 @@
     </div>
 
     <div class="{{ $fieldWrap }}">
-        <flux:select wire:model.live="client_id" label="Client" variant="listbox" searchable clearable placeholder="All Clients...">
-            <x-slot name="search">
-                <flux:select.search placeholder="Search..." />
-            </x-slot>
-            @foreach ($clients as $client)
-                <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
-            @endforeach
-        </flux:select>
+        {{-- Filtered in the browser from /clients/picker-options: every
+             client as a listbox option, in both layouts, was 866 KB of the
+             page's 1 MB and travelled on every status-card click (2026-11-06). --}}
+        <x-client-picker wire:model.live="client_id" label="Client" placeholder="All Clients..." clearable />
     </div>
 
     <div class="{{ $fieldWrap }}">
