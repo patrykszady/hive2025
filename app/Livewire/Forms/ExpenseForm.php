@@ -688,7 +688,7 @@ class ExpenseForm extends Form
         }
 
         //ATTACHMENT - only proceed if OCR was successful
-        app(\App\Http\Controllers\CompanyEmailController::class)->saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, null, false, $this->is_material_order);
+        app(\App\Http\Controllers\CompanyEmailController::class)->saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, null, false, $this->is_material_order, uploadedByPerson: true);
 
         // Clean up temp file
         Storage::disk('files')->delete($ocr_path);

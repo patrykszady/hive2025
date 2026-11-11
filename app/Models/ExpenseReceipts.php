@@ -40,6 +40,11 @@ class ExpenseReceipts extends Model
      */
     protected static function booted(): void
     {
+        // First, and returning nothing: a listener that returns false stops
+        // the ones after it, and the payment sync below returns its result.
+        static::saved(function (ExpenseReceipts $receipt): void {
+            app(\App\Services\Expenses\ReceiptReimbursementMark::class)->apply($receipt);
+        });
         static::saved(fn (ExpenseReceipts $receipt) => $receipt->expense_id && app(\App\Services\ExpensePaymentSync::class)->syncById((int) $receipt->expense_id));
         static::deleted(fn (ExpenseReceipts $receipt) => $receipt->expense_id && app(\App\Services\ExpensePaymentSync::class)->syncById((int) $receipt->expense_id));
     }

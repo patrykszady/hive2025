@@ -943,7 +943,7 @@ class AppExpenseDirectory
             return false;
         }
 
-        app(CompanyEmailController::class)->saveExpenseReceipt($expense->id, $ocrData, $ocrFilename, null, false, $isMaterialOrder);
+        app(CompanyEmailController::class)->saveExpenseReceipt($expense->id, $ocrData, $ocrFilename, null, false, $isMaterialOrder, uploadedByPerson: true);
 
         Storage::disk('files')->delete($ocrPath);
 

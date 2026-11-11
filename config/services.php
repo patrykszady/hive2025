@@ -198,6 +198,10 @@ return [
         'analyzer_id_check_statement' => env('AZURE_CU_ANALYZER_ID_CHECK_STATEMENT', 'hive_CheckStatement_1'),
         'analyzer_id_check' => env('AZURE_CU_ANALYZER_ID_CHECK', 'hive_Check_1'),
         'analyzer_id_waiver' => env('AZURE_CU_ANALYZER_ID_WAIVER', 'HiveWaivers20261'),
+        // Looks at the top of a scanned receipt for the hand-written R (ScannedReceiptMarkReader).
+        'analyzer_id_receipt_mark' => env('AZURE_CU_ANALYZER_ID_RECEIPT_MARK', 'hive_ReceiptMark_1'),
+        // Off: scans are not looked at, and the receipt reader's transcription decides alone.
+        'receipt_mark_image_check' => (bool) env('RECEIPT_MARK_IMAGE_CHECK', true),
     ],
 
     'ocr_space' => [

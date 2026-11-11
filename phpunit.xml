@@ -13,6 +13,7 @@
     <env name="BCRYPT_ROUNDS" value="4"/>
     <env name="CACHE_STORE" value="array"/>
   <env name="DB_CONNECTION" value="sqlite"/>
+  <env name="RECEIPT_MARK_IMAGE_CHECK" value="false"/>
   <env name="DB_DATABASE" value=":memory:"/>
     <env name="MAIL_MAILER" value="array"/>
     <env name="QUEUE_CONNECTION" value="sync"/>

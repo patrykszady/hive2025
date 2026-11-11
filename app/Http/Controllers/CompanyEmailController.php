@@ -2837,6 +2837,7 @@ class CompanyEmailController extends Controller
             'tip',
             'misc_fees',
             'handwritten_notes',
+            'client_reimbursement_mark',
         ] as $fieldKey) {
             if (($existingItems[$fieldKey] ?? null) === null || $existingItems[$fieldKey] === '') {
                 if (array_key_exists($fieldKey, $incomingItems)) {
@@ -3108,6 +3109,39 @@ class CompanyEmailController extends Controller
         }
     }
 
+    /**
+     * Paper the office handled — a scan off the office scanner, or a receipt
+     * someone uploaded with "Upload Receipt": look at its picture for the
+     * hand-written R that marks a client-reimbursed receipt, and keep the
+     * answer with the receipt's data ("true", "false" or "unknown" — the
+     * last also when the look fails). ReceiptReimbursementMark acts
+     * on it when the receipt is saved. Anything else (a vendor's emailed
+     * receipt, an Amazon order, a crawl, a material order) passes $look =
+     * false and is returned untouched.
+     *
+     * @param  array<string, mixed>|null  $receiptItems
+     * @return array<string, mixed>|null
+     */
+    protected function withScannedReceiptMark(?array $receiptItems, bool $look, string $filePath): ?array
+    {
+        if (! $look || ! config('services.azure_cu.receipt_mark_image_check')) {
+            return $receiptItems;
+        }
+
+        $receiptItems ??= [];
+
+        try {
+            $answer = app(\App\Services\Expenses\ScannedReceiptMarkReader::class)->read(Storage::disk('files')->path($filePath));
+            $receiptItems['client_reimbursement_mark_image'] = $answer['mark'];
+            $receiptItems['client_reimbursement_mark_handwriting'] = $answer['handwriting'];
+        } catch (\Throwable $exception) {
+            Log::warning('Scanned receipt mark could not be read', ['file' => basename($filePath), 'error' => $exception->getMessage()]);
+            $receiptItems['client_reimbursement_mark_image'] = \App\Services\Expenses\ReceiptReimbursementMark::UNKNOWN;
+        }
+
+        return $receiptItems;
+    }
+
     public function saveExpenseReceipt(
         $expense_id,
         $ocr_receipt_data,
@@ -3115,7 +3149,8 @@ class CompanyEmailController extends Controller
         $message = NULL,
         bool $skipDuplicateCheck = false,
         bool $isMaterialOrder = false,
-        array $autoReceiptContext = []
+        array $autoReceiptContext = [],
+        bool $uploadedByPerson = false
     )
     {
         $autoReceiptMessageId = $autoReceiptContext['message_id'] ?? null;
@@ -3316,6 +3351,8 @@ class CompanyEmailController extends Controller
                             }
                         }
 
+                        $receipt_items = $this->withScannedReceiptMark($receipt_items, (bool) $autoReceiptMessageId, $ocr_path);
+
                         // Create receipt record in database
                         $expense_receipt = new ExpenseReceipts;
                         $expense_receipt->expense_id = $expense_id;
@@ -3441,6 +3478,10 @@ class CompanyEmailController extends Controller
                 }
             }
         }
+
+        // Paper the office handled: a scan off the scanner, or a receipt someone
+        // uploaded ("Upload Receipt") — never a material order.
+        $receiptFields = $this->withScannedReceiptMark($receiptFields, (bool) $autoReceiptMessageId || ($uploadedByPerson && ! $isMaterialOrder), $sourcePath);
 
         // Save expense receipt data to the database
         $expense_receipt = new ExpenseReceipts;

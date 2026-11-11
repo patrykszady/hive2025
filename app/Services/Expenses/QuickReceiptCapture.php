@@ -130,7 +130,7 @@ class QuickReceiptCapture
     public function attach(Expense $expense, array $draft): void
     {
         app(CompanyEmailController::class)
-            ->saveExpenseReceipt($expense->id, $draft['ocr'], $draft['ocr_filename'], null, false, $draft['is_material_order']);
+            ->saveExpenseReceipt($expense->id, $draft['ocr'], $draft['ocr_filename'], null, false, $draft['is_material_order'], uploadedByPerson: true);
 
         $this->discard($draft);
     }

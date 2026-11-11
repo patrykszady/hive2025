@@ -1427,6 +1427,7 @@ class ReceiptController extends Controller
                 'purchase_order'    => $purchaseOrderNumber,
                 'service_address'   => $serviceAddress !== '' ? $serviceAddress : null,
                 'handwritten_notes' => $handwrittenNotes,
+                'client_reimbursement_mark' => \App\Services\Expenses\ReceiptReimbursementMark::answerFrom($prefix['ClientReimbursementMark'] ?? null),
                 'payment_methods'   => $this->extractPaymentMethods($prefix),
                 'raw_content'       => $rawContent,
                 'page_number'       => $this->extractIntegerFieldValue($prefix['PageNumber'] ?? null),
