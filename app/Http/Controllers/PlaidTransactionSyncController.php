@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Expense;
 use App\Models\Bank;
 use App\Models\BankAccount;
 use App\Models\Transaction;
@@ -621,12 +622,32 @@ class PlaidTransactionSyncController extends Controller
         if ($upgradeMeta['after_posted_date'] !== $upgradeMeta['before_posted_date']) {
             $matchedTransaction->posted_date = $upgradeMeta['after_posted_date'];
         }
+        $incomingDescription = $payload['name'] ?? $payload['original_description'] ?? '';
+        $merchantChanged = $this->merchantChanged($matchedTransaction, $payload, (string) $incomingDescription);
+
         // Always update amount to incoming amount on upgrade (pending -> posted can change amount)
         if (isset($payload['amount']) && (float) $matchedTransaction->amount !== (float) $payload['amount']) {
-            // The expense link was made for the old amount. Drop it and let
-            // matching run again on what was actually charged, instead of
-            // silently carrying a $425.16 receipt onto a $3,075 charge.
-            if ($matchedTransaction->expense_id) {
+            // An expense made from this very charge (no receipt behind it)
+            // has no amount of its own: a restaurant's pending $82 that posts
+            // as $102 with the tip is the same expense, now $102. Keep the
+            // link and move the expense to what was charged — 2026-11-10 the
+            // link was dropped instead, the $82 expense was orphaned and the
+            // charge had to be made an expense a second time.
+            $followingExpense = $merchantChanged ? null : $this->expenseMadeFromCharge($matchedTransaction);
+
+            if ($followingExpense) {
+                Log::channel('plaid_adds')->info('Upgrade changed the amount; the expense made from this charge follows it', [
+                    'transaction_id' => $matchedTransaction->id,
+                    'expense_id' => $followingExpense->id,
+                    'old_amount' => $matchedTransaction->amount,
+                    'new_amount' => $payload['amount'],
+                ]);
+                $followingExpense->amount = $payload['amount'];
+                $followingExpense->save();
+            } elseif ($matchedTransaction->expense_id) {
+                // The expense link was made for the old amount. Drop it and let
+                // matching run again on what was actually charged, instead of
+                // silently carrying a $425.16 receipt onto a $3,075 charge.
                 Log::channel('plaid_adds')->warning('Upgrade changed the amount; expense link dropped so matching re-runs', [
                     'transaction_id' => $matchedTransaction->id,
                     'expense_id' => $matchedTransaction->expense_id,
@@ -650,8 +671,6 @@ class PlaidTransactionSyncController extends Controller
         // merchant. Those are exactly the descriptors a mis-matched pending
         // transaction leaves a stale name on (e.g. a $12 "Laravel Forge" pending
         // inherited onto a $12 "FEE-DEP CK RTN" returned-check fee).
-        $incomingDescription = $payload['name'] ?? $payload['original_description'] ?? '';
-
         // A pending purchase that Plaid "posts" as a different merchant is not
         // the same charge: 2026-09-01 a pending $14.99 Prime Video charge became
         // a $15.00 INCOMING WIRE FEE, still tagged Amazon and linked to the
@@ -659,7 +678,7 @@ class PlaidTransactionSyncController extends Controller
         // DigitalOcean charge became a Menards purchase. The vendor and the
         // expense link were made from the pending description, so drop both
         // and let vendor and expense matching run on what actually posted.
-        if ($this->merchantChanged($matchedTransaction, $payload, (string) $incomingDescription)) {
+        if ($merchantChanged) {
             Log::channel('plaid_adds')->warning('Upgrade changed the merchant; vendor and expense link dropped so matching re-runs', [
                 'transaction_id' => $matchedTransaction->id,
                 'expense_id' => $matchedTransaction->expense_id,
@@ -688,6 +707,35 @@ class PlaidTransactionSyncController extends Controller
         
         $matchedTransaction->plaid_merchant_description = $payload['name'] ?? $payload['original_description'] ?? $matchedTransaction->plaid_merchant_description;
         $matchedTransaction->save();
+    }
+
+    /**
+     * The expense linked to this charge, when the charge is all it was made
+     * from: the same amount, no receipt, no splits, no check, no recorded
+     * tenders and no other charge on it. Such an expense carries the
+     * charge's amount, so it follows the charge when the amount settles. An
+     * expense with a receipt has an amount of its own and never follows.
+     */
+    private function expenseMadeFromCharge(Transaction $transaction): ?Expense
+    {
+        if (! $transaction->expense_id) {
+            return null;
+        }
+
+        $expense = Expense::withoutGlobalScopes()->find($transaction->expense_id);
+
+        if (! $expense
+            || round((float) $expense->amount, 2) !== round((float) $transaction->amount, 2)
+            || $expense->check_id
+            || $expense->receipts()->exists()
+            || $expense->splits()->exists()
+            || $expense->payments()->exists()
+            || $expense->sharedTransactions()->exists()
+            || Transaction::withoutGlobalScopes()->where('expense_id', $expense->id)->whereKeyNot($transaction->id)->exists()) {
+            return null;
+        }
+
+        return $expense;
     }
 
     /**

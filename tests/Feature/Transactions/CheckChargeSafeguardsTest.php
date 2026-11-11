@@ -191,6 +191,9 @@ it('lets the stale pending purchase be removed once the check came in on its own
 
 it('drops the expense link when a pending charge posts for a different amount', function () {
     $fx = chk_fixture();
+    // The expense has a receipt of its own, so its amount is the receipt's — one made
+    // from the charge alone follows the charge instead (PlaidUpgradeMerchantChangeTest).
+    \App\Models\ExpenseReceipts::withoutEvents(fn () => \App\Models\ExpenseReceipts::query()->forceCreate(['expense_id' => $fx['expense']->id]));
     $pending = chk_charge($fx, [
         'amount' => 425.16,
         'vendor_id' => $fx['jcLicht']->id,

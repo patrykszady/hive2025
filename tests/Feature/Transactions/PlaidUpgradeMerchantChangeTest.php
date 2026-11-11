@@ -92,3 +92,37 @@ it('keeps the vendor and the link when the same merchant posts', function (strin
     'same words, card-network noise aside' => ['Amazon Prime Video', 'DEBIT PURCHASE Aug 28 4849 Prime Video *5Q68Z0LV', null, null],
     'Plaid names the same merchant' => ['Amazon', 'AMZN Mktp US*2K4', 'Amazon', 'Amazon'],
 ]);
+
+it('moves an expense made from the charge to the posted amount when a tip is added', function () {
+    $fx = upg_fixture();
+    $fx['expense']->forceFill(['amount' => 82.00])->save();
+    $pending = upg_pending($fx, 'DEBIT PURCHASE Nov 07 4849 TST*LAMPLIGHTER INN', 82.00, 'Lamplighter Inn');
+
+    $posted = upg_post($fx, $pending, 'DEBIT PURCHASE Nov 07 4849 TST*LAMPLIGHTER INN T 26312', 102.00, 'Lamplighter Inn');
+
+    expect($posted->expense_id)->toBe($fx['expense']->id)
+        ->and((float) $posted->amount)->toBe(102.00)
+        ->and((float) $fx['expense']->fresh()->amount)->toBe(102.00);
+});
+
+it('still drops the link when the expense has a receipt of its own', function () {
+    $fx = upg_fixture();
+    $fx['expense']->forceFill(['amount' => 82.00])->save();
+    \App\Models\ExpenseReceipts::withoutEvents(fn () => \App\Models\ExpenseReceipts::query()->forceCreate(['expense_id' => $fx['expense']->id]));
+    $pending = upg_pending($fx, 'DEBIT PURCHASE Nov 07 4849 TST*LAMPLIGHTER INN', 82.00, 'Lamplighter Inn');
+
+    $posted = upg_post($fx, $pending, 'DEBIT PURCHASE Nov 07 4849 TST*LAMPLIGHTER INN T 26312', 102.00, 'Lamplighter Inn');
+
+    expect($posted->expense_id)->toBeNull()
+        ->and((float) $fx['expense']->fresh()->amount)->toBe(82.00);
+});
+
+it('never moves the expense when the charge posts as a different merchant', function () {
+    $fx = upg_fixture();
+    $pending = upg_pending($fx, 'DEBIT PURCHASE Aug 28 4849 Prime Video *5Q68Z0LV');
+
+    $posted = upg_post($fx, $pending, 'ACH Electronic Debit INCOMING WIRE FEE 083126', 15.00);
+
+    expect($posted->expense_id)->toBeNull()
+        ->and((float) $fx['expense']->fresh()->amount)->toBe(14.99);
+});
