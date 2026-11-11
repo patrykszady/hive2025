@@ -79,7 +79,17 @@ class ScoutRefresh extends Command
         $indexIds = [];
         $offset = 0;
         do {
-            $page = $index->getDocuments((new DocumentsQuery)->setFields([$key])->setLimit(1000)->setOffset($offset));
+            try {
+                $page = $index->getDocuments((new DocumentsQuery)->setFields([$key])->setLimit(1000)->setOffset($offset));
+            } catch (\Meilisearch\Exceptions\ApiException $e) {
+                // A model's first refresh: Meilisearch is still creating the
+                // index, so there is nothing stale in it to remove.
+                if ($e->errorCode === 'index_not_found') {
+                    return 0;
+                }
+
+                throw $e;
+            }
             foreach ($page->getResults() as $doc) {
                 if (isset($doc[$key])) {
                     $indexIds[] = (string) $doc[$key];

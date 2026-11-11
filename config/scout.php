@@ -247,7 +247,28 @@ return [
             CallLog::class => [
                 'filterableAttributes' => ['direction', 'status'],
                 'sortableAttributes' => ['created_at_unix'],
-                'searchableAttributes' => ['caller_name', 'from_number', 'to_number', 'phone_digits', 'notes', 'transcript_text'],
+                'searchableAttributes' => ['caller_name', 'from_number', 'to_number', 'phone_digits', 'notes', 'action_items', 'transcript_text'],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            \App\Models\EmailMessage::class => [
+                'filterableAttributes' => ['belongs_to_vendor_id', 'project_id', 'client_id'],
+                'sortableAttributes' => ['sent_at_unix'],
+                'searchableAttributes' => ['subject', 'summary', 'action_items', 'from_name', 'from_email', 'body'],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            \App\Models\MeetingRecording::class => [
+                'filterableAttributes' => ['belongs_to_vendor_id', 'project_id'],
+                'sortableAttributes' => ['started_at_unix'],
+                'searchableAttributes' => ['summary', 'action_items', 'transcript'],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            \App\Models\ProjectActionItem::class => [
+                'filterableAttributes' => ['belongs_to_vendor_id', 'project_id', 'status'],
+                'sortableAttributes' => ['last_mentioned_at_unix'],
+                'searchableAttributes' => ['title', 'owner', 'excerpts'],
                 'typoTolerance' => ['enabled' => true],
             ],
         ],

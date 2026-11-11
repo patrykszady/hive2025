@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Laravel\Scout\Searchable;
 
 /**
  * An in-person meeting recorded with Hive's Record button: the browser sends
@@ -22,6 +23,34 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class MeetingRecording extends Model
 {
     use HasFactory;
+    use Searchable;
+
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'meeting_recordings_index_dev' : 'meeting_recordings_index';
+    }
+
+    /** Only a meeting that reached the timeline (stopped: transcribing or done) is searched. */
+    public function shouldBeSearchable(): bool
+    {
+        return in_array($this->status, [self::STATUS_PROCESSING, self::STATUS_READY], true);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toSearchableArray(): array
+    {
+        return [
+            'id' => (int) $this->id,
+            'belongs_to_vendor_id' => $this->belongs_to_vendor_id ? (int) $this->belongs_to_vendor_id : null,
+            'project_id' => $this->project_id ? (int) $this->project_id : null,
+            'summary' => (string) ($this->summary ?? ''),
+            'action_items' => EmailMessage::searchableLines([...(array) ($this->action_items ?? []), ...(array) ($this->next_steps ?? [])]),
+            'transcript' => mb_substr((string) ($this->transcript ?? ''), 0, 60000),
+            'started_at_unix' => optional($this->started_at ?? $this->created_at)->timestamp ?? 0,
+        ];
+    }
 
     public const STATUS_RECORDING = 'recording';
 

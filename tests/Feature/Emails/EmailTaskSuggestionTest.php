@@ -361,7 +361,8 @@ it('puts Kama\'s measurement straight onto the undated Counter Measure, with its
         ->and(Task::where('project_id', $w['project']->id)->count())->toBe(2, 'no second Counter Measure');
 
     // No vendor availability text, no service-call text to the homeowner; the change is in the task's history.
-    \Illuminate\Support\Facades\Queue::assertNothingPushed();
+    // (The action item's own search-index update is the one job allowed.)
+    expect(array_diff(array_keys(\Illuminate\Support\Facades\Queue::pushedJobs()), [\Laravel\Scout\Jobs\MakeSearchable::class]))->toBe([]);
     expect(\Spatie\Activitylog\Models\Activity::where('subject_type', Task::class)->where('subject_id', $w['measure']->id)->latest('id')->value('description'))->toBe('Scheduled from an email');
 });
 

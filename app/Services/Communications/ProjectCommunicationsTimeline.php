@@ -31,10 +31,16 @@ class ProjectCommunicationsTimeline
     public const ALL_KINDS = [...self::KINDS, 'meeting'];
 
     /**
+     * `$constrain` narrows a kind's rows further (kind => a closure given
+     * that kind's query) — ProjectCommunicationsSearch passes the ids the
+     * search index matched, so a search result is always a row this
+     * timeline would have shown.
+     *
      * @param  list<string>  $kinds
+     * @param  array<string, \Closure>  $constrain
      * @return array{items: list<array<string, mixed>>, next_before: ?string}
      */
-    public function forProject(Project $project, ?Carbon $before = null, int $limit = 50, array $kinds = self::KINDS): array
+    public function forProject(Project $project, ?Carbon $before = null, int $limit = 50, array $kinds = self::KINDS, array $constrain = []): array
     {
         $limit = max(1, min($limit, 100));
         $kinds = array_values(array_intersect($kinds, self::ALL_KINDS)) ?: self::KINDS;
@@ -45,16 +51,16 @@ class ProjectCommunicationsTimeline
         $items = collect();
 
         if (in_array('call', $kinds, true)) {
-            $items = $items->concat($this->calls($project, $people, $before, $limit));
+            $items = $items->concat($this->calls($project, $people, $before, $limit, $constrain['call'] ?? null));
         }
         if (in_array('sms', $kinds, true)) {
-            $items = $items->concat($this->texts($project, $people, $before, $limit));
+            $items = $items->concat($this->texts($project, $people, $before, $limit, $constrain['sms'] ?? null));
         }
         if (in_array('email', $kinds, true)) {
-            $items = $items->concat($this->emails($project, $before, $limit));
+            $items = $items->concat($this->emails($project, $before, $limit, $constrain['email'] ?? null));
         }
         if (in_array('meeting', $kinds, true)) {
-            $items = $items->concat($this->meetings($project, $before, $limit));
+            $items = $items->concat($this->meetings($project, $before, $limit, $constrain['meeting'] ?? null));
         }
 
         $page = $items->sortByDesc(fn (array $item) => $item['at'].'|'.$item['kind'].'|'.str_pad((string) $item['id'], 12, '0', STR_PAD_LEFT))
@@ -71,7 +77,7 @@ class ProjectCommunicationsTimeline
      * @param  Collection<int, User>  $people
      * @return Collection<int, array<string, mixed>>
      */
-    protected function calls(Project $project, Collection $people, ?Carbon $before, int $limit): Collection
+    protected function calls(Project $project, Collection $people, ?Carbon $before, int $limit, ?\Closure $constrain = null): Collection
     {
         $userIds = $people->pluck('id');
         $phones = $this->phones($people);
@@ -87,6 +93,7 @@ class ProjectCommunicationsTimeline
                     $query->orWhere('from_number', 'like', "%{$phone}")->orWhere('to_number', 'like', "%{$phone}");
                 }
             })
+            ->when($constrain, fn ($query) => $constrain($query))
             ->when($before, fn ($query) => $query->where('created_at', '<', $before))
             ->orderByDesc('created_at')
             ->limit($limit)
@@ -115,16 +122,9 @@ class ProjectCommunicationsTimeline
      * @param  Collection<int, User>  $people
      * @return Collection<int, array<string, mixed>>
      */
-    protected function texts(Project $project, Collection $people, ?Carbon $before, int $limit): Collection
+    protected function texts(Project $project, Collection $people, ?Carbon $before, int $limit, ?\Closure $constrain = null): Collection
     {
-        $threadIds = SmsGroupThread::query()
-            ->where(function ($query) use ($project) {
-                $query->where('project_id', $project->id);
-                if ($project->client_id) {
-                    $query->orWhere('client_id', $project->client_id);
-                }
-            })
-            ->pluck('id');
+        $threadIds = $this->threadIds($project);
 
         if ($threadIds->isEmpty()) {
             return collect();
@@ -133,6 +133,7 @@ class ProjectCommunicationsTimeline
         return SmsMessage::query()
             ->with('sentByUser')
             ->whereIn('thread_id', $threadIds)
+            ->when($constrain, fn ($query) => $constrain($query))
             ->when($before, fn ($query) => $query->where('created_at', '<', $before))
             ->orderByDesc('created_at')
             ->limit($limit)
@@ -158,13 +159,31 @@ class ProjectCommunicationsTimeline
     }
 
     /**
+     * The text threads a project's timeline reads: its own and its client's.
+     *
+     * @return Collection<int, int>
+     */
+    public function threadIds(Project $project): Collection
+    {
+        return SmsGroupThread::query()
+            ->where(function ($query) use ($project) {
+                $query->where('project_id', $project->id);
+                if ($project->client_id) {
+                    $query->orWhere('client_id', $project->client_id);
+                }
+            })
+            ->pluck('id');
+    }
+
+    /**
      * @return Collection<int, array<string, mixed>>
      */
-    protected function emails(Project $project, ?Carbon $before, int $limit): Collection
+    protected function emails(Project $project, ?Carbon $before, int $limit, ?\Closure $constrain = null): Collection
     {
         return EmailMessage::query()
             ->where('belongs_to_vendor_id', $project->belongs_to_vendor_id)
             ->forProject($project)
+            ->when($constrain, fn ($query) => $constrain($query))
             ->when($before, fn ($query) => $query->where('sent_at', '<', $before))
             ->orderByDesc('sent_at')
             ->limit($limit)
@@ -217,13 +236,14 @@ class ProjectCommunicationsTimeline
      *
      * @return Collection<int, array<string, mixed>>
      */
-    protected function meetings(Project $project, ?Carbon $before, int $limit): Collection
+    protected function meetings(Project $project, ?Carbon $before, int $limit, ?\Closure $constrain = null): Collection
     {
         return \App\Models\MeetingRecording::query()
             ->with('recordedBy:id,first_name,last_name,nickname')
             ->where('project_id', $project->id)
             ->whereIn('status', [\App\Models\MeetingRecording::STATUS_PROCESSING, \App\Models\MeetingRecording::STATUS_READY])
             // An uploaded file sits at the time of the meeting, not of the upload.
+            ->when($constrain, fn ($query) => $constrain($query))
             ->when($before, fn ($query) => $query->whereRaw('COALESCE(started_at, created_at) < ?', [$before]))
             ->orderByRaw('COALESCE(started_at, created_at) DESC')
             ->limit($limit)

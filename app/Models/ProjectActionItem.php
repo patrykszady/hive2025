@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use Laravel\Scout\Searchable;
 
 /**
  * One action task a project's calls and texts asked for, with every place it
@@ -18,6 +19,33 @@ use Illuminate\Support\Str;
  */
 class ProjectActionItem extends Model
 {
+    use Searchable;
+
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'project_action_items_index_dev' : 'project_action_items_index';
+    }
+
+    /**
+     * The task as written, who owns it, and the words it was said in (each
+     * source's excerpt) — never the embedding.
+     *
+     * @return array<string, mixed>
+     */
+    public function toSearchableArray(): array
+    {
+        return [
+            'id' => (int) $this->id,
+            'project_id' => $this->project_id ? (int) $this->project_id : null,
+            'belongs_to_vendor_id' => $this->belongs_to_vendor_id ? (int) $this->belongs_to_vendor_id : null,
+            'status' => (string) ($this->status ?? ''),
+            'title' => (string) ($this->title ?? ''),
+            'owner' => (string) ($this->owner ?? ''),
+            'excerpts' => EmailMessage::searchableLines(array_map(fn ($source) => $source['excerpt'] ?? '', (array) ($this->sources ?? []))),
+            'last_mentioned_at_unix' => optional($this->last_mentioned_at)->timestamp ?? 0,
+        ];
+    }
+
     public const STATUS_OPEN = 'open';
 
     public const STATUS_DONE = 'done';

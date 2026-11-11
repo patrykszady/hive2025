@@ -111,7 +111,7 @@ class CallLog extends Model
      */
     public function toSearchableArray(): array
     {
-        $this->loadMissing('transcript:id,call_log_id,text,summary');
+        $this->loadMissing('transcript:id,call_log_id,text,summary,action_items,next_steps');
 
         return [
             'id' => (int) $this->id,
@@ -125,8 +125,12 @@ class CallLog extends Model
             'transcript_text' => mb_substr(
                 trim((string) ($this->transcript?->summary ?? '') . ' ' . (string) ($this->transcript?->text ?? '')),
                 0,
-                4000
+                20000
             ),
+            'action_items' => implode("\n", array_filter(array_map(
+                fn ($line) => is_string($line) ? $line : '',
+                [...(array) ($this->transcript?->action_items ?? []), ...(array) ($this->transcript?->next_steps ?? [])]
+            ))),
             'created_at_unix' => optional($this->created_at)->timestamp ?? 0,
         ];
     }

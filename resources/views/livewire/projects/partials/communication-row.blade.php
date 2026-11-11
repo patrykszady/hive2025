@@ -9,6 +9,7 @@
         'sms' => 'chat-bubble-left',
         'email' => 'envelope',
         'meeting' => 'microphone',
+        'action_item' => 'clipboard-document-check',
     };
 @endphp
 <div class="shrink-0 mt-0.5">
@@ -45,4 +46,9 @@
             @endif
         </div>
     </div>
+    {{-- A search result: the words around the match, which may sit in a
+         transcript or body the line above doesn't show. --}}
+    @if (! empty($item['match']))
+        <div class="mt-0.5 text-xs text-zinc-600 dark:text-zinc-300 line-clamp-2" data-search-match>{{ $this->highlight($item['match']) }}</div>
+    @endif
 </div>

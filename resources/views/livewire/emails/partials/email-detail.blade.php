@@ -3,10 +3,16 @@
      new part of the body with the quoted history behind a toggle, and the
      attachments through their signed links. Shared by the project page's
      Communications card and the unplaced email inbox.
-     Expects $email (App\Models\EmailMessage), $latestPart, $quotedPart. --}}
-<div class="space-y-4" x-data="{ showQuoted: false }" wire:key="email-modal-{{ $email->id }}">
+     Expects $email (App\Models\EmailMessage), $latestPart, $quotedPart.
+     Optional $mark: a closure turning text into safe HTML with searched
+     words marked (the project page's communications search). --}}
+@php
+    $mark ??= fn (string $text) => new \Illuminate\Support\HtmlString(e($text));
+    $matchInQuoted = str_contains((string) $mark($quotedPart), '<mark') && ! str_contains((string) $mark($latestPart), '<mark');
+@endphp
+<div class="space-y-4" x-data="{ showQuoted: @js($matchInQuoted) }" wire:key="email-modal-{{ $email->id }}">
     <div>
-        <flux:heading size="lg">{{ $email->subject ?: '(no subject)' }}</flux:heading>
+        <flux:heading size="lg">{{ $mark($email->subject ?: '(no subject)') }}</flux:heading>
         <flux:subheading>
             {{ $email->isInbound() ? 'Received' : 'Sent' }}
             {{ $email->sent_at->copy()->setTimezone('America/Chicago')->format('M j, Y g:i A') }} CT
@@ -38,11 +44,11 @@
                 <flux:icon.sparkles variant="micro" class="size-3.5" />
                 AI Summary
             </div>
-            <p class="text-sm text-zinc-700 dark:text-zinc-200">{{ $email->summary }}</p>
+            <p class="text-sm text-zinc-700 dark:text-zinc-200">{{ $mark((string) $email->summary) }}</p>
             @if (! empty($email->action_items))
                 <ul class="list-disc list-inside text-sm text-zinc-600 dark:text-zinc-300 space-y-0.5">
                     @foreach ($email->action_items as $actionItem)
-                        <li wire:key="action-item-{{ $loop->index }}">{{ $actionItem }}</li>
+                        <li wire:key="action-item-{{ $loop->index }}">{{ is_string($actionItem) ? $mark($actionItem) : '' }}</li>
                     @endforeach
                 </ul>
             @endif
@@ -60,7 +66,7 @@
         </div>
     @endif
 
-    <div class="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap">{{ $latestPart }}</div>
+    <div class="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap">{{ $mark($latestPart) }}</div>
 
     @if ($quotedPart !== '')
         <div>
@@ -72,7 +78,7 @@
                 x-show="showQuoted"
                 x-cloak
                 class="mt-2 text-sm text-zinc-400 dark:text-zinc-500 whitespace-pre-wrap border-l-2 border-zinc-200 dark:border-zinc-700 pl-3"
-            >{{ $quotedPart }}</div>
+            >{{ $mark($quotedPart) }}</div>
         </div>
     @endif
 

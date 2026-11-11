@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\URL;
+use Laravel\Scout\Searchable;
 
 /**
  * One email with a project stakeholder, read from a connected mailbox (see
@@ -21,12 +22,51 @@ use Illuminate\Support\Facades\URL;
 class EmailMessage extends Model
 {
     use HasFactory;
+    use Searchable;
 
     public const DIRECTION_INBOUND = 'inbound';
 
     public const DIRECTION_OUTBOUND = 'outbound';
 
     protected $guarded = [];
+
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'email_messages_index_dev' : 'email_messages_index';
+    }
+
+    /**
+     * What the project page's communications search reads: the subject, who
+     * wrote it, the AI summary with its action items, and the body.
+     *
+     * @return array<string, mixed>
+     */
+    public function toSearchableArray(): array
+    {
+        return [
+            'id' => (int) $this->id,
+            'belongs_to_vendor_id' => $this->belongs_to_vendor_id ? (int) $this->belongs_to_vendor_id : null,
+            'project_id' => $this->project_id ? (int) $this->project_id : null,
+            'client_id' => $this->client_id ? (int) $this->client_id : null,
+            'subject' => (string) ($this->subject ?? ''),
+            'from_name' => (string) ($this->from_name ?? ''),
+            'from_email' => (string) ($this->from_email ?? ''),
+            'summary' => (string) ($this->summary ?? ''),
+            'action_items' => self::searchableLines([...(array) ($this->action_items ?? []), ...(array) ($this->next_steps ?? [])]),
+            'body' => mb_substr((string) ($this->body_text ?: $this->snippet ?: ''), 0, 20000),
+            'sent_at_unix' => optional($this->sent_at)->timestamp ?? 0,
+        ];
+    }
+
+    /**
+     * A list of AI-read lines (action items, next steps) as one searchable text.
+     *
+     * @param  array<int, mixed>  $lines
+     */
+    public static function searchableLines(array $lines): string
+    {
+        return implode("\n", array_filter(array_map(fn ($line) => is_string($line) ? trim($line) : '', $lines)));
+    }
 
     protected function casts(): array
     {
