@@ -17,6 +17,7 @@ use App\Models\ReceiptAccount;
 
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Support\Transactions\MerchantIdentity;
 
 use App\Services\PlaidService;
 
@@ -985,6 +986,122 @@ class TransactionController extends Controller
         return $hasDifferentVendor;
     }
 
+    /**
+     * Unassign vendors that came only from a processor-only alias rule on a
+     * charge that names a different merchant.
+     *
+     * Rule 280 ("PADDLE.NET", 2023, from when Laravel Daily's charge read
+     * just that) later claimed "PADDLE.NET* DATAFORSEO" (30216) and "… PADDLE.NET*
+     * DATAFORSE 26248" (29633): DataForSEO charges filed under Laravel Daily,
+     * which PART 2 kept because an alias rule matched. A transaction is
+     * cleared when every rule of its vendor that matches the descriptor
+     * names nothing but a processor (a curated prefix, or one Plaid declares
+     * on the charge), the charge names a merchant, and the vendor's name is
+     * in none of the merchant texts. Transactions with an expense (or a
+     * payment) are never touched; neither are transfers, nor hand or fuzzy
+     * assignments that no rule backs. The charge then shows up unmatched on
+     * Match Vendor for a human.
+     *
+     * @param  array<int, int>  $bankAccountIds
+     * @param  \Illuminate\Support\Collection<int, VendorTransaction>  $aliases  the vendor alias rules (deposit_check null)
+     * @param  list<string>  $skipPatterns  transfer descriptors PART 1 and 2 leave alone
+     */
+    protected function clearVendorsClaimedThroughProcessors(array $bankAccountIds, \Illuminate\Support\Collection $aliases, array $skipPatterns): void
+    {
+        $transactions = Transaction::withoutGlobalScopes()
+            ->whereNotNull('vendor_id')
+            ->whereNull('expense_id')
+            ->whereNull('deleted_at')
+            ->whereNull('check_number')
+            ->whereNull('deposit')
+            ->whereDoesntHave('payments', function ($query): void {
+                $query->withoutGlobalScopes();
+            })
+            ->whereIn('bank_account_id', $bankAccountIds)
+            ->with('vendor')
+            ->get();
+
+        foreach ($transactions as $transaction) {
+            $description = (string) $transaction->plaid_merchant_description;
+            if ($description === '' || ! $transaction->vendor) {
+                continue;
+            }
+
+            $isTransfer = collect($skipPatterns)->contains(
+                fn (string $pattern) => preg_match($pattern, $description) === 1 || preg_match($pattern, (string) $transaction->plaid_merchant_name) === 1
+            );
+            if ($isTransfer) {
+                continue;
+            }
+
+            $identity = MerchantIdentity::of($transaction);
+            if (! $identity->hasProcessor() || ! $identity->namesMerchant()) {
+                continue;
+            }
+
+            $matchingRules = $aliases->filter(function (VendorTransaction $alias) use ($transaction, $description): bool {
+                if ((int) $alias->vendor_id !== (int) $transaction->vendor_id) {
+                    return false;
+                }
+                if (($alias->amount_sign === 1 && $transaction->amount <= 0) || ($alias->amount_sign === 2 && $transaction->amount >= 0)) {
+                    return false;
+                }
+                $flags = json_decode($alias->options);
+
+                return @preg_match('/'.$alias->desc.$flags, $description) === 1;
+            });
+
+            if ($matchingRules->isEmpty() || ! $matchingRules->every(fn (VendorTransaction $alias) => $identity->isProcessorOnlyRule($alias->desc))) {
+                continue;
+            }
+            if ($this->vendorNamedIn($transaction->vendor->business_name, $identity->texts())) {
+                continue;
+            }
+
+            Log::channel('plaid_adds')->info('Cleared vendor claimed through a payment processor', [
+                'transaction_id' => $transaction->id,
+                'old_vendor_id' => $transaction->vendor_id,
+                'old_vendor_name' => $transaction->vendor->business_name,
+                'rule_ids' => $matchingRules->pluck('id')->all(),
+                'processors' => $identity->processors,
+                'merchant' => $identity->merchant(),
+                'plaid_merchant_name' => $transaction->plaid_merchant_name,
+                'plaid_merchant_description' => $description,
+            ]);
+            $transaction->vendor_id = null;
+            $transaction->save();
+        }
+    }
+
+    /**
+     * Does the vendor's name, or one of its distinctive words, appear in any
+     * of these merchant texts?
+     *
+     * @param  list<string>  $texts
+     */
+    protected function vendorNamedIn(string $vendorName, array $texts): bool
+    {
+        $normalize = fn (string $text): string => trim((string) preg_replace('/\s+/u', ' ', (string) preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', mb_strtolower($text, 'UTF-8'))));
+        $name = $normalize($vendorName);
+        if ($name === '' || $texts === []) {
+            return false;
+        }
+
+        $haystack = ' '.implode(' ', array_map($normalize, $texts)).' ';
+        if (str_contains($haystack, $name) || str_contains(str_replace(' ', '', $haystack), str_replace(' ', '', $name))) {
+            return true;
+        }
+
+        $generic = ['inc', 'llc', 'co', 'corp', 'ltd', 'the', 'and', 'of', 'company'];
+        foreach (explode(' ', $name) as $token) {
+            if (mb_strlen($token) >= 3 && ! in_array($token, $generic, true) && str_contains($haystack, $token)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function add_vendor_to_transactions()
     {
         // Query BankAccount once and load the related Bank
@@ -1049,16 +1166,28 @@ class TransactionController extends Controller
                 continue;
             }
 
-            // First try matching the more specific plaid_merchant_description
-            $matchedViaName = false;
-            if (!empty($transaction->plaid_merchant_description)) {
-                $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_description, $vendors);
-            }
+            // What to fuzzy-match on. A charge billed through a payment
+            // processor — Paddle, Square, Toast, PayPal… read from the
+            // descriptor prefix or from Plaid's own payload, see
+            // App\Support\Transactions\MerchantIdentity — matches on the
+            // merchant the processor collected for and never on the
+            // processor's name. Any other charge keeps the old order: the
+            // more specific description first, then Plaid's merchant name.
+            $identity = MerchantIdentity::of($transaction);
+            $candidates = $identity->hasProcessor()
+                ? array_map(fn (array $text) => ['text' => $text['text'], 'via_name' => $text['source'] !== 'description'], $identity->merchantTexts)
+                : array_values(array_filter([
+                    ['text' => (string) $transaction->plaid_merchant_description, 'via_name' => false],
+                    ['text' => (string) $transaction->plaid_merchant_name, 'via_name' => true],
+                ], fn (array $candidate) => $candidate['text'] !== ''));
 
-            // Fall back to plaid_merchant_name if no match found
-            if (!$vendor_match && !empty($transaction->plaid_merchant_name)) {
-                $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
-                $matchedViaName = (bool) $vendor_match;
+            $matchedViaName = false;
+            foreach ($candidates as $candidate) {
+                $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($candidate['text'], $vendors);
+                if ($vendor_match) {
+                    $matchedViaName = $candidate['via_name'];
+                    break;
+                }
             }
 
             if ($vendor_match) {
@@ -1069,8 +1198,19 @@ class TransactionController extends Controller
                 $vName = strtolower($vendor_match->business_name);
                 $pName = strtolower($transaction->plaid_merchant_name ?? '');
                 $pDesc = strtolower($transaction->plaid_merchant_description ?? '');
-                $namesOverlap = ($vName !== '' && $pName !== '' && (stripos($pName, $vName) !== false || stripos($vName, $pName) !== false))
-                    || ($vName !== '' && $pDesc !== '' && stripos($pDesc, $vName) !== false);
+                if ($identity->hasProcessor()) {
+                    // Behind a processor the vendor's name has to be in one of the
+                    // merchant texts — or begin with a bank-truncated one ("DATAFORSE"
+                    // for DataForSEO). The processor's own name never counts.
+                    $namesOverlap = $vName !== '' && collect($identity->texts())->contains(function (string $text) use ($vName): bool {
+                        $text = strtolower($text);
+
+                        return stripos($text, $vName) !== false || (strlen($text) >= 4 && stripos($vName, $text) !== false);
+                    });
+                } else {
+                    $namesOverlap = ($vName !== '' && $pName !== '' && (stripos($pName, $vName) !== false || stripos($vName, $pName) !== false))
+                        || ($vName !== '' && $pDesc !== '' && stripos($pDesc, $vName) !== false);
+                }
 
                 // Conflict guard: when the vendor was matched ONLY via plaid_merchant_name,
                 // refuse the assignment if the description distinctly names a different
@@ -1182,8 +1322,16 @@ class TransactionController extends Controller
                     continue;
                 }
 
-                // Try to find correct vendor using fuzzy match
-                $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
+                // Try to find correct vendor using fuzzy match — on the merchant
+                // behind a payment processor, never on the processor's name.
+                $identity = MerchantIdentity::of($transaction);
+                $correctVendor = null;
+                foreach ($identity->hasProcessor() ? $identity->texts() : [$transaction->plaid_merchant_name] as $text) {
+                    $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($text, $vendors);
+                    if ($correctVendor) {
+                        break;
+                    }
+                }
 
                 // Location gate: never "correct" onto a DIFFERENT pinned-location
                 // vendor whose address contradicts where the charge happened —
@@ -1221,6 +1369,13 @@ class TransactionController extends Controller
             }
         }
 
+        // PART 2b: a processor-only alias rule ("PADDLE.NET", rule 280) may hold
+        // a bare processor charge, but on a charge that names the merchant after
+        // the processor it claimed someone else's purchase — and PART 2 kept
+        // those because an alias matched. Clear them (expense-less only) before
+        // PART 3, which no longer lets such a rule take the charge back.
+        $this->clearVendorsClaimedThroughProcessors($bankAccountIds, $vendorTransactionAliases, $skipPatterns);
+
         $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get()->groupBy('plaid_merchant_description');
         $vendor_transactions = VendorTransaction::whereNull('deposit_check')->orderByRaw('LENGTH(`desc`) ASC')->get();
         $aliasVendors = Vendor::withoutGlobalScopes()
@@ -1245,7 +1400,15 @@ class TransactionController extends Controller
             }
 
             foreach ($plaid_name_transactions as $transaction) {
-                $candidates = $matchingAliases->filter(function ($vendor_transaction) use ($transaction, $aliasVendors) {
+                $identity = MerchantIdentity::of($transaction);
+                $candidates = $matchingAliases->filter(function ($vendor_transaction) use ($transaction, $aliasVendors, $identity) {
+                    // A rule naming only a payment processor ("PADDLE.NET") may
+                    // hold a bare processor charge, never one that names the
+                    // merchant the processor billed for ("PADDLE.NET* DATAFORSEO").
+                    if ($identity->hasProcessor() && $identity->namesMerchant() && $identity->isProcessorOnlyRule($vendor_transaction->desc)) {
+                        return false;
+                    }
+
                     // Check amount_sign filter
                     if ($vendor_transaction->amount_sign === 1 && $transaction->amount <= 0) {
                         return false;

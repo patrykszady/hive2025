@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Transactions\MerchantIdentity;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -43,7 +44,31 @@ class VendorSuggestionService
             Cache::put($cacheKey, $suggestion, self::CACHE_TTL);
         }
 
-        return $this->revalidateAgainstVendors($suggestion, $vendors);
+        return $this->preferMerchantOverProcessor(
+            $this->revalidateAgainstVendors($suggestion, $vendors),
+            MerchantIdentity::forCard($descriptor, $transactions),
+        );
+    }
+
+    /**
+     * A charge billed through a payment processor (Paddle, Square, Toast,
+     * PayPal…) must be matched on the merchant after the processor, never
+     * on the processor: an answer whose match_desc names only the processor
+     * ("PADDLE.NET"), or none at all, gets the card's merchant match text
+     * ("DATAFORSE"). Done on every read so a cached answer is repaired too.
+     */
+    protected function preferMerchantOverProcessor(array $suggestion, MerchantIdentity $identity): array
+    {
+        if (! $identity->hasProcessor() || $identity->matchText === null) {
+            return $suggestion;
+        }
+
+        $proposed = trim((string) ($suggestion['match_desc'] ?? ''));
+        if ($proposed === '' || $identity->isProcessorOnlyRule($proposed)) {
+            $suggestion['match_desc'] = $identity->matchText;
+        }
+
+        return $suggestion;
     }
 
     /**
@@ -128,6 +153,13 @@ class VendorSuggestionService
             : '"'.$merchantName.'"';
         $sameCard = $this->sameCardContext($transactions);
 
+        // A charge billed through a payment processor: the model is told so,
+        // and that the match text is the merchant after the processor.
+        $identity = MerchantIdentity::forCard($descriptor, $transactions);
+        $processorNote = $identity->hasProcessor()
+            ? sprintf("Payment processor: %s The processor is NOT the vendor — identify the company it collected for.%s\n", $identity->note(), $identity->matchText !== null ? sprintf(' Use "%s" as match_desc.', $identity->matchText) : '')
+            : '';
+
         // Prescreen candidates: vendors sharing a distinctive token with the
         // descriptor — the full list is too long for a prompt.
         $descTokens = collect(preg_split('/[^A-Za-z0-9]+/', mb_strtolower($descriptor)))
@@ -154,7 +186,7 @@ An airport restaurant or shop charged on a travel day is at an airport of that t
 
 Descriptor: "{$descriptor}"
 Plaid's merchant match: {$plaidMatch}
-
+{$processorNote}
 Transactions with this descriptor:
 {$transactionLines}
 

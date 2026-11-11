@@ -7,6 +7,9 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Support\Transactions\MerchantIdentity;
+use App\Support\Transactions\PaymentProcessors;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Matches one merchant card (or receipt-expense card) to a vendor — the app
@@ -23,6 +26,13 @@ use App\Models\VendorTransaction;
  * for that. This class only writes the rule row and links the vendor to
  * the signed-in company, exactly as MatchVendor's own store() does.
  *
+ * One rule it refuses to write, on every path, is one that names nothing
+ * but a payment processor ("PADDLE.NET", "PAYPAL *"): such a rule claims
+ * every company billed through that processor (how two DataForSEO charges
+ * ended up under Laravel Daily). The card's MerchantIdentity decides, from
+ * the descriptor and Plaid's payload, and supplies the merchant text to
+ * match on instead.
+ *
  * MatchVendor::linkVendorToCompany() itself is left in place rather than
  * extracted here — tests/Feature/Security/T2/MatchVendorScopingSecurityTest
  * invokes it by name through reflection on a bare `new MatchVendor()`, so
@@ -34,17 +44,35 @@ class TransactionVendorMatcher
 {
     /**
      * @param  array{vendor_id: string, match_desc: string, amount_sign?: ?int, bank_specific?: bool}  $input
+     *
+     * @throws ValidationException when the match text names only a payment processor
      */
     public function matchMerchantCard(User $user, string $descriptor, array $input): ?Vendor
     {
         $company = $user->vendor;
         $matchDesc = trim((string) $input['match_desc']);
+        $vendorId = $input['vendor_id'] ?? null;
+        $identity = MerchantIdentity::forDescriptor($descriptor);
 
-        if (($input['vendor_id'] ?? null) === 'NEW') {
+        // Non-vendor codes (Deposit, Check, Transfer, Cash) never claim a
+        // vendor, so only a vendor match is held to the processor rule.
+        if (($vendorId === 'NEW' || is_numeric($vendorId)) && ($refusal = $identity->refusal($matchDesc)) !== null) {
+            throw ValidationException::withMessages(['match_desc' => $refusal]);
+        }
+
+        if ($vendorId === 'NEW') {
             $vendor = Vendor::create([
                 'business_type' => 'Retail',
-                'business_name' => $matchDesc,
+                'business_name' => $identity->hasProcessor() ? $identity->vendorNameFor($matchDesc) : $matchDesc,
             ]);
+
+            // A new vendor is normally found again by its name alone. Behind a
+            // processor the descriptor reads "PADDLE.NET* DATAFORSEO", so the
+            // merchant match text becomes its rule — cut to the bank's window
+            // ("DATAFORSE") it covers the truncated form as well.
+            if ($identity->hasProcessor()) {
+                $this->writeRule($vendor->id, $matchDesc);
+            }
 
             $this->linkVendorToCompany($vendor, $company);
             $this->runTransactionSync();
@@ -89,11 +117,19 @@ class TransactionVendorMatcher
 
     /**
      * @param  array{vendor_id: string, match_desc: string}  $input
+     *
+     * @throws ValidationException when the match text names only a payment processor
      */
     public function matchExpenseCard(User $user, \Illuminate\Support\Collection $expenses, array $input): ?Vendor
     {
         $company = $user->vendor;
         $matchDesc = trim((string) $input['match_desc']);
+
+        // A receipt names no bank descriptor, so only the curated list can
+        // tell; the rule written here feeds the transaction sweep too.
+        if (PaymentProcessors::isProcessorOnly($matchDesc)) {
+            throw ValidationException::withMessages(['match_desc' => PaymentProcessors::refusalMessage($matchDesc)]);
+        }
 
         if (($input['vendor_id'] ?? null) === 'NEW') {
             $vendor = Vendor::create([
@@ -145,34 +181,35 @@ class TransactionVendorMatcher
      *
      * @param  array{vendor_name: string, existing_vendor_id: ?int, website?: ?string, city?: ?string, state?: ?string, match_desc?: ?string, confidence?: string, reasoning?: string}  $suggestion
      * @return array{vendor: Vendor, match_desc: ?string}
+     *
+     * @throws ValidationException when a typed match text names only a payment processor
      */
     public function applySuggestion(User $user, string $descriptor, array $suggestion, ?string $typedMatchDesc): array
     {
         $company = $user->vendor;
+        $identity = MerchantIdentity::forDescriptor($descriptor);
+
+        if (filled($typedMatchDesc) && ($refusal = $identity->refusal((string) $typedMatchDesc)) !== null) {
+            throw ValidationException::withMessages(['match_desc' => $refusal]);
+        }
 
         $vendor = $this->resolveVendorFromSuggestion($suggestion);
 
         // What future transactions get matched on. A typed "Match As" wins
         // outright and is used verbatim — someone chose those characters. The
         // machine-generated options (the AI's pattern, then the raw descriptor)
-        // get the store number stripped first.
+        // are made safe first: see machineMatchDesc().
         $matchDesc = filled($typedMatchDesc)
             ? $typedMatchDesc
             : collect([
                 $suggestion['match_desc'] ?? null,
                 $descriptor,
             ])
-                ->map(fn ($value) => $this->stripStoreNumber((string) $value))
+                ->map(fn ($value) => $this->machineMatchDesc((string) $value, $identity))
                 ->first(fn ($value) => filled($value));
 
         if (filled($matchDesc)) {
-            VendorTransaction::create([
-                'vendor_id' => $vendor->id,
-                'deposit_check' => null,
-                'desc' => str_replace('*', "\*", $matchDesc),
-                'plaid_inst_id' => null,
-                'options' => json_encode('/i'),
-            ]);
+            $this->writeRule($vendor->id, $matchDesc);
         }
 
         $this->linkVendorToCompany($vendor, $company);
@@ -213,6 +250,33 @@ class TransactionVendorMatcher
     }
 
     /**
+     * A machine-generated match text made safe to write. A processor alone
+     * (the AI answering "PADDLE.NET" for a Paddle charge, or a bare
+     * processor descriptor) becomes the card's merchant match text, or
+     * nothing; a processor descriptor ("PADDLE.NET* DATAFORSEO") becomes its
+     * merchant match text ("DATAFORSE"); anything else loses its store
+     * number.
+     */
+    private function machineMatchDesc(string $value, MerchantIdentity $identity): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        if ($identity->isProcessorOnlyRule($value)) {
+            return $identity->matchText;
+        }
+
+        $split = PaymentProcessors::split($value);
+        if ($split['processor'] !== null && $split['merchant'] !== null) {
+            return PaymentProcessors::matchText($value) ?? $split['merchant'];
+        }
+
+        return $this->stripStoreNumber($value);
+    }
+
+    /**
      * Drop a card descriptor's trailing store number.
      *
      * "CITY-MARKET #0430" describes one store; matching on it would leave every
@@ -230,6 +294,18 @@ class TransactionVendorMatcher
         $stripped = preg_replace('/\s*#\s*\d+\s*$/', '', $descriptor);
 
         return filled(trim((string) $stripped)) ? trim((string) $stripped) : trim($descriptor);
+    }
+
+    /** The plain vendor rule every path here writes, "*" escaped as the web form does. */
+    private function writeRule(int $vendorId, string $matchDesc): void
+    {
+        VendorTransaction::create([
+            'vendor_id' => $vendorId,
+            'deposit_check' => null,
+            'desc' => str_replace('*', "\*", $matchDesc),
+            'plaid_inst_id' => null,
+            'options' => json_encode('/i'),
+        ]);
     }
 
     private function linkVendorToCompany(?Vendor $vendor, ?Vendor $company): void

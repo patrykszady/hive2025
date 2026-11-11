@@ -10,9 +10,12 @@ use App\Models\VendorTransaction;
 use App\Services\Transactions\TransactionVendorMatcher;
 use App\Services\Transactions\UnmatchedTransactionCards;
 use App\Services\VendorSuggestionService;
+use App\Support\Transactions\MerchantIdentity;
+use App\Support\Transactions\PaymentProcessors;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -87,6 +90,42 @@ class MatchVendor extends Component
     }
 
     /**
+     * The cards billed through a payment processor (Paddle, Square, Toast,
+     * PayPal… from the descriptor prefix or Plaid's payload), by card index:
+     * a note for under "Match As" and the merchant match text to propose
+     * ("DATAFORSE" for "PADDLE.NET* DATAFORSEO" — cut to the bank's window so
+     * it claims the truncated form too).
+     *
+     * Reading it also prefills an empty "Match As" with that text. The form
+     * arrays are positional over the computed cards and the cards render
+     * inside a lazy island, so the render that draws a card is the one
+     * moment that knows its index — the view reads this in each card's
+     * @php block. A typed value is never overwritten.
+     *
+     * @return array<int, array{note: string, match_desc: ?string}>
+     */
+    #[Computed]
+    public function processorCards(): array
+    {
+        $cards = [];
+        foreach ($this->merchantCards->values() as $index => $transactions) {
+            $descriptor = (string) ($this->merchantCards->keys()->get($index) ?? '');
+            $identity = MerchantIdentity::forCard($descriptor, $transactions);
+            if (! $identity->hasProcessor()) {
+                continue;
+            }
+
+            if ($identity->matchText !== null && blank($this->match_merchant_names[$index]['match_desc'] ?? null)) {
+                $this->match_merchant_names[$index]['match_desc'] = $identity->matchText;
+            }
+
+            $cards[$index] = ['note' => (string) $identity->note(), 'match_desc' => $identity->matchText];
+        }
+
+        return $cards;
+    }
+
+    /**
      * Forget everything the last render knew, without a page load.
      *
      * The display collections are computed per request, so this only drops
@@ -96,7 +135,7 @@ class MatchVendor extends Component
      */
     protected function refreshLists(): void
     {
-        unset($this->merchantCards, $this->expenseCards);
+        unset($this->merchantCards, $this->expenseCards, $this->processorCards);
 
         $this->ai_suggestions = [];
         $this->match_merchant_names = [];
@@ -217,6 +256,19 @@ class MatchVendor extends Component
     {
         $this->validate();
 
+        // A receipt names no bank descriptor, so only the curated list can
+        // tell a processor-only match text; the rule written here feeds
+        // the transaction sweep too.
+        $refusals = [];
+        foreach ($this->match_expense_merchant_names as $key => $vendor_match) {
+            if (PaymentProcessors::isProcessorOnly((string) $vendor_match['match_desc'])) {
+                $refusals["match_expense_merchant_names.{$key}.match_desc"] = PaymentProcessors::refusalMessage((string) $vendor_match['match_desc']);
+            }
+        }
+        if ($refusals !== []) {
+            throw ValidationException::withMessages($refusals);
+        }
+
         foreach ($this->match_expense_merchant_names as $key => $vendor_match) {
             if ($vendor_match['vendor_id'] == 'NEW') {
                 $vendor = Vendor::create([
@@ -262,13 +314,47 @@ class MatchVendor extends Component
     {
         $this->validate();
 
+        // A rule naming only a payment processor ("PADDLE.NET", "PAYPAL *")
+        // would claim every company billed through it: refuse before anything
+        // is written. Non-vendor codes (Deposit, Check, Transfer, Cash) never
+        // claim a vendor and are let through. The card's identity (descriptor
+        // prefix plus Plaid's payload) decides and names the merchant text.
+        $identities = [];
+        $refusals = [];
         foreach ($this->match_merchant_names as $key => $vendor_match) {
+            $identities[$key] = MerchantIdentity::forDescriptor((string) $this->merchantCards->keys()->get($key, ''));
+            $vendorId = $vendor_match['vendor_id'];
+            if (($vendorId === 'NEW' || is_numeric($vendorId)) && ($refusal = $identities[$key]->refusal((string) $vendor_match['match_desc'])) !== null) {
+                $refusals["match_merchant_names.{$key}.match_desc"] = $refusal;
+            }
+        }
+        if ($refusals !== []) {
+            throw ValidationException::withMessages($refusals);
+        }
+
+        foreach ($this->match_merchant_names as $key => $vendor_match) {
+            $identity = $identities[$key];
             if ($vendor_match['vendor_id'] == 'NEW') {
                 $vendor = Vendor::create([
                     'business_type' => 'Retail',
-                    'business_name' => $vendor_match['match_desc'],
+                    'business_name' => $identity->hasProcessor() ? $identity->vendorNameFor($vendor_match['match_desc']) : $vendor_match['match_desc'],
                 ]);
                 $vendor_id = $vendor->id;
+
+                // A new vendor is normally found again by its name alone. Behind
+                // a processor the descriptor reads "PADDLE.NET* DATAFORSEO", so
+                // the merchant match text becomes its rule — cut to the bank's
+                // window ("DATAFORSE") it covers the truncated form as well.
+                if ($identity->hasProcessor()) {
+                    VendorTransaction::create([
+                        'vendor_id' => $vendor_id,
+                        'deposit_check' => null,
+                        'amount_sign' => $vendor_match['amount_sign'] ?? null,
+                        'desc' => str_replace('*', "\*", $vendor_match['match_desc']),
+                        'plaid_inst_id' => null,
+                        'options' => json_encode('/i'),
+                    ]);
+                }
             } else {
                 [$deposit_check, $vendor_id] = match ($vendor_match['vendor_id']) {
                     'DEPOSIT' => [1, null],

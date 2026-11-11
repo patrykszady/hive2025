@@ -14,6 +14,7 @@ use App\Models\Vendor;
 use App\Services\Transactions\TransactionVendorMatcher;
 use App\Services\Transactions\UnmatchedTransactionCards;
 use App\Services\VendorSuggestionService;
+use App\Support\Transactions\MerchantIdentity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -43,12 +44,24 @@ class TransactionMatchController extends Controller
 
         return response()->json([
             'data' => [
-                'merchant_cards' => $cards->merchantCards($user)->map(fn ($transactions, $descriptor) => [
+                'merchant_cards' => $cards->merchantCards($user)->map(function ($transactions, $descriptor) {
+                    // A card billed through a payment processor (Paddle, Square,
+                    // Toast, PayPal… from the descriptor prefix or Plaid's
+                    // payload) names the processors, the merchant behind them
+                    // and the match text to prefill — the web card's note and
+                    // "Match As" prefill. Empty/null otherwise.
+                    $identity = MerchantIdentity::forCard((string) $descriptor, $transactions);
+
+                    return [
                     'descriptor' => (string) $descriptor,
                     'count' => $transactions->count(),
                     'total' => round((float) $transactions->sum('amount'), 2),
                     'bank' => $transactions->first()?->bank_account?->bank?->name,
                     'location' => $transactions->first()?->card_location,
+                    'processors' => $identity->processors,
+                    'merchant' => $identity->hasProcessor() ? $identity->merchant() : null,
+                    'suggested_match_desc' => $identity->hasProcessor() ? $identity->matchText : null,
+                    'processor_note' => $identity->note(),
                     'transactions' => $transactions->map(fn (Transaction $transaction) => [
                         'id' => $transaction->id,
                         'amount' => (float) $transaction->amount,
@@ -62,7 +75,8 @@ class TransactionMatchController extends Controller
                         'type' => $transaction->bank_account?->type,
                         'company' => $transaction->bank_account?->bank?->vendor?->business_name,
                     ])->values()->all(),
-                ])->values()->all(),
+                    ];
+                })->values()->all(),
                 'expense_cards' => $cards->expenseCards($user)->map(fn ($expenses, $merchantName) => [
                     'merchant_name' => (string) $merchantName,
                     'count' => $expenses->count(),

@@ -43,6 +43,11 @@ class UnmatchedTransactionCards
                 // null arrives as the string "null"; filtered below.
                 'details->location->city as plaid_city',
                 'details->location->region as plaid_region',
+                // The processor Plaid declares and its raw bank text, read by
+                // MerchantIdentity::of() in place of the whole JSON.
+                'details->payment_meta->payment_processor as plaid_payment_processor',
+                'details->counterparties as plaid_counterparties',
+                'details->original_description as plaid_original_description',
             ])
             ->with([
                 // withoutGlobalScopes at EVERY nesting level — a scoped

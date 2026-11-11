@@ -23,6 +23,7 @@
                 @foreach($this->merchantCards as $merchant_name => $merchant_transactions)
                     @php
                         $cardIndex = $loop->index;
+                        $processorCard = $this->processorCards[$cardIndex] ?? null;
                     @endphp
                     <x-island-card
                         class="mt-6"
@@ -71,10 +72,13 @@
 
                             <flux:separator />
 
-                            {{-- Form fields --}}
+                            {{-- Form fields. A card billed through a payment
+                                 processor says so under the box and comes
+                                 prefilled with the merchant text to match on. --}}
                             <flux:input
                                 wire:model="match_merchant_names.{{ $cardIndex }}.match_desc"
                                 label="Match As"
+                                :description="$processorCard['note'] ?? null"
                             />
 
                             {{-- Server-searched picker: one scroll-page of vendors at a
