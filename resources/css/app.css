@@ -114,6 +114,30 @@
     border-bottom-right-radius: var(--radius-xl, 0.75rem);
   }
 
+  /* Skeleton shapes (resources/js/skeleton-shapes.js): the recorded boxes of
+     a card's last real content, drawn in its placeholder at the same height.
+     Bars use flux:skeleton's fill; row lines use flux:table.cell's border. */
+  .skeleton-shapes {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+  }
+  .skeleton-shapes-row {
+    position: absolute;
+    inset-inline: 0;
+    height: 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--color-zinc-800) 10%, transparent);
+  }
+  .skeleton-shape {
+    position: absolute;
+    background-color: color-mix(in oklab, var(--color-zinc-400) 20%, transparent);
+  }
+  @variant dark {
+    .skeleton-shapes-row {
+      border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
+    }
+  }
+
   /* Index-page main tables (single source of truth, used inside
      <x-index-table>): fixed layout so % column widths hold, full width, and a
      floor width — below it, Flux's ui-table-scroll-area scrolls horizontally

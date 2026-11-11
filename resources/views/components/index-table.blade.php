@@ -44,6 +44,10 @@
     // wrapper (rather than patching it in place) — that insertion is what
     // triggers the .index-table-enter fade.
     'skeleton' => false,
+    // Name shared by this table's loaded content and its placeholder, so the
+    // placeholder can be drawn from the shapes of the content last seen
+    // (resources/js/skeleton-shapes.js). Defaults to the heading's slug.
+    'skeletonKey' => null,
 ])
 @php
     // Strip HTML comments first: Blade/Livewire emit <!--[if BLOCK]--> markers
@@ -64,6 +68,7 @@
     // `{{ $attributes }}` there; any other variable renders as a literal
     // attribute and the whole bag (classes included) is silently lost.
     $openState = $collapsible ? '{ open: '.($expanded ? 'true' : 'false').' }' : null;
+    $skeletonKey = $skeletonKey ?: (\Illuminate\Support\Str::slug((string) $heading) ?: 'table');
 @endphp
 <x-island-card :heading="$heading" :href="$href" :navigate="$navigate" :subheading="$subheading" :clickable="$clickable || $collapsible" :enter="$skeleton" {{ $attributes->merge(array_filter(['class' => 'overflow-hidden'.($ownsSpacing ? ' !space-y-0' : ''), 'x-data' => $openState])) }}>
     {{-- Same emptiness guard as `actions`: Blade hoists <x-slot> out of an @if,
@@ -110,6 +115,7 @@
              browser paints only the viewport during the fade, so offscreen rows
              of long tables cost nothing extra. --}}
         <div class="space-y-4" wire:key="{{ $skeleton ? 'index-table-skeleton' : 'index-table-content' }}"
+            data-skeleton-{{ $skeleton ? 'target' : 'source' }}="{{ $skeletonKey }}"
             wire:transition.opacity.duration.150ms>
             <div class="card-flush-bottom">
                 {{ $slot }}
