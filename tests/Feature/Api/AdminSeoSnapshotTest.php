@@ -190,4 +190,8 @@ it('reports the four AI feeds as live routes in the geo section, rooted on the m
         expect($feed)->toMatchArray(['ok' => true, 'age' => null, 'stale' => false]);
         expect($feed['url'])->toBe('https://hive.contractors/'.$feed['label']);
     }
+
+    // The FAQ bank (kit 0.24.0): nothing derived yet reads as zeros, never
+    // as a missing key — tests/Feature/Seo/FaqBankTest.php fills it.
+    expect($data['geo']['faq_bank'])->toBe(['answers' => 0, 'pages' => 0, 'last_generated_at' => null]);
 });

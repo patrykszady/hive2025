@@ -552,6 +552,25 @@ Schedule::command('seo:bing-coverage --limit=300')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-bing-coverage.log'));
 
+// The FAQ bank (kit 0.24.0, 2026-11-10): seo:faq-bank derives the questions
+// and answers behind /geo/answers.json and /llms-full.txt from this site's
+// own marketing pages and blog, through the OpenAI key (Anthropic as the
+// fallback) — see AppServiceProvider's FaqBankSource/TextGenerator/
+// FaqBankStore bindings and App\Support\Seo\FaqBank\HiveFaqBankSource for
+// which pages. 150 pages a night covers the whole site (home, the product
+// areas, every feature page, the homeowner pages, the blog) in one run, and
+// an unchanged page costs nothing on the next. 04:50 Chicago, after the
+// 04:00 jobs; this app's own timezone is UTC, so the zone is said here.
+Schedule::command('seo:faq-bank --limit=150')
+    ->dailyAt('04:50')
+    ->timezone('America/Chicago')
+    ->name('seo-faq-bank')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-faq-bank.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:faq-bank failed'));
+
 Schedule::command('seo:gsc-sync')
     ->dailyAt('03:30')
     ->name('seo-gsc-sync')

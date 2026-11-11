@@ -11,6 +11,7 @@ use SsSystems\Platform\Seo\AiTraffic\TrackAiTraffic;
 use SsSystems\Platform\Seo\Bing\Console\BingCoverageCommand;
 use SsSystems\Platform\Seo\Bing\Console\BingSubmitSitemapsCommand;
 use SsSystems\Platform\Seo\Clarity\Console\ClaritySyncCommand;
+use SsSystems\Platform\Seo\Faq\Bank\Console\FaqBankCommand;
 use SsSystems\Platform\Seo\IndexNow\Console\IndexNowCommand;
 use SsSystems\Platform\Seo\Intel\Console\IntelCommand;
 use SsSystems\Platform\Seo\KeywordResearch\Console\KeywordResearchCommand;
@@ -73,6 +74,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // Bing's index holds of the site — see AppServiceProvider's
         // BingCoverageClient/BingCoverageWriter/BingCoverageUrls bindings.
         BingCoverageCommand::class,
+        // The FAQ bank (kit 0.24.0, 2026-11-10): seo:faq-bank, the questions
+        // and answers behind /geo/answers.json and /llms-full.txt, derived
+        // from this site's own marketing pages and blog — see
+        // AppServiceProvider's FaqBankSource/TextGenerator/FaqBankStore
+        // bindings and routes/console.php's nightly run.
+        FaqBankCommand::class,
     ])
     ->withRouting(
         web: __DIR__.'/../routes/web.php',

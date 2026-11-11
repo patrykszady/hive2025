@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Schema;
 use SsSystems\Platform\Pulse\SnapshotBuilder;
 use SsSystems\Platform\Reports\Console\ReportRun;
 use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
+use SsSystems\Platform\Seo\Faq\Bank\FaqBankStore;
 use SsSystems\Platform\Seo\Http\Concerns\BuildsSeoSnapshot;
 use SsSystems\Platform\Seo\Http\Concerns\BuildsSeoToolBlocks;
 use SsSystems\Platform\Seo\SitemapStatus;
@@ -203,7 +204,15 @@ class SeoSnapshotController extends Controller
      * never true — the hub shows each as "live". Rooted on the marketing
      * host, like every public URL this app hands out.
      *
-     * @return array{feeds: list<array{label: string, url: string, ok: bool, age: ?string, stale: bool}>}
+     * `faq_bank` (kit 0.24.0, 2026-11-10) is the FAQ bank's own summary —
+     * how many derived answers from how many pages /geo/answers.json and
+     * /llms-full.txt carry after the hand-written list, and when
+     * seo:faq-bank last wrote one — read through AppServiceProvider's
+     * FaqBankStore binding. Guarded the way pulseSnapshot() guards
+     * site_events: the migration ships with it, but a snapshot never 500s
+     * over a table.
+     *
+     * @return array{feeds: list<array{label: string, url: string, ok: bool, age: ?string, stale: bool}>, faq_bank: array{answers: int, pages: int, last_generated_at: ?string}}
      */
     protected function geoSnapshot(): array
     {
@@ -219,7 +228,12 @@ class SeoSnapshotController extends Controller
             ];
         }
 
-        return ['feeds' => $feeds];
+        $bank = app(FaqBankStore::class);
+
+        return [
+            'feeds' => $feeds,
+            'faq_bank' => $bank->exists() ? $bank->summary() : ['answers' => 0, 'pages' => 0, 'last_generated_at' => null],
+        ];
     }
 
     protected function gscCoverageStateModel(): string

@@ -21,6 +21,11 @@
     <env name="TELESCOPE_ENABLED" value="false"/>
     <env name="URL_SHORTENER_ENABLED" value="false"/>
     <env name="OPENAI_RECEIPT_ITEM_RECOVERY" value="false" force="true"/>
+    <!-- Livewire Blaze's debug bar (BLAZE_DEBUG=true in a developer's .env) is
+         injected into every rendered page with per-render timings: a test that
+         hashes or asserts on a page's text (seo:faq-bank's in-process render,
+         tests/Feature/Seo/FaqBankTest.php) must never see it, as production never does. -->
+    <env name="BLAZE_DEBUG" value="false" force="true"/>
     <!-- Blank every credential scripts/pull-prod-env.sh brings from production:
          tests must never see (or call Google/Bing/Meta with) real keys. -->
     <env name="GOOGLE_OAUTH_CLIENT_ID" value="" force="true"/>

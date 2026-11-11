@@ -43,6 +43,7 @@ use App\Support\Seo\BingWriter;
 use App\Support\Seo\ClaritySettings;
 use App\Support\Seo\DataForSeoSettings;
 use App\Support\Seo\Faq\ConfigFaqCatalog;
+use App\Support\Seo\FaqBank\HiveFaqBankSource;
 use App\Support\Seo\HiveSeoProfile;
 use App\Support\Seo\IndexNowSiteKey;
 use App\Support\Seo\Inspection\MarketingSitemapSource;
@@ -107,6 +108,12 @@ use SsSystems\Platform\Reports\Contracts\QueryMetricsReader;
 use SsSystems\Platform\Reports\Contracts\ReportStorage;
 use SsSystems\Platform\Reports\Contracts\SiteCatalog;
 use SsSystems\Platform\Reports\Contracts\SiteIdentity;
+use SsSystems\Platform\Seo\Faq\Bank\Contracts\FaqBankSource;
+use SsSystems\Platform\Seo\Faq\Bank\Contracts\TextGenerator;
+use SsSystems\Platform\Seo\Faq\Bank\FaqBankStore;
+use SsSystems\Platform\Seo\Faq\Bank\Generators\AnthropicTextGenerator;
+use SsSystems\Platform\Seo\Faq\Bank\Generators\FirstConfiguredTextGenerator;
+use SsSystems\Platform\Seo\Faq\Bank\Generators\OpenAiTextGenerator;
 use SsSystems\Platform\Seo\Faq\Contracts\FaqCatalog;
 use SsSystems\Platform\Seo\Bing\BingWebmasterApi;
 use SsSystems\Platform\Seo\Bing\BingWebmasterClient;
@@ -459,6 +466,25 @@ class AppServiceProvider extends ServiceProvider
         // config/geo-answers.php list alone, as on gs.construction — this
         // site's product pages carry no FAQ sections of their own to merge.
         $this->app->bind(FaqCatalog::class, ConfigFaqCatalog::class);
+
+        // The FAQ bank behind that feed and /llms-full.txt (kit 0.24.0,
+        // 2026-11-10): seo:faq-bank derives many questions and answers from
+        // this site's own marketing pages and blog, every one restating the
+        // page it came from — see App\Support\Seo\FaqBank\HiveFaqBankSource
+        // for which pages, and ConfigFaqCatalog::items() for how they follow
+        // the hand-written list. The store takes no tenant column: this app
+        // is single-tenant, like the Recorder/TrafficDays bindings. The text
+        // comes from the OpenAI key the estimate and invoice readers already
+        // use (gpt-4.1-mini, the kit's default) with the Anthropic key as
+        // the fallback when OpenAI fails or has no key; with neither key the
+        // nightly run skips quietly. Both generators get the container's
+        // shared HTTP client so Http::fake() reaches them in tests.
+        $this->app->bind(FaqBankSource::class, HiveFaqBankSource::class);
+        $this->app->bind(FaqBankStore::class, fn () => new FaqBankStore(DB::connection()));
+        $this->app->bind(TextGenerator::class, fn ($app) => new FirstConfiguredTextGenerator([
+            new OpenAiTextGenerator(trim((string) config('services.openai.api_key')) ?: null, http: $app->make(HttpFactory::class)),
+            new AnthropicTextGenerator(trim((string) config('services.anthropic.api_key')) ?: null, http: $app->make(HttpFactory::class)),
+        ]));
 
         // Microsoft Clarity (kit 0.20.0, 2026-11-02): the kit's own
         // Seo\Clarity module replaces this app's former App\Services\
