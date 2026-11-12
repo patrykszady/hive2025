@@ -4064,6 +4064,11 @@ class TelnyxWebhookController extends Controller
     /**
      * Dial all configured call_recipients who have NOT yet joined the
      * conference for this call log, so they can join via the late-screen flow.
+     *
+     * App only (Patryk, 2026-11-12): on an incoming call, a recipient who
+     * has the Hive Contractors app is invited in the app and their cell is
+     * not dialed, as in the ring cascade (dialPersonAppOnly). A 9 pressed
+     * on a call the team placed still dials cells, as it always has.
      */
     protected function inviteRemainingRecipients(CallLog $callLog): void
     {
@@ -4102,6 +4107,7 @@ class TelnyxWebhookController extends Controller
         // Same window as the inbound cascade, so a press-9 invite rings as
         // long as a first ring would.
         $timeout = self::RING_SECONDS;
+        $isIncomingCall = $callLog->direction === 'incoming';
 
         $newCallControlIds = $metadata['admin_call_control_ids'] ?? [];
         $dialedPhones = [];
@@ -4112,6 +4118,18 @@ class TelnyxWebhookController extends Controller
                 continue;
             }
             $dialedPhones[$phone] = true;
+
+            if ($isIncomingCall && $this->ringsInAppOnly($user)
+                && ($appLeg = $this->dialPersonAppOnly($user, $callLog, (string) $callLog->call_control_id, $callLog->id, null))) {
+                $newCallControlIds[] = $appLeg;
+                Log::channel('telnyx')->info('DTMF 9: invited recipient to conference', [
+                    'call_log_id' => $callLog->id,
+                    'admin_user_id' => $user->id,
+                    'leg' => 'app',
+                ]);
+
+                continue;
+            }
 
             try {
                 $response = $this->telnyxHttp(0)
@@ -4299,11 +4317,25 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * The person's Hive Contractors app (or browser) rings alongside their
-     * cell, when they have one (Patryk, 2026-10-16: app and cell together;
-     * answering one stops the other). No answering machine detection and no
-     * screening prompt on it: the app shows who is calling and has no
-     * carrier voicemail. Returns the leg's call_control_id, or null.
+     * Rings the person's Hive calling login: their Hive Contractors app, and
+     * any browser they have Hive open in.
+     *
+     * App only (Patryk, 2026-11-12 — it replaces "app and cell together"
+     * of 2026-10-16, which showed up as two incoming calls on one iPhone):
+     * someone who has the app (AppVoiceCredentials::hasRingableApp()) is
+     * rung here and nowhere else, and their cell is never dialed. This leg
+     * is then the one the call waits on ($cellCallControlId null): it rings
+     * for RING_SECONDS, and its hangup rings the next person or plays the
+     * voicemail menu (handleAdminRingHangup), as an unanswered cell does.
+     * Their cell is dialed only when Telnyx refuses this leg outright.
+     *
+     * Someone without the app still rings on their cell, and a calling
+     * login they hold all the same (the browser phone) rings alongside it
+     * as before; answering one stops the other (hangUpPersonsOtherLegs).
+     *
+     * No answering machine detection and no screening prompt on this leg:
+     * the app shows who is calling and has no carrier voicemail. Returns
+     * the leg's call_control_id, or null when it could not be dialed.
      */
     protected function dialPersonAppLeg(User $person, ?CallLog $callLog, string $incomingCallControlId, ?int $callLogId, ?string $originalCaller, ?string $cellCallControlId): ?string
     {
@@ -4361,7 +4393,7 @@ class TelnyxWebhookController extends Controller
         // What is ringing this person's app right now, for the app's call
         // screen when the push carried too little (GET /api/app/v1/calls/ringing).
         Cache::put("telnyx_app_ringing:{$person->id}", ['call_log_id' => $callLogId, 'app_call_control_id' => $appCallControlId], now()->addSeconds(self::RING_SECONDS + 10));
-        Log::channel('telnyx')->info('Ringing the team member\'s app too', ['admin_user_id' => $person->id, 'app_call_control_id' => $appCallControlId, 'call_log_id' => $callLogId]);
+        Log::channel('telnyx')->info($cellCallControlId ? 'Ringing the team member\'s app too' : 'Ringing the team member in the app only — their cell stays quiet', ['admin_user_id' => $person->id, 'app_call_control_id' => $appCallControlId, 'call_log_id' => $callLogId]);
 
         return $appCallControlId;
     }
@@ -4378,7 +4410,11 @@ class TelnyxWebhookController extends Controller
         return $clean !== '' ? mb_substr($clean, 0, 128) : 'Incoming Call';
     }
 
-    /** A person answered one of their legs (app or cell): the other stops ringing. */
+    /**
+     * A person answered one of their legs: any other stops ringing. Only
+     * someone without the app has two (their cell and the browser phone);
+     * the app is a person's only leg since 2026-11-12, with nothing to stop.
+     */
     protected function hangUpPersonsOtherLegs(?int $callLogId, ?int $personId, string $answeredCallControlId): void
     {
         if (! $callLogId || ! $personId) {
@@ -4423,11 +4459,58 @@ class TelnyxWebhookController extends Controller
     public const RING_SECONDS = 15;
 
     /**
+     * Whether an incoming call rings this person in the app only (Patryk,
+     * 2026-11-12): they have the Hive Contractors app, as far as Hive can
+     * know (AppVoiceCredentials::hasRingableApp() holds the rule). A lookup
+     * that fails counts as no: when in doubt, the cell rings.
+     */
+    protected function ringsInAppOnly(User $person): bool
+    {
+        try {
+            return app(\App\Services\Voice\AppVoiceCredentials::class)->hasRingableApp($person);
+        } catch (\Throwable $exception) {
+            Log::channel('telnyx')->warning('App only: could not tell whether the team member has the app — ringing their cell', [
+                'admin_user_id' => $person->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
+     * App only (Patryk, 2026-11-12): rings a team member who has the Hive
+     * Contractors app in the app, as their only leg. Returns the leg's
+     * call_control_id, or null when Telnyx would not dial it — the one case
+     * where "has the app" turned out wrong, so the caller of this method
+     * rings their cell instead.
+     */
+    protected function dialPersonAppOnly(User $person, ?CallLog $callLog, string $incomingCallControlId, ?int $callLogId, ?string $originalCaller): ?string
+    {
+        $appCallControlId = $this->dialPersonAppLeg($person, $callLog, $incomingCallControlId, $callLogId, $originalCaller, null);
+
+        if (! $appCallControlId) {
+            Log::channel('telnyx')->warning('App only: the app leg could not be dialed — ringing the team member\'s cell instead', [
+                'admin_user_id' => $person->id,
+                'call_log_id' => $callLogId,
+            ]);
+        }
+
+        return $appCallControlId;
+    }
+
+    /**
      * Dials the first reachable recipient in $queueUserIds and stores the
      * rest as cascade_pending_ids on the call log. Returns the new leg's
      * call_control_id, or null when nobody could be dialed. Ids the loop
      * walks past (bad phone, failed dial) are consumed, so a recipient is
      * never rung twice by one cascade.
+     *
+     * App only (Patryk, 2026-11-12): a recipient who has the Hive
+     * Contractors app is rung in the app and their cell is not dialed; the
+     * app leg is the leg returned and the one the cascade waits on. Everyone
+     * else rings on their cell, with their browser phone alongside when
+     * they have a calling login (dialPersonAppLeg).
      */
     protected function dialNextAdminInCascade(?CallLog $callLog, string $incomingCallControlId, ?int $callLogId, array $queueUserIds, ?string $originalCaller): ?string
     {
@@ -4455,6 +4538,19 @@ class TelnyxWebhookController extends Controller
                 continue;
             }
             $triedPhones[$phone] = true;
+
+            $hasApp = $this->ringsInAppOnly($adminUser);
+            if ($hasApp && ($dialedCcId = $this->dialPersonAppOnly($adminUser, $callLog, $incomingCallControlId, $callLogId, $originalCaller))) {
+                Log::channel('telnyx')->info('Dialed admin (cascade)', [
+                    'admin_user_id' => $adminUser->id,
+                    'admin_name' => $adminUser->full_name,
+                    'leg' => 'app',
+                    'admin_call_control_id' => $dialedCcId,
+                    'remaining_in_cascade' => count($queueUserIds),
+                ]);
+
+                continue;
+            }
 
             try {
                 $response = $this->telnyxHttp(0)
@@ -4487,7 +4583,9 @@ class TelnyxWebhookController extends Controller
                         'remaining_in_cascade' => count($queueUserIds),
                     ]);
 
-                    $appLegs[] = $this->dialPersonAppLeg($adminUser, $callLog, $incomingCallControlId, $callLogId, $originalCaller, $dialedCcId);
+                    if (! $hasApp) {
+                        $appLegs[] = $this->dialPersonAppLeg($adminUser, $callLog, $incomingCallControlId, $callLogId, $originalCaller, $dialedCcId);
+                    }
                 } else {
                     Log::channel('telnyx')->error('Failed to dial admin', [
                         'admin_user_id' => $adminUser->id,

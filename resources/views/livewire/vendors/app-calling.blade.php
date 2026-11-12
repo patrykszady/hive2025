@@ -7,7 +7,7 @@
         <div x-data="appCalling" class="space-y-5">
             <flux:callout icon="information-circle" color="zinc">
                 <flux:callout.text>
-                    While this page is open, your incoming business calls ring here as well as on your cell. Answering in one place stops the other. Calls you place here go out from the business number, recorded and logged like any Hive call.
+                    While this page is open, your incoming business calls ring here as well as in your Hive Contractors app, or on your cell when you do not have the app. Answering in one place stops the other. Calls you place here go out from the business number, recorded and logged like any Hive call.
                 </flux:callout.text>
             </flux:callout>
 

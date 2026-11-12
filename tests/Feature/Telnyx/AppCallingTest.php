@@ -2,6 +2,7 @@
 
 use App\Livewire\Vendors\AppCalling;
 use App\Models\CallLog;
+use App\Models\PushToken;
 use App\Models\User;
 use App\Models\UserVoiceCredential;
 use App\Models\Vendor;
@@ -15,8 +16,11 @@ uses(RefreshDatabase::class);
 
 // =========================================================================
 // Hive Contractors app calling (2026-10-16): each team member's app or
-// browser signs in with a Telnyx telephony credential, rings alongside their
-// cell for business calls, and places outbound calls through Hive.
+// browser signs in with a Telnyx telephony credential, rings for business
+// calls, and places outbound calls through Hive. App only since 2026-11-12:
+// someone who has the app is rung in the app and never on their cell; a
+// calling login without the app (the browser phone) still rings alongside
+// the cell. Tests/Feature/Telnyx/AppOnlyRingTest.php covers the rule itself.
 // =========================================================================
 
 beforeEach(function () {
@@ -101,12 +105,14 @@ it('rings the cell for a call placed from the website, and never calls the busin
     expect($own['ok'])->toBeFalse()->and($own['error'])->toBe('Cannot call the company phone number.');
 });
 
-it('rings a team member\'s app alongside their cell, and answering the app connects at once and stops the cell', function () {
+it('rings a team member who has the app in the app only, and answering it connects at once with no cell leg to stop', function () {
     UserVoiceCredential::factory()->create(['user_id' => $this->patryk->id, 'sip_username' => 'gencredpatryk']);
+    PushToken::factory()->create([
+        'user_id' => $this->patryk->id,
+        'personal_access_token_id' => $this->patryk->createToken("Patryk's iPhone", ['app'])->accessToken->id,
+    ]);
     Http::fake([
-        'api.telnyx.com/v2/calls' => Http::sequence()
-            ->push(['data' => ['call_control_id' => 'cell-leg']])
-            ->push(['data' => ['call_control_id' => 'app-leg']]),
+        'api.telnyx.com/v2/calls' => Http::response(['data' => ['call_control_id' => 'app-leg']]),
         'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-1']], 200),
         'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
     ]);
@@ -125,7 +131,11 @@ it('rings a team member\'s app alongside their cell, and answering the app conne
         && $request['from_display_name'] === 'Erin Abbey'
         && ! isset($request['answering_machine_detection']));
     expect(\Illuminate\Support\Facades\Cache::get('telnyx_app_ringing:'.$this->patryk->id)['call_log_id'] ?? null)->toBe($callLog->id);
-    expect($callLog->fresh()->metadata['admin_call_control_ids'])->toBe(['cell-leg', 'app-leg']);
+    expect($callLog->fresh()->metadata['admin_call_control_ids'])->toBe(['app-leg']);
+
+    // App only: the one leg dialed is the app's — the cell never rings.
+    $dialed = collect(Http::recorded())->filter(fn ($pair) => str_ends_with($pair[0]->url(), '/v2/calls'))->map(fn ($pair) => $pair[0]['to'])->values()->all();
+    expect($dialed)->toBe(['sip:gencredpatryk@sip.telnyx.com']);
 
     // Patryk answers in the app (after the caller's welcome finished).
     \Illuminate\Support\Facades\Cache::put("telnyx_tts_complete:{$callLog->id}", true);
@@ -135,7 +145,7 @@ it('rings a team member\'s app alongside their cell, and answering the app conne
         'client_state' => base64_encode(json_encode(['action' => 'admin_ring', 'leg' => 'app', 'call_log_id' => $callLog->id, 'incoming_call_control_id' => 'incoming-cc', 'admin_user_id' => $this->patryk->id])),
     ]]])->assertSuccessful();
 
-    Http::assertSent(fn ($request) => str_contains($request->url(), 'cell-leg/actions/hangup'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/actions/hangup'));
     Http::assertNotSent(fn ($request) => str_contains($request->url(), 'app-leg/actions/speak'));
     Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/conferences'));
 });
@@ -161,6 +171,8 @@ it('cleans a caller name for Telnyx, and falls back to the business number when 
     expect(\App\Http\Controllers\Api\TelnyxWebhookController::telnyxDisplayName('Patryk Szady (test) <x>'))->toBe('Patryk Szady test x')
         ->and(\App\Http\Controllers\Api\TelnyxWebhookController::telnyxDisplayName('   '))->toBe('Incoming Call');
 
+    // A calling login and no app (the browser phone): the cell rings and
+    // the login rings alongside it, as before 2026-11-12.
     UserVoiceCredential::factory()->create(['user_id' => $this->patryk->id, 'sip_username' => 'gencredpatryk']);
     Http::fake([
         'api.telnyx.com/v2/calls' => Http::sequence()

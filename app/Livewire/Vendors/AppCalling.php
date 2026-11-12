@@ -10,9 +10,11 @@ use Livewire\Component;
 /**
  * The Hive Contractors app's calling, in a desktop browser: signs in with the
  * person's app calling login, rings for their incoming business calls (with
- * their cell), and places outbound calls from the business number through
- * Hive (logged and recorded like click-to-call). The proving ground for the
- * iPhone app, which uses the same logins and the same server side.
+ * their Hive Contractors app — or with their cell when they do not have the
+ * app: app only since 2026-11-12, see AppVoiceCredentials::hasRingableApp()),
+ * and places outbound calls from the business number through Hive (logged
+ * and recorded like click-to-call). The proving ground for the iPhone app,
+ * which uses the same logins and the same server side.
  */
 #[Title('App Calling')]
 class AppCalling extends Component

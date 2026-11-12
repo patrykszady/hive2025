@@ -202,6 +202,10 @@ beforeEach(function () {
         'services.telnyx.api_key' => 'test-api-key',
         'services.telnyx.from' => '+12247354200',
         'services.telnyx.connection_id' => 'test-connection-id',
+        // No Hive Contractors app in this file: nobody here has a calling
+        // login, and the hand-made schema above has no table for one. Pinned
+        // so a developer's own TELNYX_APP_CONNECTION_ID cannot turn it on.
+        'services.telnyx.app_connection_id' => null,
         'services.telnyx.voice_timeout' => 30,
         'services.telnyx.hold_audio_url' => 'https://example.com/audio/ringback.wav',
         'services.telnyx.tts_voice' => 'Azure.en-US-AvaMultilingualNeural',
