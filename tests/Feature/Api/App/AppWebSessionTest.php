@@ -111,3 +111,14 @@ it('rejects a tampered nonce', function () {
     $this->get($path)->assertStatus(403);
     $this->assertGuest();
 });
+
+it('never puts the sign-in link under /app, which production hands to Reverb', function () {
+    $url = Illuminate\Support\Facades\URL::temporarySignedRoute('web-session.consume', now()->addMinute(), ['nonce' => 'abc']);
+
+    expect(parse_url($url, PHP_URL_PATH))->toStartWith('/mobile/web-session/')
+        ->and(collect(Illuminate\Support\Facades\Route::getRoutes()->getRoutes())
+            ->filter(fn ($route) => in_array('GET', $route->methods(), true) && preg_match('#^app#', $route->uri()))
+            ->map(fn ($route) => $route->uri())
+            ->values()
+            ->all())->toBe([]);
+});

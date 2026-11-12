@@ -376,7 +376,10 @@ Route::get('vendor-docs/audit/{vendor}/export.xlsx', [\App\Http\Controllers\Vend
 // link from POST /api/app/v1/web-session that logs its user into THIS web
 // session (no session yet, so this must sit outside the 'auth' group) and
 // redirects into the normal authenticated routes below.
-Route::get('app/web-session/{nonce}', [\App\Http\Controllers\WebSessionLoginController::class, 'consume'])
+// Never under /app: production's nginx sends every path starting with
+// "/app" (prefix match, so "/app-…" and "/apps" too) to Reverb's websocket
+// server, which answered this link with a bare "Not found." (2026-11-12).
+Route::get('mobile/web-session/{nonce}', [\App\Http\Controllers\WebSessionLoginController::class, 'consume'])
     ->middleware('signed')
     ->name('web-session.consume');
 
