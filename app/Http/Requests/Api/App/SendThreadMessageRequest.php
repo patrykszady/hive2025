@@ -19,9 +19,10 @@ class SendThreadMessageRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * media.* reuses SmsConversation::attachmentValidationRule() — the exact
-     * rule the web composer validates its single attachment against — so an
-     * app upload is accepted or rejected the same way a web one is.
+     * media.* reuses SmsConversation::attachmentValidationRule() and
+     * SmsConversation::MAX_ATTACHMENTS — the exact rules the web composer
+     * validates its attachments against — so an app upload is accepted or
+     * rejected the same way a web one is.
      *
      * @return array<string, ValidationRule|array<mixed>|string>
      */
@@ -29,7 +30,7 @@ class SendThreadMessageRequest extends FormRequest
     {
         return [
             'body' => ['nullable', 'required_without:media', 'string', 'max:1600'],
-            'media' => ['nullable', 'array', 'max:10'],
+            'media' => ['nullable', 'array', 'max:' . SmsConversation::MAX_ATTACHMENTS],
             'media.*' => SmsConversation::attachmentValidationRule(),
             // The web composer's "Schedule send" presets (America/Chicago).
             // 'schedule_only' is the web's "Schedule Only (manual send)" —

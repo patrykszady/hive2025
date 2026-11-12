@@ -1306,8 +1306,43 @@
             $composerDisabled = ! $this->thread || $pendingOptIn;
         @endphp
         <div class="shrink-0 px-1 pb-1" wire:key="sms-composer-{{ $threadId ?? 'none' }}"
+            x-on:livewire-upload-start="uploadStarted()"
+            x-on:livewire-upload-progress="progress = $event.detail.progress"
+            x-on:livewire-upload-finish="uploading = false"
+            x-on:livewire-upload-error="uploading = false"
+            x-on:livewire-upload-cancel="uploading = false"
+            x-on:dragover="if ($event.dataTransfer?.types?.includes('Files')) { $event.preventDefault(); dragging = true }"
+            x-on:dragleave="if (! $el.contains($event.relatedTarget)) dragging = false"
+            x-on:drop="dropFiles($event)"
             x-data="{
+                // Photos and videos go up the moment they are picked or
+                // dropped (flux:file-upload), so they are usually there
+                // before the text is typed. `uploading` and `progress`
+                // follow that upload; Send and Schedule stay disabled
+                // until every file is fully up (Patryk, 2026-11-12), so a
+                // text never leaves without its photos.
+                uploading: false,
+                progress: 0,
+                dragging: false,
+                uploadStarted() {
+                    this.uploading = true;
+                    this.progress = 0;
+                },
+                dropFiles(event) {
+                    const files = event.dataTransfer?.files;
+                    if (! files || files.length === 0) return;
+                    event.preventDefault();
+                    this.dragging = false;
+                    const uploader = this.$root.querySelector('ui-file-upload');
+                    if (! uploader || uploader.disabled) return;
+                    uploader.clear();
+                    uploader.addFiles(files);
+                },
                 async submitComposer(form) {
+                    // The keyboard shortcut submits the form too; the
+                    // disabled button alone would not stop it.
+                    if (this.uploading) return;
+
                     // Optimistic clear — the box empties the instant you hit
                     // send, like iMessage. Only the VISIBLE box is cleared
                     // (via ui-composer, which owns the inner textarea); the
@@ -1330,27 +1365,28 @@
                     }
                 }
             }">
-            <form x-on:submit.prevent="submitComposer($el)">
-                @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
-                    <div class="mb-2 px-1">
-                        @php
-                            $attachmentMimeType = (string) $attachment->getMimeType();
-                            $isVideoAttachment = str_starts_with($attachmentMimeType, 'video/');
-                        @endphp
-                        <div class="relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                            @if ($isVideoAttachment)
+            <form x-on:submit.prevent="submitComposer($el)" class="rounded-2xl transition-shadow" x-bind:class="dragging && 'ring-2 ring-indigo-400'">
+                <div class="px-1 flex flex-wrap gap-x-2">
+                    @foreach ($attachments as $attachmentIndex => $attachment)
+                        @continue(! is_object($attachment) || ! method_exists($attachment, 'temporaryUrl') || ! $attachment->getRealPath())
+                        <div wire:key="sms-attachment-{{ $attachment->getFilename() }}" class="mb-2 relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
+                            @if (str_starts_with((string) $attachment->getMimeType(), 'video/'))
                                 <video src="{{ $attachment->temporaryUrl() }}" class="size-16 object-cover bg-black" muted playsinline preload="metadata"></video>
                             @else
                                 <img src="{{ $attachment->temporaryUrl() }}" alt="Attachment preview" class="size-16 object-cover" />
                             @endif
                             <div class="absolute top-0 right-0 p-0.5">
-                                <button type="button" wire:click="removeAttachment" class="p-0.5 rounded-full bg-zinc-900/50 hover:bg-zinc-900/70 flex justify-center items-center">
+                                <button type="button" wire:click="removeAttachment({{ $attachmentIndex }})" aria-label="Remove attachment" class="p-0.5 rounded-full bg-zinc-900/50 hover:bg-zinc-900/70 flex justify-center items-center">
                                     <flux:icon icon="x-mark" variant="micro" class="text-white" />
                                 </button>
                             </div>
                         </div>
+                    @endforeach
+                    <div wire:key="sms-attachment-uploading" x-show="uploading" x-cloak role="status" aria-label="Uploading" class="mb-2 size-16 flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400">
+                        <flux:icon.loading class="size-4" />
+                        <span class="text-xs tabular-nums" x-text="progress + '%'"></span>
                     </div>
-                @endif
+                </div>
 
                 <flux:composer
                     wire:model="newMessage"
@@ -1361,8 +1397,9 @@
                     max-rows="6"
                 >
                     <x-slot name="actionsLeading">
-                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach media" x-bind:disabled="!! $wire.editScheduledId || @js($composerDisabled)"></flux:button>
-                        <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*,video/*,.mp4,.mov,.webm,.m4v,.3gp,.avi" class="hidden" />
+                        <flux:file-upload wire:model="newAttachments" multiple accept="image/*,video/*,.mp4,.mov,.webm,.m4v,.3gp,.avi" x-bind:disabled="!! $wire.editScheduledId || @js($composerDisabled)">
+                            <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" aria-label="Attach photos or videos" class="[[disabled]_&]:opacity-50"></flux:button>
+                        </flux:file-upload>
                         <div x-show="! $wire.editScheduledId" x-cloak>
                             <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId ?? 'null' }} })" tooltip="Send schedule" aria-label="Send schedule" :disabled="$composerDisabled"></flux:button>
                         </div>
@@ -1371,7 +1408,7 @@
                     <x-slot name="actionsTrailing">
                         <div x-show="! $wire.editScheduledId" x-cloak>
                             <flux:dropdown position="top end">
-                                <flux:button size="sm" variant="subtle" square icon="clock" aria-label="Schedule send" :disabled="$composerDisabled"></flux:button>
+                                <flux:button size="sm" variant="subtle" square icon="clock" aria-label="Schedule send" x-bind:disabled="uploading || @js($composerDisabled)"></flux:button>
 
                                 <flux:menu>
                                     <flux:heading size="xs" class="px-2 pb-1">Schedule send</flux:heading>
@@ -1385,7 +1422,7 @@
                             </flux:dropdown>
                         </div>
 
-                        <flux:button type="submit" x-show="! $wire.editScheduledId" x-cloak size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" :disabled="$composerDisabled" aria-label="Send message" tooltip="Send message"></flux:button>
+                        <flux:button type="submit" x-show="! $wire.editScheduledId" x-cloak size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" x-bind:disabled="uploading || @js($composerDisabled)" aria-label="Send message" tooltip="Send message"></flux:button>
                         <flux:button type="submit" x-show="!! $wire.editScheduledId" x-cloak size="sm" variant="primary" square icon="check" class="data-loading:opacity-50" :disabled="$composerDisabled" aria-label="Save Draft" tooltip="Save Draft"></flux:button>
                     </x-slot>
                 </flux:composer>
@@ -1394,7 +1431,16 @@
             @error('newMessage')
                 <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
             @enderror
-            @error('attachment')
+            @error('newAttachments')
+                <p class="text-xs text-red-500 mt-1 px-1">The upload did not finish. Add the files again.</p>
+            @enderror
+            @error('newAttachments.*')
+                <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
+            @enderror
+            @error('attachments')
+                <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
+            @enderror
+            @error('attachments.*')
                 <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
             @enderror
 

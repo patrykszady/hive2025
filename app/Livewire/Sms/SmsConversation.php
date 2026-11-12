@@ -36,6 +36,9 @@ class SmsConversation extends Component
 
     private const ATTACHMENT_VALIDATION_RULE = 'nullable|file|mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm,m4v,3gp,avi';
 
+    /** How many photos or videos one text carries — the cap the app's API applies too (SendThreadMessageRequest). */
+    public const MAX_ATTACHMENTS = 10;
+
     /**
      * Messages loaded when a thread is first opened. Kept small so switching
      * threads paints quickly; older messages stream in on scroll.
@@ -55,7 +58,21 @@ class SmsConversation extends Component
 
     public string $newMessage = '';
 
-    public $attachment;
+    /**
+     * The photos and videos waiting to go out with the next text.
+     *
+     * @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile>
+     */
+    public array $attachments = [];
+
+    /**
+     * What the paper-clip just picked (the file input is `multiple`). It is
+     * folded into $attachments and emptied straight away, so a second pick
+     * adds to the first instead of replacing it.
+     *
+     * @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile>
+     */
+    public array $newAttachments = [];
 
     public bool $showImageLightbox = false;
 
@@ -154,7 +171,7 @@ class SmsConversation extends Component
         unset($this->thread, $this->presenter);
         $this->messageLimit = self::INITIAL_MESSAGE_LIMIT;
         $this->newMessage = '';
-        $this->attachment = null;
+        $this->clearAttachments();
         $this->showImageLightbox = false;
         $this->lightboxImageUrl = null;
         $this->showOptInModal = false;
@@ -336,11 +353,34 @@ class SmsConversation extends Component
         return ConversationPresenter::fingerprintsForThreads([$this->threadId])[$this->threadId] ?? '0:0:';
     }
 
-    public function updatedAttachment(): void
+    /**
+     * The uploader (flux:file-upload) sent up one or more files the moment
+     * they were picked or dropped: check them, then add them to what is
+     * already waiting. A pick with a file that cannot be sent is dropped
+     * whole, and anything past MAX_ATTACHMENTS is left out with a note, so
+     * the composer never holds a file the send would refuse. The browser
+     * keeps Send disabled until this has run for every file.
+     */
+    public function updatedNewAttachments(): void
     {
-        $this->validate([
-            'attachment' => self::attachmentValidationRule(),
-        ]);
+        $picked = array_values(array_filter($this->newAttachments));
+        $this->resetErrorBag('attachments');
+
+        try {
+            $this->validate(
+                ['newAttachments.*' => self::attachmentValidationRule()],
+                ['newAttachments.*.mimes' => 'Only photos and videos can be attached (jpg, png, gif, webp, mp4, mov, webm, m4v, 3gp, avi).'],
+            );
+        } finally {
+            $this->newAttachments = [];
+        }
+
+        $room = max(0, self::MAX_ATTACHMENTS - count($this->attachments));
+        $this->attachments = array_values(array_merge($this->attachments, array_slice($picked, 0, $room)));
+
+        if (count($picked) > $room) {
+            $this->addError('attachments', 'A text carries up to ' . self::MAX_ATTACHMENTS . ' photos or videos. The rest were left out.');
+        }
     }
 
     public static function attachmentValidationRule(): string
@@ -348,9 +388,51 @@ class SmsConversation extends Component
         return self::ATTACHMENT_VALIDATION_RULE;
     }
 
-    public function removeAttachment(): void
+    public function removeAttachment(int $index): void
     {
-        $this->attachment = null;
+        unset($this->attachments[$index]);
+        $this->attachments = array_values($this->attachments);
+        $this->resetErrorBag('attachments');
+    }
+
+    protected function clearAttachments(): void
+    {
+        $this->attachments = [];
+        $this->newAttachments = [];
+    }
+
+    /**
+     * What a text must pass before it is sent or scheduled: words, or at
+     * least one attachment, and never more attachments than one text carries.
+     *
+     * @return array<string, string>
+     */
+    protected function composerRules(): array
+    {
+        return [
+            'newMessage' => 'required_without:attachments|nullable|string|max:1600',
+            'attachments' => 'array|max:' . self::MAX_ATTACHMENTS,
+            'attachments.*' => self::attachmentValidationRule(),
+            'threadId' => 'required|exists:sms_group_threads,id',
+        ];
+    }
+
+    /**
+     * Keep the waiting attachments and hand back their paths. A relative
+     * /storage/... path shows correctly on any domain; SendGroupMms turns it
+     * into whatever Telnyx needs.
+     *
+     * @return array<int, string>
+     */
+    protected function storeAttachments(): array
+    {
+        $mediaUrls = [];
+
+        foreach ($this->attachments as $attachment) {
+            $mediaUrls[] = '/storage/' . $attachment->store('sms-attachments', 'public');
+        }
+
+        return $mediaUrls;
     }
 
     public function openImageLightbox(string $url): void
@@ -1076,11 +1158,7 @@ class SmsConversation extends Component
             return;
         }
 
-        $this->validate([
-            'newMessage' => 'required_without:attachment|nullable|string|max:1600',
-            'attachment' => self::attachmentValidationRule(),
-            'threadId' => 'required|exists:sms_group_threads,id',
-        ]);
+        $this->validate($this->composerRules());
 
         $thread = SmsGroupThread::findOrFail($this->threadId);
 
@@ -1106,13 +1184,7 @@ class SmsConversation extends Component
             ? $outboundText
             : ($outboundText !== '' ? $outboundText . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature());
 
-        $mediaUrls = [];
-        if ($this->attachment) {
-            $path = $this->attachment->store('sms-attachments', 'public');
-            // Store a relative path so images display correctly regardless of domain.
-            // The SendGroupMms job converts to an absolute URL when calling Telnyx.
-            $mediaUrls[] = '/storage/' . $path;
-        }
+        $mediaUrls = $this->storeAttachments();
 
         $rawPayload = [
             'original_text' => $text,
@@ -1123,7 +1195,7 @@ class SmsConversation extends Component
         $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id(), null, $rawPayload);
 
         $this->newMessage = '';
-        $this->attachment = null;
+        $this->clearAttachments();
 
         // Replying counts as reading — clear the unread state immediately.
         $this->markThreadAsRead();
@@ -1141,11 +1213,7 @@ class SmsConversation extends Component
             abort(403, 'Client users cannot send messages.');
         }
 
-        $this->validate([
-            'newMessage' => 'required_without:attachment|nullable|string|max:1600',
-            'attachment' => self::attachmentValidationRule(),
-            'threadId' => 'required|exists:sms_group_threads,id',
-        ]);
+        $this->validate($this->composerRules());
 
         $thread = SmsGroupThread::findOrFail($this->threadId);
 
@@ -1173,11 +1241,7 @@ class SmsConversation extends Component
             ? $outboundText
             : ($outboundText !== '' ? $outboundText . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature());
 
-        $mediaUrls = [];
-        if ($this->attachment) {
-            $path = $this->attachment->store('sms-attachments', 'public');
-            $mediaUrls[] = '/storage/' . $path;
-        }
+        $mediaUrls = $this->storeAttachments();
 
         $rawPayload = [
             'original_text' => $text,
@@ -1198,7 +1262,7 @@ class SmsConversation extends Component
         );
 
         $this->newMessage = '';
-        $this->attachment = null;
+        $this->clearAttachments();
 
         unset($this->presenter, $this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
@@ -1291,7 +1355,7 @@ class SmsConversation extends Component
 
         $this->editScheduledId = $message->id;
         $this->newMessage = trim((string) $message->display_text);
-        $this->attachment = null;
+        $this->clearAttachments();
         $this->js("(function(){ const ta = \$wire.\$el.querySelector('ui-composer textarea'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } })()");
     }
 
@@ -1314,7 +1378,7 @@ class SmsConversation extends Component
 
         $this->editScheduledId = null;
         $this->newMessage = '';
-        $this->attachment = null;
+        $this->clearAttachments();
 
         $this->refreshMessages();
 
@@ -1332,7 +1396,7 @@ class SmsConversation extends Component
     {
         $this->editScheduledId = null;
         $this->newMessage = '';
-        $this->attachment = null;
+        $this->clearAttachments();
     }
 
     public function resendOptInPrompt(\App\Services\Sms\ThreadOptInManager $optInManager): void
