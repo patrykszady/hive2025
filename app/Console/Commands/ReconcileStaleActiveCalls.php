@@ -18,13 +18,19 @@ class ReconcileStaleActiveCalls extends Command
         $execute = (bool) $this->option('execute');
 
         // A call is stale when it is still flagged active but either already
-        // has a terminating timestamp (status was never transitioned) or was
-        // started long enough ago that it cannot still be live.
+        // has a terminating timestamp (status was never transitioned), was
+        // started long enough ago that it cannot still be live, or is an
+        // outgoing call that never got past `initiated`
+        // (CallLog::NEVER_CONNECTED_MINUTES).
         $stale = CallLog::query()
             ->whereIn('status', CallLog::ACTIVE_STATUSES)
             ->where(function ($query): void {
                 $query->whereNotNull('ended_at')
-                    ->orWhere('created_at', '<', now()->subMinutes(CallLog::STALE_ACTIVE_MINUTES));
+                    ->orWhere('created_at', '<', now()->subMinutes(CallLog::STALE_ACTIVE_MINUTES))
+                    ->orWhere(fn ($neverConnected) => $neverConnected
+                        ->where('direction', 'outgoing')
+                        ->where('status', CallLog::STATUS_INITIATED)
+                        ->where('created_at', '<', now()->subMinutes(CallLog::NEVER_CONNECTED_MINUTES)));
             })
             ->orderByDesc('created_at')
             ->get();

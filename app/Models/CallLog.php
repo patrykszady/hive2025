@@ -44,6 +44,16 @@ class CallLog extends Model
     public const STALE_ACTIVE_MINUTES = 240;
 
     /**
+     * An outgoing call still `initiated` this long after it was logged never
+     * got going: its first leg rings for 30 s at most, and a direct-dial
+     * call's parked leg arrives within seconds. Call 3105 (2026-11-12): the
+     * app logged a direct dial, lost its connection that same second, the
+     * leg never reached Telnyx, and with no webhook ever coming the "In a
+     * call" badge stayed up for the full STALE_ACTIVE_MINUTES.
+     */
+    public const NEVER_CONNECTED_MINUTES = 3;
+
+    /**
      * No tenant column existed at all until now — every vendor user could
      * see every company's calls (see scopeVisibleToMessagesUser). NULL means
      * "created before this column existed"; see LEGACY_OWNER_VENDOR_ID.
@@ -248,6 +258,23 @@ class CallLog extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Calls that can still be in progress right now: an active status, no
+     * end time, younger than STALE_ACTIVE_MINUTES, and not an outgoing call
+     * that has sat `initiated` past NEVER_CONNECTED_MINUTES.
+     */
+    public function scopeStillLive(Builder $query): Builder
+    {
+        return $query
+            ->whereIn('status', self::ACTIVE_STATUSES)
+            ->whereNull('ended_at')
+            ->where('created_at', '>=', now()->subMinutes(self::STALE_ACTIVE_MINUTES))
+            ->whereNot(fn (Builder $neverConnected) => $neverConnected
+                ->where('direction', 'outgoing')
+                ->where('status', self::STATUS_INITIATED)
+                ->where('created_at', '<', now()->subMinutes(self::NEVER_CONNECTED_MINUTES)));
     }
 
     public function scopeVisibleToMessagesUser(Builder $query, User $user): Builder

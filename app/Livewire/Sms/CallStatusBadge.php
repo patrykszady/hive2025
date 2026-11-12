@@ -164,8 +164,10 @@ class CallStatusBadge extends Component
 
         // Find the most recent live call for the authenticated user. A call is
         // only "live" while it has no terminating timestamp and was started
-        // recently — this guards against calls that never received a hangup
-        // webhook and would otherwise keep the badge lit indefinitely.
+        // recently, and an outgoing call that never got past `initiated`
+        // stops counting after a few minutes (CallLog::scopeStillLive) — this
+        // guards against calls that never received a hangup webhook and
+        // would otherwise keep the badge lit for hours.
         // Match calls the user OWNS (outbound they placed) OR calls they've
         // JOINED as an admin (inbound simulring). On inbound, user_id is the
         // external caller, so the owner-only filter never lit the badge for the
@@ -176,9 +178,7 @@ class CallStatusBadge extends Component
                 $q->where('user_id', $user->id)
                     ->orWhereJsonContains('metadata->joined_admin_ids', $user->id);
             })
-            ->whereIn('status', CallLog::ACTIVE_STATUSES)
-            ->whereNull('ended_at')
-            ->where('created_at', '>=', now()->subMinutes(CallLog::STALE_ACTIVE_MINUTES))
+            ->stillLive()
             ->orderByDesc('created_at')
             ->first();
 

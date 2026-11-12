@@ -153,6 +153,50 @@ it('does not light the badge for a stale call that never ended', function () {
     Livewire::test(CallStatusBadge::class)->assertSet('activeCallId', null);
 });
 
+it('closes an outgoing call that never got past initiated after a few minutes, and the badge lets it go', function () {
+    DB::table('users')->insert(['id' => 1, 'name' => 'Pat', 'first_name' => 'Pat']);
+    $user = User::find(1);
+
+    // Call 3105 (2026-11-12): a direct dial the app logged and then lost its
+    // connection — its leg never reached Telnyx, so no webhook ever came.
+    $neverConnected = makeCall([
+        'user_id' => $user->id,
+        'direction' => 'outgoing',
+        'status' => CallLog::STATUS_INITIATED,
+        'metadata' => ['type' => 'direct_dial'],
+    ], now()->subMinutes(CallLog::NEVER_CONNECTED_MINUTES + 1));
+
+    // Still ringing its first leg: live.
+    $ringing = makeCall([
+        'direction' => 'outgoing',
+        'status' => CallLog::STATUS_INITIATED,
+    ], now()->subSeconds(40));
+
+    // Connected for a while: live, whatever its age under the stale limit.
+    $connected = makeCall([
+        'direction' => 'outgoing',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'answered_at' => now()->subMinutes(20),
+    ], now()->subMinutes(21));
+
+    // An incoming call is not held to the outgoing ring window.
+    $incoming = makeCall([
+        'direction' => 'incoming',
+        'status' => CallLog::STATUS_INITIATED,
+    ], now()->subMinutes(10));
+
+    $this->actingAs($user);
+    Livewire::test(CallStatusBadge::class)->assertSet('activeCallId', null);
+
+    $this->artisan('calls:reconcile-stale', ['--execute' => true])->assertSuccessful();
+
+    expect($neverConnected->fresh()->status)->toBe(CallLog::STATUS_FAILED)
+        ->and($neverConnected->fresh()->ended_at)->not->toBeNull()
+        ->and($ringing->fresh()->status)->toBe(CallLog::STATUS_INITIATED)
+        ->and($connected->fresh()->status)->toBe(CallLog::STATUS_TRANSFERRED)
+        ->and($incoming->fresh()->status)->toBe(CallLog::STATUS_INITIATED);
+});
+
 it('lights the badge for a recent live call', function () {
     DB::table('users')->insert(['id' => 1, 'name' => 'Pat', 'first_name' => 'Pat']);
     $user = User::find(1);
