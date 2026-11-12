@@ -358,9 +358,18 @@ async function checkAutoSignInOutcome() {
     if (tabId == null) return;
 
     const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (!tab) return;
 
-    if (looksSignedIn(tab.url)) return;
+    if (!tab) {
+        // The tab is gone: stop waiting on it, so the next scheduled check starts clean.
+        await chrome.storage.session.remove(WAITING_TAB_KEY).catch(() => {});
+
+        return;
+    }
+
+    // Signed in, but the tab's update never reached the listener (the worker
+    // was asleep, or the last update arrived before the page had its final
+    // address): fetch now rather than at the next hourly check.
+    if (looksSignedIn(tab.url)) return followUpAfterSignIn(tabId);
 
     await note('automatic sign-in did not get through — bringing the Menards tab to the front');
     await chrome.tabs.update(tabId, { active: true }).catch(() => {});
@@ -405,12 +414,25 @@ async function waitForPersonalSignIn(tabId) {
     }
 }
 
-chrome.tabs.onUpdated.addListener(async (id, _changeInfo, t) => {
-    if (id !== await waitingForSignInTabId() || !looksSignedIn(t?.url)) return;
+/** The tab whose sign-in already started a follow-up run: one run per sign-in, however many updates the tab fires. */
+let signedInFollowUpFor = null;
+
+async function followUpAfterSignIn(tabId) {
+    if (signedInFollowUpFor === tabId) return;
+    signedInFollowUpFor = tabId;
 
     await chrome.storage.session.remove(WAITING_TAB_KEY).catch(() => {});
     await note('signed in on the tab that was waiting — fetching receipts');
-    setTimeout(() => run('signed in'), 3000);
+    setTimeout(() => {
+        signedInFollowUpFor = null;
+        run('signed in');
+    }, 3000);
+}
+
+chrome.tabs.onUpdated.addListener(async (id, _changeInfo, t) => {
+    if (id !== await waitingForSignInTabId() || !looksSignedIn(t?.url)) return;
+
+    await followUpAfterSignIn(id);
 });
 
 chrome.tabs.onRemoved.addListener(async (id) => {
@@ -579,6 +601,11 @@ async function syncWithOneReload(tab, since, knownIds = []) {
     return sendSync(tab.id, since, knownIds);
 }
 
+/** Chrome's wording when a tab id no longer exists (closed, or replaced by the browser). */
+function tabIsGone(err) {
+    return /No tab with id/i.test(err?.message || '');
+}
+
 /**
  * One run at a time. On 2026-10-29 a second run (Sync now while the alarm's
  * run was still downloading) reused the first run's tab, reloaded it under
@@ -605,18 +632,25 @@ async function run(reason) {
         return;
     }
 
-    const { lastRunStartedAt } = await chrome.storage.local.get('lastRunStartedAt');
-
-    if (automaticRunTooSoon(reason, lastRunStartedAt)) {
-        await note(`a run started ${Math.round((Date.now() - new Date(lastRunStartedAt).getTime()) / 60000)} min ago — skipping the ${reason} request`);
-
-        return;
-    }
-
-    await chrome.storage.local.set({ lastRunStartedAt: new Date().toISOString() });
+    // Claimed before the first await. The check above and this line used to
+    // have two awaits between them, so two requests arriving together (the
+    // "signed in" follow-up fires once per tab update, and a tab updates
+    // several times as it loads) both got through: on 2026-11-11 two runs
+    // started in the same second, shared one tab and both died with
+    // "No tab with id".
     runInProgress = reason;
 
     try {
+        const { lastRunStartedAt } = await chrome.storage.local.get('lastRunStartedAt');
+
+        if (automaticRunTooSoon(reason, lastRunStartedAt)) {
+            await note(`a run started ${Math.round((Date.now() - new Date(lastRunStartedAt).getTime()) / 60000)} min ago — skipping the ${reason} request`);
+
+            return;
+        }
+
+        await chrome.storage.local.set({ lastRunStartedAt: new Date().toISOString() });
+
         await runOnce(reason);
     } finally {
         runInProgress = null;
@@ -639,9 +673,25 @@ async function runOnce(reason) {
     let tab = null;
 
     try {
-        ({ tab, opened, openedWindow = null } = await receiptTab());
+        let result;
 
-        const result = await syncWithOneReload(tab, since, knownIds);
+        try {
+            ({ tab, opened, openedWindow = null } = await receiptTab());
+            result = await syncWithOneReload(tab, since, knownIds);
+        } catch (err) {
+            if (!tabIsGone(err)) throw err;
+
+            // The tab the run was using disappeared under it (closed, or
+            // swapped by the browser). Nothing was sent yet, so a fresh tab
+            // of our own and one more try costs nothing.
+            await note(`the receipt tab went away (${err.message}) — opening a fresh one and trying once more`);
+            ({ tab, openedWindow = null } = await openReceiptTab());
+            opened = true;
+            await waitForLoad(tab.id);
+            await settleTab(tab.id);
+            await assertOnReceiptPage(tab.id);
+            result = await syncWithOneReload(tab, since, knownIds);
+        }
 
         if (!result?.ok) throw new Error(result?.error || 'content script returned no result');
 
@@ -997,7 +1047,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, runState: () => runInProgress };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`
