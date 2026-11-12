@@ -8,6 +8,7 @@ use App\Models\Project;
 use App\Models\SmsGroupThread;
 use App\Services\GroupSmsService;
 use App\Services\Projects\TimelapseCollectionService;
+use App\Support\Sms\ConversationPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -113,12 +114,22 @@ class ProjectMessageImageController extends Controller
         ]]);
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * One texted photo for the app. The links are the signed, session-less
+     * ones the app's message threads already use
+     * (ConversationPresenter::publicMediaUrl()) — the service's own `url` /
+     * `thumb` point at the web's cookie-authenticated route, which answers
+     * the app, a client with a token and no session, with a redirect to the
+     * login page instead of the picture.
+     *
+     * @param  array<string, mixed>  $image
+     * @return array<string, mixed>
+     */
     private function imageArray(array $image): array
     {
         return [
-            'url' => $image['url'],
-            'thumb_url' => $image['thumb'],
+            'url' => ConversationPresenter::publicMediaUrl($image['raw']),
+            'thumb_url' => ConversationPresenter::publicMediaUrl($image['raw'], thumb: true),
             'raw' => $image['raw'],
             'sender' => $image['sender'],
             'label' => $image['label'],

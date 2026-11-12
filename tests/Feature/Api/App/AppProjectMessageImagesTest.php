@@ -91,9 +91,15 @@ it('lists photos texted about the project, with sender grouping and filtering', 
     $response = $this->getJson("/api/app/v1/projects/{$project->id}/message-images")->assertOk();
 
     // The PDF on the same message must not appear — only images.
+    // The links are the signed, session-less ones — the app has a token,
+    // not a web session, and the cookie-authenticated /files/sms_media/
+    // route would answer it with a redirect to the login page.
     expect($response->json('data'))->toHaveCount(1)
-        ->and($response->json('data.0.url'))->toContain('/files/sms_media/')
+        ->and($response->json('data.0.url'))->toContain('/m/sms/')->toContain('signature=')->not->toContain('thumb=1')
+        ->and($response->json('data.0.thumb_url'))->toContain('/m/sms/')->toContain('signature=')->toContain('thumb=1')
         ->and($response->json('data.0.raw'))->toBe('/storage/sms-media/2026/08/wall.jpg');
+
+    expect(request()->create($response->json('data.0.url'))->hasValidSignature())->toBeTrue();
 
     $sender = $response->json('data.0.sender');
 

@@ -32,6 +32,20 @@ class StoreProjectPhotoRequest extends FormRequest
             // Collections hub's selected camera target. A missing/foreign
             // id falls back to the catch-all album server-side.
             'collection_id' => ['nullable', 'integer'],
+            // Chosen by the app once per shot and sent again on every retry
+            // of it — the second arrival gets the frame the first stored.
+            'client_upload_id' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'client_upload_id.regex' => 'The upload id may only contain letters, numbers, dashes and underscores.',
+            'client_upload_id.max' => 'The upload id may not be longer than 64 characters.',
         ];
     }
 }

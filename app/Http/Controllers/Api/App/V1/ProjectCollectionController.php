@@ -44,6 +44,7 @@ class ProjectCollectionController extends Controller
                 ->map(fn (ProjectTimelapse $collection) => (new ProjectCollectionResource($collection, $canManageImages))->toArray($request))
                 ->values()
                 ->all(),
+            'meta' => ['can_manage_images' => $canManageImages],
         ]);
     }
 
@@ -74,7 +75,12 @@ class ProjectCollectionController extends Controller
         return response()->json(['data' => ['id' => $collection, 'deleted' => true]]);
     }
 
-    /** A collection's frames in play order — the playback/curation screen. */
+    /**
+     * A collection's frames in play order — the playback/curation screen.
+     * The collection itself and the viewer's curation right ride along, so
+     * the screen opens on this one request instead of also listing every
+     * collection and loading the whole project to learn two facts.
+     */
     public function frames(Request $request, int $project, int $collection): JsonResponse
     {
         $found = $this->visibleProject($project);
@@ -84,12 +90,18 @@ class ProjectCollectionController extends Controller
 
         $frames = ProjectTimelapseFrame::query()
             ->where('project_timelapse_id', $resolvedCollection->id)
+            ->with('takenBy:id,first_name,nickname')
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
 
+        $resolvedCollection->setRelation('frames', $frames);
+        $canManageImages = (bool) $request->user()?->can('manageImages', $found);
+
         return response()->json([
             'data' => $frames->map(fn (ProjectTimelapseFrame $frame) => (new ProjectPhotoResource($frame))->toArray($request))->values()->all(),
+            'collection' => (new ProjectCollectionResource($resolvedCollection, $canManageImages))->toArray($request),
+            'meta' => ['can_manage_images' => $canManageImages],
         ]);
     }
 

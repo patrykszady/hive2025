@@ -19,16 +19,27 @@ class ImageThumbs
     public const MAX_EDGE = 480;
 
     /**
+     * Longest edge of a phone-screen copy. A phone shows a photo about 390pt
+     * wide at 3x, so 1280px is as sharp as that screen gets — at roughly a
+     * third of the bytes of the 1920px frame behind it.
+     */
+    public const SCREEN_EDGE = 1280;
+
+    /** JPEG quality of a phone-screen copy — looked at full width, so above the grid thumbnail's 72. */
+    public const SCREEN_QUALITY = 80;
+
+    /**
      * Absolute path to the cached thumbnail for these bytes, generating it on
      * first ask. Null when the source can't be decoded (an unsupported HEIC,
      * a truncated download) — callers fall back to the original.
      *
      * $key must change whenever the source does; callers fold in the file's
-     * size or mtime.
+     * size or mtime. $maxEdge and $quality default to the grid thumbnail;
+     * pass SCREEN_EDGE / SCREEN_QUALITY for a phone-screen copy.
      */
-    public static function path(string $key, callable $contents): ?string
+    public static function path(string $key, callable $contents, int $maxEdge = self::MAX_EDGE, int $quality = 72): ?string
     {
-        $file = self::directory().'/'.sha1($key).'.jpg';
+        $file = self::fileFor($key, $maxEdge);
 
         if (is_file($file)) {
             return $file;
@@ -43,15 +54,20 @@ class ImageThumbs
             // EXIF to carry it, so bake it in.
             $image->orientate();
 
-            if (max($image->width(), $image->height()) > self::MAX_EDGE) {
-                $image->resize(self::MAX_EDGE, self::MAX_EDGE, function ($constraint) {
+            if (max($image->width(), $image->height()) > $maxEdge) {
+                $image->resize($maxEdge, $maxEdge, function ($constraint) {
                     $constraint->aspectRatio();
                     $constraint->upsize();
                 });
             }
 
-            $image->save($file, 72, 'jpg');
+            // Written beside the final name and renamed into place: a second
+            // request arriving mid-write must find either no file or a whole
+            // one, never the first half of a JPEG.
+            $partial = $file.'.'.bin2hex(random_bytes(4)).'.part';
+            $image->save($partial, $quality, 'jpg');
             $image->destroy();
+            rename($partial, $file);
 
             return $file;
         } catch (\Throwable $e) {
@@ -59,6 +75,18 @@ class ImageThumbs
 
             return null;
         }
+    }
+
+    /**
+     * Where the copy for this key and size lives. The 480px grid thumbnail
+     * keeps the name it always had, so copies built before other sizes
+     * existed are still found (thumbFileFor() relies on that too).
+     */
+    protected static function fileFor(string $key, int $maxEdge): string
+    {
+        $name = $maxEdge === self::MAX_EDGE ? sha1($key) : sha1($key.'@'.$maxEdge);
+
+        return self::directory().'/'.$name.'.jpg';
     }
 
     /** Longest edge of a micro preview — a handful of pixels, enough to blur up from. */

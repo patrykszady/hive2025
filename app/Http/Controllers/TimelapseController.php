@@ -151,6 +151,22 @@ class TimelapseController extends Controller
             }
         }
 
+        // The phone app plays a sequence at ?size=screen: a 1280px copy,
+        // about a third of the bytes of the 1920px frame, and as sharp as
+        // a phone screen gets. Built once and kept, like the thumbnail.
+        if (request()->query('size') === 'screen' && ! request()->boolean('download')) {
+            $screen = \App\Support\ImageThumbs::path(
+                $frame->disk.':'.$path.':'.$disk->size($path),
+                fn () => $disk->get($path),
+                \App\Support\ImageThumbs::SCREEN_EDGE,
+                \App\Support\ImageThumbs::SCREEN_QUALITY,
+            );
+
+            if ($screen) {
+                return response()->file($screen, \App\Support\ImageThumbs::headers());
+            }
+        }
+
         $headers = [
             'Content-Type' => 'image/jpeg',
             'Content-Length' => (string) $disk->size($path),

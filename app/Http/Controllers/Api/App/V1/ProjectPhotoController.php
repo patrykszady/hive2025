@@ -12,6 +12,7 @@ use App\Models\ProjectTimelapseFrame;
 use App\Services\ProjectImageImporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 
@@ -30,6 +31,11 @@ use Illuminate\Support\Facades\Log;
  * collectionsFor() lists them), exactly like the web camera's own
  * `collection_id` field; a missing/foreign one falls back to the catch-all
  * album, never another project's collection.
+ *
+ * `client_upload_id` makes an upload safe to send twice: the app's outbox
+ * retries a shot whose answer never arrived (jobsite signal drops after the
+ * bytes are already here), and a second POST carrying the same id gets the
+ * frame the first one stored instead of a duplicate in the sequence.
  */
 class ProjectPhotoController extends Controller
 {
@@ -42,6 +48,7 @@ class ProjectPhotoController extends Controller
         $page = ProjectTimelapseFrame::query()
             ->whereHas('timelapse', fn ($query) => $query->where('project_id', $found->id)
                 ->when($request->filled('collection_id'), fn ($q) => $q->where('id', $request->integer('collection_id'))))
+            ->with('takenBy:id,first_name,nickname')
             ->orderByDesc('id')
             ->cursorPaginate(self::PER_PAGE);
 
@@ -56,6 +63,47 @@ class ProjectPhotoController extends Controller
         $found = $this->visibleProject($project);
         Gate::authorize('view', $found);
 
+        $uploadKey = $this->uploadKey($request, $found);
+
+        if ($uploadKey === null) {
+            return $this->frameResponse($request, $this->storeUpload($request, $found), 201);
+        }
+
+        return Cache::lock($uploadKey.':lock', 120)->block(60, function () use ($request, $found, $uploadKey): JsonResponse {
+            $stored = ProjectTimelapseFrame::query()->find(Cache::get($uploadKey));
+
+            if ($stored) {
+                return $this->frameResponse($request, $stored, 200);
+            }
+
+            $frame = $this->storeUpload($request, $found);
+            Cache::put($uploadKey, $frame->id, now()->addDay());
+
+            return $this->frameResponse($request, $frame, 201);
+        });
+    }
+
+    private function frameResponse(Request $request, ProjectTimelapseFrame $frame, int $status): JsonResponse
+    {
+        return response()->json(['data' => (new ProjectPhotoResource($frame))->toArray($request)], $status);
+    }
+
+    /**
+     * Where a `client_upload_id` remembers the frame it produced — per
+     * person and per project, so nobody can collect someone else's frame by
+     * guessing an id. Null when the upload carries none.
+     */
+    private function uploadKey(StoreProjectPhotoRequest $request, Project $project): ?string
+    {
+        $uploadId = $request->validated('client_upload_id');
+
+        return $uploadId
+            ? sprintf('app-photo-upload:%d:%d:%s', (int) auth()->id(), $project->id, $uploadId)
+            : null;
+    }
+
+    private function storeUpload(StoreProjectPhotoRequest $request, Project $found): ProjectTimelapseFrame
+    {
         $t0 = microtime(true);
         $upload = $request->file('photo');
         $sourcePath = $upload->getRealPath();
@@ -110,7 +158,7 @@ class ProjectPhotoController extends Controller
             'store_ms' => (int) round((microtime(true) - $t0) * 1000),
         ]);
 
-        return response()->json(['data' => (new ProjectPhotoResource($frame))->toArray($request)], 201);
+        return $frame;
     }
 
     /** A project the person may see: 404 when it doesn't exist, 403 when it isn't theirs. */
