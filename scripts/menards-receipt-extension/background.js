@@ -556,7 +556,8 @@ async function reportStatus(ok, error, receipts) {
                 // personal/browser: which browser this is, so Hive can stand
                 // its own server browser down once a personal one is reporting.
                 personal: await personalMode(),
-                browser: browserDescription(),
+                // …and which extension it runs, so Hive's log shows when an update took.
+                browser: `${browserDescription()} · extension ${chrome.runtime.getManifest().version}`,
             }),
         });
     } catch (e) {
@@ -601,6 +602,37 @@ async function syncWithOneReload(tab, since, knownIds = []) {
     return sendSync(tab.id, since, knownIds);
 }
 
+/**
+ * A "Load unpacked" folder can be replaced while this worker keeps running
+ * the copy it loaded — which is why every update used to cost a person a
+ * click on Reload. The manifest is read from the folder each time it is
+ * asked for, so its version says what is on disk now.
+ */
+async function versionOnDisk() {
+    try {
+        const res = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+        const version = (await res.json())?.version;
+
+        return typeof version === 'string' && version !== '' ? version : null;
+    } catch {
+        // Mid-copy (half a file), or not readable: ask again next time.
+        return null;
+    }
+}
+
+/** Reload the extension when the folder holds another version than the one running. */
+async function reloadIfFilesChanged() {
+    const running = chrome.runtime.getManifest().version;
+    const onDisk = await versionOnDisk();
+
+    if (!onDisk || onDisk === running) return false;
+
+    await note(`the folder now holds ${onDisk} (running ${running}) — reloading to use it`);
+    chrome.runtime.reload();
+
+    return true;
+}
+
 /** Chrome's wording when a tab id no longer exists (closed, or replaced by the browser). */
 function tabIsGone(err) {
     return /No tab with id/i.test(err?.message || '');
@@ -641,6 +673,10 @@ async function run(reason) {
     runInProgress = reason;
 
     try {
+        // New files in the folder: load them first. The reload restarts this
+        // worker, and a personal browser checks again two minutes later.
+        if (await reloadIfFilesChanged()) return;
+
         const { lastRunStartedAt } = await chrome.storage.local.get('lastRunStartedAt');
 
         if (automaticRunTooSoon(reason, lastRunStartedAt)) {
@@ -1047,7 +1083,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, runState: () => runInProgress };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, reloadIfFilesChanged, runState: () => runInProgress };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`

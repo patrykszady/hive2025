@@ -103,6 +103,22 @@ $('sync').addEventListener('click', async () => {
  * menards.com and cannot draw Imperva's challenge. The fetch itself reuses the
  * receipt tab that is already open and only makes XHR calls.
  */
+/**
+ * Reload the extension when opened as options.html?reload=1
+ *
+ * A "Load unpacked" folder that was just replaced is only used after a
+ * reload, and nothing outside the browser can press that button. This page
+ * is read from the folder every time it opens, so the NEW options.js can ask
+ * for the reload even while the old worker is still running. The worker also
+ * reloads by itself at its next run (reloadIfFilesChanged); this is the
+ * "now" version of the same thing.
+ */
+if (new URLSearchParams(location.search).get('reload') === '1') {
+    $('status').className = 'muted';
+    $('status').textContent = 'Reloading the extension…';
+    chrome.runtime.reload();
+}
+
 if (new URLSearchParams(location.search).get('sync') === '1') {
     $('status').className = 'muted';
     $('status').textContent = 'Starting sync (scheduled)…';

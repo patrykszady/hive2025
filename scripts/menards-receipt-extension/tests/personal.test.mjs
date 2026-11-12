@@ -161,7 +161,8 @@ test('manifest declares no new permission for the personal sign-in flow (tabs/wi
 test('reportStatus() and postToHive() both post a personal field to Hive', () => {
     const reportBody = source.slice(source.indexOf('async function reportStatus('), source.indexOf('async function syncWithOneReload('));
     assert.match(reportBody, /personal:\s*await personalMode\(\)/, 'reportStatus does not send personal');
-    assert.match(reportBody, /browser:\s*browserDescription\(\)/, 'reportStatus does not send browser');
+    // The browser, and since 1.2.2 the extension version after it ("Microsoft Edge 157 · extension 1.2.2").
+    assert.match(reportBody, /browser:\s*`\$\{browserDescription\(\)\} · extension \$\{chrome\.runtime\.getManifest\(\)\.version\}`/, 'reportStatus does not send browser + extension version');
 
     const postBody = source.slice(source.indexOf('async function postToHive('), source.indexOf('async function reportStatus('));
     assert.match(postBody, /personal:\s*await personalMode\(\)/, 'postToHive does not send personal');

@@ -19,8 +19,9 @@ const RECEIPT_URL = 'https://www.menards.com/main/receiptLookup.html';
  * @param {object} tabs  overrides for chrome.tabs
  * @param {object} session  what chrome.storage.session starts with
  */
-function load({ tabs = {}, session = {} } = {}) {
+function load({ tabs = {}, session = {}, diskVersion = 'test' } = {}) {
     const notes = [];
+    const reloads = [];
     const local = { personal: 'personal', serverUrl: 'https://hive.test', token: 't' };
     const sessionStore = { ...session };
     const listenable = () => ({ addListener() {}, removeListener() {} });
@@ -39,7 +40,10 @@ function load({ tabs = {}, session = {} } = {}) {
         setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms, 2)),
         clearTimeout, Date, Promise, Map, Set, Object, Error, JSON, Array, String, Number, Math, RegExp, Intl,
         navigator: { userAgent: 'test-agent', userAgentData: undefined, platform: 'Win32' },
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ received: 0 }), text: async () => '' }),
+        // The extension's own manifest as the folder holds it now; anything else is Hive.
+        fetch: async (url) => String(url).startsWith('chrome-extension://')
+            ? { ok: true, status: 200, json: async () => { if (diskVersion instanceof Error) throw diskVersion; return { version: diskVersion }; } }
+            : { ok: true, status: 200, json: async () => ({ received: 0 }), text: async () => '' },
         chrome: {
             storage: {
                 session: { get: get(sessionStore), set: async (o) => { Object.assign(sessionStore, o); }, remove: remove(sessionStore) },
@@ -53,7 +57,7 @@ function load({ tabs = {}, session = {} } = {}) {
             alarms: { create: async () => {}, clear: async () => {}, get: async () => null, onAlarm: listenable() },
             runtime: {
                 onMessage: listenable(), onStartup: listenable(), onInstalled: listenable(),
-                getURL: (p) => `chrome-extension://test/${p}`, sendMessage() {}, getManifest: () => ({ version: 'test' }),
+                getURL: (p) => `chrome-extension://test/${p}`, sendMessage() {}, getManifest: () => ({ version: 'test' }), reload: () => { reloads.push(true); },
                 getPlatformInfo: async () => ({ os: 'win' }),
             },
             action: { onClicked: listenable() },
@@ -90,7 +94,7 @@ function load({ tabs = {}, session = {} } = {}) {
 
     vm.runInContext(source, vm.createContext(sandbox), { filename: 'background.js' });
 
-    return { hooks: sandbox.__hiveTest, notes, sessionStore, local };
+    return { hooks: sandbox.__hiveTest, notes, sessionStore, local, reloads };
 }
 
 test('two requests arriving together start one run, not two', async () => {
@@ -171,4 +175,26 @@ test('half a minute after an automatic sign-in: the tab is gone → stop waiting
 
     assert.equal('waitingForSignInTab' in sessionStore, false);
     assert.equal(notes.length, 0);
+});
+
+test('new files in the folder: the next run reloads the extension instead of fetching', async () => {
+    const { hooks, notes, reloads } = load({ diskVersion: '9.9.9' });
+
+    await hooks.run('scheduled');
+
+    assert.equal(reloads.length, 1);
+    assert.ok(notes.some((n) => n.includes('the folder now holds 9.9.9 (running test)')), notes.join(' | '));
+    assert.ok(!notes.some((n) => n.startsWith('run start')), 'no fetch with the old code');
+    assert.equal(hooks.runState(), null);
+});
+
+test('the same version on disk, or a manifest caught mid-copy, never reloads', async () => {
+    for (const diskVersion of ['test', new SyntaxError('Unexpected end of JSON input')]) {
+        const { hooks, reloads, notes } = load({ diskVersion });
+
+        await hooks.run('scheduled');
+
+        assert.equal(reloads.length, 0);
+        assert.ok(notes.some((n) => n.startsWith('run start')), notes.join(' | '));
+    }
 });
