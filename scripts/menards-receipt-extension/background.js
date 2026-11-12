@@ -607,6 +607,11 @@ async function assertOnReceiptPage(tabId) {
     if (url.includes('/main/receiptLookup.html')) return;
 
     if (await personalMode()) {
+        // Where the receipt page actually ended up, for Hive's log: "signed
+        // out" was reported nine minutes after a good check on 2026-11-12,
+        // and nothing said whether that was the login page or something else.
+        const landed = landedOn(url);
+
         await waitForPersonalSignIn(tabId);
 
         if (await autoSignInArmed()) {
@@ -614,14 +619,14 @@ async function assertOnReceiptPage(tabId) {
             // to, when the page finishes loading); look again in half a minute.
             await chrome.alarms.create(SIGNIN_CHECK_ALARM, { delayInMinutes: 0.5 });
 
-            throw new Error('Not signed in to menards.com — signing in automatically; the receipts follow by themselves.');
+            throw new Error(`Not signed in to menards.com — signing in automatically; the receipts follow by themselves. (${landed})`);
         }
 
         // Between checks nobody asked for anything: a keep-alive that finds
         // the browser signed out says so and leaves the screen alone. The
         // next scheduled check is the one that brings the tab forward.
         if (runInProgress === KEEPALIVE_REASON) {
-            throw new Error('Not signed in to menards.com — found by the keep-alive; the next scheduled check brings the sign-in tab forward.');
+            throw new Error(`Not signed in to menards.com — found by the keep-alive; the next scheduled check brings the sign-in tab forward. (${landed})`);
         }
 
         await chrome.tabs.update(tabId, { active: true }).catch(() => {});
@@ -630,7 +635,7 @@ async function assertOnReceiptPage(tabId) {
         }
 
         throw new Error(
-            'Not signed in to menards.com — sign in on the tab that just opened; the receipts follow by themselves.'
+            `Not signed in to menards.com — sign in on the tab that just opened; the receipts follow by themselves. (${landed})`
         );
     }
 
@@ -638,6 +643,19 @@ async function assertOnReceiptPage(tabId) {
         `Not signed in to menards.com — the receipt page redirected to ${url || 'an unknown page'}. `
         + 'Sign in once over noVNC; the profile keeps the session.'
     );
+}
+
+/** "landed on /main/login.html" — the page only, never its query string (it can carry tokens). */
+function landedOn(url) {
+    if (!url) return 'landed on no page yet';
+
+    try {
+        const parsed = new URL(url);
+
+        return `landed on ${parsed.hostname === 'www.menards.com' ? '' : parsed.hostname}${parsed.pathname}`;
+    } catch {
+        return 'landed on an unreadable address';
+    }
 }
 
 /**
@@ -1239,7 +1257,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, reloadIfFilesChanged, keepAliveMinutesFrom, nextSlot, keepAliveDue, keepAlive, closeOwnWindows, runState: () => runInProgress };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, reloadIfFilesChanged, keepAliveMinutesFrom, nextSlot, keepAliveDue, keepAlive, closeOwnWindows, landedOn, runState: () => runInProgress };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`

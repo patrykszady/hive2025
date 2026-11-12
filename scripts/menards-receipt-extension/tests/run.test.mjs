@@ -38,7 +38,7 @@ function load({ tabs = {}, session = {}, diskVersion = 'test', windows = {} } = 
         console: { log() {}, warn() {}, error() {} },
         // Every wait in the source, shortened: the logic is what is under test.
         setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms, 2)),
-        clearTimeout, Date, Promise, Map, Set, Object, Error, JSON, Array, String, Number, Math, RegExp, Intl,
+        clearTimeout, Date, Promise, Map, Set, Object, Error, JSON, Array, String, Number, Math, RegExp, Intl, URL,
         navigator: { userAgent: 'test-agent', userAgentData: undefined, platform: 'Win32' },
         // The extension's own manifest as the folder holds it now; anything else is Hive.
         fetch: async (url) => String(url).startsWith('chrome-extension://')
@@ -362,4 +362,16 @@ test('the keep-alive stands down after a failed check, and resumes after a good 
     local.lastRunStartedAt = new Date(Date.now() - 45 * 60000).toISOString();
     await hooks.keepAlive();
     assert.ok(notes.some((n) => n.startsWith('run start (keep-alive)')), notes.join(' | '));
+});
+
+test('a signed-out report says which page the receipt page landed on, without its query string', async () => {
+    const { hooks, notes } = load({
+        tabs: { get: async (id) => ({ id, status: 'complete', url: 'https://www.menards.com/main/login.html?returnUrl=%2Fmain%2FreceiptLookup.html&token=abc', windowId: 1 }) },
+    });
+
+    await hooks.run('scheduled');
+
+    assert.ok(notes.some((n) => n.startsWith('FAILED: Not signed in to menards.com') && n.endsWith('(landed on /main/login.html)')), notes.join(' | '));
+    assert.equal(hooks.landedOn(''), 'landed on no page yet');
+    assert.equal(hooks.landedOn('https://geo.captcha-delivery.com/captcha/?x=1'), 'landed on geo.captcha-delivery.com/captcha/');
 });
