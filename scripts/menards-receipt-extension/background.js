@@ -323,7 +323,14 @@ function waitForLoad(tabId) {
 }
 
 async function receiptTab() {
-    const existing = await chrome.tabs.query({ url: 'https://www.menards.com/main/receiptLookup.html*' });
+    const personal = await personalMode();
+
+    // A person's browser: clear away any window of our own a previous run
+    // left behind (a sign-in that was waiting, a run that died mid-way), and
+    // never borrow a Menards tab the person has open themselves.
+    if (personal) await closeOwnWindows();
+
+    const existing = personal ? [] : await chrome.tabs.query({ url: 'https://www.menards.com/main/receiptLookup.html*' });
 
     if (existing.length) {
         // A page that sat open for hours is a page Imperva has had hours to
@@ -361,9 +368,15 @@ async function receiptTab() {
  * @returns {Promise<{tab: object, openedWindow: ?number}>}
  */
 async function openReceiptTab() {
+    const personal = await personalMode();
     const windows = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => []);
 
-    if (windows.length) {
+    // The server's browser: a background tab in the window it has. A
+    // person's browser never gets a tab in the window they are working in —
+    // with a check every half hour that was a Menards tab appearing in front
+    // of Patryk "all the time" (2026-11-12). It gets a minimized window of
+    // its own instead, closed again when the run ends.
+    if (!personal && windows.length) {
         try {
             return { tab: await chrome.tabs.create({ url: RECEIPT_URL, active: false }), openedWindow: null };
         } catch (err) {
@@ -376,9 +389,62 @@ async function openReceiptTab() {
 
     if (!tab) throw new Error('Could not open a window for the receipt page.');
 
-    await note('no browser window was open — opened a minimized one for the fetch');
+    await rememberOwnWindow(win.id);
+
+    if (!personal) await note('no browser window was open — opened a minimized one for the fetch');
 
     return { tab, openedWindow: win.id };
+}
+
+/**
+ * The windows this extension opened for its own fetches, kept in session
+ * storage (the worker does not live long enough to remember them itself), so
+ * a later run can close one that was left behind.
+ */
+const OWN_WINDOWS_KEY = 'ownWindows';
+
+async function ownWindowIds() {
+    try {
+        const { [OWN_WINDOWS_KEY]: ids } = await chrome.storage.session.get(OWN_WINDOWS_KEY);
+
+        return Array.isArray(ids) ? ids.filter((id) => typeof id === 'number') : [];
+    } catch {
+        return [];
+    }
+}
+
+async function rememberOwnWindow(windowId) {
+    const ids = await ownWindowIds();
+
+    if (!ids.includes(windowId)) await chrome.storage.session.set({ [OWN_WINDOWS_KEY]: [...ids, windowId] }).catch(() => {});
+}
+
+async function forgetOwnWindow(windowId) {
+    await chrome.storage.session.set({ [OWN_WINDOWS_KEY]: (await ownWindowIds()).filter((id) => id !== windowId) }).catch(() => {});
+}
+
+/**
+ * Close every window of our own that is still open — except one a person is
+ * looking at right now (it was brought forward for them to sign in or click
+ * through a check; taking it away mid-click would be worse than leaving it).
+ */
+async function closeOwnWindows() {
+    const keep = [];
+
+    for (const id of await ownWindowIds()) {
+        const win = await chrome.windows.get(id).catch(() => null);
+
+        if (!win) continue;
+
+        if (win.focused) {
+            keep.push(id);
+            continue;
+        }
+
+        await chrome.windows.remove(id).catch(() => {});
+    }
+
+    await chrome.storage.session.set({ [OWN_WINDOWS_KEY]: keep }).catch(() => {});
 }
 
 /**
@@ -859,6 +925,7 @@ async function runOnce(reason) {
         if (opened && tab?.id && tab.id !== await waitingForSignInTabId()) {
             if (openedWindow != null) {
                 await chrome.windows.remove(openedWindow).catch(() => {});
+                await forgetOwnWindow(openedWindow);
             } else {
                 await chrome.tabs.remove(tab.id).catch(() => {});
             }
@@ -1172,7 +1239,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, reloadIfFilesChanged, keepAliveMinutesFrom, nextSlot, keepAliveDue, keepAlive, runState: () => runInProgress };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, reloadIfFilesChanged, keepAliveMinutesFrom, nextSlot, keepAliveDue, keepAlive, closeOwnWindows, runState: () => runInProgress };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`

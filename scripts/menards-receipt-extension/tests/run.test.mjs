@@ -77,7 +77,7 @@ function load({ tabs = {}, session = {}, diskVersion = 'test', windows = {} } = 
                 onRemoved: listenable(),
                 ...tabs,
             },
-            windows: { getAll: async () => [{ id: 1 }], create: async () => ({ id: 2, tabs: [{ id: 9 }] }), update: async () => {}, remove: async () => {}, ...windows },
+            windows: { getAll: async () => [{ id: 1 }], get: async (id) => ({ id, focused: false }), create: async () => ({ id: 2, tabs: [{ id: 9 }] }), update: async () => {}, remove: async () => {}, ...windows },
             scripting: { executeScript: async () => {} },
         },
     };
@@ -119,39 +119,103 @@ test('a run that is skipped as too soon releases its claim', async () => {
     assert.ok(notes.some((n) => n.startsWith('run start (manual)')));
 });
 
-test('a tab that vanishes mid-run gets a fresh tab and a second try', async () => {
-    const created = [];
-    const { hooks, notes } = load({
-        tabs: {
-            query: async () => [{ id: 7 }],
-            reload: async (id) => { if (id === 7) throw new Error('No tab with id: 7.'); },
-            create: async () => { created.push(8); return { id: 8 }; },
+/** chrome.windows whose create() hands out window 2 (tab 9), then window 3 (tab 10), … and records what was opened and closed. */
+function recordingWindows(overrides = {}) {
+    const log = { created: [], removed: [] };
+    let next = 2;
+
+    return {
+        log,
+        windows: {
+            getAll: async () => [{ id: 1 }],
+            get: async (id) => ({ id, focused: false }),
+            create: async (options) => { const id = next++; log.created.push({ id, ...options }); return { id, tabs: [{ id: id + 7 }] }; },
+            update: async () => {},
+            remove: async (id) => { log.removed.push(id); },
+            ...overrides,
         },
+    };
+}
+
+test('a tab that vanishes mid-run gets a fresh window and a second try', async () => {
+    const { log, windows } = recordingWindows();
+    const { hooks, notes } = load({
+        windows,
+        tabs: { sendMessage: async (tabId) => { if (tabId === 9) throw new Error('No tab with id: 9.'); return { ok: true, receipts: [], skipped: 0, errors: [] }; } },
     });
 
     await hooks.run('scheduled');
 
-    assert.ok(notes.some((n) => n.includes('went away (No tab with id: 7.)')), notes.join(' | '));
-    assert.deepEqual(created, [8]);
+    assert.ok(notes.some((n) => n.includes('went away (No tab with id: 9.)')), notes.join(' | '));
+    assert.equal(log.created.length, 2);
     assert.ok(notes.some((n) => n.startsWith('no new receipts')), 'the second try finished the run: ' + notes.join(' | '));
     assert.ok(!notes.some((n) => n.startsWith('FAILED')));
 });
 
-test('any other failure is still a failure, without a second tab', async () => {
-    const created = [];
+test('any other failure is still a failure, without a second window', async () => {
+    const { log, windows } = recordingWindows();
     const { hooks, notes } = load({
-        tabs: {
-            create: async () => { created.push(1); return { id: 1 }; },
-            sendMessage: async () => ({ ok: false, error: 'HTTP 500 from the receipt list' }),
-        },
+        windows,
+        tabs: { sendMessage: async () => ({ ok: false, error: 'HTTP 500 from the receipt list' }) },
     });
 
     await hooks.run('scheduled');
 
     assert.ok(notes.some((n) => n.startsWith('FAILED: HTTP 500')), notes.join(' | '));
-    assert.equal(created.length, 1);
+    assert.equal(log.created.length, 1);
     assert.equal(hooks.tabIsGone(new Error('No tab with id: 12.')), true);
     assert.equal(hooks.tabIsGone(new Error('Receiving end does not exist.')), false);
+});
+
+// ── Out of the person's way ─────────────────────────────────────────────────
+
+test('a personal browser fetches in a minimized window of its own, and closes it', async () => {
+    const { log, windows } = recordingWindows();
+    const touched = [];
+    const { hooks, sessionStore } = load({
+        windows,
+        tabs: {
+            // The person has Menards' receipt page open themselves.
+            query: async () => { touched.push('query'); return [{ id: 50 }]; },
+            reload: async (id) => { touched.push(['reload', id]); },
+            create: async () => { touched.push('create'); return { id: 51 }; },
+        },
+    });
+
+    await hooks.run('scheduled');
+
+    assert.equal(log.created.length, 1);
+    assert.equal(log.created[0].state, 'minimized');
+    assert.equal(log.created[0].focused, false);
+    assert.deepEqual(log.removed, [2], 'its own window is closed when the run ends');
+    assert.deepEqual(touched, [], 'no tab opened in, or borrowed from, the window the person is using');
+    assert.deepEqual(Array.from(sessionStore.ownWindows), []);
+});
+
+test('the server browser keeps using a background tab in its one window', async () => {
+    const { log, windows } = recordingWindows();
+    const created = [];
+    const { hooks, local } = load({ windows, tabs: { create: async (options) => { created.push(options); return { id: 1 }; } } });
+    local.personal = false;
+
+    await hooks.run('scheduled');
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].active, false);
+    assert.equal(log.created.length, 0);
+});
+
+test('a window left behind by an earlier run is closed by the next one — unless the person is on it', async () => {
+    const stale = recordingWindows();
+    const first = load({ windows: stale.windows, session: { ownWindows: [40] } });
+    await first.hooks.run('scheduled');
+    assert.ok(stale.log.removed.includes(40), 'the stale window is closed');
+
+    const inUse = recordingWindows({ get: async (id) => ({ id, focused: id === 40 }) });
+    const second = load({ windows: inUse.windows, session: { ownWindows: [40] } });
+    await second.hooks.run('scheduled');
+    assert.ok(!inUse.log.removed.includes(40), 'a window the person is looking at stays');
+    assert.deepEqual(Array.from(second.sessionStore.ownWindows), [40]);
 });
 
 test('half a minute after an automatic sign-in: signed in but nobody noticed → fetch now', async () => {
