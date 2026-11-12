@@ -90,6 +90,9 @@ Route::prefix('app/v1')->name('api.app.v1.')->group(function () {
 
         Route::get('voice/token', [AppVoiceController::class, 'token'])->name('voice.token');
         Route::post('calls', [AppVoiceController::class, 'store'])->middleware('throttle:30,1')->name('calls.store');
+        // The app's End button also tells Hive, which hangs up the call's
+        // legs itself — the SDK's own goodbye can be lost with its socket.
+        Route::post('calls/{call}/hangup', [AppVoiceController::class, 'hangup'])->whereNumber('call')->middleware('throttle:60,1')->name('calls.hangup');
 
         // The Calls tab: the web calls dashboard's list, detail and blocking.
         Route::get('calls/ringing', [AppVoiceController::class, 'ringing'])->name('calls.ringing');

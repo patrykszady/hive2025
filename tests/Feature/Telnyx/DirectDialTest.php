@@ -180,6 +180,32 @@ it('hangs up an uncorrelated parked leg', function () {
     Http::assertSent(fn ($request) => str_contains($request->url(), 'parked-cc-1/actions/hangup'));
 });
 
+it('never hands a cancelled call\'s late leg to a redial of the same number', function (string $namedBy) {
+    $direct = fn (string $status): CallLog => CallLog::create([
+        'direction' => 'outgoing', 'from_number' => '+12247354200', 'to_number' => '+18475550100',
+        'status' => $status, 'user_id' => $this->patryk->id, 'vendor_id' => 1,
+        'metadata' => ['type' => 'direct_dial', 'target_phone' => '+18475550100', 'target_phones' => ['+18475550100']],
+    ]);
+
+    // End was pressed before the first call's leg reached Telnyx (the app
+    // told Hive, which closed it), and the same number was dialed again.
+    $cancelled = $direct(CallLog::STATUS_MISSED);
+    $redial = $direct(CallLog::STATUS_INITIATED);
+
+    Http::fake();
+
+    $named = $namedBy === 'client_state'
+        ? ['client_state' => DirectDialStarter::clientStateFor($cancelled)]
+        : ['custom_headers' => [['name' => 'X-Hive-Call-Log', 'value' => (string) $cancelled->id]]];
+    $this->postJson('/webhooks/telnyx/voice', parkedLegPayload($named))->assertSuccessful();
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'parked-cc-1/actions/hangup'));
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v2/calls'));
+    expect($redial->fresh()->status)->toBe(CallLog::STATUS_INITIATED)
+        ->and($redial->fresh()->call_control_id)->toBeNull()
+        ->and($cancelled->fresh()->status)->toBe(CallLog::STATUS_MISSED);
+})->with(['client_state', 'header']);
+
 it('hangs up a parked leg even when it correlates, if the flag is off', function () {
     $callLog = CallLog::create([
         'direction' => 'outgoing', 'from_number' => '+12247354200', 'to_number' => '+18475550100',

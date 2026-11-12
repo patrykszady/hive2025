@@ -633,23 +633,37 @@ class TelnyxWebhookController extends Controller
      * telephony credential that placed this leg (payload.from): without
      * that owner check two team members calling at once could each be
      * handed the other's parked leg.
+     *
+     * A leg that names its call is never matched to another one: when the
+     * named call is no longer waiting for its leg (the person pressed End
+     * before the leg arrived — AppCallHangup closed it — or the webhook is
+     * a replay), the leg belongs to nothing and is hung up. Falling through
+     * to "newest call to this number" would hand a cancelled call's late
+     * leg to a redial of the same number, and dial out with nobody on it.
      */
     protected function correlateParkedLeg(array $payload): ?CallLog
     {
+        $namedCallLogIds = [];
+
         $clientState = $this->decodeClientState($payload['client_state'] ?? null);
         if (($clientState['action'] ?? null) === 'direct_dial' && ! empty($clientState['call_log_id'])) {
-            $callLog = $this->directDialCallLogAwaitingPark((int) $clientState['call_log_id']);
+            $namedCallLogIds[] = (int) $clientState['call_log_id'];
+        }
+
+        $headerCallLogId = $this->customHeaderValue($payload, 'X-Hive-Call-Log');
+        if ($headerCallLogId !== null && $headerCallLogId !== '') {
+            $namedCallLogIds[] = (int) $headerCallLogId;
+        }
+
+        foreach ($namedCallLogIds as $namedCallLogId) {
+            $callLog = $this->directDialCallLogAwaitingPark($namedCallLogId);
             if ($callLog) {
                 return $callLog;
             }
         }
 
-        $headerCallLogId = $this->customHeaderValue($payload, 'X-Hive-Call-Log');
-        if ($headerCallLogId !== null && $headerCallLogId !== '') {
-            $callLog = $this->directDialCallLogAwaitingPark((int) $headerCallLogId);
-            if ($callLog) {
-                return $callLog;
-            }
+        if ($namedCallLogIds !== [] && CallLog::query()->whereKey($namedCallLogIds)->where('metadata->type', 'direct_dial')->exists()) {
+            return null;
         }
 
         $user = $this->userForParkedLegFrom($payload['from'] ?? null);

@@ -166,3 +166,30 @@ it('logs a direct-dial CallLog without placing any Telnyx call', function () {
 
     Http::assertNothingSent();
 });
+
+// =========================================================================
+// The phone's call screen shows who is being called, not the bare number
+// (2026-11-12): placing a call answers with the name Hive knows the number
+// by — the same one the Calls list shows — or null for a stranger.
+// =========================================================================
+
+it('names the person being called when Hive knows the number', function (string $ring) {
+    config(['services.telnyx.direct_dial_enabled' => true]);
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['call_control_id' => 'app-leg']], 200)]);
+    User::factory()->create(['first_name' => 'Mark', 'last_name' => 'Brodson', 'nickname' => null, 'cell_phone' => '7735550142']);
+    Sanctum::actingAs($this->member, ['app']);
+
+    $this->postJson('/api/app/v1/calls', ['to' => '(773) 555-0142', 'ring' => $ring])
+        ->assertCreated()
+        ->assertJson(['to' => '+17735550142', 'ring' => $ring, 'display_name' => 'Mark Brodson']);
+})->with(['direct', 'app', 'cell']);
+
+it('names nobody for a number Hive does not know', function (string $ring) {
+    config(['services.telnyx.direct_dial_enabled' => true]);
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['call_control_id' => 'app-leg']], 200)]);
+    Sanctum::actingAs($this->member, ['app']);
+
+    $this->postJson('/api/app/v1/calls', ['to' => '(773) 555-0143', 'ring' => $ring])
+        ->assertCreated()
+        ->assertJsonPath('display_name', null);
+})->with(['direct', 'app']);

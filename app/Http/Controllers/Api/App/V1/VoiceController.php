@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\HangUpAppCallRequest;
 use App\Http\Requests\Api\App\PlaceAppCallRequest;
 use App\Models\CallLog;
+use App\Services\Calls\AppCallHangup;
 use App\Services\Calls\CallHistory;
 use App\Services\Voice\AppVoiceCredentials;
 use App\Services\Voice\ClickToCall;
@@ -70,15 +72,17 @@ class VoiceController extends Controller
      * Place a call: Hive rings the app (or the person's cell), then dials
      * the number(s) — a single `to`, or every thread participant at once
      * for the conversation screen's "Call All" (App\Livewire\Sms\
-     * SmsConversation::initiateCallAll()).
+     * SmsConversation::initiateCallAll()). `display_name` is who Hive knows
+     * the first number as (the name the Calls list shows for it), or null:
+     * the phone's call screen shows it in place of the bare number.
      */
-    public function store(PlaceAppCallRequest $request, ClickToCall $clickToCall, DirectDialStarter $directDial): JsonResponse
+    public function store(PlaceAppCallRequest $request, ClickToCall $clickToCall, DirectDialStarter $directDial, CallHistory $history): JsonResponse
     {
         $ring = $request->validated('ring', 'app');
         $targets = $request->validated('targets') ?? [$request->validated('to')];
 
         if ($ring === 'direct') {
-            return $this->storeDirect($request, $directDial, $targets);
+            return $this->storeDirect($request, $directDial, $history, $targets);
         }
 
         $ringsApp = $ring !== 'cell';
@@ -94,6 +98,7 @@ class VoiceController extends Controller
             'to' => $result['targets'][0],
             'targets' => $result['targets'],
             'ring' => $ringsApp ? 'app' : 'cell',
+            'display_name' => $history->nameFor($result['targets'][0]),
         ], 201);
     }
 
@@ -106,7 +111,7 @@ class VoiceController extends Controller
      *
      * @param  array<int, string|null>  $targets
      */
-    protected function storeDirect(PlaceAppCallRequest $request, DirectDialStarter $directDial, array $targets): JsonResponse
+    protected function storeDirect(PlaceAppCallRequest $request, DirectDialStarter $directDial, CallHistory $history, array $targets): JsonResponse
     {
         $result = $directDial->start($request->user(), $targets);
 
@@ -120,6 +125,30 @@ class VoiceController extends Controller
             'targets' => $result['targets'],
             'ring' => 'direct',
             'client_state' => $result['client_state'],
+            'display_name' => $history->nameFor($result['targets'][0]),
         ], 201);
+    }
+
+    /**
+     * The person ended a call they placed from the app. The app's calling
+     * SDK tells Telnyx itself, but that goodbye travels over the SDK's own
+     * socket and is lost when the socket is — so the app also says so here,
+     * and Hive hangs up the call's legs (AppCallHangup). `ended` is false
+     * while Telnyx's hangup webhooks are still on their way; the app asks
+     * again until it is true.
+     */
+    public function hangup(HangUpAppCallRequest $request, int $call, AppCallHangup $hangup): JsonResponse
+    {
+        $callLog = CallLog::query()->find($call);
+        abort_unless($callLog, 404);
+        abort_unless($hangup->placedBy($request->user(), $callLog), 403, 'You did not place this call.');
+
+        if (! $hangup->supports($callLog)) {
+            return response()->json(['message' => 'This call cannot be ended from the app.'], 422);
+        }
+
+        $result = $hangup->hangUp($request->user(), $callLog, (string) ($request->validated('reason') ?? 'local-hangup'));
+
+        return response()->json(['call_log_id' => $callLog->id] + $result);
     }
 }
