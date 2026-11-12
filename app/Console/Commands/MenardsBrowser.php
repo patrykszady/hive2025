@@ -15,7 +15,7 @@ use Illuminate\Console\Command;
  */
 class MenardsBrowser extends Command
 {
-    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync|tidy|keepalive}
+    protected $signature = 'menards:browser {action=status : start|stop|status|check|login|ensure|sync|tidy|keepalive|chrome-check}
         {--jitter=0 : keepalive: wait a random 0..N seconds first, so the calls do not land on the clock}
         {--reset-profile : Wipe the browser profile — this signs you out}
         {--signin : ensure: also sign in when signed out (the daily pass). A plain ensure — the deploy runs one — only keeps the browser up}
@@ -41,6 +41,7 @@ class MenardsBrowser extends Command
             'stop' => $this->stop($browser),
             'tidy' => $this->tidy($browser),
             'keepalive' => $this->keepalive($browser),
+            'chrome-check' => $this->chromeCheck(),
             default => $this->status($browser),
         };
     }
@@ -284,7 +285,22 @@ class MenardsBrowser extends Command
         // would just draw the Imperva wall for nothing.
         $restartForPack = $repackChanged && ! $browser->updatesOverHttps();
 
-        if (! $status['running'] || ! $status['chrome'] || ! $status['extension'] || ! $status['configured'] || $restartForPack) {
+        // A Chrome update on the server (the weekly root job) replaces the
+        // program on disk; the browser already running keeps its old copy —
+        // and an old Chrome is what Imperva distrusts. One restart per
+        // update, and only on the daily pass or a person's Retry: a deploy's
+        // plain ensure never restarts for it (every restart is a new load of
+        // menards.com for Imperva to judge).
+        $restartForChrome = ($this->option('signin') || $this->option('manual'))
+            && $status['chrome']
+            && app(\App\Support\Menards\ChromeInstall::class)->runningBinaryReplaced();
+
+        if ($restartForChrome) {
+            $this->line('Chrome was updated on the server — restarting the browser to use it.');
+            \Illuminate\Support\Facades\Log::channel('menards')->info('Menards browser: restarting onto the updated Chrome', app(\App\Support\Menards\ChromeInstall::class)->versions());
+        }
+
+        if (! $status['running'] || ! $status['chrome'] || ! $status['extension'] || ! $status['configured'] || $restartForPack || $restartForChrome) {
             $this->line('Starting the browser…');
             $result = $browser->start();
 
@@ -296,7 +312,7 @@ class MenardsBrowser extends Command
 
             // Chrome needs a moment past process-up to apply the force-install
             // policy and boot the extension before status can see either.
-            sleep(10);
+            \Illuminate\Support\Sleep::for(10)->seconds();
         }
 
         // Proof beats probing. A receipt batch that arrived in the last day was
@@ -681,6 +697,42 @@ class MenardsBrowser extends Command
         NotifyMenardsBrowserNeedsAttention::dispatch($reason, $detail);
 
         $this->line("Notified admins: {$detail}");
+    }
+
+    /**
+     * Once a week: is the server's Chrome behind what the package source
+     * offers? The weekly root job in Forge is what updates it; this is the
+     * check that the job is still doing so — the server sat on Chrome 151 for
+     * months with nobody told. An admin gets one in-app notification with
+     * the command to run.
+     */
+    protected function chromeCheck(): int
+    {
+        $versions = app(\App\Support\Menards\ChromeInstall::class)->versions();
+        $behind = \App\Support\Menards\ChromeInstall::majorsBehind($versions);
+
+        \Illuminate\Support\Facades\Log::channel('menards')->info('Menards browser: weekly Chrome check', $versions + ['majors_behind' => $behind]);
+
+        if (! $versions['installed']) {
+            $this->line('Google Chrome is not installed from the package source here — nothing to check.');
+
+            return self::SUCCESS;
+        }
+
+        if ($behind === 0) {
+            $this->info("Chrome {$versions['installed']} is current.");
+
+            return self::SUCCESS;
+        }
+
+        $detail = "The server's Chrome is {$versions['installed']}; {$versions['candidate']} is out ({$behind} "
+            . \Illuminate\Support\Str::plural('release', $behind) . ' behind). The weekly update job in Forge did not bring it up. '
+            . 'On the server: sudo apt-get update && sudo apt-get install --only-upgrade google-chrome-stable';
+
+        NotifyMenardsBrowserNeedsAttention::dispatch('chrome_outdated', $detail);
+        $this->warn($detail);
+
+        return self::SUCCESS;
     }
 
     /**

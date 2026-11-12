@@ -424,6 +424,17 @@ Schedule::command('menards:browser ensure --signin')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/menards-ensure.log'));
 
+// Chrome on the server is updated by a weekly root job in Forge (Sundays
+// 00:00 UTC; forge has no sudo). This is the check on that job, a day later:
+// an admin is told in the app when Chrome is a release or more behind. The
+// daily pass above restarts the browser onto an updated Chrome by itself.
+Schedule::command('menards:browser chrome-check')
+    ->weeklyOn(1, '07:00')
+    ->timezone('America/Chicago')
+    ->environments(['production'])
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/menards-ensure.log'));
+
 // Keep-alive: Menards drops an idle session within about an hour, and every
 // new sign-in draws Imperva's hCaptcha, which needs a person. One receipt-API
 // call from inside the parked tab every 15 minutes (a random 0-3 minutes late,

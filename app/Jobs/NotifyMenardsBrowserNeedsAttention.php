@@ -113,6 +113,7 @@ class NotifyMenardsBrowserNeedsAttention implements ShouldQueue
             'signed_out' => 'Menards is signed out',
             'extension_missing' => 'Menards sync is broken',
             'down' => 'Menards browser is down',
+            'chrome_outdated' => 'Chrome on the server is out of date',
             default => 'Menards browser needs attention',
         };
     }
