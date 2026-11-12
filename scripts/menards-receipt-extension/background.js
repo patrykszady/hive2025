@@ -39,7 +39,16 @@ const BACKFILL_SINCE = '2026-07-01';
  */
 const SETTINGS_PATH = '/api/menards/extension-settings';
 const FIRST_RUN_ALARM = 'menards-receipt-first-run';
-const DEFAULT_SCHEDULE = { intervalMinutes: 60, windowStartHour: 7, windowEndHour: 19, timeZone: 'America/Chicago', lookbackDays: 14 };
+const DEFAULT_SCHEDULE = { intervalMinutes: 60, windowStartHour: 7, windowEndHour: 19, timeZone: 'America/Chicago', lookbackDays: 14, keepAliveMinutes: 30 };
+
+// Staying signed in (personal browsers). Menards drops a session after 60
+// minutes idle: over 2026-11-08..12, 10 of the 16 hourly checks that followed
+// a good one found it already signed out, and every sign-out is a sign-in —
+// the one step Imperva's check can stop, with nobody there to click. A check
+// every keepAliveMinutes, around the clock, keeps the session from ever
+// going idle; 0 turns it off.
+const KEEPALIVE_ALARM = 'menards-keep-alive';
+const KEEPALIVE_REASON = 'keep-alive';
 
 /** Receipts already delivered to Hive — listed again every run, downloaded never. */
 const KNOWN_IDS_KEY = 'sentTransactionIds';
@@ -67,6 +76,56 @@ function withinWindow(schedule, date = new Date()) {
 }
 
 /** The next full hour after `nowMs`, in ms — so checks land at :00 like a cron. */
+/** What Hive sent for keep_alive_minutes, as minutes: missing/garbage → the default, 0 → off, never under 10. */
+function keepAliveMinutesFrom(value) {
+    if (value === undefined || value === null || value === '' || !Number.isFinite(Number(value))) return DEFAULT_SCHEDULE.keepAliveMinutes;
+
+    const minutes = Math.floor(Number(value));
+
+    return minutes <= 0 ? 0 : Math.max(10, minutes);
+}
+
+/** The next clock time that is a whole multiple of `minutes` (30 → :00 and :30). */
+function nextSlot(nowMs, minutes) {
+    const slot = minutes * 60 * 1000;
+
+    return Math.floor(nowMs / slot) * slot + slot;
+}
+
+/**
+ * Whether the session has gone long enough without a check to need one: the
+ * last run (of any kind) started at least keepAliveMinutes, less a few for
+ * alarm drift, ago.
+ */
+function keepAliveDue(lastRunStartedAt, keepAliveMinutes, nowMs = Date.now()) {
+    if (!(keepAliveMinutes > 0)) return false;
+    if (!lastRunStartedAt) return true;
+
+    return nowMs - new Date(lastRunStartedAt).getTime() >= (keepAliveMinutes - 5) * 60 * 1000;
+}
+
+async function keepAlive() {
+    if (!(await personalMode())) return;
+
+    const sched = await schedule();
+    const { lastRunStartedAt, lastError } = await chrome.storage.local.get(['lastRunStartedAt', 'lastError']);
+
+    // Only a session that worked last time is worth keeping. After a failed
+    // check — signed out and the sign-in did not get through, above all —
+    // there is nothing to keep alive, and a sign-in attempt every half hour
+    // around the clock is exactly what makes Imperva trust a browser less.
+    // The scheduled checks carry on as before; the first one that succeeds
+    // clears the error and the keep-alive resumes.
+    if (lastError) return;
+
+    if (!keepAliveDue(lastRunStartedAt, sched.keepAliveMinutes)) return;
+
+    // A check like any other: it loads the receipt page and lists what is
+    // new, which is the activity that keeps the session — and it brings any
+    // new receipt in half an hour sooner, at night too.
+    await run(KEEPALIVE_REASON);
+}
+
 function nextTopOfHour(nowMs) {
     const hour = 60 * 60 * 1000;
 
@@ -109,12 +168,15 @@ async function refreshSchedule() {
             windowEndHour: Number.isFinite(Number(body.window_end_hour)) ? Number(body.window_end_hour) : DEFAULT_SCHEDULE.windowEndHour,
             timeZone: typeof body.timezone === 'string' && body.timezone ? body.timezone : DEFAULT_SCHEDULE.timeZone,
             lookbackDays: Math.max(1, Number(body.lookback_days) || DEFAULT_SCHEDULE.lookbackDays),
+            // Absent (a Hive that does not send it yet) = the default; 0 = off.
+            keepAliveMinutes: keepAliveMinutesFrom(body.keep_alive_minutes),
         };
         const current = await schedule();
 
         if (JSON.stringify(next) !== JSON.stringify(current)) {
             await chrome.storage.local.set({ schedule: next });
-            await note(`schedule from Hive: every ${next.intervalMinutes} min, ${next.windowStartHour}:00–${next.windowEndHour}:00 ${next.timeZone}`);
+            await note(`schedule from Hive: every ${next.intervalMinutes} min, ${next.windowStartHour}:00–${next.windowEndHour}:00 ${next.timeZone}`
+                + (next.keepAliveMinutes ? `; staying signed in with a check every ${next.keepAliveMinutes} min` : '; staying signed in is off'));
             await applyAlarm();
         }
     } catch {
@@ -131,8 +193,18 @@ async function applyAlarm() {
         const sched = await schedule();
         await chrome.alarms.create(ALARM, { when: nextTopOfHour(Date.now()) + 20000, periodInMinutes: sched.intervalMinutes });
 
+        if (sched.keepAliveMinutes > 0) {
+            // A little after the scheduled check's slot, so on the hour the
+            // check goes first and the keep-alive sees there is nothing to do.
+            await chrome.alarms.create(KEEPALIVE_ALARM, { when: nextSlot(Date.now(), sched.keepAliveMinutes) + 50000, periodInMinutes: sched.keepAliveMinutes });
+        } else {
+            await chrome.alarms.clear(KEEPALIVE_ALARM);
+        }
+
         return;
     }
+
+    await chrome.alarms.clear(KEEPALIVE_ALARM);
 
     await chrome.alarms.create(ALARM, { periodInMinutes: 60 * 24, delayInMinutes: 2 });
 }
@@ -371,6 +443,14 @@ async function checkAutoSignInOutcome() {
     // address): fetch now rather than at the next hourly check.
     if (looksSignedIn(tab.url)) return followUpAfterSignIn(tabId);
 
+    const { waitingQuietly } = await chrome.storage.session.get('waitingQuietly').catch(() => ({}));
+
+    if (waitingQuietly) {
+        await note('automatic sign-in (keep-alive) did not get through — leaving the tab for the next scheduled check');
+
+        return;
+    }
+
     await note('automatic sign-in did not get through — bringing the Menards tab to the front');
     await chrome.tabs.update(tabId, { active: true }).catch(() => {});
     await chrome.windows.update(tab.windowId, { state: 'normal', focused: true }).catch(() => {});
@@ -409,7 +489,9 @@ function looksSignedIn(url) {
  */
 async function waitForPersonalSignIn(tabId) {
     try {
-        await chrome.storage.session.set({ [WAITING_TAB_KEY]: tabId });
+        // quiet: the sign-in was started by a keep-alive, so when it does not
+        // get through, the 30-second check must not pull a window forward.
+        await chrome.storage.session.set({ [WAITING_TAB_KEY]: tabId, waitingQuietly: runInProgress === KEEPALIVE_REASON });
     } catch {
     }
 }
@@ -467,6 +549,13 @@ async function assertOnReceiptPage(tabId) {
             await chrome.alarms.create(SIGNIN_CHECK_ALARM, { delayInMinutes: 0.5 });
 
             throw new Error('Not signed in to menards.com — signing in automatically; the receipts follow by themselves.');
+        }
+
+        // Between checks nobody asked for anything: a keep-alive that finds
+        // the browser signed out says so and leaves the screen alone. The
+        // next scheduled check is the one that brings the tab forward.
+        if (runInProgress === KEEPALIVE_REASON) {
+            throw new Error('Not signed in to menards.com — found by the keep-alive; the next scheduled check brings the sign-in tab forward.');
         }
 
         await chrome.tabs.update(tabId, { active: true }).catch(() => {});
@@ -1083,7 +1172,7 @@ async function seedDefaults() {
 }
 
 // Pure pieces, for tests (tests/personal.test.mjs) — no chrome calls inside.
-globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, reloadIfFilesChanged, runState: () => runInProgress };
+globalThis.__hiveTest = { isPersonalPlatform, nextSettings, withinWindow, nextTopOfHour, mergeKnownIds, hourIn, automaticRunTooSoon, autoSignInAllowed, tabIsGone, run, checkAutoSignInOutcome, reloadIfFilesChanged, keepAliveMinutesFrom, nextSlot, keepAliveDue, keepAlive, runState: () => runInProgress };
 
 /**
  * Answer the residential proxy's 407s on Chrome's behalf. `--proxy-server`
@@ -1184,6 +1273,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.alarms.onAlarm.addListener(async a => {
     if (a.name === SIGNIN_CHECK_ALARM) return checkAutoSignInOutcome();
     if (a.name === FIRST_RUN_ALARM) return run('installed');
+    if (a.name === KEEPALIVE_ALARM) return keepAlive();
     if (a.name !== ALARM) return;
 
     if (await personalMode()) {

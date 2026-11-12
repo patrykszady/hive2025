@@ -24,6 +24,7 @@ it('answers the default schedule: every hour, 7 to 19 Central, 14 days back', fu
             'window_end_hour' => 19,
             'timezone' => 'America/Chicago',
             'lookback_days' => 14,
+            'keep_alive_minutes' => 30,
         ]);
 });
 
@@ -36,7 +37,9 @@ it('follows the configured cadence and never goes under five minutes', function 
         ->assertJsonPath('window_start_hour', 6)
         ->assertJsonPath('window_end_hour', 20)
         ->assertJsonPath('timezone', 'America/New_York')
-        ->assertJsonPath('lookback_days', 7);
+        ->assertJsonPath('lookback_days', 7)
+        // Not in this config: the default.
+        ->assertJsonPath('keep_alive_minutes', 30);
 });
 
 it('says so when the bridge is not configured', function (): void {

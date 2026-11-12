@@ -9,7 +9,8 @@ use Illuminate\Support\Facades\Log;
 /**
  * GET api/menards/extension-settings — the schedule a PERSONAL browser's
  * receipt extension runs on (config services.menards.personal): how often it
- * checks, between which hours, in which time zone, and how far back it lists.
+ * checks, between which hours, in which time zone, how far back it lists, and
+ * how often it checks in between to stay signed in.
  *
  * The extension in Patryk's Edge is loaded unpacked and cannot update itself,
  * so anything we may want to tune lives here and is fetched on every run.
@@ -40,6 +41,9 @@ class MenardsExtensionSettingsController extends Controller
             'window_end_hour' => (int) ($personal['window_end_hour'] ?? 19),
             'timezone' => (string) ($personal['timezone'] ?? 'America/Chicago'),
             'lookback_days' => max(1, (int) ($personal['lookback_days'] ?? 14)),
+            // Staying signed in: a check this often, around the clock, so the
+            // session never reaches Menards' 60-minute idle sign-out. 0 = off.
+            'keep_alive_minutes' => max(0, (int) ($personal['keep_alive_minutes'] ?? 30)),
         ]);
     }
 }

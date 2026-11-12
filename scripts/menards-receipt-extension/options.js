@@ -43,10 +43,11 @@ async function refresh() {
 
     const personal = typeof s.personal === 'boolean' ? s.personal : detectedMode() === 'Personal browser';
     if (personal) {
-        const sched = { intervalMinutes: 60, windowStartHour: 7, windowEndHour: 19, timeZone: 'America/Chicago', ...(s.schedule || {}) };
+        const sched = { intervalMinutes: 60, windowStartHour: 7, windowEndHour: 19, timeZone: 'America/Chicago', keepAliveMinutes: 30, ...(s.schedule || {}) };
         const alarm = await chrome.alarms.get('menards-receipt-sync').catch(() => null);
         const next = alarm ? new Date(alarm.scheduledTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—';
-        s.scheduleLine = `Checks every ${sched.intervalMinutes} min, ${sched.windowStartHour}:00–${sched.windowEndHour}:00 ${sched.timeZone} (set on Hive). Next check: ${next}.`;
+        s.scheduleLine = `Checks every ${sched.intervalMinutes} min, ${sched.windowStartHour}:00–${sched.windowEndHour}:00 ${sched.timeZone} (set on Hive). Next check: ${next}.`
+            + (sched.keepAliveMinutes > 0 ? ` Stays signed in with a check every ${sched.keepAliveMinutes} min, day and night.` : '');
     }
 
     render(s);

@@ -140,6 +140,9 @@ return [
             'window_end_hour' => (int) env('MENARDS_PERSONAL_WINDOW_END', 19),
             'timezone' => env('MENARDS_PERSONAL_TIMEZONE', 'America/Chicago'),
             'lookback_days' => (int) env('MENARDS_PERSONAL_LOOKBACK_DAYS', 14),
+            // Menards signs an idle session out after 60 minutes; a check this
+            // often keeps a personal browser signed in. 0 turns it off.
+            'keep_alive_minutes' => (int) env('MENARDS_PERSONAL_KEEPALIVE_MINUTES', 30),
         ],
         'user_data_dir' => env('MENARDS_USER_DATA_DIR'),
         'novnc_web' => env('MENARDS_NOVNC_WEB', '/usr/share/novnc'),
