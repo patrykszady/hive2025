@@ -215,37 +215,32 @@ class ScrapeMenardsReceipts extends Command
                     continue;
                 }
 
-                // Skip if this expense already has ANY receipt attached.
+                // One copy from menards.com per expense, never two: on one run
+                // 43 expenses ended up with a second copy of the same download.
                 //
-                // This used to look only for filenames LIKE '%menards-%', which
-                // meant an expense already carrying an emailed receipt, a manual
-                // upload, or a row whose filename was never set did not count as
-                // "already has a receipt" — so a second copy was attached to it.
-                // That is how 43 expenses ended up double-linked in one run.
-                $existingReceipt = ExpenseReceipts::where('expense_id', $expense->id)->first();
+                // A receipt that arrived another way — the office's scan of the
+                // paper, an upload — is NOT a reason to skip. Until 2026-11-12
+                // it was: the scan of a morning's purchase usually reaches Hive
+                // before Menards' own copy does, so that copy was fetched and
+                // then thrown away (expenses 29066 and 29067, 2026-11-11), and
+                // the expense kept only the scan. Now Menards' copy goes on
+                // beside it, the way a scan and an emailed receipt of one
+                // purchase already sit together (attachBesideOtherCopies()).
+                $menardsCopy = $this->menardsCopyOn($expense->id);
 
-                if ($existingReceipt && ! $force) {
-                    $this->line("  <comment>EXISTS</comment> Expense #{$expense->id} already has receipt — skipping (use --force to overwrite)");
+                if ($menardsCopy && ! $force) {
+                    $this->line("  <comment>EXISTS</comment> Expense #{$expense->id} already has Menards' receipt — skipping (use --force to overwrite)");
                     $linkedExpenseIds[] = $expense->id;
                     $skipped++;
 
                     continue;
                 }
 
-                // --force replaces a receipt this scraper produced. It will not
-                // throw away one that arrived another way: an emailed or manually
-                // uploaded receipt is the record of something we cannot re-fetch,
-                // so it is left alone and the scraped copy is dropped instead.
-                if ($existingReceipt && $force) {
-                    if (! str_contains((string) $existingReceipt->receipt_filename, 'menards-')) {
-                        $this->line("  <comment>KEEP</comment> Expense #{$expense->id} has a non-Menards receipt — leaving it, skipping this one");
-                        $linkedExpenseIds[] = $expense->id;
-                        $skipped++;
-
-                        continue;
-                    }
-
-                    $existingReceipt->delete();
+                // --force replaces a receipt this importer produced. It never
+                // touches one that arrived another way: a scan or an upload is
+                // the record of something we cannot fetch again.
+                if ($menardsCopy && $force) {
+                    $menardsCopy->delete();
                     $this->line("  <comment>REPLACE</comment> Deleting old receipt for expense #{$expense->id}");
                 }
 
@@ -298,9 +293,9 @@ class ScrapeMenardsReceipts extends Command
                 }
             }
 
-            // Last look before attaching: never a second receipt on one expense.
-            if ($expense && ! $force && ExpenseReceipts::where('expense_id', $expense->id)->exists()) {
-                $this->line("  <comment>EXISTS</comment> Expense #{$expense->id} got its receipt meanwhile — skipping");
+            // Last look before attaching: never a second copy from menards.com on one expense.
+            if ($expense && ! $force && $this->menardsCopyOn($expense->id)) {
+                $this->line("  <comment>EXISTS</comment> Expense #{$expense->id} got Menards' receipt meanwhile — skipping");
                 $linkedExpenseIds[] = $expense->id;
                 $skipped++;
 
@@ -314,12 +309,7 @@ class ScrapeMenardsReceipts extends Command
                     $ocrData['fields'] = ReceiptTenders::withMenardsRebateTotals($ocrData['fields'], (string) ($ocrData['fields']['raw_content'] ?? $ocrData['content'] ?? ''));
                 }
 
-                ExpenseReceipts::create([
-                    'expense_id'       => $expense->id,
-                    'receipt_filename' => $filename,
-                    'receipt_html'     => $ocrData['content'] ?? null,
-                    'receipt_items'    => $ocrData['fields'] ?? null,
-                ]);
+                $this->attachBesideOtherCopies($expense, $filename, $ocrData);
 
                 $linkedExpenseIds[] = $expense->id;
 
@@ -341,6 +331,58 @@ class ScrapeMenardsReceipts extends Command
         $this->info("Done: {$imported} imported, {$matched} matched to expenses, {$skipped} skipped");
 
         return self::SUCCESS;
+    }
+
+    /** The copy this importer attached to the expense before, if any — its files are named "…menards-…". */
+    private function menardsCopyOn(int $expenseId): ?ExpenseReceipts
+    {
+        return ExpenseReceipts::where('expense_id', $expenseId)
+            ->where('receipt_filename', 'like', '%menards-%')
+            ->first();
+    }
+
+    /**
+     * Attach Menards' own copy of a receipt. When the expense already holds
+     * another copy of the same purchase (the office's scan, an upload), both
+     * stay, by the rule the scan-plus-emailed-receipt case already follows
+     * (ExpenseReceipts::itemsSupersede): the copy whose line items add up
+     * better carries them, and the other keeps its file, text, totals and
+     * handwritten notes with its items set aside, so nothing is counted twice.
+     *
+     * @param  array{content?: ?string, fields?: ?array<string, mixed>}|null  $ocrData
+     */
+    private function attachBesideOtherCopies(Expense $expense, ?string $filename, ?array $ocrData): ExpenseReceipts
+    {
+        $fields = is_array($ocrData['fields'] ?? null) ? $ocrData['fields'] : null;
+
+        $otherCopy = ExpenseReceipts::where('expense_id', $expense->id)->orderBy('id')->get()
+            ->first(fn (ExpenseReceipts $receipt) => ! $receipt->isSupplement());
+
+        $menardsItemsWin = $otherCopy !== null
+            && $fields !== null
+            && ExpenseReceipts::itemsSupersede($fields, $otherCopy->receipt_items ?? []);
+
+        if ($otherCopy !== null && $fields !== null && ! $menardsItemsWin) {
+            $fields = ExpenseReceipts::toSupplementReceiptItems($fields, $otherCopy->id);
+        }
+
+        $receipt = ExpenseReceipts::create([
+            'expense_id'       => $expense->id,
+            'receipt_filename' => $filename,
+            'receipt_html'     => $ocrData['content'] ?? null,
+            'receipt_items'    => $fields,
+        ]);
+
+        if ($menardsItemsWin) {
+            $otherCopy->demoteToSupplementOf($receipt);
+        }
+
+        if ($otherCopy !== null) {
+            $this->line("    <info>BESIDE</info> Expense #{$expense->id} keeps the receipt it had; Menards' copy added next to it"
+                . ' (line items from ' . ($menardsItemsWin ? "Menards' copy" : 'the one it had') . ')');
+        }
+
+        return $receipt;
     }
 
     private function findMenardsVendorId(): ?int
