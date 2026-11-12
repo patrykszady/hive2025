@@ -592,6 +592,19 @@ Schedule::command('seo:gsc-sync')
     // New numbers landed: refresh where visitors come from for these days.
     ->then(fn () => Artisan::call('traffic:collect', ['--days' => 5, '--provider' => ['search_console']]));
 
+// The stored SEO snapshot (kit 0.26.0, 2026-11-11): GET seo/snapshot hands
+// ss.systems the copy this builds instead of building it while the hub
+// waits, so the SEO screen is at most fifteen minutes old. seo:gsc-sync
+// runs it too, the moment new Search Console numbers land.
+Schedule::command('seo:snapshot-store')
+    ->everyFifteenMinutes()
+    ->name('seo-snapshot-store')
+    ->environments(['production'])
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/seo-snapshot-store.log'))
+    ->onFailure(fn () => logger()->warning('Scheduled seo:snapshot-store failed'));
+
 // The admin's "Pages Google Is Having Trouble With" card otherwise reads
 // zeros/"never checked" forever, since nothing else calls URL Inspection.
 // The kit rotates stale-first under its own daily/per-minute quota

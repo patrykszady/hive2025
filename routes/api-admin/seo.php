@@ -16,6 +16,8 @@ CapabilityRegistry::declare('seo');
 Route::get('seo/snapshot', SeoSnapshotController::class)->name('seo.snapshot');
 Route::post('seo/snapshot/refresh', [SeoSnapshotController::class, 'refreshSnapshot'])->name('seo.snapshot.refresh');
 Route::get('seo/top-rows', [SeoSnapshotController::class, 'topRows'])->name('seo.top-rows');
+// The platform dashboard card's figures without the snapshot (kit 0.26.0).
+Route::get('seo/summary', [SeoSnapshotController::class, 'summary'])->name('seo.summary');
 
 Route::get('seo/reports', [SeoReportController::class, 'index'])->name('seo.reports.index');
 Route::post('seo/reports/refresh', [SeoReportController::class, 'refresh'])->name('seo.reports.refresh');

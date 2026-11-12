@@ -77,6 +77,13 @@ class SeoGscSync extends Command
         $this->info("Daily totals upserted: {$summary['daily_totals']} day(s)".($summary['status'] === 'dry-run' ? ' (dry-run)' : ''));
         $this->info("Search-appearance rows: {$summary['appearance_rows']}".($summary['status'] === 'dry-run' ? ' (dry-run)' : ''));
 
+        // New numbers landed: the stored SEO snapshot is rebuilt now rather
+        // than at the next quarter hour (kit 0.26.0). Its own failure is
+        // its own log line, never this sync's.
+        if ($summary['status'] !== 'dry-run') {
+            $this->call('seo:snapshot-store', ['--fresh' => true]);
+        }
+
         return self::SUCCESS;
     }
 }

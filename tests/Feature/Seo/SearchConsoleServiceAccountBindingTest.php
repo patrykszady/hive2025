@@ -72,6 +72,9 @@ it('syncs real Search Console data end to end through the container-resolved kit
                 'clicks' => 2, 'impressions' => 30, 'ctr' => 0.067, 'position' => 4.2,
             ]]])
             ->push(['rows' => []]),
+        // The sync ends by storing the SEO snapshot (kit 0.26.0), whose
+        // sitemap block asks the same property for its sitemaps.
+        'https://searchconsole.googleapis.com/webmasters/v3/sites/*/sitemaps' => Http::response(['sitemap' => []]),
     ]);
 
     $this->artisan('seo:gsc-sync', ['--days' => 1])->assertExitCode(0);

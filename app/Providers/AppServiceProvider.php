@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Controllers\Api\Admin\V1\SeoSnapshotController;
 use App\Models\AppNotification;
 use App\Models\Bid;
 use App\Models\CallLog;
@@ -159,6 +160,7 @@ use SsSystems\Platform\Seo\PageSpeed\SitemapUrlSource;
 use SsSystems\Platform\Seo\SearchConsoleClient;
 use SsSystems\Platform\Seo\SearchConsoleSyncClient;
 use SsSystems\Platform\Seo\SearchConsoleWriter as KitSearchConsoleWriter;
+use SsSystems\Platform\Seo\Snapshot\Contracts\SeoSnapshotSource;
 use SsSystems\Platform\Seo\Visibility\Contracts\ReportSink;
 use SsSystems\Platform\Social\Adapters\PlatformSettingCredentialStore;
 use SsSystems\Platform\Social\Contracts\MetaCredentialStore;
@@ -485,6 +487,10 @@ class AppServiceProvider extends ServiceProvider
             new OpenAiTextGenerator(trim((string) config('services.openai.api_key')) ?: null, http: $app->make(HttpFactory::class)),
             new AnthropicTextGenerator(trim((string) config('services.anthropic.api_key')) ?: null, http: $app->make(HttpFactory::class)),
         ]));
+
+        // The stored SEO snapshot (kit 0.26.0): seo:snapshot-store builds it
+        // through this site's own snapshot controller.
+        $this->app->bind(SeoSnapshotSource::class, SeoSnapshotController::class);
 
         // Microsoft Clarity (kit 0.20.0, 2026-11-02): the kit's own
         // Seo\Clarity module replaces this app's former App\Services\

@@ -16,7 +16,9 @@ use SsSystems\Platform\Reports\Jobs\RunArtisanCommandDetached;
 use SsSystems\Platform\Seo\Faq\Bank\FaqBankStore;
 use SsSystems\Platform\Seo\Http\Concerns\BuildsSeoSnapshot;
 use SsSystems\Platform\Seo\Http\Concerns\BuildsSeoToolBlocks;
+use SsSystems\Platform\Seo\Http\Concerns\ServesStoredSeoSnapshot;
 use SsSystems\Platform\Seo\SitemapStatus;
+use SsSystems\Platform\Seo\Snapshot\Contracts\SeoSnapshotSource;
 
 /**
  * GET seo/snapshot — the SEO screen's read. `pulse` is the Site Pulse block
@@ -69,13 +71,14 @@ use SsSystems\Platform\Seo\SitemapStatus;
  * seoReportControllerClass/dispatchChannelSync/formatDuration) exist so the
  * kit trait never names an App\* class — see its own docblock.
  */
-class SeoSnapshotController extends Controller
+class SeoSnapshotController extends Controller implements SeoSnapshotSource
 {
     use BuildsApiResponses;
     use BuildsSeoToolBlocks;
     use BuildsSeoSnapshot {
         refreshSnapshot as baseRefreshSnapshot;
     }
+    use ServesStoredSeoSnapshot;
 
     /** Mirrors ss-systems' SeoReports Livewire component's own TREND_DAYS. */
     public const TREND_DAYS = [7, 14, 30, 60, 90, 180, 360];
@@ -88,60 +91,95 @@ class SeoSnapshotController extends Controller
      */
     public const SEARCH_SNAPSHOT_CACHE_PREFIX = 'admin.seo-reports.search-snapshot:';
 
+    /**
+     * The stored snapshot (kit 0.26.0): built every 15 minutes and after
+     * each Search Console sync by seo:snapshot-store, `computed_at` saying
+     * when — see the kit's ServesStoredSeoSnapshot. `?fresh=1` builds it now.
+     */
     public function __invoke(Request $request): JsonResponse
+    {
+        return $this->itemResponse($this->storedSnapshot($request));
+    }
+
+    /**
+     * Every block of the snapshot, built from the tables now.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildSnapshot(Request $request): array
     {
         $trendDays = $this->normalizeTrendDays((int) $request->integer('trend_days', 14));
         $topDays = $this->normalizeTopDays((int) $request->integer('top_days', 28));
         $search = $this->searchSnapshot($trendDays);
         $rankDays = max(1, min(90, (int) $request->integer('rank_days', 7)));
 
-        return response()->json([
-            'data' => [
-                'generated_at' => now()->toIso8601String(),
-                'pulse' => $this->pulseSnapshot(),
-                'health' => $this->healthSnapshot(),
-                'report_stats' => $this->reportStats(),
-                'search' => $search,
-                'trend' => $this->trendChartData($search),
-                'trend_through' => $search['through'] ?? null,
-                // Embedded top-ten (2026-09-27, parity with gsc's shape) —
-                // the SEO screen's own Top Queries/Top Pages tables page
-                // through GET seo/top-rows instead; this is for any other
-                // consumer still reading the snapshot directly.
-                'top_queries' => $this->topTenRows('query', $topDays),
-                'top_pages' => $this->topTenRows('page', $topDays),
-                // The kit's SEO tools (0.19.1): rankings, keyword research,
-                // competitor visibility, AI traffic, map-pack and intel, in
-                // the shapes ss.systems' report page reads everywhere else
-                // — see this class's own docblock for what this replaces.
-                ...$this->seoToolBlocks($rankDays, fn (string $key, int $ttl, callable $build): array => Cache::remember($key, $ttl, $build)),
-                'gsc_errors' => $this->gscErrorSnapshot(),
-                'sitemaps' => SitemapStatus::snapshot((string) config('services.google.search_console_property')),
-                // The AI-readability feeds (2026-11-10), in the shape
-                // gs.construction's snapshot carries — the hub's "AI
-                // readability feeds" list reads label/url/ok/age/stale.
-                'geo' => $this->geoSnapshot(),
-                // How our results LOOK on Google — this site holds the same
-                // gsc_search_appearance_metrics rows gsc/jpeterson do (see
-                // database/migrations), just never had this key wired.
-                'search_appearance' => $this->searchAppearanceSnapshot(
-                    $this->normalizeTopDays((int) $request->integer('appearance_days', 28))
-                ),
-                // Honestly `available: false` until seo:clarity-sync has
-                // written a clarity_daily_metrics row (see this class's own
-                // docblock); the "Website Experience" card already reads
-                // that as "no visitor-behavior data synced yet" rather than
-                // an error.
-                'clarity' => $this->claritySnapshot(
-                    $this->normalizeWindowDays((int) $request->integer('clarity_days', 7))
-                ),
-                // hive.contractors must NEVER get the shared autopilot: it
-                // rewrites page titles/descriptions, and this app's marketing
-                // copy is hand-written product messaging, not local-SEO
-                // boilerplate a bot should touch.
-                'automated_actions' => false,
-            ],
-        ]);
+        return [
+            'generated_at' => now()->toIso8601String(),
+            'pulse' => $this->pulseSnapshot(),
+            'health' => $this->healthSnapshot(),
+            'report_stats' => $this->reportStats(),
+            'search' => $search,
+            'trend' => $this->trendChartData($search),
+            'trend_through' => $search['through'] ?? null,
+            // Embedded top-ten (2026-09-27, parity with gsc's shape) —
+            // the SEO screen's own Top Queries/Top Pages tables page
+            // through GET seo/top-rows instead; this is for any other
+            // consumer still reading the snapshot directly.
+            'top_queries' => $this->topTenRows('query', $topDays),
+            'top_pages' => $this->topTenRows('page', $topDays),
+            // The kit's SEO tools (0.19.1): rankings, keyword research,
+            // competitor visibility, AI traffic, map-pack and intel, in
+            // the shapes ss.systems' report page reads everywhere else
+            // — see this class's own docblock for what this replaces.
+            ...$this->seoToolBlocks($rankDays, fn (string $key, int $ttl, callable $build): array => Cache::remember($key, $ttl, $build)),
+            'gsc_errors' => $this->gscErrorSnapshot(),
+            'sitemaps' => SitemapStatus::snapshot((string) config('services.google.search_console_property')),
+            // The AI-readability feeds (2026-11-10), in the shape
+            // gs.construction's snapshot carries — the hub's "AI
+            // readability feeds" list reads label/url/ok/age/stale.
+            'geo' => $this->geoSnapshot(),
+            // How our results LOOK on Google — this site holds the same
+            // gsc_search_appearance_metrics rows gsc/jpeterson do (see
+            // database/migrations), just never had this key wired.
+            'search_appearance' => $this->searchAppearanceSnapshot(
+                $this->normalizeTopDays((int) $request->integer('appearance_days', 28))
+            ),
+            // Honestly `available: false` until seo:clarity-sync has
+            // written a clarity_daily_metrics row (see this class's own
+            // docblock); the "Website Experience" card already reads
+            // that as "no visitor-behavior data synced yet" rather than
+            // an error.
+            'clarity' => $this->claritySnapshot(
+                $this->normalizeWindowDays((int) $request->integer('clarity_days', 7))
+            ),
+            // hive.contractors must NEVER get the shared autopilot: it
+            // rewrites page titles/descriptions, and this app's marketing
+            // copy is hand-written product messaging, not local-SEO
+            // boilerplate a bot should touch.
+            'automated_actions' => false,
+        ];
+    }
+
+    /**
+     * What the snapshot's blocks cache for themselves — health, search,
+     * pulse, clarity, sitemaps and the SEO-tool blocks — so a build that
+     * must be fresh reads the tables.
+     */
+    public function forgetSnapshotCaches(Request $request): void
+    {
+        $keys = [
+            'admin.seo-reports.health-snapshot',
+            $this->searchSnapshotCacheKey($this->normalizeTrendDays((int) $request->integer('trend_days', 14))),
+            $this->claritySnapshotCacheKey($this->normalizeWindowDays((int) $request->integer('clarity_days', 7))),
+            'admin.seo-reports.pulse',
+            ...self::seoToolBlockCacheKeys(),
+        ];
+
+        foreach ($keys as $key) {
+            Cache::forget($key);
+        }
+
+        SitemapStatus::forget((string) config('services.google.search_console_property'));
     }
 
     /**
