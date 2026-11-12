@@ -182,6 +182,16 @@ return [
             'days' => 30,
         ],
 
+        // JavaScript errors the Hive Contractors app caught on the phone, in
+        // full (App\Services\Diagnostics\AppErrorReports); a one-line copy of
+        // each goes to the JS Errors board too.
+        'app-errors' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/app-errors.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         // Every EWCCV lookup attempt (what was searched, what EWCCV listed,
         // how it compared, the outcome), for review in /log-viewer.
         'ewccv' => [

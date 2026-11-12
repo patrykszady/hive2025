@@ -17,3 +17,8 @@ use Illuminate\Support\Facades\Route;
 Route::post('diagnostics/calling', [DiagnosticsController::class, 'calling'])
     ->middleware('throttle:60,1')
     ->name('diagnostics.calling');
+
+// JavaScript errors the app caught on the phone — App\Services\Diagnostics\AppErrorReports.
+Route::post('diagnostics/errors', [DiagnosticsController::class, 'errors'])
+    ->middleware('throttle:30,1')
+    ->name('diagnostics.errors');
