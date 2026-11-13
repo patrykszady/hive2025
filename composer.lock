@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4511c800360dcfb0323bd5e3ad83817f",
+    "content-hash": "58cd5ecede76777c363e65b5d80bf9a2",
     "packages": [
         {
             "name": "2captcha/2captcha",
@@ -11701,11 +11701,11 @@
         },
         {
             "name": "ss-systems/platform-kit",
-            "version": "0.27.0",
+            "version": "0.28.0",
             "dist": {
                 "type": "zip",
-                "url": "packages/ss-systems-platform-kit-0.27.0.zip",
-                "shasum": "55fe1dec52742f5cbb5f86c8c11f6833f372de8c"
+                "url": "packages/ss-systems-platform-kit-0.28.0.zip",
+                "shasum": "c65b5044b98693cb765a05c9bfac5532740d800d"
             },
             "require": {
                 "illuminate/bus": "^12.0|^13.0",
@@ -11726,6 +11726,13 @@
                 "phpunit/phpunit": "^11.0"
             },
             "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "SsSystems\\Platform\\Seo\\Status\\SeoStatusServiceProvider"
+                    ]
+                }
+            },
             "autoload": {
                 "psr-4": {
                     "SsSystems\\Platform\\": "src/"

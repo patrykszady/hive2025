@@ -161,7 +161,7 @@ it('answers the dashboard card from seo/summary without building the snapshot', 
 
     $data = $this->getJson('/api/admin/v1/seo/summary?prior_days=28', adminApiHeaders())->assertOk()->json('data');
 
-    expect(array_keys($data))->toBe(['health', 'gsc_errors', 'computed_at'])
+    expect(array_keys($data))->toBe(['health', 'gsc_errors', 'computed_at', 'status'])
         ->and($data['gsc_errors'])->toBe(['available' => true, 'totals' => ['tracked' => 2, 'problem' => 1, 'pass' => 1, 'not_indexed' => 1]])
         ->and($data['health'])->toHaveKeys(['score', 'prior_score', 'prior_as_of', 'pillars'])
         ->and(app(SeoSnapshotStore::class)->get([]))->toBeNull();

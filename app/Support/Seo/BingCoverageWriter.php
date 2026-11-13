@@ -13,7 +13,7 @@ use SsSystems\Platform\Seo\Bing\BingCoverageSync;
  * BelongsToSite/site_id, same as App\Support\Seo\BingWriter next to this
  * class. Bound once in AppServiceProvider.
  */
-class BingCoverageWriter implements \SsSystems\Platform\Seo\Bing\Contracts\BingCoverageWriter
+class BingCoverageWriter implements \SsSystems\Platform\Seo\Bing\Contracts\BingCoverageWriter, \SsSystems\Platform\Seo\Bing\Contracts\CountsSitemapUrls
 {
     /**
      * whereDate(), never updateOrCreate(['date' => $date, ...]): see
@@ -101,5 +101,16 @@ class BingCoverageWriter implements \SsSystems\Platform\Seo\Bing\Contracts\BingC
             ->where('in_sitemap', true)
             ->whereNotIn('url_hash', $hashes)
             ->update(['in_sitemap' => false]);
+    }
+
+    /**
+     * How many stored URLs are in the sitemap today — what the kit's
+     * SitemapShrinkGuard compares a new sitemap list against, so a sitemap
+     * source that comes back cut in half is refused instead of marking the
+     * missing pages as gone.
+     */
+    public function sitemapUrlCount(): int
+    {
+        return BingUrlInfo::query()->where('in_sitemap', true)->count();
     }
 }

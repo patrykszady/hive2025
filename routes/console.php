@@ -818,7 +818,7 @@ Schedule::command('seo:track-rankings')->weeklyOn(1, '04:00')
     ->environments(['production'])
     ->withoutOverlapping()->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-track-rankings.log'))
-    ->onFailure(fn () => logger()->warning('Scheduled seo:track-rankings failed (balance?)'));
+    ->onFailure(fn () => logger()->warning('Scheduled seo:track-rankings failed — the reason is at the end of its own log in storage/logs'));
 Schedule::command('seo:track-rankings --collect')->dailyAt('05:10')
     ->name('seo-track-rankings-collect')
     ->environments(['production'])
@@ -829,25 +829,25 @@ Schedule::command('seo:keyword-research --budget=4 --ideas')->weeklyOn(0, '04:30
     ->environments(['production'])
     ->withoutOverlapping()->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-keyword-research.log'))
-    ->onFailure(fn () => logger()->warning('Scheduled seo:keyword-research failed (balance?)'));
+    ->onFailure(fn () => logger()->warning('Scheduled seo:keyword-research failed — the reason is at the end of its own log in storage/logs'));
 Schedule::command('seo:domain-overview --budget=2')->weeklyOn(0, '05:00')
     ->name('seo-domain-overview')
     ->environments(['production'])
     ->withoutOverlapping()->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-domain-overview.log'))
-    ->onFailure(fn () => logger()->warning('Scheduled seo:domain-overview failed (balance?)'));
+    ->onFailure(fn () => logger()->warning('Scheduled seo:domain-overview failed — the reason is at the end of its own log in storage/logs'));
 Schedule::command('seo:backlink-gap --budget=1')->monthlyOn(2, '05:15')
     ->name('seo-backlink-gap')
     ->environments(['production'])
     ->withoutOverlapping()->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-backlink-gap.log'))
-    ->onFailure(fn () => logger()->warning('Scheduled seo:backlink-gap failed (balance?)'));
+    ->onFailure(fn () => logger()->warning('Scheduled seo:backlink-gap failed — the reason is at the end of its own log in storage/logs'));
 Schedule::command('seo:ai-mentions --budget=2')->weeklyOn(1, '05:30')
     ->name('seo-ai-mentions')
     ->environments(['production'])
     ->withoutOverlapping()->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-ai-mentions.log'))
-    ->onFailure(fn () => logger()->warning('Scheduled seo:ai-mentions failed (balance?)'));
+    ->onFailure(fn () => logger()->warning('Scheduled seo:ai-mentions failed — the reason is at the end of its own log in storage/logs'));
 Schedule::command('seo:competitor-brand-track --days=28 --markdown')->dailyAt('05:50')
     ->name('seo-competitor-brand-track')
     ->environments(['production'])
@@ -873,14 +873,14 @@ foreach ([
         ->environments(['production'])
         ->withoutOverlapping(90)->onOneServer()
         ->appendOutputTo(storage_path('logs/seo-intel.log'))
-        ->onFailure(fn () => logger()->warning("Scheduled seo:intel {$family} failed (balance?)"));
+        ->onFailure(fn () => logger()->warning("Scheduled seo:intel {$family} failed — the reason is at the end of its own log in storage/logs"));
 }
 Schedule::command('seo:intel business_data --budget=1')->weekdays()->dailyAt('06:10')
     ->name('seo-intel-business_data')
     ->environments(['production'])
     ->withoutOverlapping(90)->onOneServer()
     ->appendOutputTo(storage_path('logs/seo-intel.log'))
-    ->onFailure(fn () => logger()->warning('Scheduled seo:intel business_data failed (balance?)'));
+    ->onFailure(fn () => logger()->warning('Scheduled seo:intel business_data failed — the reason is at the end of its own log in storage/logs'));
 Schedule::command('seo:intel onpage --budget=1')->cron('30 5-23/2 * * 1,2')
     ->name('seo-intel-onpage-collect')
     ->environments(['production'])

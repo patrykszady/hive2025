@@ -111,3 +111,17 @@ it('forgetUrlsNotIn marks rows outside the given set as out of the sitemap and c
     // counted again — only rows that actually flip count towards $changed.
     expect($writer->forgetUrlsNotIn([$kept]))->toBe(0);
 });
+
+it('counts the stored URLs that are in the sitemap, for the kit\'s sitemap-shrink guard', function () {
+    $writer = new BingCoverageWriter;
+
+    expect($writer)->toBeInstanceOf(\SsSystems\Platform\Seo\Bing\Contracts\CountsSitemapUrls::class)
+        ->and($writer->sitemapUrlCount())->toBe(0);
+
+    foreach (['a' => true, 'b' => true, 'c' => false] as $page => $inSitemap) {
+        $url = 'https://example.test/'.$page;
+        BingUrlInfo::create(['url' => $url, 'url_hash' => sha1($url), 'in_sitemap' => $inSitemap]);
+    }
+
+    expect($writer->sitemapUrlCount())->toBe(2);
+});

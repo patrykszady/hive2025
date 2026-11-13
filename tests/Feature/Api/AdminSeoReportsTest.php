@@ -229,7 +229,12 @@ it('runs clarity-health directly, refusing (capability missing) unconfigured and
     // this test pins.)
     PlatformSetting::put(ClaritySettings::SETTING_PROJECT_ID, 'proj123');
     PlatformSetting::put(ClaritySettings::SETTING_API_TOKEN, 'tok123');
-    Http::fake(['*' => Http::response([], 200)]);
+    // An answer with data rows: since kit 0.28.0 an empty answer is "nothing
+    // to record" (no day of zeros is written), which the report reads as no
+    // live data.
+    Http::fake(['*' => Http::response([
+        ['metricName' => 'Traffic', 'information' => [['totalSessionCount' => '12', 'totalBotSessionCount' => '1', 'distinctUserCount' => '9', 'pagesPerSessionPercentage' => 1.5, 'OS' => 'Windows']]],
+    ], 200)]);
 
     Artisan::call('seo:clarity-health --markdown');
     $output = Artisan::output();
