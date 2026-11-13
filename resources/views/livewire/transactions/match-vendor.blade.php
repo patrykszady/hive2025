@@ -24,12 +24,14 @@
                     @php
                         $cardIndex = $loop->index;
                         $processorCard = $this->processorCards[$cardIndex] ?? null;
+                        $plaidMerchantName = $merchant_transactions->first()->plaid_merchant_name;
+                        $showsPlaidMerchantName = $merchant_name != $plaidMerchantName && ! ($processorCard['plaid_name_is_processor'] ?? false);
                     @endphp
                     <x-island-card
                         class="mt-6"
                         wire:key="txn-card-{{ $cardIndex }}"
                         :heading="$merchant_name"
-                        :subheading="$merchant_name != $merchant_transactions->first()->plaid_merchant_name ? $merchant_transactions->first()->plaid_merchant_name : null"
+                        :subheading="$showsPlaidMerchantName ? $plaidMerchantName : null"
                     >
                         {{-- Top-right of the header: the card's one action. --}}
                         <x-slot:actions>

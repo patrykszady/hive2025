@@ -53,14 +53,64 @@ class MatchVendor extends Component
         'form_submit' => 'store',
     ];
 
-    protected function rules()
+    /**
+     * A card is in play once either box holds something, and then needs
+     * both. A card with "Match As" and Vendor both empty is simply left for
+     * later — never an error (Patryk, 2026-11-12) — so one saves the cards
+     * one knows and leaves the rest.
+     *
+     * @return array<string, string>
+     */
+    protected function rules(): array
     {
         return [
-            'match_merchant_names.*.match_desc' => 'required',
-            'match_merchant_names.*.vendor_id' => 'required',
-            'match_expense_merchant_names.*.match_desc' => 'required',
-            'match_expense_merchant_names.*.vendor_id' => 'required',
+            'match_merchant_names.*.match_desc' => 'required_with:match_merchant_names.*.vendor_id',
+            'match_merchant_names.*.vendor_id' => 'required_with:match_merchant_names.*.match_desc',
+            'match_expense_merchant_names.*.match_desc' => 'required_with:match_expense_merchant_names.*.vendor_id',
+            'match_expense_merchant_names.*.vendor_id' => 'required_with:match_expense_merchant_names.*.match_desc',
         ];
+    }
+
+    /** @return array<string, string> */
+    protected function messages(): array
+    {
+        $needsMatchText = 'Type what to match on, or clear the vendor to leave this card for later.';
+        $needsVendor = 'Pick a vendor, or clear Match As to leave this card for later.';
+
+        return [
+            'match_merchant_names.*.match_desc.required_with' => $needsMatchText,
+            'match_merchant_names.*.vendor_id.required_with' => $needsVendor,
+            'match_expense_merchant_names.*.match_desc.required_with' => $needsMatchText,
+            'match_expense_merchant_names.*.vendor_id.required_with' => $needsVendor,
+        ];
+    }
+
+    /**
+     * The rows of a "match as" form that take part in a save, keys (card
+     * positions) kept. Left out: a card with no vendor and nothing typed —
+     * and a processor card still holding only the "Match As" it was
+     * prefilled with ($prefills, by position), which nobody typed. A row
+     * with just one box filled in stays, for validation to name what is
+     * missing.
+     *
+     * @param  array<int|string, mixed>  $rows
+     * @param  array<int|string, ?string>  $prefills
+     * @return array<int|string, array<string, mixed>>
+     */
+    protected function rowsInPlay(array $rows, array $prefills = []): array
+    {
+        return array_filter($rows, function (mixed $row, int|string $key) use ($prefills): bool {
+            if (! is_array($row)) {
+                return false;
+            }
+            if (filled($row['vendor_id'] ?? null)) {
+                return true;
+            }
+
+            $typed = trim((string) ($row['match_desc'] ?? ''));
+
+            return $typed !== '' && $typed !== trim((string) ($prefills[$key] ?? ''));
+        }, ARRAY_FILTER_USE_BOTH);
     }
 
     public function updated($field)
@@ -102,7 +152,12 @@ class MatchVendor extends Component
      * moment that knows its index — the view reads this in each card's
      * @php block. A typed value is never overwritten.
      *
-     * @return array<int, array{note: string, match_desc: ?string}>
+     * `plaid_name_is_processor` tells the card to leave Plaid's merchant name
+     * out from under its heading: on these charges Plaid often names the
+     * processor as the merchant ("Paddle" on a DataForSEO charge), and the
+     * processor is not who was paid (Patryk, 2026-11-12).
+     *
+     * @return array<int, array{note: string, match_desc: ?string, plaid_name_is_processor: bool}>
      */
     #[Computed]
     public function processorCards(): array
@@ -119,7 +174,11 @@ class MatchVendor extends Component
                 $this->match_merchant_names[$index]['match_desc'] = $identity->matchText;
             }
 
-            $cards[$index] = ['note' => (string) $identity->note(), 'match_desc' => $identity->matchText];
+            $cards[$index] = [
+                'note' => (string) $identity->note(),
+                'match_desc' => $identity->matchText,
+                'plaid_name_is_processor' => $identity->isProcessorName($transactions->first()?->plaid_merchant_name),
+            ];
         }
 
         return $cards;
@@ -254,6 +313,7 @@ class MatchVendor extends Component
 
     public function store_expense_vendors()
     {
+        $this->match_expense_merchant_names = $this->rowsInPlay($this->match_expense_merchant_names);
         $this->validate();
 
         // A receipt names no bank descriptor, so only the curated list can
@@ -310,15 +370,24 @@ class MatchVendor extends Component
         );
     }
 
-    public function store()
+    /**
+     * Validates the cards in play and returns each one's merchant identity,
+     * by card position.
+     *
+     * A rule naming only a payment processor ("PADDLE.NET", "PAYPAL *")
+     * would claim every company billed through it: refused before anything
+     * is written. Non-vendor codes (Deposit, Check, Transfer, Cash) never
+     * claim a vendor and are let through. The card's identity (descriptor
+     * prefix plus Plaid's payload) decides and names the merchant text.
+     *
+     * @return array<int|string, MerchantIdentity>
+     *
+     * @throws ValidationException
+     */
+    protected function validatedCardIdentities(): array
     {
         $this->validate();
 
-        // A rule naming only a payment processor ("PADDLE.NET", "PAYPAL *")
-        // would claim every company billed through it: refuse before anything
-        // is written. Non-vendor codes (Deposit, Check, Transfer, Cash) never
-        // claim a vendor and are let through. The card's identity (descriptor
-        // prefix plus Plaid's payload) decides and names the merchant text.
         $identities = [];
         $refusals = [];
         foreach ($this->match_merchant_names as $key => $vendor_match) {
@@ -330,6 +399,28 @@ class MatchVendor extends Component
         }
         if ($refusals !== []) {
             throw ValidationException::withMessages($refusals);
+        }
+
+        return $identities;
+    }
+
+    public function store()
+    {
+        // The rows as submitted, taken before processorCards is read: reading
+        // it fills an empty "Match As" back in, and a box the person emptied
+        // must stay empty here.
+        $submitted = $this->match_merchant_names;
+        $prefills = array_map(fn (array $card): ?string => $card['match_desc'], $this->processorCards);
+        $this->match_merchant_names = $this->rowsInPlay($submitted, $prefills);
+
+        try {
+            $identities = $this->validatedCardIdentities();
+        } catch (ValidationException $e) {
+            // The page keeps every box as the person left it, the cards left
+            // out of this save included.
+            $this->match_merchant_names = $submitted;
+
+            throw $e;
         }
 
         foreach ($this->match_merchant_names as $key => $vendor_match) {

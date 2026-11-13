@@ -177,8 +177,9 @@ it('prefills "Match As" with the merchant part and explains the processor under 
 
     expect($cards)->toHaveKeys([0, 2])
         ->and($cards)->not->toHaveKey(1)
-        ->and($cards[0])->toBe(['note' => 'Billed through Paddle, a payment processor many companies bill through — the merchant is DATAFORSE.', 'match_desc' => 'DATAFORSE'])
+        ->and($cards[0])->toBe(['note' => 'Billed through Paddle, a payment processor many companies bill through — the merchant is DATAFORSE.', 'match_desc' => 'DATAFORSE', 'plaid_name_is_processor' => true])
         ->and($cards[2]['match_desc'])->toBe('DATAFORSE')
+        ->and($cards[2]['plaid_name_is_processor'])->toBeFalse('Plaid names the merchant on this one')
         ->and($component->match_merchant_names[0]['match_desc'])->toBe('DATAFORSE')
         // A typed value is never overwritten.
         ->and($component->match_merchant_names[2]['match_desc'])->toBe('DataForSEO LLC');
@@ -186,7 +187,12 @@ it('prefills "Match As" with the merchant part and explains the processor under 
     // The rendered page carries the note under the box and the prefill in its state.
     $rendered = Livewire::actingAs($user)->test(MatchVendor::class);
 
+    // Under a card's heading sits the name Plaid gives the merchant — but not
+    // when that name is only the processor ("Paddle" on the truncated charge).
     expect($rendered->html())->toContain('the merchant is Dataforseo.')
+        ->and($rendered->html())->toMatch('/>\s*Dataforseo\s*</')
+        ->and($rendered->html())->toMatch('/>\s*Microsoft\s*</')
+        ->and($rendered->html())->not->toMatch('/>\s*Paddle\s*</')
         ->and($rendered->get('match_merchant_names')[2]['match_desc'] ?? null)->toBe('DATAFORSE')
         ->and($rendered->get('match_merchant_names')[1]['match_desc'] ?? null)->toBeNull();
 });
