@@ -236,6 +236,12 @@ return [
         // on too; see App\Services\Voice\DirectDialStarter and
         // TelnyxWebhookController::handleParkedDirectDialLeg().
         'direct_dial_enabled' => (bool) env('TELNYX_DIRECT_DIAL_ENABLED', false),
+        // "App only" (2026-11-12): a team member who has the Hive Contractors
+        // app is rung in the app and never on their cell. OFF since
+        // 2026-11-13: the app did not ring (Telnyx's wake-up push stopped
+        // reaching the iPhone), and with the cell quiet the caller went to
+        // voicemail. Off = the cell rings, with the app alongside, as before.
+        'app_only_ring' => (bool) env('TELNYX_APP_ONLY_RING', false),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
         // How long a click-to-call target rings before we give up. Carriers

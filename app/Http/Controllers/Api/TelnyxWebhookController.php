@@ -4477,9 +4477,17 @@ class TelnyxWebhookController extends Controller
      * 2026-11-12): they have the Hive Contractors app, as far as Hive can
      * know (AppVoiceCredentials::hasRingableApp() holds the rule). A lookup
      * that fails counts as no: when in doubt, the cell rings.
+     *
+     * Only while config('services.telnyx.app_only_ring') is on. Off (the
+     * default since 2026-11-13, when the app stopped ringing and calls went
+     * to voicemail), everyone's cell rings, with the app alongside.
      */
     protected function ringsInAppOnly(User $person): bool
     {
+        if (! config('services.telnyx.app_only_ring')) {
+            return false;
+        }
+
         try {
             return app(\App\Services\Voice\AppVoiceCredentials::class)->hasRingableApp($person);
         } catch (\Throwable $exception) {

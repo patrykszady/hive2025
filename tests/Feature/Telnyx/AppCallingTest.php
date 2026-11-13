@@ -106,6 +106,8 @@ it('rings the cell for a call placed from the website, and never calls the busin
 });
 
 it('rings a team member who has the app in the app only, and answering it connects at once with no cell leg to stop', function () {
+    // "App only" is a switch, off by default since 2026-11-13 (AppOnlyRingTest).
+    config(['services.telnyx.app_only_ring' => true]);
     UserVoiceCredential::factory()->create(['user_id' => $this->patryk->id, 'sip_username' => 'gencredpatryk']);
     PushToken::factory()->create([
         'user_id' => $this->patryk->id,

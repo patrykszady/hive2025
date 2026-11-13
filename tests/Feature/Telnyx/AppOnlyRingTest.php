@@ -32,6 +32,8 @@ beforeEach(function () {
         'services.telnyx.connection_id' => 'call-control-app',
         'services.telnyx.app_connection_id' => 'app-connection',
         'services.telnyx.public_url' => 'https://example.com',
+        // Switched on for these tests; off by default since 2026-11-13 (see the last test).
+        'services.telnyx.app_only_ring' => true,
     ]);
     Http::preventStrayRequests();
     Cache::flush();
@@ -562,3 +564,19 @@ it('still dials cells when 9 is pressed on a call the team placed', function () 
 
     expect(appOnly_dialed())->toBe([$this->gregCell]);
 });
+
+it('rings the cell of someone who has the app, with the app alongside, while app only is switched off', function () {
+    // 2026-11-13: the app stopped ringing (Telnyx's wake-up push no longer reached the iPhone) and,
+    // with the cell quiet, Mark Brodson's call went to voicemail. Switched off, the cell rings again.
+    config(['services.telnyx.app_only_ring' => false]);
+    appOnly_giveApp($this->patryk);
+    appOnly_fakeTelnyx([$this->patrykCell => 'patryk-cell-leg', $this->patrykApp => 'patryk-app-leg']);
+
+    $callLog = appOnly_incomingCall();
+    appOnly_startRinging($callLog);
+
+    expect(appOnly_dialed())->toBe([$this->patrykCell, $this->patrykApp])
+        ->and($callLog->fresh()->metadata['admin_call_control_ids'])->toBe(['patryk-cell-leg', 'patryk-app-leg'])
+        ->and($callLog->fresh()->metadata['cascade_pending_ids'])->toBe([$this->greg->id]);
+});
+
