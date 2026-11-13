@@ -190,6 +190,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // One instance per request or job: it guards against calling itself
+        // while a pairing moves receipts and charges about.
+        $this->app->singleton(\App\Services\Expenses\DuplicateExpenseCheck::class);
+
         // ss-systems/platform-kit's Pulse — first-party usage telemetry
         // behind the central admin's "Site Pulse" card (see docs/PULSE.md
         // in the kit and App\Http\Controllers\Api\Admin\V1\

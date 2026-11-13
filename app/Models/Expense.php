@@ -45,6 +45,14 @@ class Expense extends Model
                 app(\App\Services\ExpensePaymentSync::class)->syncById((int) $expense->id);
             }
         });
+
+        // A corrected amount or date can make a receipt expense and a charge's
+        // expense the two records of one purchase: the duplicate check again.
+        static::updated(function (Expense $expense): void {
+            if ($expense->wasChanged(['amount', 'date']) && $expense->deleted_at === null) {
+                app(\App\Services\Expenses\DuplicateExpenseCheck::class)->expenseChanged((int) $expense->id);
+            }
+        });
     }
 
     public function resolveRouteBinding($value, $field = null): ?self

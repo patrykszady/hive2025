@@ -3615,6 +3615,17 @@ class CompanyEmailController extends Controller
         $aliasCacheKey = implode(',', $vendorIds);
         static $aliasCache = [];
         static $rawAliasCache = []; // Cache raw patterns with options for direct matching
+        static $aliasRulesVersion = null;
+
+        // The rules read under an older stamp are stale: a rule was saved or
+        // deleted since (VendorTransaction::rulesVersion()), here or in
+        // another process.
+        $rulesVersion = \App\Models\VendorTransaction::rulesVersion();
+        if ($aliasRulesVersion !== $rulesVersion) {
+            $aliasCache = [];
+            $rawAliasCache = [];
+            $aliasRulesVersion = $rulesVersion;
+        }
         
         if (!isset($aliasCache[$aliasCacheKey])) {
             $aliasRows = [];

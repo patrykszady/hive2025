@@ -45,8 +45,24 @@ class ExpenseReceipts extends Model
         static::saved(function (ExpenseReceipts $receipt): void {
             app(\App\Services\Expenses\ReceiptReimbursementMark::class)->apply($receipt);
         });
-        static::saved(fn (ExpenseReceipts $receipt) => $receipt->expense_id && app(\App\Services\ExpensePaymentSync::class)->syncById((int) $receipt->expense_id));
+        // Returning nothing as well: the sync's own result must not decide
+        // whether the listener after it runs.
+        static::saved(function (ExpenseReceipts $receipt): void {
+            if ($receipt->expense_id) {
+                app(\App\Services\ExpensePaymentSync::class)->syncById((int) $receipt->expense_id);
+            }
+        });
         static::deleted(fn (ExpenseReceipts $receipt) => $receipt->expense_id && app(\App\Services\ExpensePaymentSync::class)->syncById((int) $receipt->expense_id));
+
+        // A receipt landing on an expense may make it the second record of a
+        // purchase whose bank charge already has an expense: the duplicate
+        // check, there and then, however the receipt came in. After the
+        // payment sync, so the card the receipt prints is on file.
+        static::saved(function (ExpenseReceipts $receipt): void {
+            if ($receipt->expense_id && ($receipt->wasRecentlyCreated || $receipt->wasChanged('expense_id'))) {
+                app(\App\Services\Expenses\DuplicateExpenseCheck::class)->expenseChanged((int) $receipt->expense_id);
+            }
+        });
     }
 
     protected $casts = [

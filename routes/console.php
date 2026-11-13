@@ -306,6 +306,18 @@ Schedule::command('expenses:merge-paid-invoices')
     ->withoutOverlapping()
     ->onOneServer();
 
+// A receipt that became its own expense folds into the expense of its bank
+// charge when they are one purchase (a $41 dump ticket was counted twice:
+// 29031 from the charge, 29068 from the scan). The check runs on the spot
+// whenever a receipt or a charge lands on an expense (DuplicateExpenseCheck);
+// this hourly run takes the pairs that had to wait for their window to close.
+Schedule::command('expenses:pair-receipts-with-charges')
+    ->hourly()
+    ->name('pair-receipts-with-charges')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'match_associated_expenses'))
     ->everyTenMinutes()
     ->name('match-associated-expenses')

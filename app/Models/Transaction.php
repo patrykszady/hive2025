@@ -152,6 +152,23 @@ class Transaction extends Model
             }
         });
         
+        // A charge linked to an expense may make that expense the second
+        // record of a purchase a receipt expense already stands for: the
+        // duplicate check, there and then, whichever matcher or person
+        // linked it (App\Services\Expenses\DuplicateExpenseCheck). A charge
+        // still without an expense is left to the bank matchers first, and to
+        // the receipt sweep (TransactionController::add_transaction_to_expenses_sin_vendor)
+        // after them. Only plain purchases of a non-zero amount are of interest.
+        static::saved(function ($transaction): void {
+            if ($transaction->trashed() || (float) $transaction->amount === 0.00 || $transaction->check_id !== null || $transaction->deposit !== null) {
+                return;
+            }
+
+            if ($transaction->expense_id && ($transaction->wasRecentlyCreated || $transaction->wasChanged('expense_id'))) {
+                app(\App\Services\Expenses\DuplicateExpenseCheck::class)->expenseChanged((int) $transaction->expense_id);
+            }
+        });
+
         static::deleted(function ($transaction) {
             // Re-index direct expense if linked
             if ($transaction->expense_id) {
@@ -443,15 +460,7 @@ class Transaction extends Model
      */
     public function cardNumbers(): array
     {
-        $numbers = [];
-
-        if (preg_match('/^\d{4}$/', (string) $this->owner)) {
-            $numbers[] = (string) $this->owner;
-        }
-
-        if (preg_match('/\bPURCHASE\s+(?:[A-Z][a-z]{2}\s?\d{1,2}\s+)?(?:\d{1,2}:\d{2}[ap]?\s+)?(\d{4})\b/', (string) $this->plaid_merchant_description, $m)) {
-            $numbers[] = $m[1];
-        }
+        $numbers = $this->namedCardNumbers();
 
         // A shared card account's own number says nothing about which card was
         // used once Plaid names the card member (Capital One: account 4060,
@@ -460,6 +469,32 @@ class Transaction extends Model
 
         if ($numbers === [] && preg_match('/^\d{4}$/', $account) && in_array($this->bank_account?->type, ['credit', 'Credit', 'Credit Card', 'credit card'], true)) {
             $numbers[] = $account;
+        }
+
+        return array_values(array_unique($numbers));
+    }
+
+    /**
+     * The card last fours the bank itself names on this charge — the card
+     * member (owner) or the number in the description — without falling back
+     * to the card account's own number. That fallback can say which card it
+     * probably was, never that it was not some other card of the account:
+     * on 677 expenses the receipt prints another number than the account's
+     * while the charge names no card of its own (local copy of production,
+     * 2026-11-12).
+     *
+     * @return list<string>
+     */
+    public function namedCardNumbers(): array
+    {
+        $numbers = [];
+
+        if (preg_match('/^\d{4}$/', (string) $this->owner)) {
+            $numbers[] = (string) $this->owner;
+        }
+
+        if (preg_match('/\bPURCHASE\s+(?:[A-Z][a-z]{2}\s?\d{1,2}\s+)?(?:\d{1,2}:\d{2}[ap]?\s+)?(\d{4})\b/', (string) $this->plaid_merchant_description, $m)) {
+            $numbers[] = $m[1];
         }
 
         return array_values(array_unique($numbers));

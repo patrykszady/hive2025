@@ -3343,14 +3343,29 @@ class TransactionController extends Controller
     }
 
     //find expenses with NO VENDOR that match transactions
+    /**
+     * Receipt expenses with no vendor: the vendor from the name the receipt
+     * prints, where a match rule or the vendor list knows it, and then the
+     * bank charge — through ReceiptChargePairer's rule only.
+     *
+     * Until 2026-11-13 this gave such a receipt the nearest unlinked bank
+     * charge of the same amount, of any date, any card and any company, and
+     * the charge's vendor with it: a $25 dump ticket of 2026-06-02 (expense
+     * 27088) took a Serpapi charge from a week before and became "Serpapi",
+     * while the ticket's own Groot charge got an expense of its own. A charge
+     * is now linked only when the card printed on the receipt is the card
+     * charged, within the pairing window, and the two are each other's only
+     * match.
+     */
     public function add_transaction_to_expenses_sin_vendor()
     {
         $expenses = Expense::with('receipts')->where('vendor_id', 0)->get();
         $vendor_desc = VendorTransaction::all();
+        $pairer = app(\App\Services\Expenses\ReceiptChargePairer::class);
 
         foreach ($expenses as $expense) {
             $receipt = $expense->receipts()->latest()->first();
-            if (is_array($receipt->receipt_items) && isset($receipt->receipt_items['merchant_name'])) {
+            if (is_array($receipt?->receipt_items) && isset($receipt->receipt_items['merchant_name'])) {
                 $merchant_name = $receipt->receipt_items['merchant_name'];
                 $vendor = $vendor_desc->where('desc', $merchant_name)->first();
 
@@ -3368,24 +3383,7 @@ class TransactionController extends Controller
                 }
             }
 
-            $matching_transaction =
-                Transaction::where('amount', $expense->amount)
-                    ->whereNull('expense_id')
-                    ->get()
-                    ->each(function ($item) use ($expense) {
-                        $item->date_diff = $expense->date->floatDiffInDays($item->transaction_date);
-                    })
-                    ->sortBy('date_diff')
-                    ->first();
-
-            if (isset($matching_transaction->vendor_id)) {
-                $expense->vendor_id = $matching_transaction->vendor_id;
-                $expense->save();
-
-                $matching_transaction = Transaction::findOrFail($matching_transaction->id);
-                $matching_transaction->expense()->associate($expense);
-                $matching_transaction->save();
-            }
+            rescue(fn () => $pairer->pairExpense($expense));
         }
     }
 

@@ -5,7 +5,6 @@ namespace App\Services\Expenses;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -23,7 +22,7 @@ use Illuminate\Support\Facades\Log;
  * too (invoice 8238410 for ticket 1904464). The invoice's PDF moves onto the
  * paid expense, which also takes its project and invoice number when it has
  * none, and the invoice expense is soft-deleted the way ExpenseForm::delete()
- * does it.
+ * does it (ExpenseFolder, shared with ReceiptChargePairer).
  */
 class PaidInvoiceMerger
 {
@@ -208,40 +207,7 @@ class PaidInvoiceMerger
             return $result;
         }
 
-        DB::transaction(function () use ($invoice, $payment): void {
-            ExpenseReceipts::withoutGlobalScopes()
-                ->where('expense_id', $invoice->id)
-                ->get()
-                ->each(function (ExpenseReceipts $receipt) use ($payment): void {
-                    $receipt->expense_id = $payment->id;
-                    $receipt->save();
-                });
-
-            $hasAllocation = $payment->project_id || $payment->distribution_id || $payment->splits()->exists();
-
-            if (! $hasAllocation && $invoice->project_id) {
-                $payment->project_id = $invoice->project_id;
-            }
-
-            if (blank($payment->invoice) && filled($invoice->invoice)) {
-                $payment->invoice = $invoice->invoice;
-            }
-
-            $payment->save();
-
-            foreach ($invoice->associated as $associated) {
-                $associated->parent_expense_id = null;
-                $associated->save();
-            }
-
-            foreach ($invoice->splits as $split) {
-                $split->delete();
-            }
-
-            $invoice->delete();
-        });
-
-        $payment->searchable();
+        app(ExpenseFolder::class)->fold($invoice, $payment);
 
         Log::info('Folded an invoice expense into the expense that paid it', $result);
 

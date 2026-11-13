@@ -11,6 +11,7 @@ use App\Models\Expense;
 use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
+use App\Services\Expenses\ReceiptChargePairer;
 use App\Services\Transactions\TransactionVendorMatcher;
 use App\Services\Transactions\UnmatchedTransactionCards;
 use App\Services\VendorSuggestionService;
@@ -36,11 +37,17 @@ use Illuminate\Support\Facades\Cache;
 class TransactionMatchController extends Controller
 {
     public const VENDOR_OPTIONS_CACHE_SECONDS = 3600;
-    public function unmatched(UnmatchedTransactionCards $cards, Request $request): JsonResponse
+    public function unmatched(UnmatchedTransactionCards $cards, Request $request, ReceiptChargePairer $pairer): JsonResponse
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);
 
         $user = $request->user();
+
+        // As on the web page: a receipt whose bank charge already has an
+        // expense is folded into it, not listed as a card to match.
+        if ($user->vendor?->id) {
+            rescue(fn () => $pairer->pairVendorlessReceipts((int) $user->vendor->id));
+        }
 
         return response()->json([
             'data' => [

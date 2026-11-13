@@ -7,6 +7,7 @@ use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+use App\Services\Expenses\ReceiptChargePairer;
 use App\Services\Transactions\TransactionVendorMatcher;
 use App\Services\Transactions\UnmatchedTransactionCards;
 use App\Services\VendorSuggestionService;
@@ -111,6 +112,22 @@ class MatchVendor extends Component
 
             return $typed !== '' && $typed !== trim((string) ($prefills[$key] ?? ''));
         }, ARRAY_FILTER_USE_BOTH);
+    }
+
+    /**
+     * A receipt whose bank charge already has an expense is not a question
+     * for a person: ReceiptChargePairer folds it into that expense before
+     * the cards are drawn, so no card asks who was paid.
+     */
+    public function mount(): void
+    {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
+        $companyId = auth()->user()?->vendor?->id;
+
+        if ($companyId) {
+            rescue(fn () => app(ReceiptChargePairer::class)->pairVendorlessReceipts((int) $companyId));
+        }
     }
 
     public function updated($field)
