@@ -14,8 +14,7 @@ namespace App\Support\Transactions;
  * leave the card on the page with no word of why, so it is refused when it
  * is saved, with text from the bank line to use instead.
  *
- * A NEW vendor is found again by its name, not by a rule, and is not held
- * to this.
+ * A NEW vendor gets its rule from the same text and is held to this too.
  */
 class MatchTextReach
 {

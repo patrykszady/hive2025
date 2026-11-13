@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Transactions\MatchVendor;
+use App\Models\Vendor;
 use App\Models\VendorTransaction;
 use App\Support\Transactions\MatchTextReach;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -100,16 +101,35 @@ it('refuses a rule that is in neither the bank text nor Plaid\'s name, and says 
         ->and($charge->fresh()->vendor_id)->toBeNull();
 });
 
-it('holds the check, deposit, transfer and cash codes to the bank text too, and never a NEW vendor', function () {
+it('holds the check, deposit, transfer and cash codes to the bank text too', function () {
     reachFrontierCharge($this->fixture['account']);
 
     $code = new MatchVendor();
     $code->match_merchant_names = [0 => ['match_desc' => 'ZELLE', 'vendor_id' => 'TRANSFER']];
     expect(array_keys(reachSave($code)))->toBe(['match_merchant_names.0.match_desc']);
+});
 
-    $new = new MatchVendor();
-    $new->match_merchant_names = [0 => ['match_desc' => 'Frontier Air', 'vendor_id' => 'NEW']];
-    expect(reachSave($new))->toBe([], 'a NEW vendor is found again by its name, not by a rule');
+it('gives a NEW vendor its rule from Match As, so its card leaves the page — and holds it to the same texts', function () {
+    // "Bloomberg Businessweek" for "BLOOMBERG* ***********" (Plaid: "Bloomberg") was
+    // saved as a NEW vendor with no rule, left to be found by its name, and stayed.
+    $charge = processorFixtureTransaction($this->fixture['account'], [
+        'date' => '2026-08-25', 'name' => 'BLOOMBERG* ***********', 'amount' => 40.00,
+        'merchant_name' => 'Bloomberg', 'counterparties' => [], 'payment_meta' => [],
+    ]);
+
+    $refused = new MatchVendor();
+    $refused->match_merchant_names = [0 => ['match_desc' => 'Bloomberg Businessweek', 'vendor_id' => 'NEW']];
+    expect(array_keys(reachSave($refused)))->toBe(['match_merchant_names.0.match_desc'])
+        ->and(Vendor::withoutGlobalScopes()->where('business_name', 'Bloomberg Businessweek')->exists())->toBeFalse();
+
+    $saved = new MatchVendor();
+    $saved->match_merchant_names = [0 => ['match_desc' => ' BLOOMBERG ', 'vendor_id' => 'NEW']];
+    expect(reachSave($saved))->toBe([]);
+
+    // The vendor model writes names in title case: "Bloomberg".
+    $vendor = Vendor::withoutGlobalScopes()->whereRaw('LOWER(business_name) = ?', ['bloomberg'])->sole();
+    expect(VendorTransaction::query()->sole())->vendor_id->toBe($vendor->id)->desc->toBe('BLOOMBERG')
+        ->and($charge->fresh()->vendor_id)->toBe($vendor->id);
 });
 
 it('tries the rule exactly as the matcher does, the Options box included', function () {

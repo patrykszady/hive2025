@@ -479,9 +479,10 @@ class MatchVendor extends Component
             // A rule is tried on the bank's own text and on Plaid's name for
             // the charge: one that reaches neither on the card it is saved
             // from matches nothing and leaves the card where it is. A NEW
-            // vendor is found by its name, not a rule.
+            // vendor gets its rule from the same text, so it is held to this
+            // too.
             $names = $this->merchantCards->values()->get($key, collect())->pluck('plaid_merchant_name')->all();
-            if ($vendorId !== 'NEW' && ($refusal = MatchTextReach::refusal($descriptor, (string) $vendor_match['match_desc'], $vendor_match['options'] ?? null, ! is_numeric($vendorId), $names)) !== null) {
+            if (($refusal = MatchTextReach::refusal($descriptor, (string) $vendor_match['match_desc'], $vendor_match['options'] ?? null, ! is_numeric($vendorId), $names)) !== null) {
                 $refusals["match_merchant_names.{$key}.match_desc"] = $refusal;
 
                 continue;
@@ -519,11 +520,6 @@ class MatchVendor extends Component
 
             if (($refusal = MatchRuleDuplicates::newVendorRefusal($name)) !== null) {
                 return ['field' => "match_merchant_names.{$key}.vendor_id", 'message' => $refusal];
-            }
-
-            // Behind a processor a NEW vendor gets a rule of its own text.
-            if (! $identity->hasProcessor()) {
-                return null;
             }
         }
 
@@ -581,24 +577,25 @@ class MatchVendor extends Component
             if ($vendor_match['vendor_id'] == 'NEW') {
                 $vendor = Vendor::create([
                     'business_type' => 'Retail',
-                    'business_name' => $identity->hasProcessor() ? $identity->vendorNameFor($vendor_match['match_desc']) : $vendor_match['match_desc'],
+                    'business_name' => trim($identity->hasProcessor() ? $identity->vendorNameFor($vendor_match['match_desc']) : (string) $vendor_match['match_desc']),
                 ]);
                 $vendor_id = $vendor->id;
 
-                // A new vendor is normally found again by its name alone. Behind
-                // a processor the descriptor reads "PADDLE.NET* DATAFORSEO", so
-                // the merchant match text becomes its rule — cut to the bank's
-                // window ("DATAFORSE") it covers the truncated form as well.
-                if ($identity->hasProcessor()) {
-                    VendorTransaction::create([
-                        'vendor_id' => $vendor_id,
-                        'deposit_check' => null,
-                        'amount_sign' => $vendor_match['amount_sign'] ?? null,
-                        'desc' => str_replace('*', "\*", $vendor_match['match_desc']),
-                        'plaid_inst_id' => null,
-                        'options' => json_encode('/i'),
-                    ]);
-                }
+                // The Match As text becomes the new vendor's rule, as it does
+                // for an existing vendor. It used to be written only behind a
+                // processor ("DATAFORSE" for "PADDLE.NET* DATAFORSEO"); any
+                // other new vendor was left to be found by its name alone,
+                // which failed whenever the name was not the bank's or
+                // Plaid's text — "Bloomberg Businessweek" for "BLOOMBERG*
+                // ***********" stayed on the page (2026-11-13).
+                VendorTransaction::create([
+                    'vendor_id' => $vendor_id,
+                    'deposit_check' => null,
+                    'amount_sign' => $vendor_match['amount_sign'] ?? null,
+                    'desc' => str_replace('*', "\*", trim((string) $vendor_match['match_desc'])),
+                    'plaid_inst_id' => null,
+                    'options' => json_encode('/i'),
+                ]);
             } else {
                 [$deposit_check, $vendor_id] = match ($vendor_match['vendor_id']) {
                     'DEPOSIT' => [1, null],

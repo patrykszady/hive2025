@@ -66,7 +66,7 @@ class TransactionVendorMatcher
         // charge: one that reaches neither on the card it is saved from would
         // match nothing (MatchTextReach).
         $names = Transaction::transactionsSinVendor()->where('plaid_merchant_description', $descriptor)->pluck('plaid_merchant_name')->all();
-        if ($vendorId !== 'NEW' && filled($vendorId) && ($refusal = MatchTextReach::refusal($descriptor, $matchDesc, null, ! is_numeric($vendorId), $names)) !== null) {
+        if (filled($vendorId) && ($refusal = MatchTextReach::refusal($descriptor, $matchDesc, null, $vendorId !== 'NEW' && ! is_numeric($vendorId), $names)) !== null) {
             throw ValidationException::withMessages(['match_desc' => $refusal]);
         }
 
@@ -78,7 +78,7 @@ class TransactionVendorMatcher
                 throw ValidationException::withMessages(['vendor_id' => $refusal]);
             }
         }
-        if (($vendorId !== 'NEW' || $identity->hasProcessor()) && filled($vendorId)) {
+        if (filled($vendorId)) {
             $depositCheck = ['DEPOSIT' => 1, 'CHECK' => 2, 'TRANSFER' => 3, 'CASH' => 4][$vendorId] ?? null;
             $institution = ! empty($input['bank_specific'])
                 ? Transaction::transactionsSinVendor()->where('plaid_merchant_description', $descriptor)
@@ -95,16 +95,15 @@ class TransactionVendorMatcher
         if ($vendorId === 'NEW') {
             $vendor = Vendor::create([
                 'business_type' => 'Retail',
-                'business_name' => $identity->hasProcessor() ? $identity->vendorNameFor($matchDesc) : $matchDesc,
+                'business_name' => trim($identity->hasProcessor() ? $identity->vendorNameFor($matchDesc) : $matchDesc),
             ]);
 
-            // A new vendor is normally found again by its name alone. Behind a
-            // processor the descriptor reads "PADDLE.NET* DATAFORSEO", so the
-            // merchant match text becomes its rule — cut to the bank's window
-            // ("DATAFORSE") it covers the truncated form as well.
-            if ($identity->hasProcessor()) {
-                $this->writeRule($vendor->id, $matchDesc);
-            }
+            // The Match As text becomes the new vendor's rule, as it does for
+            // an existing vendor (behind a processor it is the merchant part,
+            // "DATAFORSE"). Left to be found by its name alone, a new vendor
+            // whose name is not the bank's or Plaid's text never claimed its
+            // card (MatchVendor::store(), 2026-11-13).
+            $this->writeRule($vendor->id, $matchDesc);
 
             $this->linkVendorToCompany($vendor, $company);
             $this->runTransactionSync();
